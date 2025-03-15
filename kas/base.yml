@@ -1,0 +1,64 @@
+header:
+  version: 11
+
+build_system: oe
+
+repos:
+  bitbake:
+    url: https://git.openembedded.org/bitbake
+    branch: '2.10'
+    layers:
+      .: excluded
+
+  meta-openembedded:
+    url: https://git.openembedded.org/meta-openembedded
+    branch: styhead
+    layers:
+      meta-oe:
+      meta-perl:
+      meta-python:
+      meta-networking:
+      meta-filesystems:
+
+  meta-security:
+    url: https://git.yoctoproject.org/meta-security
+    branch: styhead
+    layers:
+      .:
+      meta-tpm:
+
+  openembedded-core:
+    url: https://git.openembedded.org/openembedded-core
+    branch: styhead
+    layers:
+      meta:
+
+  meta-arm:
+    url: https://git.yoctoproject.org/meta-arm
+    branch: styhead
+    layers:
+      meta-arm:
+      meta-arm-toolchain:
+
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado:
+
+distro: avocado
+
+env:
+  TEMPLATECONF: ../meta-avocado/conf/templates/default
+
+local_conf_header:
+  meta-avocado: |
+    USER_CLASSES:append = " buildhistory buildstats buildstats-summary"
+    EXTRA_IMAGE_FEATURES ?= "debug-tweaks"
+
+  sdk: |
+    CONF_VERSION = "2"
+
+target:
+ - avocado-image-initramfs
+ - avocado-image-rootfs
+ - avocado-image-extensions

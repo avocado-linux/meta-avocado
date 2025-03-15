@@ -1,0 +1,7 @@
+### Shell environment set up for builds. ###
+
+You can now run 'bitbake <target>'
+Targets for building Avocado images:
+    avocado-image-initramfs     - Avocado initramfs
+    avocado-image-rootfs        - Avocado rootfs
+    avocado-image-extensions    - Avocado extension packages
