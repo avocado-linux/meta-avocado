@@ -19,14 +19,12 @@ if [ -z "$1" ]; then
 fi
 
 KAS_MACHINE_FILE="$1"
+KAS_MACHINE_FILE_ABS="$(realpath "$KAS_MACHINE_FILE")"
 
 if [ ! -f "$KAS_MACHINE_FILE" ]; then
     echo "Error: File '$KAS_MACHINE_FILE' does not exist."
     exit 1
 fi
-
-# Convert the kas machine file to an absolute path
-KAS_MACHINE_FILE_ABS="$(realpath "$KAS_MACHINE_FILE")"
 
 # Determine default build directory if not provided
 if [ -z "$2" ]; then
@@ -55,11 +53,12 @@ if [ ! -e "meta-avocado" ]; then
 else
     echo "Symlink 'meta-avocado' already exists"
 fi
-
+# Convert the kas machine file to an absolute path
+KAS_MACHINE_FILE_REL="$(realpath --relative-to="$PWD" "$KAS_MACHINE_FILE_ABS")"
 # Create an .envrc file with KAS_YML pointing to the absolute path of the kas machine file.
 cat <<EOF > .envrc
-export KAS_YML="$KAS_MACHINE_FILE_ABS"
+export KAS_YML="$KAS_MACHINE_FILE_REL"
 EOF
-echo "Created .envrc file with KAS_YML set to $KAS_MACHINE_FILE_ABS"
+echo "Created .envrc file with KAS_YML set to $KAS_MACHINE_FILE_REL"
 
 echo "Build initialization complete in $(pwd)."

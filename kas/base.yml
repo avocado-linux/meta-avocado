@@ -6,13 +6,13 @@ build_system: oe
 repos:
   bitbake:
     url: https://git.openembedded.org/bitbake
-    branch: '2.10'
+    branch: '2.12'
     layers:
       .: excluded
 
   meta-openembedded:
     url: https://git.openembedded.org/meta-openembedded
-    branch: styhead
+    branch: master
     layers:
       meta-oe:
       meta-perl:
@@ -22,20 +22,20 @@ repos:
 
   meta-security:
     url: https://git.yoctoproject.org/meta-security
-    branch: styhead
+    branch: master
     layers:
       .:
       meta-tpm:
 
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
-    branch: styhead
+    branch: master
     layers:
       meta:
 
   meta-arm:
     url: https://git.yoctoproject.org/meta-arm
-    branch: styhead
+    branch: master
     layers:
       meta-arm:
       meta-arm-toolchain:
@@ -53,7 +53,7 @@ env:
 local_conf_header:
   meta-avocado: |
     USER_CLASSES:append = " buildhistory buildstats buildstats-summary"
-    EXTRA_IMAGE_FEATURES ?= "debug-tweaks"
+    EXTRA_IMAGE_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
 
   sdk: |
     CONF_VERSION = "2"

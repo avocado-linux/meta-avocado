@@ -11,6 +11,6 @@ repos:
 
 local_conf_header:
   avocado-qemux86-64: |
-    EXTRA_INITRAMFS_FEATURES ?= "debug-tweaks"
+    EXTRA_INITRAMFS_FEATURES += ""
 
 machine: avocado-qemux86-64

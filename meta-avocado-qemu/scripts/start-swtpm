@@ -1,10 +1,15 @@
 #!/bin/bash
 # Simplified TPM start script for use with kas
-# Usage: ./start-tpm.sh 
+# Usage: ./start-tpm
 # Assumes pwd is the build directory
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+BUILD_DIR="$(pwd)/build"
+SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
+SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
+
 # Create a TPM state directory under the build
-TPM_DIR="$(pwd)/tmp/tpm-state"
+TPM_DIR="$BUILD_DIR/tmp/tpm-state"
 mkdir -p "$TPM_DIR"
 TPM_SOCK="$TPM_DIR/swtpm-sock"
 
@@ -18,23 +23,13 @@ fi
 
 # Set the paths based on our successful debug run - using hardcoded paths
 # that are known to work in your environment
-SWTPM_BIN="$(pwd)/tmp/sysroots-components/x86_64/swtpm-native/usr/bin/swtpm"
+SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
 if [ -z "$SWTPM_BIN" ]; then
     echo "Error: Could not find swtpm binary"
     return -1
 fi
 
-# Find the directory with the necessary libraries
-LIB_SWTPM="(pwd)/tmp/sysroots-components/x86_64/swtpm-native/usr/lib/swtpm/libswtpm_libtpms.so.0"
-if [ -z "$LIB_SWTPM" ]; then
-    echo "Could not find libswtpm_libtpms.so.0"
-    return -1
-else
-    # Get lib path from found library
-    LIB_DIR=$(dirname "$LIB_SWTPM")
-    PARENT_DIR=$(dirname "$LIB_DIR")
-    LIB_PATH="$LIB_DIR:$PARENT_DIR"
-fi
+LIB_PATH=$("$SCRIPT_DIR/find-library-path" $SWTPM_BIN $SYSROOT_COMPONENTS_DIR $SYSROOT_UNINATIVE_DIR)
 
 echo "Starting swtpm with socket at $TPM_SOCK"
 LD_LIBRARY_PATH="$LIB_PATH" "$SWTPM_BIN" socket \

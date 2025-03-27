@@ -1,0 +1,243 @@
+#!/bin/bash
+
+# Enable/disable debugging output
+DEBUG=${DEBUG:-0}
+
+# Setup output redirection at the start
+exec 3>&1     # Save original stdout to fd 3
+exec 1>&2     # Redirect stdout to stderr for all debug output
+
+# Function to output debug messages (only when DEBUG=1)
+debug() {
+    if [ "$DEBUG" = "1" ]; then
+        echo "$@" >&2  # Always send to stderr
+    fi
+}
+
+# Check if required arguments are provided
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <executable> <search_directory1> [search_directory2] [search_directory3] ..."
+    echo "Set DEBUG=1 before running for verbose output"
+    exit 1
+fi
+
+executable="$1"
+shift 1  # Remove the first argument (executable)
+
+# Collect all search directories
+search_dirs=()
+while [ $# -gt 0 ]; do
+    search_dirs+=("$1")
+    shift
+done
+
+# Check if executable exists
+if [ ! -f "$executable" ]; then
+    echo "Error: Executable '$executable' not found."
+    exit 1
+fi
+
+# Check if all search directories exist and convert to absolute paths
+for i in "${!search_dirs[@]}"; do
+    if [ ! -d "${search_dirs[$i]}" ]; then
+        echo "Error: Search directory '${search_dirs[$i]}' not found."
+        exit 1
+    fi
+    # Convert to absolute path
+    search_dirs[$i]=$(realpath "${search_dirs[$i]}")
+    # Ensure directory has a trailing slash for path checks
+    search_dirs[$i]="${search_dirs[$i]%/}/"
+done
+
+# Convert executable to absolute path
+executable=$(realpath "$executable")
+
+# Function to get library dependencies using ldd
+get_libraries() {
+    # Get the found libraries with their paths
+    ldd "$1" 2>/dev/null | grep "=>" | awk '{print $1 ":" $3}' | grep -v "not found" | grep ":/.*$" | awk -F: '{print $2}'
+}
+
+# Function to get missing libraries
+get_missing_libraries() {
+    # Using sort -u to eliminate duplicates like the repeated libtpms.so.0
+    ldd "$1" 2>/dev/null | grep "=>" | grep "not found" | awk '{print $1}' | sort -u
+}
+
+# Function to check if a path is inside any of our search paths
+is_inside_search_paths() {
+    local path="$1"
+    # Normalize path by ensuring it ends with a slash
+    path="${path%/}/"
+    
+    for search_dir in "${search_dirs[@]}"; do
+        if [[ "$path" == "$search_dir"* ]]; then
+            return 0  # Found in a search path
+        fi
+    done
+    
+    return 1  # Not found in any search path
+}
+
+# Function to find a library in the search directories - simple and direct approach
+find_in_search_dirs() {
+    local lib_name="$1"
+    
+    debug "Searching for $lib_name in search directories..."
+    
+    # Direct search with explicit .debug exclusion
+    for search_dir in "${search_dirs[@]}"; do
+        debug "  Searching in $search_dir"
+        
+        # Explicitly exclude .debug directories
+        local result=$(find "$search_dir" -path "*.debug*" -prune -o \( -type f -o -type l \) -name "$lib_name" -print 2>/dev/null | head -1)
+        
+        if [ -n "$result" ] && [ -e "$result" ]; then
+            debug "  Found $lib_name at $result"
+            echo "$result"
+            return 0  # Stop at first match
+        fi
+    done
+    
+    debug "  Could not find $lib_name in any search directory"
+    return 1
+}
+
+# Initialize LD_LIBRARY_PATH accumulator and processed libraries list
+lib_path=""
+processed_libs=""
+
+# Function to check if a library has been processed
+is_processed() {
+    local lib="$1"
+    [[ ":$processed_libs:" == *":$lib:"* ]]
+}
+
+# Function to mark a library as processed
+mark_processed() {
+    local lib="$1"
+    if [ -z "$processed_libs" ]; then
+        processed_libs="$lib"
+    else
+        processed_libs="$processed_libs:$lib"
+    fi
+}
+
+# Function to add a directory to lib_path if not already present
+add_to_lib_path() {
+    local dir="$1"
+    if [[ ":$lib_path:" != *":$dir:"* ]]; then
+        if [ -z "$lib_path" ]; then
+            lib_path="$dir"
+        else
+            lib_path="$lib_path:$dir"
+        fi
+        debug "Added to LD_LIBRARY_PATH: $dir"
+        return 0  # Added
+    fi
+    return 1  # Already present
+}
+
+# Function to process a library and its dependencies recursively
+process_library() {
+    local lib="$1"
+    
+    # Skip if already processed
+    if is_processed "$lib"; then
+        return
+    fi
+    
+    # Mark as processed
+    mark_processed "$lib"
+    
+    # Skip if not a file
+    if [ ! -f "$lib" ]; then
+        debug "Warning: Library '$lib' is not a file or does not exist."
+        return
+    fi
+    
+    # Get the parent directory of the library
+    lib_dir=$(dirname "$lib")
+    lib_name=$(basename "$lib")
+    
+    if is_inside_search_paths "$lib"; then
+        debug "Skipping $lib - already in search paths"
+    else
+        # Search for the library in all search directories
+        found_lib=$(find_in_search_dirs "$lib_name")
+        
+        if [ -n "$found_lib" ] && [ -f "$found_lib" ]; then
+            found_lib_dir=$(dirname "$found_lib")
+            debug "Found $lib_name in $found_lib_dir"
+            
+            # Add to lib_path
+            add_to_lib_path "$found_lib_dir"
+        else
+            # If not found in search dirs, add the original location
+            debug "Could not find $lib_name in any search directory, using original location: $lib_dir"
+            add_to_lib_path "$lib_dir"
+        fi
+    fi
+    
+    # Process dependencies of this library
+    for dep_lib in $(get_libraries "$lib"); do
+        process_library "$dep_lib"
+    done
+}
+
+# Process missing library
+process_missing_library() {
+    local missing_lib="$1"
+    
+    debug "Looking for missing library: $missing_lib"
+    
+    # Search for the library in all search directories
+    local found_lib=$(find_in_search_dirs "$missing_lib")
+    
+    if [ -n "$found_lib" ]; then
+        # Found the library
+        local found_lib_dir=$(dirname "$found_lib")
+        
+        # Add to lib_path
+        add_to_lib_path "$found_lib_dir"
+        
+        # Process dependencies of this library
+        process_library "$found_lib"
+    else
+        debug "Could not find missing library $missing_lib in any search directory"
+    fi
+}
+
+debug "Analyzing dependencies for $executable..."
+debug "Search directories (in order of precedence):"
+for i in "${!search_dirs[@]}"; do
+    debug "  $((i+1)). ${search_dirs[$i]}"
+done
+
+# Process found libraries
+for lib in $(get_libraries "$executable"); do
+    process_library "$lib"
+done
+
+# Process missing libraries
+for missing_lib in $(get_missing_libraries "$executable"); do
+    process_missing_library "$missing_lib"
+done
+
+# Add current LD_LIBRARY_PATH if it exists
+if [ -n "$LD_LIBRARY_PATH" ]; then
+    if [ -n "$lib_path" ]; then
+        lib_path="$lib_path:$LD_LIBRARY_PATH"
+    else
+        lib_path="$LD_LIBRARY_PATH"
+    fi
+fi
+
+debug "Setting LD_LIBRARY_PATH=$lib_path"
+
+# At the very end, output ONLY the library path with no other text
+debug "Setting LD_LIBRARY_PATH=$lib_path"
+
+# Restore stdout and output just the clean path
+exec 1>&3
+echo "$lib_path"
