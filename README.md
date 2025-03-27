@@ -1,5 +1,6 @@
 # meta-avocado
 
+
 ## Configuring a build
 
 Source the `init-build.sh` script and pass the path to a kas configuration to build. This will create a `build-{config file name}` directory in your `cwd`.
