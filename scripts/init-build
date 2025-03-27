@@ -1,7 +1,7 @@
 #!/bin/bash
-# init-build.sh: Initialize the build directory for a kas-based project.
+# init-build: Initialize the build directory for a kas-based project.
 #
-# Usage: ./init-build.sh /path/to/kas/machine.yml [build_dir]
+# Usage: ./init-build /path/to/kas/machine.yml [build_dir]
 #
 # If build_dir is not provided, it defaults to "build-<basename>",
 # where <basename> is the name of the kas/machine.yml file without its .yml extension.
