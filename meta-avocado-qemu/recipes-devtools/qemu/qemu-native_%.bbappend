@@ -1,1 +1,1 @@
-DEPENDS:append:avocado = " ovmf swtpm-native"
+DEPENDS:append = " ovmf swtpm-native"

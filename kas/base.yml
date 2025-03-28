@@ -6,13 +6,13 @@ build_system: oe
 repos:
   bitbake:
     url: https://git.openembedded.org/bitbake
-    branch: '2.12'
+    branch: '2.8'
     layers:
       .: excluded
 
   meta-openembedded:
     url: https://git.openembedded.org/meta-openembedded
-    branch: master
+    branch: scarthgap
     layers:
       meta-oe:
       meta-perl:
@@ -22,20 +22,20 @@ repos:
 
   meta-security:
     url: https://git.yoctoproject.org/meta-security
-    branch: master
+    branch: scarthgap
     layers:
       .:
       meta-tpm:
 
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
-    branch: master
+    branch: scarthgap
     layers:
       meta:
 
   meta-arm:
     url: https://git.yoctoproject.org/meta-arm
-    branch: master
+    branch: scarthgap
     layers:
       meta-arm:
       meta-arm-toolchain:
@@ -44,11 +44,9 @@ repos:
     path: meta-avocado
     layers:
       meta-avocado:
+      meta-avocado-ports:
 
 distro: avocado
-
-env:
-  TEMPLATECONF: ../meta-avocado/conf/templates/default
 
 local_conf_header:
   meta-avocado: |

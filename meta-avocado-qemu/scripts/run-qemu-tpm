@@ -46,7 +46,8 @@ LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_EXEC" \
   -drive if=pflash,format=qcow2,readonly=on,file="$DEPLOY_DIR/$OVMF_CODE" \
   -drive if=pflash,format=qcow2,file="$DEPLOY_DIR/$OVMF_VARS" \
   -m 256 \
-  -cpu max \
+  -cpu host \
+  -enable-kvm \
   -nographic \
   -chardev socket,id=chrtpm,path="$TPM_SOCK" \
   -tpmdev emulator,id=tpm0,chardev=chrtpm \

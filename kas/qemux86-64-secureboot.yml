@@ -1,7 +1,7 @@
 header:
   version: 11
   includes:
-    - base.yml
+    - kas/base.yml
 
 repos:
   meta-avocado:
