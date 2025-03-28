@@ -6,11 +6,9 @@
 # If build_dir is not provided, it defaults to "build-<basename>",
 # where <basename> is the name of the kas/machine.yml file without its .yml extension.
 #
-# This script assumes that it resides in the meta-avocado repository root.
+# This script assumes that it resides in the scripts directory of the meta-avocado repository.
 # It creates the build directory if needed, cd's into it, and then creates a relative symlink
 # named "meta-avocado" that points back to the repository.
-
-set -e
 
 # Ensure the kas/machine.yml file is provided
 if [ -z "$1" ]; then
@@ -35,8 +33,15 @@ else
 fi
 
 # Determine the repository directory.
-# This script is assumed to live in the meta-avocado repository root.
-REPO_DIR="$(cd "$(dirname "$0")/../" && pwd)"
+# Handle both direct execution and sourcing (with dot command)
+if [[ "$0" == *"init-build"* ]]; then
+    # Script is being executed directly
+    REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+else
+    # Script is being sourced
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+echo "Repository directory: $REPO_DIR"
 
 # Create the build directory if it doesn't exist
 mkdir -p "$BUILD_DIR" || { echo "Error: Could not create directory $BUILD_DIR"; exit 1; }

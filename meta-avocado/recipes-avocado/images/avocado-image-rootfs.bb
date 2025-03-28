@@ -3,7 +3,7 @@ LICENSE = "Apache-2.0"
 
 inherit image
 
-IMAGE_FSTYPES = "squashfs wic"
+IMAGE_FSTYPES = "${ROOT_FSTYPES}"
 SQUASHFS_COMPRESSION = "zstd"
 SQUASHFS_COMPRESSION_LEVEL = "1"
 WIC_CREATE_EXTRA_ARGS = "--no-fstab-update"

@@ -1,0 +1,19 @@
+header:
+  version: 11
+  includes:
+    - base.yml
+    - vendor/nvidia.yml
+    - feature/virtualization.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-nvidia:
+
+local_conf_header:
+  avocado-jetson-orin-nano-devkit-nvme: |
+    TEGRA_OOT_ALL_DRIVER_PACKAGES:append = " nv-kernel-module-rtl8852ce"
+    INITRAMFS_MAXSIZE = "196608"
+
+machine: avocado-jetson-orin-nano-devkit-nvme
