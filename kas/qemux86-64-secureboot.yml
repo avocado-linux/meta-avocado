@@ -2,6 +2,7 @@ header:
   version: 11
   includes:
     - kas/base.yml
+    - kas/feature/tpm.yml
 
 repos:
   meta-avocado:
@@ -11,6 +12,6 @@ repos:
 
 local_conf_header:
   avocado-qemux86-64: |
-    EXTRA_INITRAMFS_FEATURES += ""
+    ROOT_FSTYPES = "squashfs wic"
 
 machine: avocado-qemux86-64

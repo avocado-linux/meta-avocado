@@ -20,13 +20,6 @@ repos:
       meta-networking:
       meta-filesystems:
 
-  meta-security:
-    url: https://git.yoctoproject.org/meta-security
-    branch: scarthgap
-    layers:
-      .:
-      meta-tpm:
-
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
     branch: scarthgap
