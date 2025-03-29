@@ -18,9 +18,6 @@ local_conf_header:
   tegra: |
     UBOOT_EXTLINUX = "1"
     USE_REDUNDANT_FLASH_LAYOUT_DEFAULT = "1"
-    # INITRAMFS_IMAGE_BUNDLE = "1"
-    FWUP_EXTRA_VARS = "TEGRAFLASH_HOST_PATH INITRAMFS_IMAGE"
-    TEGRAFLASH_HOST_PATH = "${COMPONENTS_DIR}/${MACHINE_ARCH}/tegra-bootfiles/usr/share/tegraflash"
     TEGRA_INITRD_FLASH_INITRAMFS_FSTYPES = "cpio.gz.cboot"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-tegra"
     DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"

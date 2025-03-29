@@ -8,3 +8,8 @@ repos:
     layers:
       .:
       meta-tpm:
+
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-tpm:

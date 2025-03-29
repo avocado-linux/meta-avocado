@@ -30,7 +30,6 @@ repos:
     path: meta-avocado
     layers:
       meta-avocado:
-      meta-avocado-ports:
 
 distro: avocado
 
