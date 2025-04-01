@@ -33,13 +33,6 @@ repos:
     layers:
       meta:
 
-  meta-arm:
-    url: https://git.yoctoproject.org/meta-arm
-    branch: scarthgap
-    layers:
-      meta-arm:
-      meta-arm-toolchain:
-
   meta-avocado:
     path: meta-avocado
     layers:
