@@ -1,0 +1,57 @@
+name: Yocto Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  KAS_BUILD_DIR: build
+  CACHE_KEY: ${{ runner.os }}-yocto-${{ hashFiles('**/kas/*.yml') }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: avocadolinux/yocto-build:ubuntu-22.04
+
+    strategy:
+      matrix:
+        config:
+          - kas/qemux86-64-secureboot.yml
+          - kas/jetson-orin-nano-devkit-nvme.yml
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Yocto downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            /avocado/dl
+            /avocado/sstate
+          key: ${{ env.CACHE_KEY }}
+          restore-keys: |
+            ${{ env.CACHE_KEY }}
+
+      - name: Initialize build
+        run: |
+          . scripts/init-build ${{ matrix.config }}
+          direnv allow
+
+      - name: Build with kas
+        env:
+          DL_DIR: ${{ env.DL_DIR }}
+          SSTATE_DIR: ${{ env.SSTATE_DIR }}
+        run: |
+          kas build $KAS_YML
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.config }}
+          path: build-$(basename ${{ matrix.config }} .yml)/tmp/deploy/
+          retention-days: 7
