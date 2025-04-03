@@ -2,14 +2,32 @@ header:
   version: 11
 
 repos:
-  meta-imx-frdm:
-    url: https://github.com/nxp-imx-support/meta-imx-frdm.git
-    tag: imx-frdm-2.0 
+  meta-arm:
+    url: https://git.yoctoproject.org/meta-arm.git
+    branch: scarthgap
+    layers:
+      meta-arm:
+      meta-arm-bsp:
+      meta-arm-toolchain:
+
+  meta-freescale:
+    url: https://github.com/Freescale/meta-freescale.git
+    refspec: a7bf57d
+    layers:
+      .:
+
+  meta-imx:
+    url: https://github.com/nxp-imx/meta-imx.git
+    branch: scarthgap-6.6.36-2.1.0
     layers:
       meta-imx-bsp:
-      meta-nxp-connectivity:
+
+  meta-imx-frdm:
+    url: https://github.com/nxp-imx-support/meta-imx-frdm.git
+    branch: lf-6.6.36-2.1.0
+    layers:
+      meta-imx-bsp:
 
 local_conf_header:
-  tegra: |
-    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-frdm"
-    ACCEPT_FSL_EULA = "1"
+  frdm: |
+    IMAGE_INSTALL:append = " packagegroup-avocado-frdm"
