@@ -1,7 +1,7 @@
 DESCRIPTION = "Avocado extensions package image"
 LICENSE = "Apache-2.0"
 
-inherit nopackages
+inherit image
 
 IMAGE_FSTYPES = ""
 IMAGE_FEATURES = ""
