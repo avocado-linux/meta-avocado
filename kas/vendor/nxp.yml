@@ -12,13 +12,13 @@ repos:
 
   meta-freescale:
     url: https://github.com/Freescale/meta-freescale.git
-    refspec: 0627128
+    refspec: 0f8091c
     layers:
       .:
 
   meta-imx:
     url: https://github.com/nxp-imx/meta-imx.git
-    tag: rel_imx_6.6.52_2.2.0
+    tag: rel_imx_6.6.36_2.1.0
     layers:
       meta-imx-bsp:
 
@@ -31,3 +31,4 @@ repos:
 local_conf_header:
   frdm: |
     IMAGE_INSTALL:append = " packagegroup-avocado-frdm"
+    BBMASK += "/meta-imx/meta-imx-bsp/recipes-kernel/cryptodev/cryptodev-linux_1.13.bbappend"
