@@ -12,13 +12,13 @@ repos:
 
   meta-freescale:
     url: https://github.com/Freescale/meta-freescale.git
-    refspec: a7bf57d
+    refspec: 0627128
     layers:
       .:
 
   meta-imx:
     url: https://github.com/nxp-imx/meta-imx.git
-    branch: scarthgap-6.6.36-2.1.0
+    tag: rel_imx_6.6.52_2.2.0
     layers:
       meta-imx-bsp:
 
