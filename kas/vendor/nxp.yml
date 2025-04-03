@@ -1,0 +1,15 @@
+header:
+  version: 11
+
+repos:
+  meta-imx-frdm:
+    url: https://github.com/nxp-imx-support/meta-imx-frdm.git
+    tag: imx-frdm-2.0 
+    layers:
+      meta-imx-bsp:
+      meta-nxp-connectivity:
+
+local_conf_header:
+  tegra: |
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-frdm"
+    ACCEPT_FSL_EULA = "1"

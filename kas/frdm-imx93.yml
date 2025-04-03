@@ -1,0 +1,17 @@
+header:
+  version: 11
+  includes:
+    - kas/base.yml
+    - kas/vendor/nxp.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-nxp:
+
+local_conf_header:
+  avocado-frdm-imx93: |
+    INITRAMFS_MAXSIZE = "196608"
+
+machine: avocado-frdm-imx93
