@@ -2,14 +2,6 @@ header:
   version: 11
 
 repos:
-  meta-arm:
-    url: https://git.yoctoproject.org/meta-arm.git
-    branch: scarthgap
-    layers:
-      meta-arm:
-      meta-arm-bsp:
-      meta-arm-toolchain:
-
   meta-freescale:
     url: https://github.com/Freescale/meta-freescale.git
     commit: 0f8091c
@@ -19,4 +11,3 @@ repos:
 local_conf_header:
   frdm: |
     IMAGE_INSTALL:append = " packagegroup-avocado-frdm"
-    BBMASK += "/meta-imx/meta-imx-bsp/recipes-kernel/cryptodev/cryptodev-linux_1.13.bbappend"
