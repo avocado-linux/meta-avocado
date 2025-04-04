@@ -12,21 +12,9 @@ repos:
 
   meta-freescale:
     url: https://github.com/Freescale/meta-freescale.git
-    refspec: 0f8091c
+    commit: 0f8091c
     layers:
       .:
-
-  meta-imx:
-    url: https://github.com/nxp-imx/meta-imx.git
-    tag: rel_imx_6.6.36_2.1.0
-    layers:
-      meta-imx-bsp:
-
-  meta-imx-frdm:
-    url: https://github.com/nxp-imx-support/meta-imx-frdm.git
-    branch: lf-6.6.36-2.1.0
-    layers:
-      meta-imx-bsp:
 
 local_conf_header:
   frdm: |
