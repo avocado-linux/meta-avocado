@@ -43,6 +43,4 @@ local_conf_header:
     CONF_VERSION = "2"
 
 target:
- - avocado-image-initramfs
- - avocado-image-rootfs
- - avocado-image-extensions
+ - avocado-complete
