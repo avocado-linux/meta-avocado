@@ -11,7 +11,7 @@ WIC_ROOTFS_FORMAT = "squashfs"
 
 IMAGE_FEATURES += "read-only-rootfs"
 ROOTFS_IMAGE_EXTRA_INSTALL ??= ""
-IMAGE_INSTALL = "packagegroup-core-boot packagegroup-avocado-core ${ROOTFS_IMAGE_EXTRA_INSTALL}"
+IMAGE_INSTALL = "packagegroup-avocado-rootfs ${ROOTFS_IMAGE_EXTRA_INSTALL}"
 DISTRO_FEATURES_BACKFILL_CONSIDERED=""
 
 cleanup_root_files () {

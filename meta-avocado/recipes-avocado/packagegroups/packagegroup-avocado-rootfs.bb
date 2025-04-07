@@ -4,6 +4,7 @@ LICENSE = "Apache-2.0"
 inherit packagegroup
 
 RDEPENDS:${PN} = " \
+  packagegroup-core-boot \
   base-files \
   base-passwd \
   netbase \
