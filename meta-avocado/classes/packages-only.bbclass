@@ -1,11 +1,9 @@
-DESCRIPTION = "Avocado extensions package image"
-LICENSE = "Apache-2.0"
+# packages-only.bbclass
+#
+# Class for recipes where only packages are desired, without producing any image output
+# This disables all image generation tasks while preserving package building
 
-inherit nopackages
-
-IMAGE_FSTYPES = ""
-IMAGE_FEATURES = ""
-
+# Disable image generation tasks
 do_rootfs[noexec] = "1"
 do_rootfs_wicenv[noexec] = "1"
 do_image[noexec] = "1"
@@ -19,6 +17,9 @@ do_create_image_spdx_setscene[noexec] = "1"
 do_create_rootfs_spdx_setscene[noexec] = "1"
 do_create_image_sbom_spdx[noexec] = "1"
 
-EXCLUDE_FROM_WORLD = "1"
+# Disable image-specific settings
+IMAGE_FSTYPES = ""
+IMAGE_FEATURES = ""
 
-IMAGE_INSTALL = "packagegroup-avocado-extensions"
+# Ensure these recipes are excluded from world builds
+EXCLUDE_FROM_WORLD = "1"
