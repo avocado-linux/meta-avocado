@@ -3,6 +3,8 @@
 # Class for recipes where only packages are desired, without producing any image output
 # This disables all image generation tasks while preserving package building
 
+inherit image
+
 # Disable image generation tasks
 do_rootfs[noexec] = "1"
 do_rootfs_wicenv[noexec] = "1"

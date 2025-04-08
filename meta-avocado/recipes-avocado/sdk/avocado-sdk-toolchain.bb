@@ -24,6 +24,7 @@ TOOLCHAIN_TARGET_TASK = " \
 "
 
 # Define package dependencies based on toolchain components
+DEPENDS += "packagegroup-core-standalone-sdk-target target-sdk-provides-dummy"
 RDEPENDS:${PN} = "${TOOLCHAIN_TARGET_TASK} ${TOOLCHAIN_HOST_TASK}"
 
 # Allow additional languages to be specified
@@ -58,9 +59,8 @@ python package:prepend() {
 do_package[depends] += "virtual/libc:do_packagedata"
 
 # Ensure this is considered an SDK recipe
-BBCLASSEXTEND = "nativesdk"
 inherit nativesdk
-SDK_NAME = "${DISTRO}-${TCLIBC}-${SDKMACHINE}-${IMAGE_BASENAME}-${TUNE_PKGARCH}-toolchain"
+
 SDK_VERSION = "${DISTRO_VERSION}"
 PV = "${SDK_VERSION}"
 
