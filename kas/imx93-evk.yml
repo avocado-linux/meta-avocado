@@ -11,7 +11,7 @@ repos:
       meta-avocado-nxp:
 
 local_conf_header:
-  avocado-frdm-imx93: |
+  avocado-imx93-evk: |
     INITRAMFS_MAXSIZE = "196608"
 
-machine: avocado-frdm-imx93
+machine: avocado-imx93-evk

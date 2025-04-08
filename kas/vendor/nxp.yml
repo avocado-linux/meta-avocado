@@ -9,5 +9,5 @@ repos:
       .:
 
 local_conf_header:
-  frdm: |
-    IMAGE_INSTALL:append = " packagegroup-avocado-frdm"
+  imx: |
+    IMAGE_INSTALL:append = " packagegroup-avocado-imx"
