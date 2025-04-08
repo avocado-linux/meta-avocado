@@ -6,7 +6,7 @@ do_image[deptask] = "do_image_complete"
 inherit features_check
 
 IMAGE_FEATURES += "splash hwcodecs"
-REQUIRED_DISTRO_FEATURES = "opengl"
+REQUIRED_DISTRO_FEATURES = ""
 
 inherit packagegroup
 
