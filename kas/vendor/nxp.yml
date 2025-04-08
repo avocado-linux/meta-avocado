@@ -4,7 +4,7 @@ header:
 repos:
   meta-freescale:
     url: https://github.com/Freescale/meta-freescale.git
-    commit: 0f8091c
+    branch: scarthgap
     layers:
       .:
 
