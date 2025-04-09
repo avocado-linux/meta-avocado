@@ -24,8 +24,12 @@ TOOLCHAIN_TARGET_TASK = " \
 "
 
 # Define package dependencies based on toolchain components
-DEPENDS += "packagegroup-core-standalone-sdk-target target-sdk-provides-dummy"
+DEPENDS += "packagegroup-core-standalone-sdk-target target-sdk-provides-dummy nativesdk-bash"
 RDEPENDS:${PN} = "${TOOLCHAIN_TARGET_TASK} ${TOOLCHAIN_HOST_TASK}"
+
+# Skip the build-deps QA check as it gives false positives for SDK toolchain recipes
+# where RDEPENDS are dynamically generated.
+INSANE_SKIP:${PN} += " build-deps"
 
 # Allow additional languages to be specified
 SDK_TOOLCHAIN_LANGS ?= ""
