@@ -5,6 +5,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # Specify that this is for the SDK host/SDKMACHINE
 INHIBIT_DEFAULT_DEPS = "1"
 PACKAGE_ARCH = "${SDKPKGARCH}"
+PACKAGES = "${PN}"
+
 SDK_PACKAGE_ARCHS += "sdk-provides-dummy-${SDKPKGSUFFIX}"
 TARGET_ARCH = "${SDK_ARCH}"
 
