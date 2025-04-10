@@ -2,7 +2,6 @@ DESCRIPTION = "Avocado system and configuration extension image"
 LICENSE = "Apache-2.0"
 
 inherit image
-inherit package
 
 # Configure image basics
 IMAGE_FEATURES = ""
