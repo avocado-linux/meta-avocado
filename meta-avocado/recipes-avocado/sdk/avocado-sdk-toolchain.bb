@@ -74,7 +74,6 @@ PV = "${SDK_VERSION}"
 do_configure[noexec] = "1"
 do_compile[noexec] = "1"
 
-# We're installing nothing
 do_install() {
     install -d ${D}${datadir}/${PN}
     echo "Avocado SDK Toolchain ${PV}" > ${D}${datadir}/${PN}/README
