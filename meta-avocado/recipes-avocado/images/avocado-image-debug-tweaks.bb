@@ -8,17 +8,17 @@ EXT_VERSION = "1"
 
 # Include debug packages and tools
 EXTENSION_PACKAGES = " \
+    openssh \
     strace \
     ltrace \
     lsof \
-    openssh-server-openssh \
     vim \
 "
 
 # Configure SSH server for easier remote debugging
 ssh_tweaks() {
     # Create sshd config directory
-    install -d ${IMAGE_ROOTFS}/etc/ssh
+    install -d ${IMAGE_ROOTFS}/etc/ssh/sshd_config.d/
     
     # Configure SSH for root login
     cat > ${IMAGE_ROOTFS}/etc/ssh/sshd_config.d/10-debug-allow-root.conf << 'EOF'
