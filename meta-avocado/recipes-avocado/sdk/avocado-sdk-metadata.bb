@@ -1,3 +1,19 @@
+# This Yocto recipe generates repository configuration files for the Avocado SDK.
+# It creates two primary outputs based on the build environment variables:
+# 1. avocado-sdk.repo: A yum/dnf repository configuration file that gets
+#    packaged into the resulting SDK or image. This file allows the target
+#    system to find and install packages from the Avocado repositories.
+# 2. avocado-repo.map: A mapping file placed in the build's deployment
+#    directory (DEPLOY_DIR_RPM). This file likely assists the build system
+#    or related tooling in associating specific package architectures with
+#    their corresponding repository paths on the server defined by
+#    AVOCADO_REPO_BASE.
+#
+# The do_install task dynamically generates these files by inspecting the
+# available package architectures (PACKAGE_ARCHS, SDK_PACKAGE_ARCHS) in
+# DEPLOY_DIR_RPM, applying specific rules based on DISTRO_CODENAME, MACHINE,
+# and SDK suffixes to determine the correct repository sub-paths.
+
 DESCRIPTION = "Avocado SDK machine repository configuration"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -11,7 +27,7 @@ RDEPENDS:${PN} = ""
 INSANE_SKIP:${PN} = "ldflags alreadyinstalled"
 
 # The repo file is packaged, the map file is deployed directly
-FILES:${PN} = "/avocado.repo"
+FILES:${PN} = "/avocado-sdk.repo"
 
 # Set package arch so it deploys to a specific directory
 PACKAGE_ARCH = "all_avocadosdk"
@@ -43,7 +59,7 @@ python do_install() {
     os.makedirs(deploy_dir_rpm, exist_ok=True)
 
     # Define file paths
-    repo_file_path = os.path.join(d_dir, 'avocado.repo')
+    repo_file_path = os.path.join(d_dir, 'avocado-sdk.repo')
     map_file_path = os.path.join(deploy_dir_rpm, 'avocado-repo.map')
 
     # Combine architectures into a unique set
