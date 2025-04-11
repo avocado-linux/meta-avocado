@@ -1,22 +1,6 @@
 #!/bin/bash
 
-# Function to create repository for a specific directory
-create_repo() {
-    local repo_name=$1
-    local source_dir=$2
-    local target_dir="/var/www/html/${repo_name}"
-    
-    # Create target directory
-    mkdir -p "${target_dir}"
-    
-    # Copy RPMs from source to target
-    if [ -d "${source_dir}" ]; then
-        cp -r "${source_dir}"/* "${target_dir}/"
-    fi
-    
-    # Create repository metadata
-    createrepo_c "${target_dir}"
-}
+set -e # Exit immediately if a command exits with a non-zero status.
 
 # Main script
 if [ $# -ne 1 ]; then
@@ -26,14 +10,46 @@ if [ $# -ne 1 ]; then
 fi
 
 YOCTO_DEPLOY_DIR=$1
+MAP_FILE="${YOCTO_DEPLOY_DIR}/avocado-repo.map"
 
-# Process each directory under the deploy/rpm directory
-for dir in "${YOCTO_DEPLOY_DIR}"/*; do
-    if [ -d "${dir}" ]; then
-        repo_name=$(basename "${dir}")
-        echo "Processing repository: ${repo_name}"
-        create_repo "${repo_name}" "${dir}"
+if [ ! -f "${MAP_FILE}" ]; then
+    echo "Error: Map file not found at ${MAP_FILE}" >&2
+    exit 1
+fi
+
+echo "Using map file: ${MAP_FILE}"
+
+# Process mappings from the map file
+while IFS='=' read -r key value || [ -n "$key" ]; do
+    # Skip empty lines or lines without an equals sign
+    if [ -z "$key" ] || [ -z "$value" ]; then
+        echo "Skipping invalid line: $key=$value"
+        continue
     fi
-done
 
-echo "Repository setup complete!" 
+    source_dir="${YOCTO_DEPLOY_DIR}/${key}"
+    # Target dir uses the full path specified in the map value
+    target_dir="/var/www/html/${value}"
+
+    echo "Processing mapping: Source [${source_dir}] -> Target [${target_dir}]"
+
+    if [ ! -d "${source_dir}" ]; then
+        echo "Warning: Source directory ${source_dir} not found for key '${key}'. Skipping." >&2
+        continue
+    fi
+
+    # Create target directory structure
+    mkdir -p "${target_dir}"
+
+    # Copy RPMs from source to target (using rsync for efficiency if needed, but cp is fine)
+    # Use cp -a to preserve attributes, or cp -r as before
+    echo "Copying files from ${source_dir} to ${target_dir}"
+    cp -a "${source_dir}"/* "${target_dir}/"
+
+    # Create repository metadata
+    echo "Creating repository metadata in ${target_dir}"
+    createrepo_c "${target_dir}"
+
+done < "${MAP_FILE}"
+
+echo "Repository setup complete based on map file!" 

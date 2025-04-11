@@ -5,4 +5,5 @@ inherit packagegroup
 
 RDEPENDS:${PN} = " \
   avocado-sdk-toolchain \
+  ${VIRTUAL-RUNTIME_avocado-sdk-metadata} \
 "
