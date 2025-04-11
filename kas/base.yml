@@ -46,4 +46,3 @@ target:
  - avocado-image-initramfs
  - avocado-image-rootfs
  - avocado-image-extensions
- - avocado-image-debug-tweaks
