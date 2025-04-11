@@ -14,11 +14,8 @@ IMAGE_INSTALL = "${EXTENSION_PACKAGES}"
 EXTENSION_PACKAGES ?= ""
 
 # Set the extension version and ID
-EXT_ID ?= "undefined"
+EXT_ID ?= ""
 EXT_VERSION ?= "1"
-
-# Extension installation directories
-SYSEXT_DESTDIR = "/usr/lib/extensions"
 
 do_rootfs[vardeps] += "EXT_ID EXT_VERSION"
 
@@ -38,7 +35,7 @@ EXTENSION_ID=${EXT_ID}
 EXTENSION_VERSION=${EXT_VERSION}
 EXTENSION_COMBINED=1
 EOF
-    
+ 
     # Get the machine ID from the base system for compatibility if available
     if [ -f ${STAGING_DIR_TARGET}/usr/lib/os-release ]; then
         grep "^MACHINE_ID=" ${STAGING_DIR_TARGET}/usr/lib/os-release >> ${IMAGE_ROOTFS}/usr/lib/extension-release.d/extension-release.${EXT_ID} || true
