@@ -1,0 +1,19 @@
+
+header:
+  version: 11
+  includes:
+    - kas/base.yml
+    - kas/vendor/raspberrypi.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-raspberrypi:
+
+local_conf_header:
+  reterminal: |
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
+
+
+machine: avocado-raspberrypi4
