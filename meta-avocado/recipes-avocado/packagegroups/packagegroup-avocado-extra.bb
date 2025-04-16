@@ -2,6 +2,7 @@ DESCRIPTION = "Packagegroup for Avocado extra"
 LICENSE = "Apache-2.0"
 
 inherit packagegroup
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 RDEPENDS:${PN} = " \
   openssh \
@@ -16,4 +17,5 @@ RDEPENDS:${PN} = " \
   ltrace \
   iproute2 \
   htop \
+  cryptoauthlib \
 "

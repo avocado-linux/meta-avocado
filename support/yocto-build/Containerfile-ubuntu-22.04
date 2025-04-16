@@ -15,6 +15,7 @@ RUN apt-get update && \
   gawk \
   gcc \
   git \
+  git-lfs \
   iputils-ping \
   libacl1 \
   liblz4-tool \

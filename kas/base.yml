@@ -1,5 +1,7 @@
 header:
   version: 11
+  includes:
+    - kas/extra/atecc.yml
 
 build_system: oe
 

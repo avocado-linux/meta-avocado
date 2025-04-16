@@ -1,0 +1,29 @@
+header:
+  version: 11
+
+repos:
+  meta-atmel:
+    url: https://github.com/linux4sam/meta-atmel
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  atecc: |
+    BBMASK = "meta-atmel/recipes-atmel/"
+    BBMASK += "meta-atmel/recipes-bsp/"
+    BBMASK += "meta-atmel/recipes-connectivity/"
+    BBMASK += "meta-atmel/recipes-core/"
+    BBMASK += "meta-atmel/recipes-devtools/"
+    BBMASK += "meta-atmel/recipes-egt/"
+    BBMASK += "meta-atmel/recipes-graphics/"
+    BBMASK += "meta-atmel/recipes-httpd/"
+    BBMASK += "meta-atmel/recipes-kernel/"
+    BBMASK += "meta-atmel/recipes-multimedia/"
+    BBMASK += "meta-atmel/recipes-security/optee"
+    BBMASK += "meta-atmel/recipes-support/"
+    BBMASK += "meta-atmel/recipes-utils/"
+
+  git-lfs: |
+    HOSTTOOLS += "git-lfs"
+    FETCHCMD_git = "git -c core.fsyncobjectfiles=0"
