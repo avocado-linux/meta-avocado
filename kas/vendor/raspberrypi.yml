@@ -1,0 +1,13 @@
+header:
+  version: 11
+
+repos:
+  meta-raspberrypi:
+    url: https://git.yoctoproject.org/meta-raspberrypi
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  raspberrypi: |
+    IMAGE_INSTALL:append = " packagegroup-avocado-raspberrypi"
