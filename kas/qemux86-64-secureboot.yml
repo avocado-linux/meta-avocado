@@ -13,6 +13,6 @@ repos:
 local_conf_header:
   avocado-qemux86-64: |
     ROOT_FSTYPES = "squashfs wic"
-    IMAGE_INSTALL:append = " avocado-extension-debug-tweaks"
+    ROOTFS_EXTRA_IMAGE_INSTALL:append = " avocado-extension-debug-tweaks"
 
 machine: avocado-qemux86-64
