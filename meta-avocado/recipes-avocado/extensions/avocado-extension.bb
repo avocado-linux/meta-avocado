@@ -36,15 +36,6 @@ EXT_CONFEXT_SRC_DIR ?= "${WORKDIR}/confext-files"
 
 # Main installation task
 do_install() {
-    # Create metadata file
-    cat > ${WORKDIR}/extension.conf << EOF
-[Extension]
-Type=${EXT_TYPE}
-Priority=${EXT_PRIORITY}
-Description=${EXT_DESCRIPTION}
-Version=${EXT_VERSION}
-EOF
-
     # Create release file
     cat > ${WORKDIR}/extension-release.${EXT_ID} << EOF
 ID=${DISTRO}
@@ -53,9 +44,6 @@ EOF
 
     # Process system extension files (for system or combined types)
     if [ "${EXT_TYPE}" = "system" ] || [ "${EXT_TYPE}" = "combined" ]; then
-        install -d ${D}/var/lib/extensions/${EXT_ID}
-        install -m 0644 ${WORKDIR}/extension.conf ${D}/var/lib/extensions/${EXT_ID}/
-        
         install -d ${D}/var/lib/extensions/${EXT_ID}/usr/lib/extension-release.d
         install -m 0644 ${WORKDIR}/extension-release.${EXT_ID} ${D}/var/lib/extensions/${EXT_ID}/usr/lib/extension-release.d/
         
@@ -66,9 +54,9 @@ EOF
     
     # Process configuration extension files (for configuration or combined types)
     if [ "${EXT_TYPE}" = "configuration" ] || [ "${EXT_TYPE}" = "combined" ]; then
-        install -d ${D}/var/lib/confexts/${EXT_ID}
-        install -m 0644 ${WORKDIR}/extension.conf ${D}/var/lib/confexts/${EXT_ID}/
-        
+        install -d ${D}/var/lib/confexts/${EXT_ID}/etc/extension-release.d
+        install -m 0644 ${WORKDIR}/extension-release.${EXT_ID} ${D}/var/lib/confexts/${EXT_ID}/etc/extension-release.d/
+       
         if [ -d "${EXT_CONFEXT_SRC_DIR}" ]; then
             cp -R ${EXT_CONFEXT_SRC_DIR}/* ${D}/var/lib/confexts/${EXT_ID}/
         fi
