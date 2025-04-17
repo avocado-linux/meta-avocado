@@ -7,7 +7,7 @@ require avocado-extension.bb
 EXT_ID = "debug-tweaks"
 EXT_VERSION = "1.0"
 EXT_DESCRIPTION = "Debug tweaks for development"
-EXT_TYPE = "configuration"
+EXT_TYPE = "combined"
 EXT_PRIORITY = "90"
 
 # Debug tools to include in the extension

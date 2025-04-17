@@ -45,10 +45,19 @@ Description=${EXT_DESCRIPTION}
 Version=${EXT_VERSION}
 EOF
 
+    # Create release file
+    cat > ${WORKDIR}/extension-release.${EXT_ID} << EOF
+ID=${DISTRO}
+VERSION_ID=${DISTRO_VERSION}
+EOF
+
     # Process system extension files (for system or combined types)
     if [ "${EXT_TYPE}" = "system" ] || [ "${EXT_TYPE}" = "combined" ]; then
         install -d ${D}/var/lib/extensions/${EXT_ID}
         install -m 0644 ${WORKDIR}/extension.conf ${D}/var/lib/extensions/${EXT_ID}/
+        
+        install -d ${D}/var/lib/extensions/${EXT_ID}/usr/lib/extension-release.d
+        install -m 0644 ${WORKDIR}/extension-release.${EXT_ID} ${D}/var/lib/extensions/${EXT_ID}/usr/lib/extension-release.d/
         
         if [ -d "${EXT_SYSEXT_SRC_DIR}" ]; then
             cp -R ${EXT_SYSEXT_SRC_DIR}/* ${D}/var/lib/extensions/${EXT_ID}/
