@@ -8,4 +8,8 @@ REQUIRED_DISTRO_FEATURES = ""
 
 inherit packagegroup
 
-RDEPENDS:${PN} = ""
+PREFERRED_PROVIDER_virtual/dtb = "reterminal-devicetree"
+
+RDEPENDS:${PN} = " \
+  reterminal-devicetree \
+"
