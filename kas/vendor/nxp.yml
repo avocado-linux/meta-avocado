@@ -10,4 +10,4 @@ repos:
 
 local_conf_header:
   imx: |
-    IMAGE_INSTALL:append = " packagegroup-avocado-imx"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"

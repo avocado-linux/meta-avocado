@@ -10,4 +10,4 @@ repos:
 
 local_conf_header:
   raspberrypi: |
-    IMAGE_INSTALL:append = " packagegroup-avocado-raspberrypi"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-raspberrypi"
