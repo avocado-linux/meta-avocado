@@ -1,7 +1,7 @@
 SUMMARY = "Avocado debug tweaks extension"
 DESCRIPTION = "Configuration extension with tweaks for SSH, vim, and other debug tools"
 
-require avocado-extension.bb
+require avocado-extension.inc
 
 # Set extension identification parameters
 EXT_ID = "debug-tweaks"
