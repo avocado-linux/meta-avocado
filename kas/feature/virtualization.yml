@@ -2,7 +2,7 @@ header:
   version: 11
 
 repos:
-  meta-security:
+  meta-virtualization:
     url: https://git.yoctoproject.org/meta-virtualization
     branch: scarthgap
     layers:
