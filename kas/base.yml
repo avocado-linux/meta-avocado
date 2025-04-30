@@ -40,9 +40,7 @@ local_conf_header:
   meta-avocado: |
     USER_CLASSES:append = " buildhistory buildstats buildstats-summary"
     EXTRA_IMAGE_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
+    AVOCADO_REPO_BASE = "http://package-repo"
 
   sdk: |
     CONF_VERSION = "2"
-
-target:
- - avocado-complete

@@ -4,6 +4,7 @@ header:
   includes:
     - kas/base.yml
     - kas/vendor/raspberrypi.yml
+    - kas/target/complete.yml
 
 repos:
   meta-avocado:

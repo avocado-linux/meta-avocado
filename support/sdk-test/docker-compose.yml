@@ -1,0 +1,27 @@
+services:
+  package-repo:
+    build:
+      context: ../package-repo
+      dockerfile: Containerfile
+    ports:
+      - "8080:80"
+    volumes:
+      - ${REPO_PATH}:/repo:ro
+    # Add healthcheck configuration
+    healthcheck:
+      # Command to run inside the container to check health
+      # Here we try to curl the base URL. Adjust if your repo server needs a different check.
+      # '-f' fails silently on HTTP errors but returns non-zero exit code
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 10s  # Check every 10 seconds
+      timeout: 5s    # Wait up to 5 seconds for the check to complete
+      retries: 5     # Try 5 times before marking as unhealthy
+      start_period: 15s # Grace period for startup before first check failure counts
+
+  sdk-test:
+    image: avocadolinux/sdk:dev
+    depends_on:
+      package-repo:
+        condition: service_healthy
+    volumes:
+      - ./opt:/opt

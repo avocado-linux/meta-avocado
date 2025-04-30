@@ -7,7 +7,6 @@ INHIBIT_DEFAULT_DEPS = "1"
 PACKAGE_ARCH = "${SDKPKGARCH}"
 PACKAGES = "${PN}"
 
-SDK_PACKAGE_ARCHS += "sdk-provides-dummy-${SDKPKGSUFFIX}"
 TARGET_ARCH = "${SDK_ARCH}"
 
 # These variables are derived from meta-avocado/classes/populate_sdk_base.bbclass
@@ -22,12 +21,11 @@ TOOLCHAIN_TARGET_TASK = " \
     ${@multilib_pkg_extend(d, 'packagegroup-core-standalone-sdk-target')} \
     ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'go', multilib_pkg_extend(d, 'packagegroup-go-sdk-target'), '', d)} \
     ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'rust', multilib_pkg_extend(d, 'libstd-rs'), '', d)} \
-    target-sdk-provides-dummy \
 "
 
 # Define package dependencies based on toolchain components
-DEPENDS += "packagegroup-core-standalone-sdk-target target-sdk-provides-dummy nativesdk-bash"
-RDEPENDS:${PN} = "${TOOLCHAIN_TARGET_TASK} ${TOOLCHAIN_HOST_TASK}"
+DEPENDS += "${TOOLCHAIN_TARGET_TASK}"
+RDEPENDS:${PN} = "${TOOLCHAIN_HOST_TASK} meta-environment-${MACHINE}"
 
 # Skip the build-deps QA check as it gives false positives for SDK toolchain recipes
 # where RDEPENDS are dynamically generated.

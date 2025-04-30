@@ -4,6 +4,7 @@ header:
     - kas/base.yml
     - kas/vendor/nvidia.yml
     - kas/feature/virtualization.yml
+    - kas/target/complete.yml
 
 repos:
   meta-avocado:

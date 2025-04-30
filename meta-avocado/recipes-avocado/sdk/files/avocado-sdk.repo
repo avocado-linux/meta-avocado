@@ -1,0 +1,5 @@
+[avocado-sdk]
+name=Avocado SDK
+baseurl={REPO_BASE}/$releasever/sdk/all
+enabled=1
+gpgcheck=0

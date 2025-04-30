@@ -3,6 +3,7 @@ header:
   includes:
     - kas/base.yml
     - kas/feature/tpm.yml
+    - kas/target/complete.yml
 
 repos:
   meta-avocado:

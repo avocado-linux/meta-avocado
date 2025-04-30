@@ -1,0 +1,13 @@
+header:
+  version: 11
+  includes:
+    - kas/base.yml
+    - kas/target/container.yml
+
+local_conf_header:
+  avocado-container: |
+    ROOT_FSTYPES = "container"
+
+distro: avocado-container
+
+machine: avocado-container-arm64

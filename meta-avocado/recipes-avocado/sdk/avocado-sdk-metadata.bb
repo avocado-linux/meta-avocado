@@ -23,11 +23,28 @@ PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = ""
 
+MACHINEARCH = "${@d.getVar('MACHINE_SHORT_NAME').replace('-', '_')}"
+PLATFORM = "${MACHINEARCH}-avocado-linux"
+
 # Skip QA checks likeldflags, alreadyinstalled, etc. that are not relevant for this config package
 INSANE_SKIP:${PN} = "ldflags alreadyinstalled"
 
+inherit update-alternatives
+
+ALTERNATIVE_PRIORITY = "30"
+ALTERNATIVE:${PN} += "dnf_vars_arch rpm_platform rpmrc"
+ALTERNATIVE_LINK_NAME[dnf_vars_arch] = "${sysconfdir}/dnf/vars/arch"
+ALTERNATIVE_LINK_NAME[rpm_platform] = "${sysconfdir}/rpm/platform"
+ALTERNATIVE_LINK_NAME[rpmrc] = "${sysconfdir}/rpmrc"
+
 # The repo file is packaged, the map file is deployed directly
-FILES:${PN} = "/avocado-sdk.repo"
+FILES:${PN} = " \
+    /etc/yum.repos.d \
+    /etc/rpm/platform.${PN} \
+    /etc/dnf/vars/arch.${PN} \
+    /etc/rpmrc.${PN} \
+    /usr/lib/rpm/platform/${PLATFORM}/macros \
+"
 
 # Set package arch so it deploys to a specific directory
 PACKAGE_ARCH = "all_avocadosdk"
@@ -40,6 +57,7 @@ python do_install() {
 
     d_dir = d.getVar('D')
     deploy_dir_rpm = d.getVar('DEPLOY_DIR_RPM')
+    bb.note(f"DEPLOY_DIR_RPM value: {deploy_dir_rpm}")
     base_repo_url = d.getVar('AVOCADO_REPO_BASE') # Base URL for the repo server
     distro_codename = d.getVar('DISTRO_CODENAME')
     machine = d.getVar('MACHINE')
@@ -47,6 +65,7 @@ python do_install() {
     pkg_archs = (d.getVar('PACKAGE_ARCHS') or "").split()
     sdk_pkg_archs = (d.getVar('SDK_PACKAGE_ARCHS') or "").split()
     gpg_check = d.getVar('AVOCADO_REPO_GPGCHECK') or '0'
+    repo_archs = [] # List to store archs for which repo entries are written
 
     # --- Precompute values ---
     machine_short_name = machine.replace('avocado-', '')
@@ -107,7 +126,8 @@ python do_install() {
              bb.warn(f"No map path determined for arch_dir '{arch_dir}'")
 
     def _write_repo_entry(repo_f, repo_url_path, repo_name, repo_section_name, priority, arch):
-        """Writes a repository section to the repo file. Returns True if written, False otherwise."""
+        """Writes a repository section to the repo file. Appends arch to repo_archs on success."""
+        nonlocal repo_archs # Allow modification of the outer scope list
         if repo_url_path and repo_name and repo_section_name:
             repo_f.write(f"[{repo_section_name}]\n")
             repo_f.write(f"name={repo_name}\n")
@@ -117,6 +137,7 @@ python do_install() {
             repo_f.write(f"gpgcheck={gpg_check}\n")
             repo_f.write(f"priority={priority}\n")
             repo_f.write("\n")
+            repo_archs.append(arch) # Append arch if written successfully
             return True # Indicate success for priority increment
         elif arch != "all_avocadosdk": # Only log warning if it wasn't the explicitly excluded arch
             bb.warn(f"Repo entry details not fully determined for arch '{arch}'. Skipping repo entry.")
@@ -125,7 +146,7 @@ python do_install() {
     def _process_arch(arch):
         nonlocal priority, map_f, repo_f
 
-        # Skip only dummy architectures
+        # Skip sdk-provides-dummy architectures
         if arch.startswith('sdk-provides-dummy'):
             return
 
@@ -160,13 +181,17 @@ python do_install() {
         else:
             bb.note(f"Skipping arch '{arch}' as directory '{check_dir}' does not exist")
 
+    repo_dir = os.path.join(d_dir, 'etc', 'yum.repos.d')
     # Ensure directories exist
     os.makedirs(d_dir, exist_ok=True)
     os.makedirs(deploy_dir_rpm, exist_ok=True)
+    os.makedirs(repo_dir, exist_ok=True) # Ensure repo dir exists
 
     # Define file paths
-    repo_file_path = os.path.join(d_dir, 'avocado-sdk.repo')
+    repo_filename = d.getVar('VIRTUAL-RUNTIME_avocado-sdk-metadata') + '.repo'
+    repo_file_path = os.path.join(repo_dir, repo_filename)
     map_file_path = os.path.join(deploy_dir_rpm, 'avocado-repo.map')
+    bb.note(f"Constructed map file path: {map_file_path}")
 
     # Combine architectures into a unique set
     all_archs = set(pkg_archs + sdk_pkg_archs)
@@ -177,15 +202,52 @@ python do_install() {
         map_f.write('')
     with open(repo_file_path, 'w') as repo_f:
         repo_f.write('')
+    bb.note(f"Initial write/clear done for map file: {map_file_path}")
 
     # --- Unconditionally add the mapping for this recipe's own arch ---
     map_value_path_for_all = f"{distro_codename}/sdk/all"
     with open(map_file_path, 'a') as map_f:
+        bb.note(f"Appending unconditional map entry to: {map_file_path}")
         bb.note(f"Adding unconditional map entry: all_avocadosdk={map_value_path_for_all}")
         map_f.write(f"all_avocadosdk={map_value_path_for_all}\n")
+    bb.note(f"Finished appending unconditional map entry.")
 
     # Append to files for other architectures found
     with open(map_file_path, 'a') as map_f, open(repo_file_path, 'a') as repo_f:
+        bb.note(f"Opening map file for arch loop append: {map_file_path}")
         for arch in sorted(list(all_archs)): # Sort for consistent output order
             _process_arch(arch)
+    bb.note(f"Finished arch loop append for map file.")
+
+    # --- Write the /etc/dnf/vars/arch file ---
+    arch_vars_dir = os.path.join(d_dir, 'etc', 'dnf', 'vars')
+    os.makedirs(arch_vars_dir, exist_ok=True)
+    arch_vars_path = os.path.join(arch_vars_dir, 'arch')
+    # Sort and make unique before joining for deterministic output
+    always_include_archs = ['all_avocadosdk']
+    final_archs = sorted(list(set([a.replace('-', '_') for a in repo_archs] + always_include_archs)))
+    with open(arch_vars_path, 'w') as arch_f:
+        # Join the underscore-replaced archs for the vars file
+        arch_f.write(':'.join(final_archs))
+        bb.note(f"Wrote {len(final_archs)} archs to {arch_vars_path}: {':'.join(final_archs)}")
+
+    # --- Write the /etc/rpm/platform file ---
+    platform_var = d.getVar('PLATFORM') # Get the PLATFORM variable value
+    platform_dir = os.path.join(d_dir, 'etc', 'rpm')
+    os.makedirs(platform_dir, exist_ok=True)
+    platform_file_path = os.path.join(platform_dir, 'platform')
+    with open(platform_file_path, 'w') as platform_f:
+        platform_f.write(platform_var + '\n') # Write PLATFORM value
+        bb.note(f"Wrote platform '{platform_var}' to {platform_file_path}")
+
+    # --- Write the /etc/rpmrc.${PN} file ---
+    rpmrc_file_path = os.path.join(d_dir, 'etc', f"rpmrc.{d.getVar('PN')}")
+    # Get MACHINE_SHORT_NAME with hyphens replaced by underscores
+    machine_short_name_us = d.getVar('MACHINEARCH')
+    # Join the final_archs list (already contains underscore versions) with spaces
+    all_arches_space_sep = ' '.join(final_archs)
+    rpmrc_content = f"arch_compat: {machine_short_name_us}: {all_arches_space_sep}\n"
+    with open(rpmrc_file_path, 'w') as rpmrc_f:
+        rpmrc_f.write(rpmrc_content)
+        bb.note(f"Wrote rpmrc content to {rpmrc_file_path}")
 }
