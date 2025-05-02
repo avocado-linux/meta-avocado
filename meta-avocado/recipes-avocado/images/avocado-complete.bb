@@ -4,6 +4,7 @@ LICENSE = "Apache-2.0"
 # Ensure compile task runs after dependencies
 do_compile[depends] += "avocado-image-initramfs:do_image_complete"
 do_compile[depends] += "avocado-image-rootfs:do_image_complete"
+do_compile[depends] += "avocado-image-var:do_deploy"
 do_compile[depends] += "avocado-pkg-extensions:do_build"
 do_compile[depends] += "avocado-pkg-extra:do_build"
 do_compile[depends] += "avocado-pkg-sdk:do_build"
