@@ -1,0 +1,30 @@
+header:
+  version: 11
+
+repos:
+  meta-arm:
+    url: https://git.yoctoproject.org/meta-arm.git
+    branch: scarthgap
+    layers:
+      meta-arm:
+      meta-arm-toolchain:
+
+  meta-imx:
+    url: https://github.com/nxp-imx/meta-imx.git
+    branch: scarthgap-6.6.36-2.1.0
+    layers:
+      meta-imx-bsp:
+      meta-imx-ml:
+      meta-imx-v2x:
+
+  meta-imx-frdm:
+    url: https://github.com/nxp-imx-support/meta-imx-frdm.git
+    branch: lf-6.6.36-2.1.0
+    layers:
+      meta-imx-bsp:
+
+
+local_conf_header:
+  vendor-nxp-frdm: |
+    DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"

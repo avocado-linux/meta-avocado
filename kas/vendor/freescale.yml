@@ -7,7 +7,13 @@ repos:
     branch: scarthgap
     layers:
       .:
+  meta-freescale-3rdparty:
+    url: https://github.com/Freescale/meta-freescale-3rdparty.git
+    branch: scarthgap
+    layers:
+      .:
 
 local_conf_header:
-  vendor-nxp: |
+  vendor-freescale: |
+    ACCEPT_FSL_EULA = "1"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"

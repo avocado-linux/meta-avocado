@@ -2,6 +2,7 @@ header:
   version: 11
   includes:
     - kas/base.yml
+    - kas/vendor/nxp-frdm.yml
     - kas/vendor/freescale.yml
     - kas/target/complete.yml
 
@@ -12,7 +13,7 @@ repos:
       meta-avocado-nxp:
 
 local_conf_header:
-  machine-avocado-imx93-evk: |
-    INITRAMFS_MAXSIZE = "196608"
+  avocado-imx91-frdm: |
+    # IMX_DEFAULT_BOOTLOADER = "u-boot"
 
-machine: avocado-imx93-evk
+machine: avocado-imx91-frdm
