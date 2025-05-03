@@ -5,7 +5,7 @@ header:
     - kas/target/container.yml
 
 local_conf_header:
-  avocado-container: |
+  machine-avocado-container-x86_64: |
     ROOT_FSTYPES = "container"
 
 distro: avocado-container

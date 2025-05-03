@@ -13,7 +13,7 @@ repos:
       meta-avocado-nvidia:
 
 local_conf_header:
-  avocado-jetson-orin-nano-devkit-nvme: |
+  machine-avocado-jetson-orin-nano-devkit-nvme: |
     TEGRA_OOT_ALL_DRIVER_PACKAGES:append = " nv-kernel-module-rtl8852ce"
     INITRAMFS_MAXSIZE = "196608"
 

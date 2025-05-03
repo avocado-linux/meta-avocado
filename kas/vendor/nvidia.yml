@@ -15,7 +15,7 @@ repos:
       .:
 
 local_conf_header:
-  tegra: |
+  vendor-nvidia: |
     UBOOT_EXTLINUX = "1"
     USE_REDUNDANT_FLASH_LAYOUT_DEFAULT = "1"
     TEGRA_INITRD_FLASH_INITRAMFS_FSTYPES = "cpio.gz.cboot"

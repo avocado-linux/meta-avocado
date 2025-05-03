@@ -9,5 +9,5 @@ repos:
       .:
 
 local_conf_header:
-  imx: |
+  vendor-nxp: |
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"

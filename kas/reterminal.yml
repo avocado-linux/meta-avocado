@@ -13,7 +13,7 @@ repos:
       meta-avocado-raspberrypi:
 
 local_conf_header:
-  reterminal: |
+  machine-avocado-reterminal: |
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
 
 

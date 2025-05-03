@@ -9,7 +9,7 @@ repos:
       .:
 
 local_conf_header:
-  atecc: |
+  extra-atecc: |
     BBMASK = "meta-atmel/recipes-atmel/"
     BBMASK += "meta-atmel/recipes-bsp/"
     BBMASK += "meta-atmel/recipes-connectivity/"
