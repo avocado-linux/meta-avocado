@@ -1,0 +1,257 @@
+From 3cae1fb130ebea08171fd05be0cc5605eb80545b Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sat, 3 May 2025 15:56:06 -0400
+Subject: [PATCH] Fix uid/gid stat for fakeroot
+
+---
+ mkfs/rootdir.c | 79 +++++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 53 insertions(+), 26 deletions(-)
+
+diff --git a/mkfs/rootdir.c b/mkfs/rootdir.c
+index 5f4cfb93..2d49b709 100644
+--- a/mkfs/rootdir.c
++++ b/mkfs/rootdir.c
+@@ -1071,7 +1071,7 @@ out:
+ static int add_file_items(struct btrfs_trans_handle *trans,
+ 			  struct btrfs_root *root,
+ 			  struct btrfs_inode_item *btrfs_inode, u64 objectid,
+-			  const struct stat *st, const char *path_name)
++			  const struct stat *local_st, const char *path_name)
+ {
+ 	struct btrfs_fs_info *fs_info = trans->fs_info;
+ 	int ret = -1;
+@@ -1082,7 +1082,7 @@ static int add_file_items(struct btrfs_trans_handle *trans,
+ 	struct source_descriptor source;
+ 	int fd;
+ 
+-	if (st->st_size == 0)
++	if (local_st->st_size == 0)
+ 		return 0;
+ 
+ 	fd = open(path_name, O_RDONLY);
+@@ -1105,37 +1105,37 @@ static int add_file_items(struct btrfs_trans_handle *trans,
+ #endif
+ 	}
+ 
+-	if (st->st_size <= BTRFS_MAX_INLINE_DATA_SIZE(fs_info) &&
+-	    st->st_size < sectorsize) {
+-		char *buffer = malloc(st->st_size);
++	if (local_st->st_size <= BTRFS_MAX_INLINE_DATA_SIZE(fs_info) &&
++	    local_st->st_size < sectorsize) {
++		char *buffer = malloc(local_st->st_size);
+ 
+ 		if (!buffer) {
+ 			ret = -ENOMEM;
+ 			goto end;
+ 		}
+ 
+-		ret_read = pread(fd, buffer, st->st_size, 0);
++		ret_read = pread(fd, buffer, local_st->st_size, 0);
+ 		if (ret_read == -1) {
+ 			error("cannot read %s at offset %u length %zu: %m",
+-			      path_name, 0, st->st_size);
++			      path_name, 0, local_st->st_size);
+ 			free(buffer);
+ 			goto end;
+ 		}
+ 
+ 		switch (g_compression) {
+ 		case BTRFS_COMPRESS_ZLIB:
+-			ret = zlib_compress_inline_extent(buffer, st->st_size,
++			ret = zlib_compress_inline_extent(buffer, local_st->st_size,
+ 							  &comp_buf);
+ 			break;
+ #if COMPRESSION_LZO
+ 		case BTRFS_COMPRESS_LZO:
+-			ret = lzo_compress_inline_extent(buffer, st->st_size,
++			ret = lzo_compress_inline_extent(buffer, local_st->st_size,
+ 							 &comp_buf, wrkmem);
+ 			break;
+ #endif
+ #if COMPRESSION_ZSTD
+ 		case BTRFS_COMPRESS_ZSTD:
+-			ret = zstd_compress_inline_extent(buffer, st->st_size,
++			ret = zstd_compress_inline_extent(buffer, local_st->st_size,
+ 							  &comp_buf);
+ 			break;
+ #endif
+@@ -1146,19 +1146,19 @@ static int add_file_items(struct btrfs_trans_handle *trans,
+ 
+ 		if (ret < 0) {
+ 			ret = btrfs_insert_inline_extent(trans, root, objectid,
+-							 0, buffer, st->st_size,
++							 0, buffer, local_st->st_size,
+ 							 BTRFS_COMPRESS_NONE,
+-							 st->st_size);
++							 local_st->st_size);
+ 		} else {
+ 			ret = btrfs_insert_inline_extent(trans, root, objectid,
+ 							 0, comp_buf, ret,
+ 							 g_compression,
+-							 st->st_size);
++							 local_st->st_size);
+ 		}
+ 
+ 		free(buffer);
+ 		/* Update the inode nbytes for inline extents. */
+-		btrfs_set_stack_inode_nbytes(btrfs_inode, st->st_size);
++		btrfs_set_stack_inode_nbytes(btrfs_inode, local_st->st_size);
+ 		goto end;
+ 	}
+ 
+@@ -1218,12 +1218,12 @@ static int add_file_items(struct btrfs_trans_handle *trans,
+ 
+ 	source.fd = fd;
+ 	source.buf = buf;
+-	source.size = st->st_size;
++	source.size = local_st->st_size;
+ 	source.path_name = path_name;
+ 	source.comp_buf = comp_buf;
+ 	source.wrkmem = wrkmem;
+ 
+-	while (file_pos < st->st_size) {
++	while (file_pos < local_st->st_size) {
+ 		ret = add_file_item_extent(trans, root, btrfs_inode, objectid,
+ 					   &source, file_pos);
+ 		if (ret < 0)
+@@ -1297,6 +1297,7 @@ static int ftw_add_subvol(const char *full_path, const struct stat *st,
+ 	struct inode_entry *parent;
+ 	struct btrfs_inode_item inode_item = { 0 };
+ 	u64 subvol_id, ino;
++	struct stat local_st; /* Use stat from lstat(full_path) */
+ 
+ 	subvol_id = next_subvol_id++;
+ 
+@@ -1343,7 +1344,13 @@ static int ftw_add_subvol(const char *full_path, const struct stat *st,
+ 		      subvol_id);
+ 		return ret;
+ 	}
+-	stat_to_inode_item(&inode_item, st);
++	/* Get stat info from the actual path, not the nftw callback buffer */
++	ret = lstat(full_path, &local_st);
++	if (ret < 0) {
++		error("failed to lstat '%s': %m", full_path);
++		return -errno;
++	}
++	stat_to_inode_item(&inode_item, &local_st);
+ 
+ 	btrfs_set_stack_inode_nlink(&inode_item, 1);
+ 	ret = update_inode_item(g_trans, new_root, &inode_item, ino);
+@@ -1375,6 +1382,7 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 	const bool have_hard_links = (!S_ISDIR(st->st_mode) && st->st_nlink > 1);
+ 	u64 ino;
+ 	int ret;
++	struct stat local_st; /* Use stat from lstat(full_path) */
+ 
+ 	/* The rootdir itself. */
+ 	if (unlikely(ftwbuf->level == 0)) {
+@@ -1392,7 +1400,13 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 			error("failed to add xattr item for the top level inode: %m");
+ 			return ret;
+ 		}
+-		stat_to_inode_item(&inode_item, st);
++		/* Get stat info from the actual path, not the nftw callback buffer */
++		ret = lstat(full_path, &local_st);
++		if (ret < 0) {
++			error("failed to lstat '%s': %m", full_path);
++			return -errno;
++		}
++		stat_to_inode_item(&inode_item, &local_st);
+ 		/*
+ 		 * Rootdir inode exists without any parent, thus needs to set
+ 		 * its nlink to 1 manually.
+@@ -1455,7 +1469,14 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 	while (current_path.level > ftwbuf->level)
+ 		rootdir_path_pop(&current_path);
+ 
+-	if (S_ISDIR(st->st_mode)) {
++	/* Get stat info from the actual path, not the nftw callback buffer */
++	ret = lstat(full_path, &local_st);
++	if (ret < 0) {
++		error("failed to lstat '%s': %m", full_path);
++		return -errno;
++	}
++
++	if (S_ISDIR(local_st.st_mode)) {
+ 		list_for_each_entry(rds, g_subvols, list) {
+ 			if (!strcmp(full_path, rds->full_path)) {
+ 				ret = ftw_add_subvol(full_path, st, typeflag,
+@@ -1476,6 +1497,7 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 	if (have_hard_links) {
+ 		struct hardlink_entry *found;
+ 
++		/* Use nftw 'st' for hardlink detection based on host dev/ino */
+ 		found = find_hard_link(root, st);
+ 		/*
+ 		 * Can only add the hard link if it doesn't cross subvolume
+@@ -1485,7 +1507,8 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 			ret = btrfs_add_link(g_trans, root, found->btrfs_ino,
+ 					     parent->ino, full_path + ftwbuf->base,
+ 					     strlen(full_path) - ftwbuf->base,
+-					     ftype_to_btrfs_type(st->st_mode),
++					     /* Use local_st for file type */
++					     ftype_to_btrfs_type(local_st.st_mode),
+ 					     NULL, 1, 0);
+ 			if (ret < 0) {
+ 				errno = -ret;
+@@ -1510,7 +1533,8 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 		error("failed to find free objectid for file %s: %m", full_path);
+ 		return ret;
+ 	}
+-	stat_to_inode_item(&inode_item, st);
++	/* Use local_st for inode metadata */
++	stat_to_inode_item(&inode_item, &local_st);
+ 
+ 	ret = btrfs_insert_inode(g_trans, root, ino, &inode_item);
+ 	if (ret < 0) {
+@@ -1522,7 +1546,8 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 	ret = btrfs_add_link(g_trans, root, ino, parent->ino,
+ 			     full_path + ftwbuf->base,
+ 			     strlen(full_path) - ftwbuf->base,
+-			     ftype_to_btrfs_type(st->st_mode),
++			     /* Use local_st for file type */
++			     ftype_to_btrfs_type(local_st.st_mode),
+ 			     NULL, 1, 0);
+ 	if (ret < 0) {
+ 		errno = -ret;
+@@ -1532,6 +1557,7 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 
+ 	/* Record this new hard link. */
+ 	if (have_hard_links) {
++		/* Use nftw 'st' for hardlink detection based on host dev/ino/nlink */
+ 		ret = add_hard_link(root, ino, st);
+ 		if (ret < 0) {
+ 			errno = -ret;
+@@ -1555,7 +1581,7 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 		error("failed to add xattrs for inode %llu ('%s'): %m", ino, full_path);
+ 		return ret;
+ 	}
+-	if (S_ISDIR(st->st_mode)) {
++	if (S_ISDIR(local_st.st_mode)) {
+ 		ret = rootdir_path_push(&current_path, root, ino);
+ 		if (ret < 0) {
+ 			errno = -ret;
+@@ -1563,8 +1589,9 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 				ino, full_path);
+ 			return ret;
+ 		}
+-	} else if (S_ISREG(st->st_mode)) {
+-		ret = add_file_items(g_trans, root, &inode_item, ino, st, full_path);
++	} else if (S_ISREG(local_st.st_mode)) {
++		/* Pass local_st to add_file_items */
++		ret = add_file_items(g_trans, root, &inode_item, ino, &local_st, full_path);
+ 		if (ret < 0) {
+ 			errno = -ret;
+ 			error("failed to add file extents for inode %llu ('%s'): %m",
+@@ -1578,7 +1605,7 @@ static int ftw_add_inode(const char *full_path, const struct stat *st,
+ 				ino, full_path);
+ 			return ret;
+ 		}
+-	} else if (S_ISLNK(st->st_mode)) {
++	} else if (S_ISLNK(local_st.st_mode)) {
+ 		ret = add_symbolic_link(g_trans, root, &inode_item, ino, full_path);
+ 		if (ret < 0) {
+ 			errno = -ret;
+-- 
+2.49.0
+
