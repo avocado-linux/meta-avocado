@@ -14,6 +14,6 @@ repos:
 
 local_conf_header:
   avocado-imx91-frdm: |
-    # IMX_DEFAULT_BOOTLOADER = "u-boot"
+    ROOT_FSTYPES = "wic.bmap wic.zst tar.zst"
 
 machine: avocado-imx91-frdm

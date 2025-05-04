@@ -27,4 +27,5 @@ repos:
 local_conf_header:
   vendor-nxp-frdm: |
     DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"
+    IMX_DEFAULT_BSP = "nxp"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"
