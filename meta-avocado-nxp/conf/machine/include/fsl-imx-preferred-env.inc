@@ -1,7 +1,6 @@
 # Copied from meta-imx/meta-imx-sdk/conf/distro/include/fsl-imx-preferred-env.inc
-
-PREFERRED_PROVIDER_virtual/bootloader:imx-nxp-bsp = "u-boot-imx"
-PREFERRED_PROVIDER_virtual/kernel:imx-nxp-bsp = "linux-imx"
+PREFERRED_PROVIDER_virtual/bootloader:use-nxp-bsp = "u-boot-imx"
+PREFERRED_PROVIDER_virtual/kernel:use-nxp-bsp = "linux-imx"
 PREFERRED_PROVIDER_linux-imx-mfgtool = "linux-imx-mfgtool"
 
 PREFERRED_VERSION_gstreamer1.0              = "1.24.0.imx"

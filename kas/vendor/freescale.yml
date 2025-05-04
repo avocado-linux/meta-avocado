@@ -17,3 +17,4 @@ local_conf_header:
   vendor-freescale: |
     ACCEPT_FSL_EULA = "1"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"
+    SDK_PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-sdk"
