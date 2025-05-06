@@ -1,3 +1,4 @@
 part /boot/efi --source bootimg-efi --sourceparams="loader=systemd-boot,initrd=avocado-image-initramfs-${MACHINE}.cpio.zst" --fstype=vfat --label boot --active --align 1024 --size 64M --part-type C12A7328-F81F-11D2-BA4B-00A0C93EC93B
 part / --source rootfs --fstype=squashfs --align 1024 --part-type 4f68bce3-e8cd-4db1-96e7-fbcaf984b709
+part /var --source rawcopy --sourceparams="file=${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE}.btrfs" --fstype=btrfs --align 1024 --part-type 4d21b016-b534-45c2-a9fb-5c16e091fd2d
 bootloader --ptable gpt --timeout=0 --configfile="${DEPLOY_DIR_IMAGE}/boot.conf"
