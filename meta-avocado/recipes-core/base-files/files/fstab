@@ -4,7 +4,7 @@
 proc                 /proc                proc       defaults              0  0
 devpts               /dev/pts             devpts     mode=0620,ptmxmode=0666,gid=5      0  0
 tmpfs                /run                 tmpfs      mode=0755,nodev,nosuid,strictatime 0  0
-UUID=4d21b016-b534-45c2-a9fb-5c16e091fd2d  /var                 auto       defaults              0  0
+UUID=c9da40e1-3784-4885-9e35-2a22d9d3b56f  /var                 auto       defaults              0  0
 
 # uncomment this if your device has a SD/MMC/Transflash slot
 #/dev/mmcblk0p1       /media/card          auto       defaults,sync,noauto  0  0
