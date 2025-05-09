@@ -1,28 +1,28 @@
 name: Yocto KAS Docker Build
-
 on:
   workflow_dispatch:
-
+    inputs:
+      container_image:
+        description: 'Container image to use for build'
+        required: false
+        default: 'avocadolinux/yocto-build:ubuntu-22.04'
+        type: string
 jobs:
   build:
     name: Build with KAS in Container
-    runs-on: [self-hosted, linux, x64]
-
+    runs-on: [self-hosted, molcajete, avocado]
     container:
-      image: avocadolinux/yocto-build:ubuntu-22.04
+      image: ${{ inputs.container_image || 'avocadolinux/yocto-build:ubuntu-22.04' }}
       options: >
-        --user ${UID:-1000}:${GID:-1000}
         --volume /src/cache/downloads:/avocado/dl
         --volume /src/cache/sstate:/avocado/sstate
       env:
         DL_DIR: /src/cache/downloads
         SSTATE_DIR: /src/cache/sstate
         BB_ENV_PASSTHROUGH_ADDITIONS: DL_DIR SSTATE_DIR
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Init build environment
         run: |
           . scripts/init-build.sh kas/qemux86-64-secureboot.yml
