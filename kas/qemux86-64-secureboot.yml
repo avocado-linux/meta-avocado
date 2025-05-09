@@ -1,9 +1,12 @@
 header:
   version: 11
   includes:
-    - kas/base.yml
-    - kas/feature/tpm.yml
-    - kas/target/complete.yml
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
+    - repo: meta-avocado
+      file: kas/target/complete.yml
 
 repos:
   meta-avocado:
