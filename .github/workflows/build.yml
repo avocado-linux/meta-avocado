@@ -1,0 +1,22 @@
+name: Build Avocado
+on: push
+jobs:
+  build:
+    name: Build with KAS in Container
+    runs-on: molcajete
+    container:
+      image: avocadolinux/yocto-build:ubuntu-22.04
+      options: --user root
+      env:
+        DL_DIR: /src/cache/downloads
+        SSTATE_DIR: /src/cache/sstate
+        BB_ENV_PASSTHROUGH_ADDITIONS: DL_DIR SSTATE_DIR
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Init build environment
+        run: |
+          sudo -iu avocado
+          source ./scripts/init-build kas/qemux86-64-secureboot.yml
+          kas build meta-avocado/kas/qemux86-64-secureboot.yml
+        shell: bash
