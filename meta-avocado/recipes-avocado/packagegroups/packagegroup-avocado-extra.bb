@@ -1,8 +1,8 @@
 DESCRIPTION = "Packagegroup for Avocado extra"
 LICENSE = "Apache-2.0"
 
-inherit packagegroup
 PACKAGE_ARCH = "${MACHINE_ARCH}"
+inherit packagegroup
 
 RDEPENDS:${PN} = " \
   openssh \
