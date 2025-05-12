@@ -1,4 +1,4 @@
-DESCRIPTION = "Packagegroup for inclusion in  Avocado Container image"
+DESCRIPTION = "Packagegroup for inclusion in Avocado Container image"
 LICENSE = "Apache-2.0"
 
 inherit packagegroup

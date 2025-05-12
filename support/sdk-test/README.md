@@ -24,6 +24,12 @@ Refer to the main documentation for information on how to configure the system t
 
 ## Testing
 
+Export the path to the rpms for your chosen platform
+
+```bash
+export DEPLOY_DIR=./build-qemux86-64-secureboot/build/tmp/deploy
+```
+
 You can start the package-repo container and get a bash prompt in the sdk container with the following docker compose command
 
 ```bash
@@ -33,15 +39,13 @@ docker compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
 Once you have a bash prompt for the sdk container, you can run the following commands to install the required packages and set up the container for use with a toolchain
 
 ```bash
-dnf update
-dnf install avocado-sdk-qemux86-64
-dnf update
-dnf install avocado-sdk-toolchain
+dnf update && dnf install -y avocado-sdk-qemux86-64
+dnf update && dnf install -y --setopt=tsflags=noscripts avocado-sdk-toolchain
 ```
 
 Once the toolchain is installed, you can install the target sysroot with the following:
 
 ```bash
 mkdir -p /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/var
-dnf --installroot /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/ install packagegroup-core-standalone-sdk-target
+dnf -y --setopt=tsflags=noscripts --installroot /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/ install packagegroup-core-standalone-sdk-target
 ```

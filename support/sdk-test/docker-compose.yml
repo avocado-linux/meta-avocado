@@ -6,7 +6,7 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ${REPO_PATH}:/repo:ro
+      - ${DEPLOY_DIR}/rpm:/repo:ro
     # Add healthcheck configuration
     healthcheck:
       # Command to run inside the container to check health
@@ -18,10 +18,27 @@ services:
       retries: 5     # Try 5 times before marking as unhealthy
       start_period: 15s # Grace period for startup before first check failure counts
 
-  sdk-test:
+  sdk:
     image: avocadolinux/sdk:dev
     depends_on:
       package-repo:
         condition: service_healthy
+      target:
+        condition: service_started
+    entrypoint: /entrypoint.sh
     volumes:
-      - ./opt:/opt
+      - ./entrypoint.sh:/entrypoint.sh:ro
+
+  target:
+    image: avocadolinux/sdk:dev
+    stdin_open: true  # Keep stdin open
+    tty: true         # Allocate a pseudo-TTY
+    depends_on:
+      package-repo:
+        condition: service_healthy
+    entrypoint: /entrypoint.sh
+    command: ["/run_qemu.sh"]
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./run_qemu.sh:/run_qemu.sh:ro
+      - ${DEPLOY_DIR}/images:/images
