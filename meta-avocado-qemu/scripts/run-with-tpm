@@ -17,7 +17,7 @@ tmux new-session -d -s "$SESSION_NAME" -c "$BUILD_DIR"
 # In the left pane, run start-swtpm
 tmux send-keys -t "$SESSION_NAME:0.0" "/$SCRIPT_DIR/start-swtpm" C-m
 # Split the window vertically (left/right) and set the working directory
-tmux split-window -h -t "$SESSION_NAME:0" -c "$BUILD_DIR"
+tmux split-window -h -p 80 -t "$SESSION_NAME:0" -c "$BUILD_DIR"
 # Build the command for the right pane that waits for the TPM socket before running run-qemu-tpm
 RIGHT_CMD="\
 TPM_DIR=\"$BUILD_DIR/build/tmp/tpm-state\"; \
