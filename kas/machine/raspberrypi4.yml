@@ -1,0 +1,18 @@
+
+header:
+  version: 11
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/raspberrypi.yml
+    - repo: meta-avocado
+      file: kas/target/complete.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-raspberrypi:
+
+machine: avocado-raspberrypi4

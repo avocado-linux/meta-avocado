@@ -1,7 +1,8 @@
 header:
   version: 11
   includes:
-  - kas/extra/atecc.yml
+  - repo: meta-avocado
+    file: kas/extra/atecc.yml
 
 build_system: oe
 

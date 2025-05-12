@@ -1,8 +1,10 @@
 header:
   version: 11
   includes:
-    - kas/base.yml
-    - kas/target/container.yml
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/target/container.yml
 
 local_conf_header:
   machine-avocado-container-x86_64: |

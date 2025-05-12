@@ -1,10 +1,14 @@
 header:
   version: 11
   includes:
-    - kas/base.yml
-    - kas/vendor/nvidia.yml
-    - kas/feature/virtualization.yml
-    - kas/target/complete.yml
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/nvidia.yml
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    - repo: meta-avocado
+      file: kas/target/complete.yml
 
 repos:
   meta-avocado:
