@@ -12,6 +12,8 @@ TARGET_ARCH = "${SDK_ARCH}"
 # These variables are derived from meta-avocado/classes/populate_sdk_base.bbclass
 TOOLCHAIN_HOST_TASK = " \
     nativesdk-packagegroup-sdk-host \
+    nativesdk-dnf \
+    nativesdk-btrfs-tools \
     packagegroup-cross-canadian-${MACHINE} \
     ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'go', 'packagegroup-go-cross-canadian-${MACHINE}', '', d)} \
     ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'rust', 'packagegroup-rust-cross-canadian-${MACHINE}', '', d)} \

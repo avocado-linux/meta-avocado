@@ -23,21 +23,7 @@ services:
     depends_on:
       package-repo:
         condition: service_healthy
-      target:
-        condition: service_started
     entrypoint: /entrypoint.sh
-    volumes:
-      - ./entrypoint.sh:/entrypoint.sh:ro
-
-  target:
-    image: avocadolinux/sdk:dev
-    stdin_open: true  # Keep stdin open
-    tty: true         # Allocate a pseudo-TTY
-    depends_on:
-      package-repo:
-        condition: service_healthy
-    entrypoint: /entrypoint.sh
-    command: ["/run_qemu.sh"]
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - ./run_qemu.sh:/run_qemu.sh:ro
