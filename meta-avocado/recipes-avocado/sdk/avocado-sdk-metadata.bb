@@ -29,7 +29,7 @@ PLATFORM = "${MACHINEARCH}-avocado-linux"
 # Skip QA checks likeldflags, alreadyinstalled, etc. that are not relevant for this config package
 INSANE_SKIP:${PN} = "ldflags alreadyinstalled"
 
-inherit update-alternatives
+inherit update-alternatives deploy
 
 ALTERNATIVE_PRIORITY = "30"
 ALTERNATIVE:${PN} += "dnf_vars_arch rpm_platform rpmrc"
@@ -190,7 +190,11 @@ python do_install() {
     # Define file paths
     repo_filename = d.getVar('VIRTUAL-RUNTIME_avocado-sdk-metadata') + '.repo'
     repo_file_path = os.path.join(repo_dir, repo_filename)
-    map_file_path = os.path.join(deploy_dir_rpm, 'avocado-repo.map')
+
+    # Create temporary directory for map file
+    map_dir = os.path.join(d.getVar('WORKDIR'), 'map')
+    os.makedirs(map_dir, exist_ok=True)
+    map_file_path = os.path.join(map_dir, 'avocado-repo.map')
     bb.note(f"Constructed map file path: {map_file_path}")
 
     # Combine architectures into a unique set
@@ -251,3 +255,10 @@ python do_install() {
         rpmrc_f.write(rpmrc_content)
         bb.note(f"Wrote rpmrc content to {rpmrc_file_path}")
 }
+
+do_deploy() {
+    install -d ${DEPLOY_DIR_RPM}
+    install -m 0644 ${WORKDIR}/map/avocado-repo.map ${DEPLOY_DIR_RPM}/avocado-repo.map
+}
+
+addtask deploy after do_install
