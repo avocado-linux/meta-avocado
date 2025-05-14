@@ -5,6 +5,7 @@ repos:
   meta-arm:
     url: https://git.yoctoproject.org/meta-arm.git
     branch: scarthgap
+    commit: 8e0f8af90fefb03f08cd2228cde7a89902a6b37c
     layers:
       meta-arm:
       meta-arm-toolchain:
@@ -12,6 +13,7 @@ repos:
   meta-imx:
     url: https://github.com/nxp-imx/meta-imx.git
     branch: scarthgap-6.6.36-2.1.0
+    commit: 7c10a9c047ce8c1fde05c14ec4baf275bc232a57
     layers:
       meta-imx-bsp:
       meta-imx-ml:
@@ -20,6 +22,7 @@ repos:
   meta-imx-frdm:
     url: https://github.com/nxp-imx-support/meta-imx-frdm.git
     branch: lf-6.6.36-2.1.0
+    commit: ee1376a89478686a850aa0545695340fe360fa5b
     layers:
       meta-imx-bsp:
 

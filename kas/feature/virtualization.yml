@@ -5,5 +5,6 @@ repos:
   meta-virtualization:
     url: https://git.yoctoproject.org/meta-virtualization
     branch: scarthgap
+    commit: 9e040ee8dd6025558ea60ac9db60c41bfeddf221
     layers:
       .:

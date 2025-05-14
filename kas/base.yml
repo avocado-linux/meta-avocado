@@ -1,7 +1,7 @@
 header:
   version: 11
   includes:
-    - kas/extra/atecc.yml
+  - kas/extra/atecc.yml
 
 build_system: oe
 
@@ -9,12 +9,14 @@ repos:
   bitbake:
     url: https://git.openembedded.org/bitbake
     branch: '2.8'
+    commit: 696c2c1ef095f8b11c7d2eff36fae50f58c62e5e
     layers:
       .: excluded
 
   meta-openembedded:
     url: https://git.openembedded.org/meta-openembedded
     branch: scarthgap
+    commit: e92d0173a80ea7592c866618ef5293203c50544c
     layers:
       meta-oe:
       meta-perl:
@@ -26,6 +28,7 @@ repos:
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
     branch: scarthgap
+    commit: 45c50169fa7e34349acf3e24fc19e573cbab4e65
     layers:
       meta:
 

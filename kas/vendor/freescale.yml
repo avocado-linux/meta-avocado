@@ -5,11 +5,13 @@ repos:
   meta-freescale:
     url: https://github.com/Freescale/meta-freescale.git
     branch: scarthgap
+    commit: a82f138b140f613a06bf9ac60101e4bb511c309f
     layers:
       .:
   meta-freescale-3rdparty:
     url: https://github.com/Freescale/meta-freescale-3rdparty.git
     branch: scarthgap
+    commit: 70c83e96c7f75e73245cb77f1b0cada9ed4bbc6d
     layers:
       .:
 

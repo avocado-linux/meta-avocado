@@ -46,7 +46,7 @@ RUN echo 'eval "$(direnv hook bash)"' >> /etc/bash.bashrc
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-RUN pip install --no-cache-dir kas
+RUN pip install --no-cache-dir kas ruamel.yaml
 
 ENV DL_DIR=/avocado/dl
 ENV SSTATE_DIR=/avocado/sstate
