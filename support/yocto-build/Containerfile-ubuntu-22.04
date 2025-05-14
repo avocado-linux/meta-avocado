@@ -4,6 +4,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
   apt-get install -y --no-install-recommends \
   direnv \
+  gosu \
+  passwd \
+  libnss-wrapper \
   sudo \
   tmux \
   build-essential \
@@ -45,20 +48,15 @@ ENV LC_ALL=en_US.UTF-8
 
 RUN pip install --no-cache-dir kas
 
-ARG USER_ID=1000
-ARG GROUP_ID=1000
-
-ENV USER_NAME=avocado
 ENV DL_DIR=/avocado/dl
 ENV SSTATE_DIR=/avocado/sstate
 ENV BB_ENV_PASSTHROUGH_ADDITIONS="DL_DIR SSTATE_DIR"
 
-RUN useradd -m -s /bin/bash $USER_NAME
-RUN echo "avocado ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-RUN mkdir -p /avocado/build /avocado/sstate /avocado/dl && chown -R avocado:avocado /avocado
-RUN echo "root  ALL = NOPASSWD: /bin/su ALL" >> /etc/sudoers
-
-USER avocado
-
 WORKDIR /avocado-build
+
+# Add entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/bash"]
