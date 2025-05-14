@@ -15,6 +15,6 @@ repos:
 local_conf_header:
   machine-avocado-reterminal: |
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
-
+    ROOT_FSTYPES = "wic.bz2"
 
 machine: avocado-raspberrypi4
