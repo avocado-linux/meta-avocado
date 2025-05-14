@@ -1,0 +1,23 @@
+name: PR-Build-Labeled
+
+on:
+  pull_request:
+    types: [ labeled ]
+
+jobs:
+  build:
+    runs-on: molcajete
+    if: startsWith(github.event.label.name, 'build-')
+    steps:
+      - name: Extract machine name from label
+        id: extract_machine
+        run: |
+          LABEL_NAME="${{ github.event.label.name }}"
+          MACHINE="${LABEL_NAME#build-}"
+          echo "machine=$MACHINE" | tee -a $GITHUB_OUTPUT
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: build ${{ steps.extract_machine.outputs.machine }}
+        uses: ./.github/actions/avocado-build
+        with:
+          machine: ${{ steps.extract_machine.outputs.machine }}

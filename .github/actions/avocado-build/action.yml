@@ -1,0 +1,14 @@
+name: "Build Avocado Machine"
+description: "Initialize and build for a given machine"
+inputs:
+  machine:
+    description: "Machine to build (e.g. qemux86-64-secureboot)"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Init & build ${{ inputs.machine }}
+      shell: bash
+      run: |
+        source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
+        kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml
