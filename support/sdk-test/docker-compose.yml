@@ -27,4 +27,5 @@ services:
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - ./run_qemu.sh:/run_qemu.sh:ro
+      - ./build_var.sh:/build_var.sh:ro
       - ${DEPLOY_DIR}/images:/images
