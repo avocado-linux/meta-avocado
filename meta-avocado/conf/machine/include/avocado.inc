@@ -1,0 +1,3 @@
+AVOCADO_IMAGE_ROOTFS_TYPE ?= "rootfs.squashfs"
+AVOCADO_IMAGE_INITRAMFS_TYPE ?= "cpio.zst"
+AVOCADO_IMAGE_VAR_TYPE ?= "btrfs"
