@@ -1,0 +1,9 @@
+
+bootloader    --ptable gpt-hybrid
+
+part boot_a   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat     --label BOOT     --align 4096 --size 100 --mbr
+
+part rootfs_a --source rootfs            --ondisk mmcblk0 --fstype=squashfs --align 4096 --size 128M --part-type b921b045-1df0-41c3-af44-4c6f280d3fae
+part rootfs_b --source rootfs            --ondisk mmcblk0 --fstype=squashfs --align 4096 --size 128M
+
+part /var     --source rawcopy --sourceparams="file=${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE}.btrfs" --fstype=btrfs --uuid 4d21b016-b534-45c2-a9fb-5c16e091fd2d --ondisk mmcblk0 --label DATA --align 4096
