@@ -6,6 +6,12 @@ header:
     - repo: meta-avocado
       file: kas/target/container.yml
 
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado:
+
 local_conf_header:
   machine-avocado-container-x86_64: |
     ROOT_FSTYPES = "container"

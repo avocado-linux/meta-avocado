@@ -1,0 +1,51 @@
+name: PR-Build-Labeled
+
+on:
+  pull_request:
+    types: [ labeled ]
+
+jobs:
+  set-matrix:
+    if: ${{ github.event.label.name == 'build' }}
+    runs-on: molcajete
+    outputs:
+      matrix: ${{ steps.get-machines.outputs.matrix }}
+    steps:
+      - name: Fetch and filter PR labels
+        id: get-machines
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // 1) List all labels on the PR
+            const labels = await github.paginate(
+              github.rest.issues.listLabelsOnIssue,
+              {
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: context.payload.pull_request.number
+              }
+            );
+            // 2) Keep only labels like "build-foo", emit ["foo","bar",…]
+            const machines = labels
+              .map(l => l.name)
+              .filter(n => n.startsWith('build-'))
+              .map(n => n.replace(/^build-/, ''));
+            core.info(`💡 Machines: ${machines.join(', ')}`);
+            // 3) JSON-stringify them into an output
+            core.setOutput('matrix', JSON.stringify(machines));
+
+  build:
+    needs: set-matrix
+    runs-on: molcajete
+    strategy:
+      fail-fast: false
+      matrix:
+        machine: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: build ${{ matrix.machine }}
+        uses: ./.github/actions/avocado-build
+        with:
+          machine: ${{ matrix.machine }}
