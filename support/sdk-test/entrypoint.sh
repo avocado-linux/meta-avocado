@@ -14,6 +14,12 @@ dnf install -y --setopt=tsflags=noscripts avocado-sdk-toolchain
 mkdir -p /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/var
 dnf -y --setopt=tsflags=noscripts --installroot /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/ install packagegroup-core-standalone-sdk-target
 
+mkdir -p /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/dnf/vars
+mkdir /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/rpm
+cp /etc/rpmrc /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/.
+cp /etc/dnf/vars/arch /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/dnf/vars/.
+cp /etc/rpm/platform /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/rpm/.
+
 echo "--- Entrypoint: Handing over to CMD ($@) ---"
 # Execute the command passed into the entrypoint (the original CMD or command:)
 
