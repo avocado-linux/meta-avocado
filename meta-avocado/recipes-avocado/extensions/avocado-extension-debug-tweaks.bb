@@ -12,9 +12,9 @@ EXT_PRIORITY = "90"
 
 # Debug tools to include in the extension
 EXT_DEPENDS = " \
-    openssh-sshd \
-    openssh-sftp-server \
+    openssh \
     vim \
+    tree \
     strace \
     lsof \
     procps \
@@ -38,5 +38,7 @@ do_configure() {
 PermitRootLogin yes
 # Enable password authentication
 PasswordAuthentication yes
+# Allow empty passwords
+PermitEmptyPasswords yes
 EOF
 }
