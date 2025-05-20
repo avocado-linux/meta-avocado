@@ -16,7 +16,6 @@ repos:
 
 local_conf_header:
   machine-avocado-qemux86-64: |
-    ROOT_FSTYPES = "squashfs wic"
     INITRAMFS_MAXSIZE = "200000"
 
 machine: avocado-qemux86-64

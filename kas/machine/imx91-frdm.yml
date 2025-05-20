@@ -18,6 +18,5 @@ repos:
 
 local_conf_header:
   avocado-imx91-frdm: |
-    ROOT_FSTYPES = "squashfs wic.bmap wic.zst tar.zst"
 
 machine: avocado-imx91-frdm
