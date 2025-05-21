@@ -1,0 +1,31 @@
+name: Manual Build and Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      machine:
+        description: 'Target machine to build and deploy'
+        required: true
+        default: 'reterminal'
+        type: string
+
+jobs:
+  build:
+    runs-on: molcajete
+    env:
+      DISTRO_VERSION: "0.1.0"
+      DISTRO_CODENAME: "apollo/edge"
+      AVOCADO_REPO_BASE: "https://repo.avocadolinux.org"
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Build target machine
+        uses: ./.github/actions/avocado-build
+        with:
+          machine: ${{ github.event.inputs.machine }}
+
+      - name: Deploy to target machine
+        uses: ./.github/actions/avocado-deploy
+        with:
+          machine: ${{ github.event.inputs.machine }}

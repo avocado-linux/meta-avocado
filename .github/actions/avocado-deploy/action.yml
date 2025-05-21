@@ -1,0 +1,14 @@
+name: "Build Avocado Machine"
+description: "Initialize and build for a given machine"
+inputs:
+  machine:
+    description: "Machine to build (e.g. qemux86-64-secureboot)"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Map built repos to deploy directories
+      shell: bash
+      run: |
+        source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
+        ./meta-avocado/scripts/deploy-rpm-repos.sh build/tmp/deploy/rpm /home/runner/_cache/repos

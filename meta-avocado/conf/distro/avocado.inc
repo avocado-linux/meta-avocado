@@ -1,7 +1,5 @@
 DISTRO = "avocado"
 DISTRO_NAME = "Avocado OS"
-DISTRO_VERSION = "0.1.0"
-DISTRO_CODENAME = "alpha"
 
 SDK_VENDOR = "-avocadosdk"
 SDK_VERSION := "${@'${DISTRO_VERSION}'.replace('snapshot-${METADATA_REVISION}','snapshot')}"

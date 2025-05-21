@@ -22,5 +22,9 @@ else
     USERNAME=$(getent passwd "${USER_ID}" | cut -d: -f1)
 fi
 
+# Configure passwordless sudo for the user
+echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
+chmod 0440 /etc/sudoers.d/${USERNAME}
+
 # Drop privileges and run the command
 exec gosu "${USERNAME}" "$@"

@@ -12,6 +12,7 @@ RUN apt-get update && \
   build-essential \
   chrpath \
   cpio \
+  createrepo-c \
   debianutils \
   diffstat \
   file \
@@ -37,6 +38,10 @@ RUN apt-get update && \
   zstd && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
+
+
+RUN mkdir -p /usr/lib/rpm && \
+  touch /usr/lib/rpm/rpmrc
 
 RUN locale-gen en_US.UTF-8 && \
   update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
