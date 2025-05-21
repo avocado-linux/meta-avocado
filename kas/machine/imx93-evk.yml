@@ -16,6 +16,5 @@ repos:
 
 local_conf_header:
   machine-avocado-imx93-evk: |
-    INITRAMFS_MAXSIZE = "196608"
 
 machine: avocado-imx93-evk

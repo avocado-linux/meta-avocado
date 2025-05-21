@@ -10,6 +10,8 @@ IMAGE_NAME_SUFFIX ?= ""
 EXTRA_INITRAMFS_FEATURES ??= ""
 IMAGE_FEATURES = "${EXTRA_INITRAMFS_FEATURES}"
 IMAGE_LINGUAS = ""
+IMAGE_ROOTFS_EXTRA_SPACE = "0"
+INITRAMFS_MAXSIZE = ""
 
 IMAGE_INSTALL = "packagegroup-avocado-initramfs"
 IMAGE_INSTALL:remove = "kernel-image kernel-modules kernel-devicetree"

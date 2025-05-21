@@ -25,3 +25,4 @@ local_conf_header:
     DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"
     CUDA_GCCVERSION = "8.%"
     LICENSE_FLAGS_ACCEPTED:append = " commercial_faad2 commercial_x264"
+    ROOT_FSTYPES = "squashfs"
