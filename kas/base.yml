@@ -4,6 +4,11 @@ header:
   - repo: meta-avocado
     file: kas/extra/atecc.yml
 
+env:
+  AVOCADO_REPO_BASE: "http://package-repo"
+  DISTRO_CODENAME: "dev"
+  DISTRO_VERSION: "0.1.0"
+
 build_system: oe
 
 repos:
@@ -43,7 +48,6 @@ distro: avocado
 local_conf_header:
   meta-avocado: |
     USER_CLASSES:append = " buildhistory buildstats buildstats-summary"
-    AVOCADO_REPO_BASE = "http://package-repo"
 
     ## Debugging prior to extensions loading
     #EXTRA_IMAGE_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
