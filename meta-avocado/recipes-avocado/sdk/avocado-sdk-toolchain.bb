@@ -11,12 +11,23 @@ TARGET_ARCH = "${SDK_ARCH}"
 
 # These variables are derived from meta-avocado/classes/populate_sdk_base.bbclass
 TOOLCHAIN_HOST_TASK = " \
-    nativesdk-packagegroup-sdk-host \
+    nativesdk-pkgconfig \
+    nativesdk-pseudo \
+    nativesdk-unfs3 \
+    nativesdk-opkg \
+    nativesdk-libtool \
+    nativesdk-autoconf \
+    nativesdk-automake \
+    nativesdk-shadow \
+    nativesdk-makedevs \
+    nativesdk-cmake \
+    nativesdk-meson \
+    nativesdk-bison \
+    nativesdk-flex \
+    nativesdk-perl-module-integer \
     nativesdk-dnf \
     nativesdk-btrfs-tools \
     packagegroup-cross-canadian-${MACHINE} \
-    ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'go', 'packagegroup-go-cross-canadian-${MACHINE}', '', d)} \
-    ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'rust', 'packagegroup-rust-cross-canadian-${MACHINE}', '', d)} \
 "
 
 TOOLCHAIN_TARGET_TASK = " \
@@ -27,7 +38,7 @@ TOOLCHAIN_TARGET_TASK = " \
 
 # Define package dependencies based on toolchain components
 DEPENDS += "${TOOLCHAIN_TARGET_TASK}"
-RDEPENDS:${PN} = "${TOOLCHAIN_HOST_TASK} meta-environment-${MACHINE}"
+RDEPENDS:${PN} = "${TOOLCHAIN_HOST_TASK}"
 
 # Skip the build-deps QA check as it gives false positives for SDK toolchain recipes
 # where RDEPENDS are dynamically generated.
@@ -75,10 +86,9 @@ do_configure[noexec] = "1"
 do_compile[noexec] = "1"
 
 do_install() {
-    install -d ${D}${datadir}/${PN}
-    echo "Avocado SDK Toolchain ${PV}" > ${D}${datadir}/${PN}/README
-    echo "${PV}" > ${D}${datadir}/${PN}/version
+    install -d ${D}${SDKPATHNATIVE}
+    echo "${SDK_VERSION}" > ${D}avocado-sdk-version
+    echo "${MACHINE_SHORTNAME}" > ${D}avocado-sdk-machine
 }
 
-# Only package the README and version file
-FILES:${PN} = "${datadir}/${PN}/*"
+FILES:${PN} = "/*"

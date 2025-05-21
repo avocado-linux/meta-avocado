@@ -11,8 +11,7 @@ EXTRA_INITRAMFS_FEATURES ??= ""
 IMAGE_FEATURES = "${EXTRA_INITRAMFS_FEATURES}"
 IMAGE_LINGUAS = ""
 
-INITRAMFS_IMAGE_EXTRA_INSTALL ??= ""
-IMAGE_INSTALL = "packagegroup-avocado-initramfs ${INITRAMFS_IMAGE_EXTRA_INSTALL}"
+IMAGE_INSTALL = "packagegroup-avocado-initramfs"
 IMAGE_INSTALL:remove = "kernel-image kernel-modules kernel-devicetree"
 
 IMAGE_FSTYPES = "${INITRAMFS_FSTYPES}"

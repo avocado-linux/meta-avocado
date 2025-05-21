@@ -32,17 +32,23 @@ INSANE_SKIP:${PN} = "ldflags alreadyinstalled"
 inherit update-alternatives deploy
 
 ALTERNATIVE_PRIORITY = "30"
-ALTERNATIVE:${PN} += "dnf_vars_arch rpm_platform rpmrc"
+ALTERNATIVE:${PN} += "dnf_vars_arch rpm_platform rpmrc dnf_vars_arch_sdk rpm_platform_sdk rpmrc_sdk"
 ALTERNATIVE_LINK_NAME[dnf_vars_arch] = "${sysconfdir}/dnf/vars/arch"
 ALTERNATIVE_LINK_NAME[rpm_platform] = "${sysconfdir}/rpm/platform"
 ALTERNATIVE_LINK_NAME[rpmrc] = "${sysconfdir}/rpmrc"
+ALTERNATIVE_LINK_NAME[dnf_vars_arch_sdk] = "${SDKPATHNATIVE}${sysconfdir}/dnf/vars/arch"
+ALTERNATIVE_LINK_NAME[rpm_platform_sdk] = "${SDKPATHNATIVE}${sysconfdir}/rpm/platform"
+ALTERNATIVE_LINK_NAME[rpmrc_sdk] = "${SDKPATHNATIVE}${sysconfdir}/rpmrc"
 
 # The repo file is packaged, the map file is deployed directly
 FILES:${PN} = " \
-    /etc/yum.repos.d \
+    ${SDKPATHNATIVE}/etc/yum.repos.d \
     /etc/rpm/platform.${PN} \
+    ${SDKPATHNATIVE}/etc/rpm/platform.${PN} \
     /etc/dnf/vars/arch.${PN} \
+    ${SDKPATHNATIVE}/etc/dnf/vars/arch.${PN} \
     /etc/rpmrc.${PN} \
+    ${SDKPATHNATIVE}/etc/rpmrc.${PN} \
     /usr/lib/rpm/platform/${PLATFORM}/macros \
 "
 
@@ -181,7 +187,13 @@ python do_install() {
         else:
             bb.note(f"Skipping arch '{arch}' as directory '{check_dir}' does not exist")
 
-    repo_dir = os.path.join(d_dir, 'etc', 'yum.repos.d')
+    # Get SDKPATHNATIVE for the repo file
+    sdk_path_native = d.getVar('SDKPATHNATIVE')
+    # Construct the path for the repo file within the staging directory ${D}
+    # by stripping the leading '/' from SDKPATHNATIVE.
+    sdk_native_prefix_stripped = sdk_path_native.lstrip('/')
+    repo_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'yum.repos.d')
+
     # Ensure directories exist
     os.makedirs(d_dir, exist_ok=True)
     os.makedirs(deploy_dir_rpm, exist_ok=True)
@@ -235,6 +247,14 @@ python do_install() {
         arch_f.write(':'.join(final_archs))
         bb.note(f"Wrote {len(final_archs)} archs to {arch_vars_path}: {':'.join(final_archs)}")
 
+    # --- Write the SDK-prefixed /etc/dnf/vars/arch file ---
+    sdk_arch_vars_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'dnf', 'vars')
+    os.makedirs(sdk_arch_vars_dir, exist_ok=True)
+    sdk_arch_vars_path = os.path.join(sdk_arch_vars_dir, 'arch')
+    with open(sdk_arch_vars_path, 'w') as arch_f:
+        arch_f.write(':'.join(final_archs))
+        bb.note(f"Wrote {len(final_archs)} archs to SDK-prefixed {sdk_arch_vars_path}: {':'.join(final_archs)}")
+
     # --- Write the /etc/rpm/platform file ---
     platform_var = d.getVar('PLATFORM') # Get the PLATFORM variable value
     platform_dir = os.path.join(d_dir, 'etc', 'rpm')
@@ -243,6 +263,14 @@ python do_install() {
     with open(platform_file_path, 'w') as platform_f:
         platform_f.write(platform_var + '\n') # Write PLATFORM value
         bb.note(f"Wrote platform '{platform_var}' to {platform_file_path}")
+
+    # --- Write the SDK-prefixed /etc/rpm/platform file ---
+    sdk_platform_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'rpm')
+    os.makedirs(sdk_platform_dir, exist_ok=True)
+    sdk_platform_file_path = os.path.join(sdk_platform_dir, 'platform')
+    with open(sdk_platform_file_path, 'w') as platform_f:
+        platform_f.write(platform_var + '\n')
+        bb.note(f"Wrote platform '{platform_var}' to SDK-prefixed {sdk_platform_file_path}")
 
     # --- Write the /etc/rpmrc.${PN} file ---
     rpmrc_file_path = os.path.join(d_dir, 'etc', f"rpmrc.{d.getVar('PN')}")
@@ -254,6 +282,14 @@ python do_install() {
     with open(rpmrc_file_path, 'w') as rpmrc_f:
         rpmrc_f.write(rpmrc_content)
         bb.note(f"Wrote rpmrc content to {rpmrc_file_path}")
+
+    # --- Write the SDK-prefixed /etc/rpmrc.${PN} file ---
+    sdk_rpmrc_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc')
+    os.makedirs(sdk_rpmrc_dir, exist_ok=True)
+    sdk_rpmrc_file_path = os.path.join(sdk_rpmrc_dir, f"rpmrc.{d.getVar('PN')}")
+    with open(sdk_rpmrc_file_path, 'w') as rpmrc_f:
+        rpmrc_f.write(rpmrc_content)
+        bb.note(f"Wrote rpmrc content to SDK-prefixed {sdk_rpmrc_file_path}")
 }
 
 do_deploy() {
@@ -261,4 +297,5 @@ do_deploy() {
     install -m 0644 ${WORKDIR}/map/avocado-repo.map ${DEPLOY_DIR_RPM}/avocado-repo.map
 }
 
+do_deploy[nostamp] = "1"
 addtask deploy after do_install

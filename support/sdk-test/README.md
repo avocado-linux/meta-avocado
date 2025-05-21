@@ -36,16 +36,31 @@ You can start the package-repo container and get a bash prompt in the sdk contai
 docker compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
 ```
 
-Once you have a bash prompt for the sdk container, you can run the following commands to install the required packages and set up the container for use with a toolchain
+## Runtime Environment
+
+The container will come up with the environment script sourced and you can begin extending the sdk components. The environment is decorated with several additional env vars:
+
+### Adding Native SDK Packages
+
+Exmaple adding qemu to the nativesdk
 
 ```bash
-dnf update && dnf install -y avocado-sdk-qemux86-64
-dnf update && dnf install -y --setopt=tsflags=noscripts avocado-sdk-toolchain
+dnf install -y --setopt=tsflags=noscripts $DNF_SDK_HOST_OPTS nativesdk-qemu
 ```
 
-Once the toolchain is installed, you can install the target sysroot with the following:
+### Adding target dev packages
+
+Example adding libcryptoauth3-dev to the target-dev sysroot for cross compile header and library support
 
 ```bash
-mkdir -p /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/var
-dnf -y --setopt=tsflags=noscripts --installroot /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/ install packagegroup-core-standalone-sdk-target
+dnf install -y $DNF_SDK_TARGET_OPTS --installroot ${AVOCADO_SDK_SYSROOTS}/target-dev libcryptoauth-dev
 ```
+
+### Adding sysext packages
+
+Example adding libcryptoauth3 to the sysext sysroot. The sysext sysroot has been prepopulated with the package database of the rootfilesystem and therefore anything that already exists in the root will not be installed into the sysroot for the sysext.
+
+```bash
+dnf install -y $DNF_SDK_TARGET_OPTS --setopt=install_weak_deps=False --installroot ${AVOCADO_SDK_SYSROOTS}/sysext libcryptoauth3
+```
+

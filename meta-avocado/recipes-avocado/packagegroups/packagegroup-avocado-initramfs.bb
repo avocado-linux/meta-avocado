@@ -8,4 +8,5 @@ RDEPENDS:${PN} = "\
   systemd \
   systemd-extra-utils \
   os-release-initrd \
+  ${INITRAMFS_IMAGE_EXTRA_INSTALL} \
 "

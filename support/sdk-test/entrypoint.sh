@@ -3,26 +3,45 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+export AVOCADO_SDK_PREFIX="/opt/avocado/sdk"
+export AVOCADO_SDK_SYSROOTS="${AVOCADO_SDK_PREFIX}/sysroots"
+export DNF_SDK_HOST_PREFIX="${AVOCADO_SDK_PREFIX}"
+export DNF_SDK_TARGET_PREFIX="${AVOCADO_SDK_SYSROOTS}/core2-64-avocado-linux"
+
+export DNF_SDK_HOST_OPTS="\
+    --setopt=cachedir=${DNF_SDK_HOST_PREFIX}/var/cache \
+    --setopt=logdir=${DNF_SDK_HOST_PREFIX}/var/log \
+    --setopt=varsdir=${DNF_SDK_HOST_PREFIX}/etc/dnf/vars \
+    --setopt=persistdir=${DNF_SDK_HOST_PREFIX}/var/lib/dnf \
+    --setopt=reposdir=${DNF_SDK_HOST_PREFIX}/etc/yum.repos.d \
+"
+
+export DNF_SDK_TARGET_OPTS="\
+    --setopt=varsdir=${DNF_SDK_HOST_PREFIX}/etc/dnf/vars \
+    --setopt=reposdir=${DNF_SDK_HOST_PREFIX}/etc/yum.repos.d \
+    --setopt=tsflags=noscripts \
+"
+
 echo "--- Entrypoint: Installing Avocado SDK packages ---"
-dnf update
+dnf check-update
 dnf install -y avocado-sdk-qemux86-64 
 
 echo "--- Entrypoint: Installing Avocado SDK toolchain ---"
-dnf update
-dnf install -y --setopt=tsflags=noscripts avocado-sdk-toolchain
+dnf check-update $DNF_SDK_HOST_OPTS
+dnf install -y --setopt=tsflags=noscripts $DNF_SDK_HOST_OPTS avocado-sdk-toolchain
 
-mkdir -p /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/var
-dnf -y --setopt=tsflags=noscripts --installroot /opt/avocado/sdk/avocado-qemux86-64/0.1.0/sysroots/core2-64-avocado-linux/ install packagegroup-core-standalone-sdk-target
+source ${AVOCADO_SDK_PREFIX}/environment-setup
 
-# TODO: Remove when installed with the toolchain
-mkdir -p /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/dnf/vars
-mkdir /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/rpm
-cp /etc/rpmrc /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/.
-cp /etc/dnf/vars/arch /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/dnf/vars/.
-cp /etc/rpm/platform /opt/avocado/sdk/avocado-qemux86-64/0.1.0/etc/rpm/.
+dnf install -y $DNF_SDK_TARGET_OPTS --installroot ${AVOCADO_SDK_SYSROOTS}/target-dev packagegroup-core-standalone-sdk-target
+dnf install -y $DNF_SDK_TARGET_OPTS --installroot ${AVOCADO_SDK_SYSROOTS}/rootfs packagegroup-avocado-rootfs
+
+mkdir -p ${AVOCADO_SDK_SYSROOTS}/sysext/${AVOCADO_SDK_PREFIX}/var/lib
+mkdir -p ${AVOCADO_SDK_SYSROOTS}/confext/${AVOCADO_SDK_PREFIX}/var/lib
+cp -rf ${AVOCADO_SDK_SYSROOTS}/rootfs/${AVOCADO_SDK_PREFIX}/var/lib/rpm ${AVOCADO_SDK_SYSROOTS}/sysext/${AVOCADO_SDK_PREFIX}/var/lib
+cp -rf ${AVOCADO_SDK_SYSROOTS}/rootfs/${AVOCADO_SDK_PREFIX}/var/lib/rpm ${AVOCADO_SDK_SYSROOTS}/confext/${AVOCADO_SDK_PREFIX}/var/lib
 
 echo "--- Entrypoint: Handing over to CMD ($@) ---"
 # Execute the command passed into the entrypoint (the original CMD or command:)
 
-source /opt/avocado/sdk/avocado-qemux86-64/0.1.0/environment-setup-core2-64-avocado-linux
-exec "$@" 
+set +e
+exec "$@"

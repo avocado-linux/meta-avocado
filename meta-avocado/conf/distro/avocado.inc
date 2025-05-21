@@ -25,7 +25,7 @@ SDKPATHINSTALL = "/opt/${DISTRO}/${SDK_VERSION}"
 # Configure the base sysroot directory for SDK packages.
 #   Packaging breaks if this is configured to "/", or ""
 #   Even though it would be preferrable considering we control the sysroot of installation
-SDKPATHNATIVE = "/opt/avocado/sdk/${MACHINE}/${SDK_VERSION}"
+SDKPATHNATIVE = "/opt/avocado/sdk"
 SDKPATH = "${SDKPATHNATIVE}"
 
 SDK_VENDOR = "-avocadosdk"
@@ -50,3 +50,6 @@ BB_HASHSERVE ??= "auto"
 
 MACHINE_SHORT_NAME = "${@d.getVar('MACHINE').replace('avocado-','')}"
 VIRTUAL-RUNTIME_avocado-sdk-metadata = "avocado-sdk-${MACHINE_SHORT_NAME}"
+
+ROOTFS_IMAGE_EXTRA_INSTALL ??= ""
+INITRAMFS_IMAGE_EXTRA_INSTALL ??= ""
