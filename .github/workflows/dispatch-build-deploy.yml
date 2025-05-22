@@ -1,4 +1,0 @@
-name: Dispatch Build and Deploy
-
-on:
-  workflow_dispatch:

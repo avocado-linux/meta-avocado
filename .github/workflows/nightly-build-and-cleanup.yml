@@ -1,4 +1,0 @@
-name: Nightly Build, Deploy, and Cleanup
-
-on:
-  workflow_dispatch:

@@ -1,0 +1,4 @@
+name: Edge Build and Deploy
+
+on:
+  workflow_dispatch:
