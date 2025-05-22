@@ -1,4 +1,163 @@
 name: Edge Build and Deploy
 
 on:
+  schedule:
+    - cron: '0 2 * * *' # Runs at 2 AM UTC daily
   workflow_dispatch:
+    inputs:
+      imx91-frdm:
+        description: 'Build imx91-frdm'
+        type: boolean
+        default: false
+      imx93-frdm:
+        description: 'Build imx93-frdm'
+        type: boolean
+        default: false
+      qemux86-64-secureboot:
+        description: 'Build qemux86-64-secureboot'
+        type: boolean
+        default: false
+      reterminal:
+        description: 'Build reterminal'
+        type: boolean
+        default: false
+      imx93-evk:
+        description: 'Build imx93-evk'
+        type: boolean
+        default: false
+      jetson-orin-nano-devkit-nvme:
+        description: 'Build jetson-orin-nano-devkit-nvme'
+        type: boolean
+        default: false
+      raspberrypi4:
+        description: 'Build raspberrypi4'
+        type: boolean
+        default: false
+      run_cleanup:
+        description: 'Run cleanup script on aggregated repos'
+        type: boolean
+        default: false
+      upload_to_s3:
+        description: 'Upload build artifacts to S3'
+        type: boolean
+        default: false
+
+jobs:
+  determine_build_matrix:
+    runs-on: molcajete
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      upload_to_s3_decision: ${{ steps.set-matrix.outputs.upload_to_s3_decision }}
+      run_cleanup_decision: ${{ steps.set-matrix.outputs.run_cleanup_decision }}
+    steps:
+      - name: Determine build parameters
+        id: set-matrix
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const allMachines = [
+              "imx91-frdm", "imx93-frdm", "qemux86-64-secureboot",
+              "reterminal", "imx93-evk", "jetson-orin-nano-devkit-nvme", "raspberrypi4"
+            ];
+            let selectedMachines;
+            let doUploadToS3;
+            let doRunCleanup;
+
+            if (context.eventName === 'schedule') {
+              selectedMachines = allMachines;
+              doUploadToS3 = true;
+              doRunCleanup = true;
+              core.info('Scheduled run: Selecting all machines, enabling S3 upload, and enabling cleanup.');
+            } else if (context.eventName === 'workflow_dispatch') {
+              core.info(`Dispatch inputs: ${JSON.stringify(context.payload.inputs)}`);
+              selectedMachines = Object.entries(context.payload.inputs)
+                .filter(([key, value]) => key !== 'upload_to_s3' && key !== 'run_cleanup' && (value === true || value === 'true'))
+                .map(([key, _]) => key);
+              doUploadToS3 = context.payload.inputs.upload_to_s3 === true || context.payload.inputs.upload_to_s3 === 'true';
+              doRunCleanup = context.payload.inputs.run_cleanup === true || context.payload.inputs.run_cleanup === 'true';
+              core.info(`Selected machines for dispatch: ${selectedMachines.join(', ') || 'None'}`);
+              core.info(`Upload to S3 for dispatch: ${doUploadToS3}`);
+              core.info(`Run cleanup for dispatch: ${doRunCleanup}`);
+            } else {
+              core.setFailed(`Unsupported event: ${context.eventName}`);
+              return;
+            }
+            core.setOutput('matrix', JSON.stringify(selectedMachines));
+            core.setOutput('upload_to_s3_decision', doUploadToS3);
+            core.setOutput('run_cleanup_decision', doRunCleanup);
+
+  build_and_deploy:
+    needs: determine_build_matrix
+    if: needs.determine_build_matrix.outputs.matrix != '[]'
+    runs-on: molcajete
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.job }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        machine: ${{ fromJSON(needs.determine_build_matrix.outputs.matrix) }}
+    env:
+      DISTRO_CODENAME: "apollo/edge"
+      DISTRO_VERSION: "0.1.0"
+      AVOCADO_REPO_BASE: "https://repo.avocadolinux.org"
+      LOCAL_REPO_AGGREGATION_PATH: "/home/runner/_cache/repos"
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Create local repo aggregation directory
+        run: mkdir -p ${{ env.LOCAL_REPO_AGGREGATION_PATH }}
+
+      - name: Build target machine (${{ matrix.machine }})
+        uses: ./.github/actions/avocado-build
+        with:
+          machine: ${{ matrix.machine }}
+
+      - name: Deploy target repos for ${{ matrix.machine }}
+        uses: ./.github/actions/avocado-deploy
+        with:
+          machine: ${{ matrix.machine }}
+
+  cleanup_repos:
+    needs: [determine_build_matrix, build_and_deploy]
+    if: needs.determine_build_matrix.outputs.run_cleanup_decision == 'true' && needs.build_and_deploy.result == 'success'
+    runs-on: molcajete
+    env:
+      REPO_BASE_PATH: "/home/runner/_cache/repos" # This is the same as LOCAL_REPO_AGGREGATION_PATH
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Make cleanup script executable
+        run: chmod +x ./scripts/cleanup-rpm-repos.sh
+
+      - name: Run cleanup script on aggregated repos
+        run: |
+          echo "Running cleanup script on ${{ env.REPO_BASE_PATH }}"
+          ./scripts/cleanup-rpm-repos.sh "${{ env.REPO_BASE_PATH }}"
+
+  sync_to_s3:
+    needs: [determine_build_matrix, build_and_deploy, cleanup_repos]
+    if: needs.determine_build_matrix.outputs.upload_to_s3_decision == 'true' && needs.build_and_deploy.result == 'success'
+    runs-on: molcajete
+    env:
+      REPO_BASE_PATH: "/home/runner/_cache/repos" # This is the same as LOCAL_REPO_AGGREGATION_PATH
+      S3_BUCKET_PATH: ${{ secrets.AWS_S3_BUCKET }} # Assuming this secret exists
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Sync cleaned and aggregated repos to S3
+        run: |
+          echo "Syncing repositories from ${{ env.REPO_BASE_PATH }} to s3://${{ env.S3_BUCKET_PATH }}"
+          aws s3 sync --delete "${{ env.REPO_BASE_PATH }}" "s3://${{ env.S3_BUCKET_PATH }}"
+          echo "S3 sync complete."
