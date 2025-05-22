@@ -10,5 +10,6 @@ RDEPENDS:${PN} = " \
   avocado-sdk \
   dnf \
   os-release \
+  ca-certificates \
 "
 
