@@ -2,37 +2,22 @@ name: Edge Build and Deploy
 
 on:
   schedule:
-    - cron: '0 2 * * *' # Runs at 2 AM UTC daily
+    - cron: '0 5 * * *' # Runs at 5 AM UTC daily
   workflow_dispatch:
     inputs:
-      imx91-frdm:
-        description: 'Build imx91-frdm'
-        type: boolean
-        default: false
-      imx93-frdm:
-        description: 'Build imx93-frdm'
-        type: boolean
-        default: false
-      qemux86-64-secureboot:
-        description: 'Build qemux86-64-secureboot'
-        type: boolean
-        default: false
-      reterminal:
-        description: 'Build reterminal'
-        type: boolean
-        default: false
-      imx93-evk:
-        description: 'Build imx93-evk'
-        type: boolean
-        default: false
-      jetson-orin-nano-devkit-nvme:
-        description: 'Build jetson-orin-nano-devkit-nvme'
-        type: boolean
-        default: false
-      raspberrypi4:
-        description: 'Build raspberrypi4'
-        type: boolean
-        default: false
+      target_to_build:
+        description: 'Select the machine to build'
+        type: choice
+        required: true
+        options:
+          # Machines
+          - imx91-frdm
+          - imx93-frdm
+          - qemux86-64-secureboot
+          - reterminal
+          - imx93-evk
+          - jetson-orin-nano-devkit-nvme
+          - raspberrypi4
       run_cleanup:
         description: 'Run cleanup script on aggregated repos'
         type: boolean
@@ -56,27 +41,34 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const allMachines = [
+            const allMachinesList = [
               "imx91-frdm", "imx93-frdm", "qemux86-64-secureboot",
               "reterminal", "imx93-evk", "jetson-orin-nano-devkit-nvme", "raspberrypi4"
             ];
-            let selectedMachines;
-            let doUploadToS3;
-            let doRunCleanup;
+
+            let selectedMachines = [];
+            let doUploadToS3 = false;
+            let doRunCleanup = false;
 
             if (context.eventName === 'schedule') {
-              selectedMachines = allMachines;
+              selectedMachines = allMachinesList;
               doUploadToS3 = true;
               doRunCleanup = true;
-              core.info('Scheduled run: Selecting all machines, enabling S3 upload, and enabling cleanup.');
+              core.info('Scheduled run: Selecting all machines, enabling S3 upload, and cleanup.');
             } else if (context.eventName === 'workflow_dispatch') {
-              core.info(`Dispatch inputs: ${JSON.stringify(context.payload.inputs)}`);
-              selectedMachines = Object.entries(context.payload.inputs)
-                .filter(([key, value]) => key !== 'upload_to_s3' && key !== 'run_cleanup' && (value === true || value === 'true'))
-                .map(([key, _]) => key);
+              const target = context.payload.inputs.target_to_build;
+              core.info(`Dispatch input target_to_build: ${target}`);
+
+              if (allMachinesList.includes(target)) {
+                selectedMachines = [target];
+                core.info(`Selected machine for dispatch: ${target}`);
+              } else {
+                core.warning(`Unknown target selected: ${target}. No machine will be built.`);
+              }
+
               doUploadToS3 = context.payload.inputs.upload_to_s3 === true || context.payload.inputs.upload_to_s3 === 'true';
               doRunCleanup = context.payload.inputs.run_cleanup === true || context.payload.inputs.run_cleanup === 'true';
-              core.info(`Selected machines for dispatch: ${selectedMachines.join(', ') || 'None'}`);
+
               core.info(`Upload to S3 for dispatch: ${doUploadToS3}`);
               core.info(`Run cleanup for dispatch: ${doRunCleanup}`);
             } else {
@@ -87,7 +79,7 @@ jobs:
             core.setOutput('upload_to_s3_decision', doUploadToS3);
             core.setOutput('run_cleanup_decision', doRunCleanup);
 
-  build_and_deploy:
+  build_and_deploy_rpm_repos:
     needs: determine_build_matrix
     if: needs.determine_build_matrix.outputs.matrix != '[]'
     runs-on: molcajete
@@ -121,11 +113,11 @@ jobs:
           machine: ${{ matrix.machine }}
 
   cleanup_repos:
-    needs: [determine_build_matrix, build_and_deploy]
-    if: needs.determine_build_matrix.outputs.run_cleanup_decision == 'true' && needs.build_and_deploy.result == 'success'
+    needs: [determine_build_matrix, build_and_deploy_rpm_repos]
+    if: needs.determine_build_matrix.outputs.run_cleanup_decision == 'true' && needs.build_and_deploy_rpm_repos.result == 'success'
     runs-on: molcajete
     env:
-      REPO_BASE_PATH: "/home/runner/_cache/repos" # This is the same as LOCAL_REPO_AGGREGATION_PATH
+      REPO_BASE_PATH: "/home/runner/_cache/repos"
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -139,12 +131,12 @@ jobs:
           ./scripts/cleanup-rpm-repos.sh "${{ env.REPO_BASE_PATH }}"
 
   sync_to_s3:
-    needs: [determine_build_matrix, build_and_deploy, cleanup_repos]
-    if: needs.determine_build_matrix.outputs.upload_to_s3_decision == 'true' && needs.build_and_deploy.result == 'success'
+    needs: [determine_build_matrix, build_and_deploy_rpm_repos, cleanup_repos]
+    if: needs.determine_build_matrix.outputs.upload_to_s3_decision == 'true' && needs.build_and_deploy_rpm_repos.result == 'success'
     runs-on: molcajete
     env:
-      REPO_BASE_PATH: "/home/runner/_cache/repos" # This is the same as LOCAL_REPO_AGGREGATION_PATH
-      S3_BUCKET_PATH: ${{ secrets.AWS_S3_BUCKET }} # Assuming this secret exists
+      REPO_BASE_PATH: "/home/runner/_cache/repos"
+      S3_BUCKET_PATH: ${{ secrets.AWS_S3_BUCKET }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
