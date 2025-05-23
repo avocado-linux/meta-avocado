@@ -1,0 +1,12 @@
+#!/bin/bash
+
+DNF_SDK_HOST_PREFIX="${AVOCADO_SDK_PREFIX}"
+DNF_SDK_HOST_OPTS="\
+    --setopt=cachedir=${DNF_SDK_HOST_PREFIX}/var/cache \
+    --setopt=logdir=${DNF_SDK_HOST_PREFIX}/var/log \
+    --setopt=varsdir=${DNF_SDK_HOST_PREFIX}/etc/dnf/vars \
+    --setopt=persistdir=${DNF_SDK_HOST_PREFIX}/var/lib/dnf \
+    --setopt=reposdir=${DNF_SDK_HOST_PREFIX}/etc/yum.repos.d \
+"
+
+dnf $1 --setopt=tsflags=noscripts $DNF_SDK_HOST_OPTS "${@:2}"
