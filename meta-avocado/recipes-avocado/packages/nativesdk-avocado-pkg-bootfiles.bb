@@ -1,4 +1,4 @@
-SUMMARY = "Copy boot files to /opt/avocado/bootfiles"
+SUMMARY = "Copy boot files to $SDKPATHNATIVE/bootfiles"
 LICENSE = "Apache-2.0"
 
 IMAGE_BOOTFILES ?= ""
