@@ -55,7 +55,7 @@ RUN pip install --no-cache-dir kas ruamel.yaml
 
 ENV DL_DIR=/avocado/dl
 ENV SSTATE_DIR=/avocado/sstate
-ENV BB_ENV_PASSTHROUGH_ADDITIONS="DL_DIR SSTATE_DIR"
+ENV BB_ENV_PASSTHROUGH_ADDITIONS="DL_DIR SSTATE_DIR BB_NUMBER_THREADS"
 
 WORKDIR /avocado-build
 

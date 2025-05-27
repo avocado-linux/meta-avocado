@@ -26,5 +26,11 @@ fi
 echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
 chmod 0440 /etc/sudoers.d/${USERNAME}
 
+mkdir -p /home/avocado/.config/direnv
+echo "[whitelist]" > /home/avocado/.config/direnv/config.toml
+echo "prefix = [ \"/avocado-build\" ]" >> /home/avocado/.config/direnv/config.toml
+
+chown -R "${USERNAME}:${GROUPNAME}" /home/avocado/.config
+
 # Drop privileges and run the command
 exec gosu "${USERNAME}" "$@"
