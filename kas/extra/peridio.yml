@@ -1,0 +1,23 @@
+header:
+  version: 11
+
+
+repos:
+  meta-peridio:
+    url: https://github.com/peridio/meta-peridio
+    commit: 4a636b7e05f86bc0e017510a97b573d831342b37
+    branch: scarthgap
+    layers:
+      .:
+
+  meta-erlang:
+    url: https://github.com/meta-erlang/meta-erlang
+    commit: 5b52b8c9fc990cdfe8e442085eaa536fffff76fb
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  extra-peridio: |
+    PTEST_ENABLE:pn-erlang = "0"
+    PTEST_ENABLE:pn-peridiod = "0"

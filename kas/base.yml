@@ -2,7 +2,7 @@ header:
   version: 11
   includes:
   - repo: meta-avocado
-    file: kas/extra/atecc.yml
+    file: kas/extra.yml
 
 env:
   AVOCADO_REPO_BASE: "http://package-repo"

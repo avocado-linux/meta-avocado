@@ -14,5 +14,6 @@ RDEPENDS:${PN} = " \
   avocado-sdk-repos \
   avocado-sdk-scripts \
   ca-certificates \
+  tree \
 "
 
