@@ -8,6 +8,8 @@ PACKAGES = "${PN}"
 SDK_TOOLCHAIN_DEPENDS = " \
   avocado-sdk-toolchain \
   nativesdk-avocado-pkg-bootfiles \
+  nativesdk-avocado-pkg-rootfs \
+  nativesdk-avocado-pkg-initramfs \
   nativesdk-avocado-pkg-img-initramfs \
   nativesdk-avocado-pkg-img-rootfs \
   nativesdk-avocado-pkg-img-var \
