@@ -88,14 +88,4 @@ fi
 echo "--- Avocado SDK: Changing working directory to /opt ---"
 cd /opt
 
-# Define the main function that will run in the SDK environment
-run_sdk() {
-    # Run dnf with the specified arguments
-    dnf \
-        --config="$AVOCADO_SDK_PREFIX/etc/dnf/dnf.conf" \
-        --releasever="$CODENAME" \
-        "$@"
-}
-
-# Run the main function in the SDK environment
-run_in_sdk_env run_sdk "$@"
+exec "$@"
