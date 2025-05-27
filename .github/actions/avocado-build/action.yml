@@ -8,6 +8,10 @@ inputs:
     description: "Set BB_GIT_SHALLOW for kas build"
     required: false
     default: "1"
+  parallel_make:
+    description: "Set the PARALLEL_MAKE environment variable"
+    required: false
+    default: "-j16"
 runs:
   using: "composite"
   steps:
@@ -15,7 +19,7 @@ runs:
       shell: bash
       env:
         BB_GIT_SHALLOW: ${{ inputs.shallow_clone }}
-        PARALLEL_MAKE: "-j 16"
+        PARALLEL_MAKE: ${{ inputs.parallel_make }}
       run: |
         source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
         kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml
