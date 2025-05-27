@@ -1,7 +1,9 @@
 DESCRIPTION = "Packagegroup for Avocado SDK"
 LICENSE = "Apache-2.0"
 
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
+PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
   avocado-sdk-toolchain \
