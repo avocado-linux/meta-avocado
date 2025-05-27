@@ -3,8 +3,7 @@ LICENSE = "Apache-2.0"
 
 IMAGE_BOOTFILES ?= ""
 AVOCADO_PKG_BOOTFILES_EXTRA ?= ""
-AVOCADO_IMAGES_INSTALL_PREFIX = "${SDKPATHNATIVE}/images"
-FILES:${PN} = "${AVOCADO_IMAGES_INSTALL_PREFIX}"
+FILES:${PN} = "/*"
 PACKAGES = "${PN}"
 PACKAGE_ARCH = "${SDK_ARCH}-${SDKPKGSUFFIX}"
 
@@ -20,7 +19,7 @@ do_install[depends] += "avocado-image-rootfs:do_image_complete"
 
 fakeroot do_install() {
     # Create the directory structure for installation
-    install -d ${D}${AVOCADO_IMAGES_INSTALL_PREFIX}
+    install -d ${D}
 
     # Get the list of boot files from variables
     local_bootfiles=""
@@ -50,7 +49,7 @@ fakeroot do_install() {
         fi
 
         # Install the file with explicit permissions
-        install -m 0644 ${DEPLOY_DIR_IMAGE}/${src_file} ${D}${AVOCADO_IMAGES_INSTALL_PREFIX}/$(basename ${src_file})
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/${src_file} ${D}/$(basename ${src_file})
     done
 }
 

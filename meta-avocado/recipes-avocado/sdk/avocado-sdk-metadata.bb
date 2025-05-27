@@ -29,27 +29,15 @@ PLATFORM = "${MACHINEARCH}-avocado-linux"
 # Skip QA checks likeldflags, alreadyinstalled, etc. that are not relevant for this config package
 INSANE_SKIP:${PN} = "ldflags alreadyinstalled"
 
-inherit update-alternatives deploy
-
-ALTERNATIVE_PRIORITY = "30"
-ALTERNATIVE:${PN} += "dnf_vars_arch rpm_platform rpmrc dnf_vars_arch_sdk rpm_platform_sdk rpmrc_sdk"
-ALTERNATIVE_LINK_NAME[dnf_vars_arch] = "${sysconfdir}/dnf/vars/arch"
-ALTERNATIVE_LINK_NAME[rpm_platform] = "${sysconfdir}/rpm/platform"
-ALTERNATIVE_LINK_NAME[rpmrc] = "${sysconfdir}/rpmrc"
-ALTERNATIVE_LINK_NAME[dnf_vars_arch_sdk] = "${SDKPATHNATIVE}${sysconfdir}/dnf/vars/arch"
-ALTERNATIVE_LINK_NAME[rpm_platform_sdk] = "${SDKPATHNATIVE}${sysconfdir}/rpm/platform"
-ALTERNATIVE_LINK_NAME[rpmrc_sdk] = "${SDKPATHNATIVE}${sysconfdir}/rpmrc"
+inherit deploy
 
 # The repo file is packaged, the map file is deployed directly
 FILES:${PN} = " \
-    ${SDKPATHNATIVE}/etc/yum.repos.d \
-    /etc/rpm/platform.${PN} \
-    ${SDKPATHNATIVE}/etc/rpm/platform.${PN} \
-    /etc/dnf/vars/arch.${PN} \
-    ${SDKPATHNATIVE}/etc/dnf/vars/arch.${PN} \
-    /etc/rpmrc.${PN} \
-    ${SDKPATHNATIVE}/etc/rpmrc.${PN} \
-    /usr/lib/rpm/platform/${PLATFORM}/macros \
+    ${SDKPATHNATIVE}${sysconfdir}/yum.repos.d \
+    ${SDKPATHNATIVE}${sysconfdir}/rpm/platform \
+    ${SDKPATHNATIVE}${sysconfdir}/dnf/vars/arch \
+    ${SDKPATHNATIVE}${sysconfdir}/rpmrc \
+    ${SDKPATHNATIVE}${libdir}/rpm/platform/${PLATFORM}/macros \
 "
 
 # Set package arch so it deploys to a specific directory
@@ -235,36 +223,19 @@ python do_install() {
             _process_arch(arch)
     bb.note(f"Finished arch loop append for map file.")
 
-    # --- Write the /etc/dnf/vars/arch file ---
-    arch_vars_dir = os.path.join(d_dir, 'etc', 'dnf', 'vars')
-    os.makedirs(arch_vars_dir, exist_ok=True)
-    arch_vars_path = os.path.join(arch_vars_dir, 'arch')
-    # Sort and make unique before joining for deterministic output
-    always_include_archs = ['all_avocadosdk']
-    final_archs = sorted(list(set([a.replace('-', '_') for a in repo_archs] + always_include_archs)))
-    with open(arch_vars_path, 'w') as arch_f:
-        # Join the underscore-replaced archs for the vars file
-        arch_f.write(':'.join(final_archs))
-        bb.note(f"Wrote {len(final_archs)} archs to {arch_vars_path}: {':'.join(final_archs)}")
-
     # --- Write the SDK-prefixed /etc/dnf/vars/arch file ---
     sdk_arch_vars_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'dnf', 'vars')
     os.makedirs(sdk_arch_vars_dir, exist_ok=True)
     sdk_arch_vars_path = os.path.join(sdk_arch_vars_dir, 'arch')
+    # Sort and make unique before joining for deterministic output
+    always_include_archs = ['all_avocadosdk']
+    final_archs = sorted(list(set([a.replace('-', '_') for a in repo_archs] + always_include_archs)))
     with open(sdk_arch_vars_path, 'w') as arch_f:
         arch_f.write(':'.join(final_archs))
         bb.note(f"Wrote {len(final_archs)} archs to SDK-prefixed {sdk_arch_vars_path}: {':'.join(final_archs)}")
 
-    # --- Write the /etc/rpm/platform file ---
-    platform_var = d.getVar('PLATFORM') # Get the PLATFORM variable value
-    platform_dir = os.path.join(d_dir, 'etc', 'rpm')
-    os.makedirs(platform_dir, exist_ok=True)
-    platform_file_path = os.path.join(platform_dir, 'platform')
-    with open(platform_file_path, 'w') as platform_f:
-        platform_f.write(platform_var + '\n') # Write PLATFORM value
-        bb.note(f"Wrote platform '{platform_var}' to {platform_file_path}")
-
     # --- Write the SDK-prefixed /etc/rpm/platform file ---
+    platform_var = d.getVar('PLATFORM') # Get the PLATFORM variable value
     sdk_platform_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'rpm')
     os.makedirs(sdk_platform_dir, exist_ok=True)
     sdk_platform_file_path = os.path.join(sdk_platform_dir, 'platform')
@@ -272,21 +243,15 @@ python do_install() {
         platform_f.write(platform_var + '\n')
         bb.note(f"Wrote platform '{platform_var}' to SDK-prefixed {sdk_platform_file_path}")
 
-    # --- Write the /etc/rpmrc.${PN} file ---
-    rpmrc_file_path = os.path.join(d_dir, 'etc', f"rpmrc.{d.getVar('PN')}")
+    # --- Write the SDK-prefixed /etc/rpmrc.${PN} file ---
+    sdk_rpmrc_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc')
+    os.makedirs(sdk_rpmrc_dir, exist_ok=True)
+    sdk_rpmrc_file_path = os.path.join(sdk_rpmrc_dir, "rpmrc")
     # Get MACHINE_SHORT_NAME with hyphens replaced by underscores
     machine_short_name_us = d.getVar('MACHINEARCH')
     # Join the final_archs list (already contains underscore versions) with spaces
     all_arches_space_sep = ' '.join(final_archs)
     rpmrc_content = f"arch_compat: {machine_short_name_us}: {all_arches_space_sep}\n"
-    with open(rpmrc_file_path, 'w') as rpmrc_f:
-        rpmrc_f.write(rpmrc_content)
-        bb.note(f"Wrote rpmrc content to {rpmrc_file_path}")
-
-    # --- Write the SDK-prefixed /etc/rpmrc.${PN} file ---
-    sdk_rpmrc_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc')
-    os.makedirs(sdk_rpmrc_dir, exist_ok=True)
-    sdk_rpmrc_file_path = os.path.join(sdk_rpmrc_dir, f"rpmrc.{d.getVar('PN')}")
     with open(sdk_rpmrc_file_path, 'w') as rpmrc_f:
         rpmrc_f.write(rpmrc_content)
         bb.note(f"Wrote rpmrc content to SDK-prefixed {sdk_rpmrc_file_path}")

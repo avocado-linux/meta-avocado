@@ -20,12 +20,14 @@ services:
 
   sdk:
     image: avocadolinux/sdk:dev
+    environment:
+      - AVOCADO_SDK_TARGET=qemux86-64
     depends_on:
       package-repo:
         condition: service_healthy
-    entrypoint: /entrypoint.sh
+    entrypoint: entrypoint.sh
     volumes:
-      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./:/opt
       - ./run_qemu.sh:/run_qemu.sh:ro
       - ./build_var.sh:/build_var.sh:ro
       - ${DEPLOY_DIR}/images:/images
