@@ -11,6 +11,9 @@ S = "${WORKDIR}"
 
 REPO_BASE = "${AVOCADO_REPO_BASE}"
 
+# Monitor AVOCADO_REPO_BASE for changes
+vardeps += "AVOCADO_REPO_BASE"
+
 FILES:${PN} += "${sysconfdir}/yum.repos.d/avocado-sdk.repo"
 
 inherit update-alternatives
