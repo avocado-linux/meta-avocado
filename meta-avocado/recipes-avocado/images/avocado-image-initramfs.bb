@@ -13,7 +13,7 @@ IMAGE_LINGUAS = ""
 IMAGE_ROOTFS_EXTRA_SPACE = "0"
 INITRAMFS_MAXSIZE = ""
 
-IMAGE_INSTALL = "packagegroup-avocado-initramfs"
+IMAGE_INSTALL = "packagegroup-avocado-initramfs ${INITRAMFS_IMAGE_EXTRA_INSTALL}"
 IMAGE_INSTALL:remove = "kernel-image kernel-modules kernel-devicetree"
 
 IMAGE_FSTYPES = "${INITRAMFS_FSTYPES}"

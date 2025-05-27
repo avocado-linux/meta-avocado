@@ -10,7 +10,7 @@ WIC_CREATE_EXTRA_ARGS = "--no-fstab-update"
 WIC_ROOTFS_FORMAT = "squashfs"
 
 IMAGE_FEATURES += "read-only-rootfs"
-IMAGE_INSTALL = "packagegroup-avocado-rootfs"
+IMAGE_INSTALL = "packagegroup-avocado-rootfs ${ROOTFS_IMAGE_EXTRA_INSTALL}"
 DISTRO_FEATURES_BACKFILL_CONSIDERED=""
 
 cleanup_root_files () {
