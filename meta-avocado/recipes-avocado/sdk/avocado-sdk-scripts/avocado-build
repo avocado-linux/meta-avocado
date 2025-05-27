@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
+# Source the common functions
+source "${SCRIPT_DIR}/avocado-sdk-common.sh"
+
+# Define the main function that will run in the SDK environment
+build_extension() {
+    # Common variables
+    EXT_NAME="$2"
+    EXT_VERSION="0.1.0"
+    EXT_ID="avocado"
+    OUTPUT_DIR="/opt/_avocado/extensions"
+    OUTPUT_FILE=""
+
+    # Function to create extension release file
+    create_extension_release() {
+        local release_dir="$1"
+        local release_file="$release_dir/extension-release.$EXT_NAME"
+        
+        mkdir -p "$release_dir"
+        echo "ID=$EXT_ID" > "$release_file"
+        echo "VERSION=$EXT_VERSION" >> "$release_file"
+    }
+
+    if [ "$1" = "sysext" ]; then
+        echo "Building system extension: $EXT_NAME"
+        OUTPUT_FILE="${OUTPUT_DIR}/sysext/${EXT_NAME}-${EXT_VERSION}.raw"
+        mkdir -p "${OUTPUT_DIR}/sysext"
+        rm -f "$OUTPUT_FILE"
+        create_extension_release "$AVOCADO_SDK_SYSROOTS/sysext/usr/lib/extension-release.d"
+        mksquashfs "$AVOCADO_SDK_SYSROOTS/sysext/usr" "$AVOCADO_SDK_SYSROOTS/sysext/opt" "$OUTPUT_FILE" -noappend
+        
+    elif [ "$1" = "confext" ]; then
+        echo "Building configuration extension: $EXT_NAME"
+        OUTPUT_FILE="${OUTPUT_DIR}/confext/${EXT_NAME}-${EXT_VERSION}.raw"
+        mkdir -p "${OUTPUT_DIR}/confext"
+        rm -f "$OUTPUT_FILE"
+        create_extension_release "$AVOCADO_SDK_SYSROOTS/confext/etc/extension-release.d"
+        mksquashfs "$AVOCADO_SDK_SYSROOTS/confext/etc" "$OUTPUT_FILE" -noappend
+        
+    elif [ "$1" = "var" ]; then
+        echo "Building var image"
+        IMAGES_DIR="/opt/_avocado/images"
+        mkdir -p "$IMAGES_DIR"
+        
+        # Create var sysroot structure
+        echo "Creating var sysroot structure..."
+        mkdir -p "$AVOCADO_SDK_SYSROOTS/var/lib/extensions"
+        mkdir -p "$AVOCADO_SDK_SYSROOTS/var/lib/confexts"
+        
+        # Copy existing extensions into var sysroot
+        echo "Copying system extensions..."
+        cp -f "${OUTPUT_DIR}/sysext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/extensions/"
+        echo "Copying configuration extensions..."
+        cp -f "${OUTPUT_DIR}/confext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/confexts/"
+        
+        # Create btrfs image with extensions and confexts subvolumes
+        mkfs.btrfs -r "$AVOCADO_SDK_SYSROOTS/var" \
+            --subvol rw:lib/extensions \
+            --subvol rw:lib/confexts \
+            -f "${IMAGES_DIR}/avocado-image-var.btrfs"
+        
+    else
+        echo "Usage: $0 [sysext|confext|var] <name>"
+        exit 1
+    fi
+}
+
+# Run the main function in the SDK environment
+run_in_sdk_env build_extension "$@"
+

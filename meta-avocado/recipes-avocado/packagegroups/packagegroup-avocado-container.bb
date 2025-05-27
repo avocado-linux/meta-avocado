@@ -12,6 +12,7 @@ RDEPENDS:${PN} = " \
   base-passwd \
   dnf \
   avocado-sdk-repos \
+  avocado-sdk-scripts \
   ca-certificates \
 "
 
