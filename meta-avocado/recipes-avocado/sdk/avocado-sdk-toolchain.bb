@@ -21,6 +21,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-shadow \
     nativesdk-makedevs \
     nativesdk-cmake \
+    nativesdk-make \
     nativesdk-meson \
     nativesdk-bison \
     nativesdk-flex \
