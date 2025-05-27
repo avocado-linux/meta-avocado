@@ -15,6 +15,7 @@ runs:
       shell: bash
       env:
         BB_GIT_SHALLOW: ${{ inputs.shallow_clone }}
+        PARALLEL_MAKE: "-j 16"
       run: |
         source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
         kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml
