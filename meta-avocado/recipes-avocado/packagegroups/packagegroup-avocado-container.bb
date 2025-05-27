@@ -6,12 +6,12 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  os-release \
   busybox \
   base-files \
   base-passwd \
-  avocado-sdk \
   dnf \
-  os-release \
+  avocado-sdk-repos \
   ca-certificates \
 "
 
