@@ -41,6 +41,14 @@ repos:
     layers:
       meta:
 
+  meta-ptx:
+    url: https://github.com/pengutronix/meta-ptx.git
+    branch: scarthgap
+    commit: 1189ee566604d7439e824242825da29ae3729ae5
+    layers:
+      .:
+
+
   meta-avocado:
     path: meta-avocado
     layers:

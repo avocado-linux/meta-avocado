@@ -18,6 +18,10 @@ do_deploy() {
     if [ -f ${S}/avocado-boot.conf ]; then
         install -D ${S}/avocado-boot.conf ${DEPLOYDIR}/boot.conf
     fi
+
+    if [ -f ${S}/avocado-loader.conf ]; then
+        install -D ${S}/avocado-loader.conf ${DEPLOYDIR}/loader.conf
+    fi
 }
 
 addtask deploy after do_install

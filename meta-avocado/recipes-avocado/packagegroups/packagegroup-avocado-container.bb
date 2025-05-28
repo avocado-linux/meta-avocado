@@ -15,5 +15,6 @@ RDEPENDS:${PN} = " \
   avocado-sdk-scripts \
   ca-certificates \
   tree \
+  curl \
 "
 

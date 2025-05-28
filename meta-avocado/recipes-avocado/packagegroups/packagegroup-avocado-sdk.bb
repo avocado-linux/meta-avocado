@@ -13,6 +13,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-avocado-pkg-img-initramfs \
   nativesdk-avocado-pkg-img-rootfs \
   nativesdk-avocado-pkg-img-var \
+  nativesdk-genimage \
   nativesdk-qemu \
   nativesdk-qemu-helper \
   nativesdk-bmaptool \
