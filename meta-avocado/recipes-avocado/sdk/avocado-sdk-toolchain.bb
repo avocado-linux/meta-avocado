@@ -28,6 +28,10 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-perl-module-integer \
     nativesdk-dnf \
     nativesdk-btrfs-tools \
+    nativesdk-squashfs-tools \
+    nativesdk-genimage \
+    nativesdk-dosfstools \
+    nativesdk-mtools \
     packagegroup-cross-canadian-${MACHINE} \
 "
 
