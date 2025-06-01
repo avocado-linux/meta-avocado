@@ -33,7 +33,14 @@ export DEPLOY_DIR=./build-qemux86-64-secureboot/build/tmp/deploy
 You can start the package-repo container and get a bash prompt in the sdk container with the following docker compose command
 
 ```bash
-docker compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
+podman-compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
+```
+
+Running for a different target:
+
+```bash
+export DEPLOY_DIR=./build-imx93-frdm/build/tmp/deploy
+AVOCADO_SDK_TARGET=imx93-frdm podman-compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
 ```
 
 ## Runtime Environment
@@ -45,7 +52,7 @@ The container will come up with the environment script sourced and you can begin
 Exmaple adding qemu to the nativesdk
 
 ```bash
-dnf install -y --setopt=tsflags=noscripts $DNF_SDK_HOST_OPTS nativesdk-qemu
+avocado-repo sdk install nativesdk-qemu
 ```
 
 ### Adding target dev packages
@@ -53,7 +60,7 @@ dnf install -y --setopt=tsflags=noscripts $DNF_SDK_HOST_OPTS nativesdk-qemu
 Example adding libcryptoauth3-dev to the target-dev sysroot for cross compile header and library support
 
 ```bash
-dnf install -y $DNF_SDK_TARGET_OPTS --installroot ${AVOCADO_SDK_SYSROOTS}/target-dev libcryptoauth-dev
+avocado-repo target-dev install libcryptoauth-dev
 ```
 
 ### Adding sysext packages
@@ -61,6 +68,6 @@ dnf install -y $DNF_SDK_TARGET_OPTS --installroot ${AVOCADO_SDK_SYSROOTS}/target
 Example adding libcryptoauth3 to the sysext sysroot. The sysext sysroot has been prepopulated with the package database of the rootfilesystem and therefore anything that already exists in the root will not be installed into the sysroot for the sysext.
 
 ```bash
-dnf install -y $DNF_SDK_TARGET_OPTS --setopt=install_weak_deps=False --installroot ${AVOCADO_SDK_SYSROOTS}/sysext libcryptoauth3
+avocado-repo sysext install libcryptoauth3
 ```
 

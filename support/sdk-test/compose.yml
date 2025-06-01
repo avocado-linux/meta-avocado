@@ -1,0 +1,29 @@
+services:
+  package-repo:
+    build:
+      context: ../package-repo
+      dockerfile: Containerfile
+    ports:
+      - "8080:80"
+    volumes:
+      - ${DEPLOY_DIR}/rpm:/repo:ro,z
+    networks:
+      - sdk-network
+
+  sdk:
+    image: avocadolinux/sdk:dev
+    environment:
+      - AVOCADO_SDK_TARGET=${AVOCADO_SDK_TARGET:-qemux86-64}
+    depends_on:
+      - package-repo
+    entrypoint: /entrypoint.sh
+    volumes:
+      - ./:/opt:z
+      - ./run_qemu.sh:/run_qemu.sh:ro,z
+      - ./entrypoint.sh:/entrypoint.sh:ro,z
+    networks:
+      - sdk-network
+
+networks:
+  sdk-network:
+    name: sdk-network
