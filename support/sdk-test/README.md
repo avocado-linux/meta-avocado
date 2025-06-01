@@ -27,7 +27,7 @@ Refer to the main documentation for information on how to configure the system t
 Export the path to the rpms for your chosen platform
 
 ```bash
-export DEPLOY_DIR=./build-qemux86-64-secureboot/build/tmp/deploy
+export DEPLOY_DIR=./build-qemux86-64/build/tmp/deploy
 ```
 
 You can start the package-repo container and get a bash prompt in the sdk container with the following docker compose command

@@ -2,7 +2,7 @@ name: "Build Avocado Machine"
 description: "Initialize and build for a given machine"
 inputs:
   machine:
-    description: "Machine to build (e.g. qemux86-64-secureboot)"
+    description: "Machine to build (e.g. qemux86-64)"
     required: true
   shallow_clone:
     description: "Set BB_GIT_SHALLOW for kas build"

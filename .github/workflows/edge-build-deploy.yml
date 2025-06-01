@@ -13,7 +13,7 @@ on:
           # Machines
           - imx91-frdm
           - imx93-frdm
-          - qemux86-64-secureboot
+          - qemux86-64
           - reterminal
           - imx93-evk
           - jetson-orin-nano-devkit-nvme
@@ -42,7 +42,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const allMachinesList = [
-              "imx91-frdm", "imx93-frdm", "qemux86-64-secureboot",
+              "imx91-frdm", "imx93-frdm", "qemux86-64",
               "reterminal", "imx93-evk", "jetson-orin-nano-devkit-nvme", "raspberrypi4"
             ];
 
