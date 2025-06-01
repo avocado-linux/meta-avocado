@@ -20,4 +20,5 @@ RDEPENDS:${PN} = " \
   htop \
   cryptoauthlib \
   peridiod \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'wpewebkit', '', d)} \
 "
