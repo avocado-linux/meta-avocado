@@ -10,21 +10,38 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 source "${SCRIPT_DIR}/avocado-sdk-common.sh"
 
 # Define the main function that will run in the SDK environment
-run_dnf_command() {
-    if [ "$1" = "sdk" ]; then
-        shift
-        $DNF_SDK_HOST $@
-    elif [ "$1" = "images" ]; then
-        $DNF_SDK_HOST --installroot=/opt/_avocado/images install \
-            nativesdk-avocado-pkg-img-rootfs \
-            nativesdk-avocado-pkg-img-initramfs
-    elif [ "$1" = "bootfiles" ]; then
-        $DNF_SDK_HOST --installroot=/opt/_avocado/bootfiles install \
-            nativesdk-avocado-pkg-bootfiles
-    else
-        $DNF_SDK_HOST --installroot=${AVOCADO_SDK_SYSROOTS}/$1 ${@:2}
-    fi
-}
 
-# Run the main function in the SDK environment
-run_in_sdk_env run_dnf_command "$@"
+if [ "$1" = "sdk" ]; then
+    run_dnf_command() {
+        shift
+        env -i TERM="$TERM" \
+            DNF_SDK_HOST="$DNF_SDK_HOST" \
+            RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
+            RPM_NO_CHROOT_FOR_SCRIPTS=1 \
+            $DNF_SDK_HOST $@
+    }
+    run_in_sdk_env run_dnf_command "$@"
+elif [ "$1" = "images" ]; then
+    env -i TERM="$TERM" \
+        DNF_SDK_HOST="$DNF_SDK_HOST" \
+        RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
+        RPM_NO_CHROOT_FOR_SCRIPTS=1 \
+        $DNF_SDK_HOST --installroot=/opt/_avocado/images install \
+        nativesdk-avocado-pkg-img-rootfs \
+        nativesdk-avocado-pkg-img-initramfs
+elif [ "$1" = "bootfiles" ]; then
+    env -i TERM="$TERM" \
+        DNF_SDK_HOST="$DNF_SDK_HOST" \
+        RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
+        RPM_NO_CHROOT_FOR_SCRIPTS=1 \
+        $DNF_SDK_HOST --installroot=/opt/_avocado/bootfiles install \
+        nativesdk-avocado-pkg-bootfiles
+else
+    env -i \
+        TERM="$TERM" \
+        DNF_SDK_HOST="$DNF_SDK_HOST" \
+        AVOCADO_SDK_SYSROOTS="$AVOCADO_SDK_SYSROOTS" \
+        RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
+        RPM_NO_CHROOT_FOR_SCRIPTS=1 \
+        $DNF_SDK_HOST --installroot=${AVOCADO_SDK_SYSROOTS}/$1 ${@:2}
+fi

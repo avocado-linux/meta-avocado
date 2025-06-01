@@ -34,7 +34,23 @@ build_extension() {
         mkdir -p "${OUTPUT_DIR}/sysext"
         rm -f "$OUTPUT_FILE"
         create_extension_release "$AVOCADO_SDK_SYSROOTS/sysext/usr/lib/extension-release.d"
-        mksquashfs "$AVOCADO_SDK_SYSROOTS/sysext/usr" "$AVOCADO_SDK_SYSROOTS/sysext/opt" "$OUTPUT_FILE" -noappend
+
+        # Check if required directories exist
+        if [ ! -d "$AVOCADO_SDK_SYSROOTS/sysext/usr" ] && [ ! -d "$AVOCADO_SDK_SYSROOTS/sysext/opt" ]; then
+            echo "Error: Neither /usr nor /opt directories exist in sysext sysroot"
+            exit 1
+        fi
+
+        # Build arguments for mksquashfs based on existing directories
+        SQUASHFS_ARGS=""
+        if [ -d "$AVOCADO_SDK_SYSROOTS/sysext/usr" ]; then
+            SQUASHFS_ARGS="$AVOCADO_SDK_SYSROOTS/sysext/usr"
+        fi
+        if [ -d "$AVOCADO_SDK_SYSROOTS/sysext/opt" ]; then
+            SQUASHFS_ARGS="$SQUASHFS_ARGS $AVOCADO_SDK_SYSROOTS/sysext/opt"
+        fi
+
+        mksquashfs $SQUASHFS_ARGS "$OUTPUT_FILE" -noappend
         
     elif [ "$1" = "confext" ]; then
         echo "Building configuration extension: $EXT_NAME"
@@ -42,6 +58,13 @@ build_extension() {
         mkdir -p "${OUTPUT_DIR}/confext"
         rm -f "$OUTPUT_FILE"
         create_extension_release "$AVOCADO_SDK_SYSROOTS/confext/etc/extension-release.d"
+
+        # Check if etc directory exists
+        if [ ! -d "$AVOCADO_SDK_SYSROOTS/confext/etc" ]; then
+            echo "Error: /etc directory does not exist in confext sysroot"
+            exit 1
+        fi
+
         mksquashfs "$AVOCADO_SDK_SYSROOTS/confext/etc" "$OUTPUT_FILE" -noappend
         
     elif [ "$1" = "var" ]; then
