@@ -1,6 +1,6 @@
 
 header:
-  version: 11
+  version: 16
   includes:
     - repo: meta-avocado
       file: kas/base.yml
@@ -18,5 +18,5 @@ repos:
 local_conf_header:
   machine-avocado-reterminal: |
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
-
+    DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"
 machine: avocado-reterminal

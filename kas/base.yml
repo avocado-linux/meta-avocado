@@ -1,8 +1,5 @@
 header:
-  version: 11
-  includes:
-  - repo: meta-avocado
-    file: kas/extra.yml
+  version: 16
 
 env:
   AVOCADO_REPO_BASE: "http://package-repo"
@@ -25,7 +22,7 @@ repos:
   meta-openembedded:
     url: https://git.openembedded.org/meta-openembedded
     branch: scarthgap
-    commit: e92d0173a80ea7592c866618ef5293203c50544c
+    commit: 491671faee11ea131feab5a3a451d1a01deb2ab1
     layers:
       meta-oe:
       meta-perl:
@@ -37,9 +34,17 @@ repos:
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
     branch: scarthgap
-    commit: b214cc84a922f7a3fb7ebbc501189ce25e8bd2bd
+    commit: 29d920f4c2249df7a69f00100924b4525e03c0d9
     layers:
       meta:
+
+  meta-ptx:
+    url: https://github.com/pengutronix/meta-ptx.git
+    branch: scarthgap
+    commit: 1189ee566604d7439e824242825da29ae3729ae5
+    layers:
+      .:
+
 
   meta-avocado:
     path: meta-avocado

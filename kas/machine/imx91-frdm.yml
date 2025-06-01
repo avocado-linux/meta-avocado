@@ -1,5 +1,5 @@
 header:
-  version: 11
+  version: 16
   includes:
     - repo: meta-avocado
       file: kas/base.yml

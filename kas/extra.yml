@@ -1,7 +1,9 @@
 header:
-  version: 11
+  version: 16
   includes:
   - repo: meta-avocado
     file: kas/extra/atecc.yml
   - repo: meta-avocado
     file: kas/extra/peridio.yml
+  - repo: meta-avocado
+    file: kas/extra/webkit.yml

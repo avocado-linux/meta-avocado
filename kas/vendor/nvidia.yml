@@ -1,11 +1,11 @@
 header:
-  version: 11
+  version: 16
 
 repos:
   meta-tegra:
     url: https://github.com/oe4t/meta-tegra
     branch: scarthgap
-    commit: 409701a6b716c28244965369b7e8ff195ae4f036
+    commit: e4379e5131b0f0df3949c023a13f648506a3084d
     layers:
       .:
 

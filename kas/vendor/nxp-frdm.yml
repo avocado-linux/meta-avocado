@@ -1,5 +1,5 @@
 header:
-  version: 11
+  version: 16
 
 repos:
   meta-arm:
@@ -22,7 +22,7 @@ repos:
   meta-imx-frdm:
     url: https://github.com/nxp-imx-support/meta-imx-frdm.git
     branch: lf-6.6.36-2.1.0
-    commit: ee1376a89478686a850aa0545695340fe360fa5b
+    commit: 1377d9d8c658fd78f2a7362e09a75f5c929ff5ce
     layers:
       meta-imx-bsp:
 
