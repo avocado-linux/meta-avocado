@@ -30,7 +30,7 @@ fi
 # Image paths relative to build directory
 MACHINE="avocado-qemux86-64"
 DEPLOY_DIR="$BUILD_DIR/tmp/deploy/images/$MACHINE"
-IMAGE_NAME="avocado-image-rootfs-$MACHINE.rootfs.wic"
+IMAGE_NAME="avocado-image-genimage-$MACHINE.img"
 OVMF_CODE="ovmf.code.qcow2"
 OVMF_VARS="ovmf.vars.qcow2"
 QEMU_EXEC="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-x86_64"
