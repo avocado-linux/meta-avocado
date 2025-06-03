@@ -1,0 +1,1 @@
+PARALLEL_MAKE = "${@d.getVar('PARALLEL_MAKE_ERLANG') or ''}"
