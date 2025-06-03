@@ -25,47 +25,39 @@ build_extension() {
         
         mkdir -p "$release_dir"
         echo "ID=$EXT_ID" > "$release_file"
-        echo "VERSION=$EXT_VERSION" >> "$release_file"
+        echo "VERSION_ID=$EXT_VERSION" >> "$release_file"
+        echo "EXTENSION_RELOAD_MANAGER=1"
     }
 
     if [ "$1" = "sysext" ]; then
         echo "Building system extension: $EXT_NAME"
-        OUTPUT_FILE="${OUTPUT_DIR}/sysext/${EXT_NAME}-${EXT_VERSION}.raw"
+        OUTPUT_FILE="${OUTPUT_DIR}/sysext/${EXT_NAME}.raw"
         mkdir -p "${OUTPUT_DIR}/sysext"
         rm -f "$OUTPUT_FILE"
         create_extension_release "$AVOCADO_SDK_SYSROOTS/sysext/usr/lib/extension-release.d"
 
-        # Check if required directories exist
-        if [ ! -d "$AVOCADO_SDK_SYSROOTS/sysext/usr" ] && [ ! -d "$AVOCADO_SDK_SYSROOTS/sysext/opt" ]; then
-            echo "Error: Neither /usr nor /opt directories exist in sysext sysroot"
+        # Check if sysext directory exists
+        if [ ! -d "$AVOCADO_SDK_SYSROOTS/sysext" ]; then
+            echo "Error: sysext directory does not exist in sysroot"
             exit 1
         fi
 
-        # Build arguments for mksquashfs based on existing directories
-        SQUASHFS_ARGS=""
-        if [ -d "$AVOCADO_SDK_SYSROOTS/sysext/usr" ]; then
-            SQUASHFS_ARGS="$AVOCADO_SDK_SYSROOTS/sysext/usr"
-        fi
-        if [ -d "$AVOCADO_SDK_SYSROOTS/sysext/opt" ]; then
-            SQUASHFS_ARGS="$SQUASHFS_ARGS $AVOCADO_SDK_SYSROOTS/sysext/opt"
-        fi
-
-        mksquashfs $SQUASHFS_ARGS "$OUTPUT_FILE" -noappend
+        mksquashfs "$AVOCADO_SDK_SYSROOTS/sysext" "$OUTPUT_FILE" -noappend
         
     elif [ "$1" = "confext" ]; then
         echo "Building configuration extension: $EXT_NAME"
-        OUTPUT_FILE="${OUTPUT_DIR}/confext/${EXT_NAME}-${EXT_VERSION}.raw"
+        OUTPUT_FILE="${OUTPUT_DIR}/confext/${EXT_NAME}.raw"
         mkdir -p "${OUTPUT_DIR}/confext"
         rm -f "$OUTPUT_FILE"
         create_extension_release "$AVOCADO_SDK_SYSROOTS/confext/etc/extension-release.d"
 
-        # Check if etc directory exists
-        if [ ! -d "$AVOCADO_SDK_SYSROOTS/confext/etc" ]; then
-            echo "Error: /etc directory does not exist in confext sysroot"
+        # Check if confext directory exists
+        if [ ! -d "$AVOCADO_SDK_SYSROOTS/confext" ]; then
+            echo "Error: confext directory does not exist in sysroot"
             exit 1
         fi
 
-        mksquashfs "$AVOCADO_SDK_SYSROOTS/confext/etc" "$OUTPUT_FILE" -noappend
+        mksquashfs "$AVOCADO_SDK_SYSROOTS/confext" "$OUTPUT_FILE" -noappend
         
     elif [ "$1" = "var" ]; then
         echo "Building var image"

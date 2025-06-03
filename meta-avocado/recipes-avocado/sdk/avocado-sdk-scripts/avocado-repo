@@ -27,15 +27,7 @@ elif [ "$1" = "images" ]; then
         RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
         RPM_NO_CHROOT_FOR_SCRIPTS=1 \
         $DNF_SDK_HOST --installroot=/opt/_avocado/images install \
-        nativesdk-avocado-pkg-img-rootfs \
-        nativesdk-avocado-pkg-img-initramfs
-elif [ "$1" = "bootfiles" ]; then
-    env -i TERM="$TERM" \
-        DNF_SDK_HOST="$DNF_SDK_HOST" \
-        RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
-        RPM_NO_CHROOT_FOR_SCRIPTS=1 \
-        $DNF_SDK_HOST --installroot=/opt/_avocado/bootfiles install \
-        nativesdk-avocado-pkg-bootfiles
+        nativesdk-avocado-pkg-images
 else
     env -i \
         TERM="$TERM" \
