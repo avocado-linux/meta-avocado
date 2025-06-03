@@ -16,5 +16,6 @@ repos:
 
 local_conf_header:
   machine-avocado-qemux86-64: |
-
+    EXTRA_IMAGE_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
+    EXTRA_INITRAMFS_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
 machine: avocado-qemux86-64
