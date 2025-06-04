@@ -4,7 +4,7 @@ header:
     - repo: meta-avocado
       file: kas/base.yml
     - repo: meta-avocado
-      file: kas/target/container.yml
+      file: kas/target/sdk-container.yml
 
 repos:
   meta-avocado:
@@ -13,9 +13,9 @@ repos:
       meta-avocado:
 
 local_conf_header:
-  machine-avocado-container-x86_64: |
+  machine-avocado-container-arm64: |
     ROOT_FSTYPES = "container"
 
 distro: avocado-container
 
-machine: avocado-container-x86_64
+machine: avocado-container-arm64

@@ -8,6 +8,10 @@ inputs:
     description: "Set BB_GIT_SHALLOW for kas build"
     required: false
     default: "1"
+  target:
+    description: "Set target for kas build"
+    required: false
+    default: "avocado-complete"
   parallel_make:
     description: "Set the PARALLEL_MAKE environment variable"
     required: false
@@ -22,4 +26,4 @@ runs:
         PARALLEL_MAKE: ${{ inputs.parallel_make }}
       run: |
         source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
-        kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml
+        kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml --target ${{ inputs.target }}

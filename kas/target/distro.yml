@@ -5,4 +5,4 @@ header:
     file: kas/extra.yml
 
 target:
- - avocado-complete
+ - avocado-core

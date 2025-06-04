@@ -6,7 +6,7 @@
 Source the `init-build` script and pass the path to a kas configuration to build. This will create a `build-{config file name}` directory in your `cwd`.
 
 ```bash
-. scripts/init-build kas/machine/qemux86-64-secureboot.yml
+. scripts/init-build kas/machine/qemux86-64.yml
 ```
 
 If you have direnv installed, there is a .envrc file added to the build dir to make it easier to reference the kas config. `$KAS_YML`

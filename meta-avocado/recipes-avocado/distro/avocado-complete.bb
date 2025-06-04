@@ -2,13 +2,9 @@ SUMMARY = "Meta-target to build Avocado OS images, extensions, and extra package
 LICENSE = "Apache-2.0"
 
 # Ensure compile task runs after dependencies
-do_compile[depends] += "avocado-image-initramfs:do_image_complete"
-do_compile[depends] += "avocado-image-rootfs:do_image_complete"
-do_compile[depends] += "avocado-image-var:do_deploy"
-do_compile[depends] += "${@bb.utils.contains('MACHINE_FEATURES', 'genimage', 'avocado-image-genimage:do_deploy', '', d)}"
-do_compile[depends] += "avocado-pkg-extensions:do_build"
+do_compile[depends] += "avocado-core:do_build"
 do_compile[depends] += "avocado-pkg-extra:do_build"
-do_compile[depends] += "avocado-pkg-sdk:do_build"
+do_compile[depends] += "avocado-pkg-sdk-extra:do_build"
 
 # Skip other tasks
 do_packagedata[noexec] = "1"
