@@ -17,6 +17,10 @@ build_extension() {
     EXT_ID="avocado"
     OUTPUT_DIR="/opt/_avocado/extensions"
     OUTPUT_FILE=""
+    IMAGES_DIR="/opt/_avocado/images"
+    DEPLOY_DIR="${IMAGES_DIR}/deploy"
+    OUTPUT_PATH="/opt/_avocado/output"
+    TMP_PATH="/opt/_avocado/genimage-tmp"
 
     # Function to create extension release file
     create_extension_release() {
@@ -61,7 +65,6 @@ build_extension() {
         
     elif [ "$1" = "var" ]; then
         echo "Building var image"
-        IMAGES_DIR="/opt/_avocado/images"
         mkdir -p "$IMAGES_DIR"
         
         # Create var sysroot structure
@@ -69,20 +72,66 @@ build_extension() {
         mkdir -p "$AVOCADO_SDK_SYSROOTS/var/lib/extensions"
         mkdir -p "$AVOCADO_SDK_SYSROOTS/var/lib/confexts"
         
-        # Copy existing extensions into var sysroot
+        # Copy existing extensions into var sysroot if they exist
         echo "Copying system extensions..."
-        cp -f "${OUTPUT_DIR}/sysext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/extensions/"
+        if ls "${OUTPUT_DIR}/sysext/"*.raw 1> /dev/null 2>&1; then
+            cp -f "${OUTPUT_DIR}/sysext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/extensions/"
+        else
+            echo "No system extensions found, skipping..."
+        fi
+
         echo "Copying configuration extensions..."
-        cp -f "${OUTPUT_DIR}/confext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/confexts/"
+        if ls "${OUTPUT_DIR}/confext/"*.raw 1> /dev/null 2>&1; then
+            cp -f "${OUTPUT_DIR}/confext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/confexts/"
+        else
+            echo "No configuration extensions found, skipping..."
+        fi
         
         # Create btrfs image with extensions and confexts subvolumes
         mkfs.btrfs -r "$AVOCADO_SDK_SYSROOTS/var" \
             --subvol rw:lib/extensions \
             --subvol rw:lib/confexts \
             -f "${IMAGES_DIR}/avocado-image-var.btrfs"
+
+    elif [ "$1" = "image" ]; then
+        echo "Building complete system image"
+        mkdir -p "$IMAGES_DIR"
+        mkdir -p "$DEPLOY_DIR"
+        mkdir -p "$OUTPUT_PATH"
+        
+        # Clean and recreate temporary directory
+        rm -rf "$TMP_PATH"
+        mkdir -p "$TMP_PATH"
+
+        # First build the var image if it doesn't exist
+        if [ ! -f "${IMAGES_DIR}/avocado-image-var.btrfs" ]; then
+            echo "Building var image first..."
+            build_extension "var" "$EXT_NAME"
+        fi
+
+        # Copy var image to deploy directory
+        cp "${IMAGES_DIR}/avocado-image-var.btrfs" "${DEPLOY_DIR}/"
+
+        # Prepare genimage configuration
+        echo "Preparing genimage configuration..."
+        cp "${DEPLOY_DIR}/genimage.cfg" "${OUTPUT_PATH}/genimage.cfg"
+        
+        # Replace variables in genimage configuration
+        sed -i "s|@VAR-IMG@|${DEPLOY_DIR}/avocado-image-var.btrfs|g" "${OUTPUT_PATH}/genimage.cfg"
+        sed -i "s|@IMAGE@|avocado-image-${AVOCADO_SDK_TARGET}.img|g" "${OUTPUT_PATH}/genimage.cfg"
+
+        # Run genimage to create the final system image
+        echo "Running genimage to create final system image..."
+        genimage --config "${OUTPUT_PATH}/genimage.cfg" \
+                --inputpath "$DEPLOY_DIR" \
+                --outputpath "$OUTPUT_PATH" \
+                --tmppath "$TMP_PATH" \
+                --rootpath "$IMAGES_DIR"
+
+        echo "System image created in $OUTPUT_PATH"
         
     else
-        echo "Usage: $0 [sysext|confext|var] <name>"
+        echo "Usage: $0 [sysext|confext|var|image] <name>"
         exit 1
     fi
 }

@@ -19,7 +19,6 @@ services:
     entrypoint: /entrypoint.sh
     volumes:
       - ./:/opt:z
-      - ./run_qemu.sh:/run_qemu.sh:ro,z
       - ./entrypoint.sh:/entrypoint.sh:ro,z
     networks:
       - sdk-network

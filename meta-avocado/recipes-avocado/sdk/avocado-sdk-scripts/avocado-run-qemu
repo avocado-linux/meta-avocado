@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
+# Source the common functions
+source "${SCRIPT_DIR}/avocado-sdk-common.sh"
+
+# Define the main function that will run in the SDK environment
+run_qemu() {
+    # Check if this is a QEMU target
+    if [[ ! "$AVOCADO_SDK_TARGET" =~ qemu ]]; then
+        echo "Error: This script can only be run for QEMU targets"
+        echo "Current target: $AVOCADO_SDK_TARGET"
+        exit 1
+    fi
+
+    # Check if the image file exists
+    IMAGE_FILE="/opt/_avocado/output/avocado-image-qemux86-64.img"
+    if [ ! -f "$IMAGE_FILE" ]; then
+        echo "Error: Image file not found: $IMAGE_FILE"
+        echo "Please build the image first using: avocado-build image"
+        exit 1
+    fi
+
+    qemu-system-x86_64 \
+        -drive file=/opt/_avocado/output/avocado-image-qemux86-64.img,format=raw,if=virtio \
+        -drive if=pflash,format=qcow2,readonly=on,file=/opt/_avocado/images/deploy/ovmf.code.qcow2 \
+        -drive if=pflash,format=qcow2,file=/opt/_avocado/images/deploy/ovmf.vars.qcow2 \
+        -m 256 \
+        -cpu max \
+        -nographic
+}
+
+# Run the main function in the SDK environment
+run_in_sdk_env run_qemu "$@"
