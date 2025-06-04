@@ -71,3 +71,50 @@ Example adding libcryptoauth3 to the sysext sysroot. The sysext sysroot has been
 avocado-repo sysext install libcryptoauth3
 ```
 
+## Building a system extension
+
+Let's build a system extension that adds peridiod to the runtime. Start by installing the package contents for the peridiod package to the sysext sysroot:
+
+```bash
+avocado-repo sysext install peridiod -y
+```
+
+Then build the system extension
+
+```bash
+avocado-build sysext peridiod
+```
+
+This will output the `peridiod` system extension raw file to the output dir at
+
+```bash
+/opt/_avocado/extensions/sysext/peridiod.raw
+```
+
+## Building and booting the image in qemu
+
+Build the final image
+
+```bash
+avocado-build image
+```
+
+This will place files into the folder
+
+```bash
+/opt/_avocado/output
+```
+
+## Booting the image in qemu
+
+Extens the toolchain with qemu-system-x86-64
+
+```bash
+avocado-repo sdk install nativesdk-qemu-system-x86-64
+```
+
+Run the VM
+
+```bash
+avocado-run-qemu
+```
