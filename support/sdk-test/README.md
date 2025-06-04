@@ -1,5 +1,5 @@
 # SDK Container Test
-This docker compose setup enables testing of an SDK container with the package repo.
+This podman compose setup enables testing of an SDK container with the package repo.
 
 ## Setup
 
@@ -13,7 +13,7 @@ You will need to build an sdk container that is compatible with your host. Do th
 Once the container image is built, you can import the image from the build directory
 
 ```bash
-docker import build-container-x86_64/build/tmp/deploy/images/avocado-container-x86_64/avocado-image-container-avocado-container-x86_64.rootfs.tar.bz2 avocadolinux/sdk:dev
+podman import build-container-x86_64/build/tmp/deploy/images/avocado-container-x86_64/avocado-image-container-avocado-container-x86_64.rootfs.tar.bz2 avocadolinux/sdk:dev
 ```
 
 ### Building target package repos
@@ -30,17 +30,17 @@ Export the path to the rpms for your chosen platform
 export DEPLOY_DIR=./build-qemux86-64/build/tmp/deploy
 ```
 
-You can start the package-repo container and get a bash prompt in the sdk container with the following docker compose command
+You can start the package-repo container and get a bash prompt in the sdk container with the following `podman-compose` command
 
 ```bash
-podman-compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
+podman-compose -f support/sdk-test/compose.yml run sdk-test /bin/bash
 ```
 
 Running for a different target:
 
 ```bash
 export DEPLOY_DIR=./build-imx93-frdm/build/tmp/deploy
-AVOCADO_SDK_TARGET=imx93-frdm podman-compose -f support/sdk-test/docker-compose.yml run sdk-test /bin/bash
+AVOCADO_SDK_TARGET=imx93-frdm podman-compose -f support/sdk-test/compose.yml run sdk-test /bin/bash
 ```
 
 ## Runtime Environment
