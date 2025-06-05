@@ -93,6 +93,12 @@ This will output the `peridiod` system extension raw file to the output dir at
 
 ## Building and booting the image in qemu
 
+Download the necessary images for the bootchain and the core rootfs for use when building the image
+
+```bash
+avocado-repo images
+```
+
 Build the final image
 
 ```bash
@@ -107,7 +113,7 @@ This will place files into the folder
 
 ## Booting the image in qemu
 
-Extens the toolchain with qemu-system-x86-64
+Extends the toolchain with qemu-system-x86-64
 
 ```bash
 avocado-repo sdk install nativesdk-qemu-system-x86-64
@@ -117,4 +123,12 @@ Run the VM
 
 ```bash
 avocado-run-qemu
+```
+
+## Making changes
+
+If you make changes to the contents of the extensions, you will need to force the var partition to be recreated
+
+```bash
+avocado-build var
 ```
