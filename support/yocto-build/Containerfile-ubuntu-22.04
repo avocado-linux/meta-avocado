@@ -57,6 +57,10 @@ ENV DL_DIR=/avocado/dl
 ENV SSTATE_DIR=/avocado/sstate
 ENV BB_ENV_PASSTHROUGH_ADDITIONS="DL_DIR SSTATE_DIR BB_NUMBER_THREADS"
 
+# Create aliases in global bashrc
+RUN echo "alias kb='kas build \$KAS_YML'" >> /etc/bash.bashrc
+RUN echo "alias ks='kas shell \$KAS_YML'" >> /etc/bash.bashrc
+
 WORKDIR /avocado-build
 
 # Add entrypoint script
