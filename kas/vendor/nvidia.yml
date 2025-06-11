@@ -18,10 +18,14 @@ repos:
 
 local_conf_header:
   vendor-nvidia: |
-    UBOOT_EXTLINUX = "1"
-    USE_REDUNDANT_FLASH_LAYOUT_DEFAULT = "1"
+    INITRAMFS_IMAGE_BUNDLE = "1"
+    KERNEL_MODULE_AUTOLOAD:append = " nvme"
+
     TEGRA_INITRD_FLASH_INITRAMFS_FSTYPES = "cpio.gz.cboot"
-    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-tegra"
-    DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"
-    CUDA_GCCVERSION = "8.%"
+    DISTRO_FEATURES_EXTRA:append = "opengl seccomp virtualization efi"
     LICENSE_FLAGS_ACCEPTED:append = " commercial_faad2 commercial_x264"
+
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-tegra-rootfs "
+    INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-tegra-initramfs"
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-tegra-extra"
+    SDK_PKG_EXTRA_INSTALL:append = " packagegroup-avocado-tegra-sdk-extra"

@@ -14,7 +14,7 @@ IMAGE_ROOTFS_EXTRA_SPACE = "0"
 INITRAMFS_MAXSIZE = ""
 
 IMAGE_INSTALL = "packagegroup-avocado-initramfs ${INITRAMFS_IMAGE_EXTRA_INSTALL}"
-IMAGE_INSTALL:remove = "kernel-image kernel-modules kernel-devicetree"
+IMAGE_INSTALL:remove = "kernel-image kernel-devicetree"
 
 IMAGE_FSTYPES = "${INITRAMFS_FSTYPES}"
 IMAGE_FSTYPES ??= "cpio.zst"
@@ -38,7 +38,6 @@ cleanup_root_files () {
     rm -rf ${IMAGE_ROOTFS}/mnt
     rm -rf ${IMAGE_ROOTFS}/srv
     rm -rf ${IMAGE_ROOTFS}/boot/*
-    rm -rf ${IMAGE_ROOTFS}/usr/lib/opkg
 }
 
 create_sysroot_dir() {

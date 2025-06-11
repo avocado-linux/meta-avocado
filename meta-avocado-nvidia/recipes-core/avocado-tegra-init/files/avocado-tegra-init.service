@@ -1,0 +1,18 @@
+[Unit]
+Description=Detect and mount APP_<slot> partition on /sysroot
+DefaultDependencies=no
+After=systemd-udev-settle.service
+Before=initrd-root-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/avocado-tegra-init
+RemainAfterExit=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN
+MountFlags=shared
+PrivateDevices=no
+ProtectSystem=no
+ProtectHome=no
+
+[Install]
+WantedBy=initrd-root-fs.target

@@ -3,4 +3,4 @@ LICENSE = "Apache-2.0"
 
 inherit image-packages-only
 
-IMAGE_INSTALL = "packagegroup-avocado-sdk"
+IMAGE_INSTALL = "packagegroup-avocado-sdk ${SDK_TOOLCHAIN_EXTRA_INSTALL}"
