@@ -30,7 +30,7 @@ build_extension() {
         mkdir -p "$release_dir"
         echo "ID=$EXT_ID" > "$release_file"
         echo "VERSION_ID=$EXT_VERSION" >> "$release_file"
-        echo "EXTENSION_RELOAD_MANAGER=1"
+        echo "EXTENSION_RELOAD_MANAGER=1" >> "$release_file"
     }
 
     if [ "$1" = "sysext" ]; then
