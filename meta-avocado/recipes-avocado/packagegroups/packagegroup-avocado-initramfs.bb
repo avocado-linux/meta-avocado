@@ -10,4 +10,5 @@ RDEPENDS:${PN} = "\
   systemd \
   systemd-extra-utils \
   os-release-initrd \
+  util-linux \
 "
