@@ -33,14 +33,14 @@ export DEPLOY_DIR=./build-qemux86-64/build/tmp/deploy
 You can start the package-repo container and get a bash prompt in the sdk container with the following `podman-compose` command
 
 ```bash
-podman-compose -f support/sdk-test/compose.yml run sdk-test /bin/bash
+podman-compose -f support/sdk-test/compose.yml run sdk /bin/bash
 ```
 
 Running for a different target:
 
 ```bash
 export DEPLOY_DIR=./build-imx93-frdm/build/tmp/deploy
-AVOCADO_SDK_TARGET=imx93-frdm podman-compose -f support/sdk-test/compose.yml run sdk-test /bin/bash
+AVOCADO_SDK_TARGET=imx93-frdm podman-compose -f support/sdk-test/compose.yml run sdk /bin/bash
 ```
 
 ## Runtime Environment
