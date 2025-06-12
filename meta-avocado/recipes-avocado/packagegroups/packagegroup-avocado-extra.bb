@@ -21,4 +21,9 @@ RDEPENDS:${PN} = " \
   cryptoauthlib \
   peridiod \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'wpewebkit', '', d)} \
+  ${MACHINE_EXTRA_RDEPENDS} \
+"
+
+RRECOMMENDS:${PN} = " \
+  ${MACHINE_EXTRA_RRECOMMENDS} \
 "
