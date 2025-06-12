@@ -24,10 +24,10 @@ Refer to the main documentation for information on how to configure the system t
 
 ## Testing
 
-Export the path to the rpms for your chosen platform
+Export the absolute path to the rpms for your chosen platform
 
 ```bash
-export DEPLOY_DIR=./build-qemux86-64/build/tmp/deploy
+export DEPLOY_DIR="$(pwd)/build-qemux86-64/build/tmp/deploy"
 ```
 
 You can start the package-repo container and get a bash prompt in the sdk container with the following `podman-compose` command
@@ -39,7 +39,7 @@ podman-compose -f support/sdk-test/compose.yml run sdk /bin/bash
 Running for a different target:
 
 ```bash
-export DEPLOY_DIR=./build-imx93-frdm/build/tmp/deploy
+export DEPLOY_DIR="$(pwd)/build-imx93-frdm/build/tmp/deploy"
 AVOCADO_SDK_TARGET=imx93-frdm podman-compose -f support/sdk-test/compose.yml run sdk /bin/bash
 ```
 
