@@ -3,4 +3,9 @@ LICENSE = "Apache-2.0"
 
 inherit packagegroup
 
-RDEPENDS:${PN} = ""
+RDEPENDS:${PN} = " \
+  triton-server \
+  triton-client \
+  triton-python-backend \
+  triton-tensorrt-backend \
+"
