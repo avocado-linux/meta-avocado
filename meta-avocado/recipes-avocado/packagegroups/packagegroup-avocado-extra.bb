@@ -20,10 +20,13 @@ RDEPENDS:${PN} = " \
   htop \
   cryptoauthlib \
   peridiod \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'wpewebkit', '', d)} \
-  ${MACHINE_EXTRA_RDEPENDS} \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
 "
 
-RRECOMMENDS:${PN} = " \
-  ${MACHINE_EXTRA_RRECOMMENDS} \
+OPENGL_PACKAGES = " \
+  wpewebkit \
+  weston \
+  weston-init \
+  wayland \
+  wayland-utils \
 "
