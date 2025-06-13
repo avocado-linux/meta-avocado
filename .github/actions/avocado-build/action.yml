@@ -11,11 +11,15 @@ inputs:
   target:
     description: "Set target for kas build"
     required: false
-    default: "avocado-complete"
+    default: "avocado-distro"
   parallel_make:
     description: "Set the PARALLEL_MAKE environment variable"
     required: false
     default: "-j16"
+  sdk_machine:
+    description: "Set the SDKMACHINE environment variable"
+    required: false
+    default: "x86_64"
 runs:
   using: "composite"
   steps:
@@ -24,6 +28,10 @@ runs:
       env:
         BB_GIT_SHALLOW: ${{ inputs.shallow_clone }}
         PARALLEL_MAKE: ${{ inputs.parallel_make }}
+        SDKMACHINE: ${{ inputs.sdk_machine }}
       run: |
+        echo "TARGET: ${{ inputs.target }}"
+        echo "SDKMACHINE: ${{ inputs.sdk_machine }}"
+
         source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
         kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml --target ${{ inputs.target }}

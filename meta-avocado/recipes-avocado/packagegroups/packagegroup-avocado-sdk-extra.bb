@@ -14,7 +14,6 @@ SDK_TOOLCHAIN_DEPENDS = " \
   ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'go', 'packagegroup-go-cross-canadian-${MACHINE}', '', d)} \
   ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'rust', 'packagegroup-rust-cross-canadian-${MACHINE}', '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
-  ${VIRTUAL-RUNTIME_avocado-sdk-metadata} \
 "
 
 SDK_SYSROOT_DEPENDS = " \

@@ -7,6 +7,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 INHIBIT_PACKAGE_STRIP = "1"
 
+# Skip architecture mismatch QA checks
+INSANE_SKIP:${PN} += "arch"
+
 do_compile[depends] += "avocado-image-initramfs:do_image_complete"
 do_compile[depends] += "avocado-image-rootfs:do_image_complete"
 do_compile[depends] += "avocado-image-var:do_deploy"
