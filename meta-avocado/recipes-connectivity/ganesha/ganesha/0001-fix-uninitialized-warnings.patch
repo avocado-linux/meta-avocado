@@ -1,0 +1,86 @@
+From 9ae4c4a9a15d73376b672fc101c24b941183f49d Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Fri, 13 Jun 2025 14:25:38 -0400
+Subject: [PATCH 1/2] fix uninitialized warnings
+
+---
+ src/FSAL/FSAL_GPFS/fsal_ds.c                            | 3 ++-
+ src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_helpers.c | 2 +-
+ src/Protocols/NFS/nfs4_op_bind_conn.c                   | 2 +-
+ src/Protocols/NFS/nfs_proto_tools.c                     | 6 +++---
+ 4 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/src/FSAL/FSAL_GPFS/fsal_ds.c b/src/FSAL/FSAL_GPFS/fsal_ds.c
+index ad250ade9..a4b3fac98 100644
+--- a/src/FSAL/FSAL_GPFS/fsal_ds.c
++++ b/src/FSAL/FSAL_GPFS/fsal_ds.c
+@@ -341,7 +341,8 @@ static nfsstat4 ds_commit(struct fsal_ds_handle *const ds_pub,
+ 	struct gpfs_file_handle *gpfs_handle = &ds->wire;
+ 	struct fsync_arg arg = { 0 };
+ 	unsigned int *fh;
+-	int retval;
++	int retval = 0;
++
+ 	struct gpfs_fsal_export *exp = container_of(
+ 		op_ctx->fsal_export, struct gpfs_fsal_export, export);
+ 	int export_fd = exp->export_fd;
+diff --git a/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_helpers.c b/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_helpers.c
+index be46ec769..32187cc43 100644
+--- a/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_helpers.c
++++ b/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_helpers.c
+@@ -1755,7 +1755,7 @@ void place_new_dirent(mdcache_entry_t *parent_dir,
+ 		      mdcache_dir_entry_t *new_dir_entry)
+ {
+ 	mdcache_dir_entry_t *left;
+-	mdcache_dir_entry_t *right;
++	mdcache_dir_entry_t *right = NULL;
+ 	struct avltree_node *node, *parent, *unbalanced, *other;
+ 	int is_left, code;
+ 	fsal_cookie_t ck, nck;
+diff --git a/src/Protocols/NFS/nfs4_op_bind_conn.c b/src/Protocols/NFS/nfs4_op_bind_conn.c
+index 98d6f527d..989cb1b19 100644
+--- a/src/Protocols/NFS/nfs4_op_bind_conn.c
++++ b/src/Protocols/NFS/nfs4_op_bind_conn.c
+@@ -123,7 +123,7 @@ enum nfs_req_result nfs4_op_bind_conn(struct nfs_argop4 *op,
+ 			 .bctsr_resok4;
+ 	nfs41_session_t *session;
+ 	channel_dir_from_client4 client_channel_dir;
+-	channel_dir_from_server4 server_channel_dir;
++	channel_dir_from_server4 server_channel_dir = CDFS4_FORE;
+ 	nfsstat4 bind_to_backchannel;
+ 	bool added_conn_to_session;
+ 
+diff --git a/src/Protocols/NFS/nfs_proto_tools.c b/src/Protocols/NFS/nfs_proto_tools.c
+index 3bae9b613..f2dd6afa4 100644
+--- a/src/Protocols/NFS/nfs_proto_tools.c
++++ b/src/Protocols/NFS/nfs_proto_tools.c
+@@ -364,7 +364,7 @@ static inline bool atrib_supported(int attr, attrmask_t fsal_supported)
+ static fattr_xdr_result encode_supported_attrs(XDR *xdr,
+ 					       struct xdr_attrs_args *args)
+ {
+-	struct bitmap4 bits;
++	struct bitmap4 bits = { 0 };
+ 	int attr, offset;
+ 	int max_attr_idx;
+ 
+@@ -397,7 +397,7 @@ static fattr_xdr_result encode_supported_attrs(XDR *xdr,
+ static fattr_xdr_result decode_supported_attrs(XDR *xdr,
+ 					       struct xdr_attrs_args *args)
+ {
+-	struct bitmap4 bits;
++	struct bitmap4 bits = { 0 };
+ 	int attr, offset;
+ 	int max_attr_idx;
+ 
+@@ -2506,7 +2506,7 @@ static fattr_xdr_result decode_mode_set_masked(XDR *xdr,
+ static fattr_xdr_result
+ encode_support_exclusive_create(XDR *xdr, struct xdr_attrs_args *args)
+ {
+-	struct bitmap4 bits;
++	struct bitmap4 bits = { 0 };
+ 	int attr, offset;
+ 	bool __attribute__((unused)) res;
+ 
+-- 
+2.49.0
+
