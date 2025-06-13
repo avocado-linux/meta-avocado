@@ -1,0 +1,14 @@
+name: "Stage Avocado Repos"
+description: "Initialize and stage RPM repositories with build RPMs"
+inputs:
+  machine:
+    description: "Machine to stage RPMs for (e.g. qemux86-64)"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Map built repos to deploy directories
+      shell: bash
+      run: |
+        echo "Staging repos for ${{ inputs.machine }}"
+        ./scripts/repo-stage-rpms.sh ./build-${{ inputs.machine }}/build/tmp/deploy/rpm /home/runner/_cache/repos

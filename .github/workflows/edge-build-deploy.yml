@@ -5,6 +5,10 @@ on:
     - cron: '0 5 * * *' # Runs at 5 AM UTC daily
   workflow_dispatch:
     inputs:
+      build_all:
+        description: 'Build all machines and perform all tasks'
+        type: boolean
+        default: false
       target_to_build:
         description: 'Select the machine to build'
         type: choice
@@ -18,22 +22,12 @@ on:
           - imx93-evk
           - jetson-orin-nano-devkit-nvme
           - raspberrypi4
-      run_cleanup:
-        description: 'Run cleanup script on aggregated repos'
-        type: boolean
-        default: false
-      upload_to_s3:
-        description: 'Upload build artifacts to S3'
-        type: boolean
-        default: false
 
 jobs:
   determine_build_matrix:
     runs-on: molcajete
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
-      upload_to_s3_decision: ${{ steps.set-matrix.outputs.upload_to_s3_decision }}
-      run_cleanup_decision: ${{ steps.set-matrix.outputs.run_cleanup_decision }}
     steps:
       - name: Determine build parameters
         id: set-matrix
@@ -47,49 +41,48 @@ jobs:
             ];
 
             let selectedMachines = [];
-            let doUploadToS3 = false;
-            let doRunCleanup = false;
 
             if (context.eventName === 'schedule') {
               selectedMachines = allMachinesList;
-              doUploadToS3 = true;
-              doRunCleanup = true;
-              core.info('Scheduled run: Selecting all machines, enabling S3 upload, and cleanup.');
+              core.info('Scheduled run: Selecting all machines.');
             } else if (context.eventName === 'workflow_dispatch') {
-              const target = context.payload.inputs.target_to_build;
-              core.info(`Dispatch input target_to_build: ${target}`);
+              const buildAll = context.payload.inputs.build_all === true || context.payload.inputs.build_all === 'true';
 
-              if (allMachinesList.includes(target)) {
-                selectedMachines = [target];
-                core.info(`Selected machine for dispatch: ${target}`);
+              if (buildAll) {
+                selectedMachines = allMachinesList;
+                core.info('Build all selected: Building all machines.');
               } else {
-                core.warning(`Unknown target selected: ${target}. No machine will be built.`);
+                const target = context.payload.inputs.target_to_build;
+                core.info(`Dispatch input target_to_build: ${target}`);
+
+                if (allMachinesList.includes(target)) {
+                  selectedMachines = [target];
+                  core.info(`Selected machine for dispatch: ${target}`);
+                } else {
+                  core.warning(`Unknown target selected: ${target}. No machine will be built.`);
+                }
               }
-
-              doUploadToS3 = context.payload.inputs.upload_to_s3 === true || context.payload.inputs.upload_to_s3 === 'true';
-              doRunCleanup = context.payload.inputs.run_cleanup === true || context.payload.inputs.run_cleanup === 'true';
-
-              core.info(`Upload to S3 for dispatch: ${doUploadToS3}`);
-              core.info(`Run cleanup for dispatch: ${doRunCleanup}`);
             } else {
               core.setFailed(`Unsupported event: ${context.eventName}`);
               return;
             }
             core.setOutput('matrix', JSON.stringify(selectedMachines));
-            core.setOutput('upload_to_s3_decision', doUploadToS3);
-            core.setOutput('run_cleanup_decision', doRunCleanup);
 
-  build_and_deploy_rpm_repos:
+  build:
     needs: determine_build_matrix
     if: needs.determine_build_matrix.outputs.matrix != '[]'
     runs-on: molcajete
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.job }}
-      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
         machine: ${{ fromJSON(needs.determine_build_matrix.outputs.matrix) }}
+        build_config:
+          - target: avocado-distro
+            sdk_machine: x86_64
+          - target: avocado-sdk
+            sdk_machine: x86_64
+          - target: avocado-sdk
+            sdk_machine: aarch64
     env:
       DISTRO_CODENAME: "apollo/edge"
       DISTRO_VERSION: "0.1.0"
@@ -102,19 +95,23 @@ jobs:
       - name: Create local repo aggregation directory
         run: mkdir -p ${{ env.LOCAL_REPO_AGGREGATION_PATH }}
 
-      - name: Build target machine (${{ matrix.machine }})
+      - name: Build ${{ matrix.build_config.target }} for ${{ matrix.machine }}
         uses: ./.github/actions/avocado-build
         with:
           machine: ${{ matrix.machine }}
+          target: ${{ matrix.build_config.target }}
+          sdk_machine: ${{ matrix.build_config.sdk_machine }}
 
-      - name: Deploy target repos for ${{ matrix.machine }}
-        uses: ./.github/actions/avocado-deploy
+      - name: Stage target repos for ${{ matrix.machine }}
+        uses: ./.github/actions/avocado-stage-repo
         with:
           machine: ${{ matrix.machine }}
 
   cleanup_repos:
-    needs: [determine_build_matrix, build_and_deploy_rpm_repos]
-    if: needs.determine_build_matrix.outputs.run_cleanup_decision == 'true' && needs.build_and_deploy_rpm_repos.result == 'success'
+    needs:
+      - determine_build_matrix
+      - build
+    if: needs.build.result == 'success'
     runs-on: molcajete
     env:
       REPO_BASE_PATH: "/home/runner/_cache/repos"
@@ -123,16 +120,34 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Make cleanup script executable
-        run: chmod +x ./scripts/cleanup-rpm-repos.sh
+        run: chmod +x ./scripts/repo-purge-window.sh
 
       - name: Run cleanup script on aggregated repos
         run: |
           echo "Running cleanup script on ${{ env.REPO_BASE_PATH }}"
-          ./scripts/cleanup-rpm-repos.sh "${{ env.REPO_BASE_PATH }}"
+          ./scripts/repo-purge-window.sh "${{ env.REPO_BASE_PATH }}"
+
+  update_repo_metadata:
+    needs:
+      - determine_build_matrix
+      - build
+      - cleanup_repos
+    if: needs.build.result == 'success'
+    runs-on: molcajete
+    env:
+      REPO_BASE_PATH: "/home/runner/_cache/repos"
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Update repository metadata
+        run: |
+          echo "Updating repository metadata in ${{ env.REPO_BASE_PATH }}"
+          ./scripts/repo-update-metadata.sh "${{ env.REPO_BASE_PATH }}"
 
   sync_to_s3:
-    needs: [determine_build_matrix, build_and_deploy_rpm_repos, cleanup_repos]
-    if: needs.determine_build_matrix.outputs.upload_to_s3_decision == 'true' && needs.build_and_deploy_rpm_repos.result == 'success'
+    needs: [determine_build_matrix, build, cleanup_repos, update_repo_metadata]
+    if: needs.build.result == 'success'
     runs-on: molcajete
     env:
       REPO_BASE_PATH: "/home/runner/_cache/repos"
