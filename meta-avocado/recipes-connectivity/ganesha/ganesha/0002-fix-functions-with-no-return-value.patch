@@ -1,0 +1,36 @@
+From 384df54a8ab26e4fe6d511125b7ff42aaf46b7d7 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Thu, 12 Jun 2025 13:46:58 -0400
+Subject: [PATCH 2/2] fix functions with no return value
+
+---
+ src/log/log_functions.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/log/log_functions.c b/src/log/log_functions.c
+index c9f8e6d71..ef3308b06 100644
+--- a/src/log/log_functions.c
++++ b/src/log/log_functions.c
+@@ -2588,7 +2588,8 @@ void gsh_libunwind(void)
+ 					i, procname, (long long)off,
+ 					(long long)ip, (long long)sp);
+ 				if (n > 0)
+-					write(fd, buffer, n);
++					if (write(fd, buffer, n) < 0) {
++					}
+ 			} else {
+ 				LogMajor(
+ 					COMPONENT_INIT,
+@@ -2606,7 +2607,8 @@ void gsh_libunwind(void)
+ 					     i, "<unknown symbol>",
+ 					     (long long)ip, (long long)sp);
+ 				if (n > 0)
+-					write(fd, buffer, n);
++					if (write(fd, buffer, n) < 0) {
++					}
+ 			} else {
+ 				LogMajor(COMPONENT_INIT,
+ 					 " #%u %s [ip=%#llx] [sp=%#llx]", i,
+-- 
+2.49.0
+
