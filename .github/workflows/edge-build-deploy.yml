@@ -26,9 +26,39 @@ on:
 jobs:
   determine_build_matrix:
     runs-on: molcajete
+    env:
+      DISTRO_CODENAME: "apollo/edge"
+      DISTRO_VERSION: "0.1.0"
+      AVOCADO_REPO_BASE: "https://repo.avocadolinux.org"
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      release_name: ${{ steps.set-release.outputs.release_name }}
+      staging_release_path: ${{ steps.set-release.outputs.staging_release_path }}
+      unified_release_path: ${{ steps.set-release.outputs.unified_release_path }}
+      distro_codename_clean: ${{ steps.set-release.outputs.distro_codename_clean }}
+      distro_codename: ${{ steps.set-release.outputs.distro_codename }}
     steps:
+      - name: Set release name
+        id: set-release
+        run: |
+          # Convert slash to dash and generate timestamp
+          CODENAME_CLEAN=$(echo "${{ env.DISTRO_CODENAME }}" | sed 's/\//-/g')
+          TIMESTAMP=$(date -u '+%Y-%m-%d-%H%M%S')
+          RELEASE_NAME="${CODENAME_CLEAN}-${TIMESTAMP}"
+          REPO_PATH="/home/runner/_cache/repos"
+          STAGING_RELEASE_PATH="${REPO_PATH}/staging/${RELEASE_NAME}"
+          UNIFIED_RELEASE_PATH="${REPO_PATH}/releases/${RELEASE_NAME}"
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "staging_release_path=$STAGING_RELEASE_PATH" >> $GITHUB_OUTPUT
+          echo "unified_release_path=$UNIFIED_RELEASE_PATH" >> $GITHUB_OUTPUT
+          echo "distro_codename_clean=$CODENAME_CLEAN" >> $GITHUB_OUTPUT
+          echo "distro_codename=${{ env.DISTRO_CODENAME }}" >> $GITHUB_OUTPUT
+          echo "Generated release name: $RELEASE_NAME"
+          echo "Staging release path: $STAGING_RELEASE_PATH"
+          echo "Unified release path: $UNIFIED_RELEASE_PATH"
+          echo "Clean distro codename: $CODENAME_CLEAN"
+          echo "Distro codename: ${{ env.DISTRO_CODENAME }}"
+
       - name: Determine build parameters
         id: set-matrix
         uses: actions/github-script@v7
@@ -84,16 +114,13 @@ jobs:
           - target: avocado-sdk
             sdk_machine: aarch64
     env:
-      DISTRO_CODENAME: "apollo/edge"
-      DISTRO_VERSION: "0.1.0"
-      AVOCADO_REPO_BASE: "https://repo.avocadolinux.org"
-      LOCAL_REPO_AGGREGATION_PATH: "/home/runner/_cache/repos"
+      STAGING_RELEASE_PATH: ${{ needs.determine_build_matrix.outputs.staging_release_path }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Create local repo aggregation directory
-        run: mkdir -p ${{ env.LOCAL_REPO_AGGREGATION_PATH }}
+        run: mkdir -p ${{ env.STAGING_RELEASE_PATH }}/${{ matrix.machine }}/${{ matrix.build_config.target }}/${{ matrix.build_config.sdk_machine }}
 
       - name: Build ${{ matrix.build_config.target }} for ${{ matrix.machine }}
         uses: ./.github/actions/avocado-build
@@ -101,20 +128,77 @@ jobs:
           machine: ${{ matrix.machine }}
           target: ${{ matrix.build_config.target }}
           sdk_machine: ${{ matrix.build_config.sdk_machine }}
+          distro_codename: ${{ needs.determine_build_matrix.outputs.distro_codename }}
 
       - name: Stage target repos for ${{ matrix.machine }}
         uses: ./.github/actions/avocado-stage-repo
         with:
           machine: ${{ matrix.machine }}
+          repo_base_path: ${{ env.STAGING_RELEASE_PATH }}/${{ matrix.machine }}/${{ matrix.build_config.target }}/${{ matrix.build_config.sdk_machine }}
 
-  cleanup_repos:
+  aggregate_repos:
     needs:
       - determine_build_matrix
       - build
     if: needs.build.result == 'success'
     runs-on: molcajete
     env:
-      REPO_BASE_PATH: "/home/runner/_cache/repos"
+      STAGING_RELEASE_PATH: ${{ needs.determine_build_matrix.outputs.staging_release_path }}
+      UNIFIED_RELEASE_PATH: ${{ needs.determine_build_matrix.outputs.unified_release_path }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Create unified release directory
+        run: mkdir -p ${{ env.UNIFIED_RELEASE_PATH }}
+
+      - name: Aggregate repos from all machines
+        run: |
+          echo "Aggregating repos from staging to unified release path"
+          echo "From: ${{ env.STAGING_RELEASE_PATH }}"
+          echo "To: ${{ env.UNIFIED_RELEASE_PATH }}"
+
+          # Get the list of machines that were built from the matrix
+          MACHINES='${{ toJSON(fromJSON(needs.determine_build_matrix.outputs.matrix)) }}'
+          echo "Machines to aggregate: $MACHINES"
+
+          # Define build configurations (matching the matrix)
+          TARGETS=("avocado-distro" "avocado-sdk")
+          SDK_MACHINES=("x86_64" "aarch64")
+
+          # Parse the JSON array and rsync each machine's content for all target/sdk combinations
+          echo "$MACHINES" | jq -r '.[]' | while read machine; do
+            echo "Processing machine: $machine"
+
+            for target in "${TARGETS[@]}"; do
+              for sdk_machine in "${SDK_MACHINES[@]}"; do
+                # Skip invalid combinations for avocado-distro (only uses x86_64)
+                if [ "$target" = "avocado-distro" ] && [ "$sdk_machine" != "x86_64" ]; then
+                  continue
+                fi
+
+                STAGING_PATH="${{ env.STAGING_RELEASE_PATH }}/$machine/$target/$sdk_machine"
+                if [ -d "$STAGING_PATH" ]; then
+                  echo "Aggregating $machine/$target/$sdk_machine from $STAGING_PATH"
+                  rsync -av "$STAGING_PATH/" "${{ env.UNIFIED_RELEASE_PATH }}/"
+                else
+                  echo "Path not found (may be expected): $STAGING_PATH"
+                fi
+              done
+            done
+          done
+
+          echo "Aggregation complete"
+
+  cleanup_repos:
+    needs:
+      - determine_build_matrix
+      - build
+      - aggregate_repos
+    if: needs.build.result == 'success'
+    runs-on: molcajete
+    env:
+      UNIFIED_RELEASE_PATH: ${{ needs.determine_build_matrix.outputs.unified_release_path }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -124,8 +208,8 @@ jobs:
 
       - name: Run cleanup script on aggregated repos
         run: |
-          echo "Running cleanup script on ${{ env.REPO_BASE_PATH }}"
-          ./scripts/repo-purge-window.sh "${{ env.REPO_BASE_PATH }}"
+          echo "Running cleanup script on ${{ env.UNIFIED_RELEASE_PATH }}"
+          ./scripts/repo-purge-window.sh "${{ env.UNIFIED_RELEASE_PATH }}"
 
   update_repo_metadata:
     needs:
@@ -135,22 +219,22 @@ jobs:
     if: needs.build.result == 'success'
     runs-on: molcajete
     env:
-      REPO_BASE_PATH: "/home/runner/_cache/repos"
+      UNIFIED_RELEASE_PATH: ${{ needs.determine_build_matrix.outputs.unified_release_path }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Update repository metadata
         run: |
-          echo "Updating repository metadata in ${{ env.REPO_BASE_PATH }}"
-          ./scripts/repo-update-metadata.sh "${{ env.REPO_BASE_PATH }}"
+          echo "Updating repository metadata in ${{ env.UNIFIED_RELEASE_PATH }}"
+          ./scripts/repo-update-metadata.sh "${{ env.UNIFIED_RELEASE_PATH }}"
 
   sync_to_s3:
     needs: [determine_build_matrix, build, cleanup_repos, update_repo_metadata]
     if: needs.build.result == 'success'
     runs-on: molcajete
     env:
-      REPO_BASE_PATH: "/home/runner/_cache/repos"
+      UNIFIED_RELEASE_PATH: ${{ needs.determine_build_matrix.outputs.unified_release_path }}
       S3_BUCKET_PATH: ${{ secrets.AWS_S3_BUCKET }}
     steps:
       - name: Checkout repo
@@ -165,6 +249,26 @@ jobs:
 
       - name: Sync cleaned and aggregated repos to S3
         run: |
-          echo "Syncing repositories from ${{ env.REPO_BASE_PATH }} to s3://${{ env.S3_BUCKET_PATH }}"
-          aws s3 sync --delete "${{ env.REPO_BASE_PATH }}" "s3://${{ env.S3_BUCKET_PATH }}"
+          echo "Syncing repositories from ${{ env.UNIFIED_RELEASE_PATH }} to s3://${{ env.S3_BUCKET_PATH }}/releases/${{ needs.determine_build_matrix.outputs.release_name }}"
+          aws s3 sync --delete "${{ env.UNIFIED_RELEASE_PATH }}" "s3://${{ env.S3_BUCKET_PATH }}/releases/${{ needs.determine_build_matrix.outputs.release_name }}"
           echo "S3 sync complete."
+
+      - name: Create latest redirect to current release
+        run: |
+          echo "Creating redirect from latest/${{ needs.determine_build_matrix.outputs.distro_codename_clean }} to releases/${{ needs.determine_build_matrix.outputs.release_name }}"
+          aws s3api put-object \
+            --bucket "${{ env.S3_BUCKET_PATH }}" \
+            --key "latest/${{ needs.determine_build_matrix.outputs.distro_codename_clean }}" \
+            --website-redirect-location "/releases/${{ needs.determine_build_matrix.outputs.release_name }}" \
+            --content-type "text/html"
+          echo "Latest redirect created successfully."
+
+      - name: Clean up staging directory
+        run: |
+          echo "Cleaning up staging directory: ${{ needs.determine_build_matrix.outputs.staging_release_path }}"
+          if [ -d "${{ needs.determine_build_matrix.outputs.staging_release_path }}" ]; then
+            rm -rf "${{ needs.determine_build_matrix.outputs.staging_release_path }}"
+            echo "Staging directory cleaned up successfully."
+          else
+            echo "Staging directory not found, nothing to clean up."
+          fi
