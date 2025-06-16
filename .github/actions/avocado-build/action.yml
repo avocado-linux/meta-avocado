@@ -39,4 +39,4 @@ runs:
         echo "DISTRO_CODENAME: ${{ inputs.distro_codename }}"
 
         source ./scripts/init-build kas/machine/${{ inputs.machine }}.yml
-        kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml --target ${{ inputs.target }}
+        PARALLEL_MAKE_ERLANG="-j16" kas build meta-avocado/kas/machine/${{ inputs.machine }}.yml --target ${{ inputs.target }}
