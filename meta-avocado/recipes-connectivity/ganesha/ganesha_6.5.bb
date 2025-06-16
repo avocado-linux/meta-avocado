@@ -16,7 +16,7 @@ SRCREV = "952fb93373a6f9f9e187bf9bc35c41a9fc25efa6"
 S = "${WORKDIR}/git"
 
 DEPENDS = "flex-native bison-native util-linux libunwind ntirpc"
-
+RDEPENDS:${PN} = "netbase ntirpc rpcbind"
 inherit cmake pkgconfig systemd
 
 # enable building -native and -nativesdk variants
