@@ -18,5 +18,5 @@ repos:
 
 local_conf_header:
   machine-avocado-jetson-orin-nano-devkit-nvme: |
-
+    ROOTFS_IMAGE_EXTRA_INSTALL += "kernel-module-r8168 linux-firmware-rtl8168"
 machine: avocado-jetson-orin-nano-devkit-nvme
