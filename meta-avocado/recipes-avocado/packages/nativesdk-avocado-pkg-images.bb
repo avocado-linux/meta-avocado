@@ -68,4 +68,4 @@ do_install() {
 FILES:${PN} = "/deploy/*"
 
 # Skip arch QA check - some files are correctly of a different arch than the target.
-INSANE_SKIP:${PN} += "arch"
+INSANE_SKIP:${PN} += "arch buildpaths"
