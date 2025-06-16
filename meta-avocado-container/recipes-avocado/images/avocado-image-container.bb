@@ -2,16 +2,22 @@ DESCRIPTION = "Avocado SDK Container image"
 LICENSE = "Apache-2.0"
 
 inherit image
+inherit image-oci
 IMGCLASSES += " image-container-post-processing"
 inherit_defer ${IMGCLASSES}
 
 IMAGE_INSTALL = "packagegroup-avocado-container"
 IMAGE_FEATURES = "package-management"
 IMAGE_LINGUAS = ""
-IMAGE_FSTYPES = "container"
+
+IMAGE_FSTYPES = "container oci"
 NO_RECOMMENDATIONS = "1"
 
-RPM_PREPROCESS_COMMANDS += "update_alternatives; "
+IMAGE_CONTAINER_NO_DUMMY = "0"
+
+OCI_IMAGE_ENTRYPOINT = "entrypoint"
+
+RPM_PREPROCESS_COMMANDS += "update_alternatives; rootfs_fixup_var_volatile; "
 
 update_alternatives () {
     # Configure DNF to be friendly to update-alternatives
@@ -29,4 +35,7 @@ update_alternatives () {
     ln -s ${IMAGE_ROOTFS}/etc/rpmrc.dnf ${IMAGE_ROOTFS}/etc/rpmrc
 }
 
-
+rootfs_fixup_var_volatile () {
+    install -m 1777 -d ${IMAGE_ROOTFS}/${localstatedir}/volatile/tmp
+    install -m 755 -d ${IMAGE_ROOTFS}/${localstatedir}/volatile/log
+}

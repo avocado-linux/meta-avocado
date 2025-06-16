@@ -1,5 +1,14 @@
 header:
   version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-container:
 
 local_conf_header:
   target-container: |

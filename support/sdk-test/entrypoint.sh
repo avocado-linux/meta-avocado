@@ -14,4 +14,4 @@ while ! check_repo; do
 done
 
 echo "Package repo is ready!"
-entrypoint.sh "$@"
+entrypoint "$@"

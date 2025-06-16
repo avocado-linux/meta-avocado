@@ -4,7 +4,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-SRC_URI = "file://entrypoint.sh \
+SRC_URI = "file://entrypoint \
+           file://switch-user \
            file://avocado-repo \
            file://avocado-build \
 					 file://avocado-sdk-common.sh \
@@ -19,15 +20,17 @@ RDEPENDS:${PN} += "bash"
 
 do_install() {
 	install -d ${D}${bindir}
-	install -m 0755 ${S}/entrypoint.sh ${D}${bindir}
+	install -m 0755 ${S}/entrypoint ${D}${bindir}
+	install -m 0755 ${S}/switch-user ${D}${bindir}
 	install -m 0755 ${S}/avocado-repo ${D}${bindir}
 	install -m 0755 ${S}/avocado-build ${D}${bindir}
 	install -m 0755 ${S}/avocado-sdk-common.sh ${D}${bindir}
 	install -m 0755 ${S}/avocado-run-qemu ${D}${bindir}
-	sed -i "s|__SDK_INSTALL_PATH__|${SDKPATHNATIVE}|g" ${D}${bindir}/entrypoint.sh
+	sed -i "s|__SDK_INSTALL_PATH__|${SDKPATHNATIVE}|g" ${D}${bindir}/entrypoint
 }
 
-FILES:${PN} += "${bindir}/entrypoint.sh \
+FILES:${PN} += "${bindir}/entrypoint \
+                ${bindir}/switch-user \
                 ${bindir}/avocado-repo \
                 ${bindir}/avocado-build \
 								${bindir}/avocado-sdk-common.sh \
