@@ -66,3 +66,6 @@ do_install() {
 
 # Package all the artifacts
 FILES:${PN} = "/deploy/*"
+
+# Skip arch QA check - some files are correctly of a different arch than the target.
+INSANE_SKIP:${PN} += "arch"
