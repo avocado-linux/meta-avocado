@@ -18,5 +18,5 @@ repos:
 local_conf_header:
   machine-avocado-reterminal: |
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
-    DISTRO_FEATURES_EXTRA:append= "opengl seccomp virtualization"
+    DISTRO_FEATURES_EXTRA:append= "opengl wayland seccomp virtualization"
 machine: avocado-reterminal
