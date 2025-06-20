@@ -1,1 +1,1 @@
-PARALLEL_MAKE = "${@d.getVar('PARALLEL_MAKE_ERLANG') or ''}"
+PARALLEL_MAKE = "${@d.getVar('PARALLEL_MAKE_ERLANG') if d.getVar('PARALLEL_MAKE_ERLANG') else d.getVar('PARALLEL_MAKE')}"
