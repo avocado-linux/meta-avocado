@@ -14,8 +14,6 @@ REQUIRED_AVOCADO_BBLAYERS_CONF_VERSION = "${DISTRO}-1"
 
 LOCALCONF_VERSION = "2"
 
-DISTRO_FEATURES:remove = "pulseaudio ldconfig gobject-introspection-data"
-
 # We don't actually package the yocto SDK, but declare these anyways
 SDK_NAME = "${DISTRO}-${TCLIBC}-${SDKMACHINE}-${IMAGE_BASENAME}-${TUNE_PKGARCH}-${MACHINE}"
 SDKPATHINSTALL = "/opt/${DISTRO}/${SDK_VERSION}"
@@ -48,6 +46,7 @@ BB_HASHSERVE ??= "auto"
 
 MACHINE_SHORT_NAME = "${@d.getVar('MACHINE').replace('avocado-','')}"
 VIRTUAL-RUNTIME_avocado-sdk-metadata = "avocado-sdk-${MACHINE_SHORT_NAME}"
+VIRTUAL-RUNTIME_dbus ?= "dbus"
 
 ROOTFS_IMAGE_EXTRA_INSTALL ??= ""
 INITRAMFS_IMAGE_EXTRA_INSTALL ??= ""

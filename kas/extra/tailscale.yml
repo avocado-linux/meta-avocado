@@ -1,0 +1,13 @@
+header:
+  version: 16
+
+repos:
+  meta-tailscale:
+    url: https://github.com/ChristophHandschuh/meta-tailscale
+    commit: 15512514410da95e139a7e97b600aee5df4564cc
+    branch: master
+    layers:
+      .:
+
+local_conf_header:
+  extra-tailscale: |

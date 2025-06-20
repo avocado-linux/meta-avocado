@@ -22,7 +22,7 @@ local_conf_header:
     KERNEL_MODULE_AUTOLOAD:append = " nvme"
 
     TEGRA_INITRD_FLASH_INITRAMFS_FSTYPES = "cpio.gz.cboot"
-    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization efi"
+    DISTRO_FEATURES_EXTRA:append = "splash opengl wayland seccomp virtualization efi"
     LICENSE_FLAGS_ACCEPTED:append = " commercial_faad2 commercial_x264"
 
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-tegra-rootfs "

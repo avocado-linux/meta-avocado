@@ -8,7 +8,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 export IMAGE_BASENAME = "${MLPREFIX}avocado-image-initramfs"
 IMAGE_NAME_SUFFIX ?= ""
 EXTRA_INITRAMFS_FEATURES ??= ""
-IMAGE_FEATURES = "${EXTRA_INITRAMFS_FEATURES}"
+IMAGE_FEATURES = "read-only-rootfs ${EXTRA_INITRAMFS_FEATURES}"
 IMAGE_LINGUAS = ""
 IMAGE_ROOTFS_EXTRA_SPACE = "0"
 INITRAMFS_MAXSIZE = ""
@@ -40,9 +40,10 @@ cleanup_root_files () {
     rm -rf ${IMAGE_ROOTFS}/boot/*
 }
 
-create_sysroot_dir() {
+create_dirs() {
     mkdir -p ${IMAGE_ROOTFS}/sysroot
+    mkdir -p ${IMAGE_ROOTFS}/opt
 }
 
-IMAGE_PREPROCESS_COMMAND += "create_sysroot_dir;"
+IMAGE_PREPROCESS_COMMAND += "create_dirs;"
 ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"

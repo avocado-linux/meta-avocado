@@ -12,6 +12,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-python3-pip \
   nativesdk-strace \
   nativesdk-ganesha \
+  nativesdk-ldd \
   ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'go', 'packagegroup-go-cross-canadian-${MACHINE}', '', d)} \
   ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'rust', 'packagegroup-rust-cross-canadian-${MACHINE}', '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \

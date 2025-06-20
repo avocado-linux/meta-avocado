@@ -5,6 +5,12 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
+XSERVER ?= "xserver-xorg \
+            xf86-video-fbdev \
+            xf86-video-modesetting \
+            "
+XSERVERCODECS ?= ""
+
 RDEPENDS:${PN} = " \
   openssh \
   openssh-sshd \
@@ -12,6 +18,8 @@ RDEPENDS:${PN} = " \
   vim \
   strace \
   lsof \
+  ldd \
+  civetweb \
   procps \
   tcpdump \
   pstree \
@@ -22,6 +30,8 @@ RDEPENDS:${PN} = " \
   peridiod \
   ganesha \
   nfs-utils \
+  ${XSERVER} \
+  ${XSERVERCODECS} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'wpewebkit', '', d)} \
   ${MACHINE_EXTRA_RDEPENDS} \
 "

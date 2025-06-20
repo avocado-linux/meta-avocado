@@ -1,0 +1,24 @@
+name: "peoplenet"
+platform: "onnxruntime_onnx"
+max_batch_size: 8
+input [
+  {
+    name: "INPUT"
+    allow_ragged_batch: false
+    data_type: TYPE_FP32
+    dims: [ 3, 544, 960 ]
+  }
+]
+output [
+  {
+    name: "output_bbox/BiasAdd"
+    data_type: TYPE_FP32
+    dims: [ 4, 34, 60 ]
+  },
+  {
+    name: "output_cov/Sigmoid"
+    data_type: TYPE_FP32
+    dims: [ 1, 34, 60 ]
+  }
+]
+

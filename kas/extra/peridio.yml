@@ -17,7 +17,7 @@ repos:
       .:
 
 env:
-  PARALLEL_MAKE_ERLANG: ""
+  PARALLEL_MAKE_HIGHMEM: ""
 
 local_conf_header:
   extra-peridio: |
