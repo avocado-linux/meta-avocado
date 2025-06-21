@@ -8,6 +8,7 @@ env:
   BB_GIT_SHALLOW: "0"
   BB_GENERATE_SHALLOW_TARBALLS: "1"
   BB_GIT_SHALLOW_DEPTH: "1"
+  SDKMACHINE: "x86_64"
 
 build_system: oe
 

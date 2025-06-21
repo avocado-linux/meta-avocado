@@ -15,6 +15,7 @@ repos:
 local_conf_header:
   machine-avocado-container-x86_64: |
     ROOT_FSTYPES = "container"
+    BBMASK += "meta-avocado/recipes-core/util-linux"
 
 distro: avocado-container
 
