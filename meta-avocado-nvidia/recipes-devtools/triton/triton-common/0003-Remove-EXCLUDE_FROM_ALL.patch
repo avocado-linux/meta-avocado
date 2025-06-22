@@ -1,0 +1,43 @@
+From 155e1992c36143705fdd13ba03a7d9d75126c01a Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 22 Jun 2025 11:49:57 -0400
+Subject: [PATCH 3/3] Remove EXCLUDE_FROM_ALL
+
+---
+ protobuf/CMakeLists.txt | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/protobuf/CMakeLists.txt b/protobuf/CMakeLists.txt
+index e621de6..f92a056 100644
+--- a/protobuf/CMakeLists.txt
++++ b/protobuf/CMakeLists.txt
+@@ -62,7 +62,7 @@ if(${TRITON_COMMON_ENABLE_PROTOBUF})
+   endif()
+ 
+   add_library(
+-    proto-library EXCLUDE_FROM_ALL OBJECT
++    proto-library
+     ${PROTO_SRCS} ${PROTO_HDRS}
+   )
+ 
+@@ -134,7 +134,7 @@ if(${TRITON_COMMON_ENABLE_GRPC})
+   endif()
+ 
+   add_library(
+-    grpc-service-library EXCLUDE_FROM_ALL OBJECT
++    grpc-service-library
+     ${GRPC_SRCS} ${GRPC_HDRS}
+   )
+ 
+@@ -190,7 +190,7 @@ if(${TRITON_COMMON_ENABLE_GRPC})
+   )
+ 
+   add_library(
+-    grpc-health-library EXCLUDE_FROM_ALL OBJECT
++    grpc-health-library 
+     ${HEALTH_SRCS} ${HEALTH_HDRS}
+   )
+ 
+-- 
+2.49.0
+

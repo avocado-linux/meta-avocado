@@ -26,4 +26,6 @@ RDEPENDS:${PN} = " \
   cuda-libraries \
   xserver-xorg-video-nvidia \
   deepstream-7.1 \
+  nvgstapps \
+  v4l-utils \
 "

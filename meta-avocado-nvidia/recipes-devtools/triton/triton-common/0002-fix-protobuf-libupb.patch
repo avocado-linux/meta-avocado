@@ -1,0 +1,41 @@
+From 32813dea220fd1430ca76cf241b34848327c870c Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 22 Jun 2025 05:24:07 -0400
+Subject: [PATCH 2/2] fix protobuf::libupb
+
+---
+ protobuf/CMakeLists.txt | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/protobuf/CMakeLists.txt b/protobuf/CMakeLists.txt
+index 781a758..e621de6 100644
+--- a/protobuf/CMakeLists.txt
++++ b/protobuf/CMakeLists.txt
+@@ -31,6 +31,14 @@ find_package(Protobuf REQUIRED)
+ message(STATUS "Using protobuf ${Protobuf_VERSION}")
+ include_directories(${Protobuf_INCLUDE_DIRS})
+ 
++add_library(protobuf::libupb STATIC IMPORTED)
++
++set_target_properties(protobuf::libupb PROPERTIES
++  INTERFACE_COMPILE_FEATURES "cxx_std_14"
++  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
++  INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:utf8_range::utf8_range>"
++)
++
+ if(${TRITON_COMMON_ENABLE_GRPC})
+   find_package(gRPC CONFIG REQUIRED)
+   message(STATUS "Using gRPC ${gRPC_VERSION}")
+@@ -49,7 +57,8 @@ if(${TRITON_COMMON_ENABLE_PROTOBUF})
+ 
+   set(_PROTOBUF_PROTOC $<TARGET_FILE:protobuf::protoc>)
+   if(${TRITON_COMMON_ENABLE_GRPC})
+-    set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
++    find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin)
++    # set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
+   endif()
+ 
+   add_library(
+-- 
+2.49.0
+

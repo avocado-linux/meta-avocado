@@ -30,6 +30,7 @@ RDEPENDS:${PN} = " \
   peridiod \
   ganesha \
   nfs-utils \
+  gdb \
   ${XSERVER} \
   ${XSERVERCODECS} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'wpewebkit', '', d)} \

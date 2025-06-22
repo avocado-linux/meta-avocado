@@ -1,0 +1,38 @@
+From 0e8bd4d1a66bb7e8afd98797f90630d90fd12dbb Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 22 Jun 2025 16:49:32 -0400
+Subject: [PATCH 3/3] export libraries
+
+---
+ protobuf/CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/protobuf/CMakeLists.txt b/protobuf/CMakeLists.txt
+index e621de6..fe652df 100644
+--- a/protobuf/CMakeLists.txt
++++ b/protobuf/CMakeLists.txt
+@@ -93,6 +93,7 @@ if(${TRITON_COMMON_ENABLE_PROTOBUF})
+       ${PROTO_HDRS}
+     DESTINATION include
+   )
++  set_target_properties(proto-library PROPERTIES ARCHIVE_OUTPUT_NAME proto-library)
+ endif()
+ 
+ #
+@@ -166,6 +167,7 @@ if(${TRITON_COMMON_ENABLE_GRPC})
+     DESTINATION include
+     OPTIONAL
+   )
++  set_target_properties(grpc-service-library PROPERTIES ARCHIVE_OUTPUT_NAME grpc-service-library)
+ endif()
+ 
+ #
+@@ -218,4 +220,5 @@ if(${TRITON_COMMON_ENABLE_GRPC})
+     DESTINATION include
+     OPTIONAL
+   )
++  set_target_properties(grpc-health-library PROPERTIES ARCHIVE_OUTPUT_NAME grpc-health-library)
+ endif()
+-- 
+2.49.0
+

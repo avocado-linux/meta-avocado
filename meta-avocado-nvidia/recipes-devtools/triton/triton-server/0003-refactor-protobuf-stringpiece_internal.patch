@@ -1,0 +1,43 @@
+From b88bbdbdc84d2362520315e1eb1d0014c22228ee Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 22 Jun 2025 12:40:21 -0400
+Subject: [PATCH 3/3] refactor protobuf::stringpiece_internal
+
+---
+ src/grpc/CMakeLists.txt | 3 ---
+ src/grpc/grpc_server.cc | 3 +--
+ 2 files changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/src/grpc/CMakeLists.txt b/src/grpc/CMakeLists.txt
+index ebb9249b..b466dba6 100644
+--- a/src/grpc/CMakeLists.txt
++++ b/src/grpc/CMakeLists.txt
+@@ -64,11 +64,8 @@ target_link_libraries(
+     proto-library                 # from repo-common
+     triton-common-logging         # from repo-common
+     triton-common-table-printer   # from repo-common
+-    triton-common-json            # from repo-common
+     grpc-health-library           # from repo-common
+     grpc-service-library          # from repo-common
+-    triton-core-serverapi         # from repo-core
+-    triton-core-serverstub        # from repo-core
+     PkgConfig::gRPC++
+     PkgConfig::gRPC
+     protobuf::libprotobuf
+diff --git a/src/grpc/grpc_server.cc b/src/grpc/grpc_server.cc
+index 74ec443a..75c6ae41 100644
+--- a/src/grpc/grpc_server.cc
++++ b/src/grpc/grpc_server.cc
+@@ -869,8 +869,7 @@ CommonHandler::RegisterModelConfig()
+             model_config_message, &buffer, &byte_size);
+         if (err == nullptr) {
+           ::google::protobuf::util::JsonStringToMessage(
+-              ::google::protobuf::stringpiece_internal::StringPiece(
+-                  buffer, (int)byte_size),
++              absl::string_view(buffer, byte_size),
+               response->mutable_config());
+         }
+         TRITONSERVER_MessageDelete(model_config_message);
+-- 
+2.49.0
+

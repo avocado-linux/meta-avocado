@@ -1,0 +1,24 @@
+From 09c3b52b5b4099ea632dfbab30a7732b0a4d4752 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 22 Jun 2025 13:25:23 -0400
+Subject: [PATCH 2/2] Add proto-library back to link
+
+---
+ src/CMakeLists.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index bbe5b66..e3825cd 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -439,6 +439,7 @@ find_package(re2 REQUIRED)
+ target_link_libraries(
+   triton-core
+   PRIVATE
++    proto-library                    # from repo-common
+     triton-common-async-work-queue   # from repo-common
+     triton-common-thread-pool        # from repo-common
+     triton-common-error              # from repo-common
+-- 
+2.49.0
+

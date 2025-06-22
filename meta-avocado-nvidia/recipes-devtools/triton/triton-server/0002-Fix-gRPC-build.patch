@@ -1,0 +1,106 @@
+From d1315f9b789c029c794b19579826f4a0c31639a0 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sat, 21 Jun 2025 08:18:07 -0400
+Subject: [PATCH 2/2] Fix gRPC build
+
+---
+ src/CMakeLists.txt      | 21 ++++++++++++++-------
+ src/grpc/CMakeLists.txt | 10 +++++-----
+ 2 files changed, 19 insertions(+), 12 deletions(-)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index d389d504..bbc07833 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -30,18 +30,22 @@ project(tritonserverexe LANGUAGES C CXX)
+ 
+ include(GNUInstallDirs)
+ 
+-if(TRITON_ENABLE_GRPC)
+-  set(TRITON_COMMON_ENABLE_PROTOBUF ON)
+-  set(TRITON_COMMON_ENABLE_GRPC ON)
+-endif() # TRITON_ENABLE_GRPC
+-
+ # CUDA
+ #
+ if(${TRITON_ENABLE_GPU})
++  message(STATUS "Loading CUDA")
+   enable_language(CUDA)
++  find_package(CUDA REQUIRED)
++  include_directories(${CUDA_INCLUDE_DIRS})
++  link_directories(${CUDA_LIBRARIES})
+   message(STATUS "Using CUDA ${CUDA_VERSION}")
+ endif() # TRITON_ENABLE_GPU
+ 
++if(TRITON_ENABLE_GRPC)
++  set(TRITON_COMMON_ENABLE_PROTOBUF ON)
++  set(TRITON_COMMON_ENABLE_GRPC ON)
++endif() # TRITON_ENABLE_GRPC
++
+ # libevent
+ #
+ if(${TRITON_ENABLE_HTTP} OR ${TRITON_ENABLE_METRICS} OR
+@@ -272,7 +276,10 @@ if(${TRITON_ENABLE_GRPC})
+   #
+   # GRPC
+   #
+-  find_package(gRPC CONFIG REQUIRED)
++  pkg_check_modules(gRPC     REQUIRED IMPORTED_TARGET grpc)
++  pkg_check_modules(gRPC++   REQUIRED IMPORTED_TARGET grpc++)
++  pkg_check_modules(re2 REQUIRED IMPORTED_TARGET grpc)
++  find_package(Protobuf REQUIRED)
+   message(STATUS "Using gRPC ${gRPC_VERSION}")
+ 
+   add_subdirectory(grpc)
+@@ -285,7 +292,7 @@ if(${TRITON_ENABLE_GRPC})
+   target_include_directories(
+     main
+     PRIVATE
+-      $<TARGET_PROPERTY:gRPC::grpc,INTERFACE_INCLUDE_DIRECTORIES>
++      $<TARGET_PROPERTY:PkgConfig::gRPC,INTERFACE_INCLUDE_DIRECTORIES>
+   )
+ 
+   target_compile_definitions(
+diff --git a/src/grpc/CMakeLists.txt b/src/grpc/CMakeLists.txt
+index 0cd027a3..ebb9249b 100644
+--- a/src/grpc/CMakeLists.txt
++++ b/src/grpc/CMakeLists.txt
+@@ -48,7 +48,7 @@ else()
+   target_compile_options(
+     grpc-endpoint-library
+     PRIVATE
+-      -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -Wno-error=maybe-uninitialized -Werror
++      -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -Wno-error=maybe-uninitialized
+   )
+ endif()
+ 
+@@ -69,14 +69,14 @@ target_link_libraries(
+     grpc-service-library          # from repo-common
+     triton-core-serverapi         # from repo-core
+     triton-core-serverstub        # from repo-core
+-    gRPC::grpc++
+-    gRPC::grpc
++    PkgConfig::gRPC++
++    PkgConfig::gRPC
+     protobuf::libprotobuf
+ )
+ 
+ target_include_directories(
+   grpc-endpoint-library
+-  PRIVATE $<TARGET_PROPERTY:gRPC::grpc,INTERFACE_INCLUDE_DIRECTORIES>
++  PRIVATE $<TARGET_PROPERTY:PkgConfig::gRPC,INTERFACE_INCLUDE_DIRECTORIES>
+ )
+ 
+ # FIXME when Triton support of OpenTelemetry is available on Windows
+@@ -105,7 +105,7 @@ if(${TRITON_ENABLE_GPU})
+   target_link_libraries(
+     grpc-endpoint-library
+     PUBLIC
+-      CUDA::cudart
++      cudart
+   )
+ endif() # TRITON_ENABLE_GPU
+ 
+-- 
+2.49.0
+
