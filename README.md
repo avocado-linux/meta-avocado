@@ -26,3 +26,7 @@ meta-avocado/meta-avocado-qemu/scripts/run-with-tpm
 ```
 
 This will open a tmux session.
+
+## Testing
+
+See [support/sdk-test/README.md](support/sdk-test/README.md) for testing instructions.
