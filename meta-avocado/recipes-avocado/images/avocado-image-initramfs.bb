@@ -40,9 +40,10 @@ cleanup_root_files () {
     rm -rf ${IMAGE_ROOTFS}/boot/*
 }
 
-create_sysroot_dir() {
+create_dirs() {
     mkdir -p ${IMAGE_ROOTFS}/sysroot
+    mkdir -p ${IMAGE_ROOTFS}/opt
 }
 
-IMAGE_PREPROCESS_COMMAND += "create_sysroot_dir;"
+IMAGE_PREPROCESS_COMMAND += "create_dirs;"
 ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"
