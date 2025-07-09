@@ -1,0 +1,20 @@
+header:
+  version: 16
+
+repos:
+  meta-rockchip:
+    url: https://git.yoctoproject.org/meta-rockchip.git
+    branch: scarthgap
+    commit: 9690180b7e9953361958c962b80d891eda8c1028
+    layers:
+      .:
+  meta-arm:
+    url: https://git.yoctoproject.org/meta-arm.git
+    branch: scarthgap
+    commit: 8e0f8af90fefb03f08cd2228cde7a89902a6b37c
+    layers:
+      meta-arm:
+      meta-arm-toolchain:
+
+local_conf_header:
+  vendor-rockchip: |
