@@ -2,7 +2,7 @@ name: PR-Build-Labeled
 
 on:
   pull_request:
-    types: [ labeled ]
+    types: [labeled]
 
 jobs:
   set-matrix:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Fetch and filter PR labels
         id: get-machines
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -46,6 +46,15 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
       - name: build ${{ matrix.machine }}
-        uses: ./.github/actions/avocado-build
-        with:
-          machine: ${{ matrix.machine }}
+        env:
+          BB_GIT_SHALLOW: "1"
+          PARALLEL_MAKE: "-j16"
+          SDKMACHINE: "x86_64"
+          DISTRO_CODENAME: ""
+        run: |
+          echo "TARGET: avocado-distro"
+          echo "SDKMACHINE: x86_64"
+          echo "DISTRO_CODENAME: "
+
+          source ./scripts/init-build kas/machine/${{ matrix.machine }}.yml
+          PARALLEL_MAKE_ERLANG="-j16" kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml --target avocado-distro

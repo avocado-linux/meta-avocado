@@ -11,53 +11,14 @@ fi
 
 SOURCE_DEPLOY_DIR=$1
 TARGET_DEPLOY_DIR=$2
-MAP_FILE="${SOURCE_DEPLOY_DIR}/avocado-repo.map"
 
-if [ ! -f "${MAP_FILE}" ]; then
-    echo "Error: Map file not found at ${MAP_FILE}" >&2
-    exit 1
-fi
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "Using map file: ${MAP_FILE}"
-echo "Source deploy directory: ${SOURCE_DEPLOY_DIR}"
-echo "Target deploy directory: ${TARGET_DEPLOY_DIR}"
+echo "Step 1: Copying RPM files..."
+"${SCRIPT_DIR}/copy-rpm-files.sh" "${SOURCE_DEPLOY_DIR}" "${TARGET_DEPLOY_DIR}"
 
-# Process mappings from the map file
-while IFS='=' read -r key value || [ -n "$key" ]; do
-    # Skip empty lines or lines without an equals sign
-    if [ -z "$key" ] || [ -z "$value" ]; then
-        echo "Skipping invalid line: $key=$value"
-        continue
-    fi
+echo "Step 2: Updating repository metadata..."
+"${SCRIPT_DIR}/update-repo-metadata.sh" "${SOURCE_DEPLOY_DIR}" "${TARGET_DEPLOY_DIR}"
 
-    source_dir="${SOURCE_DEPLOY_DIR}/${key}"
-    # Target dir uses the full path specified in the map value
-    target_dir="${TARGET_DEPLOY_DIR}/${value}"
-
-    echo "Processing mapping: Source [${source_dir}] -> Target [${target_dir}]"
-
-    if [ ! -d "${source_dir}" ]; then
-        echo "Warning: Source directory ${source_dir} not found for key '${key}'. Skipping." >&2
-        continue
-    fi
-
-    # Create target directory structure
-    mkdir -p "${target_dir}"
-
-    # Copy RPMs from source to target
-    echo "Copying files from ${source_dir} to ${target_dir}"
-    cp -a "${source_dir}"/* "${target_dir}/"
-
-    # Create repository metadata
-    echo "Creating repository metadata in ${target_dir}"
-    if [ -d "${target_dir}/repodata" ]; then
-        echo "Updating existing repository in ${target_dir}"
-        createrepo_c --update "${target_dir}"
-    else
-        echo "Creating new repository in ${target_dir}"
-        createrepo_c "${target_dir}"
-    fi
-
-done < "${MAP_FILE}"
-
-echo "Repository setup complete based on map file!" 
+echo "Repository setup complete!" 
