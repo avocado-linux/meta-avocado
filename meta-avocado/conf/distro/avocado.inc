@@ -14,6 +14,8 @@ REQUIRED_AVOCADO_BBLAYERS_CONF_VERSION = "${DISTRO}-1"
 
 LOCALCONF_VERSION = "2"
 
+MACHINE_SHORT_NAME = "${@d.getVar('MACHINE').replace('avocado-','')}"
+
 # We don't actually package the yocto SDK, but declare these anyways
 SDK_NAME = "${DISTRO}-${TCLIBC}-${SDKMACHINE}-${IMAGE_BASENAME}-${TUNE_PKGARCH}-${MACHINE}"
 SDKPATHINSTALL = "/opt/${DISTRO}/${SDK_VERSION}"
@@ -21,7 +23,7 @@ SDKPATHINSTALL = "/opt/${DISTRO}/${SDK_VERSION}"
 # Configure the base sysroot directory for SDK packages.
 #   Packaging breaks if this is configured to "/", or ""
 #   Even though it would be preferrable considering we control the sysroot of installation
-SDKPATHNATIVE = "/opt/_avocado/sdk"
+SDKPATHNATIVE = "/opt/_avocado/${MACHINE_SHORT_NAME}/sdk"
 SDKPATH = "${SDKPATHNATIVE}"
 
 SDK_VENDOR = "-avocadosdk"
@@ -44,7 +46,6 @@ INHERIT += "uninative"
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
 BB_HASHSERVE ??= "auto"
 
-MACHINE_SHORT_NAME = "${@d.getVar('MACHINE').replace('avocado-','')}"
 VIRTUAL-RUNTIME_avocado-sdk-metadata = "avocado-sdk-${MACHINE_SHORT_NAME}"
 VIRTUAL-RUNTIME_dbus ?= "dbus"
 
