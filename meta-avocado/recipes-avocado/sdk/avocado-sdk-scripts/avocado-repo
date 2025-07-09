@@ -18,22 +18,31 @@ if [ "$1" = "sdk" ]; then
             DNF_SDK_HOST="$DNF_SDK_HOST" \
             RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
             RPM_NO_CHROOT_FOR_SCRIPTS=1 \
-            $DNF_SDK_HOST $@
+            DNF_SDK_HOST_OPTS="$DNF_SDK_HOST_OPTS" \
+            DNF_SDK_REPO_CONF="$DNF_SDK_REPO_CONF" \
+            $DNF_SDK_HOST $DNF_SDK_HOST_OPTS $DNF_SDK_REPO_CONF $@
     }
     run_in_sdk_env run_dnf_command "$@"
 elif [ "$1" = "images" ]; then
     env -i TERM="$TERM" \
         DNF_SDK_HOST="$DNF_SDK_HOST" \
-        RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
+        AVOCADO_SDK_PREFIX="$AVOCADO_SDK_PREFIX" \
+        RPM_CONFIGDIR="$AVOCADO_SDK_PREFIX/usr/lib/rpm" \
+        RPM_ETCCONFIGDIR="$DNF_SDK_TARGET_PREFIX" \
+        DNF_SDK_HOST_OPTS="$DNF_SDK_HOST_OPTS" \
+        DNF_SDK_TARGET_REPO_CONF="$DNF_SDK_TARGET_REPO_CONF" \
         RPM_NO_CHROOT_FOR_SCRIPTS=1 \
-        $DNF_SDK_HOST --installroot=/opt/_avocado/images install \
-        nativesdk-avocado-pkg-images
+        $DNF_SDK_HOST $DNF_SDK_HOST_OPTS $DNF_SDK_TARGET_REPO_CONF --installroot=${AVOCADO_PREFIX}/images install \
+        avocado-pkg-images
 else
     env -i \
         TERM="$TERM" \
         DNF_SDK_HOST="$DNF_SDK_HOST" \
-        AVOCADO_SDK_SYSROOTS="$AVOCADO_SDK_SYSROOTS" \
-        RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
+        AVOCADO_SDK_PREFIX="$AVOCADO_SDK_PREFIX" \
+        RPM_CONFIGDIR="$AVOCADO_SDK_PREFIX/usr/lib/rpm" \
+        RPM_ETCCONFIGDIR="$DNF_SDK_TARGET_PREFIX" \
+        DNF_SDK_HOST_OPTS="$DNF_SDK_HOST_OPTS" \
+        DNF_SDK_TARGET_REPO_CONF="$DNF_SDK_TARGET_REPO_CONF" \
         RPM_NO_CHROOT_FOR_SCRIPTS=1 \
-        $DNF_SDK_HOST --installroot=${AVOCADO_SDK_SYSROOTS}/$1 ${@:2}
+        $DNF_SDK_HOST $DNF_SDK_HOST_OPTS $DNF_SDK_TARGET_REPO_CONF --installroot=${AVOCADO_PREFIX}/$1 ${@:2}
 fi

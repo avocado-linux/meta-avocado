@@ -15,12 +15,12 @@ build_extension() {
     EXT_NAME="$2"
     EXT_VERSION="0.1.0"
     EXT_ID="avocado"
-    OUTPUT_DIR="/opt/_avocado/extensions"
+    OUTPUT_DIR="${AVOCADO_PREFIX}/extensions"
     OUTPUT_FILE=""
-    IMAGES_DIR="/opt/_avocado/images"
+    IMAGES_DIR="${AVOCADO_PREFIX}/images"
     DEPLOY_DIR="${IMAGES_DIR}/deploy"
-    OUTPUT_PATH="/opt/_avocado/output"
-    TMP_PATH="/opt/_avocado/genimage-tmp"
+    OUTPUT_PATH="${AVOCADO_PREFIX}/output"
+    TMP_PATH="${AVOCADO_PREFIX}/genimage-tmp"
 
     # Function to create extension release file
     create_extension_release() {
@@ -38,30 +38,30 @@ build_extension() {
         OUTPUT_FILE="${OUTPUT_DIR}/sysext/${EXT_NAME}.raw"
         mkdir -p "${OUTPUT_DIR}/sysext"
         rm -f "$OUTPUT_FILE"
-        create_extension_release "$AVOCADO_SDK_SYSROOTS/sysext/usr/lib/extension-release.d"
+        create_extension_release "$AVOCADO_PREFIX/sysext/usr/lib/extension-release.d"
 
         # Check if sysext directory exists
-        if [ ! -d "$AVOCADO_SDK_SYSROOTS/sysext" ]; then
+        if [ ! -d "$AVOCADO_PREFIX/sysext" ]; then
             echo "Error: sysext directory does not exist in sysroot"
             exit 1
         fi
 
-        mksquashfs "$AVOCADO_SDK_SYSROOTS/sysext" "$OUTPUT_FILE" -noappend
+        mksquashfs "$AVOCADO_PREFIX/sysext" "$OUTPUT_FILE" -noappend
         
     elif [ "$1" = "confext" ]; then
         echo "Building configuration extension: $EXT_NAME"
         OUTPUT_FILE="${OUTPUT_DIR}/confext/${EXT_NAME}.raw"
         mkdir -p "${OUTPUT_DIR}/confext"
         rm -f "$OUTPUT_FILE"
-        create_extension_release "$AVOCADO_SDK_SYSROOTS/confext/etc/extension-release.d"
+        create_extension_release "$AVOCADO_PREFIX/confext/etc/extension-release.d"
 
         # Check if confext directory exists
-        if [ ! -d "$AVOCADO_SDK_SYSROOTS/confext" ]; then
+        if [ ! -d "$AVOCADO_PREFIX/confext" ]; then
             echo "Error: confext directory does not exist in sysroot"
             exit 1
         fi
 
-        mksquashfs "$AVOCADO_SDK_SYSROOTS/confext" "$OUTPUT_FILE" -noappend
+        mksquashfs "$AVOCADO_PREFIX/confext" "$OUTPUT_FILE" -noappend
         
     elif [ "$1" = "var" ]; then
         echo "Building var image"
@@ -69,26 +69,26 @@ build_extension() {
         
         # Create var sysroot structure
         echo "Creating var sysroot structure..."
-        mkdir -p "$AVOCADO_SDK_SYSROOTS/var/lib/extensions"
-        mkdir -p "$AVOCADO_SDK_SYSROOTS/var/lib/confexts"
+        mkdir -p "$AVOCADO_PREFIX/var/lib/extensions"
+        mkdir -p "$AVOCADO_PREFIX/var/lib/confexts"
         
         # Copy existing extensions into var sysroot if they exist
         echo "Copying system extensions..."
         if ls "${OUTPUT_DIR}/sysext/"*.raw 1> /dev/null 2>&1; then
-            cp -f "${OUTPUT_DIR}/sysext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/extensions/"
+            cp -f "${OUTPUT_DIR}/sysext/"*.raw "$AVOCADO_PREFIX/var/lib/extensions/"
         else
             echo "No system extensions found, skipping..."
         fi
 
         echo "Copying configuration extensions..."
         if ls "${OUTPUT_DIR}/confext/"*.raw 1> /dev/null 2>&1; then
-            cp -f "${OUTPUT_DIR}/confext/"*.raw "$AVOCADO_SDK_SYSROOTS/var/lib/confexts/"
+            cp -f "${OUTPUT_DIR}/confext/"*.raw "$AVOCADO_PREFIX/var/lib/confexts/"
         else
             echo "No configuration extensions found, skipping..."
         fi
         
         # Create btrfs image with extensions and confexts subvolumes
-        mkfs.btrfs -r "$AVOCADO_SDK_SYSROOTS/var" \
+        mkfs.btrfs -r "$AVOCADO_PREFIX/var" \
             --subvol rw:lib/extensions \
             --subvol rw:lib/confexts \
             -f "${IMAGES_DIR}/avocado-image-var.btrfs"

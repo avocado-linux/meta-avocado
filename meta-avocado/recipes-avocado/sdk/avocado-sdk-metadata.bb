@@ -33,11 +33,10 @@ inherit deploy
 
 # The repo file is packaged, the map file is deployed directly
 FILES:${PN} = " \
-    ${SDKPATHNATIVE}${sysconfdir}/yum.repos.d \
-    ${SDKPATHNATIVE}${sysconfdir}/rpm/platform \
-    ${SDKPATHNATIVE}${sysconfdir}/dnf/vars/arch \
-    ${SDKPATHNATIVE}${sysconfdir}/rpmrc \
-    ${SDKPATHNATIVE}${libdir}/rpm/platform/${PLATFORM}/macros \
+    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/rpmrc \
+    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/rpm/platform \
+    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/dnf/vars/arch \
+    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/yum.repos.d \
 "
 
 # Set package arch so it deploys to a specific directory
@@ -60,6 +59,7 @@ python do_install() {
     sdk_pkg_archs = (d.getVar('SDK_PACKAGE_ARCHS') or "").split()
     gpg_check = d.getVar('AVOCADO_REPO_GPGCHECK') or '0'
     repo_archs = [] # List to store archs for which repo entries are written
+    sdk_repo_archs = ['x86_64-avocadosdk', 'aarch64-avocadosdk']
 
     # --- Precompute values ---
     machine_short_name = machine.replace('avocado-', '')
@@ -79,13 +79,13 @@ python do_install() {
             map_value_path = f"{distro_codename}/sdk/all"
             bb.note(f"Mapping arch '{arch}' (dir: {arch_dir}) to map path '{map_value_path}' (no repo entry)")
 
-        elif sdk_suffix_us and arch_dir.endswith(sdk_suffix_us):
-            # Rule: other *avocadosdk -> DISTRO/sdk/MACHINE_SHORT
+        elif arch in sdk_repo_archs:
+            # Rule: Dedicated SDK arch -> DISTRO/sdk/MACHINE_SHORT
             map_value_path = f"{distro_codename}/sdk/{machine_short_name}"
             repo_url_path = map_value_path
             repo_name = f"{machine_short_name}-sdk"
-            repo_section_name = repo_name # Use cleaned name for section too
-            bb.note(f"Mapping SDK arch '{arch}' (dir: {arch_dir}) to path '{map_value_path}', repo name '{repo_name}'")
+            repo_section_name = repo_name
+            bb.note(f"Mapping dedicated SDK arch '{arch}' to path '{map_value_path}', repo name '{repo_name}'")
 
         elif arch_dir == machine.replace('-', '_'):
             # Rule: MACHINE -> DISTRO/target/MACHINE_SHORT
@@ -144,8 +144,8 @@ python do_install() {
         if arch.startswith('sdk-provides-dummy'):
             return
 
-        # Skip the special arch handled unconditionally above
-        if arch == "all_avocadosdk":
+        # Skip the special arch handled unconditionally above and the dedicated SDK archs
+        if arch == "all_avocadosdk" or arch in sdk_repo_archs:
             return
 
         # arch_dir calculated for directory check and potential map key
@@ -175,12 +175,43 @@ python do_install() {
         else:
             bb.note(f"Skipping arch '{arch}' as directory '{check_dir}' does not exist")
 
+    def _process_sdk_archs():
+        """
+        Handles the special-case SDK architectures to ensure they always have
+        a map entry and a single, shared repo configuration.
+        """
+        nonlocal priority, map_f, repo_f
+        sdk_repo_written = False
+        for arch in sdk_repo_archs:
+            arch_dir = arch.replace('-', '_')
+            repo_details = _determine_repo_paths(arch, arch_dir)
+
+            # Always write the map entry for these SDK archs
+            _write_map_entry(map_f, arch_dir, repo_details["map_value_path"])
+
+            # Write the repo entry only once for the first SDK arch encountered
+            if not sdk_repo_written:
+                if _write_repo_entry(
+                    repo_f,
+                    repo_details["repo_url_path"],
+                    repo_details["repo_name"],
+                    repo_details["repo_section_name"],
+                    priority,
+                    arch
+                ):
+                    priority += 1
+                    sdk_repo_written = True # Mark as written
+            else:
+                # For subsequent SDK archs, just ensure they are in the list
+                # for the dnf/vars/arch file without writing a new repo section.
+                repo_archs.append(arch)
+
     # Get SDKPATHNATIVE for the repo file
     sdk_path_native = d.getVar('SDKPATHNATIVE')
     # Construct the path for the repo file within the staging directory ${D}
     # by stripping the leading '/' from SDKPATHNATIVE.
     sdk_native_prefix_stripped = sdk_path_native.lstrip('/')
-    repo_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'yum.repos.d')
+    repo_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'yum.repos.d')
 
     # Ensure directories exist
     os.makedirs(d_dir, exist_ok=True)
@@ -198,7 +229,7 @@ python do_install() {
     bb.note(f"Constructed map file path: {map_file_path}")
 
     # Combine architectures into a unique set
-    all_archs = set(pkg_archs + sdk_pkg_archs)
+    all_archs = set(pkg_archs + sdk_pkg_archs + sdk_repo_archs)
     priority = 1
 
     # Overwrite map file and repo file initially
@@ -219,24 +250,27 @@ python do_install() {
     # Append to files for other architectures found
     with open(map_file_path, 'a') as map_f, open(repo_file_path, 'a') as repo_f:
         bb.note(f"Opening map file for arch loop append: {map_file_path}")
+        # Process the dedicated SDK architectures first to ensure single repo entry
+        _process_sdk_archs()
         for arch in sorted(list(all_archs)): # Sort for consistent output order
             _process_arch(arch)
     bb.note(f"Finished arch loop append for map file.")
 
     # --- Write the SDK-prefixed /etc/dnf/vars/arch file ---
-    sdk_arch_vars_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'dnf', 'vars')
+    sdk_arch_vars_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'dnf', 'vars')
     os.makedirs(sdk_arch_vars_dir, exist_ok=True)
     sdk_arch_vars_path = os.path.join(sdk_arch_vars_dir, 'arch')
-    # Sort and make unique before joining for deterministic output
-    always_include_archs = ['all_avocadosdk']
-    final_archs = sorted(list(set([a.replace('-', '_') for a in repo_archs] + always_include_archs)))
+    # Filter out SDK architectures - only include target architectures
+    sdk_archs_underscore = [arch.replace('-', '_') for arch in sdk_repo_archs] + ['all_avocadosdk']
+    target_archs = [a.replace('-', '_') for a in repo_archs if a.replace('-', '_') not in sdk_archs_underscore]
+    final_archs = sorted(list(set(target_archs)))
     with open(sdk_arch_vars_path, 'w') as arch_f:
         arch_f.write(':'.join(final_archs))
-        bb.note(f"Wrote {len(final_archs)} archs to SDK-prefixed {sdk_arch_vars_path}: {':'.join(final_archs)}")
+        bb.note(f"Wrote {len(final_archs)} target archs to SDK-prefixed {sdk_arch_vars_path}: {':'.join(final_archs)}")
 
     # --- Write the SDK-prefixed /etc/rpm/platform file ---
     platform_var = d.getVar('PLATFORM') # Get the PLATFORM variable value
-    sdk_platform_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc', 'rpm')
+    sdk_platform_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'rpm')
     os.makedirs(sdk_platform_dir, exist_ok=True)
     sdk_platform_file_path = os.path.join(sdk_platform_dir, 'platform')
     with open(sdk_platform_file_path, 'w') as platform_f:
@@ -244,7 +278,7 @@ python do_install() {
         bb.note(f"Wrote platform '{platform_var}' to SDK-prefixed {sdk_platform_file_path}")
 
     # --- Write the SDK-prefixed /etc/rpmrc.${PN} file ---
-    sdk_rpmrc_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'etc')
+    sdk_rpmrc_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc')
     os.makedirs(sdk_rpmrc_dir, exist_ok=True)
     sdk_rpmrc_file_path = os.path.join(sdk_rpmrc_dir, "rpmrc")
     # Get MACHINE_SHORT_NAME with hyphens replaced by underscores

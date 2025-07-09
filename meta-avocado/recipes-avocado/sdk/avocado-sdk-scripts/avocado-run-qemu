@@ -19,7 +19,7 @@ run_qemu() {
     fi
 
     # Check if the image file exists
-    IMAGE_FILE="/opt/_avocado/output/avocado-image-qemux86-64.img"
+    IMAGE_FILE="${AVOCADO_PREFIX}/output/avocado-image-qemux86-64.img"
     if [ ! -f "$IMAGE_FILE" ]; then
         echo "Error: Image file not found: $IMAGE_FILE"
         echo "Please build the image first using: avocado-build image"
@@ -27,9 +27,9 @@ run_qemu() {
     fi
 
     qemu-system-x86_64 \
-        -drive file=/opt/_avocado/output/avocado-image-qemux86-64.img,format=raw,if=virtio \
-        -drive if=pflash,format=qcow2,readonly=on,file=/opt/_avocado/images/deploy/ovmf.code.qcow2 \
-        -drive if=pflash,format=qcow2,file=/opt/_avocado/images/deploy/ovmf.vars.qcow2 \
+        -drive file=${AVOCADO_PREFIX}/output/avocado-image-qemux86-64.img,format=raw,if=virtio \
+        -drive if=pflash,format=qcow2,readonly=on,file=${AVOCADO_PREFIX}/images/deploy/ovmf.code.qcow2 \
+        -drive if=pflash,format=qcow2,file=${AVOCADO_PREFIX}/images/deploy/ovmf.vars.qcow2 \
         -m 256 \
         -cpu max \
         -nographic
