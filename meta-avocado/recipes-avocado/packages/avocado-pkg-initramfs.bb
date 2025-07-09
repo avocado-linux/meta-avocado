@@ -1,7 +1,7 @@
 DESCRIPTION = "Avocado Initramfs Packages"
 LICENSE = "Apache-2.0"
 
-PACKAGE_ARCH = "${SDK_ARCH}-${SDKPKGSUFFIX}"
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 PACKAGES = "${PN}"
 inherit packagegroup
 

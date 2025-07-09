@@ -32,6 +32,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-genimage \
     nativesdk-dosfstools \
     nativesdk-mtools \
+    nativesdk-dummy-provides \
     packagegroup-cross-canadian-${MACHINE} \
 "
 

@@ -7,10 +7,6 @@ PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
   avocado-sdk-toolchain \
-  nativesdk-avocado-pkg-rootfs \
-  nativesdk-avocado-pkg-initramfs \
-  nativesdk-avocado-pkg-images \
-  ${VIRTUAL-RUNTIME_avocado-sdk-metadata} \
 "
 
 SDK_SYSROOT_DEPENDS = " \
