@@ -4,5 +4,12 @@ header:
   - repo: meta-avocado
     file: kas/extra.yml
 
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-distro:
+      meta-avocado-sdk:
+
 target:
- - avocado-core
+  - avocado-distro

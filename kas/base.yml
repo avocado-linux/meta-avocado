@@ -51,6 +51,7 @@ repos:
     path: meta-avocado
     layers:
       meta-avocado:
+      meta-avocado-shared:
 
 distro: avocado
 
