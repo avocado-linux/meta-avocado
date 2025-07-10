@@ -1,0 +1,21 @@
+
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/stm.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-stm:
+
+local_conf_header:
+  machine-avocado-stm32mp25-dk: |
+
+machine: avocado-stm32mp25-dk

@@ -1,0 +1,13 @@
+header:
+  version: 16
+
+repos:
+  meta-stm:
+    url: https://github.com/STMicroelectronics/meta-st-stm32mp
+    branch: scarthgap
+    commit: a7270d718ff2ee50889d44a07e98e0576c643a3c
+    layers:
+      .:
+
+local_conf_header:
+  vendor-stm: |
