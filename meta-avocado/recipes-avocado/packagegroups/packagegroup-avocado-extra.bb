@@ -28,6 +28,8 @@ RDEPENDS:${PN} = " \
 
 OPENGL_PACKAGES = " \
   wpewebkit \
+  wpebackend-fdo \
+  cog \
   weston \
   weston-init \
   wayland \
