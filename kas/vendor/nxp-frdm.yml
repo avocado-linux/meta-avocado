@@ -22,7 +22,7 @@ repos:
   meta-imx-frdm:
     url: https://github.com/nxp-imx-support/meta-imx-frdm.git
     branch: lf-6.6.36-2.1.0
-    commit: 1377d9d8c658fd78f2a7362e09a75f5c929ff5ce
+    commit: 0391d7457a9f044f2b38ed3f91570926a669261b
     layers:
       meta-imx-bsp:
 

@@ -17,14 +17,14 @@ repos:
   bitbake:
     url: https://git.openembedded.org/bitbake
     branch: "2.8"
-    commit: 696c2c1ef095f8b11c7d2eff36fae50f58c62e5e
+    commit: 139f61fe9eec221745184a14b3618d2dfa650b91
     layers:
       .: excluded
 
   meta-openembedded:
     url: https://git.openembedded.org/meta-openembedded
     branch: scarthgap
-    commit: 491671faee11ea131feab5a3a451d1a01deb2ab1
+    commit: e8fd97d86af86cdcc5a6eb3f301cbaf6a2084943
     layers:
       meta-oe:
       meta-perl:
@@ -36,7 +36,7 @@ repos:
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
     branch: scarthgap
-    commit: 29d920f4c2249df7a69f00100924b4525e03c0d9
+    commit: 7a59dc5ee6edd9596e87c2fbcd1f2594c06b3d1b
     layers:
       meta:
 
