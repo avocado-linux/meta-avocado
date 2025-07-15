@@ -15,11 +15,12 @@ on:
         required: true
         options:
           # Machines
+          - imx8mp-evk
           - imx91-frdm
           - imx93-frdm
+          - imx93-evk
           - qemux86-64
           - reterminal
-          - imx93-evk
           - jetson-orin-nano-devkit-nvme
           - raspberrypi4
       distro_codename:
@@ -73,7 +74,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const allMachinesList = [
-              "imx91-frdm", "imx93-frdm", "qemux86-64",
+              "imx8mp-evk", "imx91-frdm", "imx93-frdm", "qemux86-64",
               "reterminal", "imx93-evk", "jetson-orin-nano-devkit-nvme", "raspberrypi4"
             ];
 
