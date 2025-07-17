@@ -91,10 +91,14 @@ else
         RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX" \
         $DNF_SDK_HOST $DNF_SDK_HOST_OPTS $DNF_SDK_REPO_CONF -y install avocado-sdk-toolchain
 
+    echo "--- Avocado SDK: Installing sdk target sysroot ---"
+      RPM_ETCCONFIGDIR="$DNF_SDK_TARGET_PREFIX" \
+      $DNF_SDK_HOST $DNF_SDK_TARGET_REPO_CONF \
+       -y --installroot ${AVOCADO_PREFIX}/sdk/target-sysroot install packagegroup-core-standalone-sdk-target
+
     echo "--- Avocado SDK: Installing rootfs sysroot ---"
-    RPM_CONFIGDIR="$AVOCADO_SDK_PREFIX/usr/lib/rpm" \
-      RPM_ETCCONFIGDIR="$DNF_SDK_TARGET_PREFIX"
-      $DNF_SDK_HOST $DNF_SDK_HOST_OPTS $DNF_SDK_TARGET_REPO_CONF \
+      RPM_ETCCONFIGDIR="$DNF_SDK_TARGET_PREFIX" \
+      $DNF_SDK_HOST $DNF_SDK_TARGET_REPO_CONF \
       -y --installroot ${AVOCADO_PREFIX}/rootfs install avocado-pkg-rootfs
 
     echo "--- Avocado SDK: Setting up sysext|confext sysroots ---"
