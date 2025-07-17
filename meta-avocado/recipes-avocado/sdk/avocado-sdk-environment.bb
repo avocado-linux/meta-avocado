@@ -14,7 +14,7 @@ TOOLCHAIN_CONFIGSITE_NOCACHE := "${TOOLCHAIN_CONFIGSITE_NOCACHE}"
 
 SDK_DIR = "${WORKDIR}/sdk"
 SDK_OUTPUT = "${SDK_DIR}/image"
-SDKTARGETSYSROOT = "${SDKPATH}/sysroots/target-dev"
+SDKTARGETSYSROOT = "${SDK_DIR}/target-sysroot"
 
 inherit cross-canadian
 
