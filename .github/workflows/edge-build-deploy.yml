@@ -33,7 +33,7 @@ jobs:
     runs-on: molcajete
     env:
       DISTRO_VERSION: "0.1.0"
-      DISTRO_CODENAME: ${{ github.event.inputs.distro_codename }}
+      DISTRO_CODENAME: ${{ github.event.inputs.distro_codename || 'latest/apollo/edge' }}
       AVOCADO_REPO_BASE: "https://repo.avocadolinux.org"
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
