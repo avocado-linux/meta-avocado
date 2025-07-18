@@ -108,7 +108,7 @@ else
     cp -rf ${AVOCADO_PREFIX}/rootfs/var/lib/rpm ${AVOCADO_PREFIX}/confext/var/lib
 fi
 
-echo "--- Avocado SDK: Changing working directory to /opt ---"
-cd /opt
+echo "--- Avocado SDK: Changing working directory to /opt/_avocado/src ---"
+cd /opt/_avocado/src
 
 exec "$@"
