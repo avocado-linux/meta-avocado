@@ -1,0 +1,22 @@
+From 4a5ea7d74f32372fc31af020febdb68fce5147d7 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <jschneck@mac.com>
+Date: Mon, 18 Mar 2024 13:52:35 -0400
+Subject: [PATCH] qemu arm mmc init
+Upstream-Status: Inappropriate [avocado specific]
+
+---
+ board/emulation/qemu-arm/qemu-arm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/board/emulation/qemu-arm/qemu-arm.c b/board/emulation/qemu-arm/qemu-arm.c
+index 942f1fff57..e1bb8f010c 100644
+--- a/board/emulation/qemu-arm/qemu-arm.c
++++ b/board/emulation/qemu-arm/qemu-arm.c
+@@ -104,6 +104,7 @@ struct mm_region *mem_map = qemu_arm64_mem_map;
+
+ int board_init(void)
+ {
++	pci_init();
+ 	return 0;
+ }
+

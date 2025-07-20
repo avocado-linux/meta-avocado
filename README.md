@@ -22,7 +22,7 @@ kas build $KAS_YML
 Qemu can be run with a swtpm with the following command
 
 ```bash
-meta-avocado/meta-avocado-qemu/scripts/run-with-tpm
+meta-avocado/meta-avocado-qemu/scripts/run-qemux86-64-swtpm
 ```
 
 This will open a tmux session.

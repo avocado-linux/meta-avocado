@@ -17,6 +17,8 @@ RDEPENDS:${PN} = " \
   ${MACHINE_ESSENTIAL_EXTRA_RDEPENDS} \
 "
 
+RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"
+
 RRECOMMENDS:${PN} = "\
   ${VIRTUAL-RUNTIME_base-utils-syslog} \
   ${MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS} \

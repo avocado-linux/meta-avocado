@@ -12,3 +12,5 @@ RDEPENDS:${PN} = "\
   os-release-initrd \
   util-linux \
 "
+
+RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"
