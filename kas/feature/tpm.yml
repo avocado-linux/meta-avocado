@@ -3,7 +3,8 @@ header:
 
 repos:
   meta-security:
-    url: https://git.yoctoproject.org/meta-security
+    url: https://github.com/avocado-linux/vendor-meta-security
+    path: meta-security
     branch: scarthgap
     commit: bc865c5276c2ab4031229916e8d7c20148dfbac3
     layers:

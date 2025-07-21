@@ -1,17 +1,18 @@
 header:
   version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/vendor/arm.yml
 
 repos:
-  meta-arm:
-    url: https://git.yoctoproject.org/meta-arm.git
-    branch: scarthgap
-    commit: 8e0f8af90fefb03f08cd2228cde7a89902a6b37c
+  meta-avocado:
+    path: meta-avocado
     layers:
-      meta-arm:
-      meta-arm-toolchain:
+      meta-avocado:
 
   meta-imx:
-    url: https://github.com/nxp-imx/meta-imx.git
+    url: https://github.com/avocado-linux/vendor-meta-imx.git
+    path: meta-imx
     branch: scarthgap-6.6.36-2.1.0
     commit: 7c10a9c047ce8c1fde05c14ec4baf275bc232a57
     layers:
@@ -20,7 +21,8 @@ repos:
       meta-imx-v2x:
 
   meta-imx-frdm:
-    url: https://github.com/nxp-imx-support/meta-imx-frdm.git
+    url: https://github.com/avocado-linux/vendor-meta-imx-frdm.git
+    path: meta-imx-frdm
     branch: lf-6.6.36-2.1.0
     commit: 0391d7457a9f044f2b38ed3f91570926a669261b
     layers:

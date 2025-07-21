@@ -3,7 +3,8 @@ header:
 
 repos:
   meta-virtualization:
-    url: https://git.yoctoproject.org/meta-virtualization
+    url: https://github.com/avocado-linux/vendor-meta-virtualization
+    path: meta-virtualization
     branch: scarthgap
     commit: a5449c0c50aa07d02186f548fe6bb6c1ce8823dc
     layers:
