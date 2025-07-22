@@ -12,12 +12,14 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-python3-pip \
   nativesdk-strace \
   nativesdk-ganesha \
-  ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'go', 'packagegroup-go-cross-canadian-${MACHINE}', '', d)} \
-  ${@bb.utils.contains('SDK_TOOLCHAIN_LANGS', 'rust', 'packagegroup-rust-cross-canadian-${MACHINE}', '', d)} \
+  nativesdk-mkfat \
+  packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
 
 SDK_SYSROOT_DEPENDS = " \
+  ${@multilib_pkg_extend(d, 'packagegroup-core-standalone-sdk-target')} \
+  ${@multilib_pkg_extend(d, 'libstd-rs')} \
 "
 
 RDEPENDS:${PN} = " \
