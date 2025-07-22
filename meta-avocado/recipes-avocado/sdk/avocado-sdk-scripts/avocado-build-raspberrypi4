@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -e
+
+echo "[ERROR] Not implemented."
+exit 1
