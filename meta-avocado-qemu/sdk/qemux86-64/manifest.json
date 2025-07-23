@@ -1,0 +1,70 @@
+{
+  "runtime" : {
+    "platform": "avocado-raspberrypi4",
+    "architecture": "arm64"
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "filename": "avocado-raspberrypi4-rootdisk.zip",
+      "build": "mkfwup",
+      "build_conf": "rootdisk.conf",
+      "build_args": [],
+      "devpath": "/dev/mmcblk0",
+      "images": [
+        {
+          "boot": {
+            "filename": "boot.img",
+            "build": "mkfat",
+            "build_args": [],
+            "files": [
+              { "filename": "avocado-image-initramfs-avocado-raspberrypi4.cpio.zst" },
+              { "filename": "Image" },
+              { "filename": "u-boot.bin", "output": "kernel8.img" },
+              { "filename": "bcm2711-rpi-4-b.dtb" },
+              { "filename": "bcm2711-rpi-400.dtb" },
+              { "filename": "bcm2711-rpi-cm4.dtb" },
+              { "filename": "bcm2711-rpi-cm4s.dtb" },
+              { "filename": "bootcode.bin" },
+              { "filename": "cmdline.txt" },
+              { "filename": "config.txt" },
+              { "filename": "fixup_cd.dat" },
+              { "filename": "fixup_db.dat" },
+              { "filename": "fixup_x.dat" },
+              { "filename": "fixup.dat" },
+              { "filename": "fixup4.dat" },
+              { "filename": "fixup4cd.dat" },
+              { "filename": "fixup4db.dat" },
+              { "filename": "fixup4x.dat" },
+              { "filename": "start_cd.elf" },
+              { "filename": "start_db.elf" },
+              { "filename": "start_x.elf" },
+              { "filename": "start.elf" },
+              { "filename": "start4.elf" },
+              { "filename": "start4cd.elf" },
+              { "filename": "start4db.elf" },
+              { "filename": "start4x.elf" }
+            ]
+          },
+          "rootfs": { "filename": "avocado-image-rootfs-avocado-raspberrypi4.rootfs.squashfs" },
+          "var": { "filename": "avocado-image-var-avocado-raspberrypi4.var.img" },
+          "uboot_env": { "filename": "uboot.env" }
+        }
+      ],
+      "partitions": [
+        {
+          "image": "efi",
+          "offset": "2",
+          "blocks": "256"
+        },
+        {
+          "image": "rootfs",
+          "size_mb": "160"
+        },
+        {
+          "image": "var",
+          "expand": "true"
+        }
+      ]
+    }
+  }
+}

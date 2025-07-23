@@ -6,12 +6,12 @@ inherit cargo
 # DEFAULT_PREFERENCE = "-1"
 
 # how to get mkfat could be as easy as but default to a git checkout:
-# SRC_URI += "crate://crates.io/mkfat/0.1.0"
+# SRC_URI += "crate://crates.io/mkfat/0.1.1"
 SRC_URI += "git://git@github.com/avocado-linux/mkfat.git;protocol=ssh;nobranch=1;branch=main"
-SRCREV = "7b59cf15ac9926de1ff94d3afa0274ed4033435a"
+SRCREV = "4110541dd4f0841fa0b0acb16ca99c26284ee704"
 S = "${WORKDIR}/git"
 CARGO_SRC_DIR = ""
-PV:append = ".AUTOINC+7b59cf15ac"
+
 
 # please note if you have entries that do not begin with crate://
 # you must change them to how that package can be fetched
