@@ -57,7 +57,7 @@
           "blocks": "256"
         },
         {
-          "image": "boot",
+          "image": "bootfs",
           "offset": "4096",
           "size_mb": "128"
         },

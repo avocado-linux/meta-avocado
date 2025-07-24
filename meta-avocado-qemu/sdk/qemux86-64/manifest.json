@@ -8,14 +8,14 @@
       "filename": "avocado-raspberrypi4-rootdisk.zip",
       "build": "mkfwup",
       "build_conf": "rootdisk.conf",
-      "build_args": [],
+      "build_args": ["--base", "${AVOCADO_SDK_RUNTIME_DIR}"],
       "devpath": "/dev/mmcblk0",
       "images": [
         {
           "boot": {
             "filename": "boot.img",
             "build": "mkfat",
-            "build_args": [],
+            "build_args": ["--base", "${AVOCADO_SDK_RUNTIME_DIR}"],
             "files": [
               { "filename": "avocado-image-initramfs-avocado-raspberrypi4.cpio.zst" },
               { "filename": "Image" },
@@ -24,9 +24,10 @@
               { "filename": "bcm2711-rpi-400.dtb" },
               { "filename": "bcm2711-rpi-cm4.dtb" },
               { "filename": "bcm2711-rpi-cm4s.dtb" },
+              { "filename": "uart1.dtbo" , "output": "overlays/uart1.dtbo"},
               { "filename": "bootcode.bin" },
               { "filename": "cmdline.txt" },
-              { "filename": "config.txt" },
+              { "filename": "config.txt", "output": "config.txt" },
               { "filename": "fixup_cd.dat" },
               { "filename": "fixup_db.dat" },
               { "filename": "fixup_x.dat" },
@@ -54,7 +55,9 @@
         {
           "image": "efi",
           "offset": "2",
-          "blocks": "256"
+          "blocks": "256",
+          "type_uuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "boot": "true"
         },
         {
           "image": "rootfs",
