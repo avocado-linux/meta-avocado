@@ -18,42 +18,10 @@ ramdisk_addr_r=0x02700000
 devtype=mmc
 devnum=0
 bootpart=1
-
-# Calculate partition based on avocado_boot_slot
-avocado_boot_init=\
-  if test -n "${avocado_boot_slot}"; then\
-    if test "${avocado_boot_slot}" = "a"; then\
-      echo "Booting A";\
-      setenv rootdev /dev/mmcblk0p2;\
-    else\
-      if test "${avocado_boot_slot}" = "b"; then\
-        echo "Booting B";\
-        setenv rootdev /dev/mmcblk0p3;\
-      else\
-        if test "${avocado_boot_slot}" = "r"; then\
-          echo "Booting Recovery";\
-          setenv rootdev;\
-        else\
-          echo "avocado_boot_slot=${avocado_boot_slot} invalid";\
-          echo "Booting Recovery";\
-          setenv rootdev;\
-        fi;\
-      fi;\
-    fi;\
-  else\
-    echo "avocado_boot_slot undefined";\
-    echo "Booting A";\
-    setenv rootdev /dev/mmcblk0p2;\
-  fi;\
-  fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs;\
-  if test -n "${rootdev}"; then\
-    setenv bootargs "${bootargs} root=${rootdev} rootwait";\
-  else\
-    setenv bootargs "${bootargs} rootwait";\
-  fi;
+rootdev=/dev/mmcblk0p3
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
 load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} ${initramfs_file}
 avocado_boot=booti ${kernel_addr_r} ${ramdisk_addr_r}:${filesize} ${fdt_addr};
 
-bootcmd=run avocado_boot_init load_image load_initramfs avocado_boot
+bootcmd=run load_image load_initramfs avocado_boot
