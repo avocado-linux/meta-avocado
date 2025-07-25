@@ -12,6 +12,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-strace \
   nativesdk-ganesha \
   nativesdk-mkfat \
+  nativesdk-stone \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
