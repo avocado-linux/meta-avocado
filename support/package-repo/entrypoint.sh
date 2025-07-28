@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Run the repository setup script if a directory is mounted
 if [ -d "/repo" ]; then

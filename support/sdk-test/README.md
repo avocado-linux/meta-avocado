@@ -33,14 +33,14 @@ export DEPLOY_DIR="$(pwd)/build-qemux86-64/build/tmp/deploy"
 You can start the package-repo container and get a bash prompt in the sdk container with the following `docker compose` command
 
 ```bash
-docker compose -f support/sdk-test/compose.yml run sdk /bin/bash
+docker compose -f support/sdk-test/compose.yml run sdk /usr/bin/bash
 ```
 
 Running for a different target:
 
 ```bash
 export DEPLOY_DIR="$(pwd)/build-imx93-frdm/build/tmp/deploy"
-AVOCADO_SDK_TARGET=imx93-frdm docker-compose -f support/sdk-test/compose.yml run sdk /bin/bash
+AVOCADO_SDK_TARGET=imx93-frdm docker-compose -f support/sdk-test/compose.yml run sdk /usr/bin/bash
 ```
 
 ## Runtime Environment

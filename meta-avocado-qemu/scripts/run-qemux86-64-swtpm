@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # This script creates a new tmux session with two panes:
 # - Left pane: Runs start-swtpm to start swtpm.
 # - Right pane: Waits for the TPM socket to become available and then runs run-qemux86-64-swtpm.

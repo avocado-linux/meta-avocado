@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -e
+
+hook="avocado-build"
+target="reterminal"
+
+echo -e "\033[34m[INFO]\033[0m SDK lifecycle hook '$hook' for target '$target' is a no-op."
+echo -e "\033[32m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+exit 0

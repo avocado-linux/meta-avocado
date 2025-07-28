@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # init-build: Initialize the build directory for a kas-based project.
 #
 # Usage: ./init-build /path/to/kas/machine.yml [build_dir]

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Function to source environment setup in a subshell
 run_in_sdk_env() {

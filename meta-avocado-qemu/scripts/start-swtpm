@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Simplified TPM start script for use with kas
 # Usage: ./start-tpm
 # Assumes pwd is the build directory

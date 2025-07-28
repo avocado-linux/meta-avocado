@@ -33,6 +33,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-dosfstools \
     nativesdk-mtools \
     nativesdk-dummy-provides \
+    avocado-sdk-target \
     packagegroup-cross-canadian-${MACHINE} \
 "
 

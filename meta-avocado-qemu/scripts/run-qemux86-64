@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Script to run QEMU with TPM support via kas
 # Usage: ./run-qemu-tpm
 # Assumes pwd is build directory

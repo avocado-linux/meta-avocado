@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Don't exit on errors - we want to continue building other SDKs
 set +e
