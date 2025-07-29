@@ -22,7 +22,19 @@ echo "PROJECT_ROOT: $PROJECT_ROOT"
 echo "SCRIPT_DIR: $SCRIPT_DIR"
 
 # Store original arguments passed to this script
-ARGS="$@"
+CLEAN_BUILD=false
+PASSTHRU_ARGS=()
+for arg in "$@"; do
+    case $arg in
+        --clean)
+        CLEAN_BUILD=true
+        ;;
+        *)
+        PASSTHRU_ARGS+=("$arg")
+        ;;
+    esac
+done
+ARGS="${PASSTHRU_ARGS[@]}"
 
 # Arrays to track build results
 SUCCESSFUL_BUILDS=()
@@ -49,6 +61,11 @@ for sdk_config in "$PROJECT_ROOT"/kas/sdk/*.yml; do
         if . scripts/init-build "$sdk_config"; then
             echo "Successfully initialized build environment for $sdk_name"
             
+            if [ "$CLEAN_BUILD" = true ]; then
+                echo "--> --clean specified, removing build directory"
+                rm -rf ./build
+            fi
+
             # Run kas build with the original arguments
             echo "Running: kas build $sdk_config $ARGS"
             if kas build $sdk_config $ARGS; then
