@@ -8,19 +8,21 @@ GROUP_ID=${GROUP_ID:-1000}
 USERNAME=avocado
 GROUPNAME=avocado
 
-# Check if group exists, create if not
-if ! getent group "${GROUP_ID}" > /dev/null; then
-    groupadd -g "${GROUP_ID}" "${GROUPNAME}"
-else
-    GROUPNAME=$(getent group "${GROUP_ID}" | cut -d: -f1)
+# If a user with USER_ID exists, find its name and delete it
+if getent passwd "${USER_ID}" > /dev/null; then
+    EXISTING_USERNAME=$(getent passwd "${USER_ID}" | cut -d: -f1)
+    userdel -r -f "${EXISTING_USERNAME}" 2>/dev/null
 fi
 
-# Check if user exists, create if not
-if ! getent passwd "${USER_ID}" > /dev/null; then
-    useradd -m -u "${USER_ID}" -g "${GROUP_ID}" -s /bin/bash "${USERNAME}"
-else
-    USERNAME=$(getent passwd "${USER_ID}" | cut -d: -f1)
+# If a group with GROUP_ID exists, find its name and delete it
+if getent group "${GROUP_ID}" > /dev/null; then
+    EXISTING_GROUPNAME=$(getent group "${GROUP_ID}" | cut -d: -f1)
+    groupdel "${EXISTING_GROUPNAME}"
 fi
+
+# Create group and user
+groupadd -g "${GROUP_ID}" "${GROUPNAME}"
+useradd -m -u "${USER_ID}" -g "${GROUP_ID}" -s /bin/bash "${USERNAME}"
 
 # Configure passwordless sudo for the user
 echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
