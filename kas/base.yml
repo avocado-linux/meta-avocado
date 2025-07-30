@@ -43,6 +43,14 @@ repos:
     layers:
       meta:
 
+  meta-lts-mixins:
+    url: https://github.com/avocado-linux/vendor-meta-lts-mixins
+    path: meta-lts-mixins
+    branch: scarthgap/rust
+    commit: 65c51abe3871d50e599366765838d1478eba093e
+    layers:
+      .:
+
   meta-ptx:
     url: https://github.com/avocado-linux/vendor-meta-ptx.git
     path: meta-ptx
