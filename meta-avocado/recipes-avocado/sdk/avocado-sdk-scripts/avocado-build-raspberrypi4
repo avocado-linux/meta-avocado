@@ -1,9 +1,0 @@
-#!/bin/bash
-
-set -e
-
-hook="avocado-build"
-target="raspberrypi4"
-
-echo -e "\033[31m[ERROR]\033[0m SDK lifecycle hook '$hook' for target '$target' is not implemented."
-exit 1
