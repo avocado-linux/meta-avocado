@@ -29,5 +29,5 @@ genimage --config "$OUTPUT_DIR/genimage.cfg" \
   --tmppath "$TMP_DIR" \
   --rootpath "$OUTPUT_DIR"
 
-echo -e "\033[32m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
