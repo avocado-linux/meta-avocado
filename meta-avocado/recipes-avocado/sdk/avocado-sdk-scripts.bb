@@ -7,7 +7,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI = "file://entrypoint.sh \
            file://avocado-repo \
            file://avocado-build \
-					 file://avocado-sdk-common.sh \
+           file://avocado-sdk-common.sh \
 "
 
 S = "${WORKDIR}"
@@ -32,5 +32,9 @@ do_install() {
 FILES:${PN} += "${bindir}/entrypoint.sh \
                 ${bindir}/avocado-repo \
                 ${bindir}/avocado-build \
+                ${bindir}/avocado-build-qemux86-64 \
+                ${bindir}/avocado-build-raspberrypi4 \
+                ${bindir}/avocado-provision-qemux86-64 \
+                ${bindir}/avocado-provision-raspberrypi4 \
 								${bindir}/avocado-sdk-common.sh \
 "
