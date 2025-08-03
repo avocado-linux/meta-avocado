@@ -13,9 +13,19 @@ do_fetch[noexec] = "1"
 do_unpack[noexec] = "1"
 do_patch[noexec] = "1"
 do_install[noexec] = "1"
-do_package[noexec] = "1"
 do_populate_sysroot[noexec] = "1"
+do_package[noexec] = "1"
+do_package_qa[noexec] = "1"
 do_package_write_rpm[noexec] = "1"
 
 # Ensure these recipes are excluded from world builds
 EXCLUDE_FROM_WORLD = "1"
+
+do_stone_validate() {
+    stone \
+        validate \
+        -m "${DEPLOY_DIR_IMAGE}/stone-${MACHINE_SHORT_NAME}.json" \
+        -i "${DEPLOY_DIR_IMAGE}"
+}
+
+addtask stone_validate after do_compile

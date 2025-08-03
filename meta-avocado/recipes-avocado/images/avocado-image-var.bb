@@ -10,12 +10,12 @@ fakeroot do_compile() {
     install -o root -g root -d ${WORKDIR}/btrfs_root/lib/extensions
     install -o root -g root -d ${WORKDIR}/btrfs_root/lib/confexts
 
-    mkfs.btrfs -r ${WORKDIR}/btrfs_root --subvol rw:lib/extensions --subvol rw:lib/confexts -f ${WORKDIR}/avocado-image-var-${MACHINE}.btrfs
+    mkfs.btrfs -r ${WORKDIR}/btrfs_root --subvol rw:lib/extensions --subvol rw:lib/confexts -f ${WORKDIR}/avocado-image-var-${MACHINE}.var.img
 }
 
 do_deploy() {
     install -d ${DEPLOYDIR}
-    install -m 0644 ${WORKDIR}/avocado-image-var-${MACHINE}.btrfs ${DEPLOYDIR}/avocado-image-var-${MACHINE}.btrfs
+    install -m 0644 ${WORKDIR}/avocado-image-var-${MACHINE}.var.img ${DEPLOYDIR}/avocado-image-var-${MACHINE}.var.img
 }
 
 addtask deploy after do_compile

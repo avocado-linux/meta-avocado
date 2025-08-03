@@ -11,7 +11,7 @@ FILESEXTRAPATHS:prepend := "${@':'.join(['%s/genimage' % layer for layer in d.ge
 SRC_URI:append = "${@bb.utils.contains('MACHINE_FEATURES', 'genimage', ' file://${MACHINE_SHORT_NAME}.cfg', '', d)}"
 
 GENIMAGE_CONFIG = "${MACHINE_SHORT_NAME}.cfg"
-GENIMAGE_VARIABLES[VAR-IMG] ?= "avocado-image-var-${MACHINE}.btrfs"
+GENIMAGE_VARIABLES[VAR-IMG] ?= "avocado-image-var-${MACHINE}.var.img"
 GENIMAGE_VARIABLES[MACHINE] ?= "${MACHINE}"
 
 do_genimage[depends] += "virtual/kernel:do_deploy"

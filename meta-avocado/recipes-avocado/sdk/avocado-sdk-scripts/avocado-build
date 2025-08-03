@@ -91,7 +91,7 @@ build_extension() {
         mkfs.btrfs -r "$AVOCADO_PREFIX/var" \
             --subvol rw:lib/extensions \
             --subvol rw:lib/confexts \
-            -f "${IMAGES_DIR}/avocado-image-var.btrfs"
+            -f "${IMAGES_DIR}/avocado-image-var.var.img"
 
     elif [ "$1" = "image" ]; then
         echo "Building complete system image"
