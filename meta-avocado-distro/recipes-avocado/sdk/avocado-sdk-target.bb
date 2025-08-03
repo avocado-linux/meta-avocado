@@ -19,6 +19,7 @@ FILES:${PN}   = "\
   ${SDKPATHNATIVE}${bindir}/avocado-build-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}${bindir}/avocado-provision-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}/stone \
+  ${SDKPATHNATIVE}/stone-${MACHINE_SHORT_NAME}.json \
 "
 
 do_install() {
@@ -31,7 +32,7 @@ do_install() {
 
 do_deploy() {
     install -d ${DEPLOYDIR}
-    install -m 0755 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
+    install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
 }
 
 addtask deploy before do_package after do_install
