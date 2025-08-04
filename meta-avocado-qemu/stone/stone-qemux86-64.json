@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-qemux86-64",
+    "architecture": "x86_64"
+  },
+  "storage_devices": {}
+}

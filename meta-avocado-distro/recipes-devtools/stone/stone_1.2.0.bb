@@ -1,7 +1,7 @@
 inherit cargo cargo-update-recipe-crates
 
 SRCBRANCH = "main"
-SRCREV = "4967fb8161bcc1a4264d3563a078af46140213ee"
+SRCREV = "512c66a4c61fc9d22aaf9bd878ff5e7891786766"
 SRC_URI = "git://git@github.com/avocado-linux/stone.git;protocol=https;nobranch=1;branch=${SRCBRANCH}"
 
 SRC_URI[sha256sum] = "3ebfa61108b7f31db116a647c21a547a15210bc005c16c04598f9e2b9153f3d1"
@@ -23,4 +23,4 @@ LICENSE = "Apache-2.0"
 include stone-${PV}.inc
 include stone.inc
 
-BBCLASSEXTEND = "nativesdk"
+BBCLASSEXTEND = "native nativesdk"

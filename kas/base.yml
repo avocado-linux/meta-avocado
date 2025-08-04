@@ -20,7 +20,7 @@ repos:
     branch: "2.8"
     commit: 139f61fe9eec221745184a14b3618d2dfa650b91
     layers:
-      .: excluded
+      .: disabled
 
   meta-openembedded:
     url: https://github.com/avocado-linux/vendor-meta-openembedded

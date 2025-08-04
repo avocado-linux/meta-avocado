@@ -18,6 +18,10 @@ do_compile[depends] += "virtual/kernel:do_deploy"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+FILESEXTRAPATHS:prepend := "${@':'.join(['%s/stone' % layer for layer in d.getVar('BBLAYERS').split()])}:"
+
+SRC_URI = "file://stone-${MACHINE_SHORT_NAME}.json"
+
 # Custom task to collect artifacts
 python do_collect_artifacts() {
     import shutil
@@ -56,6 +60,15 @@ python do_collect_artifacts() {
 
 # Add the task to the build pipeline
 addtask collect_artifacts after do_compile before do_install
+
+inherit deploy
+
+do_deploy() {
+    install -d ${DEPLOYDIR}
+    install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
+}
+
+addtask deploy after do_compile before collect_artifacts
 
 do_install() {
     # Install collected artifacts

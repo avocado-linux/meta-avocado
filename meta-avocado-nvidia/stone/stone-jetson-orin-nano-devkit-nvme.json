@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-jetson-orin-nano-devkit-nvme",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}

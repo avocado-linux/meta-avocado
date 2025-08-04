@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-imx93-frdm",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}

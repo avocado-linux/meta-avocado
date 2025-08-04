@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-raspberrypi4",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}

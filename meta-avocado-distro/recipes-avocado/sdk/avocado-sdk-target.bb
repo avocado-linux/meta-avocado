@@ -7,19 +7,18 @@ PACKAGES = "${PN}"
 PACKAGE_ARCH = "${SDKPKGARCH}"
 INSANE_SKIP:${PN} = "file-rdeps build-deps"
 
+FILESEXTRAPATHS:prepend := "${@':'.join(['%s/stone' % layer for layer in d.getVar('BBLAYERS').split()])}:"
+
 SRC_URI = "\
   file://avocado-build-${MACHINE_SHORT_NAME} \
   file://avocado-provision-${MACHINE_SHORT_NAME} \
   file://stone-${MACHINE_SHORT_NAME}.json \
 "
 
-inherit deploy
-
 FILES:${PN}   = "\
   ${SDKPATHNATIVE}${bindir}/avocado-build-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}${bindir}/avocado-provision-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}/stone \
-  ${SDKPATHNATIVE}/stone-${MACHINE_SHORT_NAME}.json \
 "
 
 do_install() {
@@ -29,10 +28,3 @@ do_install() {
     install -m 0755 ${WORKDIR}/avocado-provision-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
     install -m 0755 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${D}${SDKPATHNATIVE}/stone/stone-${MACHINE_SHORT_NAME}.json
 }
-
-do_deploy() {
-    install -d ${DEPLOYDIR}
-    install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
-}
-
-addtask deploy before do_package after do_install

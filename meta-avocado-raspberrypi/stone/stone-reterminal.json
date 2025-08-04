@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-reterminal",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}

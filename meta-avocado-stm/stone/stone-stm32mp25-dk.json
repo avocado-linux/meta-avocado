@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-stm32mp25-dk",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}
