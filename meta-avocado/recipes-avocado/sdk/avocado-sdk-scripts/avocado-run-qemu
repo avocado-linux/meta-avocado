@@ -18,24 +18,45 @@ run_qemu() {
         exit 1
     fi
 
-    # Check if the image file exists
-    IMAGE_FILE="${AVOCADO_PREFIX}/output/avocado-image-qemux86-64.img"
+    IMAGE_FILE="${AVOCADO_PREFIX}/output/avocado-image-${AVOCADO_SDK_TARGET}.img"
     if [ ! -f "$IMAGE_FILE" ]; then
         echo "Error: Image file not found: $IMAGE_FILE"
         echo "Please build the image first using: avocado-build image"
         exit 1
     fi
 
-    IMAGES_DIR="${AVOCADO_PREFIX}/images"
-    QEMU_BIOS="${IMAGES_DIR}/deploy/u-boot.rom"
+    qemu-img resize -f raw "${IMAGE_FILE}" 1024M
 
-    qemu-system-x86_64 \
+    IMAGES_DIR="${AVOCADO_PREFIX}/images"
+
+    if [[ "$AVOCADO_SDK_TARGET" == "qemux86-64" ]]; then
+        QEMU_SYSTEM="qemu-system-x86_64"
+        QEMU_BIOS="${IMAGES_DIR}/deploy/u-boot.rom"
+        CPU_TYPE="max"
+        QEMU_OPTS=()
+    elif [[ "$AVOCADO_SDK_TARGET" == "qemuarm64" ]]; then
+        QEMU_SYSTEM="qemu-system-aarch64"
+        QEMU_BIOS="${IMAGES_DIR}/deploy/flash.bin"
+        CPU_TYPE="cortex-a53"
+        QEMU_OPTS=("-M" "virt,secure=on,highmem=off")
+    else
+        echo "Error: Unsupported QEMU target: $AVOCADO_SDK_TARGET"
+        exit 1
+    fi
+
+    if [ ! -f "$QEMU_BIOS" ]; then
+        echo "Error: BIOS file not found: $QEMU_BIOS"
+        exit 1
+    fi
+
+    "${QEMU_SYSTEM}" \
         -bios "${QEMU_BIOS}" \
         -device sdhci-pci \
         -device sd-card,drive=mmc \
         -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc \
         -m 1024 \
-        -cpu max \
+        -cpu "${CPU_TYPE}" \
+        "${QEMU_OPTS[@]}" \
         -nographic
 }
 

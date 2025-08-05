@@ -15,3 +15,7 @@ repos:
     path: meta-avocado
     layers:
       meta-avocado-tpm:
+
+local_conf_header:
+  feature/tpm: |
+    DISTRO_FEATURES:append = " tpm2"

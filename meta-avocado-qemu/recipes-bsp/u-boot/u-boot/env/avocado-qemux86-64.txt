@@ -1,0 +1,56 @@
+machine=avocado-qemuarm64
+initramfs_file=avocado-image-initramfs-avocado-qemux86-64.cpio.zst
+kernel_file=bzImage
+
+console=ttyS0
+devtype=mmc
+devnum=0
+bootpart=2
+rootdev=/dev/mmcblk0p5
+
+kernel_addr_r=0x1000000
+ramdisk_addr_r=0x2000000
+
+# Calculate partition based on avocado_boot_slot
+avocado_boot_init=\
+  if test -n "${avocado_boot_slot}"; then\
+    if test "${avocado_boot_slot}" = "a"; then\
+      echo "Booting A";\
+      setenv bootpart 2;\
+      setenv rootdev /dev/mmcblk0p5;\
+    else\
+      if test "${avocado_boot_slot}" = "b"; then\
+        echo "Booting B";\
+        setenv bootpart 3;\
+        setenv rootdev /dev/mmcblk0p6;\
+      else\
+        if test "${avocado_boot_slot}" = "r"; then\
+          echo "Booting Recovery";\
+          setenv bootpart 4;\
+          setenv rootdev;\
+        else\
+          echo "avocado_boot_slot=${avocado_boot_slot} invalid";\
+          echo "Booting Recovery";\
+          setenv bootpart 4;\
+          setenv rootdev;\
+        fi;\
+      fi;\
+    fi;\
+  else\
+    echo "avocado_boot_slot undefined";\
+    echo "Booting A";\
+    setenv bootpart 2;\
+    setenv rootdev /dev/mmcblk0p5;\
+  fi;\
+  if test -n "${rootdev}"; then\
+    setenv bootargs console=${console} root=${rootdev} rootwait;\
+  else\
+    setenv bootargs console=${console} rootwait;\
+  fi;
+
+load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
+load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} ${initramfs_file}
+
+avocado_boot=zboot ${kernel_addr_r} ${ramdisk_addr_r}
+
+bootcmd=run avocado_boot_init load_image load_initramfs avocado_boot

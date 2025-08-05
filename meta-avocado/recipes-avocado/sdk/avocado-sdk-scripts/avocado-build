@@ -91,7 +91,7 @@ build_extension() {
         mkfs.btrfs -r "$AVOCADO_PREFIX/var" \
             --subvol rw:lib/extensions \
             --subvol rw:lib/confexts \
-            -f "${IMAGES_DIR}/avocado-image-var.var.img"
+            -f "${IMAGES_DIR}/avocado-image-var.btrfs"
 
     elif [ "$1" = "image" ]; then
         echo "Building complete system image"
@@ -119,6 +119,7 @@ build_extension() {
         # Replace variables in genimage configuration
         sed -i "s|@VAR-IMG@|${DEPLOY_DIR}/avocado-image-var.btrfs|g" "${OUTPUT_PATH}/genimage.cfg"
         sed -i "s|@IMAGE@|avocado-image-${AVOCADO_SDK_TARGET}.img|g" "${OUTPUT_PATH}/genimage.cfg"
+        sed -i "s|@MACHINE@|avocado-${AVOCADO_SDK_TARGET}|g" "${OUTPUT_PATH}/genimage.cfg"
 
         # Run genimage to create the final system image
         echo "Running genimage to create final system image..."
