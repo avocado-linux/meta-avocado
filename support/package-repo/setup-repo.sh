@@ -12,6 +12,8 @@ fi
 YOCTO_DEPLOY_DIR=$1
 MAP_FILE="${YOCTO_DEPLOY_DIR}/avocado-repo.map"
 
+releasever="${AVOCADO_SDK_REPO_RELEASE}"
+
 if [ ! -f "${MAP_FILE}" ]; then
     echo "Error: Map file not found at ${MAP_FILE}" >&2
     exit 1
@@ -22,6 +24,8 @@ echo "Using map file: ${MAP_FILE}"
 # Process mappings from the map file
 while IFS='=' read -r key value || [ -n "$key" ]; do
     # Skip empty lines or lines without an equals sign
+    value=$(eval "echo \"${value}\"")
+
     if [ -z "$key" ] || [ -z "$value" ]; then
         echo "Skipping invalid line: $key=$value"
         continue
@@ -52,4 +56,4 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
 
 done < "${MAP_FILE}"
 
-echo "Repository setup complete based on map file!" 
+echo "Repository setup complete based on map file!"
