@@ -11,29 +11,30 @@ TARGET_ARCH = "${SDK_ARCH}"
 
 # These variables are derived from meta-avocado/classes/populate_sdk_base.bbclass
 TOOLCHAIN_HOST_TASK = " \
-    nativesdk-pkgconfig \
-    nativesdk-pseudo \
-    nativesdk-unfs3 \
-    nativesdk-opkg \
-    nativesdk-libtool \
+    avocado-sdk-target \
     nativesdk-autoconf \
     nativesdk-automake \
-    nativesdk-shadow \
-    nativesdk-makedevs \
-    nativesdk-cmake \
-    nativesdk-make \
-    nativesdk-meson \
     nativesdk-bison \
-    nativesdk-flex \
-    nativesdk-perl-module-integer \
-    nativesdk-dnf \
     nativesdk-btrfs-tools \
-    nativesdk-squashfs-tools \
-    nativesdk-genimage \
+    nativesdk-cmake \
+    nativesdk-curl \
+    nativesdk-dnf \
     nativesdk-dosfstools \
-    nativesdk-mtools \
     nativesdk-dummy-provides \
-    avocado-sdk-target \
+    nativesdk-flex \
+    nativesdk-genimage \
+    nativesdk-libtool \
+    nativesdk-make \
+    nativesdk-makedevs \
+    nativesdk-meson \
+    nativesdk-mtools \
+    nativesdk-opkg \
+    nativesdk-perl-module-integer \
+    nativesdk-pkgconfig \
+    nativesdk-pseudo \
+    nativesdk-shadow \
+    nativesdk-squashfs-tools \
+    nativesdk-unfs3 \
     packagegroup-cross-canadian-${MACHINE} \
 "
 
