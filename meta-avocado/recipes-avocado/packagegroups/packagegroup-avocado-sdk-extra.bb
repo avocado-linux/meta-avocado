@@ -5,14 +5,16 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
+  nativesdk-bmaptool \
+  nativesdk-fwup \
+  nativesdk-ganesha \
+  nativesdk-jq \
+  nativesdk-mkfat \
+  nativesdk-python3-pip \
   nativesdk-qemu \
   nativesdk-qemu-helper \
-  nativesdk-bmaptool \
-  nativesdk-python3-pip \
-  nativesdk-strace \
-  nativesdk-ganesha \
-  nativesdk-mkfat \
   nativesdk-stone \
+  nativesdk-strace \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
