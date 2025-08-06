@@ -17,9 +17,6 @@ repos:
     layers:
       .:
 
-env:
-  PARALLEL_MAKE_ERLANG: ""
-
 local_conf_header:
   extra-peridio: |
     PTEST_ENABLED:pn-erlang = "0"

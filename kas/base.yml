@@ -1,5 +1,10 @@
 header:
   version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/ptx.yml
+  - repo: meta-avocado
+    file: kas/vendor/fwup.yml
 
 env:
   AVOCADO_REPO_BASE: "http://package-repo"
@@ -48,14 +53,6 @@ repos:
     path: meta-lts-mixins
     branch: scarthgap/rust
     commit: 65c51abe3871d50e599366765838d1478eba093e
-    layers:
-      .:
-
-  meta-ptx:
-    url: https://github.com/avocado-linux/vendor-meta-ptx.git
-    path: meta-ptx
-    branch: scarthgap
-    commit: 1189ee566604d7439e824242825da29ae3729ae5
     layers:
       .:
 

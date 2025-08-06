@@ -1,0 +1,11 @@
+header:
+  version: 16
+
+repos:
+  meta-fwup:
+    url: https://github.com/avocado-linux/vendor-meta-fwup.git
+    path: meta-fwup
+    commit: efd16d9cf0bd08aea1d74890000bd24242a1b986
+    branch: master
+    layers:
+      .:
