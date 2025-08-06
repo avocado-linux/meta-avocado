@@ -42,8 +42,6 @@ FILES:${PN} = " \
 # Set package arch so it deploys to a specific directory
 PACKAGE_ARCH = "all_avocadosdk"
 
-AVOCADO_REPO_BASE ?= "http://localhost:8080"
-
 python do_install() {
     import os
     import bb
@@ -51,8 +49,6 @@ python do_install() {
     d_dir = d.getVar('D')
     deploy_dir_rpm = d.getVar('DEPLOY_DIR_RPM')
     bb.note(f"DEPLOY_DIR_RPM value: {deploy_dir_rpm}")
-    base_repo_url = d.getVar('AVOCADO_REPO_BASE') # Base URL for the repo server
-    distro_codename = d.getVar('DISTRO_CODENAME')
     machine = d.getVar('MACHINE')
     sdk_pkg_suffix = d.getVar('SDKPKGSUFFIX') or ""
     pkg_archs = (d.getVar('PACKAGE_ARCHS') or "").split()
@@ -76,12 +72,12 @@ python do_install() {
         # --- Apply Rules ---
         if arch == "all_avocadosdk":
             # Rule: all_avocadosdk -> DISTRO/sdk/all
-            map_value_path = f"{distro_codename}/sdk/all"
+            map_value_path = f"$releasever/sdk/all"
             bb.note(f"Mapping arch '{arch}' (dir: {arch_dir}) to map path '{map_value_path}' (no repo entry)")
 
         elif arch in sdk_repo_archs:
             # Rule: Dedicated SDK arch -> DISTRO/sdk/MACHINE_SHORT
-            map_value_path = f"{distro_codename}/sdk/{machine_short_name}"
+            map_value_path = f"$releasever/sdk/{machine_short_name}"
             repo_url_path = map_value_path
             repo_name = f"{machine_short_name}-sdk"
             repo_section_name = repo_name
@@ -90,7 +86,7 @@ python do_install() {
         elif arch_dir == machine.replace('-', '_'):
             # Rule: MACHINE -> DISTRO/target/MACHINE_SHORT
             # Compare underscore versions to handle potential input mismatch
-            map_value_path = f"{distro_codename}/target/{machine_short_name}"
+            map_value_path = f"$releasever/target/{machine_short_name}"
             repo_url_path = map_value_path
             repo_name = f"{machine_short_name}-target"
             repo_section_name = repo_name
@@ -98,7 +94,7 @@ python do_install() {
 
         else:
             # Rule: other -> DISTRO/target/arch_dir
-            map_value_path = f"{distro_codename}/target/{arch_dir}"
+            map_value_path = f"$releasever/target/{arch_dir}"
             repo_url_path = map_value_path
             # Use original arch (with hyphens) for naming consistency
             repo_name = f"{machine_short_name}-{arch}"
@@ -126,7 +122,7 @@ python do_install() {
             repo_f.write(f"[{repo_section_name}]\n")
             repo_f.write(f"name={repo_name}\n")
             # Base URL for repo file uses the main repo server base
-            repo_f.write(f"baseurl={base_repo_url}/{repo_url_path}\n")
+            repo_f.write(f"baseurl=${{repo_url}}/{repo_url_path}\n")
             repo_f.write(f"enabled=1\n")
             repo_f.write(f"gpgcheck={gpg_check}\n")
             repo_f.write(f"priority={priority}\n")
@@ -240,7 +236,7 @@ python do_install() {
     bb.note(f"Initial write/clear done for map file: {map_file_path}")
 
     # --- Unconditionally add the mapping for this recipe's own arch ---
-    map_value_path_for_all = f"{distro_codename}/sdk/all"
+    map_value_path_for_all = f"$releasever/sdk/all"
     with open(map_file_path, 'a') as map_f:
         bb.note(f"Appending unconditional map entry to: {map_file_path}")
         bb.note(f"Adding unconditional map entry: all_avocadosdk={map_value_path_for_all}")

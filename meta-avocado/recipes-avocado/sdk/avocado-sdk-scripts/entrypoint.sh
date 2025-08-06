@@ -20,6 +20,13 @@ else
     CODENAME=${CODENAME:-dev}
 fi
 
+# Get repo url from environment or default to prod
+if [ -n "$AVOCADO_SDK_REPO_URL" ]; then
+    REPO_URL="$AVOCADO_SDK_REPO_URL"
+else
+    REPO_URL="https://repo.avocadolinux.org"
+fi
+
 export AVOCADO_PREFIX="/opt/_avocado/${AVOCADO_SDK_TARGET}"
 export AVOCADO_SDK_PREFIX="${AVOCADO_PREFIX}/sdk"
 export AVOCADO_EXT_SYSROOTS="${AVOCADO_PREFIX}/extensions"
@@ -55,6 +62,14 @@ export DNF_SDK_TARGET_REPO_CONF="\
 
 export RPM_ETCCONFIGDIR="$AVOCADO_SDK_PREFIX"
 export RPM_NO_CHROOT_FOR_SCRIPTS=1
+
+mkdir -p /etc/dnf/vars
+mkdir -p ${AVOCADO_SDK_PREFIX}/etc/dnf/vars
+mkdir -p ${AVOCADO_SDK_PREFIX}/target-repoconf/etc/dnf/vars
+
+echo "${REPO_URL}" > /etc/dnf/vars/repo_url
+echo "${REPO_URL}" > ${AVOCADO_SDK_PREFIX}/etc/dnf/vars/repo_url
+echo "${REPO_URL}" > ${AVOCADO_SDK_PREFIX}/target-repoconf/etc/dnf/vars/repo_url
 
 if [ -f "${AVOCADO_SDK_PREFIX}/environment-setup" ]; then
     echo "--- Avocado SDK: Found ${AVOCADO_SDK_PREFIX}/environment-setup ---"
