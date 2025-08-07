@@ -1,8 +1,8 @@
 header:
   version: 16
   includes:
-    - repo: meta-avocado
-      file: kas/vendor/arm.yml
+  - repo: meta-avocado
+    file: kas/vendor/arm.yml
 
 repos:
   meta-avocado:
@@ -14,7 +14,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-rockchip
     path: meta-rockchip
     branch: scarthgap
-    commit: 9690180b7e9953361958c962b80d891eda8c1028
+    commit: 10dce67934a45008027f9be750106d5bc8d2e0b2
     layers:
       .:
 
