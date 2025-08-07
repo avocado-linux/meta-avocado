@@ -10,14 +10,14 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 source "${SCRIPT_DIR}/avocado-sdk-common.sh"
 
 # Get codename from environment or os-release
-if [ -n "$AVOCADO_SDK_CODENAME" ]; then
-    CODENAME="$AVOCADO_SDK_CODENAME"
+if [ -n "$AVOCADO_SDK_REPO_RELEASE" ]; then
+    REPO_RELEASE="$AVOCADO_SDK_REPO_RELEASE"
 else
     # Read VERSION_CODENAME from os-release, defaulting to "dev" if not found
     if [ -f /etc/os-release ]; then
-        CODENAME=$(grep "^VERSION_CODENAME=" /etc/os-release | cut -d= -f2 | tr -d '"')
+        REPO_RELEASE=$(grep "^VERSION_CODENAME=" /etc/os-release | cut -d= -f2 | tr -d '"')
     fi
-    CODENAME=${CODENAME:-dev}
+    REPO_RELEASE=${REPO_RELEASE:-dev}
 fi
 
 # Get repo url from environment or default to prod
@@ -34,7 +34,7 @@ export DNF_SDK_HOST_PREFIX="${AVOCADO_SDK_PREFIX}"
 export DNF_SDK_TARGET_PREFIX="${AVOCADO_SDK_PREFIX}/target-repoconf"
 export DNF_SDK_HOST="\
     dnf \
-    --releasever="$CODENAME" \
+    --releasever="$REPO_RELEASE" \
     --best \
     --setopt=tsflags=noscripts \
 "

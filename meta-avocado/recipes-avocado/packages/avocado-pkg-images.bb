@@ -13,7 +13,6 @@ INSANE_SKIP:${PN} += "arch"
 do_compile[depends] += "avocado-image-initramfs:do_image_complete"
 do_compile[depends] += "avocado-image-rootfs:do_image_complete"
 do_compile[depends] += "avocado-image-var:do_deploy"
-do_compile[depends] += "${@bb.utils.contains('MACHINE_FEATURES', 'genimage', 'avocado-image-genimage:do_deploy', '', d)}"
 do_compile[depends] += "virtual/kernel:do_deploy"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
@@ -35,10 +34,6 @@ python do_collect_artifacts() {
     # Copy everything from deploy dir
     if os.path.exists(deploy_dir):
         for item in os.listdir(deploy_dir):
-            # Skip avocado-image-genimage files
-            if item.startswith('avocado-image-genimage'):
-                continue
-
             src = os.path.join(deploy_dir, item)
             dst = os.path.join(dest_dir, item)
 

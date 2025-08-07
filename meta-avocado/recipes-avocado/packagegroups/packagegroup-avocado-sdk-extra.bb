@@ -13,7 +13,6 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-python3-pip \
   nativesdk-qemu \
   nativesdk-qemu-helper \
-  nativesdk-stone \
   nativesdk-strace \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \

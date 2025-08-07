@@ -12,7 +12,7 @@ fi
 YOCTO_DEPLOY_DIR=$1
 MAP_FILE="${YOCTO_DEPLOY_DIR}/avocado-repo.map"
 
-releasever="${AVOCADO_SDK_REPO_RELEASE}"
+releasever="${AVOCADO_SDK_REPO_RELEASE:-dev}"
 
 if [ ! -f "${MAP_FILE}" ]; then
     echo "Error: Map file not found at ${MAP_FILE}" >&2
@@ -30,6 +30,8 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
         echo "Skipping invalid line: $key=$value"
         continue
     fi
+
+    value=$(eval "echo \"${value}\"")
 
     source_dir="${YOCTO_DEPLOY_DIR}/${key}"
     # Target dir uses the full path specified in the map value

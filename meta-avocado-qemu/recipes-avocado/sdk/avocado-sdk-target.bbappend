@@ -5,9 +5,22 @@ SRC_URI:append = "\
   file://avocado-run-qemu \
   file://${MACHINE_SHORT_NAME}/rootdisk.conf \
 "
+
+SHARED_RDEPENDS = "\
+  nativesdk-fwup \
+  nativesdk-mkfat \
+  nativesdk-jq \
+"
+
 DEPENDS:append = " nativesdk-qemu"
-RDEPENDS:${PN}:append:qemuarm64 = " nativesdk-qemu-system-aarch64 nativesdk-fwup"
-RDEPENDS:${PN}:append:qemux86-64 = " nativesdk-qemu-system-x86-64 nativesdk-fwup"
+RDEPENDS:${PN}:append:qemuarm64 = " \
+  nativesdk-qemu-system-aarch64 \
+  ${SHARED_RDEPENDS} \
+"
+RDEPENDS:${PN}:append:qemux86-64 = " \
+  nativesdk-qemu-system-x86-64 \
+  ${SHARED_RDEPENDS} \
+"
 
 do_install:append() {
     install -m 0755 ${WORKDIR}/avocado-run-qemu ${D}${SDKPATHNATIVE}${bindir}

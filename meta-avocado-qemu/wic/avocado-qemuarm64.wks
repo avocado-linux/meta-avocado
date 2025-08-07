@@ -1,5 +1,0 @@
-bootloader --ptable gpt --configfile="qemuarm64.cfg"
-
-part /boot --ondisk=vda --align 64 --size=100M --active --source bootimg-partition --fstype=ext4     --label boot --sourceparams="loader=u-boot"
-part /     --ondisk=vda                                 --source rootfs            --fstype=squashfs      --align 1024 --part-type b921b045-1df0-41c3-af44-4c6f280d3fae
-part /var --source rawcopy --sourceparams="file=${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE}.var.img" --fstype=btrfs --align 1024 --uuid 4d21b016-b534-45c2-a9fb-5c16e091fd2d

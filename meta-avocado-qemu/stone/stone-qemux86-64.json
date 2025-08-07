@@ -1,18 +1,20 @@
 {
   "runtime": {
     "platform": "avocado-qemux86-64",
-    "architecture": "x86_64"
+    "architecture": "arm64"
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-raspberrypi4-rootdisk.zip",
+      "out": "avocado-qemux86-64-rootdisk.zip",
       "build": "fwup",
       "build_args": {
         "template": "rootdisk.conf"
       },
       "devpath": "/dev/mmcblk0",
       "block_size": 512,
+      "uuid": "4bc367b3-5d70-4289-b24d-9b09cb79685c",
       "images": {
+        "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",
           "size": 128,
@@ -31,19 +33,52 @@
       },
       "partitions": [
         {
+          "name": "uboot_env",
+          "image": "uboot_env",
+          "offset": 1,
+          "offset_unit": "mebibytes",
+          "offset_redundant": 1152,
+          "offset_redundant_unit": "kibibytes",
+          "size": 128,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "boot-a",
           "image": "boot",
-          "offset": 1028,
-          "offset_unit": "bytes",
+          "offset": 2,
+          "offset_unit": "mebibytes",
           "size": 128,
           "size_unit": "mebibytes"
         },
         {
+          "name": "boot-b",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "recovery",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
           "image": "rootfs",
           "size": 160,
           "size_unit": "mebibytes"
         },
         {
+          "name": "rootfs-b",
+          "image": "",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
           "image": "var",
+          "size": 128,
+          "size_unit": "mebibytes",
           "expand": "true"
         }
       ]

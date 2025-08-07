@@ -5,9 +5,11 @@ set -e
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+IMAGES_DIR="${AVOCADO_PREFIX}/images"
+DEPLOY_DIR="${IMAGES_DIR}/deploy"
 
 # Source the common functions
-source "${SCRIPT_DIR}/avocado-sdk-common.sh"
+source "avocado-sdk-common.sh"
 
 # Define the main function that will run in the SDK environment
 run_qemu() {
@@ -18,7 +20,7 @@ run_qemu() {
         exit 1
     fi
 
-    IMAGE_FILE="${AVOCADO_PREFIX}/output/avocado-image-${AVOCADO_SDK_TARGET}.img"
+    IMAGE_FILE="${DEPLOY_DIR}/${AVOCADO_SDK_TARGET}-rootdisk.img"
     if [ ! -f "$IMAGE_FILE" ]; then
         echo "Error: Image file not found: $IMAGE_FILE"
         echo "Please build the image first using: avocado-build image"
@@ -26,8 +28,6 @@ run_qemu() {
     fi
 
     qemu-img resize -f raw "${IMAGE_FILE}" 1024M
-
-    IMAGES_DIR="${AVOCADO_PREFIX}/images"
 
     if [[ "$AVOCADO_SDK_TARGET" == "qemux86-64" ]]; then
         QEMU_SYSTEM="qemu-system-x86_64"

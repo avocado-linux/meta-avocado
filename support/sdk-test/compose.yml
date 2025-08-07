@@ -3,6 +3,8 @@ services:
     build:
       context: ../package-repo
       dockerfile: Containerfile
+    environment:
+      - AVOCADO_SDK_REPO_RELEASE=${AVOCADO_SDK_REPO_RELEASE:-dev}
     ports:
       - "8080:80"
     volumes:
@@ -23,6 +25,8 @@ services:
     image: avocadolinux/sdk:dev
     environment:
       - AVOCADO_SDK_TARGET=${AVOCADO_SDK_TARGET:-qemux86-64}
+      - AVOCADO_SDK_REPO_URL=${AVOCADO_SDK_REPO_URL:-http://package-repo}
+      - AVOCADO_SDK_REPO_RELEASE=${AVOCADO_SDK_REPO_RELEASE:-dev}
     depends_on:
       package-repo:
         condition: service_healthy

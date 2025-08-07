@@ -12,23 +12,25 @@ OUTPUT_DIR="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
 
 mkdir -p "$OUTPUT_DIR"
 
-echo "Preparing genimage configuration."
-cp "$DEPLOY_DIR/genimage.cfg" "$OUTPUT_DIR/genimage.cfg"
-sed -i "s|@VAR-IMG@|$OUTPUT_DIR/avocado-image-var.btrfs|g" "$OUTPUT_DIR/genimage.cfg"
-sed -i "s|@IMAGE@|avocado-image-qemux86-64.img|g" "$OUTPUT_DIR/genimage.cfg"
-sed -i "s|@MACHINE@|avocado-${AVOCADO_SDK_TARGET}|g" "$OUTPUT_DIR/genimage.cfg"
+# Replace with device specific runtime build
+#
+# echo "Preparing genimage configuration."
+# cp "$DEPLOY_DIR/genimage.cfg" "$OUTPUT_DIR/genimage.cfg"
+# sed -i "s|@VAR-IMG@|$OUTPUT_DIR/avocado-image-var.btrfs|g" "$OUTPUT_DIR/genimage.cfg"
+# sed -i "s|@IMAGE@|avocado-image-qemux86-64.img|g" "$OUTPUT_DIR/genimage.cfg"
+# sed -i "s|@MACHINE@|avocado-${AVOCADO_SDK_TARGET}|g" "$OUTPUT_DIR/genimage.cfg"
 
-echo "Preparing temporary directory."
-TMP_DIR="$AVOCADO_PREFIX/genimage-tmp"
-rm -rf "$TMP_DIR"
-mkdir -p "$TMP_DIR"
+# echo "Preparing temporary directory."
+# TMP_DIR="$AVOCADO_PREFIX/genimage-tmp"
+# rm -rf "$TMP_DIR"
+# mkdir -p "$TMP_DIR"
 
-echo "Running genimage."
-genimage --config "$OUTPUT_DIR/genimage.cfg" \
-  --inputpath "$DEPLOY_DIR" \
-  --outputpath "$OUTPUT_DIR" \
-  --tmppath "$TMP_DIR" \
-  --rootpath "$OUTPUT_DIR"
+# echo "Running genimage."
+# genimage --config "$OUTPUT_DIR/genimage.cfg" \
+#   --inputpath "$DEPLOY_DIR" \
+#   --outputpath "$OUTPUT_DIR" \
+#   --tmppath "$TMP_DIR" \
+#   --rootpath "$OUTPUT_DIR"
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0

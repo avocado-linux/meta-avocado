@@ -22,7 +22,6 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-dosfstools \
     nativesdk-dummy-provides \
     nativesdk-flex \
-    nativesdk-genimage \
     nativesdk-libtool \
     nativesdk-make \
     nativesdk-makedevs \
@@ -33,6 +32,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-pkgconfig \
     nativesdk-pseudo \
     nativesdk-shadow \
+    nativesdk-stone \
     nativesdk-squashfs-tools \
     nativesdk-unfs3 \
     packagegroup-cross-canadian-${MACHINE} \
