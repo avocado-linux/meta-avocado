@@ -1,0 +1,59 @@
+machine=imx93-frdm
+initramfs_file=avocado-image-initramfs-avocado-imx93-frdm.cpio.zst
+devicetree_file=imx93-11x11-frdm.dtb
+kernel_file=Image
+
+console=ttyLP0,115200
+devtype=mmc
+devnum=1
+bootpart=3
+rootdev=/dev/mmcblk1p6
+
+image_addr=0x80200000
+fdt_addr=0x83000000
+ramdisk_addr=0x84000000
+
+# Calculate partition based on avocado_boot_slot
+avocado_boot_init=\
+  if test -n "${avocado_boot_slot}"; then\
+    if test "${avocado_boot_slot}" = "a"; then\
+      echo "Booting A";\
+      setenv bootpart 3;\
+      setenv rootdev /dev/mmcblk1p6;\
+    else\
+      if test "${avocado_boot_slot}" = "b"; then\
+        echo "Booting B";\
+        setenv bootpart 4;\
+        setenv rootdev /dev/mmcblk1p7;\
+      else\
+        if test "${avocado_boot_slot}" = "r"; then\
+          echo "Booting Recovery";\
+          setenv bootpart 5;\
+          setenv rootdev;\
+        else\
+          echo "avocado_boot_slot=${avocado_boot_slot} invalid";\
+          echo "Booting Recovery";\
+          setenv bootpart 5;\
+          setenv rootdev;\
+        fi;\
+      fi;\
+    fi;\
+  else\
+    echo "avocado_boot_slot undefined";\
+    echo "Booting A";\
+    setenv bootpart 3;\
+    setenv rootdev /dev/mmcblk1p6;\
+  fi;\
+  if test -n "${rootdev}"; then\
+    setenv bootargs console=${console} root=${rootdev} rootwait;\
+  else\
+    setenv bootargs console=${console} rootwait;\
+  fi;
+
+load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
+load_devicetree=load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file}
+load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}
+
+avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
+
+bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot

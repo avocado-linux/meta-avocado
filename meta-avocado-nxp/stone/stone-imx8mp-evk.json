@@ -3,5 +3,95 @@
     "platform": "avocado-imx8mp-evk",
     "architecture": "arm64"
   },
-  "storage_devices": {}
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-imx8mp-evk-rootdisk.zip",
+      "build_args": {
+        "type": "fwup",
+        "template": "rootdisk.conf"
+      },
+      "devpath": "/dev/mmcblk1",
+      "block_size": 512,
+      "uuid": "4bc367b3-5d70-4289-b24d-9b09cb79685c",
+      "images": {
+        "imx_boot": "imx-boot",
+        "uboot_env": "uboot.env",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32"
+          },
+          "files": [
+            "avocado-image-initramfs-avocado-imx8mp-evk.cpio.zst",
+            "Image",
+            "imx8mp-evk.dtb"
+          ]
+        },
+        "rootfs": "avocado-image-rootfs-avocado-imx8mp-evk.rootfs.squashfs",
+        "var": "avocado-image-var-avocado-imx8mp-evk.var.img"
+      },
+      "partitions": [
+        {
+          "name": "imx-boot",
+          "image": "imx_boot",
+          "offset": 32,
+          "offset_unit": "kibibytes",
+          "size": 3072,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "offset": 4,
+          "offset_unit": "mebibytes",
+          "offset_redundant": 4352,
+          "offset_redundant_unit": "kibibytes",
+          "size": 128,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "boot-a",
+          "image": "boot",
+          "offset": 6,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot-b",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "recovery",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
+          "image": "rootfs",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "image": "",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "expand": "true"
+        }
+      ]
+    }
+  }
 }

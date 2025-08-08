@@ -13,6 +13,7 @@ INSANE_SKIP:${PN} += "arch"
 do_compile[depends] += "avocado-image-initramfs:do_image_complete"
 do_compile[depends] += "avocado-image-rootfs:do_image_complete"
 do_compile[depends] += "avocado-image-var:do_deploy"
+do_compile[depends] += "avocado-stone:do_compile"
 do_compile[depends] += "virtual/kernel:do_deploy"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
