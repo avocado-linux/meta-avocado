@@ -33,7 +33,7 @@
       },
       "partitions": [
         {
-          "name": "uboot_env",
+          "name": "uboot-env",
           "image": "uboot_env",
           "offset": 1,
           "offset_unit": "mebibytes",

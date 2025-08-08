@@ -1,13 +1,14 @@
-do_compile[depends] += "u-boot-imx:do_deploy"
-do_compile[depends] += "imx-boot:do_deploy"
+inherit stone
+
+do_compile[depends] += "u-boot:do_deploy"
 
 DEPENDS += " jq-native mkfat-native fwup-native"
 
-SRC_URI += "file://imx/rootdisk.conf"
+SRC_URI += "file://${MACHINE_SHORT_NAME}/rootdisk.conf"
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0644 ${WORKDIR}/imx/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  install -m 0644 ${WORKDIR}/${MACHINE_SHORT_NAME}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
 }
 
 do_stone_provision:append() {
@@ -40,11 +41,9 @@ do_stone_provision:append() {
   boot_config=$(echo "${images_config}" | jq .boot)
   boot_size=$(echo "${boot_config}" | jq -r .size)
   boot_image_file=$(echo "${boot_config}" | jq -r .out)
-  imx_boot_image_file=$(echo "${images_config}" | jq -r --arg key "imx_boot" '.[$key] | if type=="object" then .out else . end')
   echo "${boot_config}" | mkfat -b "${DEPLOY_DIR_IMAGE}" -s "${boot_size}" -o "${DEPLOY_DIR_IMAGE}/${boot_image_file}"
 
   partitions_config=$(echo "${rootdisk_config}" | jq .partitions)
-  imx_boot_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "imx-boot")')
   uboot_env_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "uboot-env")')
   boot_a_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "boot-a")')
   boot_b_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "boot-b")')
@@ -53,16 +52,6 @@ do_stone_provision:append() {
   var_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "var")')
 
   block_size=$(echo "${rootdisk_config}" | jq -r .block_size)
-
-  imx_boot_offset_val=$(echo "${imx_boot_partition}" | jq -r .offset)
-  imx_boot_offset_unit=$(echo "${imx_boot_partition}" | jq -r .offset_unit)
-  imx_boot_offset_in_bytes=$(convert_unit_to_bytes "$imx_boot_offset_val" "$imx_boot_offset_unit")
-  imx_boot_offset_blocks=$(expr "$imx_boot_offset_in_bytes" / "$block_size")
-
-  imx_boot_size_val=$(echo "${imx_boot_partition}" | jq -r .size)
-  imx_boot_size_unit=$(echo "${imx_boot_partition}" | jq -r .size_unit)
-  imx_boot_size_in_bytes=$(convert_unit_to_bytes "$imx_boot_size_val" "$imx_boot_size_unit")
-  imx_boot_size_blocks=$(expr "$imx_boot_size_in_bytes" / "$block_size")
 
   uboot_env_offset_val=$(echo "${uboot_env_partition}" | jq -r .offset)
   uboot_env_offset_unit=$(echo "${uboot_env_partition}" | jq -r .offset_unit)
@@ -174,7 +163,6 @@ do_stone_provision:append() {
   fi
 
   export AVOCADO_SDK_RUNTIME_DIR="${DEPLOY_DIR_IMAGE}"
-  export AVOCADO_IMAGE_IMX_BOOT="${imx_boot_image_file}"
   export AVOCADO_IMAGE_UBOOT_ENV="${uboot_env_image_file}"
   export AVOCADO_IMAGE_BOOT="${boot_image_file}"
   export AVOCADO_IMAGE_ROOTFS="${rootfs_a_image_file}"
@@ -186,8 +174,6 @@ do_stone_provision:append() {
   export AVOCADO_OS_ARCHITECTURE="${architecture}"
   export AVOCADO_OS_AUTHOR="Avocado Linux"
   export AVOCADO_DISK_UUID="${disk_uuid}"
-  export AVOCADO_PARTITION_IMX_BOOT_OFFSET="${imx_boot_offset_blocks}"
-  export AVOCADO_PARTITION_IMX_BOOT_BLOCKS="${imx_boot_size_blocks}"
   export AVOCADO_PARTITION_UBOOT_ENV_OFFSET="${uboot_env_offset_blocks}"
   export AVOCADO_PARTITION_UBOOT_ENV_OFFSET_REDUND="${uboot_env_offset_redund_blocks}"
   export AVOCADO_PARTITION_UBOOT_ENV_BLOCKS="${uboot_env_size_blocks}"
@@ -205,7 +191,6 @@ do_stone_provision:append() {
   export AVOCADO_PARTITION_VAR_BLOCKS="${var_size_blocks}"
 
   bbnote "AVOCADO_SDK_RUNTIME_DIR=${AVOCADO_SDK_RUNTIME_DIR}"
-  bbnote "AVOCADO_IMAGE_IMX_BOOT=${AVOCADO_IMAGE_IMX_BOOT}"
   bbnote "AVOCADO_IMAGE_UBOOT_ENV=${AVOCADO_IMAGE_UBOOT_ENV}"
   bbnote "AVOCADO_IMAGE_BOOT=${AVOCADO_IMAGE_BOOT}"
   bbnote "AVOCADO_IMAGE_ROOTFS=${AVOCADO_IMAGE_ROOTFS}"
@@ -217,8 +202,6 @@ do_stone_provision:append() {
   bbnote "AVOCADO_OS_ARCHITECTURE=${AVOCADO_OS_ARCHITECTURE}"
   bbnote "AVOCADO_OS_AUTHOR=${AVOCADO_OS_AUTHOR}"
   bbnote "AVOCADO_DISK_UUID=${AVOCADO_DISK_UUID}"
-  bbnote "AVOCADO_PARTITION_IMX_BOOT_OFFSET=${AVOCADO_PARTITION_IMX_BOOT_OFFSET}"
-  bbnote "AVOCADO_PARTITION_IMX_BOOT_BLOCKS=${AVOCADO_PARTITION_IMX_BOOT_BLOCKS}"
   bbnote "AVOCADO_PARTITION_UBOOT_ENV_OFFSET=${AVOCADO_PARTITION_UBOOT_ENV_OFFSET}"
   bbnote "AVOCADO_PARTITION_UBOOT_ENV_OFFSET_REDUND=${AVOCADO_PARTITION_UBOOT_ENV_OFFSET_REDUND}"
   bbnote "AVOCADO_PARTITION_UBOOT_ENV_BLOCKS=${AVOCADO_PARTITION_UBOOT_ENV_BLOCKS}"

@@ -9,9 +9,11 @@ SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
 # Image paths relative to build directory
-MACHINE="avocado-qemux86-64"
+MACHINE_SHORT_NAME="qemux86-64"
+MACHINE="avocado-${MACHINE_SHORT_NAME}"
 DEPLOY_DIR="$BUILD_DIR/tmp/deploy/images/$MACHINE"
-IMAGE_NAME="avocado-image-genimage-$MACHINE.img"
+IMAGE_NAME="${MACHINE_SHORT_NAME}-rootdisk.img"
+IMAGE_FILE="$DEPLOY_DIR/$IMAGE_NAME"
 QEMU_BIOS="${DEPLOY_DIR}/u-boot.rom"
 QEMU_IMG="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-img"
 QEMU_EXEC="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-x86_64"
@@ -20,14 +22,14 @@ echo "LIB_PATH=$LIB_PATH"
 echo "Starting QEMU..."
 echo "-------------------------------------"
 
-LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_IMG" resize -f raw "$DEPLOY_DIR/$IMAGE_NAME" 1024M
+LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_IMG" resize -f raw "$IMAGE_FILE" 1024M
 
 # Run QEMU with TPM support
 LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_EXEC" \
   -bios "${QEMU_BIOS}" \
   -device sdhci-pci \
   -device sd-card,drive=mmc \
-  -drive file="$DEPLOY_DIR/$IMAGE_NAME",if=none,format=raw,id=mmc \
+  -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
   -m 256 \
   -cpu max \
   -nographic

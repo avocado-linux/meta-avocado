@@ -22,14 +22,14 @@ inherit deploy
 do_stone_validate[nostamp] = "1"
 
 do_deploy() {
-    install -d ${DEPLOYDIR}/stone
-    install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone/stone-${MACHINE_SHORT_NAME}.json
+    install -d ${DEPLOYDIR}
+    install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
 }
 
 do_stone_validate:stone-validate() {
     stone \
         validate \
-        -m "${DEPLOY_DIR_IMAGE}/stone/stone-${MACHINE_SHORT_NAME}.json" \
+        -m "${DEPLOY_DIR_IMAGE}/stone-${MACHINE_SHORT_NAME}.json" \
         -i "${DEPLOY_DIR_IMAGE}"
 }
 

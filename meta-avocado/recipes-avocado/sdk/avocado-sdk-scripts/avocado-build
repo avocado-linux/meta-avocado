@@ -144,7 +144,7 @@ build_extension() {
         echo "${boot_config}" | mkfat -b "${DEPLOY_DIR}" -s "${boot_size}" -o "${DEPLOY_DIR}/${boot_image_file}"
 
         partitions_config=$(echo "${rootdisk_config}" | jq .partitions)
-        uboot_env_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "uboot_env")')
+        uboot_env_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "uboot-env")')
         boot_a_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "boot-a")')
         boot_b_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "boot-b")')
         rootfs_a_partition=$(echo "${partitions_config}" | jq -r '.[] | select(.name == "rootfs-a")')

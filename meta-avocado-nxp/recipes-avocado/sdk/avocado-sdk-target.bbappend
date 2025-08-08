@@ -13,7 +13,7 @@ RDEPENDS:${PN}:append = " \
 "
 
 do_install:append() {
-    install -d ${D}${SDKPATHNATIVE}/stone/${MACHINE_SHORT_NAME}
+    install -d ${D}${SDKPATHNATIVE}/${MACHINE_SHORT_NAME}
     install -m 0644 ${WORKDIR}/imx/rootdisk.conf ${D}${SDKPATHNATIVE}/stone/${MACHINE_SHORT_NAME}/rootdisk.conf
     install -m 0755 ${WORKDIR}/imx/stone-provision-sd.sh ${D}${SDKPATHNATIVE}/stone/${MACHINE_SHORT_NAME}/stone-provision.sh
 }
