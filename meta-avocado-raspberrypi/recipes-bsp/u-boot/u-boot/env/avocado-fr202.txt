@@ -1,0 +1,27 @@
+machine=avocado-fr202
+initramfs_file=avocado-image-initramfs-avocado-fr202.cpio.zst
+kernel_file=Image
+
+stderr=serial,vidconsole
+stdin=serial,usbkbd
+stdout=serial,vidconsole
+serial#=1000000088c98f3b
+
+fdt_addr=2eff2000
+fdt_addr_r=0x02600000
+fdt_high=ffffffffffffffff
+
+initrd_high=ffffffffffffffff
+kernel_addr_r=0x00080000
+ramdisk_addr_r=0x02700000
+
+devtype=mmc
+devnum=0
+bootpart=1
+rootdev=/dev/mmcblk0p3
+
+load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
+load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} ${initramfs_file}
+avocado_boot=booti ${kernel_addr_r} ${ramdisk_addr_r}:${filesize} ${fdt_addr};
+
+bootcmd=run load_image load_initramfs avocado_boot
