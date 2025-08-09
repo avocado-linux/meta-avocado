@@ -182,7 +182,7 @@ do_stone_provision:append() {
   export AVOCADO_OS_CODENAME="${AVOCADO_SDK_REPO_RELEASE}"
   export AVOCADO_OS_DESCRIPTION="Avocado ${AVOCADO_SDK_REPO_RELEASE}"
   export AVOCADO_OS_VERSION="${AVOCADO_OS_VERSION_FINAL}"
-  export AVOCADO_OS_PLATFORM="${AVOCADO_SDK_TARGET}"
+  export AVOCADO_OS_PLATFORM="${MACHINE}"
   export AVOCADO_OS_ARCHITECTURE="${architecture}"
   export AVOCADO_OS_AUTHOR="Avocado Linux"
   export AVOCADO_DISK_UUID="${disk_uuid}"
