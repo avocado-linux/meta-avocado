@@ -24,7 +24,6 @@
           },
           "files": [
             { "in": "u-boot.bin", "out": "kernel8.img" },
-            { "in": "avocado-image-initramfs-avocado-raspberrypi4.cpio.zst", "out": "initramfs.cpio.zst" },
             { "in": "bootfiles/bootcode.bin", "out": "bootcode.bin" },
             { "in": "bootfiles/cmdline.txt", "out": "cmdline.txt" },
             { "in": "bootfiles/config.txt", "out": "config.txt" },
@@ -47,7 +46,9 @@
             "bcm2711-rpi-4-b.dtb",
             "bcm2711-rpi-400.dtb",
             "bcm2711-rpi-cm4.dtb",
-            "bcm2711-rpi-cm4s.dtb"
+            "bcm2711-rpi-cm4s.dtb",
+            "avocado-image-initramfs-avocado-raspberrypi4.cpio.zst",
+            "Image"
           ]
         },
         "rootfs": "avocado-image-rootfs-avocado-raspberrypi4.rootfs.squashfs",
@@ -55,12 +56,14 @@
       },
       "partitions": [
         {
+          "name": "uboot-env",
           "image": "uboot_env",
           "offset": 1,
           "offset_unit": "mebibytes",
           "offset_redundant": 1152,
           "offset_redundant_unit": "kibibytes",
           "size": 128,
+          "size_unit": "kibibytes",
           "in-partition-table": "false"
         },
         {
@@ -96,6 +99,7 @@
           "size_unit": "mebibytes"
         },
         {
+          "name": "var",
           "image": "var",
           "size": 256,
           "size_unit": "mebibytes",

@@ -6,3 +6,7 @@ RPI_USE_U_BOOT = "1"
 
 CMDLINE_ROOT_PARTITION = "/dev/mmcblk0p2"
 CMDLINE_ROOT_FSTYPE = "rootfstype=squashfs"
+
+AVOCADO_VAR_PART_DEV = "/dev/mmcblk0p3"
+
+DEPENDS:append:pn-mesa = " libxshmfence"
