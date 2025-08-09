@@ -1,7 +1,7 @@
 inherit cargo cargo-update-recipe-crates
 
 SRCBRANCH = "main"
-SRCREV = "be2ad5a9f5537d6dbfca6950206ae31a5aedb612"
+SRCREV = "bcc8ceccc8d4a31081bdf799a298415458080041"
 SRC_URI = "git://git@github.com/avocado-linux/mkfat.git;protocol=https;nobranch=1;branch=${SRCBRANCH}"
 
 SRC_URI[sha256sum] = "3ebfa61108b7f31db116a647c21a547a15210bc005c16c04598f9e2b9153f3d1"

@@ -6,8 +6,8 @@
   "storage_devices": {
     "rootdisk": {
       "out": "avocado-qemux86-64-rootdisk.zip",
-      "build": "fwup",
       "build_args": {
+        "type": "fwup",
         "template": "rootdisk.conf"
       },
       "devpath": "/dev/mmcblk0",
@@ -21,12 +21,12 @@
           "size_unit": "mebibytes",
           "build_args": {
             "type": "fat",
-            "variant": "FAT32"
-          },
-          "files": [
-            "avocado-image-initramfs-avocado-qemux86-64.cpio.zst",
-            "bzImage"
-          ]
+            "variant": "FAT32",
+            "files": [
+              "avocado-image-initramfs-avocado-qemux86-64.cpio.zst",
+              "bzImage"
+            ]
+          }
         },
         "rootfs": "avocado-image-rootfs-avocado-qemux86-64.rootfs.squashfs",
         "var": "avocado-image-var-avocado-qemux86-64.var.img"

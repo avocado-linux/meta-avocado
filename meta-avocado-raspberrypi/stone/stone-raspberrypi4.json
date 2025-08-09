@@ -6,8 +6,8 @@
   "storage_devices": {
     "rootdisk": {
       "out": "avocado-raspberrypi4-rootdisk.zip",
-      "build": "fwup",
       "build_args": {
+        "type": "fwup",
         "template": "rootdisk.conf"
       },
       "devpath": "/dev/mmcblk0",
@@ -20,9 +20,8 @@
           "size_unit": "mebibytes",
           "build_args": {
             "type": "fat",
-            "variant": "FAT32"
-          },
-          "files": [
+            "variant": "FAT32",
+            "files": [
             { "in": "u-boot.bin", "out": "kernel8.img" },
             { "in": "bootfiles/bootcode.bin", "out": "bootcode.bin" },
             { "in": "bootfiles/cmdline.txt", "out": "cmdline.txt" },
@@ -49,7 +48,8 @@
             "bcm2711-rpi-cm4s.dtb",
             "avocado-image-initramfs-avocado-raspberrypi4.cpio.zst",
             "Image"
-          ]
+            ]
+          }
         },
         "rootfs": "avocado-image-rootfs-avocado-raspberrypi4.rootfs.squashfs",
         "var": "avocado-image-var-avocado-raspberrypi4.var.img"
