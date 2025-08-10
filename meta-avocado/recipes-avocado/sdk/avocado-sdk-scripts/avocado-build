@@ -127,7 +127,7 @@ build_extension() {
         fi
 
         # Copy var image to deploy directory
-        cp "${IMAGES_DIR}/avocado-image-var.btrfs" "${DEPLOY_DIR}/"
+        cp "${IMAGES_DIR}/avocado-image-var.btrfs" "${DEPLOY_DIR}/avocado-image-var-avocado-${AVOCADO_SDK_TARGET}.var.img"
 
         stone_manifest="${AVOCADO_SDK_PREFIX}/stone/stone-${AVOCADO_SDK_TARGET}.json"
         rootdisk_config=$(cat "${stone_manifest}" | jq .storage_devices.rootdisk)
