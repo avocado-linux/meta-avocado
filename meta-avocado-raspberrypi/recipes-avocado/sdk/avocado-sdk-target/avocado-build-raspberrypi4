@@ -13,7 +13,7 @@ mkdir -p "$output_dir"
 
 input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/deploy"
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
-manifest="$AVOCADO_PREFIX/sdk/stone/stone-raspberrypi4.json"
+manifest="$AVOCADO_PREFIX/sdk/stone/stone-${target}.json"
 
 echo -e "\033[94m[INFO]\033[0m Running stone validate.
   Manifest:        ${manifest}
@@ -31,6 +31,7 @@ echo -e "\033[94m[INFO]\033[0m Running stone create.
 
 stone \
   create \
+  --os-release "${AVOCADO_PREFIX}/rootfs/usr/lib/os-release" \
   -m $manifest \
   -i "$input_dir" \
   -o "$output_dir"
