@@ -1,5 +1,8 @@
 DISTRO = "avocado"
 DISTRO_NAME = "Avocado OS"
+DISTRO_VENDOR = "Avocado Linux"
+DISTRO_VENDOR_URL = "https://avocadolinux.org"
+DISTRO_DOCUMENTATION_URL = "https://docs.avocadolinux.org"
 
 SDK_VENDOR = "-avocadosdk"
 SDK_VERSION := "${@'${DISTRO_VERSION}'.replace('snapshot-${METADATA_REVISION}','snapshot')}"
