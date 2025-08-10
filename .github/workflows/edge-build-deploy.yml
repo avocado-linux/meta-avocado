@@ -2,7 +2,7 @@ name: Edge Build and Deploy
 
 on:
   schedule:
-    - cron: "0 5 * * *" # Runs at 5 AM UTC daily
+    - cron: "0 9 * * *" # Runs at 9 AM UTC daily
   workflow_dispatch:
     inputs:
       build_all:
