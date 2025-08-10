@@ -3,9 +3,9 @@
 set -e # Exit immediately if a command exits with a non-zero status.
 
 # Main script
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 <source-deploy-directory> <target-deploy-directory>"
-    echo "Example: $0 /path/to/build/tmp/deploy/rpm /path/to/target/repo"
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <source-deploy-directory> <target-deploy-directory> <releasever>"
+    echo "Example: $0 /path/to/build/tmp/deploy/rpm /path/to/target/repo latest/apollo/edge"
     exit 1
 fi
 
