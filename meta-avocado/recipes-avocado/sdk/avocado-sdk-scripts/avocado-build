@@ -119,10 +119,6 @@ build_extension() {
         mkdir -p "$IMAGES_DIR"
         mkdir -p "$DEPLOY_DIR"
         mkdir -p "$OUTPUT_PATH"
-        
-        # Clean and recreate temporary directory
-        rm -rf "$TMP_PATH"
-        mkdir -p "$TMP_PATH"
 
         # First build the var image if it doesn't exist
         if [ ! -f "${IMAGES_DIR}/avocado-image-var.btrfs" ]; then
