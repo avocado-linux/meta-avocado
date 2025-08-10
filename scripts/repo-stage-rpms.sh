@@ -11,6 +11,8 @@ fi
 
 SOURCE_DEPLOY_DIR=$1
 TARGET_DEPLOY_DIR=$2
+releasever=$3
+
 MAP_FILE="${SOURCE_DEPLOY_DIR}/avocado-repo.map"
 
 if [ ! -f "${MAP_FILE}" ]; then
@@ -23,7 +25,9 @@ echo "Source deploy directory: ${SOURCE_DEPLOY_DIR}"
 echo "Target deploy directory: ${TARGET_DEPLOY_DIR}"
 
 # Process mappings from the map file
-while IFS='=' read -r key value || [ -n "$key" ]; do
+while IFS='=' read -r key value || [ -n "$key" ]; do   
+    value=$(eval "echo \"${value}\"")
+    
     # Skip empty lines or lines without an equals sign
     if [ -z "$key" ] || [ -z "$value" ]; then
         echo "Skipping invalid line: $key=$value"

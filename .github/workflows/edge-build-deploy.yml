@@ -157,7 +157,7 @@ jobs:
         run: |
           echo "Staging repos for ${{ matrix.machine }} to ${{ env.STAGING_PATH }}"
           ls ./build-${{ matrix.machine }}/build/tmp/deploy/rpm
-          ./scripts/repo-stage-rpms.sh ./build-${{ matrix.machine }}/build/tmp/deploy/rpm ${{ env.STAGING_PATH }}
+          ./scripts/repo-stage-rpms.sh ./build-${{ matrix.machine }}/build/tmp/deploy/rpm ${{ env.STAGING_PATH }} ${{ needs.determine_build_matrix.outputs.distro_codename }}
 
   aggregate_packages:
     needs:
