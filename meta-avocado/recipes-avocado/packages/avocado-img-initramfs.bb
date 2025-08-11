@@ -1,4 +1,4 @@
-DESCRIPTION = "Avocado Rootfs Image Package"
+DESCRIPTION = "Avocado Initramfs Image Package"
 LICENSE = "Apache-2.0"
 
 AVOCADO_PKG_IMG_RECIPE = "avocado-image-initramfs"

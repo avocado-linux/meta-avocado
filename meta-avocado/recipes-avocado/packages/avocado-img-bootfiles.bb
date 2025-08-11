@@ -10,13 +10,20 @@ INHIBIT_PACKAGE_STRIP = "1"
 # Skip architecture mismatch QA checks
 INSANE_SKIP:${PN} += "arch"
 
-do_compile[depends] += "avocado-image-initramfs:do_image_complete"
-do_compile[depends] += "avocado-image-rootfs:do_image_complete"
-do_compile[depends] += "avocado-image-var:do_deploy"
 do_compile[depends] += "avocado-stone:do_deploy"
 do_compile[depends] += "virtual/kernel:do_deploy"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
+PACKAGES = "${PN}"
+
+# Prevent automatic dependency detection for image packages
+RDEPENDS:${PN} = ""
+INHIBIT_PACKAGE_STRIP = "1"
+INHIBIT_SYSROOT_STRIP = "1"
+INHIBIT_DEFAULT_DEPS = "1"
+SKIP_FILEDEPS = "1"
+AUTO_LIBNAME_RDEPS = "0"
+INSANE_SKIP:${PN} += "arch ldflags file-rdeps build-deps already-stripped dev-deps"
 
 # Custom task to collect artifacts
 python do_collect_artifacts() {
@@ -32,9 +39,14 @@ python do_collect_artifacts() {
         shutil.rmtree(dest_dir)
     os.makedirs(dest_dir)
 
-    # Copy everything from deploy dir
+    # Copy bootfiles from deploy dir, excluding rootfs, initramfs, and var images
     if os.path.exists(deploy_dir):
         for item in os.listdir(deploy_dir):
+            # Skip rootfs, initramfs, and var image files
+            if any(pattern in item.lower() for pattern in ['rootfs', 'initramfs', 'var.', '-var-']):
+                bb.note(f"Skipping {item} - not a bootfile")
+                continue
+
             src = os.path.join(deploy_dir, item)
             dst = os.path.join(dest_dir, item)
 

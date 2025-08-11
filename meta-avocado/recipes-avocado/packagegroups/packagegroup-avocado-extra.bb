@@ -6,9 +6,12 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  avocado-hitl \
+  avocado-img-bootfiles \
+  avocado-img-initramfs \
+  avocado-img-rootfs \
+  avocado-img-var \
   avocado-pkg-rootfs \
-  avocado-pkg-initramfs \
-  avocado-pkg-images \
   openssh \
   openssh-sshd \
   openssh-sftp-server \

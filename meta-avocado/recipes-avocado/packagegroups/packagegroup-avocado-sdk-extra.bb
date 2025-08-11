@@ -5,6 +5,7 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
+  nativesdk-avocado-hitl \
   nativesdk-bmaptool \
   nativesdk-fwup \
   nativesdk-ganesha \
