@@ -1,13 +1,14 @@
 FROM fedora:40
 
 # Install required packages
-RUN dnf install -y createrepo_c nginx && \
+RUN dnf install -y createrepo_c nginx inotify-tools && \
     dnf clean all
 
-# Copy the repository setup script and entrypoint
+# Copy the repository setup script, monitoring script, and entrypoint
 COPY setup-repo.sh /usr/local/bin/
+COPY monitor-repo.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/setup-repo.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/setup-repo.sh /usr/local/bin/monitor-repo.sh /usr/local/bin/entrypoint.sh
 
 # Configure nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf

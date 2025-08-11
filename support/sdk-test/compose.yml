@@ -5,6 +5,7 @@ services:
       dockerfile: Containerfile
     environment:
       - AVOCADO_SDK_REPO_RELEASE=${AVOCADO_SDK_REPO_RELEASE:-dev}
+      - ENABLE_MONITORING=${ENABLE_MONITORING:-true}
     ports:
       - "8080:80"
     volumes:

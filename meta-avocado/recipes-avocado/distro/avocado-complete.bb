@@ -16,7 +16,23 @@ do_package[noexec] = "1"
 do_package_qa[noexec] = "1"
 do_package_write_rpm[noexec] = "1"
 
-do_build[nostamp] = "1"
+do_compile[nostamp] = "1"
+do_write_completion_marker[nostamp] = "1"
 
 # Ensure these recipes are excluded from world builds
 EXCLUDE_FROM_WORLD = "1"
+
+# Custom task to write completion marker
+do_compile() {
+    # Write a completion marker file to the deploy directory
+    # This triggers repository monitoring and metadata updates
+    if [ -n "${DEPLOY_DIR_RPM}" ] && [ -d "${DEPLOY_DIR_RPM}" ]; then
+        echo "$(date -Iseconds): Build completed for ${PN}" > "${DEPLOY_DIR_RPM}/avocado-build.done"
+        echo "Writing build completion marker to ${DEPLOY_DIR_RPM}/avocado-build.done"
+    else
+        bbwarn "DEPLOY_DIR_RPM not set or directory does not exist: ${DEPLOY_DIR_RPM}"
+    fi
+}
+
+# Force the compile task to be part of the build pipeline
+addtask compile after do_configure before do_build
