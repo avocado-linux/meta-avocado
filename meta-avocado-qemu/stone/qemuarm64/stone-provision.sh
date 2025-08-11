@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 
-set -e
+# Environment variables provided by avocado:
+# AVOCADO_STONE_MANIFEST - path to manifest JSON file
+# AVOCADO_STONE_BUILD_DIR - build output directory
+# AVOCADO_STONE_DATA_DIR - stone data directory
 
-target="qemuarm64"
+archive_name=$(cat $AVOCADO_STONE_MANIFEST | jq -r .storage_devices.rootdisk.out)
+archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
+archive_image="${archive_file%%.*}.img"
 
-echo -e "\033[94m[INFO]\033[0m Stone provision for target '$target' is a no-op."
-echo -e "\033[92m[SUCCESS]\033[0m Successfully ran stone provision for target '$target'."
-exit 0
+fwup \
+  -a \
+  -i "${archive_file}" \
+  -d "${archive_image}" \
+  -t complete
