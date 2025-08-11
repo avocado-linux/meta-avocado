@@ -272,10 +272,10 @@ build_extension() {
         AVOCADO_PARTITION_UBOOT_ENV_OFFSET=${uboot_env_offset_blocks} \
         AVOCADO_PARTITION_UBOOT_ENV_OFFSET_REDUND=${uboot_env_offset_redund_blocks} \
         AVOCADO_PARTITION_UBOOT_ENV_BLOCKS=${uboot_env_size_blocks} \
-        AVOCADO_PARTITION_BOOTFS_A_OFFSET=${boot_a_offset_blocks} \
-        AVOCADO_PARTITION_BOOTFS_A_BLOCKS=${boot_a_size_blocks} \
-        AVOCADO_PARTITION_BOOTFS_B_OFFSET=${boot_b_offset_blocks} \
-        AVOCADO_PARTITION_BOOTFS_B_BLOCKS=${boot_b_size_blocks} \
+        AVOCADO_PARTITION_BOOT_A_OFFSET=${boot_a_offset_blocks} \
+        AVOCADO_PARTITION_BOOT_A_BLOCKS=${boot_a_size_blocks} \
+        AVOCADO_PARTITION_BOOT_B_OFFSET=${boot_b_offset_blocks} \
+        AVOCADO_PARTITION_BOOT_B_BLOCKS=${boot_b_size_blocks} \
         AVOCADO_PARTITION_RECOVERY_OFFSET=${recovery_offset_blocks} \
         AVOCADO_PARTITION_RECOVERY_BLOCKS=${recovery_size_blocks} \
         AVOCADO_PARTITION_ROOTFS_A_OFFSET=${rootfs_a_offset_blocks} \
