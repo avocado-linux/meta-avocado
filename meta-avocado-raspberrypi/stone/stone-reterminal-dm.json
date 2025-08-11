@@ -1,0 +1,113 @@
+{
+  "runtime": {
+    "platform": "avocado-reterminal",
+    "architecture": "arm64",
+    "provision": "stone-provision.sh"
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-reterminal-rootdisk.zip",
+      "build_args": {
+        "type": "fwup",
+        "template": "rootdisk.conf"
+      },
+      "devpath": "/dev/mmcblk0",
+      "block_size": 512,
+      "images": {
+        "uboot_env": "uboot.env",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": [
+              { "in": "u-boot.bin", "out": "kernel8.img" },
+              { "in": "bootfiles/bootcode.bin", "out": "bootcode.bin" },
+              { "in": "bootfiles/cmdline.txt", "out": "cmdline.txt" },
+              { "in": "bootfiles/config.txt", "out": "config.txt" },
+              { "in": "bootfiles/fixup_cd.dat", "out": "fixup_cd.dat" },
+              { "in": "bootfiles/fixup_db.dat", "out": "fixup_db.dat" },
+              { "in": "bootfiles/fixup_x.dat", "out": "fixup_x.dat" },
+              { "in": "bootfiles/fixup.dat", "out": "fixup.dat" },
+              { "in": "bootfiles/fixup4.dat", "out": "fixup4.dat" },
+              { "in": "bootfiles/fixup4cd.dat", "out": "fixup4cd.dat" },
+              { "in": "bootfiles/fixup4db.dat", "out": "fixup4db.dat" },
+              { "in": "bootfiles/fixup4x.dat", "out": "fixup4x.dat" },
+              { "in": "bootfiles/start_cd.elf", "out": "start_cd.elf" },
+              { "in": "bootfiles/start_db.elf", "out": "start_db.elf" },
+              { "in": "bootfiles/start_x.elf", "out": "start_x.elf" },
+              { "in": "bootfiles/start.elf", "out": "start.elf" },
+              { "in": "bootfiles/start4.elf", "out": "start4.elf" },
+              { "in": "bootfiles/start4cd.elf", "out": "start4cd.elf" },
+              { "in": "bootfiles/start4db.elf", "out": "start4db.elf" },
+              { "in": "bootfiles/start4x.elf", "out": "start4x.elf" },
+              { "in": "devicetree/reTerminal-DM.dtbo", "out": "reTerminal-DM.dtbo" },
+              "bcm2711-rpi-4-b.dtb",
+              "bcm2711-rpi-400.dtb",
+              "bcm2711-rpi-cm4.dtb",
+              "bcm2711-rpi-cm4s.dtb",
+              "avocado-image-initramfs-avocado-reterminal-dm.cpio.zst",
+              "Image"
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-avocado-reterminal-dm.rootfs.squashfs",
+        "var": "avocado-image-var-avocado-reterminal-dm.var.img"
+      },
+      "partitions": [
+        {
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "offset": 1,
+          "offset_unit": "mebibytes",
+          "offset_redundant": 1152,
+          "offset_redundant_unit": "kibibytes",
+          "size": 128,
+          "size_unit": "kibibytes",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "boot-a",
+          "image": "boot",
+          "offset": 2,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot-b",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "recovery",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
+          "image": "rootfs",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "image": "",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "size": 256,
+          "size_unit": "mebibytes",
+          "expand": "true"
+        }
+      ]
+    }
+  }
+}

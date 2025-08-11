@@ -1,0 +1,22 @@
+
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/raspberrypi.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-raspberrypi:
+
+local_conf_header:
+  machine-avocado-reterminal-dm: |
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
+    DISTRO_FEATURES_EXTRA:append= "opengl wayland seccomp virtualization"
+machine: avocado-reterminal-dm
