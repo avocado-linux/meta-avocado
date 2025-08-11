@@ -11,7 +11,7 @@ SRC_URI += " \
 do_deploy:append() {
   install -d ${DEPLOYDIR}
   install -m 0644 ${WORKDIR}/imx/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
-  install -m 0755 ${WORKDIR}/${MACHINE_SHORT_NAME}/stone-provision.sh ${DEPLOYDIR}/stone-provision.sh
+  install -m 0755 ${WORKDIR}/imx/stone-provision.sh ${DEPLOYDIR}/stone-provision.sh
 }
 
 do_stone_provision:append() {
