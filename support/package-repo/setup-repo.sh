@@ -47,10 +47,10 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
     # Create target directory structure
     mkdir -p "${target_dir}"
 
-    # Copy RPMs from source to target (using rsync for efficiency if needed, but cp is fine)
-    # Use cp -a to preserve attributes, or cp -r as before
-    echo "Copying files from ${source_dir} to ${target_dir}"
-    cp -a "${source_dir}"/* "${target_dir}/"
+    # Sync RPMs from source to target with deletion of extra files
+    # Use rsync to ensure destination is an exact mirror of source
+    echo "Syncing files from ${source_dir} to ${target_dir} (with deletion of extra files)"
+    rsync -av --delete "${source_dir}/" "${target_dir}/"
 
     # Create repository metadata
     echo "Creating repository metadata in ${target_dir}"

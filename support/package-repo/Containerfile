@@ -1,7 +1,7 @@
 FROM fedora:40
 
 # Install required packages
-RUN dnf install -y createrepo_c nginx inotify-tools && \
+RUN dnf install -y createrepo_c nginx inotify-tools rsync && \
     dnf clean all
 
 # Copy the repository setup script, monitoring script, and entrypoint
