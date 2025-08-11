@@ -1,7 +1,8 @@
 {
   "runtime": {
     "platform": "avocado-qemux86-64",
-    "architecture": "arm64"
+    "architecture": "arm64",
+    "provision": "stone-provision.sh"
   },
   "storage_devices": {
     "rootdisk": {
@@ -14,6 +15,7 @@
       "block_size": 512,
       "uuid": "4bc367b3-5d70-4289-b24d-9b09cb79685c",
       "images": {
+        "bios": "u-boot.rom",
         "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",

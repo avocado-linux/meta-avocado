@@ -1,7 +1,8 @@
 {
   "runtime": {
     "platform": "avocado-imx8mp-evk",
-    "architecture": "arm64"
+    "architecture": "arm64",
+    "provision": "stone-provision.sh"
   },
   "storage_devices": {
     "rootdisk": {
