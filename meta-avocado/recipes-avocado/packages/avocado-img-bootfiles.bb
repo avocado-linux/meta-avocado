@@ -67,16 +67,16 @@ addtask collect_artifacts after do_compile before do_install
 
 do_install() {
     # Install collected artifacts
-    install -d ${D}/deploy
+    install -d ${D}
 
     # Copy everything from our collection
     if [ -d ${WORKDIR}/deploy-artifacts ]; then
-        cp -r ${WORKDIR}/deploy-artifacts/* ${D}/deploy
+        cp -r ${WORKDIR}/deploy-artifacts/* ${D}
     fi
 }
 
 # Package all the artifacts
-FILES:${PN} = "/deploy/*"
+FILES:${PN} = "/*"
 
 # Skip arch QA check - some files are correctly of a different arch than the target.
 INSANE_SKIP:${PN} += "arch buildpaths"
