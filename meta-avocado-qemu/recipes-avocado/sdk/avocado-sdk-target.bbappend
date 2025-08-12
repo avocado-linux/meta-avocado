@@ -2,7 +2,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 FILESEXTRAPATHS:prepend := "${@':'.join(['%s/stone' % layer for layer in d.getVar('BBLAYERS').split()])}:"
 
 SRC_URI:append = "\
-  file://avocado-run-qemu \
+  file://vm \
 "
 
 SHARED_RDEPENDS = "\
@@ -22,9 +22,9 @@ RDEPENDS:${PN}:append:qemux86-64 = " \
 "
 
 do_install:append() {
-    install -m 0755 ${WORKDIR}/avocado-run-qemu ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${WORKDIR}/vm ${D}${SDKPATHNATIVE}${bindir}
 }
 
 FILES:${PN}:append = "\
-  ${SDKPATHNATIVE}${bindir}/avocado-run-qemu \
+  ${SDKPATHNATIVE}${bindir}/vm \
 "
