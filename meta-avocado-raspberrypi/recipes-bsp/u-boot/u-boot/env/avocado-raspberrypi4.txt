@@ -1,5 +1,5 @@
 machine=avocado-raspberrypi4
-initramfs_file=avocado-image-initramfs-avocado-raspberrypi4.cpio.zst
+initramfs_file=avocado-image-initramfs-raspberrypi4.cpio.zst
 kernel_file=Image
 
 stderr=serial,vidconsole

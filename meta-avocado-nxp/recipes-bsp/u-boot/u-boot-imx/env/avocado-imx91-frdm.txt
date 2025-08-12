@@ -1,5 +1,5 @@
 machine=imx91-frdm
-initramfs_file=avocado-image-initramfs-avocado-imx91-frdm.cpio.zst
+initramfs_file=avocado-image-initramfs-imx91-frdm.cpio.zst
 devicetree_file=imx91-11x11-frdm.dtb
 kernel_file=Image
 

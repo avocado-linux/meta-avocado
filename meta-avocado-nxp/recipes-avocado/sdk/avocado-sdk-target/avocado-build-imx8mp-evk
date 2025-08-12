@@ -11,7 +11,7 @@ output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
 
 mkdir -p "$output_dir"
 
-input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/deploy"
+input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
 manifest="$AVOCADO_PREFIX/sdk/stone/stone-${target}.json"
 

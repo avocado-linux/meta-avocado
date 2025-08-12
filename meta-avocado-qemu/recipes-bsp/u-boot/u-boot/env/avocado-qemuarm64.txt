@@ -1,5 +1,5 @@
 machine=avocado-qemuarm64
-initramfs_file=avocado-image-initramfs-avocado-qemuarm64.cpio.zst
+initramfs_file=avocado-image-initramfs-qemuarm64.cpio.zst
 kernel_file=Image
 
 console=ttyAMA0

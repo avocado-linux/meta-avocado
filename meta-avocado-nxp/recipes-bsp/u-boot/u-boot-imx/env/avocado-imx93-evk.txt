@@ -1,5 +1,5 @@
 machine=imx93-evk
-initramfs_file=avocado-image-initramfs-avocado-imx93-evk.cpio.zst
+initramfs_file=avocado-image-initramfs-imx93-evk.cpio.zst
 devicetree_file=imx93-11x11-evk.dtb
 kernel_file=Image
 

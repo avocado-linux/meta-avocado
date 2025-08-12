@@ -33,7 +33,7 @@ elif [ "$1" = "images" ]; then
         DNF_SDK_TARGET_REPO_CONF="$DNF_SDK_TARGET_REPO_CONF" \
         RPM_NO_CHROOT_FOR_SCRIPTS=1 \
         $DNF_SDK_HOST $DNF_SDK_HOST_OPTS $DNF_SDK_TARGET_REPO_CONF --installroot=${AVOCADO_PREFIX}/images install \
-        avocado-pkg-images
+        avocado-img-initramfs avocado-img-rootfs avocado-img-var avocado-img-bootfiles
 else
     env -i \
         TERM="$TERM" \

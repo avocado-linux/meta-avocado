@@ -25,13 +25,13 @@
             "type": "fat",
             "variant": "FAT32",
             "files": [
-              "avocado-image-initramfs-avocado-qemux86-64.cpio.zst",
+              "avocado-image-initramfs-qemux86-64.cpio.zst",
               "bzImage"
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-avocado-qemux86-64.rootfs.squashfs",
-        "var": "avocado-image-var-avocado-qemux86-64.var.img"
+        "rootfs": "avocado-image-rootfs-qemux86-64.squashfs",
+        "var": "avocado-image-var-qemux86-64.btrfs"
       },
       "partitions": [
         {

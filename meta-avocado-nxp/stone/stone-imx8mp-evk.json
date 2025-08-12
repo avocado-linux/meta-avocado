@@ -25,14 +25,14 @@
             "type": "fat",
             "variant": "FAT32",
             "files": [
-              "avocado-image-initramfs-avocado-imx8mp-evk.cpio.zst",
+              "avocado-image-initramfs-imx8mp-evk.cpio.zst",
               "Image",
               "imx8mp-evk.dtb"
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-avocado-imx8mp-evk.rootfs.squashfs",
-        "var": "avocado-image-var-avocado-imx8mp-evk.var.img"
+        "rootfs": "avocado-image-rootfs-imx8mp-evk.squashfs",
+        "var": "avocado-image-var-imx8mp-evk.btrfs"
       },
       "partitions": [
         {

@@ -18,7 +18,7 @@ build_extension() {
     OUTPUT_DIR="${AVOCADO_PREFIX}/extensions"
     OUTPUT_FILE=""
     IMAGES_DIR="${AVOCADO_PREFIX}/images"
-    DEPLOY_DIR="${IMAGES_DIR}/deploy"
+    DEPLOY_DIR="${IMAGES_DIR}"
     OUTPUT_PATH="${AVOCADO_PREFIX}/output"
 
     # Function to create extension release file
@@ -117,7 +117,6 @@ build_extension() {
     elif [ "$1" = "image" ]; then
         echo "Building complete system image"
         mkdir -p "$IMAGES_DIR"
-        mkdir -p "$DEPLOY_DIR"
         mkdir -p "$OUTPUT_PATH"
 
         # First build the var image if it doesn't exist
@@ -127,7 +126,7 @@ build_extension() {
         fi
 
         # Copy var image to deploy directory
-        cp "${IMAGES_DIR}/avocado-image-var.btrfs" "${DEPLOY_DIR}/avocado-image-var-avocado-${AVOCADO_SDK_TARGET}.var.img"
+        cp "${IMAGES_DIR}/avocado-image-var.btrfs" "${DEPLOY_DIR}/avocado-image-var-${AVOCADO_SDK_TARGET}.btrfs"
 
         stone_manifest="${AVOCADO_SDK_PREFIX}/stone/stone-${AVOCADO_SDK_TARGET}.json"
         rootdisk_config=$(cat "${stone_manifest}" | jq .storage_devices.rootdisk)

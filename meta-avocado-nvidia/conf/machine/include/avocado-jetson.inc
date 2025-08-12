@@ -7,8 +7,8 @@ INITRAMFS_FSTYPES = "${AVOCADO_IMAGE_INITRAMFS_TYPE}"
 ROOT_FSTYPES = "squashfs tegraflash"
 IMAGE_TEGRAFLASH_FS_TYPE = "squashfs"
 
-DATAFILE = "avocado-image-var-${MACHINE}.var.img"
-IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE}.var.img"
+DATAFILE = "avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
+IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
 
 # Extras Repo Configurations
 PACKAGECONFIG:remove:pn-wpewebkit = "gbm"

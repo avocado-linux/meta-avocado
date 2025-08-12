@@ -47,13 +47,13 @@
               "bcm2711-rpi-400.dtb",
               "bcm2711-rpi-cm4.dtb",
               "bcm2711-rpi-cm4s.dtb",
-              "avocado-image-initramfs-avocado-raspberrypi4.cpio.zst",
+              "avocado-image-initramfs-raspberrypi4.cpio.zst",
               "Image"
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-avocado-raspberrypi4.rootfs.squashfs",
-        "var": "avocado-image-var-avocado-raspberrypi4.var.img"
+        "rootfs": "avocado-image-rootfs-raspberrypi4.squashfs",
+        "var": "avocado-image-var-raspberrypi4.btrfs"
       },
       "partitions": [
         {

@@ -1,5 +1,5 @@
 machine=avocado-fr202
-initramfs_file=avocado-image-initramfs-avocado-fr202.cpio.zst
+initramfs_file=avocado-image-initramfs-fr202.cpio.zst
 kernel_file=Image
 
 stderr=serial,vidconsole

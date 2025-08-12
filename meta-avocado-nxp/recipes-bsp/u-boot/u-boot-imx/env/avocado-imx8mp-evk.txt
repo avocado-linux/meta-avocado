@@ -1,6 +1,6 @@
 machine=imx8mp-evk
 kernel_file=Image
-initramfs_file=avocado-image-initramfs-avocado-imx8mp-evk.cpio.zst
+initramfs_file=avocado-image-initramfs-imx8mp-evk.cpio.zst
 devicetree_file=imx8mp-evk.dtb
 
 console=ttymxc1,115200

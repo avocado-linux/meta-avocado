@@ -25,14 +25,14 @@
             "type": "fat",
             "variant": "FAT32",
             "files": [
-              "avocado-image-initramfs-avocado-imx91-frdm.cpio.zst",
+              "avocado-image-initramfs-imx91-frdm.cpio.zst",
               "Image",
               "imx91-11x11-frdm.dtb"
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-avocado-imx91-frdm.rootfs.squashfs",
-        "var": "avocado-image-var-avocado-imx91-frdm.var.img"
+        "rootfs": "avocado-image-rootfs-imx91-frdm.squashfs",
+        "var": "avocado-image-var-imx91-frdm.btrfs"
       },
       "partitions": [
         {

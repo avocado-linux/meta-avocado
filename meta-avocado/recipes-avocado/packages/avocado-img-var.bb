@@ -2,7 +2,7 @@ DESCRIPTION = "Avocado Var Image Package"
 LICENSE = "Apache-2.0"
 
 AVOCADO_PKG_IMG_RECIPE = "avocado-image-var"
-AVOCADO_PKG_IMG_NAME = "${AVOCADO_PKG_IMG_RECIPE}-${MACHINE}.${AVOCADO_IMAGE_VAR_TYPE}"
+AVOCADO_PKG_IMG_NAME = "${AVOCADO_PKG_IMG_RECIPE}-${MACHINE_SHORT_NAME}.${AVOCADO_IMAGE_VAR_TYPE}"
 AVOCADO_PKG_IMG_DEPTASK = "do_deploy"
 
 # Prevent automatic dependency detection for image packages
