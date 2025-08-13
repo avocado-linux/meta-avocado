@@ -1,0 +1,177 @@
+
+#!/usr/bin/env bash
+
+# Avocado Hardware in the Loop (HITL) NFS Server
+# This script starts the Ganesha NFS daemon with configurable options
+
+set -euo pipefail
+
+# Default configuration
+DEFAULT_CONFIG="/etc/avocado/hitl-nfs.conf"
+DEFAULT_PIDFILE="/var/run/avocado-hitl-server.pid"
+DEFAULT_LOGFILE="/dev/stdout"
+
+# Script variables
+CONFIG_FILE="$DEFAULT_CONFIG"
+PIDFILE="$DEFAULT_PIDFILE"
+LOGFILE="$DEFAULT_LOGFILE"
+FOREGROUND=true
+VERBOSE=false
+
+# Function to display usage information
+usage() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Avocado Hardware in the Loop (HITL) NFS Server
+
+OPTIONS:
+    -c, --config FILE       Configuration file (default: $DEFAULT_CONFIG)
+    -p, --pidfile FILE      PID file location (default: $DEFAULT_PIDFILE)
+    -l, --logfile FILE      Log file location (default: $DEFAULT_LOGFILE)
+    -d, --daemon           Run as daemon (background mode)
+    -v, --verbose          Enable verbose output
+    -h, --help             Show this help message
+
+EXAMPLES:
+    $0                                          # Start with default settings
+    $0 --config /custom/hitl-nfs.conf           # Use custom config file
+    $0 --daemon --logfile /var/log/ganesha.log # Run as daemon with log file
+
+EOF
+}
+
+# Function for logging messages
+log() {
+    if [[ "$VERBOSE" == true ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2
+    fi
+}
+
+# Function for error messages
+error() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -p|--pidfile)
+            PIDFILE="$2"
+            shift 2
+            ;;
+        -l|--logfile)
+            LOGFILE="$2"
+            shift 2
+            ;;
+        -d|--daemon)
+            FOREGROUND=false
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            error "Unknown option: $1. Use --help for usage information."
+            ;;
+    esac
+done
+
+# Validate configuration file exists
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    error "Configuration file not found: $CONFIG_FILE"
+fi
+
+# Validate configuration file is readable
+if [[ ! -r "$CONFIG_FILE" ]]; then
+    error "Configuration file is not readable: $CONFIG_FILE"
+fi
+
+# Check if ganesha.nfsd is available
+if ! command -v ganesha.nfsd >/dev/null 2>&1; then
+    error "ganesha.nfsd command not found. Please ensure NFS Ganesha is installed."
+fi
+
+# Create PID file directory if it doesn't exist
+PIDDIR=$(dirname "$PIDFILE")
+if [[ ! -d "$PIDDIR" ]]; then
+    log "Creating PID file directory: $PIDDIR"
+    mkdir -p "$PIDDIR" || error "Failed to create PID file directory: $PIDDIR"
+fi
+
+# Create log file directory if it's not stdout/stderr and doesn't exist
+if [[ "$LOGFILE" != "/dev/stdout" && "$LOGFILE" != "/dev/stderr" ]]; then
+    LOGDIR=$(dirname "$LOGFILE")
+    if [[ ! -d "$LOGDIR" ]]; then
+        log "Creating log file directory: $LOGDIR"
+        mkdir -p "$LOGDIR" || error "Failed to create log file directory: $LOGDIR"
+    fi
+fi
+
+# Build ganesha command arguments
+GANESHA_ARGS=()
+
+# Always use the specified config file
+GANESHA_ARGS+=("-f" "$CONFIG_FILE")
+
+# Always use the specified PID file
+GANESHA_ARGS+=("-p" "$PIDFILE")
+
+# Set foreground or daemon mode
+if [[ "$FOREGROUND" == true ]]; then
+    GANESHA_ARGS+=("-F")
+    GANESHA_ARGS+=("-L" "$LOGFILE")
+else
+    # In daemon mode, let ganesha handle logging
+    if [[ "$LOGFILE" != "/dev/stdout" && "$LOGFILE" != "/dev/stderr" ]]; then
+        GANESHA_ARGS+=("-L" "$LOGFILE")
+    fi
+fi
+
+# Display configuration summary
+log "Starting Avocado HITL NFS Server with the following configuration:"
+log "  Config file: $CONFIG_FILE"
+log "  PID file: $PIDFILE"
+log "  Log file: $LOGFILE"
+log "  Mode: $([ "$FOREGROUND" == true ] && echo "foreground" || echo "daemon")"
+
+# Start ganesha.nfsd
+log "Executing: ganesha.nfsd ${GANESHA_ARGS[*]}"
+
+# Handle cleanup on script termination
+cleanup() {
+    log "Received termination signal, cleaning up..."
+    if [[ -f "$PIDFILE" ]]; then
+        PID=$(cat "$PIDFILE" 2>/dev/null || true)
+        if [[ -n "$PID" && "$PID" =~ ^[0-9]+$ ]]; then
+            log "Terminating ganesha process (PID: $PID)"
+            kill "$PID" 2>/dev/null || true
+            # Give it a moment to terminate gracefully
+            sleep 2
+            # Force kill if still running
+            if kill -0 "$PID" 2>/dev/null; then
+                log "Force killing ganesha process (PID: $PID)"
+                kill -9 "$PID" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$PIDFILE"
+    fi
+}
+
+# Set up signal handlers for graceful shutdown
+if [[ "$FOREGROUND" == true ]]; then
+    trap cleanup EXIT INT TERM
+fi
+
+# Execute ganesha.nfsd
+exec ganesha.nfsd "${GANESHA_ARGS[@]}"

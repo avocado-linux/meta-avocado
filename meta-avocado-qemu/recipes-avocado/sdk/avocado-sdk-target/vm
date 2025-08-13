@@ -6,6 +6,8 @@ set -e
 # Parse command line arguments
 RUNTIME=""
 MEMORY="1024"
+SMP="2"
+ENABLE_KVM=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -13,9 +15,17 @@ while [[ $# -gt 0 ]]; do
             MEMORY="$2"
             shift 2
             ;;
+        --smp)
+            SMP="$2"
+            shift 2
+            ;;
+        --enable-kvm)
+            ENABLE_KVM=true
+            shift
+            ;;
         -*)
             echo "Error: Unknown option $1"
-            echo "Usage: $0 <runtime> [--mem MEMORY]"
+            echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm]"
             exit 1
             ;;
         *)
@@ -23,7 +33,7 @@ while [[ $# -gt 0 ]]; do
                 RUNTIME="$1"
             else
                 echo "Error: Multiple runtime arguments provided"
-                echo "Usage: $0 <runtime> [--mem MEMORY]"
+                echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm]"
                 exit 1
             fi
             shift
@@ -34,13 +44,15 @@ done
 # Check if runtime argument is provided
 if [ -z "$RUNTIME" ]; then
     echo "Error: Runtime argument required"
-    echo "Usage: $0 <runtime> [--mem MEMORY]"
+    echo "Usage: $0 <runtime> [--mem MEMORY] [--enable-kvm]"
     exit 1
 fi
 
 # Display runtime and flag arguments
 echo "Runtime: ${RUNTIME}"
 echo "Memory: ${MEMORY} MB"
+echo "SMP: ${SMP}"
+echo "KVM Enabled: ${ENABLE_KVM}"
 
 # Check if this is a QEMU target
 if [[ ! "$AVOCADO_SDK_TARGET" =~ qemu ]]; then
@@ -66,6 +78,11 @@ else
     exit 1
 fi
 
+# Override CPU to 'host' if KVM is enabled
+if [ "$ENABLE_KVM" = true ]; then
+    QEMU_CPU="host"
+fi
+
 # Set the Stone build directory
 STONE_DATA_DIR="${AVOCADO_PREFIX}/output/runtimes/${RUNTIME}/stone"
 STONE_BUILD_DIR="${STONE_DATA_DIR}/_build"
@@ -82,11 +99,21 @@ qemu-img resize -f raw "$IMAGE_FILE" 1024M
 
 QEMU_BIOS="${STONE_DATA_DIR}/${QEMU_BIOS_FILE}"
 
-"${QEMU_BINARY}" \
-    -bios "${QEMU_BIOS}" \
-    -device sdhci-pci \
-    -device sd-card,drive=mmc \
-    -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc \
-    -m "${MEMORY}" \
-    -cpu "${QEMU_CPU}" \
+# Build QEMU command arguments
+QEMU_ARGS=(
+    -bios "${QEMU_BIOS}"
+    -device sdhci-pci
+    -device sd-card,drive=mmc
+    -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc
+    -m "${MEMORY}"
+    -smp "${SMP}"
+    -cpu "${QEMU_CPU}"
     -nographic
+)
+
+# Add KVM flag if enabled
+if [ "$ENABLE_KVM" = true ]; then
+    QEMU_ARGS+=(-enable-kvm)
+fi
+
+"${QEMU_BINARY}" "${QEMU_ARGS[@]}"

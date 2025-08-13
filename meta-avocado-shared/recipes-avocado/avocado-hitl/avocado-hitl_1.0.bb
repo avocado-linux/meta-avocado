@@ -8,9 +8,3 @@ inherit packagegroup
 RDEPENDS:${PN} = " \
     nfs-utils \
 "
-
-RDEPENDS:${PN}:class-nativesdk += " \
-  nativesdk-ganesha \
-"
-
-BBCLASSEXTEND = "nativesdk"
