@@ -1,0 +1,39 @@
+inherit cargo cargo-update-recipe-crates systemd
+
+SRCBRANCH = "main"
+SRCREV = "dd24e439075d1a1cec6fe86fbcb2f4049ed7d25c"
+SRC_URI = " \
+    git://git@github.com/avocado-linux/avocado-runtime.git;protocol=https;nobranch=1;branch=${SRCBRANCH} \
+    file://00-avocado.preset \
+    file://avocado-extension.service \
+"
+
+require ${BPN}-crates.inc
+
+S = "${WORKDIR}/git"
+
+CARGO_SRC_DIR = ""
+
+LIC_FILES_CHKSUM = " \
+    file://LICENSE;md5=4164c7d0d31659e348a3ecfc70b41f93 \
+"
+
+SUMMARY = "Runtime control for Avocado Linux"
+HOMEPAGE = "https://github.com/avocado-linux/avocado-runtime"
+LICENSE = "Apache-2.0"
+
+include avocadoctl-${PV}.inc
+include avocadoctl.inc
+
+SYSTEMD_SERVICE:${PN} = "avocado-extension.service"
+SYSTEMD_AUTO_ENABLE = "enable"
+
+do_install:append() {
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${WORKDIR}/avocado-extension.service ${D}${systemd_system_unitdir}/
+
+    install -d ${D}${sysconfdir}/systemd/system-preset
+    install -m 0644 ${WORKDIR}/00-avocado.preset ${D}${sysconfdir}/systemd/system-preset/00-avocado.preset
+}
+
+BBCLASSEXTEND = "native nativesdk"

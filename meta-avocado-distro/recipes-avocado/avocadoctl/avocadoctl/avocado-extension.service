@@ -1,0 +1,20 @@
+[Unit]
+Description=Avocado merge extensions
+
+ConditionCapability=CAP_SYS_ADMIN
+
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target systemd-tmpfiles-setup.service
+Conflicts=shutdown.target initrd-switch-root.target
+Before=shutdown.target initrd-switch-root.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=avocadoctl refresh
+ExecReload=avocadoctl refresh
+ExecStop=avocadoctl unmerge
+
+[Install]
+WantedBy=sysinit.target

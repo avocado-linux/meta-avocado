@@ -11,6 +11,7 @@ RDEPENDS:${PN} = "\
   systemd-extra-utils \
   os-release-initrd \
   util-linux \
+  avocadoctl \
 "
 
 RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"
