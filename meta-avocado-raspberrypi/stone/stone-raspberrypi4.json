@@ -2,7 +2,26 @@
   "runtime": {
     "platform": "avocado-raspberrypi4",
     "architecture": "arm64",
-    "provision": "stone-provision.sh"
+    "provision_default": "img"
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      },
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info"]
+      }
+    }
   },
   "storage_devices": {
     "rootdisk": {

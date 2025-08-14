@@ -2,7 +2,22 @@
   "runtime": {
     "platform": "avocado-qemux86-64",
     "architecture": "arm64",
-    "provision": "stone-provision.sh"
+    "provision_default": "img"
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      }
+    }
   },
   "storage_devices": {
     "rootdisk": {
@@ -24,10 +39,7 @@
           "build_args": {
             "type": "fat",
             "variant": "FAT32",
-            "files": [
-              "avocado-image-initramfs-qemux86-64.cpio.zst",
-              "bzImage"
-            ]
+            "files": ["avocado-image-initramfs-qemux86-64.cpio.zst", "bzImage"]
           }
         },
         "rootfs": "avocado-image-rootfs-qemux86-64.squashfs",

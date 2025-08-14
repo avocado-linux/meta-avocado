@@ -2,7 +2,26 @@
   "runtime": {
     "platform": "avocado-reterminal",
     "architecture": "arm64",
-    "provision": "stone-provision.sh"
+    "provision_default": "img"
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      },
+      "usb": {
+        "script": "stone-provision-usb.sh",
+        "envs": ["device_info"]
+      }
+    }
   },
   "storage_devices": {
     "rootdisk": {
@@ -43,7 +62,10 @@
               { "in": "bootfiles/start4cd.elf", "out": "start4cd.elf" },
               { "in": "bootfiles/start4db.elf", "out": "start4db.elf" },
               { "in": "bootfiles/start4x.elf", "out": "start4x.elf" },
-              { "in": "devicetree/reTerminal-DM.dtbo", "out": "reTerminal-DM.dtbo" },
+              {
+                "in": "devicetree/reTerminal-DM.dtbo",
+                "out": "reTerminal-DM.dtbo"
+              },
               "bcm2711-rpi-4-b.dtb",
               "bcm2711-rpi-400.dtb",
               "bcm2711-rpi-cm4.dtb",
