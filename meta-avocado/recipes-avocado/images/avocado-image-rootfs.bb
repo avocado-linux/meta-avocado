@@ -27,5 +27,30 @@ create_dirs() {
     mkdir -p ${IMAGE_ROOTFS}/opt
 }
 
-IMAGE_PREPROCESS_COMMAND += "create_dirs;"
+cleanup_users() {
+    # Filter passwd file - keep only systemd*, root, nobody, messagebus
+    if [ -f ${IMAGE_ROOTFS}/etc/passwd ]; then
+        grep -E "^(systemd|root|nobody|messagebus)" ${IMAGE_ROOTFS}/etc/passwd > ${IMAGE_ROOTFS}/etc/passwd.tmp || true
+        mv ${IMAGE_ROOTFS}/etc/passwd.tmp ${IMAGE_ROOTFS}/etc/passwd
+    fi
+
+    # Filter shadow file - keep only systemd*, root, nobody, messagebus
+    if [ -f ${IMAGE_ROOTFS}/etc/shadow ]; then
+        grep -E "^(systemd|root|nobody|messagebus)" ${IMAGE_ROOTFS}/etc/shadow > ${IMAGE_ROOTFS}/etc/shadow.tmp || true
+        mv ${IMAGE_ROOTFS}/etc/shadow.tmp ${IMAGE_ROOTFS}/etc/shadow
+    fi
+
+    # Filter group file - keep only systemd*, root, nobody, messagebus
+    if [ -f ${IMAGE_ROOTFS}/etc/group ]; then
+        grep -E "^(systemd|root|nobody|messagebus)" ${IMAGE_ROOTFS}/etc/group > ${IMAGE_ROOTFS}/etc/group.tmp || true
+        mv ${IMAGE_ROOTFS}/etc/group.tmp ${IMAGE_ROOTFS}/etc/group
+    fi
+
+    # Filter gshadow file - keep only systemd*, root, nobody, messagebus
+    if [ -f ${IMAGE_ROOTFS}/etc/gshadow ]; then
+        grep -E "^(systemd|root|nobody|messagebus)" ${IMAGE_ROOTFS}/etc/gshadow > ${IMAGE_ROOTFS}/etc/gshadow.tmp || true
+        mv ${IMAGE_ROOTFS}/etc/gshadow.tmp ${IMAGE_ROOTFS}/etc/gshadow
+    fi
+}
+IMAGE_PREPROCESS_COMMAND += "create_dirs; cleanup_users;"
 ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"

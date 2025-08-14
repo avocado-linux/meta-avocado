@@ -10,7 +10,6 @@ RDEPENDS:${PN} = " \
   base-files \
   base-passwd \
   netbase \
-  avocado-shadow-users \
   avocadoctl \
   btrfs-tools \
   ${VIRTUAL-RUNTIME_base-utils} \
