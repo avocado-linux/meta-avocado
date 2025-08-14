@@ -1,9 +1,9 @@
 inherit cargo cargo-update-recipe-crates systemd
 
 SRCBRANCH = "main"
-SRCREV = "dd24e439075d1a1cec6fe86fbcb2f4049ed7d25c"
+SRCREV = "1afd8f6af6357ac68bff89fac7a1c7a68f550151"
 SRC_URI = " \
-    git://git@github.com/avocado-linux/avocado-runtime.git;protocol=https;nobranch=1;branch=${SRCBRANCH} \
+    git://git@github.com/avocado-linux/avocado-control.git;protocol=https;nobranch=1;branch=${SRCBRANCH} \
     file://00-avocado.preset \
     file://avocado-extension.service \
 "
@@ -19,7 +19,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 SUMMARY = "Runtime control for Avocado Linux"
-HOMEPAGE = "https://github.com/avocado-linux/avocado-runtime"
+HOMEPAGE = "https://github.com/avocado-linux/avocado-control"
 LICENSE = "Apache-2.0"
 
 include avocadoctl-${PV}.inc
