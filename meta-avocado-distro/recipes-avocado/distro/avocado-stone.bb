@@ -13,6 +13,18 @@ do_package_write_rpm[noexec] = "1"
 
 SRC_URI = "file://stone-${MACHINE_SHORT_NAME}.json"
 
+SRC_URI:append:stone-img = " \
+    file://stone-provision-img.sh \
+"
+
+SRC_URI:append:stone-sd = " \
+    file://stone-provision-sd.sh \
+"
+
+SRC_URI:append:stone-usb = " \
+    file://stone-provision-usb.sh \
+"
+
 inherit stone
 inherit deploy
 
@@ -34,6 +46,21 @@ do_configure() {
 do_deploy() {
     install -d ${DEPLOYDIR}
     install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
+}
+
+do_deploy:append:stone-sd() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${WORKDIR}/stone-provision-sd.sh ${DEPLOYDIR}/stone-provision-sd.sh
+}
+
+do_deploy:append:stone-usb() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${WORKDIR}/stone-provision-usb.sh ${DEPLOYDIR}/stone-provision-usb.sh
+}
+
+do_deploy:append:stone-img() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${WORKDIR}/stone-provision-img.sh ${DEPLOYDIR}/stone-provision-img.sh
 }
 
 do_stone_validate() {
