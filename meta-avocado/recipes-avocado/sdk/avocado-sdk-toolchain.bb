@@ -31,6 +31,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-perl-module-integer \
     nativesdk-pkgconfig \
     nativesdk-pseudo \
+    nativesdk-rsync \
     nativesdk-shadow \
     nativesdk-stone \
     nativesdk-squashfs-tools \
