@@ -8,6 +8,7 @@ RUNTIME=""
 MEMORY="1024"
 SMP="2"
 ENABLE_KVM=false
+HOST_FWD_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -23,9 +24,13 @@ while [[ $# -gt 0 ]]; do
             ENABLE_KVM=true
             shift
             ;;
+        --host-fwd)
+            HOST_FWD_ARGS+=("$2")
+            shift 2
+            ;;
         -*)
             echo "Error: Unknown option $1"
-            echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm]"
+            echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
             exit 1
             ;;
         *)
@@ -33,7 +38,7 @@ while [[ $# -gt 0 ]]; do
                 RUNTIME="$1"
             else
                 echo "Error: Multiple runtime arguments provided"
-                echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm]"
+                echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
                 exit 1
             fi
             shift
@@ -44,7 +49,7 @@ done
 # Check if runtime argument is provided
 if [ -z "$RUNTIME" ]; then
     echo "Error: Runtime argument required"
-    echo "Usage: $0 <runtime> [--mem MEMORY] [--enable-kvm]"
+    echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
     exit 1
 fi
 
@@ -53,6 +58,9 @@ echo "Runtime: ${RUNTIME}"
 echo "Memory: ${MEMORY} MB"
 echo "SMP: ${SMP}"
 echo "KVM Enabled: ${ENABLE_KVM}"
+if [ ${#HOST_FWD_ARGS[@]} -gt 0 ]; then
+    echo "Port Forwarding: ${HOST_FWD_ARGS[*]}"
+fi
 
 # Check if this is a QEMU target
 if [[ ! "$AVOCADO_SDK_TARGET" =~ qemu ]]; then
@@ -83,6 +91,18 @@ if [ "$ENABLE_KVM" = true ]; then
     QEMU_CPU="host"
 fi
 
+# Build hostfwd string from collected port mappings
+HOSTFWD_STRING=""
+if [ ${#HOST_FWD_ARGS[@]} -gt 0 ]; then
+    for hostfwd in "${HOST_FWD_ARGS[@]}"; do
+        if [ -z "$HOSTFWD_STRING" ]; then
+            HOSTFWD_STRING="hostfwd=tcp::${hostfwd}"
+        else
+            HOSTFWD_STRING="${HOSTFWD_STRING},hostfwd=tcp::${hostfwd}"
+        fi
+    done
+fi
+
 # Set the Stone build directory
 STONE_DATA_DIR="${AVOCADO_PREFIX}/output/runtimes/${RUNTIME}/stone"
 STONE_BUILD_DIR="${STONE_DATA_DIR}/_build"
@@ -110,6 +130,12 @@ QEMU_ARGS=(
     -cpu "${QEMU_CPU}"
     -nographic
 )
+
+# Add network arguments if port forwarding is configured
+if [ -n "$HOSTFWD_STRING" ]; then
+    QEMU_ARGS+=(-netdev "user,id=net0,$HOSTFWD_STRING")
+    QEMU_ARGS+=(-device "e1000,netdev=net0")
+fi
 
 # Add KVM flag if enabled
 if [ "$ENABLE_KVM" = true ]; then
