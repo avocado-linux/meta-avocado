@@ -20,6 +20,9 @@ FILES:${PN}   = "\
   ${SDKPATHNATIVE}/stone \
 "
 
+DEPENDS:append:stone-usb = " nativesdk-libusb1"
+RDEPENDS:${PN}:append:stone-usb = " nativesdk-libusb1"
+
 do_install() {
     install -d ${D}${SDKPATHNATIVE}${bindir}
     install -d ${D}${SDKPATHNATIVE}/stone
