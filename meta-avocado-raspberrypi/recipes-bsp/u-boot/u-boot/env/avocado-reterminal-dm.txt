@@ -1,5 +1,5 @@
 machine=avocado-reterminal-dm
-initramfs_file=avocado-image-initramfs-avocado-reterminal-dm.cpio.zst
+initramfs_file=avocado-image-initramfs-reterminal-dm.cpio.zst
 kernel_file=Image
 
 stderr=serial,vidconsole
