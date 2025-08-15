@@ -11,6 +11,7 @@ RDEPENDS:${PN} = " \
   base-passwd \
   netbase \
   avocadoctl \
+  avocado-users \
   btrfs-tools \
   ${VIRTUAL-RUNTIME_base-utils} \
   ${VIRTUAL-RUNTIME_login_manager} \

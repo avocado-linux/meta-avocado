@@ -12,6 +12,7 @@ RDEPENDS:${PN} = "\
   os-release-initrd \
   util-linux \
   avocadoctl \
+  avocado-users \
 "
 
 RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"

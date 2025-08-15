@@ -72,5 +72,5 @@ cleanup_users() {
         mv ${IMAGE_ROOTFS}/etc/gshadow.tmp ${IMAGE_ROOTFS}/etc/gshadow
     fi
 }
-IMAGE_PREPROCESS_COMMAND += "create_dirs; cleanup_users;"
+IMAGE_PREPROCESS_COMMAND += "create_dirs;"
 ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"
