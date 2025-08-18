@@ -12,7 +12,7 @@ do_deploy:append:seeed() {
     append_config_if_missing "dtoverlay=dwc2,dr_mode=host"
     append_config_if_missing "enable_uart=1"
     append_config_if_missing "dtparam=spi=on"
-    append_config_if_missing "initramfs avocado-image-initramfs-${MACHINE}.cpio.zst followkernel"
+    append_config_if_missing "initramfs avocado-image-initramfs-${MACHINE_SHORT_NAME}.cpio.zst followkernel"
 
     if ${@'true' if 'seeed-reterminal-dm' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \
         || ${@'true' if 'seeed-reterminal-dm-mender' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'}; then

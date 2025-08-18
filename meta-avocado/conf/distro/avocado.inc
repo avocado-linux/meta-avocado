@@ -10,7 +10,7 @@ SDK_VERSION[vardepvalue] = "${SDK_VERSION}"
 TCLIBCAPPEND = ""
 
 MAINTAINER = "Avocado Developers <info@avocadolinux.org>"
-
+HOMEPAGE = "${DISTRO_VENDOR_URL}"
 TARGET_VENDOR = "-avocado"
 
 REQUIRED_AVOCADO_BBLAYERS_CONF_VERSION = "${DISTRO}-1"

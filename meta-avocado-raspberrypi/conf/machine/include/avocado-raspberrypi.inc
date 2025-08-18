@@ -6,6 +6,7 @@ RPI_USE_U_BOOT = "1"
 
 CMDLINE_ROOT_PARTITION = "/dev/mmcblk0p2"
 CMDLINE_ROOT_FSTYPE = "rootfstype=squashfs"
+CMDLINE:append = " audit=0"
 
 AVOCADO_VAR_PART_DEV = "/dev/mmcblk0p3"
 

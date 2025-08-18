@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "platform": "avocado-fr202",
+    "platform": "avocado-raspberrypi5",
     "architecture": "arm64",
     "provision_default": "img"
   },
@@ -25,7 +25,7 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-fr202-rootdisk.zip",
+      "out": "avocado-raspberrypi5-rootdisk.zip",
       "build_args": {
         "type": "fwup",
         "template": "rootdisk.conf"
@@ -62,17 +62,18 @@
               { "in": "bootfiles/start4cd.elf", "out": "start4cd.elf" },
               { "in": "bootfiles/start4db.elf", "out": "start4db.elf" },
               { "in": "bootfiles/start4x.elf", "out": "start4x.elf" },
-              "bcm2711-rpi-4-b.dtb",
-              "bcm2711-rpi-400.dtb",
-              "bcm2711-rpi-cm4.dtb",
-              "bcm2711-rpi-cm4s.dtb",
-              "avocado-image-initramfs-fr202.cpio.zst",
+              "bcm2712-rpi-5-b.dtb",
+              "bcm2712-rpi-cm5-cm5io.dtb",
+              "bcm2712-rpi-cm5-cm4io.dtb",
+              "bcm2712-rpi-cm5l-cm5io.dtb",
+              "bcm2712-rpi-cm5l-cm4io.dtb",
+              "avocado-image-initramfs-raspberrypi5.cpio.zst",
               "Image"
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-fr202.squashfs",
-        "var": "avocado-image-var-fr202.btrfs"
+        "rootfs": "avocado-image-rootfs-raspberrypi5.squashfs",
+        "var": "avocado-image-var-raspberrypi5.btrfs"
       },
       "partitions": [
         {
