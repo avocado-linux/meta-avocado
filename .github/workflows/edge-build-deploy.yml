@@ -22,8 +22,10 @@ on:
           - qemuarm64
           - qemux86-64
           - reterminal
+          - reterminal-dm
           - jetson-orin-nano-devkit-nvme
           - raspberrypi4
+          - raspberrypi5
       distro_codename:
         description: "Distribution codename"
         type: string
@@ -76,7 +78,8 @@ jobs:
           script: |
             const allMachinesList = [
               "imx8mp-evk", "imx91-frdm", "imx93-frdm", "qemuarm64", "qemux86-64",
-              "reterminal", "imx93-evk", "jetson-orin-nano-devkit-nvme", "raspberrypi4"
+              "reterminal", "reterminal-dm", "imx93-evk", "jetson-orin-nano-devkit-nvme",
+              "raspberrypi4", "raspberrypi5"
             ];
 
             let selectedMachines = [];
