@@ -3,7 +3,7 @@
 set -e
 
 hook="avocado-build"
-target="fr202"
+target="$AVOCADO_TARGET"
 
 RUNTIME_NAME="$1"
 
