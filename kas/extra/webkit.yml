@@ -10,3 +10,6 @@ repos:
     layers:
       .:
 
+local_conf_header:
+  extra-webkit: |
+    PREFERRED_PROVIDER_virtual/wpebackend = "wpebackend-fdo"
