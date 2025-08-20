@@ -10,8 +10,10 @@ do_deploy:append:seeed() {
     CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
     append_config_if_missing "dtoverlay=vc4-kms-v3d-pi4"
     append_config_if_missing "dtoverlay=dwc2,dr_mode=host"
+    append_config_if_missing "dtparam=audio=on"
+    append_config_if_missing "disable_fw_kms_setup=1"
     append_config_if_missing "enable_uart=1"
-    append_config_if_missing "dtparam=spi=on"
+    append_config_if_missing "disable_splash=1"
     append_config_if_missing "initramfs avocado-image-initramfs-${MACHINE_SHORT_NAME}.cpio.zst followkernel"
 
     if ${@'true' if 'seeed-reterminal-dm' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \
@@ -25,6 +27,8 @@ do_deploy:append:seeed() {
         || ${@'true' if 'dual-gbe-cm4' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \
         || ${@'true' if 'dual-gbe-cm4-mender' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'}; then
         append_config_if_missing "dtoverlay=i2c3,pins_4_5"
+        append_config_if_missing "dtparam=ant2"
+        append_config_if_missing "gpio=13=pu"
         append_config_if_missing "dtoverlay=reTerminal,tp_rotate=1"
 
     elif ${@'true' if 'seeed-recomputer-r100x-mender' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \

@@ -51,7 +51,7 @@
           "image": "uboot_env",
           "offset": 1,
           "offset_unit": "mebibytes",
-          "offset_redundant": 1152,
+          "offset_redundant": 1280,
           "offset_redundant_unit": "kibibytes",
           "size": 128,
           "size_unit": "kibibytes"

@@ -10,3 +10,11 @@ RDEPENDS:${PN}:append = " \
   nativesdk-jq \
   nativesdk-rpi-usbboot \
 "
+
+SRC_URI:append = " file://avocado-deploy-rpi"
+
+do_install:append() {
+  install -m 755 ${WORKDIR}/avocado-deploy-rpi ${D}${SDKPATHNATIVE}${bindir}/avocado-deploy-${MACHINE_SHORT_NAME}
+}
+
+FILES:${PN}:append = " ${SDKPATHNATIVE}${bindir}/avocado-deploy-${MACHINE_SHORT_NAME}"

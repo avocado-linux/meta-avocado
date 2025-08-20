@@ -13,4 +13,6 @@ PREFERRED_PROVIDER_virtual/dtb = "reterminal-devicetree"
 RDEPENDS:${PN} = " \
   reterminal-devicetree \
   kernel-module-ili9881d \
+  kernel-module-mipi-dsi \
+  kernel-module-ltr30x \
 "

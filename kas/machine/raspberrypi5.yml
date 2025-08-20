@@ -15,4 +15,7 @@ repos:
     layers:
       meta-avocado-raspberrypi:
 
+local_conf_header:
+  machine-avocado-raspberrypi5: |
+
 machine: avocado-raspberrypi5

@@ -26,7 +26,14 @@ RDEPENDS:${PN} = " \
   htop \
   cryptoauthlib \
   peridiod \
+  fwup \
+  parted \
+  rsync \
+  avahi-daemon \
+  libnss-mdns \
+  i2c-tools \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
 "
 
 OPENGL_PACKAGES = " \
@@ -37,4 +44,11 @@ OPENGL_PACKAGES = " \
   weston-init \
   wayland \
   wayland-utils \
+  libdrm-tests \
+"
+
+CONATINER_PACKAGES = " \
+  docker \
+  podman \
+  podman-compose \
 "

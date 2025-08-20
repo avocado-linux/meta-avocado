@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "platform": "avocado-reterminal",
+    "platform": "avocado-reterminal-dm",
     "architecture": "arm64",
     "provision_default": "img"
   },
@@ -23,9 +23,12 @@
       }
     }
   },
+  "deploy": {
+    "script": "stone-deploy.sh"
+  },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-reterminal-rootdisk.zip",
+      "out": "avocado-reterminal-dm-rootdisk.zip",
       "build_args": {
         "type": "fwup",
         "template": "rootdisk.conf"
@@ -66,6 +69,9 @@
                 "in": "devicetree/reTerminal-DM.dtbo",
                 "out": "reTerminal-DM.dtbo"
               },
+              { "in": "vc4-kms-v3d-pi4.dtbo", "out": "overlays/vc4-kms-v3d-pi4.dtbo" },
+              { "in": "i2c3.dtbo", "out": "overlays/i2c3.dtbo" },
+              { "in": "dwc2.dtbo", "out": "overlays/dwc2.dtbo" },
               "bcm2711-rpi-4-b.dtb",
               "bcm2711-rpi-400.dtb",
               "bcm2711-rpi-cm4.dtb",
@@ -84,7 +90,7 @@
           "image": "uboot_env",
           "offset": 1,
           "offset_unit": "mebibytes",
-          "offset_redundant": 1152,
+          "offset_redundant": 1280,
           "offset_redundant_unit": "kibibytes",
           "size": 128,
           "size_unit": "kibibytes",

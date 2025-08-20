@@ -15,6 +15,8 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-qemu \
   nativesdk-qemu-helper \
   nativesdk-strace \
+  nativesdk-openssh-scp \
+  nativesdk-openssh-ssh \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
