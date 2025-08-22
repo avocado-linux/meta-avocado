@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
 # Basic description
 DESCRIPTION = "Custom Device Tree and Kernel Modules for Seeed ReTerminal"
 LICENSE = "Apache-2.0"
@@ -8,7 +10,7 @@ DEPENDS += "virtual/kernel dtc-native"
 # Specify compatible machine(s)
 COMPATIBLE_MACHINE = "avocado-reterminal|avocado-reterminal-dm"
 
-SRCREV = "4f240f8ff9d3d3731050181dca1fb1f536ca03de"
+SRCREV = "e9d88ebad195561a0b788d36f59bc67a7bcc697b"
 
 SRC_URI = "\
     https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/${SRCREV}/modules/mipi_dsi/mipi_dsi_drv.c;name=mipi_dsi_drv \
@@ -16,6 +18,7 @@ SRC_URI = "\
     https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/${SRCREV}/modules/mipi_dsi/touch_panel.c;name=touch_panel \
     https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/${SRCREV}/modules/mipi_dsi/mipi_dsi.h;name=mipi_dsi \
     file://Makefile \
+    file://0001-Fix-drm-warnings-for-panel-rotation.patch \
 "
 
 SRC_URI[mipi_dsi_drv.sha256sum] = "23ddf55f4a3d542dce3b0af96a3062366a9389d566914a976bb973ef2849e510"
@@ -28,4 +31,4 @@ S = "${WORKDIR}"
 inherit module
 
 # Add the module to the package
-RPROVIDES:${PN} += "kernel-module-mipi-dsi"
+RPROVIDES:${PN} += "kernel-module-seeed-mipi-dsi"

@@ -5,11 +5,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 DEPENDS += "virtual/kernel dtc-native"
 
+SRCREV = "e9d88ebad195561a0b788d36f59bc67a7bcc697b"
+
 # Specify compatible machine(s)
 COMPATIBLE_MACHINE = "avocado-reterminal|avocado-reterminal-dm"
 
 SRC_URI = "\
-    https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/4f240f8ff9d3d3731050181dca1fb1f536ca03de/modules/ltr30x/ltr30x.c;name=ltr30x \
+    https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/${SRCREV}/modules/ltr30x/ltr30x.c;name=ltr30x \
     file://Makefile \
 "
 

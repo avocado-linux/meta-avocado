@@ -10,10 +10,12 @@ DEPENDS += "virtual/kernel"
 # Specify compatible machine(s)
 COMPATIBLE_MACHINE = "avocado-reterminal|avocado-reterminal-dm"
 
+SRCREV = "4f240f8ff9d3d3731050181dca1fb1f536ca03de"
+
 # Location of the source .dts file
 SRC_URI = "\
-    https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/4f240f8ff9d3d3731050181dca1fb1f536ca03de/overlays/rpi/reTerminal-overlay.dts;downloadfilename=reTerminal.dts;name=reTerminal \
-    https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/4f240f8ff9d3d3731050181dca1fb1f536ca03de/overlays/rpi/reTerminal-DM-overlay.dts;downloadfilename=reTerminal-DM.dts;name=reTerminal-DM \
+    https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/${SRCREV}/overlays/rpi/reTerminal-overlay.dts;downloadfilename=reTerminal.dts;name=reTerminal \
+    https://raw.githubusercontent.com/Seeed-Studio/seeed-linux-dtoverlays/${SRCREV}/overlays/rpi/reTerminal-DM-overlay.dts;downloadfilename=reTerminal-DM.dts;name=reTerminal-DM \
 "
 
 SRC_URI[reTerminal.sha256sum] = "bc82b77cf82388c48254a9b34451d549fe4d6d486095ea49e9d38d8a05959c66"

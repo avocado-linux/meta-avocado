@@ -32,6 +32,10 @@ RDEPENDS:${PN} = " \
   avahi-daemon \
   libnss-mdns \
   i2c-tools \
+  iperf3 \
+  p11-kit \
+  ca-certificates \
+  ethtool \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
 "

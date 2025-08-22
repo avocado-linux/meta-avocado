@@ -20,7 +20,12 @@ do_deploy:append:seeed() {
         || ${@'true' if 'seeed-reterminal-dm-mender' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'}; then
         append_config_if_missing "dtoverlay=reTerminal-DM"
         append_config_if_missing "dtparam=i2c_vc=on"
+        append_config_if_missing "dtparam=i2c_arm=on"
+        append_config_if_missing "dtparam=i2s=on"
+        append_config_if_missing "dtparam=spi=on"
+        append_config_if_missing "dtoverlay=i2c1,pins_2_3"
         append_config_if_missing "dtoverlay=i2c3,pins_4_5"
+        append_config_if_missing "dtoverlay=imx219,cam0"
 
     elif ${@'true' if 'seeed-reterminal' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \
         || ${@'true' if 'seeed-reterminal-mender' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \

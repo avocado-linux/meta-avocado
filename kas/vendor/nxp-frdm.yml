@@ -3,6 +3,8 @@ header:
   includes:
   - repo: meta-avocado
     file: kas/vendor/arm.yml
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
 
 repos:
   meta-avocado:

@@ -67,9 +67,11 @@
               { "in": "bootfiles/start4x.elf", "out": "start4x.elf" },
               {
                 "in": "devicetree/reTerminal-DM.dtbo",
-                "out": "reTerminal-DM.dtbo"
+                "out": "overlays/reTerminal-DM.dtbo"
               },
               { "in": "vc4-kms-v3d-pi4.dtbo", "out": "overlays/vc4-kms-v3d-pi4.dtbo" },
+              { "in": "imx219.dtbo", "out": "overlays/imx219.dtbo" },
+              { "in": "i2c1.dtbo", "out": "overlays/i2c1.dtbo" },
               { "in": "i2c3.dtbo", "out": "overlays/i2c3.dtbo" },
               { "in": "dwc2.dtbo", "out": "overlays/dwc2.dtbo" },
               "bcm2711-rpi-4-b.dtb",

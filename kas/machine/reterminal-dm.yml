@@ -17,6 +17,7 @@ repos:
 
 local_conf_header:
   machine-avocado-reterminal-dm: |
-    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal-rootfs"
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-reterminal-extra"
 
 machine: avocado-reterminal-dm

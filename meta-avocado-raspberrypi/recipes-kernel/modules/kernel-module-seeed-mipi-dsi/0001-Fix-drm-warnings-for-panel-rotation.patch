@@ -1,0 +1,30 @@
+From 809b28d924ab7bff9d8c6c70aae51797b31e0e74 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Thu, 21 Aug 2025 21:53:04 -0400
+Subject: [PATCH] Fix drm warnings for panel rotation
+
+---
+ panel-ili9881x.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/panel-ili9881x.c b/panel-ili9881x.c
+index 7632e98..fe0c543 100644
+--- a/panel-ili9881x.c
++++ b/panel-ili9881x.c
+@@ -794,7 +794,12 @@ static int ili9881x_get_modes(struct drm_panel *panel, struct drm_connector *con
+ 	connector->display_info.width_mm = mode->width_mm;
+ 	connector->display_info.height_mm = mode->height_mm;
+ 	drm_mode_probed_add(connector, mode);
+-	drm_connector_set_panel_orientation(connector, DRM_MODE_PANEL_ORIENTATION_RIGHT_UP);
++	
++        /* Only set panel orientation once to avoid DRM warnings */
++        if (!connector->display_info.panel_orientation) {
++            drm_connector_set_panel_orientation(connector, 
++                                           DRM_MODE_PANEL_ORIENTATION_NORMAL);
++        }
+ 	return 1;
+ }
+ 
+-- 
+2.49.0
+

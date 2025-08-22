@@ -1,4 +1,4 @@
-DESCRIPTION = "Packagegroup for inclusion in Avocado reTerminal images"
+DESCRIPTION = "Packagegroup for rootfs inclusions in Avocado reTerminal images"
 LICENSE = "Apache-2.0"
 
 inherit features_check
@@ -12,7 +12,4 @@ PREFERRED_PROVIDER_virtual/dtb = "reterminal-devicetree"
 
 RDEPENDS:${PN} = " \
   reterminal-devicetree \
-  kernel-module-ili9881d \
-  kernel-module-mipi-dsi \
-  kernel-module-ltr30x \
 "

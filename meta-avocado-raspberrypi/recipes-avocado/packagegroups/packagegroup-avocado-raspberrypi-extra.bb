@@ -1,4 +1,4 @@
-DESCRIPTION = "Packagegroup for inclusion in all Avocado RaspberryPi images"
+DESCRIPTION = "Packagegroup for extra inclusions in Avocado RaspberryPi images"
 LICENSE = "Apache-2.0"
 
 inherit features_check
