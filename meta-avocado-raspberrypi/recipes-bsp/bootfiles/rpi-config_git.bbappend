@@ -34,7 +34,7 @@ do_deploy:append:seeed() {
         append_config_if_missing "dtoverlay=i2c3,pins_4_5"
         append_config_if_missing "dtparam=ant2"
         append_config_if_missing "gpio=13=pu"
-        append_config_if_missing "dtoverlay=reTerminal,tp_rotate=1"
+        append_config_if_missing "dtoverlay=reTerminal"
 
     elif ${@'true' if 'seeed-recomputer-r100x-mender' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'} \
         || ${@'true' if 'seeed-recomputer-r100x' in d.getVar('MACHINEOVERRIDES').split(':') else 'false'}; then
