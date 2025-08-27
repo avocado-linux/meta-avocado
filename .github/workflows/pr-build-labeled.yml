@@ -46,6 +46,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
       - name: build ${{ matrix.machine }}
+        shell: bash
         env:
           BB_GIT_SHALLOW: "1"
           PARALLEL_MAKE: "-j16"
@@ -54,7 +55,5 @@ jobs:
         run: |
           echo "TARGET: avocado-distro"
           echo "SDKMACHINE: x86_64"
-          echo "DISTRO_CODENAME: "
-
-          source ./scripts/init-build kas/machine/${{ matrix.machine }}.yml
-          PARALLEL_MAKE_ERLANG="-j16" kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml --target avocado-distro
+          . scripts/init-build kas/machine/${{ matrix.machine }}.yml
+          kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml --target avocado-complete

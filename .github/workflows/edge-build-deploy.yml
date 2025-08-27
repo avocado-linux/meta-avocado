@@ -33,7 +33,7 @@ on:
 
 jobs:
   determine_build_matrix:
-    runs-on: molcajete
+    runs-on: avocado-build
     env:
       DISTRO_VERSION: "0.1.0"
       DISTRO_CODENAME: ${{ github.event.inputs.distro_codename || 'latest/apollo/edge' }}
@@ -113,7 +113,7 @@ jobs:
   build:
     needs: determine_build_matrix
     if: needs.determine_build_matrix.outputs.matrix != '[]'
-    runs-on: molcajete
+    runs-on: avocado-build
     strategy:
       fail-fast: false
       matrix:
@@ -167,7 +167,7 @@ jobs:
       - determine_build_matrix
       - build
     if: needs.build.result == 'success'
-    runs-on: molcajete
+    runs-on: avocado-build
     env:
       STAGING_BASE_PATH: ${{ needs.determine_build_matrix.outputs.staging_base_path }}
       PACKAGES_PATH: ${{ needs.determine_build_matrix.outputs.packages_path }}
@@ -235,7 +235,7 @@ jobs:
       - build
       - aggregate_packages
     if: needs.build.result == 'success'
-    runs-on: molcajete
+    runs-on: avocado-build
     env:
       PACKAGES_PATH: ${{ needs.determine_build_matrix.outputs.packages_path }}
     steps:
@@ -256,7 +256,7 @@ jobs:
       - build
       - cleanup_packages
     if: needs.build.result == 'success'
-    runs-on: molcajete
+    runs-on: avocado-build
     env:
       PACKAGES_PATH: ${{ needs.determine_build_matrix.outputs.packages_path }}
       RELEASES_PATH: ${{ needs.determine_build_matrix.outputs.releases_path }}
@@ -281,7 +281,7 @@ jobs:
     needs:
       [determine_build_matrix, build, cleanup_packages, create_release_metadata]
     if: needs.build.result == 'success'
-    runs-on: molcajete
+    runs-on: avocado-build
     env:
       PACKAGES_PATH: ${{ needs.determine_build_matrix.outputs.packages_path }}
       RELEASES_PATH: ${{ needs.determine_build_matrix.outputs.releases_path }}
@@ -312,7 +312,7 @@ jobs:
           # First sync everything EXCEPT repomd.xml files. Then sync ONLY repomd.xml files. This
           # ensures that if a new repomd.xml is served, that the content it addresses exists.
           aws s3 sync "${{ env.RELEASES_PATH }}" "s3://${{ env.S3_BUCKET_PATH }}/${{ env.DISTRO_CODENAME }}" --exclude "*/repomd.xml"
-          aws s3 sync "${{ env.RELEASES_PATH}}" "s3://${{ env.S3_BUCKET_PATH }}/${{ env.DISTRO_CODENAME }}" --exclude "*" --include "*/repomd.xml"
+          aws s3 sync "${{ env.RELEASES_PATH }}" "s3://${{ env.S3_BUCKET_PATH }}/${{ env.DISTRO_CODENAME }}" --exclude "*" --include "*/repomd.xml"
 
       - name: Clean up staging, releases, and latest directories
         run: |

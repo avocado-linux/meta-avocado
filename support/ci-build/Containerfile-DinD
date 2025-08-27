@@ -9,12 +9,9 @@ ARG DOCKER_VERSION=24.0.7
 ARG DOCKER_COMPOSE_VERSION=v2.23.0
 ARG DUMB_INIT_VERSION=1.2.5
 ARG RUNNER_USER_UID=1001
-ARG DOCKER_GROUP_GID=974
+ARG DOCKER_GROUP_GID=123
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-
 RUN apt-get update -y \
     && apt-get install -y software-properties-common \
     && add-apt-repository -y ppa:git-core/ppa \
@@ -36,6 +33,7 @@ RUN apt-get update -y \
     git-lfs \
     groff \
     iputils-ping \
+    iptables \
     jq \
     less \
     libacl1 \
@@ -49,6 +47,7 @@ RUN apt-get update -y \
     python3-subunit \
     rsync \
     socat \
+    software-properties-common \
     sudo \
     texinfo \
     tmux \
@@ -56,15 +55,13 @@ RUN apt-get update -y \
     wget \
     xz-utils \
     zip \
-    zstd && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
+    zstd \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
-    unzip /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip
+unzip /tmp/awscliv2.zip -d /tmp && \
+/tmp/aws/install && \
+rm -rf /tmp/aws /tmp/awscliv2.zip
 
 RUN aws --version
 
@@ -83,8 +80,10 @@ RUN locale-gen en_US.UTF-8 && \
 RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash && \
     apt-get install -y --no-install-recommends git-lfs
 
+# Runner user
 RUN adduser --disabled-password --gecos "" --uid $RUNNER_USER_UID runner \
     && groupadd docker --gid $DOCKER_GROUP_GID \
+    && groupadd -f sudo \
     && usermod -aG sudo runner \
     && usermod -aG docker runner \
     && echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" > /etc/sudoers \
@@ -130,7 +129,7 @@ RUN set -vx; \
     && if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "i386" ]; then export ARCH=x86_64 ; fi \
     && curl -fLo docker.tgz https://download.docker.com/linux/static/${CHANNEL}/${ARCH}/docker-${DOCKER_VERSION}.tgz \
     && tar zxvf docker.tgz \
-    && install -o root -g root -m 755 docker/docker /usr/bin/docker \
+    && install -o root -g root -m 755 docker/* /usr/bin/ \
     && rm -rf docker docker.tgz
 
 RUN export ARCH=$(echo ${TARGETPLATFORM} | cut -d / -f2) \
@@ -145,7 +144,8 @@ RUN export ARCH=$(echo ${TARGETPLATFORM} | cut -d / -f2) \
 
 # We place the scripts in `/usr/bin` so that users who extend this image can
 # override them with scripts of the same name placed in `/usr/local/bin`.
-COPY entrypoint.sh startup.sh logger.sh graceful-stop.sh update-status /usr/bin/
+COPY entrypoint-dind.sh startup.sh logger.sh wait.sh graceful-stop.sh update-status /usr/bin/
+RUN chmod +x /usr/bin/entrypoint-dind.sh /usr/bin/startup.sh
 
 # Copy the docker shim which propagates the docker MTU to underlying networks
 # to replace the docker binary in the PATH.
@@ -154,14 +154,17 @@ COPY docker-shim.sh /usr/local/bin/docker
 # Configure hooks folder structure.
 COPY hooks /etc/arc/hooks/
 
+VOLUME /var/lib/docker
+
 # Add the Python "User Script Directory" to the PATH
-ENV PATH="${PATH}:${HOME}/.local/bin/"
+ENV PATH="${PATH}:${HOME}/.local/bin"
 ENV ImageOS=ubuntu24
 
 RUN echo "PATH=${PATH}" > /etc/environment \
     && echo "ImageOS=${ImageOS}" >> /etc/environment
 
-ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["entrypoint.sh"]
-
+# No group definition, as that makes it harder to run docker.
 USER runner
+
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["entrypoint-dind.sh"]
