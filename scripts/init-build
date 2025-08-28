@@ -27,9 +27,14 @@ fi
 # Determine default build directory if not provided
 if [ -z "$2" ]; then
     BASENAME=$(basename "$KAS_MACHINE_FILE" .yml)
-    BUILD_DIR="build-${BASENAME}"
+    BUILD_DIR="$(pwd)/build-${BASENAME}"
 else
-    BUILD_DIR="$2"
+    # Make BUILD_DIR absolute if it's not already
+    if [[ "$2" = /* ]]; then
+        BUILD_DIR="$2"
+    else
+        BUILD_DIR="$(pwd)/$2"
+    fi
 fi
 
 # Determine the repository directory.
