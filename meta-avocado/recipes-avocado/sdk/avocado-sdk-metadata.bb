@@ -127,6 +127,7 @@ python do_install() {
             repo_f.write(f"gpgcheck={gpg_check}\n")
             repo_f.write(f"priority={priority}\n")
             repo_f.write("\n")
+
             repo_archs.append(arch) # Append arch if written successfully
             return True # Indicate success for priority increment
         elif arch != "all_avocadosdk": # Only log warning if it wasn't the explicitly excluded arch
@@ -202,6 +203,20 @@ python do_install() {
                 # for the dnf/vars/arch file without writing a new repo section.
                 repo_archs.append(arch)
 
+    def _write_additional_target_repo():
+        """
+        Writes the additional target-ext repo entry at priority 2.
+        """
+        nonlocal repo_f
+        repo_f.write(f"[{machine_short_name}-target-ext]\n")
+        repo_f.write(f"name={machine_short_name}-target-ext\n")
+        repo_f.write(f"baseurl=${{repo_url}}/$releasever/target/{machine_short_name}-ext\n")
+        repo_f.write(f"enabled=1\n")
+        repo_f.write(f"gpgcheck={gpg_check}\n")
+        repo_f.write(f"priority=2\n")
+        repo_f.write("\n")
+        bb.note(f"Added additional target repo '{machine_short_name}-target-ext' at priority 2")
+
     # Get SDKPATHNATIVE for the repo file
     sdk_path_native = d.getVar('SDKPATHNATIVE')
     # Construct the path for the repo file within the staging directory ${D}
@@ -226,7 +241,7 @@ python do_install() {
 
     # Combine architectures into a unique set
     all_archs = set(pkg_archs + sdk_pkg_archs + sdk_repo_archs)
-    priority = 1
+    priority = 3  # Start at 3 since priority 2 is reserved for additional target repos
 
     # Overwrite map file and repo file initially
     with open(map_file_path, 'w') as map_f:
@@ -248,6 +263,8 @@ python do_install() {
         bb.note(f"Opening map file for arch loop append: {map_file_path}")
         # Process the dedicated SDK architectures first to ensure single repo entry
         _process_sdk_archs()
+        # Add the additional target repo at priority 2
+        _write_additional_target_repo()
         for arch in sorted(list(all_archs)): # Sort for consistent output order
             _process_arch(arch)
     bb.note(f"Finished arch loop append for map file.")
