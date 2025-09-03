@@ -16,5 +16,6 @@ repos:
 
 local_conf_header:
   machine-avocado-imx8mp-evk: |
+    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
 
 machine: avocado-imx8mp-evk

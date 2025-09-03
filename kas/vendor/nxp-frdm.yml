@@ -33,6 +33,6 @@ repos:
 
 local_conf_header:
   vendor-nxp-frdm: |
-    DISTRO_FEATURES_EXTRA:append= "opengl wayland seccomp virtualization"
     IMX_DEFAULT_BSP = "nxp"
+    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"
