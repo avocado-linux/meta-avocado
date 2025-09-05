@@ -36,6 +36,8 @@ RDEPENDS:${PN} = " \
   p11-kit \
   ca-certificates \
   ethtool \
+  livebook \
+  nodejs \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
 "

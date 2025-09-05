@@ -7,6 +7,7 @@ PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
   packagegroup-core-boot \
+  os-release \
   base-files \
   base-passwd \
   netbase \

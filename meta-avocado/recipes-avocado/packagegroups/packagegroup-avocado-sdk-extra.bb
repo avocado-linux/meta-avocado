@@ -19,6 +19,10 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-openssh-ssh \
   nativesdk-elixir \
   nativesdk-erlang \
+  nativesdk-rebar3 \
+  nativesdk-nodejs \
+  nativesdk-git \
+  nativesdk-ca-certificates \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
