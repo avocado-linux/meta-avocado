@@ -1,0 +1,28 @@
+header:
+  version: 16
+
+env:
+  BB_GIT_SHALLOW: "0"
+  BB_GENERATE_SHALLOW_TARBALLS: "1"
+  BB_GIT_SHALLOW_DEPTH: "1"
+  PRSERV_HOST: "${PRSERV_HOST:-auto}"
+
+build_system: oe
+
+repos:
+  bitbake:
+    url: https://github.com/avocado-linux/vendor-bitbake
+    path: bitbake
+    branch: "2.8"
+    commit: 982645110a19ebb94d519926a4e14c8a2a205cfd
+    layers:
+      .: disabled
+
+  openembedded-core:
+    url: https://github.com/avocado-linux/vendor-openembedded-core
+    path: openembedded-core
+    branch: scarthgap
+    commit: f023779af6c0e5c838bdacbd6d9765d1c6740575
+    layers:
+      meta:
+

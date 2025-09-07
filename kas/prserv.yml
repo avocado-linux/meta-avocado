@@ -1,0 +1,22 @@
+header:
+  version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/oe.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado:
+
+local_conf_header:
+  oe-base: |
+    INHERIT += "buildhistory"
+    BUILDHISTORY_COMMIT = "1"
+
+# Minimal distro configuration
+distro: avocado
+
+# Minimal machine - we don't actually build anything, just need bitbake
+machine: qemux86-64

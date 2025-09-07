@@ -2,6 +2,8 @@ header:
   version: 16
   includes:
   - repo: meta-avocado
+    file: kas/vendor/oe.yml
+  - repo: meta-avocado
     file: kas/vendor/ptx.yml
   - repo: meta-avocado
     file: kas/vendor/fwup.yml
@@ -10,23 +12,10 @@ env:
   AVOCADO_REPO_BASE: "http://package-repo"
   DISTRO_CODENAME: "dev"
   DISTRO_VERSION: "0.1.0"
-  BB_GIT_SHALLOW: "0"
-  BB_GENERATE_SHALLOW_TARBALLS: "1"
-  BB_GIT_SHALLOW_DEPTH: "1"
   PARALLEL_MAKE_HIGHMEM: ""
   SDKMACHINE: "x86_64"
 
-build_system: oe
-
 repos:
-  bitbake:
-    url: https://github.com/avocado-linux/vendor-bitbake
-    path: bitbake
-    branch: "2.8"
-    commit: 982645110a19ebb94d519926a4e14c8a2a205cfd
-    layers:
-      .: disabled
-
   meta-openembedded:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
@@ -39,14 +28,6 @@ repos:
       meta-networking:
       meta-filesystems:
       meta-multimedia:
-
-  openembedded-core:
-    url: https://github.com/avocado-linux/vendor-openembedded-core
-    path: openembedded-core
-    branch: scarthgap
-    commit: f023779af6c0e5c838bdacbd6d9765d1c6740575
-    layers:
-      meta:
 
   meta-lts-mixins:
     url: https://github.com/avocado-linux/vendor-meta-lts-mixins
