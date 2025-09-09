@@ -11,11 +11,15 @@ echo "SCRIPT_DIR: $SCRIPT_DIR"
 
 # Store original arguments passed to this script
 CLEAN_BUILD=false
+SDKMACHINE="x86-64"
 PASSTHRU_ARGS=()
 for arg in "$@"; do
     case $arg in
         --clean)
         CLEAN_BUILD=true
+        ;;
+        --sdkmachine=*)
+        SDKMACHINE="${arg#*=}"
         ;;
         *)
         PASSTHRU_ARGS+=("$arg")
@@ -30,6 +34,7 @@ FAILED_BUILDS=()
 
 echo "Building all machines in kas/machine directory..."
 echo "Arguments passed: $ARGS"
+echo "SDKMACHINE: $SDKMACHINE"
 echo
 
 # Find all .yml files in kas/machine directory
@@ -55,8 +60,8 @@ for machine_config in "$PROJECT_ROOT"/kas/machine/*.yml; do
             fi
             
             # Run kas build with the original arguments
-            echo "Running: kas build $machine_config $ARGS"
-            if kas build $machine_config $ARGS; then
+            echo "Running: SDKMACHINE=$SDKMACHINE kas build $machine_config $ARGS"
+            if SDKMACHINE=$SDKMACHINE kas build $machine_config $ARGS; then
                 echo "✅ Build SUCCEEDED for $machine_name"
                 SUCCESSFUL_BUILDS+=("$machine_name")
             else
