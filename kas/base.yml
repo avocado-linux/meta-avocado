@@ -50,10 +50,7 @@ local_conf_header:
     USER_CLASSES:append = " buildhistory buildstats buildstats-summary"
 
     ## Debugging prior to extensions loading
-    #EXTRA_IMAGE_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
-    #EXTRA_INITRAMFS_FEATURES += " allow-empty-password allow-root-login empty-root-password post-install-logging"
-    ## Debugging Extensions
-    #ROOTFS_IMAGE_EXTRA_INSTALL:append = " avocado-extension-debug-tweaks"
+    AVOCADO_ALLOW_ROOT_LOGIN = "1"
 
   sdk: |
     CONF_VERSION = "2"
