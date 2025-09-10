@@ -3,5 +3,15 @@
     "platform": "avocado-jetson-orin-nano-devkit-nvme",
     "architecture": "arm64"
   },
-  "storage_devices": {}
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.tegraflash.tar.gz",
+      "devpath": "/dev/nvme0n1",
+      "block_size": 512,
+      "partitions": [],
+      "images": {
+        "tegraflash": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.tegraflash.tar.gz"
+      }
+    }
+  }
 }
