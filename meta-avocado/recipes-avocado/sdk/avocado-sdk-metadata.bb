@@ -42,11 +42,10 @@ FILES:${PN} = " \
 # Set package arch so it deploys to a specific directory
 PACKAGE_ARCH = "all_avocadosdk"
 
-python do_install() {
+python do_compile() {
     import os
     import bb
 
-    d_dir = d.getVar('D')
     deploy_dir_rpm = d.getVar('DEPLOY_DIR_RPM')
     bb.note(f"DEPLOY_DIR_RPM value: {deploy_dir_rpm}")
     machine = d.getVar('MACHINE')
@@ -205,43 +204,51 @@ python do_install() {
 
     def _write_additional_target_repo():
         """
-        Writes the additional target-ext repo entry at priority 2.
+        Writes the additional target-ext repo entry at the end with highest priority number.
         """
-        nonlocal repo_f
+        nonlocal repo_f, priority
         repo_f.write(f"[{machine_short_name}-target-ext]\n")
         repo_f.write(f"name={machine_short_name}-target-ext\n")
         repo_f.write(f"baseurl=${{repo_url}}/$releasever/target/{machine_short_name}-ext\n")
         repo_f.write(f"enabled=1\n")
         repo_f.write(f"gpgcheck={gpg_check}\n")
-        repo_f.write(f"priority=2\n")
+        repo_f.write(f"priority={priority}\n")
         repo_f.write("\n")
-        bb.note(f"Added additional target repo '{machine_short_name}-target-ext' at priority 2")
+        bb.note(f"Added additional target repo '{machine_short_name}-target-ext' at priority {priority}")
 
     # Get SDKPATHNATIVE for the repo file
     sdk_path_native = d.getVar('SDKPATHNATIVE')
-    # Construct the path for the repo file within the staging directory ${D}
+    # Construct the path for the repo file within the work directory
     # by stripping the leading '/' from SDKPATHNATIVE.
     sdk_native_prefix_stripped = sdk_path_native.lstrip('/')
-    repo_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'yum.repos.d')
+
+    # Create directories in WORKDIR for generated files
+    work_dir = d.getVar('WORKDIR')
+    repo_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'yum.repos.d')
+    arch_vars_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'dnf', 'vars')
+    platform_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'rpm')
+    rpmrc_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc')
 
     # Ensure directories exist
-    os.makedirs(d_dir, exist_ok=True)
     os.makedirs(deploy_dir_rpm, exist_ok=True)
-    os.makedirs(repo_dir, exist_ok=True) # Ensure repo dir exists
+    os.makedirs(repo_work_dir, exist_ok=True)
+    os.makedirs(arch_vars_work_dir, exist_ok=True)
+    os.makedirs(platform_work_dir, exist_ok=True)
+    os.makedirs(rpmrc_work_dir, exist_ok=True)
 
-    # Define file paths
+    # Define file paths in WORKDIR
     repo_filename = d.getVar('VIRTUAL-RUNTIME_avocado-sdk-metadata') + '.repo'
-    repo_file_path = os.path.join(repo_dir, repo_filename)
+    repo_file_path = os.path.join(repo_work_dir, repo_filename)
 
     # Create temporary directory for map file
-    map_dir = os.path.join(d.getVar('WORKDIR'), 'map')
+    map_dir = os.path.join(work_dir, 'map')
     os.makedirs(map_dir, exist_ok=True)
     map_file_path = os.path.join(map_dir, 'avocado-repo.map')
     bb.note(f"Constructed map file path: {map_file_path}")
 
     # Combine architectures into a unique set
     all_archs = set(pkg_archs + sdk_pkg_archs + sdk_repo_archs)
-    priority = 3  # Start at 3 since priority 2 is reserved for additional target repos
+    priority = 1  # Start at 1 for SDK repos
 
     # Overwrite map file and repo file initially
     with open(map_file_path, 'w') as map_f:
@@ -261,18 +268,44 @@ python do_install() {
     # Append to files for other architectures found
     with open(map_file_path, 'a') as map_f, open(repo_file_path, 'a') as repo_f:
         bb.note(f"Opening map file for arch loop append: {map_file_path}")
-        # Process the dedicated SDK architectures first to ensure single repo entry
+        # Process the dedicated SDK architectures first to ensure single repo entry (priority 1)
         _process_sdk_archs()
-        # Add the additional target repo at priority 2
-        _write_additional_target_repo()
-        for arch in sorted(list(all_archs)): # Sort for consistent output order
+
+        # Sort architectures with machine arch first, then reverse-sorted tune archs (most specific first)
+        machine_arch = machine.replace('-', '_')
+        sorted_archs = sorted(list(all_archs))
+
+        # Reorder: machine arch first, then reverse-sorted others (most specific tune first)
+        ordered_archs = []
+        machine_arch_found = None
+
+        # Find the machine arch and put it first
+        for arch in sorted_archs:
+            arch_dir = arch.replace('-', '_')
+            if arch_dir == machine_arch:
+                machine_arch_found = arch
+                break
+
+        if machine_arch_found:
+            ordered_archs.append(machine_arch_found)
+            # Add all others except the machine arch, in reverse order (most specific first)
+            other_archs = [arch for arch in sorted_archs if arch != machine_arch_found]
+            ordered_archs.extend(reversed(other_archs))
+        else:
+            # If machine arch not found, just use reverse-sorted order
+            ordered_archs = list(reversed(sorted_archs))
+            bb.note(f"Machine arch '{machine_arch}' not found in available architectures")
+
+        # Process all architectures in the correct order (machine first, then most specific tunes first)
+        for arch in ordered_archs:
             _process_arch(arch)
+
+        # Add the additional target-ext repo last with highest priority number
+        _write_additional_target_repo()
     bb.note(f"Finished arch loop append for map file.")
 
     # --- Write the SDK-prefixed /etc/dnf/vars/arch file ---
-    sdk_arch_vars_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'dnf', 'vars')
-    os.makedirs(sdk_arch_vars_dir, exist_ok=True)
-    sdk_arch_vars_path = os.path.join(sdk_arch_vars_dir, 'arch')
+    sdk_arch_vars_path = os.path.join(arch_vars_work_dir, 'arch')
     # Filter out SDK architectures - only include target architectures
     sdk_archs_underscore = [arch.replace('-', '_') for arch in sdk_repo_archs] + ['all_avocadosdk']
     target_archs = [a.replace('-', '_') for a in repo_archs if a.replace('-', '_') not in sdk_archs_underscore]
@@ -283,17 +316,13 @@ python do_install() {
 
     # --- Write the SDK-prefixed /etc/rpm/platform file ---
     platform_var = d.getVar('PLATFORM') # Get the PLATFORM variable value
-    sdk_platform_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'rpm')
-    os.makedirs(sdk_platform_dir, exist_ok=True)
-    sdk_platform_file_path = os.path.join(sdk_platform_dir, 'platform')
+    sdk_platform_file_path = os.path.join(platform_work_dir, 'platform')
     with open(sdk_platform_file_path, 'w') as platform_f:
         platform_f.write(platform_var + '\n')
         bb.note(f"Wrote platform '{platform_var}' to SDK-prefixed {sdk_platform_file_path}")
 
-    # --- Write the SDK-prefixed /etc/rpmrc.${PN} file ---
-    sdk_rpmrc_dir = os.path.join(d_dir, sdk_native_prefix_stripped, 'target-repoconf', 'etc')
-    os.makedirs(sdk_rpmrc_dir, exist_ok=True)
-    sdk_rpmrc_file_path = os.path.join(sdk_rpmrc_dir, "rpmrc")
+    # --- Write the SDK-prefixed /etc/rpmrc file ---
+    sdk_rpmrc_file_path = os.path.join(rpmrc_work_dir, "rpmrc")
     # Get MACHINE_SHORT_NAME with hyphens replaced by underscores
     machine_short_name_us = d.getVar('MACHINEARCH')
     # Join the final_archs list (already contains underscore versions) with spaces
@@ -302,6 +331,36 @@ python do_install() {
     with open(sdk_rpmrc_file_path, 'w') as rpmrc_f:
         rpmrc_f.write(rpmrc_content)
         bb.note(f"Wrote rpmrc content to SDK-prefixed {sdk_rpmrc_file_path}")
+}
+
+python do_install() {
+    import os
+    import shutil
+
+    work_dir = d.getVar('WORKDIR')
+    d_dir = d.getVar('D')
+
+    # Copy all generated files from WORKDIR to D
+    generated_files_dir = os.path.join(work_dir, 'generated-files')
+    if os.path.exists(generated_files_dir):
+        # Copy the entire generated-files directory structure to D
+        for root, dirs, files in os.walk(generated_files_dir):
+            # Calculate relative path from generated-files
+            rel_path = os.path.relpath(root, generated_files_dir)
+            if rel_path == '.':
+                dest_dir = d_dir
+            else:
+                dest_dir = os.path.join(d_dir, rel_path)
+
+            # Ensure destination directory exists
+            os.makedirs(dest_dir, exist_ok=True)
+
+            # Copy all files
+            for file in files:
+                src_file = os.path.join(root, file)
+                dest_file = os.path.join(dest_dir, file)
+                shutil.copy2(src_file, dest_file)
+                bb.note(f"Installed {src_file} to {dest_file}")
 }
 
 do_deploy() {
