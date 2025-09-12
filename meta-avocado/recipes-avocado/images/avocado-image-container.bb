@@ -5,7 +5,7 @@ inherit image
 IMGCLASSES += " image-container-post-processing"
 inherit_defer ${IMGCLASSES}
 
-IMAGE_INSTALL = "packagegroup-avocado-container"
+IMAGE_INSTALL = "packagegroup-avocado-container packagegroup-core-base-utils"
 IMAGE_FEATURES = "package-management"
 IMAGE_LINGUAS = ""
 IMAGE_FSTYPES = "container"
