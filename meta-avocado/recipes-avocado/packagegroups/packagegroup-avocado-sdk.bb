@@ -5,6 +5,7 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
+  avocado-sdk-bootstrap \
   avocado-sdk-toolchain \
 "
 
