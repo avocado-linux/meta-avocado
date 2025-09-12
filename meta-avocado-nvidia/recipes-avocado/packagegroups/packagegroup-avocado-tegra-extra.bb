@@ -4,6 +4,7 @@ LICENSE = "Apache-2.0"
 inherit packagegroup
 
 RDEPENDS:${PN} = " \
+  avocado-img-tegraflash \
   triton-server \
   triton-client \
   triton-python-backend \

@@ -80,7 +80,7 @@ do_stone_create() {
 }
 
 do_stone_provision() {
-    stone \
+    ${@'AVOCADO_PROVISION_PROFILE="' + d.getVar('AVOCADO_PROVISION_PROFILE') + '"' if d.getVar('AVOCADO_PROVISION_PROFILE') else ''} stone \
         provision \
         -i "${DEPLOY_DIR}/stone"
 }

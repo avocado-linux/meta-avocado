@@ -1,7 +1,18 @@
 {
   "runtime": {
     "platform": "avocado-jetson-orin-nano-devkit-nvme",
-    "architecture": "arm64"
+    "architecture": "arm64",
+    "provision_default": "tegraflash"
+  },
+  "provision": {
+    "profiles": {
+      "tegraflash": {
+        "script": "stone-provision-tegraflash.sh"
+      },
+      "noop": {
+        "script": "stone-provision-noop.sh"
+      }
+    }
   },
   "storage_devices": {
     "rootdisk": {
@@ -10,7 +21,9 @@
       "block_size": 512,
       "partitions": [],
       "images": {
-        "tegraflash": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.tegraflash.tar.gz"
+        "tegraflash": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.tegraflash.tar.gz",
+        "rootfs": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.squashfs",
+        "var": "avocado-image-var-jetson-orin-nano-devkit-nvme.btrfs"
       }
     }
   }
