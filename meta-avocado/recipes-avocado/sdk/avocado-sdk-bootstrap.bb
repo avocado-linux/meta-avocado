@@ -11,4 +11,5 @@ RDEPENDS:${PN} += " \
   nativesdk-dnf \
   nativesdk-bash \
   nativesdk-opkg \
+  nativesdk-ca-certificates \
 "

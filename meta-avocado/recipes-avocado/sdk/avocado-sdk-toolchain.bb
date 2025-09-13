@@ -16,7 +16,6 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-automake \
     nativesdk-bison \
     nativesdk-btrfs-tools \
-    nativesdk-ca-certificates \
     nativesdk-cmake \
     nativesdk-curl \
     nativesdk-dnf \
