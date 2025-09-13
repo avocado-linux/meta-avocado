@@ -47,7 +47,7 @@ require conf/distro/include/security_flags.inc
 INHERIT += "uninative"
 
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
-BB_HASHSERVE ??= "auto"
+BB_HASHSERVE ??= "${@os.getenv('BB_HASHSERVE') or 'auto'}"
 
 VIRTUAL-RUNTIME_avocado-sdk-metadata = "avocado-sdk-${MACHINE_SHORT_NAME}"
 VIRTUAL-RUNTIME_dbus ?= "dbus"
