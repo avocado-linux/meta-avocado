@@ -7,6 +7,7 @@ PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
   avocado-sdk-repos \
+  avocado-sdk-scripts \
   base-files \
   base-passwd \
   ca-certificates \
