@@ -103,6 +103,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-bash \
   nativesdk-fwup \
   nativesdk-ganesha \
+  nativesdk-gptfdisk \
   nativesdk-mkfat \
   nativesdk-python3-pip \
   nativesdk-python3-pyyaml \

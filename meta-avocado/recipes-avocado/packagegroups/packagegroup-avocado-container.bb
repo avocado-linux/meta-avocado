@@ -14,4 +14,5 @@ RDEPENDS:${PN} = " \
   dnf \
   os-release \
   tree \
+  usbutils \
 "
