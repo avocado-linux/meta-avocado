@@ -116,6 +116,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-erlang \
   nativesdk-rebar3 \
   nativesdk-nodejs \
+  nativesdk-nodejs-npm \
   nativesdk-git \
   nativesdk-ca-certificates \
   packagegroup-rust-cross-canadian-${MACHINE} \
