@@ -44,8 +44,8 @@ RDEPENDS:${PN} = " \
   usbutils \
   libgpiod \
   libgpiod-tools \
-  ${BASLER_PACKAGES} \
   ${GSTREAMER_PACKAGES} \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${BASLER_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
 "
