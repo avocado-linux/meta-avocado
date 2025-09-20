@@ -51,6 +51,7 @@ local_conf_header:
 
     ## Debugging prior to extensions loading
     AVOCADO_ALLOW_ROOT_LOGIN = "1"
+    LICENSE_FLAGS_ACCEPTED:append = " commercial_gstreamer1.0-plugins-ugly commercial_mpeg2dec"
 
   sdk: |
     CONF_VERSION = "2"

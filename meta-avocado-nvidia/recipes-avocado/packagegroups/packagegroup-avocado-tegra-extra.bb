@@ -1,12 +1,35 @@
 DESCRIPTION = "Packagegroup for inclusion in extra Avocado tegra images"
 LICENSE = "Apache-2.0"
 
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
+PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
   avocado-img-tegraflash \
-  triton-server \
-  triton-client \
-  triton-python-backend \
-  triton-tensorrt-backend \
+  tegra-libraries-core \
+  tegra-libraries-camera \
+  tegra-libraries-multimedia \
+  tegra-libraries-multimedia-ds \
+  tegra-libraries-multimedia-v4l \
+  tegra-libraries-multimedia-utils \
+  tegra-mmapi \
+  ${GSTREAMER_PACKAGES} \
+"
+
+GSTREAMER_PACKAGES = " \
+  gstreamer1.0-plugins-nvarguscamerasrc \
+  gstreamer1.0-plugins-nvcompositor \
+  gstreamer1.0-plugins-nvdrmvideosink \
+  gstreamer1.0-plugins-nveglgles \
+  gstreamer1.0-plugins-nvipcpipeline \
+  gstreamer1.0-plugins-nvjpeg \
+  gstreamer1.0-plugins-nvtee \
+  gstreamer1.0-plugins-nvunixfd \
+  gstreamer1.0-plugins-nvv4l2camerasrc \
+  gstreamer1.0-plugins-nvvidconv \
+  gstreamer1.0-plugins-nvvideo4linux2 \
+  gstreamer1.0-plugins-nvvideosinks \
+  gstreamer1.0-plugins-tegra \
+  nvgstapps \
 "

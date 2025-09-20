@@ -9,6 +9,8 @@ inherit features_check
 IMAGE_FEATURES += "splash hwcodecs"
 REQUIRED_DISTRO_FEATURES = "opengl virtualization"
 
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
+PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = ""
