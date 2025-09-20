@@ -54,13 +54,16 @@ if [ -f "${input_dir}/${tegraflash_image}" ]; then
     
     # Find the rootfs image in input directory and replace it in the unpacked tegraflash
     if [ -f "${input_dir}/${rootfs_image}" ]; then
-        echo -e "\033[94m[INFO]\033[0m Replacing rootfs image in unpacked tegraflash"
+        echo -e "\033[94m[INFO]\033[0m Replacing rootfs image in unpacked tegraflash (renaming to avocado-image-rootfs.squashfs)"
         # Find where the rootfs image is located in the unpacked directory and replace it
         find "$tmp_dir" -name "$(basename "$rootfs_image")" -exec cp "${input_dir}/${rootfs_image}" {} \;
         
-        # If no existing rootfs image found, copy it to the root of unpacked directory
-        if [ ! -f "$tmp_dir/$(basename "$rootfs_image")" ]; then
-            cp "${input_dir}/${rootfs_image}" "$tmp_dir/"
+        # Rename any existing rootfs images to the standard name
+        find "$tmp_dir" -name "$(basename "$rootfs_image")" -exec mv {} "$tmp_dir/avocado-image-rootfs.squashfs" \;
+        
+        # If no existing rootfs image found, copy it to the root of unpacked directory with the standard name
+        if [ ! -f "$tmp_dir/avocado-image-rootfs.squashfs" ]; then
+            cp "${input_dir}/${rootfs_image}" "$tmp_dir/avocado-image-rootfs.squashfs"
         fi
     else
         echo -e "\033[93m[WARNING]\033[0m Rootfs image not found: ${input_dir}/${rootfs_image}"
