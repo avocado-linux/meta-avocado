@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+
+set -e
+
+hook="avocado-build"
+target="recomputer-j401x"
+
+RUNTIME_NAME="$1"
+
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
+
+mkdir -p "$output_dir"
+
+input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+manifest="$AVOCADO_PREFIX/sdk/stone/stone-${target}.json"
+
+# Extract tegraflash image name from manifest
+tegraflash_image=$(jq -r '.storage_devices.rootdisk.images.tegraflash' "$manifest")
+var_image=$(jq -r '.storage_devices.rootdisk.images.var' "$manifest")
+rootfs_image=$(jq -r '.storage_devices.rootdisk.images.rootfs' "$manifest")
+
+echo -e "\033[94m[INFO]\033[0m Extracted image names from manifest:
+  Tegraflash image: ${tegraflash_image}
+  Var image:        ${var_image}
+  Rootfs image:     ${rootfs_image}"
+
+# Create temporary directory for tegraflash extraction
+tmp_dir="$input_dir/tmp_tegraflash"
+mkdir -p "$tmp_dir"
+
+echo -e "\033[94m[INFO]\033[0m Unpacking tegraflash image:
+  Source: ${input_dir}/${tegraflash_image}
+  Temp dir: ${tmp_dir}"
+
+# Find and unpack the tegraflash tar.gz
+if [ -f "${input_dir}/${tegraflash_image}" ]; then
+    # Extract tegraflash tar.gz to temp directory
+    tar -xzf "${input_dir}/${tegraflash_image}" -C "$tmp_dir"
+    
+    # Find the var image in input directory and replace it in the unpacked tegraflash
+    if [ -f "${input_dir}/${var_image}" ]; then
+        echo -e "\033[94m[INFO]\033[0m Replacing var image in unpacked tegraflash"
+        # Find where the var image is located in the unpacked directory and replace it
+        find "$tmp_dir" -name "$(basename "$var_image")" -exec cp "${input_dir}/${var_image}" {} \;
+        
+        # If no existing var image found, copy it to the root of unpacked directory
+        if [ ! -f "$tmp_dir/$(basename "$var_image")" ]; then
+            cp "${input_dir}/${var_image}" "$tmp_dir/"
+        fi
+    else
+        echo -e "\033[93m[WARNING]\033[0m Var image not found: ${input_dir}/${var_image}"
+    fi
+    
+    # Find the rootfs image in input directory and replace it in the unpacked tegraflash
+    if [ -f "${input_dir}/${rootfs_image}" ]; then
+        echo -e "\033[94m[INFO]\033[0m Replacing rootfs image in unpacked tegraflash (renaming to avocado-image-rootfs.squashfs)"
+        # Find where the rootfs image is located in the unpacked directory and replace it
+        find "$tmp_dir" -name "$(basename "$rootfs_image")" -exec cp "${input_dir}/${rootfs_image}" {} \;
+        
+        # Rename any existing rootfs images to the standard name
+        find "$tmp_dir" -name "$(basename "$rootfs_image")" -exec mv {} "$tmp_dir/avocado-image-rootfs.squashfs" \;
+        
+        # If no existing rootfs image found, copy it to the root of unpacked directory with the standard name
+        if [ ! -f "$tmp_dir/avocado-image-rootfs.squashfs" ]; then
+            cp "${input_dir}/${rootfs_image}" "$tmp_dir/avocado-image-rootfs.squashfs"
+        fi
+    else
+        echo -e "\033[93m[WARNING]\033[0m Rootfs image not found: ${input_dir}/${rootfs_image}"
+    fi
+    
+    # Backup original tegraflash and repack the modified version
+    echo -e "\033[94m[INFO]\033[0m Repacking modified tegraflash image"
+    mv "${input_dir}/${tegraflash_image}" "${input_dir}/${tegraflash_image}.backup"
+    
+    # Create new tar.gz from the modified temp directory
+    (cd "$tmp_dir" && tar -czf "${input_dir}/${tegraflash_image}" .[^.]* * 2>/dev/null || tar -czf "${input_dir}/${tegraflash_image}" *)
+    
+    # Clean up temp directory
+    rm -rf "$tmp_dir"
+    
+    echo -e "\033[92m[SUCCESS]\033[0m Successfully modified tegraflash image"
+else
+    echo -e "\033[91m[ERROR]\033[0m Tegraflash image not found: ${input_dir}/${tegraflash_image}"
+    exit 1
+fi
+
+echo -e "\033[94m[INFO]\033[0m Running stone validate.
+  Manifest:        ${manifest}
+  Input directory: ${input_dir}"
+
+stone \
+  validate \
+  -m "${manifest}" \
+  -i "$input_dir"
+
+echo -e "\033[94m[INFO]\033[0m Running stone create.
+  Manifest:         ${manifest}
+  Input directory:  ${input_dir}
+  Output directory: ${output_dir}"
+
+stone \
+  create \
+  --os-release "${AVOCADO_PREFIX}/rootfs/usr/lib/os-release" \
+  -m $manifest \
+  -i "$input_dir" \
+  -o "$output_dir"
+
+echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+exit 0

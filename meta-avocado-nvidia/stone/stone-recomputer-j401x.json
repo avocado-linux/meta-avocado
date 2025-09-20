@@ -1,0 +1,30 @@
+{
+  "runtime": {
+    "platform": "avocado-recomputer-j401x",
+    "architecture": "arm64",
+    "provision_default": "tegraflash"
+  },
+  "provision": {
+    "profiles": {
+      "tegraflash": {
+        "script": "stone-provision-tegraflash.sh"
+      },
+      "noop": {
+        "script": "stone-provision-noop.sh"
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-image-rootfs-recomputer-j401x.tegraflash.tar.gz",
+      "devpath": "/dev/nvme0n1",
+      "block_size": 512,
+      "partitions": [],
+      "images": {
+        "tegraflash": "avocado-image-rootfs-recomputer-j401x.tegraflash.tar.gz",
+        "rootfs": "avocado-image-rootfs-recomputer-j401x.squashfs",
+        "var": "avocado-image-var-recomputer-j401x.btrfs"
+      }
+    }
+  }
+}

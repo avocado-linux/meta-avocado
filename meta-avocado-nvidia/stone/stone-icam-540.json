@@ -1,0 +1,30 @@
+{
+  "runtime": {
+    "platform": "avocado-icam-540",
+    "architecture": "arm64",
+    "provision_default": "tegraflash"
+  },
+  "provision": {
+    "profiles": {
+      "tegraflash": {
+        "script": "stone-provision-tegraflash.sh"
+      },
+      "noop": {
+        "script": "stone-provision-noop.sh"
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-image-rootfs-icam-540.tegraflash.tar.gz",
+      "devpath": "/dev/nvme0n1",
+      "block_size": 512,
+      "partitions": [],
+      "images": {
+        "tegraflash": "avocado-image-rootfs-icam-540.tegraflash.tar.gz",
+        "rootfs": "avocado-image-rootfs-icam-540.squashfs",
+        "var": "avocado-image-var-icam-540.btrfs"
+      }
+    }
+  }
+}

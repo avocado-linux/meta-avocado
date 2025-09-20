@@ -1,0 +1,22 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/nvidia.yml
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-nvidia:
+
+local_conf_header:
+  machine-avocado-recomputer-j401x: |
+    ROOTFS_IMAGE_EXTRA_INSTALL += "kernel-module-r8168 linux-firmware-rtl8168"
+machine: avocado-recomputer-j401x
