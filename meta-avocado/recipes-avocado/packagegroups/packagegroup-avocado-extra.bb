@@ -37,7 +37,15 @@ RDEPENDS:${PN} = " \
   ca-certificates \
   ethtool \
   livebook \
+  v4l-utils \
+  libv4l \
   nodejs \
+  opencv \
+  usbutils \
+  libgpiod \
+  libgpiod-tools \
+  ${BASLER_PACKAGES} \
+  ${GSTREAMER_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
 "
@@ -57,4 +65,18 @@ CONATINER_PACKAGES = " \
   docker \
   podman \
   podman-compose \
+"
+
+BASLER_PACKAGES = " \
+  pylon \
+  python3-pypylon \
+  gst-plugin-pylon \
+"
+GSTREAMER_PACKAGES = " \
+  gstreamer1.0 \
+  gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly \
+  mpeg2dec \
 "

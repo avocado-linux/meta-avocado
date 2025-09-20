@@ -1,0 +1,15 @@
+header:
+  version: 16
+
+repos:
+  meta-basler-tools:
+    url: https://github.com/slactjohnson/meta-basler-tools.git
+    path: meta-basler-tools
+    branch: scarthgap
+    commit: ef4d0a805152f8d6abc4c20272da24f8d7ae54ee
+    layers:
+      .:
+
+local_conf_header:
+  extra-basler: |
+    ACCEPT_BASLER_EULA = "1"
