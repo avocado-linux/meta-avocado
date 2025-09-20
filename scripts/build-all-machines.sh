@@ -11,7 +11,7 @@ echo "SCRIPT_DIR: $SCRIPT_DIR"
 
 # Store original arguments passed to this script
 CLEAN_BUILD=false
-SDKMACHINE="x86-64"
+SDKMACHINE="x86_64"
 PASSTHRU_ARGS=()
 for arg in "$@"; do
     case $arg in
