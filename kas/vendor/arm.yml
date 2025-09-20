@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-arm.git
     path: meta-arm
     branch: scarthgap
-    commit: 8e0f8af90fefb03f08cd2228cde7a89902a6b37c
+    commit: 0f1e7bf92c89759f0ab74cfa5be4ee47b092ad46
     layers:
       meta-arm:
       meta-arm-toolchain:

@@ -20,7 +20,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
     branch: scarthgap
-    commit: e8fd97d86af86cdcc5a6eb3f301cbaf6a2084943
+    commit: b9fb6556a3c8a3e477dce334205b658cb79ad501
     layers:
       meta-oe:
       meta-perl:
@@ -33,7 +33,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-lts-mixins
     path: meta-lts-mixins
     branch: scarthgap/rust
-    commit: 65c51abe3871d50e599366765838d1478eba093e
+    commit: a0705b87e7c1a257dafb089063f3302ed49c87d3
     layers:
       .:
 

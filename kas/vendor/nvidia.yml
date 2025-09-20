@@ -6,12 +6,13 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-tegra
     path: meta-tegra
     branch: scarthgap
-    commit: 5bd3a1c9f2dd523351ae1ad32e46b98db4a6d4d2
+    commit: aca8ae6dcaedd1651337838514d0797059c41406
     layers:
       .:
 
   meta-tegra-community:
-    url: https://github.com/avocado-linux/meta-tegra-community
+    url: https://github.com/avocado-linux/vendor-meta-tegra-community
+    path: meta-tegra-community
     branch: scarthgap
     commit: 241d1073ba8e610ef8da3fe8470b0a4d0567521f
     layers:

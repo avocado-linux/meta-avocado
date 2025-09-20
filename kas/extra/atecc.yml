@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-atmel
     path: meta-atmel
     branch: scarthgap
-    commit: f54c1bc08dc88d58494a153a96a0b111219bc5b4
+    commit: b24958f1ef37ef2771e04bd4b2f23e7889466eca
     layers:
       .:
 

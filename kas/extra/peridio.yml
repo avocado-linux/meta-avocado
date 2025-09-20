@@ -12,7 +12,7 @@ repos:
   meta-erlang:
     url: https://github.com/avocado-linux/vendor-meta-erlang
     path: meta-erlang
-    commit: 5b52b8c9fc990cdfe8e442085eaa536fffff76fb
+    commit: ce8fdd45448fb084b86fa79c0bd2ea9b072f2ffd
     branch: scarthgap
     layers:
       .:

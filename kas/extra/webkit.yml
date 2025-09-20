@@ -5,7 +5,7 @@ repos:
   meta-webkit:
     url: https://github.com/avocado-linux/vendor-meta-webkit
     path: meta-webkit
-    commit: 4923077d1ec33961bb3bf9f23d3bd21db51c7447
+    commit: 2d29669a3d78e462276044f3f8bde0e4dec33696
     branch: scarthgap
     layers:
       .:
