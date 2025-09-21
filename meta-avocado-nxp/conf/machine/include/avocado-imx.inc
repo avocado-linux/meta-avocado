@@ -1,1 +1,2 @@
 MACHINEOVERRIDES =. "avocado-imx:"
+SECOEXT_FIRMWARE_NAME ?= "none"
