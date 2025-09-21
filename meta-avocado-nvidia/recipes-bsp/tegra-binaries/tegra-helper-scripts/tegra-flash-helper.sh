@@ -692,6 +692,8 @@ if [ $want_signing -eq 1 ]; then
     L4T_CONF_DTBO="L4TConfiguration.dtbo"
     rootfs_ab=0
     gen_rcmdump=0
+    gen_read_ramcode=0
+    debug_mode=0
     FLASHARGS="--chip 0x23 --bl uefi_jetson_minimal_with_dtb.bin \
           --sdram_config $sdramcfg_files \
           --odmdata $odmdata \
