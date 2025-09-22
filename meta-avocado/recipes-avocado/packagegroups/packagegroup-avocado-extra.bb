@@ -45,6 +45,7 @@ RDEPENDS:${PN} = " \
   libgpiod \
   libgpiod-tools \
   ${GSTREAMER_PACKAGES} \
+  ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${BASLER_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
@@ -79,4 +80,16 @@ GSTREAMER_PACKAGES = " \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly \
   mpeg2dec \
+"
+
+PYTHON_PACKAGES = " \
+  python3-pyyaml \
+  python3-pip \
+  python3-flask \
+  python3-werkzeug \
+  python3-jinja2 \
+  python3-markupsafe \
+  python3-itsdangerous \
+  python3-click \
+  python3-opencv \
 "
