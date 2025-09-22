@@ -1,0 +1,1 @@
+SECOEXT_FIRMWARE_NAME ?= "none"
