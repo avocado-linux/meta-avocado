@@ -52,8 +52,13 @@ jobs:
           PARALLEL_MAKE: "-j16"
           SDKMACHINE: "x86_64"
           DISTRO_CODENAME: ""
+          # CI-specific configuration to avoid locking issues with parallel builds
+          CI: "true"
+          SOURCE_MIRROR_URL: "file:///avocado/dl"
+          SSTATE_MIRRORS: "file:///avocado/sstate/PATH;downloadfilename=PATH"
         run: |
           echo "TARGET: avocado-distro"
           echo "SDKMACHINE: x86_64"
           . scripts/init-build kas/machine/${{ matrix.machine }}.yml
-          kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml --target avocado-complete
+          # Use CI overlay to enable mirrors and avoid directory locking
+          kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml:meta-avocado/kas/ci/mirrors.yml --target avocado-complete
