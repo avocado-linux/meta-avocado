@@ -3,10 +3,6 @@ header:
   includes:
   - repo: meta-avocado
     file: kas/vendor/oe.yml
-  - repo: meta-avocado
-    file: kas/vendor/ptx.yml
-  - repo: meta-avocado
-    file: kas/vendor/fwup.yml
 
 env:
   AVOCADO_REPO_BASE: "http://package-repo"
@@ -51,7 +47,24 @@ local_conf_header:
 
     ## Debugging prior to extensions loading
     #AVOCADO_ALLOW_ROOT_LOGIN = "1"
-    LICENSE_FLAGS_ACCEPTED:append = " commercial_gstreamer1.0-plugins-ugly commercial_mpeg2dec"
+    LICENSE_FLAGS_ACCEPTED:append = " commercial_gstreamer1.0-plugins-ugly commercial_mpeg2dec commercial_faad2 commercial_ffmpeg commercial_x264"
 
+    # Enable Fortran support globally
+    FORTRAN:forcevariable = ",fortran"
+
+    # Ensure gcc-cross is built with Fortran before gcc-runtime
+    DEPENDS:append:pn-gcc-runtime = " gcc-cross-${TARGET_ARCH}"
+
+    # Make sure the Fortran compiler is available for the target build
+    GFORTRAN:class-target = "${TARGET_PREFIX}gfortran"
+    FC:class-target = "${TARGET_PREFIX}gfortran"
+    F77:class-target = "${TARGET_PREFIX}gfortran"
+
+    # Enable Fortran for both cross and runtime
+    FORTRAN:pn-gcc-cross-${TARGET_ARCH} = ",fortran"
+    FORTRAN:pn-gcc-runtime = ",fortran"
+
+    # Add libquadmath which is often needed with Fortran
+    RUNTIMETARGET:append:pn-gcc-runtime = " libquadmath"
   sdk: |
     CONF_VERSION = "2"

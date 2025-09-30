@@ -1,0 +1,17 @@
+header:
+  version: 16
+
+repos:
+  meta-qt5:
+    url: https://github.com/meta-qt5/meta-qt5.git
+    path: meta-qt5
+    commit: e197839013fa2cfd59339508303bce91fef48928
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  extra-qt5: |
+    PACKAGECONFIG:append:pn-qtbase = " gles2 eglfs kms gbm"
+    PACKAGECONFIG:append:pn-qtmultimedia = " gstreamer"
+

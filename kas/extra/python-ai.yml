@@ -1,0 +1,23 @@
+header:
+  version: 16
+
+repos:
+  meta-python-ai:
+    url: https://github.com/zboszor/meta-python-ai.git
+    path: meta-python-ai
+    commit: 57dba41efc2a938f10a4120f6723dcb7baa68f26
+    branch: scarthgap
+    layers:
+      .:
+
+  meta-clang-revival:
+    url: https://github.com/zboszor/meta-clang-revival.git
+    path: meta-clang-revival
+    commit: f34e150f6def4f7a9226bad517b6f6b4dcadb516
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  extra-python-ai: |
+

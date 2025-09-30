@@ -1,0 +1,15 @@
+header:
+  version: 16
+
+repos:
+  meta-clang:
+    url: https://github.com/kraj/meta-clang.git
+    path: meta-clang
+    commit: 057ee563305e9484b29d02347aeafdadc5ea28ed
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  extra-clang: |
+

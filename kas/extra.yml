@@ -8,4 +8,16 @@ header:
   - repo: meta-avocado
     file: kas/extra/webkit.yml
   - repo: meta-avocado
+    file: kas/extra/fwup.yml
+  - repo: meta-avocado
     file: kas/extra/basler.yml
+  - repo: meta-avocado
+    file: kas/extra/ros.yml
+  - repo: meta-avocado
+    file: kas/extra/qt5.yml
+  - repo: meta-avocado
+    file: kas/extra/realsense.yml
+  - repo: meta-avocado
+    file: kas/extra/clang.yml
+  - repo: meta-avocado
+    file: kas/extra/python-ai.yml

@@ -8,6 +8,9 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-avocado-hitl \
   nativesdk-bmaptool \
   nativesdk-coreutils \
+  nativesdk-libgfortran \
+  nativesdk-go \
+  nativesdk-go-runtime \
   nativesdk-util-linux \
   nativesdk-util-linux-agetty \
   nativesdk-util-linux-blkdiscard \

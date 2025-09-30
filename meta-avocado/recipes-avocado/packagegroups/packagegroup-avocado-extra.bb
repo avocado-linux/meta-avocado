@@ -46,6 +46,7 @@ RDEPENDS:${PN} = " \
   libgpiod-tools \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${BASLER_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
@@ -73,6 +74,7 @@ BASLER_PACKAGES = " \
   python3-pypylon \
   gst-plugin-pylon \
 "
+
 GSTREAMER_PACKAGES = " \
   gstreamer1.0 \
   gstreamer1.0-plugins-base \
@@ -92,4 +94,46 @@ PYTHON_PACKAGES = " \
   python3-itsdangerous \
   python3-click \
   python3-opencv \
+"
+
+QT5_PACKAGES = " \
+  qtbase \
+  qtbase-plugins \
+  qtbase-tools \
+  qtdeclarative \
+  qtdeclarative-plugins \
+  qtdeclarative-tools \
+  qtquickcontrols2 \
+  qtmultimedia \
+  qtmultimedia-plugins \
+  qtgraphicaleffects \
+  qtsvg \
+  qtimageformats \
+  qtserialport \
+  qtsensors \
+  qtconnectivity \
+  qtlocation \
+  qtnetworkauth \
+  qtwebsockets \
+  qtwebengine \
+  qtxmlpatterns \
+  qttools \
+  qttools-plugins \
+  qtcharts \
+  qtvirtualkeyboard \
+  qt3d \
+  qtgamepad \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl wayland', 'qtwayland qtwayland-plugins', '', d)} \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'qtx11extras', '', d)} \
+  ${QT5_OPTIONAL_PACKAGES} \
+"
+
+# Optional packages that may require additional dependencies or features
+QT5_OPTIONAL_PACKAGES = " \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'bluetooth', 'qtconnectivity', '', d)} \
+  qtscript \
+  qtremoteobjects \
+  qtscxml \
+  qtdatavis3d \
+  qttranslations \
 "

@@ -1,0 +1,15 @@
+header:
+  version: 16
+
+repos:
+  meta-realsense:
+    url: https://github.com/IntelRealSense/meta-intel-realsense.git
+    path: meta-realsense
+    commit: 6d585884724b7c0c56c6734949ebde3dbc55f72c
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  extra-realsense: |
+
