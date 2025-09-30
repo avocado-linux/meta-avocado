@@ -1,0 +1,131 @@
+<?xml version="1.0"?>
+
+<configuration>
+    <parser_instructions>
+        <!-- NOTE: entries here are used by the parser when generating output -->
+        <!-- NOTE: each filename must be on it's own line as in variable=value-->
+        WRITE_PROTECT_BOUNDARY_IN_KB=0
+        SECTOR_SIZE_IN_BYTES = 4096
+        GROW_LAST_PARTITION_TO_FILL_DISK=true
+    </parser_instructions>
+
+    <!-- NOTE: "physical_partition" are listed in order and apply to UFS devices that have physical partitions -->
+
+    <!-- This is LUN 0 - HLOS LUN" -->
+    <physical_partition>
+        <partition label="efi" 			    size_in_kb="524288" 	type="C12A7328-F81F-11D2-BA4B-00A0C93EC93B" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="efi.bin"/>
+		<partition label="persist" 		    size_in_kb="30720" 		type="0FC63DAF-8483-4772-8E79-3D69D8477DE4" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>	
+		<partition label="system" 		    size_in_kb="10485760" 	type="B921B045-1DF0-41C3-AF44-4C6F280D3FAE" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="system.img"/> 
+		<partition label="avocado" 		    size_in_kb="2097152" 	type="A1B2C3D4-E5F6-7890-ABCD-EF1234567890" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="avocado-image-var-rubikpi3.btrfs"/>
+	</physical_partition>                   
+										    
+    <!-- This is LUN 1 - Boot LUN A" -->    
+    <physical_partition>                    
+        <partition label="xbl_a" 		    size_in_kb="3604" 		type="DEA0BA2C-CBDD-4805-B4F9-F428251C3E98" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="xbl.elf"/>
+        <partition label="xbl_config_a"     size_in_kb="512" 		type="5A325AE4-4276-B66D-0ADD-3494DF27706A" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="xbl_config.elf"/>
+        <partition label="xbl_b" 		    size_in_kb="3604" 		type="7A3DF1A3-A31A-454D-BD78-DF259ED486BE" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="xbl_config_b"     size_in_kb="512" 		type="F462E0EA-A20E-4B10-867A-2D4455366548" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="last_parti" 	    size_in_kb="0" 			type="00000000-0000-0000-0000-000000000000" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+        </physical_partition>               	
+												
+    <!-- This is LUN 2 - Boot LUN B" -->    	
+    <physical_partition>                    	
+        <partition label="xbl_a" 		    size_in_kb="3604" 		type="DEA0BA2C-CBDD-4805-B4F9-F428251C3E98" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="xbl.elf"/>
+        <partition label="xbl_config_a"     size_in_kb="512" 		type="5A325AE4-4276-B66D-0ADD-3494DF27706A" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="xbl_config.elf"/>
+        <partition label="xbl_b" 		    size_in_kb="3604" 		type="7A3DF1A3-A31A-454D-BD78-DF259ED486BE" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="xbl_config_b" 	size_in_kb="512" 		type="F462E0EA-A20E-4B10-867A-2D4455366548" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="last_parti" 		size_in_kb="0" 			type="00000000-0000-0000-0000-000000000000" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+        </physical_partition>	
+	
+    <!-- This is LUN 3 - OTP LUN" -->	
+    <!-- QCOM development requirement: Ensure all partitions in LUN	 is a MULTIPLE OF 128K -->
+	
+    <physical_partition>	
+        <partition label="ALIGN_TO_128K_1" 	size_in_kb="104" 		type="FDE1604B-D68B-4BD4-973D-962AE7A1ED88" bootable="false" readonly="true" />		
+        <partition label="cdt" 				size_in_kb="128" 		type="A19F205F-CCD8-4B6D-8F1E-2D9BC24CFFB1" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="RubikPi3_CDT.bin" />
+		<partition label="usb_fw" 			size_in_kb="1024" 		type="3C3DDB5E-314A-44E7-93E3-62D519D7B4BB" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+        <partition label="ddr_a" 			size_in_kb="1024" 		type="20A0C19C-286A-42FA-9CE7-F64C3226A794" bootable="false" readonly="true"/>
+		<partition label="ddr_b" 			size_in_kb="1024" 		type="325DEF02-1305-44A3-AA8D-AC82FEBE220E" 									system="true" dontautomount="true" filename=""/>
+        <partition label="last_parti" 		size_in_kb="0" 			type="00000000-0000-0000-0000-000000000000" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+    </physical_partition>
+
+   <!-- This is LUN 4 - Firmware LUN" -->
+     <physical_partition>	
+		<!-- These are the 'A' partition's needed for the A/B boot/ota update feature. A and B partitions must have differrent GUID's.  -->
+        <partition label="aop_a" 			size_in_kb="512" 		type="D69E90A5-4CAB-0071-F6DF-AB977F141A7F" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="aop.mbn"/>
+		<partition label="dtb_a" 			size_in_kb="65536" 		type="2A1A52FC-AA0B-401C-A808-5EA0F91068F8" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="dtb.bin"/>
+		<partition label="apdp_a" 			size_in_kb="256" 		type="E6E98DA2-E22A-4D12-AB33-169E7DEAA507" bootable="false" readonly=" false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="xbl_ramdump_a" 	size_in_kb="2048" 		type="0382F197-E41F-4E84-B18B-0B564AEAD875" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="XblRamdump.elf"/>
+		<partition label="uefi_a" 			size_in_kb="5120" 		type="400FFDCD-22E0-47E7-9A23-F16ED9382388" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="uefi.elf"/>
+		<partition label="tz_a" 			size_in_kb="4096" 		type="A053AA7F-40B8-4B1C-BA08-2F68AC71A4F4" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="tz.mbn"/>
+        <partition label="hyp_a" 			size_in_kb="8192" 		type="E1A6A689-0C8D-4CC6-B4E8-55A4320FBD8A" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="hypvm.mbn"/>
+        <partition label="mdtpsecapp_a" 	size_in_kb="4096" 		type="EA02D680-8712-4552-A3BE-E6087829C1E6" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+        <partition label="mdtp_a" 			size_in_kb="32768" 		type="3878408A-E263-4B67-B878-6340B35B11E3" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="devcfg_a" 		size_in_kb="128" 		type="F65D4B16-343D-4E25-AAFC-BE99B6556A6D" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="devcfg.mbn"/>
+        <partition label="qupfw_a" 			size_in_kb="80" 		type="21D1219F-2ED1-4AB4-930A-41A16AE75F7F" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="qupv3fw.elf"/>
+        <partition label="uefisecapp_a" 	size_in_kb="2048" 		type="BE8A7E08-1B7A-4CAE-993A-D5B7FB55B3C2" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="uefi_sec.mbn"/>
+		<partition label="imagefv_a" 		size_in_kb="2048" 		type="17911177-C9E6-4372-933C-804B678E666F" bootable="false" readonly="false"  	system="true" dontautomount="true" filename="imagefv.elf"/>
+		<partition label="shrm_a" 			size_in_kb="128" 		type="CB74CA22-2F0D-4B82-A1D6-C4213F348D73" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="shrm.elf"/>	
+		<partition label="multiimgoem_a" 	size_in_kb="32" 		type="E126A436-757E-42D0-8D19-0F362F7A62B8" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="multi_image.mbn"/>
+		<partition label="cpucp_a" 			size_in_kb="1024" 		type="1E8615BD-6D8C-41AD-B3EA-50E8BF40E43F" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="cpucp.elf"/>
+		<partition label="qweslicstore_a" 	size_in_kb="256" 		type="7BAB3C93-5F73-4D02-B8CB-5B9F899D29A8" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />		         
+        
+		<!-- These are the 'B' partition's needed for the A/B bo	ot/ota UPDATE FEATURE. A AND B PARTITIONS must have differrent GUID's.  -->	
+		
+		<partition label="aop_b" 			size_in_kb="512" 		type="B8B27C4C-4B5B-8AB2-502F-A792B590A896" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="apdp_b" 			size_in_kb="256" 		type="110F198D-8174-4193-9AF1-5DA94CDC59C9" bootable="false" readonly=" false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="dtb_b" 			size_in_kb="65536" 		type="A166F11A-2B39-4FAA-B7E7-F8AA080D0587" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+		<partition label="xbl_ramdump_b" 	size_in_kb="2048" 		type="FF608BF6-AEDF-4084-BEC5-C92AB4E4534D" bootable="false" readonly="false"	system="true" dontautomount="true" filename=""/>
+		<partition label="uefi_b" 			size_in_kb="5120" 		type="9F234B5B-0EFB-4313-8E4C-0AF1F605536B" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="tz_b" 			size_in_kb="4096" 		type="C832EA16-8B0D-4398-A67B-EBB30EF98E7E" bootable="false" readonly="false"	system="true" dontautomount="true" filename=""/>
+        <partition label="hyp_b" 			size_in_kb="8192" 		type="CB45ECA0-504E-42BB-91BA-C9B3236F6A6E" bootable="false" readonly="false"	system="true" dontautomount="true" filename=""/>
+        <partition label="mdtpsecapp_b" 	size_in_kb="4096" 		type="77036CD4-03D5-42BB-8ED1-37E5A88BAA34" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="mdtp_b" 			size_in_kb="32768" 		type="77036CD4-03D5-42BB-8ED1-37E5A88BAA34" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="devcfg_b" 		size_in_kb="128" 		type="169534E7-7809-4240-9763-0BA5DC37B5FF" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="qupfw_b" 			size_in_kb="80" 		type="F0BDD669-EE04-4F41-84BD-8F3B7B799B6C" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="uefisecapp_b" 	size_in_kb="2048" 		type="538CBDBA-D4A4-4438-A466-D7B356FAC165" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="imagefv_b" 		size_in_kb="2048" 		type="920CFC3D-7285-4A47-9C1C-4A87590E0687" bootable="false" readonly="false"  	system="true" dontautomount="true" filename=""/>
+		<partition label="shrm_b" 			size_in_kb="128" 		type="39FD6C00-49EB-6BD1-6899-2FB849DD4F75" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>		
+		<partition label="multiimgoem_b" 	size_in_kb="32" 		type="3E3E3ECD-C512-4F95-9144-6063826A8970" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+		<partition label="cpucp_b" 			size_in_kb="1024" 		type="6C1111FB-5354-41DE-AC17-5B6E542BE836" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+		<partition label="qweslicstore_b" 	size_in_kb="256" 		type="225AF6E5-C009-4B6F-A240-625D1510D1FF" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+		<!-- These are non A/B partitions. In a A/B build these would not BE UPDATED VIA A OTA UPDATE -->	
+		<partition label="SYSFW_VERSION" 	size_in_kb="4" 			type="3C44F88B-1878-4C29-B122-EE78766442A7" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="recoveryinfo" 	size_in_kb="4" 			type="7374B391-291C-49FA-ABC2-0463AB5F713F" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+		<partition label="devinfo" 			size_in_kb="4" 			type="65ADDCF4-0C5C-4D9A-AC2D-D90B5CBFCD03" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="questdatafv" 		size_in_kb="16384" 		type="7F86D79A-7C83-4FC8-BEF2-7D0A7A97AF23" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />  
+		<partition label="qmcs" 			size_in_kb="30720" 		type="358740B1-34BD-4E4C-9656-3454F0A8FDD9" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="dip" 				size_in_kb="1024" 		type="4114B077-005D-4E12-AC8C-B493BDA684FB" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="splash" 			size_in_kb="33424" 		type="AD99F201-DC71-4E30-9630-E19EEF553D1B" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="limits" 			size_in_kb="4" 			type="10A0C19C-516A-5444-5CE3-664C3226A794" bootable="false" readonly="true"/>
+		<partition label="limits-cdsp" 		size_in_kb="4" 			type="545D3707-8329-40E8-8B5E-3E554CBDC786" bootable="false" readonly="true"/>
+        <partition label="toolsfv" 			size_in_kb="1024" 		type="97745ABA-135A-44C3-9ADC-05616173C24C" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="tools.fv"/>
+        <partition label="logfs" 			size_in_kb="8192" 		type="BC0330EB-3410-4951-A617-03898DBE3372" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="quantumsdk" 		size_in_kb="40960" 		type="AA9A5C4C-4F1F-7D3A-014A-22BD33BF7191" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="logdump" 			size_in_kb="524288" 	type="5AF80809-AABB-4943-9168-CDFC38742598" readonly="false" bootable="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="secdata" 			size_in_kb="25" 		type="76CFC7EF-039D-4E2C-B81E-4DD8C2CB2A93" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/> 
+        <partition label="quantumfv" 		size_in_kb="512" 		type="80C23C26-C3F9-4A19-BB38-1E457DACEB09" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="catecontentfv" 	size_in_kb="1024" 		type="E12D830B-7F62-4F0B-B48A-8178C5BF3AC1" bootable="false" readonly="true"/>
+		<partition label="vm-data" 			size_in_kb="33424" 		type="21ADB864-C9E7-4C76-BE68-568E20C58439" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="last_parti" 		size_in_kb="0" 			type="00000000-0000-0000-0000-000000000000" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+    </physical_partition>	
+		
+    <!-- This is LUN 5 - Protected Read-write LUN" -->	
+    <!-- QCOM development requirement: Ensure all partitions in 	LUN5 iS A MULTIPLE OF 128K -->
+			
+    <physical_partition>	
+        <partition label="modemst1" 		size_in_kb="3072" 		type="EBBEADAF-22C9-E33B-8F5D-0E81686A68CB" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="modemst2" 		size_in_kb="3072" 		type="0A288B1F-22C9-E33B-8F5D-0E81686A68CB" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="fsg" 				size_in_kb="3072" 		type="638FF8E2-22C9-E33B-8F5D-0E81686A68CB" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
+        <partition label="fsc" 				size_in_kb="128" 		type="57B90A16-22C9-E33B-8F5D-0E81686A68CB" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
+        <partition label="last_parti" 		size_in_kb="0" 			type="00000000-0000-0000-0000-000000000000" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="" />
+    </physical_partition>
+
+    <!--  This is LUN 6  -->
+    <physical_partition>
+        <partition label="rubikpi_con" size_in_kb="8192" type="bc5955e1-b79f-426a-b20f-6f735cf43411" bootable="false" readonly="false" system="true" dontautomount="true" filename="rubikpi_config.img"/> 
+        <partition label="devcfg_full" size_in_kb="204800" type="29ef4121-8b11-4b2c-abe5-0557f11b9d57" bootable="false" readonly="false" system="true" dontautomount="true" filename="devcfg_full.img"/>
+        <partition label="dtb_con" size_in_kb="69632" type="2e59c2b6-288c-4c4c-9491-9265fd929d94" bootable="false" readonly="false" system="true" dontautomount="true" filename="rubikpi_dtso.img"/>
+        <partition label="last_parti" size_in_kb="0" type="00000000-0000-0000-0000-000000000000" bootable="false" readonly="true" system="true" dontautomount="true" filename=""/>
+    </physical_partition>
+</configuration>

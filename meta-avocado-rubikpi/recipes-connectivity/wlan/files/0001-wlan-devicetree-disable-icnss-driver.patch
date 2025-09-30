@@ -1,0 +1,41 @@
+From 8cc06303e7e6c5ce4c6187af7cec074d11d1a6e2 Mon Sep 17 00:00:00 2001
+From: Sahil Chandna <quic_chandna@quicinc.com>
+Date: Wed, 6 Mar 2024 22:44:11 +0530
+Subject: [PATCH] wlan-devicetree: disable icnss driver
+
+Conditionally disable icnss driver for realtime kernel.
+
+Change-Id: Ibf852fd9c70d8b18ca16558a029fe94aebe52c16
+Signed-off-by: Sahil Chandna <quic_chandna@quicinc.com>
+---
+ qcm6490-wlan-idp.dtsi | 1 +
+ qcm6490-wlan-rb3.dtsi | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/qcm6490-wlan-idp.dtsi b/qcm6490-wlan-idp.dtsi
+index d315e71..8bffa00 100644
+--- a/qcm6490-wlan-idp.dtsi
++++ b/qcm6490-wlan-idp.dtsi
+@@ -5,6 +5,7 @@
+ &soc {
+ icnss2: qcom,wcn6750 {
+ 		compatible = "qcom,wcn6750";
++		status = "disabled";
+ 		reg = <0x0 0x17a10040 0x0 0x0>,
+ 		    <0x0 0xb0000000 0x0 0x10000>;
+ 		reg-names = "msi_addr", "smmu_iova_ipa";
+diff --git a/qcm6490-wlan-rb3.dtsi b/qcm6490-wlan-rb3.dtsi
+index f2533a1..eacc269 100644
+--- a/qcm6490-wlan-rb3.dtsi
++++ b/qcm6490-wlan-rb3.dtsi
+@@ -5,6 +5,7 @@
+ &soc {
+ icnss2: qcom,wcn6750 {
+ 		compatible = "qcom,wcn6750";
++		status = "disabled";
+ 		reg = <0x0 0x17a10040 0x0 0x0>,
+ 		    <0x0 0xb0000000 0x0 0x10000>;
+ 		reg-names = "msi_addr", "smmu_iova_ipa";
+-- 
+2.17.1
+

@@ -1,0 +1,17 @@
+diff --git a/Kbuild b/Kbuild
+index ea59c3a925..cc5ef7181b 100644
+--- a/Kbuild
++++ b/Kbuild
+@@ -5010,6 +5010,12 @@ ifneq ($(WLAN_CTRL_NAME),)
+ ccflags-y += -DWLAN_CTRL_NAME=\"$(WLAN_CTRL_NAME)\"
+ endif
+ 
++ccflags_file := wlan_ccflags_opts
++ccflags_var := $(shell echo $(ccflags-y) > $(ccflags_file))
++ccflags_tmp := $(shell sed -i 's/\"/\\\"/g' $(ccflags_file))
++ccvar := "@$(ccflags_file)"
++ccflags-y := $(ccvar)
++
+ # inject some build related information
+ ifeq ($(CONFIG_BUILD_TAG), y)
+ CLD_CHECKOUT = $(shell cd "$(WLAN_ROOT)" && \

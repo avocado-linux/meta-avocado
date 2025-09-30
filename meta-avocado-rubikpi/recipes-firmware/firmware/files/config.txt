@@ -1,0 +1,2 @@
+wl_preinit=autocountry=1
+ccode=XZ

@@ -1,0 +1,22 @@
+
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/rubikpi.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-rubikpi:
+
+local_conf_header:
+  machine-avocado-rubikpi3: |
+    AVOCADO_ALLOW_ROOT_LOGIN = "1"
+
+machine: avocado-rubikpi3

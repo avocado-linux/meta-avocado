@@ -1,0 +1,15 @@
+diff --git a/display/qcm6490-sde.dtsi b/display/qcm6490-sde.dtsi
+index 27461c3..63a3cda 100644
+--- a/display/qcm6490-sde.dtsi
++++ b/display/qcm6490-sde.dtsi
+@@ -623,8 +623,8 @@
+ 						00 00 8a 8a];
+ 		qcom,platform-regulator-settings = [1d 1d 1d 1d 1d];
+ 
+-		qcom,dsi-pll-ssc-en;
+-		qcom,dsi-pll-ssc-mode = "down-spread";
++		// qcom,dsi-pll-ssc-en;
++		// qcom,dsi-pll-ssc-mode = "down-spread";
+ 
+ 		vdda-0p9-supply = <&vreg_l10c_0p88>;
+ 

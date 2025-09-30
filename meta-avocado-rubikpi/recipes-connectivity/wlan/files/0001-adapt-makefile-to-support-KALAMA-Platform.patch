@@ -1,0 +1,59 @@
+From c0e91140827bb3c7ffe005b3cf9870ab548f9582 Mon Sep 17 00:00:00 2001
+From: jialchen <quic_jialchen@quicinc.com>
+Date: Wed, 16 Aug 2023 15:38:43 +0800
+Subject: [PATCH] adapt makefile to support KALAMA Platform
+
+Signed-off-by: Jialong Chen <quic_jialchen@quicinc.com>
+---
+ Makefile | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e98e3ca..32ee6d9 100644
+--- a/Makefile
++++ b/Makefile
+@@ -137,7 +137,7 @@ CONFIG_LAYER2_ROAMING = y
+ #bit0: ROAM_ON_EXPIRED, #bit1: ROAM_ON_RESUME, #bit2: ROAM_ACTIVE
+ CONFIG_ROAMING_FLAG = 0x3
+ ###################### Platform Related #######################
+-CONFIG_PLATFORM_I386_PC = y
++CONFIG_PLATFORM_I386_PC = n
+ CONFIG_PLATFORM_ANDROID_X86 = n
+ CONFIG_PLATFORM_ANDROID_INTEL_X86 = n
+ CONFIG_PLATFORM_JB_X86 = n
+@@ -200,6 +200,7 @@ CONFIG_PLATFORM_RTL8197D = n
+ CONFIG_PLATFORM_AML_S905 = n
+ CONFIG_PLATFORM_ZTE_ZX296716 = n
+ CONFIG_PLATFORM_RISCV_LIPI4A = n
++CONFIG_PLATFORM_ARM_KALAMA = y
+ ########### CUSTOMER ################################
+ CONFIG_CUSTOMER_HUAWEI_GENERAL = n
+
+@@ -2308,6 +2309,15 @@ STAGINGMODDIR := /lib/modules/$(KVER)/kernel/drivers/staging
+
+ endif
+
++ifeq ($(CONFIG_PLATFORM_ARM_KALAMA), y)
++EXTRA_CFLAGS += -DCONFIG_LITTLE_ENDIAN
++EXTRA_CFLAGS += -DCONFIG_IOCTL_CFG80211 -DRTW_USE_CFG80211_STA_EVENT
++ARCH := arm64
++CROSS_COMPILE ?=
++KSRC := $(KERNEL_SRC)
++INSTALL_PREFIX :=
++endif
++
+ ########### CUSTOMER ################################
+ ifeq ($(CONFIG_CUSTOMER_HUAWEI_GENERAL), y)
+ CONFIG_CUSTOMER_HUAWEI = y
+@@ -2467,7 +2477,7 @@ export CONFIG_RTL8822BU = m
+ all: modules
+
+ modules:
+-	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KSRC) M=$(shell pwd)  modules
++	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KERNEL_SRC) M=$(M)  modules
+
+ strip:
+	$(CROSS_COMPILE)strip $(MODULE_NAME).ko --strip-unneeded
+--
+2.17.1
+

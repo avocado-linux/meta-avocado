@@ -1,0 +1,163 @@
+From d45c0e0d0d7eee71c1bc8832be3915bc3be36237 Mon Sep 17 00:00:00 2001
+From: jialchen <quic_jialchen@quicinc.com>
+Date: Wed, 16 Aug 2023 17:59:47 +0800
+Subject: [PATCH] adapt upstream driver to kp5.15
+
+kp5.15's api have some gap with kernel.org 5.15.
+Adapt some api to fix compilation issue.
+
+Signed-off-by: Jialong Chen <quic_jialchen@quicinc.com>
+---
+ include/xmit_osdep.h          |  6 ++++--
+ os_dep/linux/ioctl_cfg80211.c | 20 +++++++++++++++-----
+ os_dep/linux/xmit_linux.c     |  6 +++---
+ 3 files changed, 22 insertions(+), 10 deletions(-)
+
+diff --git a/include/xmit_osdep.h b/include/xmit_osdep.h
+index 9bf9c93..21be968 100644
+--- a/include/xmit_osdep.h
++++ b/include/xmit_osdep.h
+@@ -67,8 +67,10 @@ struct sta_xmit_priv;
+ struct xmit_frame;
+ struct xmit_buf;
+
+-extern int _rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev);
+-extern int rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev);
++//extern int _rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev);
++//extern int rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev);
++extern netdev_tx_t _rtw_xmit_entry(struct sk_buff *pkt, struct net_device *pnetdev);
++extern netdev_tx_t rtw_xmit_entry(struct sk_buff *pkt, struct net_device *pnetdev);
+
+ #endif /* PLATFORM_LINUX */
+
+diff --git a/os_dep/linux/ioctl_cfg80211.c b/os_dep/linux/ioctl_cfg80211.c
+index f7b59a8..5bb1e13 100644
+--- a/os_dep/linux/ioctl_cfg80211.c
++++ b/os_dep/linux/ioctl_cfg80211.c
+@@ -468,7 +468,8 @@ u8 rtw_cfg80211_ch_switch_notify(_adapter *adapter, u8 ch, u8 bw, u8 offset,
+		 *  called by others with block-tx.
+		 */
+
+-		cfg80211_ch_switch_started_notify(adapter->pnetdev, &chdef, 0, false);
++                //QC KP 5.15's API base kernel.org 5.15 have gap,here need add compatible for QC KP 5.15
++		cfg80211_ch_switch_started_notify(adapter->pnetdev, &chdef, 0, 0, false, 0);
+ #else
+		cfg80211_ch_switch_started_notify(adapter->pnetdev, &chdef, 0);
+ #endif
+@@ -484,7 +485,8 @@ u8 rtw_cfg80211_ch_switch_notify(_adapter *adapter, u8 ch, u8 bw, u8 offset,
+ #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
+	cfg80211_ch_switch_notify(adapter->pnetdev, &chdef, 0);
+ #else
+-	cfg80211_ch_switch_notify(adapter->pnetdev, &chdef);
++//      QC KP 5.15's API base kernel.org 5.15 have gap,here add compatible for QC KP 5.15
++	cfg80211_ch_switch_notify(adapter->pnetdev, &chdef, 0, 0);
+ #endif
+
+ #else
+@@ -1152,7 +1154,8 @@ check_bss:
+		#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+		roam_info.links[0].bssid = cur_network->network.MacAddress;
+		#else
+-		roam_info.bssid = cur_network->network.MacAddress;
++        //      QC KP 5.15's API base kernel.org 5.15 have gap,here add compatible for QC KP 5.15
++		roam_info.links[0].bssid = cur_network->network.MacAddress;
+		#endif
+		roam_info.req_ie = pmlmepriv->assoc_req + sizeof(struct rtw_ieee80211_hdr_3addr) + 2;
+		roam_info.req_ie_len = pmlmepriv->assoc_req_len - sizeof(struct rtw_ieee80211_hdr_3addr) - 2;
+@@ -1916,6 +1919,7 @@ static int cfg80211_rtw_add_key(struct wiphy *wiphy, struct net_device *ndev
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+	, int link_id
+ #endif
++        , int link_id
+	, u8 key_index
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
+	, bool pairwise
+@@ -2081,6 +2085,7 @@ static int cfg80211_rtw_get_key(struct wiphy *wiphy, struct net_device *ndev
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+	, int link_id
+ #endif
++	, int link_id
+	, u8 keyid
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
+	, bool pairwise
+@@ -2272,6 +2277,7 @@ static int cfg80211_rtw_del_key(struct wiphy *wiphy, struct net_device *ndev,
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+				int link_id,
+ #endif
++				int link_id,
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
+				u8 key_index, bool pairwise, const u8 *mac_addr)
+ #else	/* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) */
+@@ -2295,6 +2301,7 @@ static int cfg80211_rtw_set_default_key(struct wiphy *wiphy, struct net_device *
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+	int link_id,
+ #endif
++	int link_id,
+	u8 key_index
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 38)) || defined(COMPAT_KERNEL_RELEASE)
+	, bool unicast, bool multicast
+@@ -2346,6 +2353,7 @@ int cfg80211_rtw_set_default_mgmt_key(struct wiphy *wiphy, struct net_device *nd
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+	int link_id,
+ #endif
++	int link_id,
+	u8 key_index)
+ {
+ #define SET_DEF_KEY_PARAM_FMT " key_index=%d"
+@@ -5407,7 +5415,8 @@ static int cfg80211_rtw_change_beacon(struct wiphy *wiphy, struct net_device *nd
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
+ static int cfg80211_rtw_stop_ap(struct wiphy *wiphy, struct net_device *ndev, unsigned int link_id)
+ #else
+-static int cfg80211_rtw_stop_ap(struct wiphy *wiphy, struct net_device *ndev)
++//To do compatible with KP, on here use same API with KERNEL_VERSION(6, 1, 0))
++static int cfg80211_rtw_stop_ap(struct wiphy *wiphy, struct net_device *ndev, unsigned int link_id)
+ #endif
+ {
+	_adapter *adapter = (_adapter *)rtw_netdev_priv(ndev);
+@@ -6788,6 +6797,7 @@ static int cfg80211_rtw_get_channel(struct wiphy *wiphy,
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
+	unsigned int link_id,
+ #endif
++	unsigned int link_id,
+	struct cfg80211_chan_def *chandef)
+ {
+	_adapter *padapter = wiphy_to_adapter(wiphy);
+@@ -10729,7 +10739,7 @@ void rtw_wdev_unregister(struct wireless_dev *wdev)
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2))
+	if (wdev->links[0].client.current_bss) {
+	#else
+-	if (wdev->current_bss) {
++	if (wdev->links[0].client.current_bss) {
+	#endif
+		RTW_INFO(FUNC_ADPT_FMT" clear current_bss by cfg80211_disconnected\n", FUNC_ADPT_ARG(adapter));
+		rtw_cfg80211_indicate_disconnect(adapter, 0, 1);
+diff --git a/os_dep/linux/xmit_linux.c b/os_dep/linux/xmit_linux.c
+index f4f508e..30c0aa3 100644
+--- a/os_dep/linux/xmit_linux.c
++++ b/os_dep/linux/xmit_linux.c
+@@ -371,7 +371,7 @@ void rtw_os_wake_queue_at_free_stainfo(_adapter *padapter, int *qcnt_freed)
+ #endif
+ }
+
+-int _rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev)
++netdev_tx_t _rtw_xmit_entry(struct sk_buff *pkt, struct net_device *pnetdev)
+ {
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(pnetdev);
+	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
+@@ -514,11 +514,11 @@ fail:
+ }
+ #endif
+
+-int rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev)
++netdev_tx_t rtw_xmit_entry(struct sk_buff *pkt, struct net_device *pnetdev)
+ {
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(pnetdev);
+	struct	mlme_priv	*pmlmepriv = &(padapter->mlmepriv);
+-	int ret = 0;
++	netdev_tx_t ret = NETDEV_TX_OK;
+
+	if (pkt) {
+ #ifdef CONFIG_CUSTOMER_ALIBABA_GENERAL
+--
+2.17.1
+

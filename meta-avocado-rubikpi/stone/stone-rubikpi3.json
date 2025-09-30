@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-rubikpi3",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}
