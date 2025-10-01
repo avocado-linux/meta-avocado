@@ -31,3 +31,4 @@ do_install() {
         install -m 0644 ${WORKDIR}/shadow ${D}${sysconfdir}/shadow
     fi
 }
+do_install[vardeps] += "AVOCADO_ALLOW_ROOT_LOGIN"

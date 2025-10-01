@@ -2,6 +2,9 @@ DESCRIPTION = "Avocado image rootfs"
 LICENSE = "Apache-2.0"
 
 inherit image
+IMGCLASSES += " image-os"
+inherit_defer ${IMGCLASSES}
+
 IMAGE_LINK_NAME = ""
 IMAGE_MACHINE_SUFFIX = "-${MACHINE_SHORT_NAME}"
 IMAGE_NAME = "${IMAGE_BASENAME}${IMAGE_MACHINE_SUFFIX}"

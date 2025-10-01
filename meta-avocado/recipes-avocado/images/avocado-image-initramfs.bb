@@ -2,6 +2,8 @@ DESCRIPTION = "Avocado initramfs image"
 LICENSE = "Apache-2.0"
 
 inherit image
+IMGCLASSES += " image-os"
+inherit_defer ${IMGCLASSES}
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 IMAGE_LINK_NAME = ""
