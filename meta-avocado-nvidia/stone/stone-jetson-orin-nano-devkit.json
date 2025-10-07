@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "platform": "avocado-jetson-orin-nano-devkit-nvme",
+    "platform": "avocado-jetson-orin-nano-devkit",
     "architecture": "arm64",
     "provision_default": "tegraflash"
   },
@@ -16,14 +16,14 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.tegraflash.tar.gz",
+      "out": "avocado-image-rootfs-jetson-orin-nano-devkit.tegraflash.tar.gz",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "tegraflash": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.tegraflash.tar.gz",
-        "rootfs": "avocado-image-rootfs-jetson-orin-nano-devkit-nvme.squashfs",
-        "var": "avocado-image-var-jetson-orin-nano-devkit-nvme.btrfs"
+        "tegraflash": "avocado-image-rootfs-jetson-orin-nano-devkit.tegraflash.tar.gz",
+        "rootfs": "avocado-image-rootfs-jetson-orin-nano-devkit.squashfs",
+        "var": "avocado-image-var-jetson-orin-nano-devkit.btrfs"
       }
     }
   }

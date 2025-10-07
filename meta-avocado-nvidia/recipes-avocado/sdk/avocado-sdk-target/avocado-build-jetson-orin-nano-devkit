@@ -3,7 +3,7 @@
 set -e
 
 hook="avocado-build"
-target="jetson-orin-nano-devkit-nvme"
+target="jetson-orin-nano-devkit"
 
 RUNTIME_NAME="$1"
 
