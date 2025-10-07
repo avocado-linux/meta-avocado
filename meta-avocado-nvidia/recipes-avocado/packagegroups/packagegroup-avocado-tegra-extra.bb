@@ -6,14 +6,31 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
-  avocado-img-tegraflash \
-  tegra-libraries-core \
+  tegra-redundant-boot-base \
+  tegra-binaries \
+  tegra-nvphs \
+  tegra-nvs-service \
+  tegra-nvsciipc \
+  tegra-nvstartup \
+  tegra-nvfancontrol \
+  tegra-configs-udev \
+  tegra-redundant-boot \
+  nvidia-kernel-oot-display \
+  tegra-cuda-utils \
+  tegra-tools \
   tegra-libraries-camera \
+  tegra-libraries-core \
+  tegra-libraries-cuda \
   tegra-libraries-multimedia \
   tegra-libraries-multimedia-ds \
   tegra-libraries-multimedia-v4l \
   tegra-libraries-multimedia-utils \
+  tegra-libraries-nvml \
+  tegra-libraries-nvsci \
+  tegra-libraries-pva \
+  tegra-nvpower \
   tegra-mmapi \
+  nvidia-docker \
   ${GSTREAMER_PACKAGES} \
 "
 
