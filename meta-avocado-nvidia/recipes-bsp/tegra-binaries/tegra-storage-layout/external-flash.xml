@@ -35,7 +35,7 @@
         <partition name="A_kernel" id="3" type="kernel">
             <allocation_policy> sequential </allocation_policy>
             <filesystem_type> basic </filesystem_type>
-            <size> 167772160 </size>
+            <size> 134217728 </size>
             <file_system_attribute> 0 </file_system_attribute>
             <allocation_attribute> 8 </allocation_attribute>
             <percent_reserved> 0 </percent_reserved>
@@ -61,7 +61,7 @@
         <partition name="B_kernel" type="kernel">
             <allocation_policy> sequential </allocation_policy>
             <filesystem_type> basic </filesystem_type>
-            <size> 167772160 </size>
+            <size> 134217728 </size>
             <file_system_attribute> 0 </file_system_attribute>
             <allocation_attribute> 8 </allocation_attribute>
             <percent_reserved> 0 </percent_reserved>

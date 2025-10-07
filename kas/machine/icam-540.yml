@@ -18,6 +18,6 @@ repos:
 
 local_conf_header:
   machine-avocado-icam-540: |
-    ROOTFS_IMAGE_EXTRA_INSTALL += "kernel-module-r8168 linux-firmware-rtl8168"
+    # ROOTFS_IMAGE_EXTRA_INSTALL += "kernel-module-r8168 linux-firmware-rtl8168"
 
 machine: avocado-icam-540

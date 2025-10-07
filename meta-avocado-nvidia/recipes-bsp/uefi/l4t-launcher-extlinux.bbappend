@@ -1,0 +1,12 @@
+do_compile() {
+    if [ -n "${INITRAMFS_IMAGE}" ]; then
+        if [ "${INITRAMFS_IMAGE_BUNDLE}" = "1" ]; then
+	    cp -L ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}-${INITRAMFS_LINK_NAME}.bin ${B}/${KERNEL_IMAGETYPE}
+	else
+	    cp -L ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}-${MACHINE}.bin ${B}/${KERNEL_IMAGETYPE}
+	    cp -L ${DEPLOY_DIR_IMAGE}/${INITRAMFS_IMAGE}-${MACHINE_SHORT_NAME}.${AVOCADO_IMAGE_INITRAMFS_TYPE} ${B}/initrd
+	fi
+    else
+	cp -L ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGETYPE}-${MACHINE}.bin ${B}/${KERNEL_IMAGETYPE}
+    fi
+}
