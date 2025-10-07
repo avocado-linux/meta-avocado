@@ -35,6 +35,7 @@ RUN apt-get update -y \
     git \
     git-lfs \
     groff \
+    gfortran \
     iputils-ping \
     jq \
     less \
