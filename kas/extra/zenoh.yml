@@ -1,0 +1,20 @@
+header:
+  version: 16
+
+repos:
+  zenoh:
+    url: "https://github.com/Jarsop/meta-zenoh.git"
+    path: "meta-zenoh"
+    commit: 549f9c6b312992517cce9cb138da07e88dd4520f
+    branch: scarthgap
+    layers:
+      meta-zenoh:
+
+local_conf_header:
+  extra-zenoh: |
+    ZENOH_SHARED_MEMORY = "true"
+    ZENOH_UNSTABLE_API = "true"
+    INSANE_SKIP:pn-zenoh-c += "buildpaths"
+    # Needed for scarthgap
+    DEBUG_PREFIX_MAP:remove:pn-zenoh-c = "-fcanon-prefix-map"
+    DEBUG_PREFIX_MAP:remove:pn-zenoh-c-native = "-fcanon-prefix-map"

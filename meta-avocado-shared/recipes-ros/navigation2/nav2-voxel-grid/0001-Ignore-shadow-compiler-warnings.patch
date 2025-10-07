@@ -1,0 +1,26 @@
+From 39eba09cd394dcb05754794f343c4293b462ccd2 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 6 Oct 2025 01:11:06 -0400
+Subject: [PATCH] Ignore shadow compiler warnings
+
+---
+ CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4b88a87d8..5def3fd25 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -7,6 +7,9 @@ find_package(rclcpp REQUIRED)
+ 
+ nav2_package()
+ 
++# Don't treat shadow warnings from external headers as errors
++add_compile_options(-Wno-error=shadow)
++
+ include_directories(
+   include)
+ 
+-- 
+2.49.0
+

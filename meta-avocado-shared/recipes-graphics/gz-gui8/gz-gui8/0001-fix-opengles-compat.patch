@@ -1,0 +1,30 @@
+From 8a434bbba36f24e28713f2af0e75e1b3f51e2a56 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 6 Oct 2025 01:24:34 -0400
+Subject: [PATCH] fix opengles compat
+
+---
+ src/plugins/minimal_scene/EngineToQtInterface.cc | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/plugins/minimal_scene/EngineToQtInterface.cc b/src/plugins/minimal_scene/EngineToQtInterface.cc
+index 380f881f..f47d7ebf 100644
+--- a/src/plugins/minimal_scene/EngineToQtInterface.cc
++++ b/src/plugins/minimal_scene/EngineToQtInterface.cc
+@@ -23,6 +23,13 @@
+ 
+ #include <QOpenGLExtraFunctions>
+ 
++// GL_UNSIGNED_INT_8_8_8_8_REV is not available in OpenGL ES
++// Define it if missing for compatibility with GLES platforms
++#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
++// Use RGBA byte order format available in GLES
++#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
++#endif
++
+ // clang-format off
+ namespace gz
+ {
+-- 
+2.49.0
+

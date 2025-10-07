@@ -1,0 +1,26 @@
+From 0497bce1c043b85301ba09291f6aa07f23334c2f Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 6 Oct 2025 00:56:52 -0400
+Subject: [PATCH] Ignore shadow compiler warnings
+
+---
+ CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6a82f0151..3fad48a09 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -21,6 +21,9 @@ find_package(tf2_ros REQUIRED)
+ 
+ nav2_package()
+ 
++# Don't treat shadow warnings from external headers as errors
++add_compile_options(-Wno-error=shadow)
++
+ set(library_name ${PROJECT_NAME}_core)
+ 
+ add_subdirectory(src)
+-- 
+2.49.0
+

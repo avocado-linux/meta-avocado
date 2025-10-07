@@ -5,5 +5,6 @@ inherit image-packages-only
 
 IMAGE_INSTALL = "\
   packagegroup-avocado-extra \
+  packagegroup-ros-world-jazzy \
   ${PKG_EXTRA_INSTALL} \
 "

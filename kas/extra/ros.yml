@@ -9,18 +9,14 @@ repos:
     commit: dc025a7f50842baa84305cc772010c5094e73e75
     layers:
       meta-ros-common:
-      meta-ros2-humble:
+      meta-ros2-jazzy:
       meta-ros2:
 
 local_conf_header:
   extra-ros: |
-    ROS_DISTRO = "humble"
+    ROS_DISTRO = "jazzy"
     ROS_VERSION = "2"
     ROS_SUPERFLORE_GENERATED_BUILDTOOLS:append = " ${ROS_SUPERFLORE_GENERATED_WORLD_PACKAGES}"
     DISTRO_FEATURES:append = " ros2"
-    PREFERRED_VERSION_octomap = "1.10.0"
-
-    # Fix cross-compilation issues with ROS packages
-    # Ensure proper library paths for target architecture
-    CMAKE_PREFIX_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/humble:"
-    PKG_CONFIG_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/humble/lib/pkgconfig:"
+    PREFERRED_VERSION_octomap = "1.9.8"
+    BBMASK += "meta-ros/meta-ros2-jazzy/recipes-bbappends/ros2-canopen/lely-core-libraries_%.bbappend"

@@ -1,0 +1,52 @@
+From 3f45eed6fb53ad2302a0de98cccf8f34237e8e0a Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 5 Oct 2025 20:44:29 -0400
+Subject: [PATCH 1/2] Use pkg-config to find TinyXML2
+
+This helps avoid absolute paths from being injected into the
+generated cmake files.
+
+Upstream-Status: Pending
+
+Signed-off-by: Rob Woolley <rob.woolley@windriver.com>
+---
+ CMakeLists.txt | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f02b12901..2c748e2fd 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -24,6 +24,19 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
+ find_package(ament_cmake REQUIRED)
+ find_package(ament_cmake_gen_version_h REQUIRED)
+ find_package(backward_ros REQUIRED)
++
++find_package(PkgConfig REQUIRED)
++pkg_check_modules(tinyxml2 REQUIRED IMPORTED_TARGET tinyxml2)
++
++# Create TinyXML2::TinyXML2 target from pkg-config results
++if(NOT TARGET TinyXML2::TinyXML2)
++  add_library(TinyXML2::TinyXML2 INTERFACE IMPORTED)
++  set_target_properties(TinyXML2::TinyXML2 PROPERTIES
++    INTERFACE_INCLUDE_DIRECTORIES "${tinyxml2_INCLUDE_DIRS}"
++    INTERFACE_LINK_LIBRARIES "${tinyxml2_LIBRARIES}"
++  )
++endif()
++
+ foreach(Dependency IN ITEMS ${THIS_PACKAGE_INCLUDE_DEPENDS})
+   find_package(${Dependency} REQUIRED)
+ endforeach()
+@@ -51,8 +64,7 @@ target_link_libraries(hardware_interface PUBLIC
+                       rcutils::rcutils
+                       rcpputils::rcpputils
+                       ${joint_limits_TARGETS}
+-                      ${TinyXML2_LIBRARIES}
+-                      ${tinyxml2_vendor_LIBRARIES}
++                      TinyXML2::TinyXML2
+                       ${pal_statistics_LIBRARIES}
+                       ${control_msgs_TARGETS}
+                       ${lifecycle_msgs_TARGETS}
+--
+2.49.0
+
