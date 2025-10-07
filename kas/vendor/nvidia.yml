@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-tegra
     path: meta-tegra
     branch: scarthgap
-    commit: aca8ae6dcaedd1651337838514d0797059c41406
+    commit: c5b6e96253220fd4805c895c39d9085cdf83bc0d
     layers:
       .:
 
@@ -20,9 +20,6 @@ repos:
 
 local_conf_header:
   vendor-nvidia: |
-    INITRAMFS_IMAGE_BUNDLE = "1"
-    KERNEL_MODULE_AUTOLOAD:append = " nvme"
-
     TEGRA_INITRD_FLASH_INITRAMFS_FSTYPES = "cpio.gz.cboot"
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization efi"
     LICENSE_FLAGS_ACCEPTED:append = " commercial_faad2 commercial_x264"

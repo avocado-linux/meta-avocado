@@ -24,7 +24,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-openembedded-core
     path: openembedded-core
     branch: scarthgap
-    commit: baa5e7ea5f37f54c2a00080798ad7fb4c0664f69
+    commit: 4cf131ebd157b79226533b5a5074691dd0e1a4ab
     layers:
       meta:
 

@@ -16,7 +16,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
     branch: scarthgap
-    commit: b9fb6556a3c8a3e477dce334205b658cb79ad501
+    commit: e621da947048842109db1b4fd3917a02e0501aa2
     layers:
       meta-oe:
       meta-perl:
@@ -66,5 +66,7 @@ local_conf_header:
 
     # Add libquadmath which is often needed with Fortran
     RUNTIMETARGET:append:pn-gcc-runtime = " libquadmath"
+    HOSTTOOLS += "gfortran"
+
   sdk: |
     CONF_VERSION = "2"

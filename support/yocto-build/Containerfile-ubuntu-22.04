@@ -20,6 +20,7 @@ RUN apt-get update && \
   gcc \
   git \
   git-lfs \
+  gfortran \
   iputils-ping \
   libacl1 \
   liblz4-tool \
