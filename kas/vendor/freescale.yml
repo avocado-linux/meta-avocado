@@ -22,3 +22,5 @@ local_conf_header:
     ACCEPT_FSL_EULA = "1"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"
     SDK_PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-sdk"
+    BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
+    BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"

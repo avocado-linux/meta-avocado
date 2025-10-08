@@ -36,3 +36,5 @@ local_conf_header:
     IMX_DEFAULT_BSP = "nxp"
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx"
+    BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
+    BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"
