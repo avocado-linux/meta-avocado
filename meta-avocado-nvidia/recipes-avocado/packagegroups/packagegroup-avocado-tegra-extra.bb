@@ -6,6 +6,7 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  tegra-firmware \
   tegra-redundant-boot-base \
   tegra-binaries \
   tegra-nvphs \
