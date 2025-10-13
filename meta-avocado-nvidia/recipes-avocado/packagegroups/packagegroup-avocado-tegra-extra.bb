@@ -32,6 +32,8 @@ RDEPENDS:${PN} = " \
   tegra-nvpower \
   tegra-mmapi \
   nvidia-docker \
+  linux-firmware-rtl8168 \
+  kernel-module-r8168 \
   ${GSTREAMER_PACKAGES} \
 "
 
