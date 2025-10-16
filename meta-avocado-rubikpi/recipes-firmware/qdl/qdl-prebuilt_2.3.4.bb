@@ -9,7 +9,7 @@ S = "${WORKDIR}"
 
 BBCLASSEXTEND = "native"
 
-DEPENDS:class-native += "unzip-native"
+DEPENDS:class-native += "unzip-native patchelf-native"
 
 do_compile[noexec] = "1"
 do_install[noexec] = "1"
@@ -19,7 +19,10 @@ inherit deploy
 do_deploy() {
     install -d ${DEPLOY_DIR_IMAGE}
     case ${BUILD_ARCH} in
-        x86_64) install -m 0755 ${S}/qdl_${PV}/QDL_Linux_x64/qdl ${DEPLOY_DIR_IMAGE}/qdl ;;
+        x86_64)
+            install -m 0755 ${S}/qdl_${PV}/QDL_Linux_x64/qdl ${DEPLOY_DIR_IMAGE}/qdl
+            patchelf --set-interpreter /lib/ld-linux-x86-64.so.2 ${DEPLOY_DIR_IMAGE}/qdl
+            ;;
         aarch64) install -m 0755 ${S}/qdl_${PV}/QDL_Linux_ARM/qdl ${DEPLOY_DIR_IMAGE}/qdl ;;
     esac
 }

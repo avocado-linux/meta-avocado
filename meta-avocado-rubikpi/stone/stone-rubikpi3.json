@@ -1,7 +1,30 @@
 {
   "runtime": {
     "platform": "avocado-rubikpi3",
-    "architecture": "arm64"
+    "architecture": "arm64",
+    "provision_default": "ufs"
   },
-  "storage_devices": {}
+  "provision": {
+    "profiles": {
+      "ufs": {
+        "script": "stone-provision-ufs.sh"
+      },
+      "noop": {
+        "script": "stone-provision-noop.sh"
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-image-rootfs-rubikpi3.ufs.tar.gz",
+      "devpath": "/dev/disk/by-partlabel/system",
+      "block_size": 512,
+      "partitions": [],
+      "images": {
+        "ufs": "avocado-image-rootfs-rubikpi3.ufs.tar.gz",
+        "rootfs": "avocado-image-rootfs-rubikpi3.squashfs",
+        "var": "avocado-image-var-rubikpi3.btrfs"
+      }
+    }
+  }
 }

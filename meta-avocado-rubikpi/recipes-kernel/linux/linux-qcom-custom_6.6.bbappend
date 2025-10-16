@@ -20,6 +20,10 @@ do_configure:append() {
     kernel_conf_variable BTRFS_FS y
     kernel_conf_variable SQUASHFS y
     kernel_conf_variable SQUASHFS_ZSTD y
+    kernel_conf_variable LOCALVERSION ""
+    kernel_conf_variable LOCALVERSION_AUTO n
+    kernel_conf_variable AUDIT n
+    kernel_conf_variable USB_DWC3 n
     oe_runmake -C ${S} O=${B} savedefconfig && cp ${B}/defconfig ${WORKDIR}/defconfig.saved
 }
 

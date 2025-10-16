@@ -34,3 +34,5 @@ local_conf_header:
     INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-initramfs"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-base"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-extra"
+    PACKAGECONFIG:remove:pn-qtbase = " eglfs"
+    PACKAGECONFIG:remove:pn-qtwayland = " xcomposite-egl"
