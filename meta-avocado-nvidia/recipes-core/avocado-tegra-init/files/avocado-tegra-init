@@ -26,7 +26,7 @@ if [ "$foundslotsfx" != "yes" ]; then
     echo -n "$message"
     for count in $(seq 1 10); do
         for dev in $(lsblk -dnpo NAME); do
-          blkid --probe "$dev"
+          blkid --probe "$dev" || true
         done
         rootdev=$(blkid -l -t PARTLABEL=APP$slotsfx | cut -d: -f1)
         if [ -n "$rootdev" ]; then
