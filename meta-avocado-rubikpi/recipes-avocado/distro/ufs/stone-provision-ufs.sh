@@ -25,4 +25,20 @@ tar -xzf "$archive_file" -C "$build_dir"
 
 echo "Running qdl binary from build directory"
 cd "$build_dir/avocado-image-rootfs"
+
+# Wait for device in QDL mode
+echo "Waiting for QDL device..."
+for i in {1..30}; do
+    if lsusb | grep -q "05c6:9008"; then
+        echo "QDL device found"
+        sleep 1  # Give it one more second to settle
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "ERROR: QDL device not found after 30 seconds, aborting"
+        exit 1
+    fi
+    sleep 1
+done
+
 ./qdl --storage ufs prog_firehose_ddr.elf rawprogram*.xml patch*.xml

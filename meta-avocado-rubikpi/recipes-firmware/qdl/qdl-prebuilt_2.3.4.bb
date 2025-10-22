@@ -15,6 +15,7 @@ do_compile[noexec] = "1"
 do_install[noexec] = "1"
 
 inherit deploy
+do_deploy[depends] += "patchelf-native:do_populate_sysroot"
 
 do_deploy() {
     install -d ${DEPLOY_DIR_IMAGE}
