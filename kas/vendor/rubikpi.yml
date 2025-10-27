@@ -29,7 +29,7 @@ repos:
 
 local_conf_header:
   meta-qcom: |
-    DISTRO_FEATURES_EXTRA:append= " opengl vulkan wayland seccomp"
+    DISTRO_FEATURES_EXTRA:append= " opengl vulkan wayland seccomp virtualization"
     INITRAMFS_IMAGE_BUNDLE ?= "1"
     INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-initramfs"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-base"
