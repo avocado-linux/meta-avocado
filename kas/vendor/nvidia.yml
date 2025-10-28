@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-tegra
     path: meta-tegra
     branch: scarthgap
-    commit: c5b6e96253220fd4805c895c39d9085cdf83bc0d
+    commit: 33a4726304d0de35b6b3b4b9ad138f9fd23e12c5
     layers:
       .:
 

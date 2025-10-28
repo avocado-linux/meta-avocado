@@ -5,7 +5,7 @@ repos:
   meta-clang:
     url: https://github.com/kraj/meta-clang.git
     path: meta-clang
-    commit: 057ee563305e9484b29d02347aeafdadc5ea28ed
+    commit: 731488911f55ebfe746068512b426351192f82f2
     branch: scarthgap
     layers:
       .:

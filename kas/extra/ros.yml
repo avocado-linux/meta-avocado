@@ -6,7 +6,7 @@ repos:
     url: https://github.com/ros/meta-ros.git
     path: meta-ros
     branch: scarthgap
-    commit: dc025a7f50842baa84305cc772010c5094e73e75
+    commit: 4a8044f2fd092f5cf5d7371aae1da4b4c961e54c
     layers:
       meta-ros-common:
       meta-ros2-humble:
