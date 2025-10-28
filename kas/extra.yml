@@ -21,3 +21,5 @@ header:
     file: kas/extra/clang.yml
   - repo: meta-avocado
     file: kas/extra/python-ai.yml
+  - repo: meta-avocado
+    file: kas/extra/swupdate.yml
