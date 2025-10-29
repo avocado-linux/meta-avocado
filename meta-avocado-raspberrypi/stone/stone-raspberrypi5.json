@@ -42,7 +42,7 @@
             "type": "fat",
             "variant": "FAT32",
             "files": [
-              { "in": "u-boot.bin", "out": "kernel8.img" },
+              { "in": "u-boot.bin", "out": "kernel_2712.img" },
               { "in": "bootfiles/bootcode.bin", "out": "bootcode.bin" },
               { "in": "bootfiles/cmdline.txt", "out": "cmdline.txt" },
               { "in": "bootfiles/config.txt", "out": "config.txt" },
@@ -62,6 +62,9 @@
               { "in": "bootfiles/start4cd.elf", "out": "start4cd.elf" },
               { "in": "bootfiles/start4db.elf", "out": "start4db.elf" },
               { "in": "bootfiles/start4x.elf", "out": "start4x.elf" },
+              { "in": "overlay_map.dtb", "out": "overlays/overlay_map.dtb" },
+              { "in": "bcm2712d0.dtbo", "out": "overlays/bcm2712d0.dtbo" },
+              { "in": "vc4-kms-v3d-pi5.dtbo", "out": "overlays/vc4-kms-v3d-pi5.dtbo" },
               "bcm2712-rpi-5-b.dtb",
               "bcm2712-rpi-cm5-cm5io.dtb",
               "bcm2712-rpi-cm5-cm4io.dtb",
