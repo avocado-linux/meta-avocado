@@ -35,6 +35,7 @@ RDEPENDS:${PN} = " \
   linux-firmware-rtl8168 \
   kernel-module-r8168 \
   ${GSTREAMER_PACKAGES} \
+  swupdate \
 "
 
 GSTREAMER_PACKAGES = " \
