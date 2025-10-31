@@ -14,6 +14,7 @@ ramdisk_addr_r=0x02700000
 devtype=mmc
 devnum=0
 bootpart=1
+bootdelay=-2
 rootdev=/dev/mmcblk0p3
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
