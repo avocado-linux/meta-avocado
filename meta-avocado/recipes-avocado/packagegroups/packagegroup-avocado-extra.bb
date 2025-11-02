@@ -47,6 +47,7 @@ RDEPENDS:${PN} = " \
   logrotate \
   coreutils \
   glibc-utils \
+  tio \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
