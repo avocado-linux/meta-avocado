@@ -32,6 +32,10 @@ do_compile() {
     # Remove var partition files
     find "${TEMP_DIR}" -name "avocado-image-var*" -delete
 
+    # Copy swupdate scripts
+    cp ${DEPLOY_DIR_IMAGE}/*-pre.sh ${TEMP_DIR}/
+    cp ${DEPLOY_DIR_IMAGE}/*-post.sh ${TEMP_DIR}/
+
     # Backup original archive
     mv "${ARCHIVE_PATH}" "${ARCHIVE_PATH}.backup"
 
