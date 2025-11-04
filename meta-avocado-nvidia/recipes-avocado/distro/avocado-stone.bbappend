@@ -3,6 +3,7 @@ do_compile[depends] += "avocado-img-tegraflash:do_build"
 SRC_URI += " \
   file://stone-provision-tegraflash.sh \
   file://stone-provision-noop.sh \
+  file://stone-provision-peridio.sh \
 "
 
 DEPENDS += " jq-native"
@@ -12,4 +13,5 @@ do_deploy:append() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${WORKDIR}/stone-provision-tegraflash.sh ${DEPLOYDIR}/stone-provision-tegraflash.sh
   install -m 0755 ${WORKDIR}/stone-provision-noop.sh ${DEPLOYDIR}/stone-provision-noop.sh
+  install -m 0755 ${WORKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
 }
