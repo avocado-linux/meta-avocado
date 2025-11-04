@@ -11,6 +11,9 @@
       },
       "noop": {
         "script": "stone-provision-noop.sh"
+      },
+      "peridio": {
+        "script": "stone-provision-peridio.sh"
       }
     }
   },
