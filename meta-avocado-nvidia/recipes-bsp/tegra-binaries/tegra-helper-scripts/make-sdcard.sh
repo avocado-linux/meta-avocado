@@ -426,6 +426,71 @@ get_device_serial() {
     echo "$result"
 }
 
+# Helper function to find USB device instance (bus-devpath) from a block device
+find_usb_instance_from_device() {
+    local dev="$1"
+    local dev_name=$(basename "$dev")
+    local sysfs_path="/sys/block/$dev_name"
+    
+    if [ ! -L "$sysfs_path/device" ]; then
+        return 1
+    fi
+    
+    # Walk up the device hierarchy to find the USB device
+    local current_path=$(readlink -f "$sysfs_path/device" 2>/dev/null)
+    while [ -n "$current_path" ] && [ "$current_path" != "/" ] && [ "$current_path" != "/sys" ]; do
+        # Check if this is a USB device (has idVendor and idProduct)
+        if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
+            # Extract bus and device number from path (e.g., /sys/devices/pci0000:00/0000:00:14.0/usb2/2-10)
+            local usb_path_info=$(basename "$current_path")
+            if echo "$usb_path_info" | grep -q '^[0-9]\+-[0-9]\+'; then
+                echo "$usb_path_info"
+                return 0
+            fi
+        fi
+        current_path=$(dirname "$current_path")
+    done
+    
+    return 1
+}
+
+# Shared function to disconnect USB device by toggling authorized attribute
+# This is the reliable method for triggering Jetson devices to detect disconnect
+disconnect_usb_device() {
+    local usb_instance="$1"
+    
+    if [ -z "$usb_instance" ]; then
+        echo "WARN: No USB instance provided for disconnect" >&2
+        return 1
+    fi
+    
+    local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
+    
+    if [ ! -w "$authorized_path" ]; then
+        echo "WARN: Cannot write to $authorized_path (device may not exist)" >&2
+        return 1
+    fi
+    
+    echo "Disconnecting USB device $usb_instance by toggling authorized..." >&2
+    # Set authorized to 0 (disconnect)
+    echo 0 > "$authorized_path" 2>/dev/null || {
+        echo "ERR: Failed to deauthorize USB device $usb_instance" >&2
+        return 1
+    }
+    
+    # Wait a moment for the disconnect to be processed
+    sleep 1
+    
+    # Set authorized back to 1 (reconnect)
+    echo 1 > "$authorized_path" 2>/dev/null || {
+        echo "WARN: Failed to reauthorize USB device $usb_instance (this may be expected)" >&2
+        return 0  # Still return success as disconnect was achieved
+    }
+    
+    echo "USB device $usb_instance disconnected and reconnected" >&2
+    return 0
+}
+
 if [ "$wait_for_usb_device" = "yes" ]; then
     echo -n "Looking for USB storage device from $serial_number..."
     output=
@@ -573,12 +638,26 @@ if [ "$wait_for_usb_device" = "yes" -a "$keep_connection" != "yes" ]; then
         blockdev --flushbufs "$output" 2>/dev/null || true
     fi
     
-    # Try to trigger device rescan for clean state
-    if [ -w "/sys/class/block/$dev_name/device/rescan" ]; then
-        echo 1 > "/sys/class/block/$dev_name/device/rescan" 2>/dev/null || true
+    # Find USB device instance and disconnect using authorized toggle
+    if [ -b "$output" ]; then
+        usb_instance=$(find_usb_instance_from_device "$output")
+        if [ -n "$usb_instance" ]; then
+            disconnect_usb_device "$usb_instance"
+        fi
     fi
     
     echo "Device buffers flushed"
+fi
+
+# Final disconnect of USB device at end of script
+if [ -b "$output" ]; then
+    usb_instance=$(find_usb_instance_from_device "$output")
+    if [ -n "$usb_instance" ]; then
+        authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
+        if [ -w "$authorized_path" ]; then
+            echo 0 > "$authorized_path" 2>/dev/null || true
+        fi
+    fi
 fi
 
 exit 0

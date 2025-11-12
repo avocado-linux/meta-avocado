@@ -108,6 +108,43 @@ wait_for_rcm() {
     "$here/find-jetson-usb" --wait "$usb_instance"
 }
 
+# Shared function to disconnect USB device by toggling authorized attribute
+# This is the reliable method for triggering Jetson devices to detect disconnect
+disconnect_usb_device() {
+    local usb_instance="$1"
+    
+    if [ -z "$usb_instance" ]; then
+        echo "WARN: No USB instance provided for disconnect" >&2
+        return 1
+    fi
+    
+    local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
+    
+    if [ ! -w "$authorized_path" ]; then
+        echo "WARN: Cannot write to $authorized_path (device may not exist)" >&2
+        return 1
+    fi
+    
+    echo "Disconnecting USB device $usb_instance by toggling authorized..." >&2
+    # Set authorized to 0 (disconnect)
+    echo 0 > "$authorized_path" 2>/dev/null || {
+        echo "ERR: Failed to deauthorize USB device $usb_instance" >&2
+        return 1
+    }
+    
+    # Wait a moment for the disconnect to be processed
+    sleep 1
+    
+    # Set authorized back to 1 (reconnect)
+    echo 1 > "$authorized_path" 2>/dev/null || {
+        echo "WARN: Failed to reauthorize USB device $usb_instance (this may be expected)" >&2
+        return 0  # Still return success as disconnect was achieved
+    }
+    
+    echo "USB device $usb_instance disconnected and reconnected" >&2
+    return 0
+}
+
 copy_signed_binaries() {
     local signdir="${1:-signed}"
     local xmlfile="${2:-flash.xml.tmp}"
@@ -378,172 +415,15 @@ unmount_and_release() {
             blockdev --flushbufs "$dev" 2>/dev/null || true
         fi
         
-        # Alternative: Use hdparm if available
-        if command -v hdparm >/dev/null 2>&1; then
-            hdparm -f "$dev" 2>/dev/null || true
+        # Use the reliable USB disconnect method via authorized toggle
+        if [ -n "$usb_instance" ]; then
+            disconnect_usb_device "$usb_instance"
         fi
-        
-        # For USB storage devices, use usbutils to properly disconnect
-        # This is critical for Jetson devices waiting for host disconnect
-        echo "Attempting to disconnect USB device $dev using usbutils" >&2
-        
-        # First, identify the USB device using lsusb and sysfs
-        local usb_bus="" usb_device_num="" usb_vendor_id="" usb_product_id=""
-        local usb_device_path=""
-        
-        if [ -L "/sys/block/$dev_name/device" ]; then
-            usb_device_path=$(readlink -f "/sys/block/$dev_name/device" 2>/dev/null)
-            echo "USB device path: $usb_device_path" >&2
-            
-            # Walk up the device hierarchy to find the USB device
-            local current_path="$usb_device_path"
-            while [ -n "$current_path" ] && [ "$current_path" != "/" ] && [ "$current_path" != "/sys" ]; do
-                if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
-                    usb_vendor_id=$(cat "$current_path/idVendor" 2>/dev/null)
-                    usb_product_id=$(cat "$current_path/idProduct" 2>/dev/null)
-                    
-                    # Extract bus and device number from path (e.g., /sys/devices/pci0000:00/0000:00:14.0/usb2/2-10)
-                    local usb_path_info=$(basename "$current_path")
-                    if echo "$usb_path_info" | grep -q '^[0-9]\+-[0-9]\+'; then
-                        usb_bus=$(echo "$usb_path_info" | cut -d'-' -f1)
-                        usb_device_num=$(lsusb -s "$usb_bus:" | grep "$usb_vendor_id:$usb_product_id" | awk '{print $4}' | tr -d ':')
-                    fi
-                    
-                    echo "Found USB device: Bus $usb_bus Device $usb_device_num ID $usb_vendor_id:$usb_product_id" >&2
-                    break
-                fi
-                current_path=$(dirname "$current_path")
-            done
-        fi
-        
-        # Method 1: Use eject command (most reliable for USB storage)
-        if command -v eject >/dev/null 2>&1; then
-            echo "Trying eject command on $dev..." >&2
-            if eject "$dev" 2>/dev/null; then
-                echo "Successfully ejected $dev" >&2
-                return 0
-            else
-                echo "Eject command failed, trying USB-specific methods..." >&2
-            fi
-        fi
-        
-        # Method 2: Use USB device-specific disconnect via sysfs
-        if [ -n "$usb_vendor_id" ] && [ -n "$usb_product_id" ] && [ -n "$current_path" ]; then
-            echo "Attempting USB device disconnect via sysfs..." >&2
-            
-            # Try to unbind the USB storage driver
-            local usb_interface_path="$current_path"
-            for interface_dir in "$usb_interface_path"/*; do
-                if [ -d "$interface_dir" ] && echo "$(basename "$interface_dir")" | grep -q '^[0-9]\+-[0-9]\+:[0-9]\+\.[0-9]\+$'; then
-                    local interface_name=$(basename "$interface_dir")
-                    echo "Trying to unbind interface $interface_name" >&2
-                    
-                    # Find the driver for this interface
-                    if [ -L "$interface_dir/driver" ]; then
-                        local driver_path=$(readlink "$interface_dir/driver")
-                        local driver_name=$(basename "$driver_path")
-                        echo "Unbinding from driver: $driver_name" >&2
-                        
-                        if [ -w "/sys/bus/usb/drivers/$driver_name/unbind" ]; then
-                            echo "$interface_name" > "/sys/bus/usb/drivers/$driver_name/unbind" 2>/dev/null || true
-                        fi
-                    fi
-                fi
-            done
-            
-            # Try to remove the entire USB device
-            if [ -w "$current_path/remove" ]; then
-                echo "Removing USB device at $current_path" >&2
-                echo 1 > "$current_path/remove" 2>/dev/null || true
-                return 0
-            fi
-        fi
-        
-        # Method 3: Try to reset the USB port
-        if [ -n "$usb_bus" ] && [ -n "$usb_device_num" ]; then
-            echo "Attempting USB port reset for bus $usb_bus device $usb_device_num" >&2
-            
-            # Look for USB hub control
-            local hub_path="/sys/bus/usb/devices/$usb_bus-0:1.0"
-            if [ -d "$hub_path" ]; then
-                echo "Found USB hub at $hub_path" >&2
-                # This is a more advanced approach that would require additional tools
-            fi
-        fi
-        
-        # Method 4: Use our comprehensive USB reset utility
-        echo "Trying comprehensive USB reset utility..." >&2
-        if usb_reset_device "$dev"; then
-            echo "USB reset utility succeeded" >&2
-            return 0
-        fi
-        
-        # Additional sync to ensure all operations complete
-        sync
-        
-        echo "All automatic USB disconnect methods attempted" >&2
     fi
     
     return 0
 }
 
-# USB reset utility using usbutils and sysfs
-usb_reset_device() {
-    local dev="$1"
-    local dev_name=$(basename "$dev")
-    
-    echo "Performing comprehensive USB reset for $dev" >&2
-    
-    # Find all USB devices that might be related to our block device
-    if command -v lsusb >/dev/null 2>&1; then
-        echo "Available USB devices:" >&2
-        lsusb | while read line; do
-            echo "  $line" >&2
-        done
-        
-        # Look for NVIDIA/flashpkg devices specifically
-        local nvidia_devices=$(lsusb | grep -i "nvidia\|0955:" || true)
-        if [ -n "$nvidia_devices" ]; then
-            echo "Found NVIDIA USB devices:" >&2
-            echo "$nvidia_devices" | while read line; do
-                echo "  $line" >&2
-                
-                # Extract bus and device numbers
-                local bus_num=$(echo "$line" | awk '{print $2}')
-                local dev_num=$(echo "$line" | awk '{print $4}' | tr -d ':')
-                
-                # Try to reset this specific device
-                local usb_device_path="/sys/bus/usb/devices/$bus_num-*"
-                for device_path in $usb_device_path; do
-                    if [ -d "$device_path" ] && [ -f "$device_path/idVendor" ]; then
-                        local vendor=$(cat "$device_path/idVendor" 2>/dev/null)
-                        if [ "$vendor" = "0955" ]; then  # NVIDIA vendor ID
-                            echo "Attempting reset of NVIDIA device at $device_path" >&2
-                            
-                            # Method 1: Authorize/deauthorize
-                            if [ -w "$device_path/authorized" ]; then
-                                echo "Deauthorizing device..." >&2
-                                echo 0 > "$device_path/authorized" 2>/dev/null || true
-                                sleep 2
-                                echo "Reauthorizing device..." >&2
-                                echo 1 > "$device_path/authorized" 2>/dev/null || true
-                            fi
-                            
-                            # Method 2: Remove device
-                            if [ -w "$device_path/remove" ]; then
-                                echo "Removing USB device..." >&2
-                                echo 1 > "$device_path/remove" 2>/dev/null || true
-                                return 0
-                            fi
-                        fi
-                    fi
-                done
-            done
-        fi
-    fi
-    
-    return 1
-}
 
 # Wait for exported storage device with minimum size requirement
 wait_for_exported_storage() {
@@ -777,6 +657,12 @@ generate_flash_package() {
         done
     fi
     
+    # Disconnect USB device to trigger Jetson to process commands
+    if [ -n "$usb_instance" ]; then
+        echo "Disconnecting USB device to trigger command processing..." >&2
+        disconnect_usb_device "$usb_instance"
+    fi
+    
     # Wait for the command device to disconnect (indicates reboot started)
     echo "Waiting for device to process commands and disconnect..." >&2
     local disconnect_count=0
@@ -810,18 +696,7 @@ generate_flash_package() {
     
     if [ $disconnect_count -ge $max_disconnect_wait ]; then
         echo "" >&2
-        echo "WARNING: Automatic USB disconnect failed after ${max_disconnect_wait}s" >&2
-        echo "" >&2
-        echo "The Jetson device is waiting for USB disconnect to proceed." >&2
-        echo "Please manually disconnect and reconnect the USB cable now." >&2
-        echo "" >&2
-        echo "Steps:" >&2
-        echo "  1. Unplug the USB-C cable from the Jetson device" >&2
-        echo "  2. Wait 2-3 seconds" >&2
-        echo "  3. Plug the USB-C cable back in" >&2
-        echo "" >&2
-        echo -n "Press Enter after reconnecting the USB cable..." >&2
-        read -r
+        echo "WARNING: Device did not disconnect after ${max_disconnect_wait}s" >&2
         echo "Continuing with device detection..." >&2
     else
         echo "Device disconnected, waiting for reconnection with exported storage..." >&2
@@ -998,4 +873,14 @@ fi
 echo "Successfully finished at $(date -Is)" | tee -a "$logfile"
 echo "Host-side log:              $logfile"
 echo "Device-side logs stored in: device-logs-$dtstamp"
+
+# Final disconnect of USB device
+if [ -n "$usb_instance" ]; then
+    echo "Disconnecting USB device at end of script..." | tee -a "$logfile"
+    authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
+    if [ -w "$authorized_path" ]; then
+        echo 0 > "$authorized_path" 2>/dev/null || true
+    fi
+fi
+
 exit 0
