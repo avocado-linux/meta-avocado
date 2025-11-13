@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -e
+
+RELEASE=$1
+
+echo "Loading containers into local Docker repository..."
+
+docker import --platform linux/arm64 build-container-arm64/build/tmp/deploy/images/avocado-container-arm64/avocado-image-container-avocado-container-arm64.rootfs.tar.bz2 avocadolinux/sdk:${RELEASE}-arm64
+docker import --platform linux/amd64 build-container-x86_64/build/tmp/deploy/images/avocado-container-x86_64/avocado-image-container-avocado-container-x86_64.rootfs.tar.bz2 avocadolinux/sdk:${RELEASE}-amd64
+
+echo "Removing existing manifest if present..."
+docker manifest rm avocadolinux/sdk:${RELEASE} || true
+
+echo "Creating multi-platform manifest..."
+docker manifest create avocadolinux/sdk:${RELEASE} \
+  avocadolinux/sdk:${RELEASE}-amd64 \
+  avocadolinux/sdk:${RELEASE}-arm64
+
+docker manifest annotate avocadolinux/sdk:${RELEASE} \
+  avocadolinux/sdk:${RELEASE}-amd64 --os linux --arch amd64 
+
+docker manifest annotate avocadolinux/sdk:${RELEASE} \
+  avocadolinux/sdk:${RELEASE}-arm64 --os linux --arch arm64
+
+echo "Done! Images loaded locally:"
+echo "  - avocadolinux/sdk:${RELEASE}-amd64"
+echo "  - avocadolinux/sdk:${RELEASE}-arm64"
+echo "  - avocadolinux/sdk:${RELEASE} (manifest)"
+echo ""
+echo "To test locally, run: docker run -it avocadolinux/sdk:${RELEASE}"
+echo "To push to Docker Hub, use: ./sdk-push-containers.sh ${RELEASE}"
+
