@@ -1,0 +1,9 @@
+[Unit]
+Description=OTA bootloader update verifier
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/nvbootctrl verify
+
+[Install]
+WantedBy=multi-user.target

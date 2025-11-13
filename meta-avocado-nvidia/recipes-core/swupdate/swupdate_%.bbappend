@@ -15,7 +15,7 @@ do_deploy() {
         install -m 0755 ${WORKDIR}/rootfs-pre.sh ${DEPLOYDIR}/
 }
 
-# make sure we have nvbootctrl
-RDEPENDS:${PN} += "tegra-redundant-boot-base"
+# make sure we have nvidia boot tools
+RDEPENDS:${PN} += "tegra-redundant-boot-base tegra-redundant-boot"
 
 addtask deploy after do_compile before do_package
