@@ -4,7 +4,7 @@ header:
 repos:
   meta-peridio:
     url: https://github.com/peridio/meta-peridio
-    commit: 4a636b7e05f86bc0e017510a97b573d831342b37
+    commit: 3029c6d040fe0c69df291d049857be3badb5fdd0
     branch: scarthgap
     layers:
       .:
