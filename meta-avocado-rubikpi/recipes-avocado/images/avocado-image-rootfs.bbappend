@@ -1,6 +1,6 @@
 inherit image-avocado-qcom-deploy
 
-DEPENDS += "qdl-prebuilt-native"
+do_deploy_fixup[depends] += "qdl-prebuilt-native:do_deploy"
 
 do_deploy_fixup:append() {
     # copy splash.img

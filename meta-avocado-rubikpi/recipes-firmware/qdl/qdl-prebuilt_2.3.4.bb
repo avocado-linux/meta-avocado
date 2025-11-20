@@ -18,13 +18,13 @@ inherit deploy
 do_deploy[depends] += "patchelf-native:do_populate_sysroot"
 
 do_deploy() {
-    install -d ${DEPLOY_DIR_IMAGE}
+    install -d ${DEPLOYDIR}
     case ${BUILD_ARCH} in
         x86_64)
-            install -m 0755 ${S}/qdl_${PV}/QDL_Linux_x64/qdl ${DEPLOY_DIR_IMAGE}/qdl
-            patchelf --set-interpreter /lib/ld-linux-x86-64.so.2 ${DEPLOY_DIR_IMAGE}/qdl
+            install -m 0755 ${S}/qdl_${PV}/QDL_Linux_x64/qdl ${DEPLOYDIR}/qdl
+            patchelf --set-interpreter /lib/ld-linux-x86-64.so.2 ${DEPLOYDIR}/qdl
             ;;
-        aarch64) install -m 0755 ${S}/qdl_${PV}/QDL_Linux_ARM/qdl ${DEPLOY_DIR_IMAGE}/qdl ;;
+        aarch64) install -m 0755 ${S}/qdl_${PV}/QDL_Linux_ARM/qdl ${DEPLOYDIR}/qdl ;;
     esac
 }
 addtask deploy after do_unpack before do_build
