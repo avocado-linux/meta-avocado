@@ -16,8 +16,4 @@ repos:
     layers:
       meta-avocado-nvidia:
 
-local_conf_header:
-  machine-avocado-jetson-agx-orin-devkit: |
-    # ROOTFS_IMAGE_EXTRA_INSTALL += "kernel-module-r8168 linux-firmware-rtl8168"
-
 machine: avocado-jetson-agx-orin-devkit
