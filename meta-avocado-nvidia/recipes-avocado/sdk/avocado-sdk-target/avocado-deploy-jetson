@@ -11,6 +11,7 @@ machine="$AVOCADO_DEPLOY_MACHINE"
 ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 rsync -av --delete -e "ssh ${ssh_opts}" ${AVOCADO_PREFIX}/output/extensions/ root@${machine}:/var/lib/avocado/extensions/
+ssh ${ssh_opts} root@${machine} 'swupdate -i /dev/stdin && reboot' < ${AVOCADO_PREFIX}/output/runtimes/${runtime}/stone/_build/peridio/avocado-image-avocado-${target}.swu
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
