@@ -25,6 +25,7 @@ RDEPENDS:${PN} = " \
   iproute2 \
   htop \
   cryptoauthlib \
+  cockpit \
   peridiod \
   fwup \
   parted \
@@ -48,6 +49,7 @@ RDEPENDS:${PN} = " \
   coreutils \
   glibc-utils \
   tio \
+  sscg \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
