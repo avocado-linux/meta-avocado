@@ -108,20 +108,93 @@ wait_for_rcm() {
     "$here/find-jetson-usb" --wait "$usb_instance"
 }
 
+# Helper function to find USB device instance (bus-devpath) from a block device
+# Returns the USB path like "3-1" or "4-2.1"
+find_usb_instance_from_device() {
+    local dev="$1"
+    local dev_name=$(basename "$dev")
+    local sysfs_path="/sys/block/$dev_name"
+    
+    if [ ! -L "$sysfs_path/device" ]; then
+        return 1
+    fi
+    
+    # Walk up the device hierarchy to find the USB device
+    local current_path=$(readlink -f "$sysfs_path/device" 2>/dev/null)
+    while [ -n "$current_path" ] && [ "$current_path" != "/" ] && [ "$current_path" != "/sys" ]; do
+        # Check if this is a USB device (has idVendor and idProduct)
+        if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
+            # Extract bus and device number from path (e.g., /sys/devices/pci0000:00/0000:00:14.0/usb2/2-10)
+            local usb_path_info=$(basename "$current_path")
+            if echo "$usb_path_info" | grep -q '^[0-9]\+-[0-9.]\+'; then
+                echo "$usb_path_info"
+                return 0
+            fi
+        fi
+        current_path=$(dirname "$current_path")
+    done
+    
+    return 1
+}
+
+# Helper function to find current device by session ID (derived from serial number)
+# This is needed because devices can change their device node (/dev/sdX) and USB path
+find_device_by_session() {
+    local sessid="$1"
+    
+    if [ -z "$sessid" ]; then
+        return 1
+    fi
+    
+    # Scan all /dev/sd[a-z] devices to find one matching the session ID
+    for candidate in /dev/sd[a-z]; do
+        [ -b "$candidate" ] || continue
+        local cand_model=$(get_device_property "$candidate" "ID_MODEL")
+        if [ "$cand_model" = "$sessid" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 # Shared function to disconnect USB device by toggling authorized attribute
 # This is the reliable method for triggering Jetson devices to detect disconnect
+# Parameters:
+#   $1: usb_instance - The USB bus path (e.g., "3-1")
+#   $2: session_id (optional) - If provided, will rescan to find current USB instance
 disconnect_usb_device() {
     local usb_instance="$1"
+    local sessid="$2"
+    
+    # If session ID is provided, rescan to find current device and USB instance
+    # This handles the case where device reconnected with a different USB path
+    if [ -n "$sessid" ]; then
+        echo "Rescanning for device with session ID $sessid..." >&2
+        local current_dev=$(find_device_by_session "$sessid")
+        if [ -n "$current_dev" ]; then
+            local rescanned_instance=$(find_usb_instance_from_device "$current_dev")
+            if [ -n "$rescanned_instance" ]; then
+                echo "Device found at $current_dev with USB instance $rescanned_instance" >&2
+                usb_instance="$rescanned_instance"
+            else
+                echo "WARN: Could not find USB instance for rescanned device $current_dev" >&2
+            fi
+        else
+            echo "WARN: Could not find device with session ID $sessid for disconnect" >&2
+        fi
+    fi
     
     if [ -z "$usb_instance" ]; then
-        echo "WARN: No USB instance provided for disconnect" >&2
+        echo "WARN: No USB instance available for disconnect" >&2
         return 1
     fi
     
     local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
     
     if [ ! -w "$authorized_path" ]; then
-        echo "WARN: Cannot write to $authorized_path (device may not exist)" >&2
+        echo "WARN: Cannot write to $authorized_path (device may not exist or path changed)" >&2
         return 1
     fi
     
@@ -416,8 +489,9 @@ unmount_and_release() {
         fi
         
         # Use the reliable USB disconnect method via authorized toggle
+        # Pass session_id to allow rescanning if device path changed
         if [ -n "$usb_instance" ]; then
-            disconnect_usb_device "$usb_instance"
+            disconnect_usb_device "$usb_instance" "$session_id"
         fi
     fi
     
@@ -658,9 +732,10 @@ generate_flash_package() {
     fi
     
     # Disconnect USB device to trigger Jetson to process commands
+    # Pass session_id to allow rescanning if device path changed
     if [ -n "$usb_instance" ]; then
         echo "Disconnecting USB device to trigger command processing..." >&2
-        disconnect_usb_device "$usb_instance"
+        disconnect_usb_device "$usb_instance" "$session_id"
     fi
     
     # Wait for the command device to disconnect (indicates reboot started)
@@ -875,11 +950,30 @@ echo "Host-side log:              $logfile"
 echo "Device-side logs stored in: device-logs-$dtstamp"
 
 # Final disconnect of USB device
-if [ -n "$usb_instance" ]; then
+# Rescan using session_id to handle case where device reconnected with different path
+if [ -n "$usb_instance" ] || [ -n "$session_id" ]; then
     echo "Disconnecting USB device at end of script..." | tee -a "$logfile"
-    authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
-    if [ -w "$authorized_path" ]; then
-        echo 0 > "$authorized_path" 2>/dev/null || true
+    
+    # Try to rescan by session_id first to get current USB instance
+    local final_usb_instance="$usb_instance"
+    if [ -n "$session_id" ]; then
+        local rescanned_dev=$(find_device_by_session "$session_id")
+        if [ -n "$rescanned_dev" ]; then
+            local rescanned_instance=$(find_usb_instance_from_device "$rescanned_dev")
+            if [ -n "$rescanned_instance" ]; then
+                echo "Device rescanned to $rescanned_dev with USB instance $rescanned_instance" | tee -a "$logfile"
+                final_usb_instance="$rescanned_instance"
+            fi
+        fi
+    fi
+    
+    if [ -n "$final_usb_instance" ]; then
+        authorized_path="/sys/bus/usb/devices/$final_usb_instance/authorized"
+        if [ -w "$authorized_path" ]; then
+            echo 0 > "$authorized_path" 2>/dev/null || true
+        else
+            echo "WARN: Cannot write to $authorized_path (device may not exist)" | tee -a "$logfile"
+        fi
     fi
 fi
 

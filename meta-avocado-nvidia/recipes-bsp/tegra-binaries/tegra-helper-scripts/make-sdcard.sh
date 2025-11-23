@@ -454,20 +454,65 @@ find_usb_instance_from_device() {
     return 1
 }
 
+# Helper function to find current device and USB instance by serial number
+# This is needed because devices can change their device node (/dev/sdX) and USB path
+# when they reboot or change modes
+find_device_by_serial() {
+    local target_serial="$1"
+    
+    if [ -z "$target_serial" ]; then
+        return 1
+    fi
+    
+    # Scan all /dev/sd[a-z] devices to find one matching the serial
+    for candidate in /dev/sd[a-z]; do
+        [ -b "$candidate" ] || continue
+        local cand_serial=$(get_device_serial "$candidate")
+        if [ "$cand_serial" = "$target_serial" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 # Shared function to disconnect USB device by toggling authorized attribute
 # This is the reliable method for triggering Jetson devices to detect disconnect
+# Parameters:
+#   $1: usb_instance - The USB bus path (e.g., "3-1")
+#   $2: serial_number (optional) - If provided, will rescan to find current USB instance
 disconnect_usb_device() {
     local usb_instance="$1"
+    local device_serial="$2"
+    
+    # If serial number is provided, rescan to find current device and USB instance
+    # This handles the case where device reconnected with a different USB path
+    if [ -n "$device_serial" ]; then
+        echo "Rescanning for device with serial $device_serial..." >&2
+        local current_dev=$(find_device_by_serial "$device_serial")
+        if [ -n "$current_dev" ]; then
+            local rescanned_instance=$(find_usb_instance_from_device "$current_dev")
+            if [ -n "$rescanned_instance" ]; then
+                echo "Device found at $current_dev with USB instance $rescanned_instance" >&2
+                usb_instance="$rescanned_instance"
+            else
+                echo "WARN: Could not find USB instance for rescanned device $current_dev" >&2
+            fi
+        else
+            echo "WARN: Could not find device with serial $device_serial for disconnect" >&2
+        fi
+    fi
     
     if [ -z "$usb_instance" ]; then
-        echo "WARN: No USB instance provided for disconnect" >&2
+        echo "WARN: No USB instance available for disconnect" >&2
         return 1
     fi
     
     local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
     
     if [ ! -w "$authorized_path" ]; then
-        echo "WARN: Cannot write to $authorized_path (device may not exist)" >&2
+        echo "WARN: Cannot write to $authorized_path (device may not exist or path changed)" >&2
         return 1
     fi
     
@@ -639,22 +684,33 @@ if [ "$wait_for_usb_device" = "yes" -a "$keep_connection" != "yes" ]; then
     fi
     
     # Find USB device instance and disconnect using authorized toggle
+    # Pass serial_number to allow rescanning if device path changed
     if [ -b "$output" ]; then
         usb_instance=$(find_usb_instance_from_device "$output")
-        if [ -n "$usb_instance" ]; then
-            disconnect_usb_device "$usb_instance"
-        fi
+        disconnect_usb_device "$usb_instance" "$serial_number"
     fi
     
     echo "Device buffers flushed"
 fi
 
 # Final disconnect of USB device at end of script
-if [ -b "$output" ]; then
-    usb_instance=$(find_usb_instance_from_device "$output")
+# Rescan using serial number to handle case where device reconnected with different path
+if [ -b "$output" ] && [ "$wait_for_usb_device" = "yes" ]; then
+    # Try to rescan by serial first
+    local current_output="$output"
+    if [ -n "$serial_number" ]; then
+        local rescanned_dev=$(find_device_by_serial "$serial_number")
+        if [ -n "$rescanned_dev" ]; then
+            current_output="$rescanned_dev"
+            echo "Final disconnect: device rescanned to $current_output" >&2
+        fi
+    fi
+    
+    usb_instance=$(find_usb_instance_from_device "$current_output")
     if [ -n "$usb_instance" ]; then
         authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
         if [ -w "$authorized_path" ]; then
+            echo "Final disconnect of USB device $usb_instance..." >&2
             echo 0 > "$authorized_path" 2>/dev/null || true
         fi
     fi

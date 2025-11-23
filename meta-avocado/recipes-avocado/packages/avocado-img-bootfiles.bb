@@ -16,6 +16,13 @@ do_compile[depends] += "virtual/kernel:do_deploy"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 PACKAGES = "${PN}"
 
+# Default skip patterns for bootfiles collection
+AVOCADO_IMG_BOOTFILES_SKIP_DEFAULT = "rootfs initramfs var. -var-"
+# Additional skip patterns (can be extended via bbappends)
+AVOCADO_IMG_BOOTFILES_SKIP_EXTRA ?= ""
+# Combined skip patterns
+AVOCADO_IMG_BOOTFILES_SKIP = "${AVOCADO_IMG_BOOTFILES_SKIP_DEFAULT} ${AVOCADO_IMG_BOOTFILES_SKIP_EXTRA}"
+
 # Prevent automatic dependency detection for image packages
 RDEPENDS:${PN} = ""
 INHIBIT_PACKAGE_STRIP = "1"
@@ -33,18 +40,22 @@ python do_collect_artifacts() {
     deploy_dir = d.getVar('DEPLOY_DIR_IMAGE')
     workdir = d.getVar('WORKDIR')
     dest_dir = os.path.join(workdir, 'deploy-artifacts')
+    
+    # Get skip patterns from variable (space-separated)
+    skip_patterns_str = d.getVar('AVOCADO_IMG_BOOTFILES_SKIP') or ''
+    skip_patterns = skip_patterns_str.split()
 
     # Clean and create destination
     if os.path.exists(dest_dir):
         shutil.rmtree(dest_dir)
     os.makedirs(dest_dir)
 
-    # Copy bootfiles from deploy dir, excluding rootfs, initramfs, and var images
+    # Copy bootfiles from deploy dir, excluding files matching skip patterns
     if os.path.exists(deploy_dir):
         for item in os.listdir(deploy_dir):
-            # Skip rootfs, initramfs, and var image files
-            if any(pattern in item.lower() for pattern in ['rootfs', 'initramfs', 'var.', '-var-']):
-                bb.note(f"Skipping {item} - not a bootfile")
+            # Skip files matching any of the configured patterns
+            if any(pattern in item.lower() for pattern in skip_patterns):
+                bb.note(f"Skipping {item} - matches pattern in AVOCADO_IMG_BOOTFILES_SKIP")
                 continue
 
             src = os.path.join(deploy_dir, item)
