@@ -23,6 +23,12 @@ MANIFEST="$AVOCADO_STONE_MANIFEST"
 DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 
+# Check if AVOCADO_PROVISION_OUT is set and create directory
+if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
+    echo "AVOCADO_PROVISION_OUT is set: $AVOCADO_PROVISION_OUT"
+    mkdir -p "$AVOCADO_PROVISION_OUT"
+fi
+
 # Extract image names from manifest
 ROOTFS_IMAGE=$(jq -r '.storage_devices.rootdisk.images.rootfs' "$MANIFEST")
 
@@ -152,4 +158,11 @@ echo "  - $(basename "$SWU_FILE")"
 for f in "${OUTDIR}"/*.raw; do
     [ -f "$f" ] && echo "  - $(basename "$f")"
 done
+
+# Copy to AVOCADO_PROVISION_OUT if set
+if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
+    echo "=== Copying output files to $AVOCADO_PROVISION_OUT ==="
+    cp -v "${OUTDIR}"/* "$AVOCADO_PROVISION_OUT/"
+    echo "  Copy complete"
+fi
 
