@@ -1,16 +1,12 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI_SHARED = " \
-  file://overlayfs.cfg \
-  file://erofs.cfg \
-  file://gpt.cfg \
-  file://loop.cfg \
-  file://squashfs.cfg \
   file://dm-verity.cfg.in \
+  file://avocado-core.cfg \
+  file://avocado-extra.cfg \
 "
 SRC_URI:append:avocado-qemux86-64 = " \
   ${SRC_URI_SHARED} \
-  file://efi.cfg \
   file://tpm.cfg \
 "
 
