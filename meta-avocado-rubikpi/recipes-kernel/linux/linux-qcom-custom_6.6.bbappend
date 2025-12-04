@@ -21,6 +21,8 @@ do_configure:append() {
     kernel_conf_variable LOCALVERSION_AUTO n
     kernel_conf_variable AUDIT n
     kernel_conf_variable USB_DWC3 n
+    kernel_conf_variable CRYPTO_LZ4 m
+    kernel_conf_variable ZRAM m
     oe_runmake -C ${S} O=${B} savedefconfig && cp ${B}/defconfig ${WORKDIR}/defconfig.saved
 }
 

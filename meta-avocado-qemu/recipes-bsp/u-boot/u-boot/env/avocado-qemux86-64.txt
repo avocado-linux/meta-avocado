@@ -1,4 +1,4 @@
-machine=avocado-qemuarm64
+machine=avocado-qemux86-64
 initramfs_file=avocado-image-initramfs-qemux86-64.cpio.zst
 kernel_file=bzImage
 
