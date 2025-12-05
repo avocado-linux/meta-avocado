@@ -45,9 +45,9 @@ avocado_boot_init=\
     setenv rootdev /dev/mmcblk1p6;\
   fi;\
   if test -n "${rootdev}"; then\
-    setenv bootargs console=${console} root=${rootdev} rootwait;\
+    setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;\
   else\
-    setenv bootargs console=${console} rootwait;\
+    setenv bootargs audit=0 console=${console} rootwait;\
   fi;
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}

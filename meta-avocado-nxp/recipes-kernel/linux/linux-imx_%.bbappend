@@ -1,11 +1,10 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += " \
-  file://squashfs.cfg \
-  file://gpt.cfg \
-  file://btrfs.cfg \
+  file://avocado-core.cfg \
+  file://avocado-extra.cfg \
 "
 
 do_configure:append() {
-  cat ../*.cfg >> ${B}/.config
+  cat ${WORKDIR}/*.cfg >> ${B}/.config
 }
