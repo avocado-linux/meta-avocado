@@ -5,7 +5,7 @@ repos:
   meta-swupdate:
     url: https://github.com/sbabic/meta-swupdate.git
     path: meta-swupdate
-    commit: 43ef322cbf5b91d84b007c343cf73e9b01699594
+    commit: 2b48267fcfedf61c2a33c7830e794115263639f8
     branch: scarthgap
     layers:
       .:

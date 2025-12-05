@@ -1,8 +1,8 @@
 header:
   version: 16
   includes:
-    - repo: meta-avocado
-      file: kas/feature/virtualization.yml
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
 
 repos:
   meta-qcom:
@@ -15,7 +15,7 @@ repos:
     url: https://github.com/qualcomm-linux/meta-qcom-hwe
     path: meta-qcom-hwe
     branch: scarthgap
-    commit: a5fdd68fe7111e9666d39e42980d270ca9f83bcf
+    commit: f9c5445cdf73e4a5422695426ba10f15869de275
     layers:
       .:
 
@@ -23,7 +23,7 @@ repos:
     url: https://github.com/qualcomm-linux/meta-qcom-distro
     path: meta-qcom-distro
     branch: scarthgap
-    commit: 08cc4b0bcbe2c0b23d9f786e48a3a826a593bc18
+    commit: 72d1a5b1e41edf2943b68d971670ea490ff1f782
     layers:
       .:
 

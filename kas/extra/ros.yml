@@ -6,15 +6,15 @@ repos:
     url: https://github.com/ros/meta-ros.git
     path: meta-ros
     branch: scarthgap
-    commit: 4a8044f2fd092f5cf5d7371aae1da4b4c961e54c
+    commit: 8fb0ee223c8dfcd69f7b71ef8bce449015c1d3fa
     layers:
       meta-ros-common:
-      meta-ros2-humble:
+      meta-ros2-jazzy:
       meta-ros2:
 
 local_conf_header:
   extra-ros: |
-    ROS_DISTRO = "humble"
+    ROS_DISTRO = "jazzy"
     ROS_VERSION = "2"
     ROS_SUPERFLORE_GENERATED_BUILDTOOLS:append = " ${ROS_SUPERFLORE_GENERATED_WORLD_PACKAGES}"
     DISTRO_FEATURES:append = " ros2"
@@ -22,5 +22,5 @@ local_conf_header:
 
     # Fix cross-compilation issues with ROS packages
     # Ensure proper library paths for target architecture
-    CMAKE_PREFIX_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/humble:"
-    PKG_CONFIG_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/humble/lib/pkgconfig:"
+    CMAKE_PREFIX_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/jazzy:"
+    PKG_CONFIG_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/jazzy/lib/pkgconfig:"

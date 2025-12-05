@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-security
     path: meta-security
     branch: scarthgap
-    commit: bc865c5276c2ab4031229916e8d7c20148dfbac3
+    commit: afbbe28cee4af2c6760aaead43a4a3ef29969809
     layers:
       .:
       meta-tpm:

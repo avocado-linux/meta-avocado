@@ -5,7 +5,7 @@ repos:
   meta-python-ai:
     url: https://github.com/zboszor/meta-python-ai.git
     path: meta-python-ai
-    commit: 57dba41efc2a938f10a4120f6723dcb7baa68f26
+    commit: 47e39d760ce2ecd99bbbc0fbefde4a96ed32a85a
     branch: scarthgap
     layers:
       .:

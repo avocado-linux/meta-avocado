@@ -14,7 +14,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-rockchip
     path: meta-rockchip
     branch: scarthgap
-    commit: 10dce67934a45008027f9be750106d5bc8d2e0b2
+    commit: 33cf864d799fba8b8ec03b4b7d8c4cfd86564d27
     layers:
       .:
 

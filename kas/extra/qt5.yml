@@ -5,7 +5,7 @@ repos:
   meta-qt5:
     url: https://github.com/meta-qt5/meta-qt5.git
     path: meta-qt5
-    commit: e197839013fa2cfd59339508303bce91fef48928
+    commit: 9ae2fe2696b10f5dc4253c4f467dc388139860bd
     branch: scarthgap
     layers:
       .:
