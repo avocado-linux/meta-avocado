@@ -1,7 +1,5 @@
 inherit image-avocado-qcom-deploy
 
-do_deploy_fixup[depends] += "qdl-prebuilt-native:do_deploy"
-
 do_deploy_fixup:append() {
     # copy splash.img
     if [ -f ${DEPLOY_DIR_IMAGE}/splash.img ]; then
@@ -44,6 +42,5 @@ do_deploy_fixup:append() {
     fi
 
     # create final provision image
-    install -m 0755 ${DEPLOY_DIR_IMAGE}/qdl qdl
     tar -caf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.ufs.tar.gz -C ${DEPLOY_DIR_IMAGE} ${IMAGE_BASENAME}
 }

@@ -11,7 +11,7 @@ RDEPENDS:${PN}:append = "nativesdk-jq \
     nativesdk-python3-pyyaml \
     nativesdk-libxml2 \
     nativesdk-libusb1 \
-"
+    nativesdk-qdl"
 
 SRC_URI:append = " file://avocado-deploy-rubikpi3"
 

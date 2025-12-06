@@ -41,4 +41,4 @@ for i in {1..30}; do
     sleep 1
 done
 
-./qdl --storage ufs prog_firehose_ddr.elf rawprogram*.xml patch*.xml
+qdl --storage ufs prog_firehose_ddr.elf rawprogram*.xml patch*.xml
