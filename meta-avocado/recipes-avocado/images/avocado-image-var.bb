@@ -1,6 +1,8 @@
 DESCRIPTION = "Avocado image var"
 LICENSE = "Apache-2.0"
 
+PV = "${DISTRO_VERSION}"
+
 inherit deploy
 
 DEPENDS += "btrfs-tools-native"

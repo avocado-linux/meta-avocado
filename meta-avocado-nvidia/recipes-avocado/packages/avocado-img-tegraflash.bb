@@ -1,6 +1,8 @@
 DESCRIPTION = "Avocado tegraflash Image Package"
 LICENSE = "Apache-2.0"
 
+PV = "${DISTRO_VERSION}"
+
 AVOCADO_PKG_IMG_RECIPE = "avocado-image-rootfs"
 AVOCADO_PKG_IMG_NAME = "${AVOCADO_PKG_IMG_RECIPE}-${MACHINE_SHORT_NAME}.tegraflash.tar.gz"
 

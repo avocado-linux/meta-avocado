@@ -1,6 +1,8 @@
 SUMMARY = "Meta-target to build Avocado OS core images and nativesdk toolchain"
 LICENSE = "Apache-2.0"
 
+PV = "${DISTRO_VERSION}"
+
 # Ensure compile task runs after dependencies
 do_compile[depends] += "avocado-core:do_build"
 do_compile[depends] += "avocado-stone:do_build"

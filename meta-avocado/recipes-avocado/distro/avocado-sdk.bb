@@ -1,6 +1,8 @@
 SUMMARY = "Meta-target to build Avocado OS sdk packages"
 LICENSE = "Apache-2.0"
 
+PV = "${SDK_VERSION}"
+
 # Ensure compile task runs after dependencies
 do_compile[depends] += "avocado-pkg-sdk:do_build"
 do_compile[depends] += "avocado-pkg-sdk-extra:do_build"

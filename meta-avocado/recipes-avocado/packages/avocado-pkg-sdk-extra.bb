@@ -1,6 +1,8 @@
 SUMMARY = "Builds the Avocado SDK Extras for the platform"
 LICENSE = "Apache-2.0"
 
+PV = "${SDK_VERSION}"
+
 inherit image-packages-only
 
 IMAGE_INSTALL = " \

@@ -1,6 +1,8 @@
 DESCRIPTION = "Avocado SDK Container image"
 LICENSE = "Apache-2.0"
 
+PV = "${DISTRO_VERSION}"
+
 inherit image
 IMGCLASSES += " image-container-post-processing"
 inherit_defer ${IMGCLASSES}

@@ -1,6 +1,8 @@
 DESCRIPTION = "Avocado image rootfs"
 LICENSE = "Apache-2.0"
 
+PV = "${DISTRO_VERSION}"
+
 inherit image
 IMGCLASSES += " image-os"
 inherit_defer ${IMGCLASSES}

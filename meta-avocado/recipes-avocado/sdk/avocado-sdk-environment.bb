@@ -1,6 +1,8 @@
 SUMMARY = "Package of environment files for SDK"
 LICENSE = "MIT"
 
+PV = "${SDK_VERSION}"
+
 EXCLUDE_FROM_WORLD = "1"
 
 MODIFYTOS = "0"

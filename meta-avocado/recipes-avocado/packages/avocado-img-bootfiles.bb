@@ -3,6 +3,8 @@ DESCRIPTION = "Collects all build artifacts from the deploy directory into a sin
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+PV = "${DISTRO_VERSION}"
+
 # Don't create debug packages for this
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 INHIBIT_PACKAGE_STRIP = "1"
@@ -40,7 +42,7 @@ python do_collect_artifacts() {
     deploy_dir = d.getVar('DEPLOY_DIR_IMAGE')
     workdir = d.getVar('WORKDIR')
     dest_dir = os.path.join(workdir, 'deploy-artifacts')
-    
+
     # Get skip patterns from variable (space-separated)
     skip_patterns_str = d.getVar('AVOCADO_IMG_BOOTFILES_SKIP') or ''
     skip_patterns = skip_patterns_str.split()
