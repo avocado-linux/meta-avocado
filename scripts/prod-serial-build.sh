@@ -46,7 +46,7 @@ FAILED_BUILDS=()
 # Build configurations to run for each target
 declare -A BUILD_CONFIGS
 BUILD_CONFIGS=(
-    ["avocado-distro-aarch64"]="aarch64:avocado-distro"
+    ["avocado-distro"]="x86_64:avocado-distro"
     ["avocado-sdk-aarch64"]="aarch64:avocado-sdk"
     ["avocado-sdk-x86_64"]="x86_64:avocado-sdk"
 )
