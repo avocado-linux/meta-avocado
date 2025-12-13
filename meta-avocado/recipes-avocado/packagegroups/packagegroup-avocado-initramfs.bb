@@ -13,6 +13,7 @@ RDEPENDS:${PN} = "\
   util-linux \
   avocadoctl \
   avocado-users \
+  ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
 "
 
 RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"

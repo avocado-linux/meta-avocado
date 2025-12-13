@@ -14,6 +14,7 @@ RDEPENDS:${PN} = " \
   avocadoctl \
   avocado-users \
   btrfs-tools \
+  ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
   ${VIRTUAL-RUNTIME_base-utils} \
   ${VIRTUAL-RUNTIME_login_manager} \
   ${MACHINE_ESSENTIAL_EXTRA_RDEPENDS} \
