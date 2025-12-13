@@ -16,7 +16,5 @@ repos:
 
 local_conf_header:
   machine-avocado-qemuarm64: |
-    ## Debugging prior to extensions loading
-    #AVOCADO_ALLOW_ROOT_LOGIN = "1"
 
 machine: avocado-qemuarm64

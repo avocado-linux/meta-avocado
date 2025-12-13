@@ -17,6 +17,5 @@ repos:
 
 local_conf_header:
   machine-avocado-rubikpi3: |
-    AVOCADO_ALLOW_ROOT_LOGIN = "1"
 
 machine: avocado-rubikpi3
