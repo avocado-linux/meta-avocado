@@ -92,6 +92,10 @@ for target in "${TARGETS[@]}"; do
         echo "  Target: $build_target"
         echo "------------------------------------------"
         
+        # Clean the build directory before each build
+        echo "Cleaning ./build directory..."
+        rm -rf ./build
+        
         # Run kas build
         if SDKMACHINE=$sdkmachine kas build --target "$build_target" "$machine_config"; then
             echo "✅ Build SUCCEEDED for $target - $config_name"
