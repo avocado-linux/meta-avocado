@@ -6,13 +6,10 @@ SRC_URI = "git://git@github.com/rubikpi-ai/linux;protocol=https;nobranch=1 \
            ${@bb.utils.contains('DISTRO_FEATURES', 'smack', ' file://smack.cfg', '', d)} \
            ${@bb.utils.contains('DISTRO_FEATURES', 'smack', ' file://smack_debug.cfg', '', d)} \
            file://0001-QCLINUX-Add-support-to-compile-msm_display.ko.patch \
-           file://0002-QCLINUX-arm64-dts-qcom-Disable-eMMC-ICE.patch \
-           file://0003-PENDING-arm64-dts-qcom-Add-EEPROM-support-for-IQ-907.patch \
-           file://0004-QCLINUX-net-stmmac-Add-EEPROM-support-to-driver.patch \
-           file://0005-kernel-arm64-dts-qcom-enable-EEPROM-Client-Driver.patch \
-           file://0006-kernel-config-qcom-enable-AT24-EEPROM-driver.patch"
+           file://0002-PENDING-misc-fastrpc-Return-on-argument-copy-failure.patch \
+           file://0003-QCLINUX-arm64-dts-qcom-Add-board-id-and-msm-id-for-R.patch"
 
-SRCREV = "75a16b050e861e6bc41bcd5fd1358d2f6ba7f3ce"
+SRCREV = "8c1599030840bcca335c12a08c7485a885345d62"
 
 S = "${WORKDIR}/git"
 
