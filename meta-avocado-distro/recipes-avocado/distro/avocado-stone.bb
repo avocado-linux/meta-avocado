@@ -12,6 +12,8 @@ DEPENDS += " stone-native"
 # Skip other tasks
 do_populate_sysroot[noexec] = "1"
 do_install[noexec] = "1"
+do_packagedata[noexec] = "1"
+do_package[noexec] = "1"
 do_package_qa[noexec] = "1"
 do_package_write_rpm[noexec] = "1"
 
