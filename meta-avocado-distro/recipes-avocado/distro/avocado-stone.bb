@@ -2,12 +2,16 @@ DESCRIPTION = "Create an Avocado Stone for testing a finished yocto build"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
+PV = "${DISTRO_VERSION}"
+
 PACKAGES = "${PN}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 DEPENDS += " stone-native"
 
 # Skip other tasks
+do_populate_sysroot[noexec] = "1"
+do_install[noexec] = "1"
 do_package_qa[noexec] = "1"
 do_package_write_rpm[noexec] = "1"
 
