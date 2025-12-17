@@ -75,11 +75,13 @@ if [[ "$AVOCADO_SDK_TARGET" =~ x86-64$ ]]; then
     QEMU_BINARY="qemu-system-x86_64"
     QEMU_BIOS_FILE="u-boot.rom"
     QEMU_CPU="max"
+    QEMU_MACHINE=""
 elif [[ "$AVOCADO_SDK_TARGET" =~ arm64$ ]]; then
     QEMU_ARCH="aarch64"
     QEMU_BINARY="qemu-system-aarch64"
     QEMU_BIOS_FILE="flash.bin"
     QEMU_CPU="cortex-a53"
+    QEMU_MACHINE="@QB_MACHINE@"
 else
     echo "Error: Unsupported architecture in AVOCADO_SDK_TARGET: $AVOCADO_SDK_TARGET"
     echo "Supported architectures: x86-64, arm64"
@@ -135,6 +137,11 @@ QEMU_ARGS=(
 if [ -n "$HOSTFWD_STRING" ]; then
     QEMU_ARGS+=(-netdev "user,id=net0,$HOSTFWD_STRING")
     QEMU_ARGS+=(-device "e1000,netdev=net0")
+fi
+
+# Add machine type if specified
+if [ -n "$QEMU_MACHINE" ]; then
+    QEMU_ARGS+=(-machine "${QEMU_MACHINE}")
 fi
 
 # Add KVM flag if enabled

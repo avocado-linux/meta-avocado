@@ -14,4 +14,5 @@ RDEPENDS:${PN} += " \
   nativesdk-bash \
   nativesdk-opkg \
   nativesdk-ca-certificates \
+  nativesdk-curl \
 "

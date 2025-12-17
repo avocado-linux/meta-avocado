@@ -25,6 +25,13 @@ do_install:append() {
     install -m 0755 ${WORKDIR}/vm ${D}${SDKPATHNATIVE}${bindir}
 }
 
+# Substitute QB_MACHINE value for qemuarm64 (strip "-machine " prefix from QB_MACHINE)
+QB_MACHINE_VALUE = "${@d.getVar('QB_MACHINE').replace('-machine ', '') if d.getVar('QB_MACHINE') else ''}"
+
+do_install:append:qemuarm64() {
+    sed -i 's|@QB_MACHINE@|${QB_MACHINE_VALUE}|g' ${D}${SDKPATHNATIVE}${bindir}/vm
+}
+
 FILES:${PN}:append = "\
   ${SDKPATHNATIVE}${bindir}/vm \
 "
