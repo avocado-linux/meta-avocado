@@ -10,7 +10,7 @@ env:
   DISTRO_VERSION: "0.1.0"
   PARALLEL_MAKE_HIGHMEM: ""
   SDKMACHINE: "x86_64"
-  BB_ENV_PASSTHROUGH_ADDITIONS: "AVOCADO_ALLOW_ROOT_LOGIN $BB_ENV_PASSTHROUGH_ADDITIONS"
+  AVOCADO_DEV_ROOT_LOGIN: "0"
 
 repos:
   meta-openembedded:
@@ -46,11 +46,6 @@ distro: avocado
 local_conf_header:
   meta-avocado: |
     USER_CLASSES:append = " rm_work buildhistory buildstats buildstats-summary"
-
-    # Enable root login by setting to 1, or using the ENABLE_ROOT_LOGIN env var
-    #
-    # Disabled by default
-    AVOCADO_ALLOW_ROOT_LOGIN ??= "0"
 
     LICENSE_FLAGS_ACCEPTED:append = " commercial commercial_%"
 
