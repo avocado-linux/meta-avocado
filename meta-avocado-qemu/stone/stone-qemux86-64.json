@@ -16,12 +16,16 @@
       "img": {
         "script": "stone-provision-img.sh",
         "envs": ["device_info"]
+      },
+      "peridio": {
+        "script": "stone-provision-peridio.sh",
+        "envs": []
       }
     }
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-qemux86-64-rootdisk.zip",
+      "out": "avocado-os-qemux86-64.zip",
       "build_args": {
         "type": "fwup",
         "template": "rootdisk.conf"

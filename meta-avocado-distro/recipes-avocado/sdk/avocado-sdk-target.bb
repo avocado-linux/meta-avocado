@@ -21,7 +21,12 @@ FILES:${PN}   = "\
   ${SDKPATHNATIVE}${bindir}/avocado-provision-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}/stone \
 "
-
+RDEPENDS:${PN}:append = "\
+  nativesdk-jq \
+  nativesdk-socat \
+  nativesdk-util-linux-uuidgen \
+  nativesdk-zstd \
+"
 DEPENDS:append:stone-usb = " nativesdk-libusb1"
 RDEPENDS:${PN}:append:stone-usb = " nativesdk-libusb1"
 

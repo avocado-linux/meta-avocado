@@ -8,7 +8,6 @@ SRC_URI:append = "\
 SHARED_RDEPENDS = "\
   nativesdk-fwup \
   nativesdk-mkfat \
-  nativesdk-jq \
 "
 
 DEPENDS:append = " nativesdk-qemu"
