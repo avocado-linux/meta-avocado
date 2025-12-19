@@ -1,0 +1,7 @@
+{
+    "peridiod": {
+        "installer": "{{PERIDIOD_INSTALLER}}",
+        "installer_opts": "{{PERIDIOD_INSTALLER_OPTIONS}}",
+        "reboot_required": "{{PERIDIOD_REBOOT_REQUIRED}}"
+    }
+}

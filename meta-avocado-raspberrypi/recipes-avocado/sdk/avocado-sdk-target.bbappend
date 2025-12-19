@@ -7,7 +7,6 @@ do_compile[depends] += "rpi-bootfiles:do_deploy"
 RDEPENDS:${PN}:append = " \
   nativesdk-fwup \
   nativesdk-mkfat \
-  nativesdk-jq \
   nativesdk-rpi-usbboot \
 "
 

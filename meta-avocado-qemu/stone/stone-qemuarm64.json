@@ -21,7 +21,7 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-qemuarm64-rootdisk.zip",
+      "out": "avocado-os-qemuarm64.zip",
       "build_args": {
         "type": "fwup",
         "template": "rootdisk.conf"

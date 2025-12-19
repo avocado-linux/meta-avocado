@@ -4,5 +4,4 @@ FILESEXTRAPATHS:prepend := "${@':'.join(['%s/stone' % layer for layer in d.getVa
 RDEPENDS:${PN}:append = " \
   nativesdk-fwup \
   nativesdk-mkfat \
-  nativesdk-jq \
 "

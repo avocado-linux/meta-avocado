@@ -1,7 +1,6 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 RDEPENDS:${PN}:append = " \
-  nativesdk-jq \
   nativesdk-coreutils \
   nativesdk-util-linux \
   nativesdk-util-linux-getopt \
