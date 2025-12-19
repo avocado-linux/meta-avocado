@@ -110,7 +110,7 @@ STONE_DATA_DIR="${AVOCADO_PREFIX}/output/runtimes/${RUNTIME}/stone"
 STONE_BUILD_DIR="${STONE_DATA_DIR}/_build"
 
 # Check if the image file exists
-IMAGE_FILE="${STONE_BUILD_DIR}/avocado-${AVOCADO_SDK_TARGET}-rootdisk.img"
+IMAGE_FILE="${STONE_BUILD_DIR}/avocado-os-${AVOCADO_SDK_TARGET}.img"
 if [ ! -f "$IMAGE_FILE" ]; then
     echo "Error: Image file not found: $IMAGE_FILE"
     echo "Please build the image first using: avocado-build image"
