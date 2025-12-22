@@ -46,8 +46,9 @@ EXTRA_OECMAKE = "\
 # install the systemd unit
 SYSTEMD_SERVICE_${PN} = "ganesha.nfsd.service"
 
-# Package the configuration files
+# Package the configuration files and state directories
 FILES:${PN} += "${sysconfdir}/ganesha/*"
+FILES:${PN}:append:class-nativesdk = " ${prefix}/var/lib/nfs/ganesha"
 
 do_install:append:class-nativesdk() {
     # For nativesdk, move config files from ${D}${prefix}/etc to ${D}${sysconfdir}
@@ -56,6 +57,10 @@ do_install:append:class-nativesdk() {
         cp -r "${D}${prefix}/etc"/* "${D}${sysconfdir}/"
         rm -rf "${D}${prefix}/etc"
     fi
+
+    # Create the ganesha state directories needed for NFSv4 recovery
+    # These are required at runtime for client recovery tracking
+    install -d "${D}${prefix}/var/lib/nfs/ganesha"
 }
 
 do_compile:append() {
