@@ -35,6 +35,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-shadow \
     nativesdk-stone \
     nativesdk-squashfs-tools \
+    nativesdk-systemd-systemctl \
     nativesdk-unfs3 \
     packagegroup-cross-canadian-${MACHINE} \
 "
