@@ -10,12 +10,19 @@
         "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
         "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
         "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      },
+      "peridio": {
+        "PERIDIO_VERSION": "${PERIDIO_VERSION}"
       }
     },
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info", "peridio"]
+      },
+      "peridio": {
+        "script": "stone-provision-peridio.sh",
+        "envs": ["peridio"]
       }
     }
   },

@@ -136,8 +136,8 @@ get_file_hash() {
     sha256sum "$file" | cut -d' ' -f1
 }
 
-# Function to get file length
-get_file_length() {
+# Function to get file size
+get_file_size() {
     local file="$1"
     stat -c%s "$file"
 }
@@ -180,7 +180,7 @@ generate_custom_metadata() {
         '{
             "peridiod": {
                 "installer": $installer,
-                "installer_options": $installer_opts,
+                "installer_opts": $installer_opts,
                 "reboot_required": $reboot_required
             }
         }'
@@ -228,7 +228,7 @@ AVOCADO_OS_BINARY_ID=$(generate_uuid)
 
 # Get file info
 AVOCADO_OS_HASH=$(get_file_hash "$AVOCADO_OS_FILE")
-AVOCADO_OS_LENGTH=$(get_file_length "$AVOCADO_OS_FILE")
+AVOCADO_OS_SIZE=$(get_file_size "$AVOCADO_OS_FILE")
 AVOCADO_OS_SIG_FILE="${AVOCADO_OS_FILE}.sig"
 
 # Get signature info
@@ -240,7 +240,7 @@ log_verbose "  Artifact ID: $AVOCADO_OS_ARTIFACT_ID"
 log_verbose "  Version ID: $AVOCADO_OS_VERSION_ID"
 log_verbose "  Binary ID: $AVOCADO_OS_BINARY_ID"
 log_verbose "  Hash: $AVOCADO_OS_HASH"
-log_verbose "  Length: $AVOCADO_OS_LENGTH"
+log_verbose "  Size: $AVOCADO_OS_SIZE"
 
 # Add avocado-os to artifacts
 ARTIFACTS_JSON=$(echo "$ARTIFACTS_JSON" | jq \
@@ -273,7 +273,7 @@ AVOCADO_OS_CUSTOM_METADATA=$(generate_custom_metadata "avocado-os")
 # Add avocado-os to manifest
 MANIFEST_JSON=$(echo "$MANIFEST_JSON" | jq \
     --arg hash "$AVOCADO_OS_HASH" \
-    --argjson length "$AVOCADO_OS_LENGTH" \
+    --argjson size "$AVOCADO_OS_SIZE" \
     --arg binary_id "$AVOCADO_OS_BINARY_ID" \
     --arg target "$TARGET" \
     --arg artifact_version_id "$AVOCADO_OS_VERSION_ID" \
@@ -281,7 +281,7 @@ MANIFEST_JSON=$(echo "$MANIFEST_JSON" | jq \
     --argjson custom_metadata "$AVOCADO_OS_CUSTOM_METADATA" \
     '. += [{
         "hash": $hash,
-        "length": $length,
+        "size": $size,
         "binary_id": $binary_id,
         "target": $target,
         "artifact_version_id": $artifact_version_id,
@@ -334,18 +334,26 @@ else
         
         # Get file info
         EXT_HASH=$(get_file_hash "$ext_path")
-        EXT_LENGTH=$(get_file_length "$ext_path")
+        EXT_SIZE=$(get_file_size "$ext_path")
         
         # Get signature info
         EXT_SIG_JSON=$(get_signature_info "$ext_sig")
         EXT_KEYID=$(echo "$EXT_SIG_JSON" | jq -r '.keyid // ""')
         EXT_SIGNATURE=$(echo "$EXT_SIG_JSON" | jq -r '.signature // ""')
         
+        # Verify extension has a valid signature
+        if [ ! -f "$ext_sig" ] || [ -z "$EXT_KEYID" ] || [ -z "$EXT_SIGNATURE" ]; then
+            echo "Error: Extension '$parsed_name' is unsigned or has an invalid signature."
+            echo "Please sign the runtime first by running:"
+            echo "  avocado runtime sign -r ${RUNTIME_NAME}"
+            exit 1
+        fi
+        
         log_verbose "  Artifact ID: $EXT_ARTIFACT_ID"
         log_verbose "  Version ID: $EXT_VERSION_ID"
         log_verbose "  Binary ID: $EXT_BINARY_ID"
         log_verbose "  Hash: $EXT_HASH"
-        log_verbose "  Length: $EXT_LENGTH"
+        log_verbose "  Size: $EXT_SIZE"
         
         # Add extension to artifacts
         ARTIFACTS_JSON=$(echo "$ARTIFACTS_JSON" | jq \
@@ -379,7 +387,7 @@ else
         # Add extension to manifest
         MANIFEST_JSON=$(echo "$MANIFEST_JSON" | jq \
             --arg hash "$EXT_HASH" \
-            --argjson length "$EXT_LENGTH" \
+            --argjson size "$EXT_SIZE" \
             --arg binary_id "$EXT_BINARY_ID" \
             --arg target "$TARGET" \
             --arg artifact_version_id "$EXT_VERSION_ID" \
@@ -387,7 +395,7 @@ else
             --argjson custom_metadata "$EXT_CUSTOM_METADATA" \
             '. += [{
                 "hash": $hash,
-                "length": $length,
+                "size": $size,
                 "binary_id": $binary_id,
                 "target": $target,
                 "artifact_version_id": $artifact_version_id,
@@ -525,7 +533,3 @@ log_verbose "Archive size: $(stat -c%s "$ARCHIVE_PATH") bytes"
 
 # Print summary (always shown)
 echo "Peridio bundle: ${BUNDLE_NAME} ($(echo "$MANIFEST_JSON" | jq 'length') artifacts)"
-
-
-
-

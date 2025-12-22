@@ -169,6 +169,3 @@ get_version_id() {
 load_state
 process_artifacts
 
-
-
-

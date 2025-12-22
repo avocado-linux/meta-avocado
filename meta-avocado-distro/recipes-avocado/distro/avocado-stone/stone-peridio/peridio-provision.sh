@@ -208,6 +208,3 @@ log_verbose "=== Peridio Provisioning Complete ==="
 # Save the updated state file
 save_state
 
-
-
-
