@@ -37,7 +37,6 @@ SRC_URI:append:stone-peridio = " \
     file://peridio-bundle.sh \
     file://peridio-provision.sh \
     file://peridio-state.sh \
-    file://custom-metadata-template.json \
     file://stone-provision-peridio.sh \
 "
 
@@ -86,7 +85,6 @@ do_deploy:append:stone-peridio() {
   install -m 0755 ${WORKDIR}/peridio-bundle.sh ${DEPLOYDIR}/peridio-bundle.sh
   install -m 0755 ${WORKDIR}/peridio-provision.sh ${DEPLOYDIR}/peridio-provision.sh
   install -m 0755 ${WORKDIR}/peridio-state.sh ${DEPLOYDIR}/peridio-state.sh
-  install -m 0644 ${WORKDIR}/custom-metadata-template.json ${DEPLOYDIR}/custom-metadata-template.json
   install -m 0755 ${WORKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
 }
 

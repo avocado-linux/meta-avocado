@@ -168,7 +168,7 @@ generate_custom_metadata() {
         reboot_required="true"
     else
         installer="avocado-ext"
-        installer_opts="{\"name\": \"${ext_name}-${ext_version}.raw\", \"enabled\": true}"
+        installer_opts="{\"name\": \"${ext_name}-${ext_version}\", \"image\": \"${ext_name}-${ext_version}.raw\", \"enabled\": true}"
         reboot_required="false"
     fi
     
@@ -193,17 +193,33 @@ MANIFEST_JSON="[]"
 log_verbose ""
 log_verbose "=== Processing Avocado OS ==="
 
-# Find the avocado-os archive (zip file)
+# Find the avocado-os archive (zip or swu file depending on installer type)
 AVOCADO_OS_FILE=""
-for f in "$PROVISION_DIR"/*.zip; do
-    if [ -f "$f" ]; then
-        AVOCADO_OS_FILE="$f"
-        break
-    fi
-done
+case "$INSTALLER_TYPE" in
+    fwup)
+        for f in "$PROVISION_DIR"/*.zip; do
+            if [ -f "$f" ]; then
+                AVOCADO_OS_FILE="$f"
+                break
+            fi
+        done
+        ;;
+    swupdate)
+        for f in "$PROVISION_DIR"/*.swu; do
+            if [ -f "$f" ]; then
+                AVOCADO_OS_FILE="$f"
+                break
+            fi
+        done
+        ;;
+    *)
+        echo "Error: Unknown installer type: $INSTALLER_TYPE"
+        exit 1
+        ;;
+esac
 
 if [ -z "$AVOCADO_OS_FILE" ] || [ ! -f "$AVOCADO_OS_FILE" ]; then
-    echo "Error: Avocado OS archive not found in $PROVISION_DIR"
+    echo "Error: Avocado OS archive not found in $PROVISION_DIR (expected .$INSTALLER_TYPE archive)"
     exit 1
 fi
 

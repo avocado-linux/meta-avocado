@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Stone Platform Provisioning for Peridio (Tegra/Nvidia)
+# Creates swupdate archive and delegates to common provisioning scripts
+
 # Exit immediately if any command fails
 set -e
 # Exit on undefined variables
@@ -12,6 +15,10 @@ set -o pipefail
 # AVOCADO_STONE_BUILD_DIR - build output directory
 # AVOCADO_STONE_DATA_DIR - stone data directory
 
+# =============================================================================
+# Create swupdate archive from stone output
+# =============================================================================
+
 OUTDIR="${AVOCADO_STONE_BUILD_DIR}/peridio"
 mkdir -p "$OUTDIR"
 
@@ -22,12 +29,6 @@ echo "Output directory: $OUTDIR"
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
-
-# Check if AVOCADO_PROVISION_OUT is set and create directory
-if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
-    echo "AVOCADO_PROVISION_OUT is set: $AVOCADO_PROVISION_OUT"
-    mkdir -p "$AVOCADO_PROVISION_OUT"
-fi
 
 # Extract image names from manifest
 ROOTFS_IMAGE=$(jq -r '.storage_devices.rootdisk.images.rootfs' "$MANIFEST")
@@ -70,34 +71,6 @@ if [ -f "${DATA_DIR}/${ROOTFS_IMAGE}" ]; then
 else
     echo "ERROR: Rootfs image not found: ${DATA_DIR}/${ROOTFS_IMAGE}"
     exit 1
-fi
-
-# Collect extensions
-echo "=== Collecting extension images ==="
-EXT_SOURCES="${AVOCADO_PREFIX}/output/extensions"
-EXT_LIST="${AVOCADO_EXT_LIST:-}"
-
-if [ -z "$EXT_LIST" ]; then
-    echo "WARNING: AVOCADO_EXT_LIST is empty or not set; no extensions will be copied"
-else
-    if [ ! -d "$EXT_SOURCES" ]; then
-        echo "WARNING: Extension directory not found: $EXT_SOURCES"
-    else
-        echo "  Using extension directory: $EXT_SOURCES"
-        for ext_name in $EXT_LIST; do
-            case "$ext_name" in
-                *.raw) ext_file="$ext_name" ;;
-                *)     ext_file="${ext_name}.raw" ;;
-            esac
-            src="${EXT_SOURCES}/${ext_file}"
-            if [ -f "$src" ]; then
-                cp "$src" "${OUTDIR}/${ext_file}"
-                echo "  Copied extension: ${ext_file} -> ${OUTDIR}"
-            else
-                echo "WARNING: Extension image not found: ${src}"
-            fi
-        done
-    fi
 fi
 
 # Generate sw-description file
@@ -152,17 +125,9 @@ FILE_LIST="${SWU_DIR}/file_list.txt"
 
 echo "  Created swupdate image: $SWU_FILE"
 
-echo "=== Peridio provisioning complete ==="
-echo "Output files in $OUTDIR:"
-echo "  - $(basename "$SWU_FILE")"
-for f in "${OUTDIR}"/*.raw; do
-    [ -f "$f" ] && echo "  - $(basename "$f")"
-done
+# =============================================================================
+# Call the common provisioning script
+# =============================================================================
 
-# Copy to AVOCADO_PROVISION_OUT if set
-if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
-    echo "=== Copying output files to $AVOCADO_PROVISION_OUT ==="
-    cp -v "${OUTDIR}"/* "$AVOCADO_PROVISION_OUT/"
-    echo "  Copy complete"
-fi
-
+echo "=== Delegating to common Peridio provisioning ==="
+exec "${AVOCADO_RUNTIME_BUILD_DIR}/peridio-provision.sh" --avocado-os "$SWU_FILE" --installer-type swupdate
