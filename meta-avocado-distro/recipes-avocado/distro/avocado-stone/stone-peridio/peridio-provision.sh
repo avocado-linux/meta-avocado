@@ -196,6 +196,10 @@ if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
     
     log_verbose "Copy complete"
     
+    # Save the state file before generating the bundle
+    # (bundle script reads the state file, so it must be persisted first)
+    save_state
+    
     # Generate the Peridio bundle
     log_verbose ""
     log_verbose "=== Generating Peridio Bundle ==="
@@ -204,8 +208,3 @@ fi
 
 log_verbose ""
 log_verbose "=== Peridio Provisioning Complete ==="
-
-# Save the updated state file
-save_state
-
-
