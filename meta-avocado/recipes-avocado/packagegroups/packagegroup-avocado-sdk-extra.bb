@@ -128,7 +128,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
 "
 
 SDK_SYSROOT_DEPENDS = " \
-  ${@multilib_pkg_extend(d, 'packagegroup-core-standalone-sdk-target')} \
+  avocado-sdk-target-sysroot \
   ${@multilib_pkg_extend(d, 'libstd-rs')} \
 "
 
