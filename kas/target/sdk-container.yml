@@ -9,6 +9,7 @@ repos:
 
 local_conf_header:
   target-container: |
+    DISTRO_FEATURES_EXTRA:append = "virtualization"
 
 target:
   - avocado-image-container

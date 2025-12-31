@@ -8,7 +8,7 @@ target="qemux86-64"
 RUNTIME_NAME="$1"
 
 input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
-manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_PREFIX/sdk/stone/stone-${target}.json}"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 build_include_flags() {

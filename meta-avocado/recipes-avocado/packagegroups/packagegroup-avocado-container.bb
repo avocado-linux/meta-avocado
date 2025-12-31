@@ -15,4 +15,8 @@ RDEPENDS:${PN} = " \
   os-release \
   tree \
   usbutils \
+  bindfs \
+  fuse-overlayfs \
+  ganesha \
+  util-linux-mount \
 "

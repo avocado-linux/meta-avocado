@@ -26,8 +26,8 @@ SDKPATHINSTALL = "/opt/${DISTRO}/${SDK_VERSION}"
 # Configure the base sysroot directory for SDK packages.
 #   Packaging breaks if this is configured to "/", or ""
 #   Even though it would be preferrable considering we control the sysroot of installation
-SDKPATHNATIVE = "/opt/_avocado/${MACHINE_SHORT_NAME}/sdk"
-SDKPATH = "${SDKPATHNATIVE}"
+SDKPATH = "/opt/_avocado/${MACHINE_SHORT_NAME}/sdk"
+SDKPATHNATIVE = "${SDKPATH}/${SDK_ARCH}"
 
 SDK_VENDOR = "-avocadosdk"
 SDKPKGSUFFIX = "avocadosdk"

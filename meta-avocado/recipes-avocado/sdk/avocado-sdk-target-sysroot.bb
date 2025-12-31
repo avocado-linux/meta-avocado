@@ -7,4 +7,3 @@ PACKAGES = "${PN}"
 inherit packagegroup
 
 RDEPENDS:${PN} = "packagegroup-core-standalone-sdk-target"
-

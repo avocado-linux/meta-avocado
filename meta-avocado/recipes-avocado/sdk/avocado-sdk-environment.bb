@@ -21,7 +21,7 @@ SDKTARGETSYSROOT = "${SDKPATH}/target-sysroot"
 inherit cross-canadian
 
 do_generate_content[cleandirs] = "${SDK_OUTPUT}"
-do_generate_content[dirs] = "${SDK_OUTPUT}/${SDKPATH}"
+do_generate_content[dirs] = "${SDK_OUTPUT}/${SDKPATHNATIVE}"
 # Need to ensure we have the virtual mappings and site files for all multtilib variants
 do_generate_content[depends] = "${@oe.utils.build_depends_string(all_multilib_tune_values(d, 'TOOLCHAIN_NEED_CONFIGSITE_CACHE'), 'do_populate_sysroot')}"
 python do_generate_content() {
@@ -55,24 +55,24 @@ python () {
 
 create_sdk_files() {
 	# Setup site file for external use
-	toolchain_create_sdk_siteconfig ${SDK_OUTPUT}/${SDKPATH}/site-config
+	toolchain_create_sdk_siteconfig ${SDK_OUTPUT}/${SDKPATHNATIVE}/site-config
 
-	toolchain_create_sdk_env_script ${SDK_OUTPUT}/${SDKPATH}/environment-setup
+	toolchain_create_sdk_env_script ${SDK_OUTPUT}/${SDKPATHNATIVE}/environment-setup
 
 	# Add version information
-	toolchain_create_sdk_version ${SDK_OUTPUT}/${SDKPATH}/version
+	toolchain_create_sdk_version ${SDK_OUTPUT}/${SDKPATHNATIVE}/version
 
-	toolchain_create_post_relocate_script ${SDK_OUTPUT}/${SDKPATH}/post-relocate-setup.sh ${SDKPATH}
+	toolchain_create_post_relocate_script ${SDK_OUTPUT}/${SDKPATHNATIVE}/post-relocate-setup.sh ${SDKPATHNATIVE}
 }
 
 do_install() {
-    install -d ${D}/${SDKPATH}
-    install -m 0644 -t ${D}/${SDKPATH} ${SDK_OUTPUT}/${SDKPATH}/*
+    install -d ${D}/${SDKPATHNATIVE}
+    install -m 0644 -t ${D}/${SDKPATHNATIVE} ${SDK_OUTPUT}/${SDKPATHNATIVE}/*
 }
 
 PACKAGES = "${PN}"
 FILES:${PN}= " \
-    ${SDKPATH}/* \
+    ${SDKPATHNATIVE}/* \
     "
 
 deltask do_fetch

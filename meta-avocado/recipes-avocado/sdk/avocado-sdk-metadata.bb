@@ -35,10 +35,10 @@ inherit deploy
 
 # The repo file is packaged, the map file is deployed directly
 FILES:${PN} = " \
-    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/rpmrc \
-    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/rpm/platform \
-    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/dnf/vars/arch \
-    ${SDKPATHNATIVE}/target-repoconf${sysconfdir}/yum.repos.d \
+    ${SDKPATH}/target-repoconf${sysconfdir}/rpmrc \
+    ${SDKPATH}/target-repoconf${sysconfdir}/rpm/platform \
+    ${SDKPATH}/target-repoconf${sysconfdir}/dnf/vars/arch \
+    ${SDKPATH}/target-repoconf${sysconfdir}/yum.repos.d \
 "
 
 # Set package arch so it deploys to a specific directory
@@ -218,18 +218,18 @@ python do_compile() {
         repo_f.write("\n")
         bb.note(f"Added additional target repo '{machine_short_name}-target-ext' at priority {priority}")
 
-    # Get SDKPATHNATIVE for the repo file
-    sdk_path_native = d.getVar('SDKPATHNATIVE')
+    # Get SDKPATH for the repo file
+    sdk_path = d.getVar('SDKPATH')
     # Construct the path for the repo file within the work directory
-    # by stripping the leading '/' from SDKPATHNATIVE.
-    sdk_native_prefix_stripped = sdk_path_native.lstrip('/')
+    # by stripping the leading '/' from SDKPATH.
+    sdk_prefix_stripped = sdk_path.lstrip('/')
 
     # Create directories in WORKDIR for generated files
     work_dir = d.getVar('WORKDIR')
-    repo_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'yum.repos.d')
-    arch_vars_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'dnf', 'vars')
-    platform_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc', 'rpm')
-    rpmrc_work_dir = os.path.join(work_dir, 'generated-files', sdk_native_prefix_stripped, 'target-repoconf', 'etc')
+    repo_work_dir = os.path.join(work_dir, 'generated-files', sdk_prefix_stripped, 'target-repoconf', 'etc', 'yum.repos.d')
+    arch_vars_work_dir = os.path.join(work_dir, 'generated-files', sdk_prefix_stripped, 'target-repoconf', 'etc', 'dnf', 'vars')
+    platform_work_dir = os.path.join(work_dir, 'generated-files', sdk_prefix_stripped, 'target-repoconf', 'etc', 'rpm')
+    rpmrc_work_dir = os.path.join(work_dir, 'generated-files', sdk_prefix_stripped, 'target-repoconf', 'etc')
 
     # Ensure directories exist
     os.makedirs(deploy_dir_rpm, exist_ok=True)

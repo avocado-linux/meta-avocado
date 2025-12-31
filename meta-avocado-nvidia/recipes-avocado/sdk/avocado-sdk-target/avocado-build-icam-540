@@ -13,7 +13,7 @@ mkdir -p "$output_dir"
 
 input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
-manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_PREFIX/sdk/stone/stone-${target}.json}"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 build_include_flags() {

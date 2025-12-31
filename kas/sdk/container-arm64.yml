@@ -5,6 +5,8 @@ header:
       file: kas/base.yml
     - repo: meta-avocado
       file: kas/target/sdk-container.yml
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
 
 repos:
   meta-avocado:
