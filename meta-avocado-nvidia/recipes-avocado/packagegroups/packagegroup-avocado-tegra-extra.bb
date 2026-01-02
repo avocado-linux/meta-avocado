@@ -16,7 +16,7 @@ RDEPENDS:${PN} = " \
   tegra-nvfancontrol \
   tegra-configs-udev \
   tegra-redundant-boot \
-  nvidia-kernel-oot-display \
+  nvidia-kernel-oot \
   tegra-cuda-utils \
   tegra-tools \
   tegra-libraries-camera \
