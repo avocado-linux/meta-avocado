@@ -152,6 +152,27 @@ get_signature_info() {
     fi
 }
 
+# Function to compute bundle hash using JCS (JSON Canonicalization Scheme)
+# This matches the server-side hash computation
+compute_bundle_hash() {
+    local manifest_json="$1"
+    
+    # Apply JCS: sort keys lexicographically and compact format
+    local jcs_json
+    jcs_json=$(echo "$manifest_json" | jq -Sc '[.[] | {
+        artifact_id,
+        artifact_version_id,
+        binary_id,
+        custom_metadata,
+        hash,
+        size,
+        target
+    }]')
+    
+    # Compute SHA256 hash and encode as lowercase hex
+    echo -n "$jcs_json" | sha256sum | cut -d' ' -f1
+}
+
 # Function to generate custom metadata from template
 # Args: artifact_type ("avocado-os" or "avocado-ext") [ext_name] [ext_version]
 generate_custom_metadata() {
@@ -470,18 +491,29 @@ rm -f "$MANIFEST_TEMP_FILE"
 log_verbose ""
 log_verbose "=== Building Final Bundle JSON ==="
 
+# Compute bundle hash (matching server-side computation)
+BUNDLE_HASH=$(compute_bundle_hash "$MANIFEST_JSON")
+BUNDLE_HASH_VERSION=1
+
+log_verbose "Bundle hash: $BUNDLE_HASH"
+log_verbose "Bundle hash version: $BUNDLE_HASH_VERSION"
+
 BUNDLE_JSON=$(jq -n \
     --argjson artifacts "$ARTIFACTS_JSON" \
     --arg bundle_id "$BUNDLE_ID" \
     --arg bundle_name "$BUNDLE_NAME" \
     --arg bundle_keyid "$BUNDLE_KEYID" \
     --arg bundle_sig "$BUNDLE_SIGNATURE" \
+    --arg bundle_hash "$BUNDLE_HASH" \
+    --argjson bundle_hash_version "$BUNDLE_HASH_VERSION" \
     --argjson manifest "$MANIFEST_JSON" \
     '{
         "artifacts": $artifacts,
         "bundle": {
             "id": $bundle_id,
             "name": $bundle_name,
+            "hash": $bundle_hash,
+            "hash_version": $bundle_hash_version,
             "signatures": [{"keyid": $bundle_keyid, "sig": $bundle_sig}],
             "manifest": $manifest
         }
