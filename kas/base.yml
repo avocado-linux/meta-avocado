@@ -47,7 +47,7 @@ local_conf_header:
   meta-avocado: |
     USER_CLASSES:append = " rm_work buildhistory buildstats buildstats-summary"
 
-    LICENSE_FLAGS_ACCEPTED:append = " commercial commercial_%"
+    LICENSE_FLAGS_ACCEPTED:append = " commercial commercial_% synaptics-killswitch"
 
     # Enable Fortran support globally
     FORTRAN:forcevariable = ",fortran"
