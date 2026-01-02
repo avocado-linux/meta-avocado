@@ -10,4 +10,5 @@ inherit packagegroup
 
 RDEPENDS:${PN} = " \
   userlandtools \
+  ${MACHINE_EXTRA_RRECOMMENDS} \
 "
