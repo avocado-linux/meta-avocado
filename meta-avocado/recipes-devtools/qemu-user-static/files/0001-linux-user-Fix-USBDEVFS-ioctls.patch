@@ -19,7 +19,7 @@ do_ioctl_usbdevfs_bulk) that properly:
 This fixes USB device access when running i386/x86_64 binaries that
 use libusb on aarch64 hosts via qemu-user-static.
 
-Signed-off-by: Avocado Linux <avocado@example.com>
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
 ---
  linux-user/ioctls.h  |   4 +-
  linux-user/syscall.c | 118 +++++++++++++++++++++++++++++++++++++++++++
