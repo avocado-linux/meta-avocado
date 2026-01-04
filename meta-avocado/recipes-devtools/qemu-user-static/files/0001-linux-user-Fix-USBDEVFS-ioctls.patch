@@ -1,0 +1,175 @@
+From 8c580a5977dd6842bed0a93a534dc940cd264126 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sat, 3 Jan 2026 18:58:23 -0500
+Subject: [PATCH] linux-user: Fix USBDEVFS_CONTROL and USBDEVFS_BULK ioctls for
+ user-mode emulation
+
+The USBDEVFS_CONTROL and USBDEVFS_BULK ioctls contain embedded data
+pointers that need special handling in QEMU user-mode emulation.
+Without this, the kernel receives guest addresses that are not valid
+in the host address space, resulting in EFAULT errors.
+
+This patch adds special handlers (do_ioctl_usbdevfs_control and
+do_ioctl_usbdevfs_bulk) that properly:
+1. Convert the target struct to host format
+2. Lock the user data buffer to get a valid host pointer
+3. Call the ioctl with the host pointer
+4. Unlock and write back for IN transfers
+
+This fixes USB device access when running i386/x86_64 binaries that
+use libusb on aarch64 hosts via qemu-user-static.
+
+Signed-off-by: Avocado Linux <avocado@example.com>
+---
+ linux-user/ioctls.h  |   4 +-
+ linux-user/syscall.c | 118 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 120 insertions(+), 2 deletions(-)
+
+diff --git a/linux-user/ioctls.h b/linux-user/ioctls.h
+index 3b41128fd..6598e6099 100644
+--- a/linux-user/ioctls.h
++++ b/linux-user/ioctls.h
+@@ -286,9 +286,9 @@
+ 
+ #ifdef CONFIG_USBFS
+   /* USB ioctls */
+-  IOCTL(USBDEVFS_CONTROL, IOC_RW,
++  IOCTL_SPECIAL(USBDEVFS_CONTROL, IOC_RW, do_ioctl_usbdevfs_control,
+         MK_PTR(MK_STRUCT(STRUCT_usbdevfs_ctrltransfer)))
+-  IOCTL(USBDEVFS_BULK, IOC_RW,
++  IOCTL_SPECIAL(USBDEVFS_BULK, IOC_RW, do_ioctl_usbdevfs_bulk,
+         MK_PTR(MK_STRUCT(STRUCT_usbdevfs_bulktransfer)))
+   IOCTL(USBDEVFS_RESETEP, IOC_W, MK_PTR(TYPE_INT))
+   IOCTL(USBDEVFS_SETINTERFACE, IOC_W,
+diff --git a/linux-user/syscall.c b/linux-user/syscall.c
+index 1ce4c7978..b97922e20 100644
+--- a/linux-user/syscall.c
++++ b/linux-user/syscall.c
+@@ -5000,6 +5000,124 @@ do_ioctl_usbdevfs_submiturb(const IOCTLEntry *ie, uint8_t *buf_temp,
+ 
+     return ret;
+ }
++
++static abi_long
++do_ioctl_usbdevfs_control(const IOCTLEntry *ie, uint8_t *buf_temp,
++                          int fd, int cmd, abi_long arg)
++{
++    const argtype *arg_type = ie->arg_type;
++    int target_size;
++    abi_long ret;
++    void *argptr;
++    struct usbdevfs_ctrltransfer host_ctrl;
++    abi_ulong target_data;
++    void *host_data_ptr;
++    int rw_dir;
++    uint16_t wLength;
++
++    arg_type++;
++    target_size = thunk_type_size(arg_type, THUNK_TARGET);
++
++    /* Read the target struct */
++    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
++    if (!argptr) {
++        return -TARGET_EFAULT;
++    }
++    thunk_convert(&host_ctrl, argptr, arg_type, THUNK_HOST);
++    unlock_user(argptr, arg, 0);
++
++    /* Extract the data pointer and length */
++    target_data = (uintptr_t)host_ctrl.data;
++    wLength = host_ctrl.wLength;
++
++    /*
++     * Determine direction from bRequestType.
++     * Bit 7: 0 = Host-to-Device (OUT), 1 = Device-to-Host (IN)
++     */
++    rw_dir = (host_ctrl.bRequestType & USB_DIR_IN) ? VERIFY_WRITE : VERIFY_READ;
++
++    /* Lock the user buffer if there is data to transfer */
++    if (wLength > 0 && target_data) {
++        host_data_ptr = lock_user(rw_dir, target_data, wLength,
++                                  rw_dir == VERIFY_READ ? 1 : 0);
++        if (!host_data_ptr) {
++            return -TARGET_EFAULT;
++        }
++        host_ctrl.data = host_data_ptr;
++    } else {
++        host_data_ptr = NULL;
++        host_ctrl.data = NULL;
++    }
++
++    ret = get_errno(safe_ioctl(fd, ie->host_cmd, &host_ctrl));
++
++    /* Unlock the buffer, write back if it was an IN transfer */
++    if (host_data_ptr) {
++        unlock_user(host_data_ptr, target_data,
++                    (rw_dir == VERIFY_WRITE && !is_error(ret)) ? wLength : 0);
++    }
++
++    return ret;
++}
++
++static abi_long
++do_ioctl_usbdevfs_bulk(const IOCTLEntry *ie, uint8_t *buf_temp,
++                       int fd, int cmd, abi_long arg)
++{
++    const argtype *arg_type = ie->arg_type;
++    int target_size;
++    abi_long ret;
++    void *argptr;
++    struct usbdevfs_bulktransfer host_bulk;
++    abi_ulong target_data;
++    void *host_data_ptr;
++    int rw_dir;
++    unsigned int len;
++
++    arg_type++;
++    target_size = thunk_type_size(arg_type, THUNK_TARGET);
++
++    /* Read the target struct */
++    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
++    if (!argptr) {
++        return -TARGET_EFAULT;
++    }
++    thunk_convert(&host_bulk, argptr, arg_type, THUNK_HOST);
++    unlock_user(argptr, arg, 0);
++
++    /* Extract the data pointer and length */
++    target_data = (uintptr_t)host_bulk.data;
++    len = host_bulk.len;
++
++    /*
++     * Determine direction from endpoint.
++     * Bit 7: 0 = OUT, 1 = IN
++     */
++    rw_dir = (host_bulk.ep & USB_DIR_IN) ? VERIFY_WRITE : VERIFY_READ;
++
++    /* Lock the user buffer if there is data to transfer */
++    if (len > 0 && target_data) {
++        host_data_ptr = lock_user(rw_dir, target_data, len,
++                                  rw_dir == VERIFY_READ ? 1 : 0);
++        if (!host_data_ptr) {
++            return -TARGET_EFAULT;
++        }
++        host_bulk.data = host_data_ptr;
++    } else {
++        host_data_ptr = NULL;
++        host_bulk.data = NULL;
++    }
++
++    ret = get_errno(safe_ioctl(fd, ie->host_cmd, &host_bulk));
++
++    /* Unlock the buffer, write back if it was an IN transfer */
++    if (host_data_ptr) {
++        unlock_user(host_data_ptr, target_data,
++                    (rw_dir == VERIFY_WRITE && !is_error(ret)) ? len : 0);
++    }
++
++    return ret;
++}
+ #endif /* CONFIG_USBFS */
+ 
+ static abi_long do_ioctl_dm(const IOCTLEntry *ie, uint8_t *buf_temp, int fd,
+-- 
+2.49.0
+

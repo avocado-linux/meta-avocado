@@ -48,6 +48,8 @@ RDEPENDS:${PN} = " \
   logrotate \
   coreutils \
   glibc-utils \
+  qemu-user-static \
+  qemu-user-static-binfmt \
   tio \
   sscg \
   ${GSTREAMER_PACKAGES} \

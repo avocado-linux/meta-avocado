@@ -44,6 +44,12 @@ repos:
 distro: avocado
 
 local_conf_header:
+  qemu: |
+    PREFERRED_VERSION_qemu = "9%"
+    PREFERRED_VERSION_qemu-native = "9%"
+    PREFERRED_VERSION_qemu-user-static = "9%"
+    PREFERRED_VERSION_nativesdk-qemu = "9%"
+
   meta-avocado: |
     USER_CLASSES:append = " rm_work buildhistory buildstats buildstats-summary"
 
