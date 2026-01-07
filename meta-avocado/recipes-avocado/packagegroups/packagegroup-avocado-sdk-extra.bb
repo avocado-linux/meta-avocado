@@ -6,11 +6,53 @@ PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-avocado-hitl \
+  nativesdk-bash \
+  nativesdk-bc \
   nativesdk-bmaptool \
+  nativesdk-bzip2 \
+  nativesdk-ca-certificates \
   nativesdk-coreutils \
-  nativesdk-libgfortran \
+  nativesdk-cpio \
+  nativesdk-diffutils \
+  nativesdk-elfutils \
+  nativesdk-elixir \
+  nativesdk-erlang \
+  nativesdk-file \
+  nativesdk-findutils \
+  nativesdk-fwup \
+  nativesdk-ganesha \
+  nativesdk-gawk \
+  nativesdk-git \
   nativesdk-go \
   nativesdk-go-runtime \
+  nativesdk-gptfdisk \
+  nativesdk-grep \
+  nativesdk-gzip \
+  nativesdk-jq \
+  nativesdk-kmod \
+  nativesdk-less \
+  nativesdk-libgfortran \
+  nativesdk-mkfat \
+  nativesdk-ncurses \
+  nativesdk-nodejs \
+  nativesdk-nodejs-npm \
+  nativesdk-openssh-scp \
+  nativesdk-openssh-ssh \
+  nativesdk-openssl \
+  nativesdk-openssl-dev \
+  nativesdk-pahole \
+  nativesdk-patch \
+  nativesdk-perl \
+  nativesdk-python3 \
+  nativesdk-python3-pip \
+  nativesdk-python3-pyyaml \
+  nativesdk-qemu \
+  nativesdk-qemu-helper \
+  nativesdk-rebar3 \
+  nativesdk-sed \
+  nativesdk-socat \
+  nativesdk-strace \
+  nativesdk-tar \
   nativesdk-util-linux \
   nativesdk-util-linux-agetty \
   nativesdk-util-linux-blkdiscard \
@@ -96,39 +138,14 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-util-linux-wipefs \
   nativesdk-util-linux-write \
   nativesdk-util-linux-zramctl \
-  nativesdk-jq \
-  nativesdk-findutils \
-  nativesdk-grep \
-  nativesdk-sed \
-  nativesdk-gawk \
-  nativesdk-tar \
-  nativesdk-gzip \
-  nativesdk-bash \
-  nativesdk-fwup \
-  nativesdk-ganesha \
-  nativesdk-gptfdisk \
-  nativesdk-mkfat \
-  nativesdk-python3-pip \
-  nativesdk-python3-pyyaml \
-  nativesdk-qemu \
-  nativesdk-qemu-helper \
-  nativesdk-strace \
-  nativesdk-openssh-scp \
-  nativesdk-openssh-ssh \
-  nativesdk-elixir \
-  nativesdk-erlang \
-  nativesdk-rebar3 \
-  nativesdk-nodejs \
-  nativesdk-nodejs-npm \
-  nativesdk-git \
-  nativesdk-ca-certificates \
-  nativesdk-socat \
+  nativesdk-xz \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
 
 SDK_SYSROOT_DEPENDS = " \
   avocado-sdk-target-sysroot \
+  kernel-devsrc \
   ${@multilib_pkg_extend(d, 'libstd-rs')} \
 "
 
