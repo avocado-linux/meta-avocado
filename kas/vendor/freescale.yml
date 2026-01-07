@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-freescale.git
     path: meta-freescale
     branch: scarthgap
-    commit: 7d83a350d8b28498321a481a2a1c51bb4afb48e9
+    commit: 902dde8c5bd29bb507ac8d37772565a6c9ab77cd
     layers:
       .:
   meta-freescale-3rdparty:

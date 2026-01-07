@@ -16,15 +16,15 @@ repos:
     url: https://github.com/avocado-linux/vendor-bitbake
     path: bitbake
     branch: "2.8-avocado"
-    commit: 7924aec6d1b26f869ef1f854a2505dffb2d50429
+    commit: 5cc148046230d7ad36f4730d13267a6b74c048c0
     layers:
       .: disabled
 
   openembedded-core:
     url: https://github.com/avocado-linux/vendor-openembedded-core
     path: openembedded-core
-    branch: scarthgap
-    commit: ef198b0c6063ede32cb93fe44eb89937c076a073
+    branch: scarthgap-avocado
+    commit: 7c90ddfb7e6771e5ad412e3b599e531a35856299
     layers:
       meta:
 

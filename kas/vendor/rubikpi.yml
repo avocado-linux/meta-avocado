@@ -15,7 +15,7 @@ repos:
     url: https://github.com/qualcomm-linux/meta-qcom-hwe
     path: meta-qcom-hwe
     branch: scarthgap
-    commit: f9c5445cdf73e4a5422695426ba10f15869de275
+    commit: 61d7b15a840af1263fc3efa50a6a082d463d4dbe
     layers:
       .:
 
@@ -23,7 +23,7 @@ repos:
     url: https://github.com/qualcomm-linux/meta-qcom-distro
     path: meta-qcom-distro
     branch: scarthgap
-    commit: 72d1a5b1e41edf2943b68d971670ea490ff1f782
+    commit: d8e9c3a6e568f0b3a0e6ac32349f3e6646ca2163
     layers:
       .:
 

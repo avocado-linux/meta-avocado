@@ -17,7 +17,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
     branch: scarthgap
-    commit: 89a01c3d9ad1f8fce6aeb4dd0e694cfa28d42099
+    commit: 2b26d30fc7f478f5735d514f0c1bc28f6a4148b6
     layers:
       meta-oe:
       meta-perl:

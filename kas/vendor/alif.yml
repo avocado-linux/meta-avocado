@@ -6,7 +6,7 @@ repos:
     url: https://github.com/alifsemi/meta-alif.git
     path: meta-alif
     branch: scarthgap
-    commit: 0f69f0927041e7a178cc963381ef8b870955c134
+    commit: b12e9f563046f611d1bdbdfae6d6cea6c14656a2
     layers:
       .:
   meta-alif-ensemble:

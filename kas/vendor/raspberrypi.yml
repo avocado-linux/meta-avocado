@@ -9,7 +9,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-raspberrypi
     path: meta-raspberrypi
     branch: scarthgap
-    commit: cd677051d18d4af2f043ac1ab58509ae5f594cf6
+    commit: 2c646d29912dcc873469a57b1c207e1549c5094d
     layers:
       .:
 
