@@ -52,6 +52,12 @@ RDEPENDS:${PN} = " \
   qemu-user-static-binfmt \
   tio \
   sscg \
+  redis \
+  net-tools \
+  cifs-utils \
+  ntfs-3g-ntfsprogs \
+  less \
+  picocom \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
@@ -103,6 +109,9 @@ PYTHON_PACKAGES = " \
   python3-itsdangerous \
   python3-click \
   python3-opencv \
+  python3-gpiozero \
+  python3-spidev \
+  python3-smbus \
 "
 
 QT5_PACKAGES = " \
