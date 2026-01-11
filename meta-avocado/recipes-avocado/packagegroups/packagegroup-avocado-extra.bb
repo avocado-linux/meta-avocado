@@ -109,7 +109,6 @@ PYTHON_PACKAGES = " \
   python3-itsdangerous \
   python3-click \
   python3-opencv \
-  python3-gpiozero \
   python3-spidev \
   python3-smbus \
 "

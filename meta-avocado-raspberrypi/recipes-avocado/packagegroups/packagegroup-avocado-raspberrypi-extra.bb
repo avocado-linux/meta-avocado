@@ -10,5 +10,6 @@ inherit packagegroup
 
 RDEPENDS:${PN} = " \
   userlandtools \
+  python3-gpiozero \
   ${MACHINE_EXTRA_RRECOMMENDS} \
 "
