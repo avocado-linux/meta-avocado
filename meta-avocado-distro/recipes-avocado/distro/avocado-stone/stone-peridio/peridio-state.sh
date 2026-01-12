@@ -168,3 +168,4 @@ get_version_id() {
 # Initialize state management
 load_state
 process_artifacts
+

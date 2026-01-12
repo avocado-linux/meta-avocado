@@ -6,9 +6,9 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e"
 
 DEPENDS += "libusb1 pkgconfig-native vim-native"
 
-PV = "20250227"
+PV = "20260109"
 SRC_URI = "git://github.com/raspberrypi/usbboot.git;branch=master;protocol=https;gitsm=1"
-SRCREV = "ecfb7222788735bd3b4714b0126f71025ae252da"
+SRCREV = "d6d87604df0b180be9269b3f9357efec3946c356"
 
 S = "${WORKDIR}/git"
 

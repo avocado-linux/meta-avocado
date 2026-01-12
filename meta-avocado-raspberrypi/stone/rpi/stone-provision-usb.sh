@@ -28,12 +28,13 @@ if [[ ! -f "$archive_file" ]]; then
 fi
 
 VID=0a5c
-PID=2711
+# Supported boot device PIDs: BCM2711 (Pi4) and BCM2712 (Pi5)
+PIDS=("2711" "2712")
 TIMEOUT=20
 
 start_time=$(date +%s)
 last_boot_dot_time=0
-echo "Waiting for CM4 boot device to be detected..."
+echo "Waiting for rpi boot device to be detected..."
 
 while :; do
   # Show progress dots every 2 seconds
@@ -44,11 +45,17 @@ while :; do
   fi
   for d in /sys/bus/usb/devices/*; do
     [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
-    if [[ $(<"$d/idVendor") == "$VID" && $(<"$d/idProduct") == "$PID" ]]; then
-      echo ""  # New line after progress dots
-      echo "CM4 boot device detected at $(basename "$d")"
-      found=true
-      break 2   # break out of both loops
+    device_vid=$(<"$d/idVendor")
+    device_pid=$(<"$d/idProduct")
+    if [[ "$device_vid" == "$VID" ]]; then
+      for pid in "${PIDS[@]}"; do
+        if [[ "$device_pid" == "$pid" ]]; then
+          echo ""  # New line after progress dots
+          echo "rpi boot device detected at $(basename "$d") (${device_vid}:${device_pid})"
+          found=true
+          break 3   # break out of all loops
+        fi
+      done
     fi
   done
 
@@ -56,7 +63,7 @@ while :; do
   now=$(date +%s)
   if (( now - start_time >= TIMEOUT )); then
     echo ""  # New line after progress dots
-    echo "Timed out after $TIMEOUT seconds waiting for CM4 boot device"
+    echo "Timed out after $TIMEOUT seconds waiting for rpi boot device"
     exit 1
   fi
 
@@ -104,14 +111,14 @@ fi
 echo "Using rpiboot at: $rpiboot_path"
 echo "Using mass-storage-gadget64 at: $mass_storage_gadget_path"
 
-# Execute rpiboot to put the CM4 into mass storage mode
+# Execute rpiboot to put the rpi into mass storage mode
 echo "Executing rpiboot to enable mass storage mode..."
 if ! "$rpiboot_path" -d "$mass_storage_gadget_path"; then
     echo "Error: rpiboot failed to execute"
     exit 1
 fi
 
-echo "Waiting for CM4 to appear as mass storage device..."
+echo "Waiting for rpi to appear as mass storage device..."
 
 # Wait for the RPi mass storage device to appear
 # Looking for USB device 0a5c:0104 and corresponding block device
@@ -241,7 +248,7 @@ fi
 device_size_gib=$((rpi_device_size_bytes / 1024 / 1024 / 1024))
 device_size_gib_decimal=$(echo "scale=2; $rpi_device_size_bytes / 1024 / 1024 / 1024" | bc -l 2>/dev/null || echo "$device_size_gib")
 
-echo "CM4 successfully ready as mass storage device:"
+echo "rpi successfully ready as mass storage device:"
 echo "  Device: $rpi_block_device"
 echo "  Size: ${device_size_gib_decimal} GiB (${rpi_device_size_bytes} bytes)"
 
@@ -314,7 +321,7 @@ if ! dd if=/dev/zero of="${rpi_block_device}" bs=512 seek=${uboot_offset_blocks}
     exit 1
 fi
 
-echo "Writing system image to CM4..."
+echo "Writing system image to rpi..."
 
 # Ensure device is not mounted and accessible
 if mount | grep -q "${rpi_block_device}"; then
@@ -339,7 +346,7 @@ if ! fwup -a -u -i "${archive_file}" -d "${rpi_block_device}" -t complete 2>&1; 
     exit 1
 fi
 
-echo "System image successfully written to CM4!"
+echo "System image successfully written to rpi!"
 echo "Please disconnect the USB cable and power cycle the device in normal boot mode."
 echo "Remove any boot mode jumpers or reset boot switches and ensure the device boots from eMMC."
 
