@@ -7,6 +7,7 @@ PV = "${DISTRO_VERSION}"
 do_compile[depends] += "avocado-core:do_build"
 do_compile[depends] += "avocado-stone:do_build"
 do_compile[depends] += "avocado-pkg-extra:do_build"
+do_compile[depends] += "avocado-pkg-sdk-all:do_build"
 do_compile[depends] += "${VIRTUAL-RUNTIME_avocado-sdk-metadata}:do_deploy"
 
 # Skip other tasks
