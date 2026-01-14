@@ -8,6 +8,11 @@ SRC_URI:append = " \
   file://env-mmc.cfg \
 "
 
+# Enable NVMe support for Raspberry Pi 5 (has PCIe)
+SRC_URI:append:raspberrypi5 = " \
+  file://nvme.cfg \
+"
+
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
 # do_configure:prepend:rpi() {
