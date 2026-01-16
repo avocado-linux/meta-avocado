@@ -6,8 +6,9 @@
 # 4. /etc/rpmrc: RPM architecture compatibility configuration
 #
 # This recipe checks DEPLOY_DIR_RPM for existing directories and only includes
-# repo entries for architectures that have packages deployed. This ensures the
-# .repo file matches the map file and only lists repos that actually exist.
+# repo entries for target architectures that have packages deployed. SDK
+# repository entries are always included regardless of whether SDK directories
+# exist, ensuring distro builds produce complete repo configurations.
 #
 # The map file (avocado-repo.map) is generated separately by the
 # avocado-repo-map bbclass, which is inherited by the meta-target recipes
@@ -109,17 +110,15 @@ python do_compile() {
         return priority
 
     def _process_sdk_archs(repo_f, priority, deploy_dir_rpm):
-        """Handle SDK architectures - write single shared repo entry."""
+        """Handle SDK architectures - write single shared repo entry.
+
+        Always writes the SDK repo entry regardless of whether the directory
+        exists, ensuring distro builds include SDK repository configuration.
+        """
         nonlocal repo_archs
         sdk_repo_written = False
         for arch in sdk_repo_archs:
             arch_dir = arch.replace('-', '_')
-
-            # Only include SDK archs that have directories in DEPLOY_DIR_RPM
-            check_dir = os.path.join(deploy_dir_rpm, arch_dir)
-            if not os.path.isdir(check_dir):
-                bb.note(f"Skipping SDK arch '{arch}' - directory '{check_dir}' does not exist")
-                continue
 
             repo_details = avocado_determine_repo_paths(d, arch, arch_dir)
 

@@ -7,7 +7,6 @@ inherit avocado-repo-map
 
 # Ensure compile task runs after dependencies
 do_compile[depends] += "avocado-pkg-sdk:do_build"
-do_compile[depends] += "avocado-pkg-sdk-all:do_build"
 do_compile[depends] += "avocado-pkg-sdk-extra:do_build"
 
 # Skip other tasks
