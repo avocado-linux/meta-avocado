@@ -139,6 +139,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-util-linux-wipefs \
   nativesdk-util-linux-write \
   nativesdk-util-linux-zramctl \
+  nativesdk-uv \
   nativesdk-xz \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \

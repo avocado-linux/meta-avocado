@@ -58,6 +58,7 @@ RDEPENDS:${PN} = " \
   ntfs-3g-ntfsprogs \
   less \
   picocom \
+  uv \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
