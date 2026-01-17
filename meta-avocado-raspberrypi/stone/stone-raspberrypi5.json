@@ -69,6 +69,7 @@
               { "in": "overlay_map.dtb", "out": "overlays/overlay_map.dtb" },
               { "in": "bcm2712d0.dtbo", "out": "overlays/bcm2712d0.dtbo" },
               { "in": "vc4-kms-v3d-pi5.dtbo", "out": "overlays/vc4-kms-v3d-pi5.dtbo" },
+              { "in": "dwc2.dtbo", "out": "overlays/dwc2.dtbo" },
               "bcm2712-rpi-5-b.dtb",
               "bcm2712-rpi-cm5-cm5io.dtb",
               "bcm2712-rpi-cm5-cm4io.dtb",
