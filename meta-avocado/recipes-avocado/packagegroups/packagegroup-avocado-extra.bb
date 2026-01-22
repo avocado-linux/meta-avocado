@@ -65,6 +65,11 @@ RDEPENDS:${PN} = " \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${BASLER_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
+  ${JAVA_PACKAGES} \
+"
+
+JAVA_PACKAGES = " \
+  openjdk-17-jdk \
 "
 
 OPENGL_PACKAGES = " \

@@ -23,3 +23,5 @@ header:
     file: kas/extra/python-ai.yml
   - repo: meta-avocado
     file: kas/extra/swupdate.yml
+  - repo: meta-avocado
+    file: kas/extra/openjdk.yml
