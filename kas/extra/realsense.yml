@@ -3,7 +3,7 @@ header:
 
 repos:
   meta-realsense:
-    url: https://github.com/IntelRealSense/meta-intel-realsense.git
+    url: https://github.com/avocado-linux/vendor-meta-intel-realsense.git
     path: meta-realsense
     commit: 6d585884724b7c0c56c6734949ebde3dbc55f72c
     branch: scarthgap

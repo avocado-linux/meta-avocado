@@ -3,7 +3,7 @@ header:
 
 repos:
   meta-python-ai:
-    url: https://github.com/zboszor/meta-python-ai.git
+    url: https://github.com/avocado-linux/vendor-meta-python-ai.git
     path: meta-python-ai
     commit: 47e39d760ce2ecd99bbbc0fbefde4a96ed32a85a
     branch: scarthgap
@@ -11,7 +11,7 @@ repos:
       .:
 
   meta-clang-revival:
-    url: https://github.com/zboszor/meta-clang-revival.git
+    url: https://github.com/avocado-linux/vendor-meta-clang-revival.git
     path: meta-clang-revival
     commit: f34e150f6def4f7a9226bad517b6f6b4dcadb516
     branch: scarthgap
