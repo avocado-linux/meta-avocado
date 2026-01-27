@@ -1,0 +1,48 @@
+From f28015a756e3af2aad9f1b221440161ff5dd79f8 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <justin@peridio.com>
+Date: Mon, 26 Jan 2026 13:52:49 -0500
+Subject: [PATCH] rust: fix mismatched lifetime syntaxes in qr_code crate
+
+Fix Rust 1.89+ compatibility by using explicit lifetime syntax in
+return types. The mismatched_lifetime_syntaxes lint was added in
+newer Rust versions and causes compilation failures when combined
+with #![deny(warnings)].
+
+The changes add explicit '<'_>' lifetime annotations to return types
+where the lifetime is elided in the function arguments but hidden
+in the return type.
+
+Upstream-Status: Pending
+---
+ .../rust/chromium_crates_io/vendor/qr_code-v2/src/lib.rs        | 2 +-
+ .../rust/chromium_crates_io/vendor/qr_code-v2/src/optimize.rs   | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/lib.rs b/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/lib.rs
+index 1b72962..3dbdb49 100644
+--- a/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/lib.rs
++++ b/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/lib.rs
+@@ -216,7 +216,7 @@ impl QrCode {
+     }
+ 
+     /// Returns an iterator over QR code vector of colors.
+-    pub fn iter(&self) -> QrCodeIterator {
++    pub fn iter(&self) -> QrCodeIterator<'_> {
+         QrCodeIterator::new(self)
+     }
+ 
+diff --git a/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/optimize.rs b/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/optimize.rs
+index 26e9940..8a8bde9 100644
+--- a/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/optimize.rs
++++ b/third_party/rust/chromium_crates_io/vendor/qr_code-v2/src/optimize.rs
+@@ -109,7 +109,7 @@ impl<'a> Parser<'a> {
+     ///                                Segment { mode: Numeric, begin: 3, end: 6 },
+     ///                                Segment { mode: Byte, begin: 6, end: 10 }]);
+     ///
+-    pub fn new(data: &[u8]) -> Parser {
++    pub fn new(data: &[u8]) -> Parser<'_> {
+         Parser {
+             ecs_iter: EcsIter {
+                 base: data.iter(),
+-- 
+2.49.0

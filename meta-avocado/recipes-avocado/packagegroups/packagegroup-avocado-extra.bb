@@ -66,6 +66,7 @@ RDEPENDS:${PN} = " \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
   ${JAVA_PACKAGES} \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl wayland', "${BROWSER_PACKAGES}", '', d)} \
 "
 
 JAVA_PACKAGES = " \
@@ -76,11 +77,17 @@ OPENGL_PACKAGES = " \
   wpewebkit \
   wpebackend-fdo \
   cog \
+  cage \
   weston \
   weston-init \
   wayland \
   wayland-utils \
   libdrm-tests \
+  xkeyboard-config \
+"
+
+BROWSER_PACKAGES = " \
+  chromium-ozone-wayland \
 "
 
 CONATINER_PACKAGES = " \

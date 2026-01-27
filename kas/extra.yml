@@ -25,3 +25,7 @@ header:
     file: kas/extra/swupdate.yml
   - repo: meta-avocado
     file: kas/extra/openjdk.yml
+  - repo: meta-avocado
+    file: kas/extra/browser.yml
+  - repo: meta-avocado
+    file: kas/extra/wayland.yml
