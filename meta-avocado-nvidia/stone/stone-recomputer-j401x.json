@@ -16,14 +16,19 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-rootfs-recomputer-j401x.tegraflash.tar.gz",
+      "out": "avocado-image-recomputer-j401x",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "tegraflash": "avocado-image-rootfs-recomputer-j401x.tegraflash.tar.gz",
         "rootfs": "avocado-image-rootfs-recomputer-j401x.squashfs",
-        "var": "avocado-image-var-recomputer-j401x.btrfs"
+        "var": "avocado-image-var-recomputer-j401x.btrfs",
+        "initramfs": "avocado-image-initramfs-recomputer-j401x.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-recomputer-j401x.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-recomputer-j401x.esp",
+        "tegraflash_tos": "tos-avocado-recomputer-j401x.img",
+        "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_tools": "tegraflash-tools"
       }
     }
   }

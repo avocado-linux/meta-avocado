@@ -5,11 +5,18 @@ ROOTFSPART_SIZE_DEFAULT = "536870912"
 TEGRAFLASH_NO_INTERNAL_STORAGE = "1"
 
 AVOCADO_IMAGE_INITRAMFS_TYPE = "cpio.gz"
-INITRAMFS_FSTYPES = "${AVOCADO_IMAGE_INITRAMFS_TYPE}"
+# Also produce cpio.gz.cboot for the A_kernel partition (boot.img)
+INITRAMFS_FSTYPES = "${AVOCADO_IMAGE_INITRAMFS_TYPE} cpio.gz.cboot"
 IMAGE_TEGRAFLASH_KERNEL = "${DEPLOY_DIR_IMAGE}/${INITRD_IMAGE}-${MACHINE_SHORT_NAME}.cpio.gz.cboot"
 
-ROOT_FSTYPES = "squashfs tegraflash"
-IMAGE_TEGRAFLASH_FS_TYPE = "squashfs"
+# Removed tegraflash from ROOT_FSTYPES - BSP files are now deployed separately
+# via tegraflash-bsp recipe and referenced in stone manifests
+ROOT_FSTYPES = "squashfs"
+
+# Ensure tegraflash-bsp is deployed for provisioning
+# Note: tegra-espimage and tos-optee are image/deploy recipes without do_populate_sysroot
+# They are built via explicit task dependencies in avocado-stone.bbappend
+EXTRA_IMAGEDEPENDS += "tegraflash-bsp"
 
 DATAFILE = "avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
 IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"

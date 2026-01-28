@@ -19,14 +19,19 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-rootfs-icam-540.tegraflash.tar.gz",
+      "out": "avocado-image-icam-540",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "tegraflash": "avocado-image-rootfs-icam-540.tegraflash.tar.gz",
         "rootfs": "avocado-image-rootfs-icam-540.squashfs",
-        "var": "avocado-image-var-icam-540.btrfs"
+        "var": "avocado-image-var-icam-540.btrfs",
+        "initramfs": "avocado-image-initramfs-icam-540.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-icam-540.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-icam-540.esp",
+        "tegraflash_tos": "tos-avocado-icam-540.img",
+        "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_tools": "tegraflash-tools"
       }
     }
   }

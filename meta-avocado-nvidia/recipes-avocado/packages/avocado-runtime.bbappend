@@ -1,1 +1,1 @@
-RDEPENDS:${PN}:append = " avocado-img-tegraflash"
+# Removed avocado-img-tegraflash - BSP files now deployed via tegraflash-bsp

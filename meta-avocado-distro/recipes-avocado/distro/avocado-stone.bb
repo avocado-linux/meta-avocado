@@ -111,7 +111,16 @@ do_stone_provision() {
 }
 
 addtask configure after do_patch before do_compile
-addtask deploy after do_compile before do_package
-addtask stone_validate after do_deploy before do_package
-addtask stone_create after do_stone_validate before do_package
-addtask stone_provision after do_stone_create before do_package
+addtask deploy after do_compile before do_build
+
+# Stone tasks run after deploy
+# Note: do_package is noexec so we can't use "before do_package"
+# Instead, chain tasks properly and make do_build depend on them
+addtask stone_validate after do_deploy
+addtask stone_create after do_stone_validate
+addtask stone_provision after do_stone_create
+
+# By default, do_build depends on do_stone_create (validate + create)
+# Machine layers can override this to only run validation
+STONE_BUILD_TASK ?= "do_stone_create"
+do_build[depends] += "${PN}:${STONE_BUILD_TASK}"

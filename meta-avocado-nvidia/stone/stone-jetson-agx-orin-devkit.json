@@ -19,14 +19,19 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-rootfs-jetson-agx-orin-devkit.tegraflash.tar.gz",
+      "out": "avocado-image-jetson-agx-orin-devkit",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "tegraflash": "avocado-image-rootfs-jetson-agx-orin-devkit.tegraflash.tar.gz",
         "rootfs": "avocado-image-rootfs-jetson-agx-orin-devkit.squashfs",
-        "var": "avocado-image-var-jetson-agx-orin-devkit.btrfs"
+        "var": "avocado-image-var-jetson-agx-orin-devkit.btrfs",
+        "initramfs": "avocado-image-initramfs-jetson-agx-orin-devkit.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-orin-devkit.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-orin-devkit.esp",
+        "tegraflash_tos": "tos-avocado-jetson-agx-orin-devkit.img",
+        "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_tools": "tegraflash-tools"
       }
     }
   }
