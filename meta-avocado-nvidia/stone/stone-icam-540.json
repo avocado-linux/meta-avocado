@@ -32,6 +32,15 @@
         "tegraflash_tos": "tos-avocado-icam-540.img",
         "tegraflash_bsp": "tegraflash-bsp",
         "tegraflash_tools": "tegraflash-tools"
+      },
+      "tegraflash": {
+        "overlays": [
+          "tegra234-p3768-0000+p3767-0000-dynamic.dtbo",
+          "tegra234-dcb-p3767-0000-hdmi.dtbo"
+        ],
+        "dce_overlays": [
+          "tegra234-dcb-p3767-0000-hdmi.dtbo"
+        ]
       }
     }
   }

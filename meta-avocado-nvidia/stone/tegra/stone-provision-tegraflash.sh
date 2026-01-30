@@ -42,6 +42,12 @@ tegraflash_tools_dir=$(jq -r '.storage_devices.rootdisk.images.tegraflash_tools 
 dtb_file=$(jq -r '.storage_devices.rootdisk.images.dtb // empty' "$AVOCADO_STONE_MANIFEST")
 bpmp_dtb_file=$(jq -r '.storage_devices.rootdisk.images.bpmp_dtb // empty' "$AVOCADO_STONE_MANIFEST")
 
+# Tegraflash overlay DTBOs (arrays of filenames) - for verification purposes
+# The actual overlay values are in flashvars (from tegra-flashvars Yocto recipe)
+# These manifest entries are used to verify that the overlay files exist in the BSP
+tegraflash_overlays=$(jq -r '.storage_devices.rootdisk.tegraflash.overlays // [] | join(",")' "$AVOCADO_STONE_MANIFEST")
+tegraflash_dce_overlays=$(jq -r '.storage_devices.rootdisk.tegraflash.dce_overlays // [] | join(",")' "$AVOCADO_STONE_MANIFEST")
+
 echo "Runtime images from manifest:"
 echo "  rootfs: $rootfs_file"
 echo "  var: $var_file"
@@ -55,6 +61,8 @@ echo "  tegraflash_bsp: $tegraflash_bsp_dir"
 echo "  tegraflash_tools: $tegraflash_tools_dir"
 echo "  dtb: $dtb_file"
 echo "  bpmp_dtb: $bpmp_dtb_file"
+echo "  overlays: $tegraflash_overlays"
+echo "  dce_overlays: $tegraflash_dce_overlays"
 
 # Create build directory for tegraflash working area
 build_dir="${AVOCADO_STONE_BUILD_DIR}/tegraflash"
@@ -170,6 +178,33 @@ fi
 
 if [ -n "$bpmp_dtb_file" ]; then
     copy_image "$bpmp_dtb_file" "$(basename "$bpmp_dtb_file")"
+fi
+
+# Verify overlay DTBOs are present in build directory
+# The overlay files are deployed by tegraflash-bsp recipe from staging
+# OVERLAY_DTB_FILE and DCE_OVERLAY are defined in flashvars (from tegra-flashvars recipe)
+if [ -n "$tegraflash_overlays" ]; then
+    echo "Verifying overlay DTBOs from manifest..."
+    IFS=',' read -ra overlay_array <<< "$tegraflash_overlays"
+    for overlay in "${overlay_array[@]}"; do
+        if [ -f "$build_dir/$overlay" ]; then
+            echo "  Found: $overlay"
+        else
+            echo "  WARNING: Overlay DTBO not found: $overlay"
+        fi
+    done
+fi
+
+if [ -n "$tegraflash_dce_overlays" ]; then
+    echo "Verifying DCE overlay DTBOs from manifest..."
+    IFS=',' read -ra dce_overlay_array <<< "$tegraflash_dce_overlays"
+    for overlay in "${dce_overlay_array[@]}"; do
+        if [ -f "$build_dir/$overlay" ]; then
+            echo "  Found: $overlay"
+        else
+            echo "  WARNING: DCE overlay DTBO not found: $overlay"
+        fi
+    done
 fi
 
 # Create temporary directory for cpp wrapper

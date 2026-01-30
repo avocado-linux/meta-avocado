@@ -110,4 +110,9 @@ do_install() {
 }
 
 FILES:${PN} = "${TEGRAFLASH_BINDIR}"
-INSANE_SKIP:${PN} = "already-stripped file-rdeps"
+# Skip QA checks for pre-built NVIDIA binaries:
+# - already-stripped: binaries are pre-stripped
+# - file-rdeps: may have dependencies not in SDK
+# - arch: NVIDIA provides 32-bit x86 binaries in some versions
+INSANE_SKIP:${PN} = "already-stripped file-rdeps arch"
+INSANE_SKIP:${PN}-dbg = "arch"

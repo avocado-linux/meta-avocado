@@ -186,6 +186,7 @@ EXTERNAL_ROOTFS_DRIVE=${@'1' if d.getVar('TEGRAFLASH_NO_INTERNAL_STORAGE') == '1
 NO_INTERNAL_STORAGE=${@'1' if d.getVar('TEGRAFLASH_NO_INTERNAL_STORAGE') == '1' else '0'}
 DATAFILE="avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
 EOF
+# Note: OVERLAY_DTB_FILE and DCE_OVERLAY are in flashvars (from tegra-flashvars recipe)
 }
 
 addtask deploy before do_build after do_compile

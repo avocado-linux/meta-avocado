@@ -1,8 +1,18 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend:icam-540 := "${THISDIR}/files/icam-540:"
 
-SRC_URI:append:icam-540 = " file://tegra234-p3768-0000+p3767-0001-icam-540.dtb"
+# icam-540: Custom DTB and overlay DTBOs
+SRC_URI:append:icam-540 = " \
+    file://tegra234-p3768-0000+p3767-0001.dtb \
+    file://tegra234-p3768-0000+p3767-0000-dynamic.dtbo \
+    file://tegra234-dcb-p3767-0000-hdmi.dtbo \
+"
 
-do_deploy:prepend:icam-540() {
-    install -d ${STAGING_DIR_HOST}/boot/devicetree
-    install -m 0644 ${WORKDIR}/tegra234-p3768-0000+p3767-0001-icam-540.dtb ${STAGING_DIR_HOST}/boot/devicetree/
+do_deploy:append:icam-540() {
+    # Install custom DTB and DTBOs directly to deploy directory
+    # This runs after the main do_deploy, so these files override the upstream versions
+    install -m 0644 ${WORKDIR}/tegra234-p3768-0000+p3767-0001.dtb ${DEPLOYDIR}/devicetree/
+    # Install overlay DTBOs (overrides upstream with ICAM-540 specific versions)
+    install -m 0644 ${WORKDIR}/tegra234-p3768-0000+p3767-0000-dynamic.dtbo ${DEPLOYDIR}/devicetree/
+    install -m 0644 ${WORKDIR}/tegra234-dcb-p3767-0000-hdmi.dtbo ${DEPLOYDIR}/devicetree/
 }
