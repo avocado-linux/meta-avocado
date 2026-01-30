@@ -26,6 +26,7 @@ RDEPENDS:${PN} = " \
   htop \
   cryptoauthlib \
   cockpit \
+  dtc \
   peridiod \
   fwup \
   parted \
