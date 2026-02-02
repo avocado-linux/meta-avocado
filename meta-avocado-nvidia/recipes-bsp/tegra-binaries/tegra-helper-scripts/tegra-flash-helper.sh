@@ -706,6 +706,11 @@ if [ $want_signing -eq 1 ]; then
     FBARGS="--cmd \"$tfcmd\""
     . "$here/odmsign.func"
     (odmsign_ext_sign_and_flash) || exit 1
+    # Workaround: odmsign.func rebuilds BCTARGS/FLASHARGS and loses overlay_dtb_arg
+    # Re-inject it into the generated flashcmd.txt before --bct_backup
+    if [ -n "$overlay_dtb_arg" ] && [ -f flashcmd.txt ]; then
+        sed -i "s|--bct_backup|$overlay_dtb_arg --bct_backup|" flashcmd.txt
+    fi
     if [ $bup_blob -eq 0 -a $no_flash -ne 0 ]; then
         mv flashcmd.txt secureflash.sh || exit 1
         chmod +x secureflash.sh
