@@ -116,3 +116,8 @@ FILES:${PN} = "${TEGRAFLASH_BINDIR}"
 # - arch: NVIDIA provides 32-bit x86 binaries in some versions
 INSANE_SKIP:${PN} = "already-stripped file-rdeps arch"
 INSANE_SKIP:${PN}-dbg = "arch"
+
+# Inhibit debug/strip processing - these are prebuilt x86_64 binaries
+# that cannot be processed by the aarch64 cross-objcopy
+INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+INHIBIT_PACKAGE_STRIP = "1"
