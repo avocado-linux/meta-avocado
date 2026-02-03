@@ -11,10 +11,7 @@ SDK_TOOLCHAIN_TEGRA = " \
   nativesdk-tegraflash-tools \
 "
 
-# Target sysroot packages for building out-of-tree kernel modules
-# that depend on nvidia-kernel-oot headers/symbols
 SDK_SYSROOT_TEGRA = " \
-  nvidia-kernel-oot-devsrc \
 "
 
 RDEPENDS:${PN} = " \

@@ -48,6 +48,8 @@ do_deploy[depends] += "tegra-binaries:do_preconfigure"
 do_deploy[depends] += "edk2-firmware-tegra:do_deploy"
 # Depend on initramfs for boot.img (runtime kernel+initramfs cboot)
 do_deploy[depends] += "avocado-image-initramfs:do_image_complete"
+# Depend on tegra-initrd-flash-initramfs for tegraflash provisioning
+do_deploy[depends] += "tegra-initrd-flash-initramfs:do_image_complete"
 
 # Deploy BSP files from the staging datadir to the images directory
 # Creates both a directory (for SDK stone path) and a tarball (for stone manifest inclusion)

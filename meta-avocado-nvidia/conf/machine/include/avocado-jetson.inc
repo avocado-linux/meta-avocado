@@ -24,3 +24,4 @@ IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_N
 # Extras Repo Configurations
 PACKAGECONFIG:remove:pn-wpewebkit = "gbm"
 DEPENDS:append:pn-wpewebkit = " libdrm"
+DEPENDS:append:pn-chromium-ozone-wayland = " virtual/libgbm"
