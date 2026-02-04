@@ -20,6 +20,10 @@
       "sd": {
         "script": "stone-provision-sd.sh",
         "envs": ["device_info"]
+      },
+      "usb": {
+        "script": "stone-provision-usb.sh",
+        "envs": ["device_info"]
       }
     }
   },
