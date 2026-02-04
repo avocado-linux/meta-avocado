@@ -11,5 +11,6 @@ inherit packagegroup
 RDEPENDS:${PN} = " \
   userlandtools \
   python3-gpiozero \
+  rpi-eeprom \
   ${MACHINE_EXTRA_RRECOMMENDS} \
 "
