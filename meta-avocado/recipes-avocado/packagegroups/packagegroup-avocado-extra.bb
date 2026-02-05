@@ -72,6 +72,7 @@ RDEPENDS:${PN} = " \
 
 JAVA_PACKAGES = " \
   openjdk-17-jdk \
+  openjdk-17-jre \
 "
 
 OPENGL_PACKAGES = " \
