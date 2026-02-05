@@ -30,5 +30,5 @@ LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_EXEC" \
   -device sdhci-pci \
   -device sd-card,drive=mmc \
   -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
-  -M virt,secure=on,highmem=off \
+  -M virt,secure=on,highmem=off,acpi=off \
   -nographic
