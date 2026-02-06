@@ -8,6 +8,4 @@ PREFERRED_PROVIDER_virtual/kernel ?= "linux-renesas"
 PREFERRED_VERSION_linux-renesas ?= "6.1%"
 KERNEL_IMAGETYPE ?= "Image"
 
-# Wic image offset
-FIP_WIC_OFFSET = "--offset 768s"
  
