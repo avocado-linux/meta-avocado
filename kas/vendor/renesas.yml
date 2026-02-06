@@ -1,0 +1,29 @@
+header:
+  version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/arm.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado:
+
+  meta-renesas:
+    url: https://github.com/renesas-rz/meta-renesas
+    path: meta-renesas
+    branch: scarthgap/rz
+    commit: b396a94cc9c0a1e491c3a0426416cb8a1dfcb04f
+    layers:
+      meta-rz-bsp:
+      meta-rz-distro:
+  
+  meta-solidrun-arm-rzg2lc:
+    url: https://github.com/solidrun/meta-solidrun-arm-rzg2lc
+    path: meta-solidrun-arm-rzg2lc
+    branch: scarthgap_rzv2n_dev
+    commit: 8db88e8e8068e0ef247e92190723f58210c17d81
+    layers:
+      meta-rzv2n:
+      meta:

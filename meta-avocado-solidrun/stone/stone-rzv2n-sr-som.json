@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "platform": "avocado-rzv2n-sr-som",
+    "architecture": "arm64"
+  },
+  "storage_devices": {}
+}
