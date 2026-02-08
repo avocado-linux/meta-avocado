@@ -27,3 +27,7 @@ repos:
     layers:
       meta-rzv2n:
       meta:
+  
+local_conf_header:
+  vendor-renesas: |
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan"
