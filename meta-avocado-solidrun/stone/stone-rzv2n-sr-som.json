@@ -1,7 +1,80 @@
 {
   "runtime": {
     "platform": "avocado-rzv2n-sr-som",
-    "architecture": "arm64"
+    "architecture": "arm64",
+    "provision_default": "sd"
   },
-  "storage_devices": {}
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info"]
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-rzv2n-sr-som-rootdisk.zip",
+      "devpath": "/dev/mmcblk1",
+      "block_size": 512,
+      "images": {
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": [
+              { "in": "Image.gz", "out": "Image" },
+              "avocado-image-initramfs-rzv2n-sr-som.cpio.zst",
+              "Flash_Writer_SCIF_RZV2N_DEV_LPDDR4X.mot",
+              "bl2_bp_mmc-avocado-rzv2n-sr-som.bin",
+              "bl2_bp_mmc-avocado-rzv2n-sr-som.srec",
+              "bl2_bp_spi-avocado-rzv2n-sr-som.bin",
+              "bl2_bp_spi-avocado-rzv2n-sr-som.srec",
+              "fip-avocado-rzv2n-sr-som.bin",
+              "fip-avocado-rzv2n-sr-som.srec",
+              { "in": "r9a09g056n48-hummingboard-iiot.dtb", "out": "sentinel.dtb" },
+              "r9a09g056n48-rzv2n-evk.dtb",
+              "rzv2n-hummingboard-iiot-csi-camera-imx678.dtbo",
+              "rzv2n-hummingboard-iiot-panel-dsi-WJ70N3TYJHMNG0.dtbo"
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-rzv2n-sr-som.squashfs",
+        "var": "avocado-image-var-rzv2n-sr-som.btrfs"
+      },
+      "partitions": [
+        {
+          "name": "boot",
+          "image": "boot",
+          "offset": 2,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs",
+          "image": "rootfs",
+          "size": 2048,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "size": 512,
+          "size_unit": "mebibytes",
+          "expand": "true"
+        }
+      ]
+    }
+  }
 }
