@@ -11,6 +11,7 @@ env:
   PARALLEL_MAKE_HIGHMEM: ""
   SDKMACHINE: "x86_64"
   AVOCADO_DEV_ROOT_LOGIN: "0"
+  AVOCADO_RM_WORK: "1"
 
 repos:
   meta-openembedded:
@@ -51,7 +52,7 @@ local_conf_header:
     PREFERRED_VERSION_nativesdk-qemu = "9%"
 
   meta-avocado: |
-    USER_CLASSES:append = " rm_work buildhistory buildstats buildstats-summary"
+    USER_CLASSES:append = "${@ ' rm_work' if os.environ.get('AVOCADO_RM_WORK', '1') == '1' else ''} buildhistory buildstats buildstats-summary"
 
     LICENSE_FLAGS_ACCEPTED:append = " commercial commercial_% synaptics-killswitch"
 
