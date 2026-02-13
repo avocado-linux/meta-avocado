@@ -9,7 +9,7 @@ bootpart=2
 rootdev=/dev/mmcblk0p5
 
 kernel_addr_r=0x1000000
-ramdisk_addr_r=0x2000000
+ramdisk_addr_r=0x4800000
 
 # Calculate partition based on avocado_boot_slot
 avocado_boot_init=\
@@ -43,14 +43,14 @@ avocado_boot_init=\
     setenv rootdev /dev/mmcblk0p5;\
   fi;\
   if test -n "${rootdev}"; then\
-    setenv bootargs console=${console} root=${rootdev} rootwait;\
+    setenv bootargs console=${console} root=${rootdev} rootwait systemd.tpm2_wait=false;\
   else\
-    setenv bootargs console=${console} rootwait;\
+    setenv bootargs console=${console} rootwait systemd.tpm2_wait=false;\
   fi;
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
 load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} ${initramfs_file}
 
-avocado_boot=zboot ${kernel_addr_r} ${ramdisk_addr_r}
+avocado_boot=zboot ${kernel_addr_r} 0 ${ramdisk_addr_r} ${filesize}
 
 bootcmd=run avocado_boot_init load_image load_initramfs avocado_boot

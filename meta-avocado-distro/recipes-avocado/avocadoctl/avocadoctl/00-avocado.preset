@@ -1,2 +1,4 @@
 disable systemd-sysext.service
+disable systemd-sysext.socket
 disable systemd-confext.service
+disable systemd-confext.socket

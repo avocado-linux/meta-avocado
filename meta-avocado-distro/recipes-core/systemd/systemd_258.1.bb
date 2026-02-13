@@ -8,7 +8,7 @@ DEPENDS = "gperf-native libcap util-linux python3-jinja2-native"
 
 SECTION = "base/shell"
 
-inherit useradd pkgconfig meson perlnative update-rc.d update-alternatives qemu systemd gettext bash-completion manpages features_check mime
+inherit useradd pkgconfig meson perlnative update-rc.d update-alternatives systemd gettext bash-completion manpages features_check mime
 
 # unmerged-usr support is deprecated upstream, taints the system and will be
 # removed in the near future. Fail the build if it is not enabled.
@@ -21,43 +21,33 @@ REQUIRED_DISTRO_FEATURES += "systemd"
 SRC_URI += " \
            file://touchscreen.rules \
            file://00-create-volatile.conf \
-           ${@bb.utils.contains('PACKAGECONFIG', 'polkit_hostnamed_fallback', 'file://org.freedesktop.hostname1_no_polkit.conf', '', d)} \
-           ${@bb.utils.contains('PACKAGECONFIG', 'polkit_hostnamed_fallback', 'file://00-hostnamed-network-user.conf', '', d)} \
+           file://org.freedesktop.hostname1_no_polkit.conf \
+           file://00-hostnamed-network-user.conf \
            file://init \
            file://99-default.preset \
            file://systemd-pager.sh \
            file://0001-binfmt-Don-t-install-dependency-links-at-install-tim.patch \
            file://0002-implment-systemd-sysv-install-for-OE.patch \
-           file://0001-Do-not-create-var-log-README.patch \
+           file://0003-Do-not-create-var-log-README.patch \
            "
 
 # patches needed by musl
 SRC_URI:append:libc-musl = " ${SRC_URI_MUSL}"
 SRC_URI_MUSL = "\
-               file://0003-missing_type.h-add-comparison_fn_t.patch \
-               file://0004-add-fallback-parse_printf_format-implementation.patch \
-               file://0005-don-t-fail-if-GLOB_BRACE-and-GLOB_ALTDIRFUNC-is-not-.patch \
-               file://0006-add-missing-FTW_-macros-for-musl.patch \
-               file://0007-Use-uintmax_t-for-handling-rlim_t.patch \
-               file://0008-Define-glibc-compatible-basename-for-non-glibc-syste.patch \
-               file://0009-Do-not-disable-buffering-when-writing-to-oom_score_a.patch \
-               file://0010-distinguish-XSI-compliant-strerror_r-from-GNU-specif.patch \
-               file://0011-avoid-redefinition-of-prctl_mm_map-structure.patch \
-               file://0012-do-not-disable-buffer-in-writing-files.patch \
-               file://0013-Handle-__cpu_mask-usage.patch \
-               file://0014-Handle-missing-gshadow.patch \
-               file://0015-missing_syscall.h-Define-MIPS-ABI-defines-for-musl.patch \
-               file://0016-pass-correct-parameters-to-getdents64.patch \
-               file://0017-Adjust-for-musl-headers.patch \
-               file://0018-test-bus-error-strerror-is-assumed-to-be-GNU-specifi.patch \
-               file://0019-errno-util-Make-STRERROR-portable-for-musl.patch \
-               file://0020-sd-event-Make-malloc_trim-conditional-on-glibc.patch \
-               file://0021-shared-Do-not-use-malloc_info-on-musl.patch \
-               file://0022-avoid-missing-LOCK_EX-declaration.patch \
-               file://0023-include-signal.h-to-avoid-the-undeclared-error.patch \
-               file://0024-undef-stdin-for-references-using-stdin-as-a-struct-m.patch \
-               file://0025-adjust-header-inclusion-order-to-avoid-redeclaration.patch \
-               file://0026-build-path.c-avoid-boot-time-segfault-for-musl.patch \
+               file://0004-musl.h-introduce-header-file-and-add-__THROW.patch \
+               file://0005-add-fallback-parse_printf_format-implementation.patch \
+               file://0006-Make-mallinfo-related-contents-glibc-specific.patch \
+               file://0007-add-src-include-override-sys-prctl.h-to-avoid-redefi.patch \
+               file://0008-distinguish-XSI-compliant-strerror_r-from-GNU-specif.patch \
+               file://0009-errno-util-Make-STRERROR-portable-for-musl.patch \
+               file://0010-src-basic-format-util.h-define-RLIM_FMT-to-fit-musl-.patch \
+               file://0011-src-include-override-malloc.h-define-dummy-malloc_tr.patch \
+               file://0012-src-shared-condition.c-avoid-using-glibc-ConditionVe.patch \
+               file://0013-build-path.c-avoid-boot-time-segfault-for-musl.patch \
+               file://0014-Handle-missing-gshadow-for-musl.patch \
+               file://0015-Avoid-sequence-point-error.patch \
+               file://0016-Fix-the-segfault-for-glob-related-codes-and-define-d.patch \
+               file://0017-Always-include-netinet-if_ether.h-first.patch \
                "
 
 PAM_PLUGINS = " \
@@ -147,7 +137,6 @@ PACKAGECONFIG[tpm2] = "-Dtpm2=enabled,-Dtpm2=disabled,tpm2-tss,tpm2-tss libtss2 
 PACKAGECONFIG[default-compression-lz4] = "-Dlz4=true -Ddefault-compression=lz4,,lz4"
 PACKAGECONFIG[default-compression-xz] = "-Dxz=true -Ddefault-compression=xz,,xz"
 PACKAGECONFIG[default-compression-zstd] = "-Dzstd=true -Ddefault-compression=zstd,,zstd"
-PACKAGECONFIG[dbus] = "-Ddbus=enabled,-Ddbus=disabled,dbus"
 PACKAGECONFIG[efi] = "-Defi=true -Dbootloader=enabled,-Defi=false -Dbootloader=disabled,python3-pyelftools-native"
 PACKAGECONFIG[elfutils] = "-Delfutils=enabled,-Delfutils=disabled,elfutils,,libelf libdw"
 PACKAGECONFIG[fido] = "-Dlibfido2=enabled,-Dlibfido2=disabled,libfido2"
@@ -155,8 +144,6 @@ PACKAGECONFIG[firstboot] = "-Dfirstboot=true,-Dfirstboot=false"
 PACKAGECONFIG[repart] = "-Drepart=enabled,-Drepart=disabled"
 PACKAGECONFIG[homed] = "-Dhomed=enabled,-Dhomed=disabled"
 # Sign the journal for anti-tampering
-PACKAGECONFIG[gcrypt] = "-Dgcrypt=enabled,-Dgcrypt=disabled,libgcrypt"
-PACKAGECONFIG[gnutls] = "-Dgnutls=enabled,-Dgnutls=disabled,gnutls"
 PACKAGECONFIG[gshadow] = "-Dgshadow=true,-Dgshadow=false"
 PACKAGECONFIG[hibernate] = "-Dhibernate=true,-Dhibernate=false"
 PACKAGECONFIG[hostnamed] = "-Dhostnamed=true,-Dhostnamed=false"
@@ -189,7 +176,7 @@ PACKAGECONFIG[no-dns-fallback] = "-Ddns-servers="
 PACKAGECONFIG[no-ntp-fallback] = "-Dntp-servers="
 PACKAGECONFIG[nss] = "-Dnss-systemd=true,-Dnss-systemd=false,,libnss-systemd"
 PACKAGECONFIG[nss-mymachines] = "-Dnss-mymachines=enabled,-Dnss-mymachines=disabled"
-PACKAGECONFIG[nss-resolve] = "-Dnss-resolve=enabled,-Dnss-resolve=disabled"
+PACKAGECONFIG[nss-resolve] = "-Dnss-resolve=enabled,-Dnss-resolve=disabled,,libnss-resolve"
 PACKAGECONFIG[oomd] = "-Doomd=true,-Doomd=false"
 PACKAGECONFIG[openssl] = "-Dopenssl=enabled,-Dopenssl=disabled,openssl"
 PACKAGECONFIG[p11kit] = "-Dp11kit=enabled,-Dp11kit=disabled,p11-kit"
@@ -240,6 +227,7 @@ RESOLV_CONF ??= ""
 # bpf-framework: pass the recipe-sysroot to the compiler used to build
 # the eBPFs, so that it can find needed system includes in there.
 CFLAGS:append = " --sysroot=${STAGING_DIR_TARGET}"
+LDFLAGS:append:aarch64 = " ${@bb.utils.contains('PACKAGECONFIG', 'openssl', '-Wl,-z,gcs-report-dynamic=none', '', d)}"
 
 EXTRA_OEMESON += "-Dnobody-user=nobody \
                   -Dnobody-group=nogroup \
@@ -249,7 +237,10 @@ EXTRA_OEMESON += "-Dnobody-user=nobody \
                   -Dsystem-uid-max=999 \
                   -Dsystem-alloc-gid-min=101 \
                   -Dsystem-gid-max=999 \
+                  -Dtranslations=${@'false' if d.getVar('USE_NLS') == 'no' else 'true'} \
                   ${@bb.utils.contains('DISTRO_FEATURES', 'zeroconf', '-Ddefault-mdns=no -Ddefault-llmnr=no', '', d)} \
+                  -Ddbus=disabled \
+                  -Dtests=false \
                   "
 
 # Hardcode target binary paths to avoid using paths from sysroot or worse
@@ -339,15 +330,6 @@ do_install() {
 	install -d ${D}${systemd_system_unitdir}/reboot.target.wants
 	install -d ${D}${systemd_system_unitdir}/rescue.target.wants
 
-	# Create symlinks for systemd-update-utmp-runlevel.service
-	if ${@bb.utils.contains('PACKAGECONFIG', 'utmp', 'true', 'false', d)} && ${@bb.utils.contains('PACKAGECONFIG', 'sysvinit', 'true', 'false', d)}; then
-		ln -sf ../systemd-update-utmp-runlevel.service ${D}${systemd_system_unitdir}/graphical.target.wants/systemd-update-utmp-runlevel.service
-		ln -sf ../systemd-update-utmp-runlevel.service ${D}${systemd_system_unitdir}/multi-user.target.wants/systemd-update-utmp-runlevel.service
-		ln -sf ../systemd-update-utmp-runlevel.service ${D}${systemd_system_unitdir}/poweroff.target.wants/systemd-update-utmp-runlevel.service
-		ln -sf ../systemd-update-utmp-runlevel.service ${D}${systemd_system_unitdir}/reboot.target.wants/systemd-update-utmp-runlevel.service
-		ln -sf ../systemd-update-utmp-runlevel.service ${D}${systemd_system_unitdir}/rescue.target.wants/systemd-update-utmp-runlevel.service
-	fi
-
 	# this file is needed to exist if networkd is disabled but timesyncd is still in use since timesyncd checks it
 	# for existence else it fails
 	if [ -s ${D}${exec_prefix}/lib/tmpfiles.d/systemd.conf ] &&
@@ -361,7 +343,7 @@ do_install() {
 		ln -s ../run/systemd/resolve/resolv.conf ${D}${sysconfdir}/resolv-conf.systemd
 	else
 		resolv_conf="${@bb.utils.contains('RESOLV_CONF', 'stub-resolv', 'run/systemd/resolve/stub-resolv.conf', 'run/systemd/resolve/resolv.conf', d)}"
-		sed -i -e "s%^L! /etc/resolv.conf.*$%L! /etc/resolv.conf - - - - ../${resolv_conf}%g" ${D}${exec_prefix}/lib/tmpfiles.d/etc.conf
+		sed -i -e "s%^L! /etc/resolv.conf.*$%L! /etc/resolv.conf - - - - ../${resolv_conf}%g" ${D}${exec_prefix}/lib/tmpfiles.d/systemd-resolve.conf
 		ln -s ../${resolv_conf} ${D}${sysconfdir}/resolv-conf.systemd
 	fi
 	if ${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'false', 'true', d)}; then
@@ -398,15 +380,8 @@ do_install() {
 			${D}/${sysconfdir}/systemd/system.conf
 	fi
 
-	if ${@bb.utils.contains('PACKAGECONFIG', 'pni-names', 'true', 'false', d)}; then
-		if ! grep -q '^NamePolicy=.*mac' ${D}${nonarch_libdir}/systemd/network/99-default.link; then
-			sed -i '/^NamePolicy=/s/$/ mac/' ${D}${nonarch_libdir}/systemd/network/99-default.link
-		fi
-		if ! grep -q 'AlternativeNamesPolicy=.*mac' ${D}${nonarch_libdir}/systemd/network/99-default.link; then
-			sed -i '/AlternativeNamesPolicy=/s/$/ mac/' ${D}${nonarch_libdir}/systemd/network/99-default.link
-		fi
-	else
-		# Actively disable Predictable Network Interface Names
+	# Actively disable Predictable Network Interface Names
+	if ! ${@bb.utils.contains('PACKAGECONFIG', 'pni-names', 'true', 'false', d)}; then
 		sed -i 's/^NamePolicy=.*/NamePolicy=/;s/^AlternativeNamesPolicy=.*/AlternativeNamesPolicy=/' ${D}${nonarch_libdir}/systemd/network/99-default.link
 	fi
 }
@@ -417,7 +392,7 @@ python populate_packages:prepend (){
 }
 PACKAGES_DYNAMIC += "^lib(udev|systemd|nss).*"
 
-PACKAGE_BEFORE_PN = "\
+PACKAGE_BEFORE_PN += "\
     ${PN}-analyze \
     ${PN}-binfmt \
     ${PN}-container \
@@ -433,6 +408,7 @@ PACKAGE_BEFORE_PN = "\
     ${PN}-networkd \
     ${PN}-rpm-macros \
     ${PN}-udev-rules \
+    ${PN}-ukify \
     ${PN}-vconsole-setup \
     ${PN}-zsh-completion \
     libsystemd-shared \
@@ -518,7 +494,6 @@ RRECOMMENDS:${PN}-binfmt = "${@bb.utils.contains('PACKAGECONFIG', 'binfmt', 'ker
 
 RDEPENDS:${PN}-vconsole-setup = "${@bb.utils.contains('PACKAGECONFIG', 'vconsole', 'kbd kbd-consolefonts kbd-keymaps', '', d)}"
 
-
 FILES:${PN}-journal-gatewayd = "${nonarch_libdir}/systemd/systemd-journal-gatewayd \
                                 ${systemd_system_unitdir}/systemd-journal-gatewayd.service \
                                 ${systemd_system_unitdir}/systemd-journal-gatewayd.socket \
@@ -541,7 +516,6 @@ FILES:${PN}-journal-remote = "${nonarch_libdir}/systemd/systemd-journal-remote \
                              "
 SYSTEMD_SERVICE:${PN}-journal-remote = "systemd-journal-remote.socket"
 
-
 FILES:${PN}-container = "${sysconfdir}/dbus-1/system.d/org.freedesktop.import1.conf \
                          ${sysconfdir}/dbus-1/system.d/org.freedesktop.machine1.conf \
                          ${sysconfdir}/systemd/system/multi-user.target.wants/machines.target \
@@ -552,15 +526,21 @@ FILES:${PN}-container = "${sysconfdir}/dbus-1/system.d/org.freedesktop.import1.c
                          ${systemd_system_unitdir}/busnames.target.wants/org.freedesktop.machine1.busname \
                          ${systemd_system_unitdir}/local-fs.target.wants/var-lib-machines.mount \
                          ${systemd_system_unitdir}/machines.target.wants/var-lib-machines.mount \
+                         ${systemd_system_unitdir}/sockets.target.wants/systemd-machined.socket \
                          ${systemd_system_unitdir}/remote-fs.target.wants/var-lib-machines.mount \
+                         ${systemd_system_unitdir}/container-getty@.service \
                          ${systemd_system_unitdir}/machine.slice \
                          ${systemd_system_unitdir}/machines.target \
                          ${systemd_system_unitdir}/org.freedesktop.import1.busname \
                          ${systemd_system_unitdir}/org.freedesktop.machine1.busname \
                          ${systemd_system_unitdir}/systemd-importd.service \
                          ${systemd_system_unitdir}/systemd-machined.service \
+                         ${systemd_system_unitdir}/systemd-machined.socket \
                          ${systemd_system_unitdir}/dbus-org.freedesktop.machine1.service \
                          ${systemd_system_unitdir}/var-lib-machines.mount \
+                         ${systemd_user_unitdir}/machine.slice \
+                         ${systemd_user_unitdir}/machines.target \
+                         ${systemd_user_unitdir}/systemd-nspawn@.service \
                          ${nonarch_libdir}/systemd/systemd-import \
                          ${nonarch_libdir}/systemd/systemd-importd \
                          ${nonarch_libdir}/systemd/systemd-machined \
@@ -602,26 +582,16 @@ FILES:${PN}-extra-utils = "\
                         ${bindir}/systemd-cgls \
                         ${bindir}/systemd-cgtop \
                         ${bindir}/systemd-stdio-bridge \
-                        ${base_bindir}/systemd-ask-password \
-                        ${base_bindir}/systemd-tty-ask-password-agent \
                         ${base_sbindir}/mount.ddi \
                         ${systemd_system_unitdir}/initrd.target.wants/systemd-pcrphase-initrd.path \
-                        ${systemd_system_unitdir}/systemd-ask-password-console.path \
-                        ${systemd_system_unitdir}/systemd-ask-password-console.service \
-                        ${systemd_system_unitdir}/systemd-ask-password-wall.path \
-                        ${systemd_system_unitdir}/systemd-ask-password-wall.service \
-                        ${systemd_system_unitdir}/sysinit.target.wants/systemd-ask-password-console.path \
-                        ${systemd_system_unitdir}/sysinit.target.wants/systemd-ask-password-wall.path \
                         ${systemd_system_unitdir}/sysinit.target.wants/systemd-pcrphase.path \
                         ${systemd_system_unitdir}/sysinit.target.wants/systemd-pcrphase-sysinit.path \
-                        ${systemd_system_unitdir}/multi-user.target.wants/systemd-ask-password-wall.path \
                         ${nonarch_libdir}/systemd/systemd-resolve-host \
                         ${nonarch_libdir}/systemd/systemd-ac-power \
                         ${nonarch_libdir}/systemd/systemd-activate \
                         ${nonarch_libdir}/systemd/systemd-measure \
                         ${nonarch_libdir}/systemd/systemd-pcrphase \
                         ${nonarch_libdir}/systemd/systemd-socket-proxyd \
-                        ${nonarch_libdir}/systemd/systemd-reply-password \
                         ${nonarch_libdir}/systemd/systemd-sleep \
                         ${nonarch_libdir}/systemd/system-sleep \
                         ${systemd_system_unitdir}/systemd-hibernate.service \
@@ -631,10 +601,6 @@ FILES:${PN}-extra-utils = "\
                         ${systemd_system_unitdir}/systemd-pcrphase-sysinit.service \
                         ${systemd_system_unitdir}/systemd-suspend.service \
                         ${systemd_system_unitdir}/sleep.target \
-                        ${nonarch_libdir}/systemd/systemd-initctl \
-                        ${systemd_system_unitdir}/systemd-initctl.service \
-                        ${systemd_system_unitdir}/systemd-initctl.socket \
-                        ${systemd_system_unitdir}/sockets.target.wants/systemd-initctl.socket \
                         ${nonarch_libdir}/systemd/system-generators/systemd-gpt-auto-generator \
                         ${nonarch_libdir}/systemd/systemd-cgroups-agent \
 "
@@ -670,6 +636,27 @@ FILES:${PN}-udev-rules = "\
                         ${nonarch_libdir}/udev/rules.d/99-systemd.rules \
 "
 
+SUMMARY:${PN}-ukify = "Create and inspect Unified Kernel Images (UKIs)"
+DESCRIPTION:${PN}-ukify = "ukify is a tool whose primary purpose is to combine components (usually a kernel, an initrd, and a UEFI boot stub) to create a Unified Kernel Image (UKI) — a PE binary that can be executed by the firmware to start the embedded linux kernel."
+FILES:${PN}-ukify = " \
+    ${bindir}/ukify \
+    ${nonarch_libdir}/systemd/ukify \
+"
+RDEPENDS:${PN}-ukify = " \
+                        python3-compression \
+                        python3-core \
+                        python3-crypt \
+                        python3-datetime \
+                        python3-io \
+                        python3-json \
+                        python3-netclient \
+                        python3-pefile \
+                        python3-pprint \
+                        python3-pydoc \
+                        python3-pyzstd \
+                        python3-shell \
+                       "
+
 CONFFILES:${PN} = "${sysconfdir}/systemd/coredump.conf \
 	${sysconfdir}/systemd/journald.conf \
 	${sysconfdir}/systemd/logind.conf \
@@ -685,8 +672,6 @@ FILES:${PN} = " ${base_bindir}/* \
                 ${base_sbindir}/shutdown \
                 ${base_sbindir}/halt \
                 ${base_sbindir}/poweroff \
-                ${base_sbindir}/runlevel \
-                ${base_sbindir}/telinit \
                 ${base_sbindir}/resolvconf \
                 ${base_sbindir}/reboot \
                 ${base_sbindir}/init \
@@ -751,9 +736,9 @@ FILES:${PN} = " ${base_bindir}/* \
                 ${datadir}/dbus-1/system.d/org.freedesktop.home1.conf \
                "
 
-FILES:${PN}-dev += "${base_libdir}/security/*.la ${datadir}/dbus-1/interfaces/ ${sysconfdir}/rpm/macros.systemd"
+FILES:${PN}-dev += "${datadir}/dbus-1/interfaces/ ${sysconfdir}/rpm/macros.systemd"
 
-RDEPENDS:${PN} += "kmod dbus util-linux-mount util-linux-umount udev (= ${EXTENDPKGV}) systemd-udev-rules util-linux-agetty util-linux-fsck util-linux-swaponoff util-linux-mkswap"
+RDEPENDS:${PN} += "kmod ${VIRTUAL-RUNTIME_dbus} util-linux-mount util-linux-umount udev (= ${EXTENDPKGV}) systemd-udev-rules util-linux-agetty util-linux-fsck util-linux-swaponoff util-linux-mkswap"
 RDEPENDS:${PN} += "systemd-serialgetty"
 RDEPENDS:${PN} += "volatile-binds"
 
@@ -807,6 +792,7 @@ FILES:udev += "${base_sbindir}/udevd \
                ${nonarch_libdir}/udev/rules.d/60-infiniband.rules \
                ${nonarch_libdir}/udev/rules.d/60-input-id.rules \
                ${nonarch_libdir}/udev/rules.d/60-persistent-alsa.rules \
+               ${nonarch_libdir}/udev/rules.d/60-persistent-hidraw.rules \
                ${nonarch_libdir}/udev/rules.d/60-persistent-input.rules \
                ${nonarch_libdir}/udev/rules.d/60-persistent-storage.rules \
                ${nonarch_libdir}/udev/rules.d/60-persistent-storage-mtd.rules \
@@ -827,7 +813,9 @@ FILES:udev += "${base_sbindir}/udevd \
                ${nonarch_libdir}/udev/rules.d/78-sound-card.rules \
                ${nonarch_libdir}/udev/rules.d/80-drivers.rules \
                ${nonarch_libdir}/udev/rules.d/80-net-setup-link.rules \
+               ${nonarch_libdir}/udev/rules.d/81-net-bridge.rules \
                ${nonarch_libdir}/udev/rules.d/81-net-dhcp.rules \
+               ${nonarch_libdir}/udev/rules.d/90-image-dissect.rules \
                ${nonarch_libdir}/udev/rules.d/90-vconsole.rules \
                ${nonarch_libdir}/udev/rules.d/90-iocost.rules \
                ${nonarch_libdir}/udev/rules.d/README \
@@ -872,7 +860,6 @@ python do_warn_musl() {
 addtask warn_musl before do_configure
 
 ALTERNATIVE:${PN} = "halt reboot shutdown poweroff \
-                     ${@bb.utils.contains('PACKAGECONFIG', 'sysvinit', 'runlevel', '', d)} \
                      ${@bb.utils.contains('PACKAGECONFIG', 'resolved', 'resolv-conf', '', d)}"
 
 ALTERNATIVE_TARGET[resolv-conf] = "${sysconfdir}/resolv-conf.systemd"
@@ -894,10 +881,6 @@ ALTERNATIVE_PRIORITY[shutdown] ?= "300"
 ALTERNATIVE_TARGET[poweroff] = "${base_bindir}/systemctl"
 ALTERNATIVE_LINK_NAME[poweroff] = "${base_sbindir}/poweroff"
 ALTERNATIVE_PRIORITY[poweroff] ?= "300"
-
-ALTERNATIVE_TARGET[runlevel] = "${base_bindir}/systemctl"
-ALTERNATIVE_LINK_NAME[runlevel] = "${base_sbindir}/runlevel"
-ALTERNATIVE_PRIORITY[runlevel] ?= "300"
 
 pkg_postinst:${PN}:append () {
 	if ${@bb.utils.contains('PACKAGECONFIG', 'set-time-epoch', 'true', 'false', d)}; then
@@ -933,7 +916,8 @@ pkg_prerm:${PN}:libc-glibc () {
 	fi
 }
 
-PACKAGE_WRITE_DEPS += "qemu-native"
+PACKAGE_WRITE_DEPS += "qemuwrapper-cross"
+
 pkg_postinst:udev-hwdb () {
 	if test -n "$D"; then
 		$INTERCEPT_DIR/postinst_intercept update_udev_hwdb ${PKG} mlprefix=${MLPREFIX} binprefix=${MLPREFIX} \

@@ -1,6 +1,7 @@
 [Unit]
-Description=Avocado merge extensions
+Description=Avocado merge extensions (initrd)
 
+ConditionPathExists=/etc/initrd-release
 ConditionDirectoryNotEmpty=|/var/lib/avocado
 ConditionCapability=CAP_SYS_ADMIN
 
