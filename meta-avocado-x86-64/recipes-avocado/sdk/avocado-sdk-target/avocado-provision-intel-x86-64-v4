@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+set -e
+
+hook="avocado-provision"
+target="intel-x86-64-v4"
+
+RUNTIME_NAME="$1"
+
+input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
+
+# Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
+build_include_flags() {
+    local main_input_dir="$1"
+    local include_flags=""
+    
+    # Add SDK stone directory for BSP files
+    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+        include_flags="$include_flags -i \"$AVOCADO_SDK_PREFIX/stone\""
+    fi
+    
+    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                include_flags="$include_flags -i \"$path\""
+            fi
+        done
+    fi
+    
+    include_flags="$include_flags -i \"$main_input_dir\""
+    echo "$include_flags"
+}
+
+# Build display string of all include paths
+build_include_display() {
+    local main_input_dir="$1"
+    local display=""
+    
+    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+        display="${display}\n    - ${AVOCADO_SDK_PREFIX}/stone"
+    fi
+    
+    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                display="${display}\n    - ${path}"
+            fi
+        done
+    fi
+    
+    display="${display}\n    - ${main_input_dir}"
+    echo -e "$display"
+}
+
+echo -e "\033[94m[INFO]\033[0m Running stone provision.
+  Input directories:$(build_include_display "$input_dir")"
+
+include_flags=$(build_include_flags "$input_dir")
+eval stone provision $include_flags
+
+
+echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+exit 0

@@ -1,0 +1,16 @@
+NVIDIA Software License Agreement and CUDA Supplement to Software License Agreement
+
+IMPORTANT NOTICE — READ BEFORE DOWNLOADING, INSTALLING, COPYING, OR USING THE LICENSED SOFTWARE
+
+This license agreement ("Agreement"), effective upon the date you download or otherwise acquire the
+Licensed Software, is a legal agreement between you, whether an individual or entity ("you") and
+NVIDIA Corporation ("NVIDIA") and governs your use of the Licensed Software and any and all
+accompanying documentation, installation routines, and scripts ("Licensed Software").
+
+This is a placeholder for the full NVIDIA proprietary license text.
+The actual license text is embedded within the NVIDIA .run driver installer and will be
+extracted during the do_unpack step. The NO_GENERIC_LICENSE variable in the recipe
+points bitbake to the extracted LICENSE file for license compliance checks.
+
+For the full license, see the LICENSE file inside the extracted NVIDIA driver package,
+or visit: https://www.nvidia.com/en-us/drivers/nvidia-license/

@@ -150,6 +150,7 @@ SDK_SYSROOT_DEPENDS = " \
   avocado-sdk-target-sysroot \
   kernel-devsrc \
   ${@multilib_pkg_extend(d, 'libstd-rs')} \
+  ${@multilib_pkg_extend(d, 'packagegroup-go-sdk-target')} \
 "
 
 RDEPENDS:${PN} = " \

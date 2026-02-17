@@ -67,7 +67,13 @@ RDEPENDS:${PN} = " \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
   ${JAVA_PACKAGES} \
+  ${AWS_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl wayland', "${BROWSER_PACKAGES}", '', d)} \
+"
+
+AWS_PACKAGES = " \
+  greengrass-bin \
+  aws-iot-device-client \
 "
 
 JAVA_PACKAGES = " \
@@ -98,11 +104,12 @@ CONATINER_PACKAGES = " \
   podman-compose \
 "
 
-BASLER_PACKAGES = " \
+# Basler Pylon SDK is only available for aarch64
+BASLER_PACKAGES = "${@' \
   pylon \
   python3-pypylon \
   gst-plugin-pylon \
-"
+' if d.getVar('TARGET_ARCH') == 'aarch64' else ''}"
 
 GSTREAMER_PACKAGES = " \
   gstreamer1.0 \

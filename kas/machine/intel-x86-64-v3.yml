@@ -1,0 +1,19 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/intel.yml
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-x86-64:
+
+machine: avocado-intel-x86-64-v3

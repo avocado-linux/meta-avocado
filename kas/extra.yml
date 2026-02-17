@@ -28,4 +28,6 @@ header:
   - repo: meta-avocado
     file: kas/extra/browser.yml
   - repo: meta-avocado
+    file: kas/extra/aws.yml
+  - repo: meta-avocado
     file: kas/extra/wayland.yml

@@ -1,0 +1,17 @@
+header:
+  version: 16
+
+repos:
+  meta-intel:
+    url: https://github.com/avocado-linux/vendor-meta-intel.git
+    path: meta-intel
+    branch: scarthgap
+    commit: 5d153e35b4e752505efeae368f188fac5e31cf33
+    layers:
+      .:
+
+local_conf_header:
+  vendor-intel: |
+    PREFERRED_PROVIDER_virtual/kernel = "linux-yocto"
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland efi"
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-x86-64-extra"
