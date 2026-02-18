@@ -46,6 +46,9 @@ avocado_boot_init=\
     setenv bootargs console=${console} root=${rootdev} rootwait systemd.tpm2_wait=false;\
   else\
     setenv bootargs console=${console} rootwait systemd.tpm2_wait=false;\
+  fi;\
+  if test -n "${cmdline_extra}"; then\
+    setenv bootargs ${bootargs} ${cmdline_extra};\
   fi;
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}

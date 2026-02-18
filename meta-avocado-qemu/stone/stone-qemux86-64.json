@@ -13,12 +13,15 @@
       },
       "peridio": {
         "PERIDIO_VERSION": "${PERIDIO_VERSION}"
+      },
+      "cmdline": {
+        "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
-        "envs": ["device_info", "peridio"]
+        "envs": ["device_info", "peridio", "cmdline"]
       },
       "peridio": {
         "script": "stone-provision-peridio.sh",
