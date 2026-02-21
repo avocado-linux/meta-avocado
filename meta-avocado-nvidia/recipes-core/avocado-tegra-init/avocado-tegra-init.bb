@@ -18,10 +18,19 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/avocado-tegra-init.service \
         ${D}${systemd_system_unitdir}/avocado-tegra-init.service
+
+    # systemd 258+ uses initrd-preset/ instead of system-preset/ when
+    # /etc/initrd-release exists (i.e. in initramfs images).  The bbclass
+    # only generates system-preset/98-*.preset, so we must provide an
+    # initrd-preset file ourselves for the service to be enabled in initramfs.
+    install -d ${D}${systemd_unitdir}/initrd-preset
+    echo "enable avocado-tegra-init.service" \
+        > ${D}${systemd_unitdir}/initrd-preset/98-avocado-tegra-init.preset
 }
 
 SYSTEMD_SERVICE:${PN} = "avocado-tegra-init.service"
 SYSTEMD_AUTO_ENABLE = "enable"
 
 FILES:${PN} += "${sbindir}/avocado-tegra-init \
-                ${systemd_system_unitdir}/avocado-tegra-init.service"
+                ${systemd_system_unitdir}/avocado-tegra-init.service \
+                ${systemd_unitdir}/initrd-preset/98-avocado-tegra-init.preset"

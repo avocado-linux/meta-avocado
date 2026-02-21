@@ -1,7 +1,7 @@
 [Unit]
 Description=Detect and mount APP_<slot> partition on /sysroot
 DefaultDependencies=no
-After=systemd-udev-settle.service
+After=systemd-udev-trigger.service
 Before=initrd-root-fs.target
 
 [Service]
