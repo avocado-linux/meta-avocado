@@ -24,7 +24,7 @@
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-icam-540.squashfs",
+        "rootfs": "avocado-image-rootfs-icam-540.erofs-lz4",
         "var": "avocado-image-var-icam-540.btrfs",
         "initramfs": "avocado-image-initramfs-icam-540.cpio.gz",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-icam-540.cboot",

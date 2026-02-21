@@ -2,6 +2,7 @@ machine=avocado-qemux86-64
 initramfs_file=avocado-image-initramfs-qemux86-64.cpio.zst
 kernel_file=bzImage
 
+cmdline_extra=
 console=ttyS0
 devtype=mmc
 devnum=0
@@ -47,9 +48,7 @@ avocado_boot_init=\
   else\
     setenv bootargs console=${console} rootwait systemd.tpm2_wait=false;\
   fi;\
-  if test -n "${cmdline_extra}"; then\
-    setenv bootargs ${bootargs} ${cmdline_extra};\
-  fi;
+  setenv bootargs ${bootargs} ${cmdline_extra};
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
 load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} ${initramfs_file}

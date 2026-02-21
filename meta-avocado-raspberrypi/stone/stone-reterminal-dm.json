@@ -83,7 +83,7 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-reterminal-dm.squashfs",
+        "rootfs": "avocado-image-rootfs-reterminal-dm.erofs-lz4",
         "var": "avocado-image-var-reterminal-dm.btrfs"
       },
       "partitions": [

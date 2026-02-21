@@ -15,6 +15,8 @@ S = "${WORKDIR}/git"
 
 do_configure:append() {
     kernel_conf_variable BTRFS_FS y
+    kernel_conf_variable EROFS_FS y
+    kernel_conf_variable EROFS_FS_ZIP y
     kernel_conf_variable SQUASHFS y
     kernel_conf_variable SQUASHFS_ZSTD y
     kernel_conf_variable LOCALVERSION ""

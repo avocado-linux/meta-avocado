@@ -52,7 +52,7 @@
             "files": ["avocado-image-initramfs-qemuarm64.cpio.zst", "Image"]
           }
         },
-        "rootfs": "avocado-image-rootfs-qemuarm64.squashfs",
+        "rootfs": "avocado-image-rootfs-qemuarm64.erofs-lz4",
         "var": "avocado-image-var-qemuarm64.btrfs"
       },
       "partitions": [
@@ -89,13 +89,13 @@
         {
           "name": "rootfs-a",
           "image": "rootfs",
-          "size": 64,
+          "size": 128,
           "size_unit": "mebibytes"
         },
         {
           "name": "rootfs-b",
           "image": "",
-          "size": 64,
+          "size": 128,
           "size_unit": "mebibytes"
         },
         {

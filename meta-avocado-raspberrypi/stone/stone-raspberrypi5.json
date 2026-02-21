@@ -80,7 +80,7 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-raspberrypi5.squashfs",
+        "rootfs": "avocado-image-rootfs-raspberrypi5.erofs-lz4",
         "var": "avocado-image-var-raspberrypi5.btrfs"
       },
       "partitions": [

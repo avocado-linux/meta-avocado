@@ -11,7 +11,7 @@ IMAGE_TEGRAFLASH_KERNEL = "${DEPLOY_DIR_IMAGE}/${INITRD_IMAGE}-${MACHINE_SHORT_N
 
 # Removed tegraflash from ROOT_FSTYPES - BSP files are now deployed separately
 # via tegraflash-bsp recipe and referenced in stone manifests
-ROOT_FSTYPES = "squashfs"
+ROOT_FSTYPES = "erofs-lz4"
 
 # Ensure tegraflash-bsp is deployed for provisioning
 # Note: tegra-espimage and tos-optee are image/deploy recipes without do_populate_sysroot

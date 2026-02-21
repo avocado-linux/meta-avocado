@@ -8,6 +8,7 @@ PACKAGES = "${PN}"
 RDEPENDS:${PN} = " \
     ${VIRTUAL-RUNTIME_dev_manager} \
     os-release-initrd \
+    erofs-utils \
     squashfs-tools \
     e2fsprogs \
     e2fsprogs-e2fsck \

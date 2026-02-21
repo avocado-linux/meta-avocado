@@ -1,7 +1,7 @@
 inherit cargo cargo-update-recipe-crates systemd
 
 SRCBRANCH = "jschneck/tuf"
-SRCREV = "71670497cdaca446c7bea31b43a349dee0012155"
+SRCREV = "1b3e76d460b5effaca701c47b1b2b4076c5a63e3"
 SRC_URI = " \
     git://git@github.com/avocado-linux/avocado-control.git;protocol=https;nobranch=1;branch=${SRCBRANCH} \
     file://00-avocado.preset \

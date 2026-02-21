@@ -2,6 +2,7 @@ machine=avocado-qemuarm64
 initramfs_file=avocado-image-initramfs-qemuarm64.cpio.zst
 kernel_file=Image
 
+cmdline_extra=
 console=ttyAMA0
 devtype=mmc
 devnum=0
@@ -48,9 +49,7 @@ avocado_boot_init=\
   else\
     setenv bootargs console=${console} rootwait;\
   fi;\
-  if test -n "${cmdline_extra}"; then\
-    setenv bootargs ${bootargs} ${cmdline_extra};\
-  fi;
+  setenv bootargs ${bootargs} ${cmdline_extra};
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
 load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}

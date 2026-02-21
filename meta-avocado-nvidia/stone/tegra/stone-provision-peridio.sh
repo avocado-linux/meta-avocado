@@ -66,7 +66,7 @@ fi
 
 # Copy rootfs image
 if [ -f "${DATA_DIR}/${ROOTFS_IMAGE}" ]; then
-    cp "${DATA_DIR}/${ROOTFS_IMAGE}" "${SWU_DIR}/avocado-image-rootfs.squashfs"
+    cp "${DATA_DIR}/${ROOTFS_IMAGE}" "${SWU_DIR}/avocado-image-rootfs.erofs-lz4"
     echo "  Found rootfs: ${ROOTFS_IMAGE}"
 else
     echo "ERROR: Rootfs image not found: ${DATA_DIR}/${ROOTFS_IMAGE}"
@@ -89,7 +89,7 @@ software = {
 
     /* OS rootfs only */
     images: (
-        { filename = "avocado-image-rootfs.squashfs"; type = "raw"; device = "/tmp/target_rootfs"; }
+        { filename = "avocado-image-rootfs.erofs-lz4"; type = "raw"; device = "/tmp/target_rootfs"; }
     );
 
     /* Pre/post install scripts in running order */

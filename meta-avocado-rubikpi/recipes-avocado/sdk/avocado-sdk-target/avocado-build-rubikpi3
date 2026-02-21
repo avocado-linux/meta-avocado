@@ -94,7 +94,7 @@ if [ -f "${input_dir}/${ufs_image}" ]; then
         find "$tmp_dir" -name "$(basename "$rootfs_image")" -exec cp "${input_dir}/${rootfs_image}" {} \;
         
         # If no existing rootfs image found, copy it to the root of unpacked directory with the standard name
-        if [ ! -f "$tmp_dir/avocado-image-rootfs-rubikpi3.squashfs" ]; then
+        if [ ! -f "$tmp_dir/avocado-image-rootfs-rubikpi3.erofs-lz4" ]; then
             cp "${input_dir}/${rootfs_image}" "$tmp_dir/system.img"
         fi
     else

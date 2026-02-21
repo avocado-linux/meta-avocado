@@ -50,7 +50,7 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-imx93-frdm.squashfs",
+        "rootfs": "avocado-image-rootfs-imx93-frdm.erofs-lz4",
         "var": "avocado-image-var-imx93-frdm.btrfs"
       },
       "partitions": [

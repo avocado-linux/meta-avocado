@@ -72,7 +72,7 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-fr202.squashfs",
+        "rootfs": "avocado-image-rootfs-fr202.erofs-lz4",
         "var": "avocado-image-var-fr202.btrfs"
       },
       "partitions": [

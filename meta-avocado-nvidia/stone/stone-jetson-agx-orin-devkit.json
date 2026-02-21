@@ -24,7 +24,7 @@
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-jetson-agx-orin-devkit.squashfs",
+        "rootfs": "avocado-image-rootfs-jetson-agx-orin-devkit.erofs-lz4",
         "var": "avocado-image-var-jetson-agx-orin-devkit.btrfs",
         "initramfs": "avocado-image-initramfs-jetson-agx-orin-devkit.cpio.gz",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-orin-devkit.cboot",

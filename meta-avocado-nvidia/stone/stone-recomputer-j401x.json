@@ -21,7 +21,7 @@
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-recomputer-j401x.squashfs",
+        "rootfs": "avocado-image-rootfs-recomputer-j401x.erofs-lz4",
         "var": "avocado-image-var-recomputer-j401x.btrfs",
         "initramfs": "avocado-image-initramfs-recomputer-j401x.cpio.gz",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-recomputer-j401x.cboot",

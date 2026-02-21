@@ -34,6 +34,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-rsync \
     nativesdk-shadow \
     nativesdk-stone \
+    nativesdk-erofs-utils \
     nativesdk-squashfs-tools \
     nativesdk-systemd-systemctl \
     nativesdk-unfs3 \

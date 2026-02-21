@@ -22,7 +22,7 @@
       "partitions": [],
       "images": {
         "ufs": "avocado-image-rootfs-rubikpi3.ufs.tar.gz",
-        "rootfs": "avocado-image-rootfs-rubikpi3.squashfs",
+        "rootfs": "avocado-image-rootfs-rubikpi3.erofs-lz4",
         "var": "avocado-image-var-rubikpi3.btrfs"
       }
     }

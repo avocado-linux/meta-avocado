@@ -50,7 +50,7 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-imx8mp-evk.squashfs",
+        "rootfs": "avocado-image-rootfs-imx8mp-evk.erofs-lz4",
         "var": "avocado-image-var-imx8mp-evk.btrfs"
       },
       "partitions": [
