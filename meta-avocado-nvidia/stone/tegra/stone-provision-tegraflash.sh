@@ -211,9 +211,30 @@ fi
 temp_bin_dir=$(mktemp -d)
 trap "rm -rf '$temp_bin_dir'" EXIT
 
-# Create cpp wrapper using native SDK cpp
-# Tegraflash needs a native cpp to preprocess DTS files on the host
-SDK_HOST_CPP="${AVOCADO_SDK_ARCH:-$(uname -m)}-avocadosdk-linux-cpp"
+# Tegraflash needs a host-native cpp to preprocess DTS files.
+# The nativesdk cpp may not be installed, so fall back to the
+# cross-compiler cpp which works fine for preprocessing (target
+# architecture is irrelevant for text preprocessing).
+SDK_HOST_CPP=""
+_nativesdk_cpp="${AVOCADO_SDK_ARCH:-$(uname -m)}-avocadosdk-linux-cpp"
+if command -v "$_nativesdk_cpp" >/dev/null 2>&1; then
+    SDK_HOST_CPP="$_nativesdk_cpp"
+elif [ -n "${CC:-}" ]; then
+    _cc_bin="${CC%% *}"
+    _cross_cpp="${_cc_bin/gcc/cpp}"
+    if command -v "$_cross_cpp" >/dev/null 2>&1; then
+        SDK_HOST_CPP="$_cross_cpp"
+    fi
+fi
+if [ -z "$SDK_HOST_CPP" ] && command -v cpp >/dev/null 2>&1; then
+    SDK_HOST_CPP="cpp"
+fi
+if [ -z "$SDK_HOST_CPP" ]; then
+    echo "ERROR: No C preprocessor (cpp) found in PATH"
+    echo "Tegraflash requires cpp for DTS preprocessing."
+    echo "Ensure the SDK toolchain is properly configured."
+    exit 1
+fi
 
 cat > "$temp_bin_dir/cpp" << CPPWRAPPER
 #!/bin/bash
