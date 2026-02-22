@@ -42,8 +42,7 @@
               "bl2_bp_spi-avocado-rzv2n-sr-som.srec",
               "fip-avocado-rzv2n-sr-som.bin",
               "fip-avocado-rzv2n-sr-som.srec",
-              { "in": "r9a09g056n48-hummingboard-iiot.dtb", "out": "sentinel.dtb" },
-              "r9a09g056n48-rzv2n-evk.dtb",
+              "r9a09g056n48-hummingboard-iiot.dtb",
               "rzv2n-hummingboard-iiot-csi-camera-imx678.dtbo",
               "rzv2n-hummingboard-iiot-panel-dsi-WJ70N3TYJHMNG0.dtbo"
             ]
