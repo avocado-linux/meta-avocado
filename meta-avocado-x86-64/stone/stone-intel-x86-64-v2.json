@@ -24,7 +24,7 @@
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-intel-x86-64-v2.squashfs",
+        "rootfs": "avocado-image-rootfs-intel-x86-64-v2.erofs-lz4",
         "var": "avocado-image-var-intel-x86-64-v2.btrfs",
         "initramfs": "avocado-image-initramfs-intel-x86-64-v2.cpio.zst",
         "kernel": "bzImage",

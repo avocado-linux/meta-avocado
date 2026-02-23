@@ -48,7 +48,7 @@ mkdir -p "$SWU_DIR"
 echo "=== Collecting files for swupdate image ==="
 
 # Copy rootfs image
-cp "${DATA_DIR}/${ROOTFS_IMAGE}" "${SWU_DIR}/avocado-image-rootfs.squashfs"
+cp "${DATA_DIR}/${ROOTFS_IMAGE}" "${SWU_DIR}/avocado-image-rootfs.erofs-lz4"
 echo "  Rootfs: ${ROOTFS_IMAGE}"
 
 # Copy pre/post install scripts from deploy directory
@@ -79,7 +79,7 @@ software = {
 
     /* OS rootfs - written to inactive A/B partition */
     images: (
-        { filename = "avocado-image-rootfs.squashfs"; type = "raw"; device = "/tmp/target_rootfs"; }
+        { filename = "avocado-image-rootfs.erofs-lz4"; type = "raw"; device = "/tmp/target_rootfs"; }
     );
 
     /* Pre/post install scripts for A/B partition switching */
