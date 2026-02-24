@@ -7,28 +7,21 @@ header:
 # Usage: kas build machine.yml:ci/mirrors.yml
 # This overlays the CI mirror configuration on top of any machine config
 
+env:
+  SOURCE_MIRROR_URL: "file:///mnt/src/cache/downloads"
+  SSTATE_MIRROR_URL: "file:///mnt/src/cache/sstate/PATH;downloadfilename=PATH"
+  CI_MIRROR_ONLY: "0"
+
 local_conf_header:
   ci-mirrors: |
-    # CI-specific configuration for parallel builds
-    # Use individual build directories instead of shared ones to prevent locking
-
-    # Set download and sstate directories to build-specific locations
     DL_DIR = "${TMPDIR}/downloads"
     SSTATE_DIR = "${TMPDIR}/sstate-cache"
 
-    # Configure mirrors to read from shared cache locations
-    # These can be set via environment variables or use defaults
-    SOURCE_MIRROR_URL ?= "${@os.getenv('SOURCE_MIRROR_URL', 'file:///home/runner/_cache/downloads')}"
-
-    # Configure premirrors with proper paired syntax (pattern replacement)
+    SOURCE_MIRROR_URL ?= "${@os.getenv('SOURCE_MIRROR_URL', 'file:///mnt/src/cache/downloads')}"
     PREMIRRORS:prepend = "git://.*/.* ${SOURCE_MIRROR_URL} ftp://.*/.* ${SOURCE_MIRROR_URL} http://.*/.* ${SOURCE_MIRROR_URL} https://.*/.* ${SOURCE_MIRROR_URL} "
 
-    # Configure sstate mirrors with proper syntax
-    SSTATE_MIRRORS ?= "file://.* ${@os.getenv('SSTATE_MIRROR_URL', 'file:///home/runner/_cache/sstate/PATH;downloadfilename=PATH')}"
+    SSTATE_MIRRORS ?= "file://.* ${@os.getenv('SSTATE_MIRROR_URL', 'file:///mnt/src/cache/sstate/PATH;downloadfilename=PATH')}"
 
-    # Optional: Only use mirrors in CI (no upstream fetching)
-    # Set CI_MIRROR_ONLY=1 environment variable to enable
     BB_FETCH_PREMIRRORONLY = "${@'1' if os.getenv('CI_MIRROR_ONLY', '0') == '1' else '0'}"
 
-    # Ensure we can write to our build-specific directories
     BB_DISKMON_DIRS = "STOPTASKS,${TMPDIR},1G,100K STOPTASKS,${DL_DIR},1G,100K STOPTASKS,${SSTATE_DIR},1G,100K STOPTASKS,/tmp,100M,100K HALT,${TMPDIR},100M,1K HALT,${DL_DIR},100M,1K HALT,${SSTATE_DIR},100M,1K HALT,/tmp,10M,1K"
