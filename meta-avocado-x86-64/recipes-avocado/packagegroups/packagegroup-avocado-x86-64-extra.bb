@@ -24,6 +24,11 @@ WIFI_REALTEK = " \
   linux-firmware-rtl8821 \
 "
 
+# Bluetooth firmware - Intel
+BT_FIRMWARE = " \
+  linux-firmware-ibt \
+"
+
 # GPU firmware - Intel
 GPU_FIRMWARE = " \
   linux-firmware-i915 \
@@ -32,6 +37,13 @@ GPU_FIRMWARE = " \
 # CPU microcode - Intel
 CPU_MICROCODE = " \
   intel-microcode \
+"
+
+# WiFi and Bluetooth userspace tools
+WIRELESS_TOOLS = " \
+  wpa-supplicant \
+  iw \
+  bluez5 \
 "
 
 # x86-64 hardware management tools
@@ -48,8 +60,10 @@ RDEPENDS:${PN} = " \
   ${WIFI_INTEL} \
   ${WIFI_ATHEROS} \
   ${WIFI_REALTEK} \
+  ${BT_FIRMWARE} \
   ${GPU_FIRMWARE} \
   ${CPU_MICROCODE} \
+  ${WIRELESS_TOOLS} \
   ${HARDWARE_TOOLS} \
   packagegroup-avocado-nvidia-gpu \
   kernel-modules \

@@ -48,18 +48,25 @@ done
 # Partition 3: recovery      (FAT32, 256 MiB) - Recovery boot
 # Partition 4: rootfs-a      (squashfs)       - sized to image + padding
 # Partition 5: rootfs-b      (squashfs)       - same size as rootfs-a
-# Partition 6: var           (btrfs)          - 512 MiB minimum, expandable
+# Partition 6: var           (btrfs)          - sized to image, 512 MiB minimum
 # =============================================================================
 
 ESP_SIZE_MIB=256
 RECOVERY_SIZE_MIB=256
-VAR_SIZE_MIB=512
 GPT_START_MIB=1
 
 # Calculate rootfs partition size (round up to next MiB + 16 MiB padding)
 ROOTFS_FILE="${DATA_DIR}/${ROOTFS_IMAGE}"
 ROOTFS_BYTES=$(stat -c%s "$ROOTFS_FILE")
 ROOTFS_SIZE_MIB=$(( (ROOTFS_BYTES / 1048576) + 16 ))
+
+# Calculate var partition size from btrfs image (round up to next MiB + 16 MiB padding, 512 MiB minimum)
+VAR_FILE="${DATA_DIR}/${VAR_IMAGE}"
+VAR_BYTES=$(stat -c%s "$VAR_FILE")
+VAR_SIZE_MIB=$(( (VAR_BYTES / 1048576) + 16 ))
+if [ "$VAR_SIZE_MIB" -lt 512 ]; then
+    VAR_SIZE_MIB=512
+fi
 
 # Calculate total image size
 TOTAL_MIB=$(( GPT_START_MIB + ESP_SIZE_MIB + ESP_SIZE_MIB + RECOVERY_SIZE_MIB + ROOTFS_SIZE_MIB + ROOTFS_SIZE_MIB + VAR_SIZE_MIB + 1 ))
