@@ -1,0 +1,28 @@
+From 63d6a8107dd80dd38d1e629b49929194e9978548 Mon Sep 17 00:00:00 2001
+From: Beniamin Sandu <b.sandu@peridio.com>
+Date: Sun, 1 Mar 2026 15:26:47 +0200
+Subject: [PATCH] dts/renesas: enable mali gpu
+
+Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+---
+ .../boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi    | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi b/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi
+index 6ca157fab123..497bc4e85393 100644
+--- a/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi
++++ b/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi
+@@ -580,4 +580,8 @@ channel1 {
+ 		renesas,channel = <1>;
+ 		status = "okay";
+ 	};
+-};
+\ No newline at end of file
++};
++
++&gpu {
++	status = "okay";
++};
+-- 
+2.48.1
+
