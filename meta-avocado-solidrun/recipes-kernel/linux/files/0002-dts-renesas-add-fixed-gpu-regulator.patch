@@ -1,0 +1,42 @@
+From 9e1feb7925ddf495794139085dd9b5a63c06ac68 Mon Sep 17 00:00:00 2001
+From: Beniamin Sandu <b.sandu@peridio.com>
+Date: Sun, 1 Mar 2026 16:26:46 +0200
+Subject: [PATCH] dts/renesas: add fixed gpu regulator
+
+Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+---
+ .../dts/renesas/rzv2n-hummingboard-iiot-common.dtsi   | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi b/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi
+index 497bc4e85393..9c30bb102bd2 100644
+--- a/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi
++++ b/arch/arm64/boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi
+@@ -213,6 +213,14 @@ m2-m-wakeup {
+ 			wakeup-source;
+ 		};
+ 	};
++
++	reg_mali: regulator-mali {
++			compatible = "regulator-fixed";
++			regulator-name = "mali";
++			regulator-min-microvolt = <800000>;
++			regulator-max-microvolt = <800000>;
++			regulator-always-on;
++	};
+ };
+ 
+ &pinctrl {
+@@ -582,6 +590,9 @@ channel1 {
+ 	};
+ };
+ 
++
++
+ &gpu {
+ 	status = "okay";
++	mali-supply = <&reg_mali>;
+ };
+-- 
+2.48.1
+
