@@ -1,3 +1,5 @@
+PREFERRED_VERSION_linux-raspberrypi ?= "6.12.%"
+
 UBOOT_ENV_SIZE = "0x20000"
 
 IMAGE_BOOT_FILES:append = " avocado-image-initramfs-${MACHINE}.cpio.zst;avocado-initramfs.cpio.zst"
