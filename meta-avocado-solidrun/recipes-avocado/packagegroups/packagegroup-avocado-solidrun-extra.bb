@@ -40,7 +40,12 @@ DISPLAY_PACKAGES = "weston \
     libdrm-tests \
     wayland-utils \
     adwaita-icon-theme \
-    xcursor-transparent-theme"
+    xcursor-transparent-theme \
+    mesa \
+    mesa-megadriver \
+    mesa-demos \
+    kmscube \
+    glmark2"
 
 # Camera and V4L2 support
 CAMERA_PACKAGES = "v4l-utils \
