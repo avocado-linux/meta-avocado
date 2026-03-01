@@ -1,0 +1,46 @@
+From 174b715391c4e571ff39174174f315bbec12738b Mon Sep 17 00:00:00 2001
+From: Biju Das <biju.das.jz@bp.renesas.com>
+Date: Fri, 23 Feb 2024 13:34:33 +0000
+Subject: [PATCH] gallium: Add Renesas rzg2l-du DRM entry point
+
+RZ/{G2L,G2LC,V2L} SoCs implements an ARM Mali-G31[1]. Add an entry point
+for Renesas rzg2l-du DRM vendor, so mesa can be used with it.
+
+Upstream-Status: Pending
+
+[1] https://lore.kernel.org/all/20211208104026.421-3-biju.das.jz@bp.renesas.com/
+
+Signed-off-by: Biju Das <biju.das.jz@bp.renesas.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/27763>
+---
+ src/gallium/targets/dri/meson.build | 1 +
+ src/gallium/targets/dri/target.c    | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/src/gallium/targets/dri/meson.build b/src/gallium/targets/dri/meson.build
+index e393407863868..43339eebf6460 100644
+--- a/src/gallium/targets/dri/meson.build
++++ b/src/gallium/targets/dri/meson.build
+@@ -95,6 +95,7 @@ foreach d : [[with_gallium_kmsro, [
+                'rcar-du_dri.so',
+                'repaper_dri.so',
+                'rockchip_dri.so',
++               'rzg2l-du_dri.so',
+                'st7586_dri.so',
+                'st7735r_dri.so',
+                'sti_dri.so',
+diff --git a/src/gallium/targets/dri/target.c b/src/gallium/targets/dri/target.c
+index e0abfbaaa3e3e..afb3d348e32d2 100644
+--- a/src/gallium/targets/dri/target.c
++++ b/src/gallium/targets/dri/target.c
+@@ -125,6 +125,7 @@ DEFINE_LOADER_DRM_ENTRYPOINT(pl111)
+ DEFINE_LOADER_DRM_ENTRYPOINT(rcar_du)
+ DEFINE_LOADER_DRM_ENTRYPOINT(repaper)
+ DEFINE_LOADER_DRM_ENTRYPOINT(rockchip)
++DEFINE_LOADER_DRM_ENTRYPOINT(rzg2l_du)
+ DEFINE_LOADER_DRM_ENTRYPOINT(st7586)
+ DEFINE_LOADER_DRM_ENTRYPOINT(st7735r)
+ DEFINE_LOADER_DRM_ENTRYPOINT(sti)
+-- 
+GitLab
+

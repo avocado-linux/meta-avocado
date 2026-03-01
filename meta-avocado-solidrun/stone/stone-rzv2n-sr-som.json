@@ -35,7 +35,7 @@
             "files": [
               { "in": "Image.gz", "out": "Image" },
               "avocado-image-initramfs-rzv2n-sr-som.cpio.zst",
-              "Flash_Writer_SCIF_RZV2N_DEV_LPDDR4X.mot",
+              "Flash_Writer_SCIF_RZV2N_SR_SOM_8GB_LPDDR4X.mot",
               "bl2_bp_mmc-avocado-rzv2n-sr-som.bin",
               "bl2_bp_mmc-avocado-rzv2n-sr-som.srec",
               "bl2_bp_spi-avocado-rzv2n-sr-som.bin",
