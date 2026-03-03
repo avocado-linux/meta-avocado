@@ -7,6 +7,7 @@ SRC_URI = " \
     file://00-avocado.preset \
     file://avocado-extension.service \
     file://avocado-extension-initrd.service \
+    file://sshdgenkeys-after-extensions.conf \
 "
 
 require ${BPN}-crates.inc
@@ -31,6 +32,7 @@ SYSTEMD_AUTO_ENABLE = "enable"
 
 FILES:${PN} += " \
     ${systemd_system_unitdir}/avocado-extension-initrd.service \
+    ${systemd_system_unitdir}/sshdgenkeys.service.d/avocado.conf \
     ${systemd_unitdir}/initrd-preset/98-avocadoctl.preset \
 "
 
@@ -38,6 +40,10 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/avocado-extension.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${WORKDIR}/avocado-extension-initrd.service ${D}${systemd_system_unitdir}/
+
+    # Ensure sshdgenkeys runs after extensions are merged (openssh needs /usr overlay)
+    install -d ${D}${systemd_system_unitdir}/sshdgenkeys.service.d
+    install -m 0644 ${WORKDIR}/sshdgenkeys-after-extensions.conf ${D}${systemd_system_unitdir}/sshdgenkeys.service.d/avocado.conf
 
     install -d ${D}${sysconfdir}/systemd/system-preset
     install -m 0644 ${WORKDIR}/00-avocado.preset ${D}${sysconfdir}/systemd/system-preset/00-avocado.preset
