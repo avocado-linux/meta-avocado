@@ -177,7 +177,7 @@ if command -v mcopy >/dev/null 2>&1; then
 title   Avocado OS
 linux   /bzImage
 initrd  /initramfs.cpio.zst
-options root=PARTLABEL=rootfs-a ro earlycon=efifb console=ttyS0,115200n8 console=tty0 nomodeset keep_bootcon
+options root=PARTLABEL=rootfs-a ro console=ttyS0,115200n8 console=tty0
 ENTRY
     mcopy -i "$ESP_IMG" "$ENTRY_CONF" "::loader/entries/avocado.conf"
     rm -f "$ENTRY_CONF"
