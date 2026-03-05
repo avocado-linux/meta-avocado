@@ -14,6 +14,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-coreutils \
   nativesdk-cpio \
   nativesdk-diffutils \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', 'nativesdk-docker', '', d)} \
   nativesdk-elfutils \
   nativesdk-elixir \
   nativesdk-erlang \

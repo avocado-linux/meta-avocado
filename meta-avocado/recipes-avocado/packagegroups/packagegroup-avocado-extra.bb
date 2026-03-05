@@ -6,60 +6,63 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  avahi-daemon \
   avocado-hitl \
   avocado-img-bootfiles \
   avocado-img-initramfs \
   avocado-img-rootfs \
   avocado-img-var \
   avocado-pkg-rootfs \
-  openssh \
-  openssh-sshd \
-  openssh-sftp-server \
-  vim \
-  strace \
-  lsof \
-  procps \
-  tcpdump \
-  pstree \
-  ltrace \
-  iproute2 \
-  htop \
-  cryptoauthlib \
+  ca-certificates \
+  chrony \
+  cifs-utils \
   cockpit \
+  coreutils \
+  cryptoauthlib \
   dtc \
-  peridiod \
+  ethtool \
   fwup \
-  parted \
-  rsync \
-  avahi-daemon \
-  libnss-mdns \
+  glibc-utils \
+  htop \
   i2c-tools \
   iperf3 \
-  p11-kit \
-  ca-certificates \
-  ethtool \
-  livebook \
-  v4l-utils \
-  libv4l \
-  nodejs \
-  opencv \
-  usbutils \
+  iproute2 \
+  less \
   libgpiod \
   libgpiod-tools \
+  libnss-mdns \
+  libv4l \
+  libwebsockets \
+  livebook \
   logrotate \
-  coreutils \
-  glibc-utils \
+  lsof \
+  ltrace \
+  net-tools \
+  nodejs \
+  ntfs-3g-ntfsprogs \
+  opencv \
+  openssh \
+  openssh-sftp-server \
+  openssh-sshd \
+  p11-kit \
+  parted \
+  peridiod \
+  picocom \
+  plymouth \
+  procps \
+  pstree \
   qemu-user-static \
   qemu-user-static-binfmt \
-  tio \
-  sscg \
   redis \
-  net-tools \
-  cifs-utils \
-  ntfs-3g-ntfsprogs \
-  less \
-  picocom \
+  rsync \
+  sscg \
+  strace \
+  tcpdump \
+  tio \
+  usbutils \
   uv \
+  v4l-utils \
+  vim \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
