@@ -4,3 +4,4 @@ systemd-timesync:x:994:
 systemd-resolve:x:995:
 systemd-journal:x:996:
 messagebus:x:999:
+avocado:x:997:

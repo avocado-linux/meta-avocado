@@ -1,7 +1,7 @@
-inherit cargo cargo-update-recipe-crates systemd
+inherit cargo cargo-update-recipe-crates systemd useradd
 
 SRCBRANCH = "main"
-SRCREV = "d9733f9b51d073b1050442cedd17bba0f7c9fe95"
+SRCREV = "28592eba69af788aa94e65d61040d84b47d38137"
 SRC_URI = " \
     git://git@github.com/avocado-linux/avocado-control.git;protocol=https;nobranch=1;branch=${SRCBRANCH} \
     file://00-avocado.preset \
@@ -27,19 +27,27 @@ LICENSE = "Apache-2.0"
 include avocadoctl-${PV}.inc
 include avocadoctl.inc
 
-SYSTEMD_SERVICE:${PN} = "avocado-extension.service"
+SYSTEMD_SERVICE:${PN} = "avocado-extension.service avocadoctl.socket avocadoctl.service"
 SYSTEMD_AUTO_ENABLE = "enable"
+
+USERADD_PACKAGES = "${PN}"
+GROUPADD_PARAM:${PN} = "--system --gid 997 avocado"
+USERADD_PARAM:${PN} = "--system --uid 998 -g avocado --home-dir / --no-create-home --shell /sbin/nologin avocado"
 
 FILES:${PN} += " \
     ${systemd_system_unitdir}/avocado-extension-initrd.service \
     ${systemd_system_unitdir}/sshdgenkeys.service.d/avocado.conf \
     ${systemd_unitdir}/initrd-preset/98-avocadoctl.preset \
+    ${systemd_system_unitdir}/avocadoctl.service \
+    ${systemd_system_unitdir}/avocadoctl.socket \
 "
 
 do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/avocado-extension.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${WORKDIR}/avocado-extension-initrd.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${S}/systemd/avocadoctl.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${S}/systemd/avocadoctl.socket ${D}${systemd_system_unitdir}/
 
     # Ensure sshdgenkeys runs after extensions are merged (openssh needs /usr overlay)
     install -d ${D}${systemd_system_unitdir}/sshdgenkeys.service.d
@@ -53,7 +61,7 @@ do_install:append() {
     # only generates system-preset/98-*.preset, so we must provide an
     # initrd-preset file ourselves for the service to be enabled in initramfs.
     install -d ${D}${systemd_unitdir}/initrd-preset
-    echo "enable avocado-extension-initrd.service" \
+    printf "enable avocadoctl.socket\nenable avocado-extension-initrd.service\n" \
         > ${D}${systemd_unitdir}/initrd-preset/98-avocadoctl.preset
 }
 
