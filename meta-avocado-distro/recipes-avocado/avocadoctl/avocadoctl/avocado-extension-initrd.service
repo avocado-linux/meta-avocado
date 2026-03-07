@@ -6,7 +6,8 @@ ConditionDirectoryNotEmpty=|/var/lib/avocado
 ConditionCapability=CAP_SYS_ADMIN
 
 DefaultDependencies=no
-After=local-fs.target
+Requires=avocadoctl.socket
+After=local-fs.target avocadoctl.socket
 Before=sysinit.target systemd-tmpfiles-setup.service systemd-userdb-load-credentials.service
 Conflicts=shutdown.target initrd-switch-root.target
 Before=shutdown.target initrd-switch-root.target
@@ -14,6 +15,7 @@ Before=shutdown.target initrd-switch-root.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+TimeoutStartSec=30
 ExecStart=avocadoctl refresh
 ExecReload=avocadoctl refresh
 ExecStop=avocadoctl unmerge
