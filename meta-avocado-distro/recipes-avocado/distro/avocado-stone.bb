@@ -50,7 +50,7 @@ do_compile[depends] += "virtual/kernel:do_deploy"
 
 do_deploy[nostamp] = "1"
 do_stone_validate[nostamp] = "1"
-do_stone_create[nostamp] = "1"
+do_stone_bundle[nostamp] = "1"
 do_stone_provision[nostamp] = "1"
 
 do_configure() {
@@ -95,13 +95,14 @@ do_stone_validate() {
         -i "${DEPLOY_DIR_IMAGE}"
 }
 
-do_stone_create() {
+do_stone_bundle() {
     stone \
-        create \
+        bundle \
         --os-release "${DEPLOY_DIR_IMAGE}/os-release" \
         -m "${DEPLOY_DIR_IMAGE}/stone-${MACHINE_SHORT_NAME}.json" \
         -i "${DEPLOY_DIR_IMAGE}" \
-        -o "${DEPLOY_DIR}/stone"
+        -o "${DEPLOY_DIR}/stone/os-bundle.aos" \
+        --build-dir "${DEPLOY_DIR}/stone"
 }
 
 do_stone_provision() {
@@ -117,10 +118,10 @@ addtask deploy after do_compile before do_build
 # Note: do_package is noexec so we can't use "before do_package"
 # Instead, chain tasks properly and make do_build depend on them
 addtask stone_validate after do_deploy
-addtask stone_create after do_stone_validate
-addtask stone_provision after do_stone_create
+addtask stone_bundle after do_stone_validate
+addtask stone_provision after do_stone_bundle
 
-# By default, do_build depends on do_stone_create (validate + create)
+# By default, do_build depends on do_stone_bundle (validate + bundle)
 # Machine layers can override this to only run validation
-STONE_BUILD_TASK ?= "do_stone_create"
+STONE_BUILD_TASK ?= "do_stone_bundle"
 do_build[depends] += "${PN}:${STONE_BUILD_TASK}"
