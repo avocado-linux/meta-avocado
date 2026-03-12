@@ -19,6 +19,7 @@ RDEPENDS:${PN} = " \
   fuse-overlayfs \
   ganesha \
   util-linux-mount \
+  ldconfig \
   ${VIRTUAL-RUNTIME_base-utils} \
   ${VIRTUAL-RUNTIME_base-utils-syslog} \
   bzip2 \

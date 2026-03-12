@@ -14,4 +14,7 @@ local_conf_header:
   vendor-intel: |
     PREFERRED_PROVIDER_virtual/kernel = "linux-yocto"
     DISTRO_FEATURES_EXTRA:append = " opengl wayland efi"
+
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-x86-64-rootfs "
+    INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-x86-64-initramfs"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-x86-64-extra"

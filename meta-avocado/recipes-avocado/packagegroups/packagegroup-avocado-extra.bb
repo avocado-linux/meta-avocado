@@ -13,6 +13,7 @@ RDEPENDS:${PN} = " \
   avocado-img-rootfs \
   avocado-img-var \
   avocado-pkg-rootfs \
+  avocado-pkg-initramfs \
   ca-certificates \
   chrony \
   cifs-utils \
