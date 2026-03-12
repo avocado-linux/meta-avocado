@@ -30,6 +30,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-grep \
   nativesdk-gzip \
   nativesdk-jq \
+  nativesdk-kabtool \
   nativesdk-kmod \
   nativesdk-less \
   nativesdk-libgfortran \
@@ -37,6 +38,8 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-ncurses \
   nativesdk-nodejs \
   nativesdk-nodejs-npm \
+  nativesdk-openjdk-17-jdk \
+  nativesdk-openjdk-17-jre \
   nativesdk-openssh-scp \
   nativesdk-openssh-ssh \
   nativesdk-openssl \
@@ -142,7 +145,6 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-util-linux-zramctl \
   nativesdk-uv \
   nativesdk-xz \
-  nativesdk-openjdk-17-jdk \
   packagegroup-rust-cross-canadian-${MACHINE} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
