@@ -31,6 +31,14 @@ RECROOTFSSIZE ?= "314572800"
 ESP_FILE ?= "esp.img"
 DATAFILE ??= ""
 
+# Compute BOOTCONTROL_OVERLAYS the same way image_types_tegra.bbclass does
+# This is a comma-separated list derived from TEGRA_BOOTCONTROL_OVERLAYS
+def tegraflash_bsp_bootcontrol_overlays(d):
+    overlays = d.getVar('TEGRA_BOOTCONTROL_OVERLAYS').split()
+    return ','.join(overlays)
+
+TEGRAFLASH_BSP_BOOTCONTROL_OVERLAYS = "${@tegraflash_bsp_bootcontrol_overlays(d)}"
+
 # Depend on tegra-bootfiles and other packages to get access to BSP files
 DEPENDS = "tegra-bootfiles tegra-binaries tegra-storage-layout nvidia-kernel-oot tegra-flashvars"
 
@@ -61,6 +69,13 @@ do_deploy() {
         bbnote "Copying all files from staging tegraflash directory"
         cp -a ${STAGING_DATADIR}/tegraflash/. ${DEPLOYDIR}/tegraflash-bsp/
         bbnote "Copied $(find ${DEPLOYDIR}/tegraflash-bsp -maxdepth 1 -type f | wc -l) files from staging"
+    fi
+
+    # Append BOOTCONTROL_OVERLAYS to flashvars (mirrors image_types_tegra.bbclass behavior)
+    # This is required for tegra-flash-helper.sh to include the correct DTB overlays,
+    # including L4TConfiguration-RootfsRedundancyLevelABEnable.dtbo for rootfs A/B support
+    if [ -f ${DEPLOYDIR}/tegraflash-bsp/flashvars ]; then
+        sed -i -e "\$a\BOOTCONTROL_OVERLAYS=\"${TEGRAFLASH_BSP_BOOTCONTROL_OVERLAYS}\"" ${DEPLOYDIR}/tegraflash-bsp/flashvars
     fi
     
     # Copy kernel DTBs and DTBOs from nvidia-kernel-oot

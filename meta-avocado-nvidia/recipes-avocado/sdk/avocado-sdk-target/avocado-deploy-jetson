@@ -5,7 +5,7 @@ set -e
 hook="avocado-deploy"
 target="$AVOCADO_TARGET"
 
-runtime="$AVOCADO_RUNTIME" 
+runtime="$AVOCADO_RUNTIME"
 machine="$AVOCADO_DEPLOY_MACHINE"
 
 ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"

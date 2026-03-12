@@ -208,11 +208,10 @@ disconnect_usb_device() {
     # Wait a moment for the disconnect to be processed
     sleep 1
     
-    # Set authorized back to 1 (reconnect)
-    echo 1 > "$authorized_path" 2>/dev/null || {
-        echo "WARN: Failed to reauthorize USB device $usb_instance (this may be expected)" >&2
-        return 0  # Still return success as disconnect was achieved
-    }
+    # Set authorized back to 1 (reconnect) - path may no longer exist after deauthorization
+    if [ -e "$authorized_path" ]; then
+        echo 1 > "$authorized_path" 2>/dev/null || true
+    fi
     
     echo "USB device $usb_instance disconnected and reconnected" >&2
     return 0
@@ -955,11 +954,11 @@ if [ -n "$usb_instance" ] || [ -n "$session_id" ]; then
     echo "Disconnecting USB device at end of script..." | tee -a "$logfile"
     
     # Try to rescan by session_id first to get current USB instance
-    local final_usb_instance="$usb_instance"
+    final_usb_instance="$usb_instance"
     if [ -n "$session_id" ]; then
-        local rescanned_dev=$(find_device_by_session "$session_id")
+        rescanned_dev=$(find_device_by_session "$session_id")
         if [ -n "$rescanned_dev" ]; then
-            local rescanned_instance=$(find_usb_instance_from_device "$rescanned_dev")
+            rescanned_instance=$(find_usb_instance_from_device "$rescanned_dev")
             if [ -n "$rescanned_instance" ]; then
                 echo "Device rescanned to $rescanned_dev with USB instance $rescanned_instance" | tee -a "$logfile"
                 final_usb_instance="$rescanned_instance"

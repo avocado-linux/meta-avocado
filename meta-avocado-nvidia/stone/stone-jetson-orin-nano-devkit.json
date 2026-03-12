@@ -2,7 +2,29 @@
   "runtime": {
     "platform": "avocado-jetson-orin-nano-devkit",
     "architecture": "arm64",
-    "provision_default": "tegraflash"
+    "provision_default": "tegraflash",
+    "update_strategy": "tegra-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "command",
+      "command": ["nvbootctrl", "get-current-slot"]
+    },
+    "os_artifacts": {
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] }
+    },
+    "activate": [
+      {
+        "type": "command",
+        "command": ["nvbootctrl", "set-active-boot-slot", "{inactive_slot}"]
+      }
+    ],
+    "rollback": [
+      {
+        "type": "command",
+        "command": ["nvbootctrl", "set-active-boot-slot", "{previous_slot}"]
+      }
+    ]
   },
   "provision": {
     "profiles": {
