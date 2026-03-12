@@ -1,7 +1,7 @@
 inherit cargo cargo-update-recipe-crates
 
-SRCBRANCH = "main"
-SRCREV = "c631debab0d864f47d5fbf70d52c3ccb91227729"
+SRCBRANCH = "rel/2.0.0"
+SRCREV = "7f85a856f1085760805a38724f0b1055ab3dbb26"
 SRC_URI = "git://git@github.com/avocado-linux/stone.git;protocol=https;nobranch=1;branch=${SRCBRANCH}"
 
 require ${BPN}-crates.inc
