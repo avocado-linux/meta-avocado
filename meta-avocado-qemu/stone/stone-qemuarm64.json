@@ -67,7 +67,7 @@
             "files": ["avocado-image-initramfs-qemuarm64.cpio.zst", "Image"]
           }
         },
-        "rootfs": "avocado-image-rootfs-qemuarm64.erofs.lz4",
+        "rootfs": "avocado-image-rootfs-qemuarm64.erofs-lz4",
         "var": "avocado-image-var-qemuarm64.btrfs"
       },
       "partitions": [
