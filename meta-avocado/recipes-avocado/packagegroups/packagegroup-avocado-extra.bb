@@ -28,6 +28,7 @@ RDEPENDS:${PN} = " \
   i2c-tools \
   iperf3 \
   iproute2 \
+  kabtool \
   less \
   libgpiod \
   libgpiod-tools \
