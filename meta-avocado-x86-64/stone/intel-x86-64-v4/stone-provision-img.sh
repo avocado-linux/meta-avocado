@@ -2,8 +2,8 @@
 
 # Disk Image Provisioning Script for Intel x86-64
 #
-# Creates a complete GPT disk image with EFI System Partition,
-# A/B rootfs partitions, recovery, and data partition.
+# Creates a complete GPT disk image from the stone manifest partition table.
+# Partition layout, sizes, types, and UUIDs are all read from the manifest JSON.
 #
 # Environment variables provided by avocado/stone:
 # AVOCADO_STONE_MANIFEST  - path to manifest JSON file
@@ -19,64 +19,83 @@ MANIFEST="$AVOCADO_STONE_MANIFEST"
 DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 
-# Read image filenames from manifest
-ROOTFS_IMAGE=$(jq -r '.storage_devices.rootdisk.images.rootfs' "$MANIFEST")
-VAR_IMAGE=$(jq -r '.storage_devices.rootdisk.images.var' "$MANIFEST")
-INITRAMFS_IMAGE=$(jq -r '.storage_devices.rootdisk.images.initramfs' "$MANIFEST")
-KERNEL_IMAGE=$(jq -r '.storage_devices.rootdisk.images.kernel' "$MANIFEST")
-BOOTLOADER_IMAGE=$(jq -r '.storage_devices.rootdisk.images.bootloader' "$MANIFEST")
+# Read platform and image references from manifest
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
+BLOCK_SIZE=$(jq -r '.storage_devices.rootdisk.block_size // 512' "$MANIFEST")
 
 echo "=== Creating disk image for ${PLATFORM} ==="
 echo "  Data directory: ${DATA_DIR}"
 echo "  Build directory: ${BUILD_DIR}"
 
-# Validate required files exist
-for img in "$ROOTFS_IMAGE" "$VAR_IMAGE" "$INITRAMFS_IMAGE" "$KERNEL_IMAGE" "$BOOTLOADER_IMAGE"; do
-    if [ ! -f "${DATA_DIR}/${img}" ]; then
-        echo "ERROR: Required image not found: ${DATA_DIR}/${img}"
-        exit 1
-    fi
-done
-
 # =============================================================================
-# Partition layout (all sizes in MiB)
+# Read partition table from manifest
 # =============================================================================
-# GPT overhead: 1 MiB at start
-# Partition 1: ESP / boot-a  (FAT32, 256 MiB) - EFI System Partition
-# Partition 2: boot-b        (FAT32, 256 MiB) - A/B standby boot
-# Partition 3: recovery      (FAT32, 256 MiB) - Recovery boot
-# Partition 4: rootfs-a      (squashfs)       - sized to image + padding
-# Partition 5: rootfs-b      (squashfs)       - same size as rootfs-a
-# Partition 6: var           (btrfs)          - sized to image, 512 MiB minimum
-# =============================================================================
+# Each partition has: name, size, size_unit, partition_type, partition_uuid (optional),
+# offset/offset_unit (optional), image (optional), expand (optional)
 
-ESP_SIZE_MIB=256
-RECOVERY_SIZE_MIB=256
-GPT_START_MIB=1
-
-# Calculate rootfs partition size (round up to next MiB + 16 MiB padding)
-ROOTFS_FILE="${DATA_DIR}/${ROOTFS_IMAGE}"
-ROOTFS_BYTES=$(stat -c%s "$ROOTFS_FILE")
-ROOTFS_SIZE_MIB=$(( (ROOTFS_BYTES / 1048576) + 16 ))
-
-# Calculate var partition size from btrfs image (round up to next MiB + 16 MiB padding, 512 MiB minimum)
-VAR_FILE="${DATA_DIR}/${VAR_IMAGE}"
-VAR_BYTES=$(stat -c%s "$VAR_FILE")
-VAR_SIZE_MIB=$(( (VAR_BYTES / 1048576) + 16 ))
-if [ "$VAR_SIZE_MIB" -lt 512 ]; then
-    VAR_SIZE_MIB=512
+NUM_PARTITIONS=$(jq '.storage_devices.rootdisk.partitions | length' "$MANIFEST")
+if [ "$NUM_PARTITIONS" -eq 0 ]; then
+    echo "ERROR: No partitions defined in manifest"
+    exit 1
 fi
 
-# Calculate total image size
-TOTAL_MIB=$(( GPT_START_MIB + ESP_SIZE_MIB + ESP_SIZE_MIB + RECOVERY_SIZE_MIB + ROOTFS_SIZE_MIB + ROOTFS_SIZE_MIB + VAR_SIZE_MIB + 1 ))
+echo "  Partitions: ${NUM_PARTITIONS}"
+
+# Convert size_unit to MiB multiplier
+size_to_mib() {
+    local size="$1"
+    local unit="$2"
+    case "$unit" in
+        mebibytes|MiB) echo "$size" ;;
+        kibibytes|KiB) echo $(( size / 1024 )) ;;
+        gibibytes|GiB) echo $(( size * 1024 )) ;;
+        *) echo "ERROR: Unknown size unit: $unit" >&2; exit 1 ;;
+    esac
+}
+
+# Build partition info arrays
+declare -a PART_NAMES PART_SIZES_MIB PART_TYPES PART_UUIDS PART_IMAGES PART_OFFSETS_MIB PART_EXPAND
+GPT_START_MIB=1
+CURSOR_MIB=${GPT_START_MIB}
+
+for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
+    name=$(jq -r ".storage_devices.rootdisk.partitions[$i].name // \"\"" "$MANIFEST")
+    size=$(jq -r ".storage_devices.rootdisk.partitions[$i].size" "$MANIFEST")
+    size_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].size_unit" "$MANIFEST")
+    ptype=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_type // \"8300\"" "$MANIFEST")
+    puuid=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_uuid // \"\"" "$MANIFEST")
+    image=$(jq -r ".storage_devices.rootdisk.partitions[$i].image // \"\"" "$MANIFEST")
+    offset=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset // \"\"" "$MANIFEST")
+    offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
+    expand=$(jq -r ".storage_devices.rootdisk.partitions[$i].expand // \"\"" "$MANIFEST")
+
+    size_mib=$(size_to_mib "$size" "$size_unit")
+
+    # Use explicit offset if provided, otherwise use cursor
+    if [ -n "$offset" ]; then
+        offset_mib=$(size_to_mib "$offset" "$offset_unit")
+        CURSOR_MIB=$offset_mib
+    fi
+
+    PART_NAMES+=("$name")
+    PART_SIZES_MIB+=("$size_mib")
+    PART_TYPES+=("$ptype")
+    PART_UUIDS+=("$puuid")
+    PART_IMAGES+=("$image")
+    PART_OFFSETS_MIB+=("$CURSOR_MIB")
+    PART_EXPAND+=("$expand")
+
+    echo "  Partition $((i+1)): ${name:-unnamed}  offset=${CURSOR_MIB}MiB  size=${size_mib}MiB  type=${ptype}${puuid:+  uuid=${puuid}}${image:+  image=${image}}"
+
+    CURSOR_MIB=$(( CURSOR_MIB + size_mib ))
+done
+
+# Total image size (partitions + 1 MiB GPT tail)
+TOTAL_MIB=$(( CURSOR_MIB + 1 ))
 
 IMAGE_NAME="avocado-os-${PLATFORM}.img"
 IMAGE_FILE="${BUILD_DIR}/${IMAGE_NAME}"
 
-echo "  ESP size:    ${ESP_SIZE_MIB} MiB"
-echo "  Rootfs size: ${ROOTFS_SIZE_MIB} MiB"
-echo "  Var size:    ${VAR_SIZE_MIB} MiB"
 echo "  Total image: ${TOTAL_MIB} MiB"
 
 # =============================================================================
@@ -87,127 +106,137 @@ echo "=== Creating raw disk image ==="
 truncate -s "${TOTAL_MIB}M" "$IMAGE_FILE"
 
 # =============================================================================
-# Create GPT partition table
+# Create GPT partition table from manifest
 # =============================================================================
 echo "=== Creating GPT partition table ==="
 
-OFFSET=${GPT_START_MIB}
-
-# ESP / boot-a
-BOOT_A_START=${OFFSET}
-BOOT_A_END=$(( OFFSET + ESP_SIZE_MIB - 1 ))
-OFFSET=$(( OFFSET + ESP_SIZE_MIB ))
-
-# boot-b
-BOOT_B_START=${OFFSET}
-BOOT_B_END=$(( OFFSET + ESP_SIZE_MIB - 1 ))
-OFFSET=$(( OFFSET + ESP_SIZE_MIB ))
-
-# recovery
-RECOVERY_START=${OFFSET}
-RECOVERY_END=$(( OFFSET + RECOVERY_SIZE_MIB - 1 ))
-OFFSET=$(( OFFSET + RECOVERY_SIZE_MIB ))
-
-# rootfs-a
-ROOTFS_A_START=${OFFSET}
-ROOTFS_A_END=$(( OFFSET + ROOTFS_SIZE_MIB - 1 ))
-OFFSET=$(( OFFSET + ROOTFS_SIZE_MIB ))
-
-# rootfs-b
-ROOTFS_B_START=${OFFSET}
-ROOTFS_B_END=$(( OFFSET + ROOTFS_SIZE_MIB - 1 ))
-OFFSET=$(( OFFSET + ROOTFS_SIZE_MIB ))
-
-# var (remainder)
-VAR_START=${OFFSET}
-VAR_END=$(( OFFSET + VAR_SIZE_MIB - 1 ))
-
-# sgdisk type codes
-# EF00 = EFI System Partition
-# 8304 = Linux x86-64 root (Discoverable Partitions Spec)
-# 8300 = Linux filesystem
-
-VAR_PARTUUID="4d21b016-b534-45c2-a9fb-5c16e091fd2d"
-
 sgdisk --zap-all "$IMAGE_FILE"
-sgdisk \
-    -n "1:$(( BOOT_A_START * 2048 )):+$(( ESP_SIZE_MIB * 2048 - 1 ))" -t 1:EF00 -c 1:"boot-a" \
-    -n "2:$(( BOOT_B_START * 2048 )):+$(( ESP_SIZE_MIB * 2048 - 1 ))" -t 2:EF00 -c 2:"boot-b" \
-    -n "3:$(( RECOVERY_START * 2048 )):+$(( RECOVERY_SIZE_MIB * 2048 - 1 ))" -t 3:EF00 -c 3:"recovery" \
-    -n "4:$(( ROOTFS_A_START * 2048 )):+$(( ROOTFS_SIZE_MIB * 2048 - 1 ))" -t 4:8304 -c 4:"rootfs-a" \
-    -n "5:$(( ROOTFS_B_START * 2048 )):+$(( ROOTFS_SIZE_MIB * 2048 - 1 ))" -t 5:8304 -c 5:"rootfs-b" \
-    -n "6:$(( VAR_START * 2048 )):+$(( VAR_SIZE_MIB * 2048 - 1 ))" -t 6:8300 -c 6:"var" -u "6:${VAR_PARTUUID}" \
-    "$IMAGE_FILE"
 
+SGDISK_ARGS=""
+for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
+    pnum=$((i + 1))
+    start_sector=$(( ${PART_OFFSETS_MIB[$i]} * 2048 ))
+    size_sectors=$(( ${PART_SIZES_MIB[$i]} * 2048 ))
+    SGDISK_ARGS="${SGDISK_ARGS} -n ${pnum}:${start_sector}:+$((size_sectors - 1))"
+    SGDISK_ARGS="${SGDISK_ARGS} -t ${pnum}:${PART_TYPES[$i]}"
+
+    if [ -n "${PART_NAMES[$i]}" ]; then
+        SGDISK_ARGS="${SGDISK_ARGS} -c ${pnum}:${PART_NAMES[$i]}"
+    fi
+
+    if [ -n "${PART_UUIDS[$i]}" ]; then
+        SGDISK_ARGS="${SGDISK_ARGS} -u ${pnum}:${PART_UUIDS[$i]}"
+    fi
+done
+
+# shellcheck disable=SC2086
+sgdisk $SGDISK_ARGS "$IMAGE_FILE"
 echo "  Partition table created"
 
 # =============================================================================
-# Create ESP (FAT32) boot image with EFI bootloader, kernel, and initramfs
+# Resolve image filenames from manifest
+# Returns the image "out" filename for Object images, or the string directly
 # =============================================================================
-echo "=== Creating ESP boot image ==="
+resolve_image_filename() {
+    local image_key="$1"
+    local img_type
+    img_type=$(jq -r ".storage_devices.rootdisk.images.\"${image_key}\" | type" "$MANIFEST")
+    if [ "$img_type" = "string" ]; then
+        jq -r ".storage_devices.rootdisk.images.\"${image_key}\"" "$MANIFEST"
+    else
+        jq -r ".storage_devices.rootdisk.images.\"${image_key}\".out" "$MANIFEST"
+    fi
+}
 
-ESP_IMG="${BUILD_DIR}/esp-boot.img"
-truncate -s "${ESP_SIZE_MIB}M" "$ESP_IMG"
-mkfs.fat -F 32 -n "BOOT-A" "$ESP_IMG"
+# =============================================================================
+# Build boot image (FAT32 ESP) if needed
+# =============================================================================
+# Check if any partition has an image that is a FAT build object
+BOOT_IMAGE_KEY=""
+for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
+    img_key="${PART_IMAGES[$i]}"
+    if [ -z "$img_key" ]; then continue; fi
 
-# Create EFI directory structure and copy files
-ESP_MNT=$(mktemp -d)
-trap "umount '$ESP_MNT' 2>/dev/null || true; rmdir '$ESP_MNT' 2>/dev/null || true" EXIT
+    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+    if [ "$build_type" = "fat" ]; then
+        BOOT_IMAGE_KEY="$img_key"
+        break
+    fi
+done
 
-if command -v mcopy >/dev/null 2>&1; then
-    # Use mtools if available (no root required)
-    mmd -i "$ESP_IMG" ::EFI
-    mmd -i "$ESP_IMG" ::EFI/BOOT
-    mcopy -i "$ESP_IMG" "${DATA_DIR}/${BOOTLOADER_IMAGE}" "::EFI/BOOT/BOOTX64.EFI"
-    mcopy -i "$ESP_IMG" "${DATA_DIR}/${KERNEL_IMAGE}" "::bzImage"
-    mcopy -i "$ESP_IMG" "${DATA_DIR}/${INITRAMFS_IMAGE}" "::initramfs.cpio.zst"
+if [ -n "$BOOT_IMAGE_KEY" ]; then
+    echo "=== Creating FAT boot image (${BOOT_IMAGE_KEY}) ==="
 
-    # Create systemd-boot loader config
-    mmd -i "$ESP_IMG" ::loader
-    mmd -i "$ESP_IMG" ::loader/entries
+    BOOT_IMG_OUT=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
+    BOOT_IMG_SIZE=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".size" "$MANIFEST")
+    BOOT_IMG="${BUILD_DIR}/${BOOT_IMG_OUT}"
 
-    LOADER_CONF=$(mktemp)
-    echo "default avocado.conf" > "$LOADER_CONF"
-    echo "timeout 3" >> "$LOADER_CONF"
-    mcopy -i "$ESP_IMG" "$LOADER_CONF" "::loader/loader.conf"
-    rm -f "$LOADER_CONF"
+    truncate -s "${BOOT_IMG_SIZE}M" "$BOOT_IMG"
+    mkfs.fat -F 32 -n "BOOT" "$BOOT_IMG"
 
-    ENTRY_CONF=$(mktemp)
-    cat > "$ENTRY_CONF" <<ENTRY
-title   Avocado OS
-linux   /bzImage
-initrd  /initramfs.cpio.zst
-options root=PARTLABEL=rootfs-a ro console=ttyS0,115200n8 console=tty0
-ENTRY
-    mcopy -i "$ESP_IMG" "$ENTRY_CONF" "::loader/entries/avocado.conf"
-    rm -f "$ENTRY_CONF"
-else
-    echo "ERROR: mtools (mcopy) not found - required for ESP image creation"
-    exit 1
+    if ! command -v mcopy >/dev/null 2>&1; then
+        echo "ERROR: mtools (mcopy) not found - required for FAT image creation"
+        exit 1
+    fi
+
+    # Copy each file listed in build_args.files
+    NUM_FILES=$(jq ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files | length" "$MANIFEST")
+    for j in $(seq 0 $(( NUM_FILES - 1 ))); do
+        file_in=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].\"in\"" "$MANIFEST")
+        file_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].out" "$MANIFEST")
+
+        # Create parent directories
+        dir_path=$(dirname "$file_out")
+        if [ "$dir_path" != "." ]; then
+            IFS='/' read -ra DIR_PARTS <<< "$dir_path"
+            current=""
+            for part in "${DIR_PARTS[@]}"; do
+                current="${current}/${part}"
+                mmd -i "$BOOT_IMG" "::${current}" 2>/dev/null || true
+            done
+        fi
+
+        echo "  Adding: ${file_in} -> ${file_out}"
+        mcopy -i "$BOOT_IMG" "${DATA_DIR}/${file_in}" "::${file_out}"
+    done
+
+    echo "  FAT boot image created: ${BOOT_IMG}"
 fi
-
-echo "  ESP boot image created"
 
 # =============================================================================
 # Write partition images into disk image
 # =============================================================================
 echo "=== Writing partition images ==="
 
-# Write ESP to boot-a
-dd if="$ESP_IMG" of="$IMAGE_FILE" bs=1M seek=${BOOT_A_START} conv=notrunc status=progress
-echo "  boot-a (ESP) written"
+for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
+    img_key="${PART_IMAGES[$i]}"
+    if [ -z "$img_key" ]; then continue; fi
 
-# Write rootfs-a
-dd if="$ROOTFS_FILE" of="$IMAGE_FILE" bs=1M seek=${ROOTFS_A_START} conv=notrunc status=progress
-echo "  rootfs-a written"
+    # Resolve the actual image file path
+    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+    if [ "$build_type" = "fat" ]; then
+        # FAT image was built above
+        img_out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$MANIFEST")
+        img_file="${BUILD_DIR}/${img_out}"
+    else
+        img_filename=$(resolve_image_filename "$img_key")
+        img_file="${DATA_DIR}/${img_filename}"
+    fi
 
-# Write var
-dd if="${DATA_DIR}/${VAR_IMAGE}" of="$IMAGE_FILE" bs=1M seek=${VAR_START} conv=notrunc status=progress
-echo "  var written"
+    if [ ! -f "$img_file" ]; then
+        echo "ERROR: Image file not found: ${img_file}"
+        exit 1
+    fi
 
-# Cleanup
-rm -f "$ESP_IMG"
-trap - EXIT
+    echo "  Writing ${PART_NAMES[$i]}: ${img_file} @ offset ${PART_OFFSETS_MIB[$i]} MiB"
+    dd if="$img_file" of="$IMAGE_FILE" bs=1M seek="${PART_OFFSETS_MIB[$i]}" conv=notrunc status=progress
+done
+
+# Cleanup built images
+if [ -n "$BOOT_IMAGE_KEY" ]; then
+    img_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
+    rm -f "${BUILD_DIR}/${img_out}"
+fi
 
 echo ""
 echo "=== Disk image created: ${IMAGE_FILE} ==="

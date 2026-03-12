@@ -2,7 +2,29 @@
   "runtime": {
     "platform": "avocado-intel-x86-64-v2",
     "architecture": "x86_64",
-    "provision_default": "img"
+    "provision_default": "img",
+    "update_strategy": "sdboot-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "sdboot-efi",
+      "partitions": {
+        "a2e0a8c1-0001-4b01-a000-000000000001": "a",
+        "a2e0a8c1-0001-4b01-b000-000000000001": "b"
+      }
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": {
+      "type": "efibootmgr",
+      "slot_entries": { "a": "boot-a", "b": "boot-b" }
+    },
+    "rollback": {
+      "type": "efibootmgr",
+      "slot_entries": { "a": "boot-a", "b": "boot-b" }
+    }
   },
   "provision": {
     "profiles": {
@@ -22,14 +44,37 @@
       "out": "avocado-image-intel-x86-64-v2",
       "devpath": "/dev/sda",
       "block_size": 512,
-      "partitions": [],
       "images": {
+        "boot": {
+          "out": "boot.img",
+          "size": 256,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": [
+              { "in": "systemd-bootx64.efi", "out": "EFI/BOOT/BOOTX64.EFI" },
+              { "in": "bzImage", "out": "bzImage" },
+              { "in": "avocado-image-initramfs-intel-x86-64-v2.cpio.zst", "out": "initramfs.cpio.zst" },
+              { "in": "loader.conf", "out": "loader/loader.conf" },
+              { "in": "avocado.conf", "out": "loader/entries/avocado.conf" }
+            ]
+          }
+        },
         "rootfs": "avocado-image-rootfs-intel-x86-64-v2.erofs-lz4",
         "var": "avocado-image-var-intel-x86-64-v2.btrfs",
         "initramfs": "avocado-image-initramfs-intel-x86-64-v2.cpio.zst",
         "kernel": "bzImage",
         "bootloader": "systemd-bootx64.efi"
-      }
+      },
+      "partitions": [
+        { "name": "boot-a", "image": "boot", "partition_type": "EF00", "partition_uuid": "a2e0a8c1-0001-4b01-a000-000000000001", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
+        { "name": "boot-b", "partition_type": "EF00", "partition_uuid": "a2e0a8c1-0001-4b01-b000-000000000001", "size": 256, "size_unit": "mebibytes" },
+        { "name": "recovery", "partition_type": "EF00", "size": 256, "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
+        { "name": "rootfs-b", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
+        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 512, "size_unit": "mebibytes", "expand": "true" }
+      ]
     }
   }
 }
