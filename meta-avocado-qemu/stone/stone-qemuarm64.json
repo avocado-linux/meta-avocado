@@ -2,7 +2,22 @@
   "runtime": {
     "platform": "avocado-qemuarm64",
     "architecture": "arm64",
-    "provision_default": "img"
+    "provision_default": "img",
+    "update_strategy": "uboot-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": {
+      "type": "uboot-env",
+      "set": { "avocado_boot_slot": "{inactive_slot}" }
+    }
   },
   "provision": {
     "envs": {
@@ -52,7 +67,7 @@
             "files": ["avocado-image-initramfs-qemuarm64.cpio.zst", "Image"]
           }
         },
-        "rootfs": "avocado-image-rootfs-qemuarm64.erofs-lz4",
+        "rootfs": "avocado-image-rootfs-qemuarm64.erofs.lz4",
         "var": "avocado-image-var-qemuarm64.btrfs"
       },
       "partitions": [

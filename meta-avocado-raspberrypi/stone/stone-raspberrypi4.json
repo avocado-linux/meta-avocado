@@ -2,7 +2,52 @@
   "runtime": {
     "platform": "avocado-raspberrypi4",
     "architecture": "arm64",
-    "provision_default": "img"
+    "provision_default": "img",
+    "update_strategy": "mbr-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{inactive_slot}",
+          "{inactive_slot}.avocado_platform": "{platform}",
+          "{inactive_slot}.avocado_architecture": "{architecture}"
+        }
+      },
+      {
+        "type": "mbr-switch",
+        "devpath": "/dev/mmcblk0",
+        "slot_layouts": {
+          "a": ["boot-a", "rootfs-a", "var"],
+          "b": ["boot-b", "rootfs-b", "var"]
+        }
+      }
+    ],
+    "rollback": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{previous_slot}"
+        }
+      },
+      {
+        "type": "mbr-switch",
+        "devpath": "/dev/mmcblk0",
+        "slot_layouts": {
+          "a": ["boot-a", "rootfs-a", "var"],
+          "b": ["boot-b", "rootfs-b", "var"]
+        }
+      }
+    ]
   },
   "provision": {
     "envs": {
@@ -10,20 +55,23 @@
         "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
         "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
         "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      },
+      "cmdline": {
+        "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info", "cmdline"]
       },
       "sd": {
         "script": "stone-provision-sd.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info", "cmdline"]
       },
       "usb": {
         "script": "stone-provision-usb.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info", "cmdline"]
       }
     }
   },
