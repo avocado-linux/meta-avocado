@@ -1,0 +1,1 @@
+MACHINEOVERRIDES =. "avocado-synaptics:"
