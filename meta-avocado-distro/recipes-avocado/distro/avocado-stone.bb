@@ -9,7 +9,7 @@ PV = "${DISTRO_VERSION}"
 PACKAGES = "${PN}"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-DEPENDS += " stone-native"
+DEPENDS += " stone-native avocado-img-var avocado-img-rootfs"
 
 # Skip other tasks
 do_populate_sysroot[noexec] = "1"

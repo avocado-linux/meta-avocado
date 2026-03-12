@@ -1,0 +1,26 @@
+header:
+  version: 16
+
+repos:
+  meta-synaptics:
+    url: https://github.com/synaptics-astra/meta-synaptics
+    path: meta-synaptics
+    branch: scarthgap_6.12_v2.2.1
+    commit: 5e8a73f54b8a3dd0e5e9a8fd5b765178a22f0d4a
+    layers:
+      .:
+
+  meta-grinn-astra:
+    url: https://github.com/grinn-global/meta-grinn-astra.git
+    path: meta-grinn-astra
+    branch: scarthgap_6.12_v2.2.0
+    commit: c055fad1d8d3b992f4f774fecc7ffc391ec1ebd0
+    layers:
+      meta-grinn-astra-bsp:
+      meta-grinn-astra-fixes:
+
+local_conf_header:
+  vendor-synaptics: |
+    LICENSE_FLAGS_ACCEPTED:append = " commercial Synaptics-EULA"
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-synaptics"

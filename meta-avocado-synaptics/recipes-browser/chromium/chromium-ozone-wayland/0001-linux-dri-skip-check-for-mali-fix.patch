@@ -1,0 +1,86 @@
+From 08ecd60d7635fb91a56bc30fafcce3eab83b4c8b Mon Sep 17 00:00:00 2001
+From: Kuldip Gor <kuldip.gor@synaptics.com>
+Date: Wed, 1 Oct 2025 22:46:33 +0530
+Subject: [PATCH] linux, dri: skip check for mali
+
+---
+ build/config/BUILDCONFIG.gn     |  5 +++++
+ build/config/linux/BUILD.gn     |  1 +
+ build/config/linux/dri/BUILD.gn | 20 +++++++++++---------
+ content/gpu/BUILD.gn            |  2 +-
+ media/gpu/sandbox/BUILD.gn      |  2 +-
+ 5 files changed, 19 insertions(+), 11 deletions(-)
+
+--- a/build/config/BUILDCONFIG.gn
++++ b/build/config/BUILDCONFIG.gn
+@@ -187,6 +187,11 @@
+   clang_warning_suppression_file = ""
+ }
+ 
++declare_args() {
++  # Synaptics defined argument
++  is_mali = false
++}
++
+ # ==============================================================================
+ # TOOLCHAIN SETUP
+ # ==============================================================================
+--- a/build/config/linux/BUILD.gn
++++ b/build/config/linux/BUILD.gn
+@@ -70,3 +70,4 @@
+     ]
+   }
+ }
++
+--- a/build/config/linux/dri/BUILD.gn
++++ b/build/config/linux/dri/BUILD.gn
+@@ -6,13 +6,15 @@
+ 
+ assert(is_linux, "This file should only be referenced on Linux")
+ 
+-pkg_config("dri") {
+-  packages = [ "dri" ]
+-  dri_driver_dir = exec_script(pkg_config_script,
+-                               common_pkg_config_args + pkg_config_args + [
+-                                     "--dridriverdir",
+-                                     "dri",
+-                                   ],
+-                               "string")
+-  defines = [ "DRI_DRIVER_DIR=\"$dri_driver_dir\"" ]
++if (!is_mali) {
++  pkg_config("dri") {
++    packages = [ "dri" ]
++    dri_driver_dir = exec_script(pkg_config_script,
++                                 common_pkg_config_args + pkg_config_args + [
++                                       "--dridriverdir",
++                                       "dri",
++                                     ],
++                                 "string")
++    defines = [ "DRI_DRIVER_DIR=\"$dri_driver_dir\"" ]
++  }
+ }
+--- a/content/gpu/BUILD.gn
++++ b/content/gpu/BUILD.gn
+@@ -125,7 +125,7 @@
+ 
+   # Use DRI on desktop Linux builds.
+   if (current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
+-      !is_castos) {
++      !is_castos && !is_mali) {
+     configs += [ "//build/config/linux/dri" ]
+   }
+ }
+--- a/media/gpu/sandbox/BUILD.gn
++++ b/media/gpu/sandbox/BUILD.gn
+@@ -26,7 +26,7 @@
+     deps += [ "//media/gpu/v4l2" ]
+   }
+   if (current_cpu != "s390x" && current_cpu != "ppc64" && is_linux &&
+-      !is_castos) {
++      !is_castos && !is_mali) {
+     # For DRI_DRIVER_DIR.
+     configs += [ "//build/config/linux/dri" ]
+   }
+-- 
+2.7.4
+

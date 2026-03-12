@@ -1,0 +1,20 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/synaptics.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-synaptics:
+
+local_conf_header:
+  machine-avocado-grinn-astra-1680-sbc: |
+
+machine: avocado-grinn-astra-1680-sbc
