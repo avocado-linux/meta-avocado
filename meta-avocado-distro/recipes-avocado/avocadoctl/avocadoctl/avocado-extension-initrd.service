@@ -18,7 +18,7 @@ RemainAfterExit=yes
 TimeoutStartSec=30
 ExecStart=avocadoctl refresh
 ExecReload=avocadoctl refresh
-ExecStop=avocadoctl unmerge
+ExecStop=-avocadoctl unmerge
 
 [Install]
 WantedBy=sysinit.target
