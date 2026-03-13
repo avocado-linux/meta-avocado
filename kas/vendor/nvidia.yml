@@ -21,7 +21,6 @@ repos:
 local_conf_header:
   vendor-nvidia: |
     TEGRA_INITRD_FLASH_INITRAMFS_FSTYPES = "cpio.gz.cboot"
-    TEGRA_INITRD_FLASH_INSTALL:append = " kernel-module-libcomposite kernel-module-usb-f-mass-storage"
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization efi"
     LICENSE_FLAGS_ACCEPTED:append = " commercial_faad2 commercial_x264"
 
