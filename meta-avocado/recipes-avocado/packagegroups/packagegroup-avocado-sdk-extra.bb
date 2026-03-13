@@ -47,6 +47,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-pahole \
   nativesdk-patch \
   nativesdk-perl \
+  nativesdk-publishtool \
   nativesdk-python3 \
   nativesdk-python3-pip \
   nativesdk-python3-crossenv \
