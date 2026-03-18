@@ -48,7 +48,7 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-rzv2n-sr-som.squashfs",
+        "rootfs": "avocado-image-rootfs-rzv2n-sr-som.erofs-lz4",
         "var": "avocado-image-var-rzv2n-sr-som.btrfs"
       },
       "partitions": [

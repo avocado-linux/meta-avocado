@@ -23,7 +23,7 @@ repos:
     url: https://github.com/solidrun/meta-solidrun-arm-rzg2lc
     path: meta-solidrun-arm-rzg2lc
     branch: scarthgap_rzv2n_dev
-    commit: 81ec67693bbc13548a524ddf8acca20f952138d3
+    commit: 91d0eecba625c4a8beda731c4246be6c7da7c998
     layers:
       meta-rzv2n:
       meta:

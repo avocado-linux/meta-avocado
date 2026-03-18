@@ -4,7 +4,7 @@
 #
 # Writes the Avocado system to an SD card:
 #   Partition 1 — 128 MiB FAT32 boot (kernel, DTBs, firmware, initramfs)
-#   Partition 2 — 2 GiB   Linux     (squashfs rootfs)
+#   Partition 2 — 2 GiB   Linux     (erofs rootfs)
 #   Partition 3 — 512 MiB Linux     (btrfs var, expanded at runtime)
 #
 # Environment variables provided by stone:
