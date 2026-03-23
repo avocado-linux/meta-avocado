@@ -1,4 +1,4 @@
-STONE_PROVISIONING ?= "tegraflash peridio"
+STONE_PROVISIONING ?= "tegraflash"
 USE_REDUNDANT_FLASH_LAYOUT_DEFAULT = "1"
 PREFERRED_PROVIDER_virtual/kernel = "linux-yocto"
 ROOTFSPART_SIZE_DEFAULT = "536870912"
@@ -17,6 +17,10 @@ ROOT_FSTYPES = "erofs-lz4"
 # Note: tegra-espimage and tos-optee are image/deploy recipes without do_populate_sysroot
 # They are built via explicit task dependencies in avocado-stone.bbappend
 EXTRA_IMAGEDEPENDS += "tegraflash-bsp"
+
+# Var partition is mounted dynamically by avocado-tegra-init using PARTLABEL discovery
+# on the same disk as rootfs. This handles NVMe, eMMC, and SD boot media transparently.
+AVOCADO_VAR_PART_DEV = "none"
 
 DATAFILE = "avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
 IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"

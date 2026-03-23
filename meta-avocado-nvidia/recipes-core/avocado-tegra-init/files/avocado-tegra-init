@@ -46,3 +46,65 @@ if [ -z "$rootdev" ]; then
 fi
 
 mount "$rootdev" /sysroot
+
+# Mount var partition by finding DATAPART_EXPAND.
+# Search order: same disk as rootfs first (handles dual-install), then other disks
+# (handles split layout: e.g. OS on eMMC, data on NVMe).
+
+# Helper: scan a disk's partitions for DATAPART_EXPAND via sysfs uevent
+find_datapart_on_disk() {
+    local diskname="$1"
+    for partdir in /sys/block/$diskname/${diskname}p*; do
+        [ -d "$partdir" ] || continue
+        if [ -f "$partdir/uevent" ]; then
+            while IFS='=' read -r key val; do
+                if [ "$key" = "PARTNAME" ] && [ "$val" = "DATAPART_EXPAND" ]; then
+                    echo "/dev/$(basename "$partdir")"
+                    return 0
+                fi
+            done < "$partdir/uevent"
+        fi
+    done
+    return 1
+}
+
+case "$rootdev" in
+  /dev/nvme*|/dev/mmc*) rootdisk="${rootdev%p*}" ;;
+  /dev/sd*)             rootdisk="${rootdev%[0-9]*}" ;;
+  *)                    rootdisk="" ;;
+esac
+
+vardev=""
+
+# First: check the same disk as rootfs (preferred for single-disk installs)
+if [ -n "$rootdisk" ]; then
+    rootdiskname=$(basename "$rootdisk")
+    echo "Looking for DATAPART_EXPAND on rootfs disk ($rootdiskname)..."
+    vardev=$(find_datapart_on_disk "$rootdiskname") || true
+fi
+
+# Second: if not found on rootfs disk, search all other block devices
+# This supports split layouts (e.g. OS on eMMC, data on NVMe)
+if [ -z "$vardev" ]; then
+    echo "DATAPART_EXPAND not on rootfs disk, scanning other disks..."
+    for disk in /sys/block/*; do
+        diskname=$(basename "$disk")
+        # Skip non-storage devices (loop, ram, zram) and the rootfs disk
+        case "$diskname" in
+            loop*|ram*|zram*|mtd*) continue ;;
+        esac
+        [ "$diskname" = "${rootdiskname:-}" ] && continue
+        vardev=$(find_datapart_on_disk "$diskname") || true
+        if [ -n "$vardev" ]; then
+            echo "Found DATAPART_EXPAND on $diskname"
+            break
+        fi
+    done
+fi
+
+if [ -n "$vardev" ]; then
+    echo "Mounting var partition: $vardev"
+    mount "$vardev" /sysroot/var
+else
+    echo "WARNING: DATAPART_EXPAND not found on any disk"
+fi
