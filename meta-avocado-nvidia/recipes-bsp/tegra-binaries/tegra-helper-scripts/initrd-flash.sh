@@ -17,6 +17,8 @@ Options:
   --skip-bootloader     Skip boot partition programming
   --usb-instance        USB instance of Jetson device
   --erase-nvme          Erase NVME drive during flashing
+  --erase-emmc          Erase eMMC drive during flashing
+  --erase-only          Only erase specified drives, do not write partitions
 
 Options passed through to flash helper:
   -u                    PKC key file for signing
@@ -48,9 +50,11 @@ sbk_keyfile=
 skip_bootloader=0
 early_final_status=0
 erase_nvme=0
+erase_emmc=0
+erase_only=0
 check_usb_instance="${TEGRAFLASH_CHECK_USB_INSTANCE:-no}"
 
-ARGS=$(getopt -n $(basename "$0") -l "usb-instance:,help,skip-bootloader,erase-nvme" -o "u:v:h" -- "$@")
+ARGS=$(getopt -n $(basename "$0") -l "usb-instance:,help,skip-bootloader,erase-nvme,erase-emmc,erase-only" -o "u:v:h" -- "$@")
 if [ $? -ne 0 ]; then
     usage >&2
     exit 1
@@ -70,6 +74,14 @@ while true; do
 	    ;;
 	--erase-nvme)
 	    erase_nvme=1
+	    shift
+	    ;;
+	--erase-emmc)
+	    erase_emmc=1
+	    shift
+	    ;;
+	--erase-only)
+	    erase_only=1
 	    shift
 	    ;;
 	-u)
@@ -702,8 +714,15 @@ generate_flash_package() {
     if [ $erase_nvme -eq 1 ]; then
 	echo "erase-nvme" >> "$mnt/flashpkg/conf/command_sequence"
     fi
-    [ $EXTERNAL_ROOTFS_DRIVE -eq 0 -o $NO_INTERNAL_STORAGE -eq 1 ] || echo "erase-mmc" >> "$mnt/flashpkg/conf/command_sequence"
-    echo "export-devices $ROOTFS_DEVICE" >> "$mnt/flashpkg/conf/command_sequence"
+    if [ $erase_emmc -eq 1 ]; then
+	echo "erase-mmc" >> "$mnt/flashpkg/conf/command_sequence"
+    else
+	[ $EXTERNAL_ROOTFS_DRIVE -eq 0 -o $NO_INTERNAL_STORAGE -eq 1 ] || echo "erase-mmc" >> "$mnt/flashpkg/conf/command_sequence"
+    fi
+
+    if [ $erase_only -eq 0 ]; then
+	echo "export-devices $ROOTFS_DEVICE" >> "$mnt/flashpkg/conf/command_sequence"
+    fi
 
     echo "extra" >> "$mnt/flashpkg/conf/command_sequence"
     echo "reboot" >> "$mnt/flashpkg/conf/command_sequence"
@@ -919,7 +938,9 @@ if ! generate_flash_package 2>&1 | tee -a "$logfile"; then
     echo "ERR: could not create command package at $(date -Is)" | tee -a "$logfile"
     exit 1
 fi
-if [ $EXTERNAL_ROOTFS_DRIVE -eq 1 ]; then
+if [ $erase_only -eq 1 ]; then
+    step_banner "Erase-only mode — skipping partition writing"
+elif [ $EXTERNAL_ROOTFS_DRIVE -eq 1 ]; then
     keep_going=1
     step_banner "Writing partitions on external storage device"
     if ! write_to_device $ROOTFS_DEVICE external-flash.xml.in 2>&1 | tee -a "$logfile"; then
@@ -937,14 +958,21 @@ else
 	fi
     fi
 fi
-step_banner "Waiting for final status from device"
-if ! get_final_status "$dtstamp" 2>&1 | tee -a "$logfile"; then
-    echo "ERR: failed to retrieve device status at $(date -Is)" | tee -a "$logfile"
-    echo "Host-side log:              $logfile"
-    echo "Device-side logs stored in: device-logs-$dtstamp"
-    exit 1
+if [ $erase_only -eq 1 ]; then
+    # In erase-only mode the device erases and reboots — it doesn't re-export
+    # the flashpkg device for status, so skip waiting for final status.
+    echo "Erase-only mode complete — device will reboot after erasing" | tee -a "$logfile"
+    echo "Successfully finished at $(date -Is)" | tee -a "$logfile"
+else
+    step_banner "Waiting for final status from device"
+    if ! get_final_status "$dtstamp" 2>&1 | tee -a "$logfile"; then
+        echo "ERR: failed to retrieve device status at $(date -Is)" | tee -a "$logfile"
+        echo "Host-side log:              $logfile"
+        echo "Device-side logs stored in: device-logs-$dtstamp"
+        exit 1
+    fi
+    echo "Successfully finished at $(date -Is)" | tee -a "$logfile"
 fi
-echo "Successfully finished at $(date -Is)" | tee -a "$logfile"
 echo "Host-side log:              $logfile"
 echo "Device-side logs stored in: device-logs-$dtstamp"
 
