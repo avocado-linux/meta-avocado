@@ -12,11 +12,3 @@ RDEPENDS:${PN}:append = "\
     nativesdk-libxml2 \
     nativesdk-libusb1 \
     nativesdk-qdl"
-
-SRC_URI:append = " file://avocado-deploy-rubikpi3"
-
-do_install:append() {
-  install -m 755 ${WORKDIR}/avocado-deploy-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}/avocado-deploy-${MACHINE_SHORT_NAME}
-}
-
-FILES:${PN}:append = " ${SDKPATHNATIVE}${bindir}/avocado-deploy-${MACHINE_SHORT_NAME}"

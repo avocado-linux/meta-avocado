@@ -245,7 +245,6 @@ chmod +x "$temp_bin_dir/cpp"
 # Add temporary directory and tegraflash tools to PATH
 export PATH="$temp_bin_dir:$build_dir:$PATH"
 
-# --- Feature 5: Auto-recovery via boardctl ---
 # Check if any NVIDIA device is in RCM mode (vendor 0955).
 # All Jetson boards in RCM use NVIDIA vendor ID 0955 with varying product IDs.
 check_rcm() {
