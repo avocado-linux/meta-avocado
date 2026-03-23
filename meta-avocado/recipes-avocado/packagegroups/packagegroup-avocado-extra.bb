@@ -106,6 +106,7 @@ CONATINER_PACKAGES = " \
   docker \
   podman \
   podman-compose \
+  k3s \
 "
 
 # Basler Pylon SDK is only available for aarch64

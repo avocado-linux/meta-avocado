@@ -9,6 +9,7 @@ PACKAGES = "${PN}"
 SDK_TOOLCHAIN_TEGRA = " \
   nativesdk-packagegroup-cuda-sdk-host \
   nativesdk-tegraflash-tools \
+  nativesdk-boardctl \
 "
 
 SDK_SYSROOT_TEGRA = " \
