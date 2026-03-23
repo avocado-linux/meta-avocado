@@ -5,9 +5,33 @@
     "provision_default": "tegraflash"
   },
   "provision": {
+    "envs": {
+      "flash_options": {
+        "ERASE_NVME": "${ERASE_NVME}",
+        "ERASE_EMMC": "${ERASE_EMMC}",
+        "ERASE_ONLY": "${ERASE_ONLY}"
+      }
+    },
     "profiles": {
       "tegraflash": {
-        "script": "stone-provision-tegraflash.sh"
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-nvme": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-mmc": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-emmc": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-sd": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
       },
       "noop": {
         "script": "stone-provision-noop.sh"

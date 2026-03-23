@@ -245,13 +245,134 @@ chmod +x "$temp_bin_dir/cpp"
 # Add temporary directory and tegraflash tools to PATH
 export PATH="$temp_bin_dir:$build_dir:$PATH"
 
+# --- Feature 5: Auto-recovery via boardctl ---
+# Check if any NVIDIA device is in RCM mode (vendor 0955).
+# All Jetson boards in RCM use NVIDIA vendor ID 0955 with varying product IDs.
+check_rcm() {
+    lsusb -d 0955: 2>/dev/null | grep -qi "APX\|rcm" && return 0
+    # Fallback: check known RCM product IDs if grep doesn't match description
+    for pid in 7018 7418 7019 7e19 7023 7223 7323 7423 7523 7623; do
+        lsusb -d 0955:$pid >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+if check_rcm; then
+    echo "Device already in RCM mode"
+else
+    boardctl_target="${BOARDCTL_TARGET:-}"
+    boardctl_attempted=0
+
+    # Only attempt boardctl if BOARDCTL_TARGET is explicitly set — this indicates
+    # the board has TOPO debug hardware. Without it, skip straight to waiting.
+    if [ -n "$boardctl_target" ] && command -v boardctl >/dev/null 2>&1; then
+        echo "Device not in RCM mode, attempting recovery via boardctl (target=$boardctl_target)..."
+        boardctl_args="-t $boardctl_target"
+        boardctl_serial="${BOARDCTL_SERIAL:-}"
+        [ -n "$boardctl_serial" ] && boardctl_args="$boardctl_args -s $boardctl_serial"
+        # boardctl may fail if device/debugger isn't connected — catch and fall through
+        set +e
+        boardctl $boardctl_args recovery 2>&1
+        boardctl_rc=$?
+        set -e
+        if [ $boardctl_rc -eq 0 ]; then
+            boardctl_attempted=1
+        else
+            echo "WARNING: boardctl failed (exit $boardctl_rc) — device may not be connected or TOPO not detected"
+            echo "Falling back to waiting for manual recovery..."
+        fi
+    fi
+
+    # Wait for device to enter RCM mode (either from boardctl or manual button press)
+    if [ $boardctl_attempted -eq 1 ]; then
+        echo "Waiting for device to enter RCM mode..."
+    else
+        echo "Please put device into recovery mode (hold recovery button, press reset)..."
+    fi
+    for i in $(seq 1 60); do
+        check_rcm && break
+        sleep 1
+    done
+    if ! check_rcm; then
+        echo "ERROR: Device did not enter RCM mode (waited 60s)"
+        exit 1
+    fi
+    echo "Device in RCM mode"
+fi
+
+# --- Determine boot media from provision profile name ---
+boot_media="nvme"
+case "${AVOCADO_PROVISION_PROFILE:-tegraflash}" in
+    tegraflash|tegraflash-nvme)
+        boot_media="nvme"
+        ;;
+    tegraflash-mmc|tegraflash-emmc)
+        boot_media="emmc"
+        ;;
+    tegraflash-sd)
+        boot_media="sd"
+        ;;
+    *)
+        echo "WARNING: Unknown tegraflash profile '${AVOCADO_PROVISION_PROFILE}', defaulting to nvme"
+        ;;
+esac
+
+echo "Boot media target: $boot_media (profile: ${AVOCADO_PROVISION_PROFILE:-tegraflash})"
+
+# --- Build flash arguments from profile + env vars ---
+flash_args=""
+
+# Boot media determines default erase behavior
+case "$boot_media" in
+    nvme)
+        sed -i \
+            -e 's/^BOOTDEV=.*/BOOTDEV="nvme0n1p1"/' \
+            -e 's/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE="nvme0n1"/' \
+            -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
+            "$build_dir/.env.initrd-flash"
+        flash_args="--erase-nvme"
+        ;;
+    emmc)
+        sed -i \
+            -e 's/^BOOTDEV=.*/BOOTDEV="mmcblk0p1"/' \
+            -e 's/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE="mmcblk0"/' \
+            -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
+            "$build_dir/.env.initrd-flash"
+        # flash.xml.in must remain as SPI boot layout (used for signing).
+        # Swap external-flash.xml.in to the eMMC rootfs layout instead.
+        if [ -f "$build_dir/internal-flash-emmc.xml" ]; then
+            cp "$build_dir/internal-flash-emmc.xml" "$build_dir/external-flash.xml.in"
+            echo "Using eMMC flash layout (internal-flash-emmc.xml -> external-flash.xml.in)"
+        else
+            echo "ERROR: internal-flash-emmc.xml not found in BSP"
+            exit 1
+        fi
+        ;;
+    sd)
+        sed -i \
+            -e 's/^BOOTDEV=.*/BOOTDEV="mmcblk1p1"/' \
+            -e 's/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE="mmcblk1"/' \
+            -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
+            "$build_dir/.env.initrd-flash"
+        ;;
+esac
+
+# Composable env var flags (override defaults from profile)
+[ "${ERASE_NVME:-0}" = "1" ] && flash_args="$flash_args --erase-nvme"
+[ "${ERASE_EMMC:-0}" = "1" ] && flash_args="$flash_args --erase-emmc"
+[ "${ERASE_ONLY:-0}" = "1" ] && flash_args="$flash_args --erase-only"
+
+# Deduplicate --erase-nvme if profile already added it
+flash_args=$(echo "$flash_args" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+echo "Flash arguments: $flash_args"
 echo "Running initrd-flash script from build directory"
 
 # Change to build directory and run initrd-flash script
 cd "$build_dir"
 
 if [ -x "./initrd-flash" ]; then
-    ./initrd-flash --erase-nvme
+    ./initrd-flash $flash_args
 else
     echo "ERROR: initrd-flash script not found or not executable"
     echo "Contents of build directory:"

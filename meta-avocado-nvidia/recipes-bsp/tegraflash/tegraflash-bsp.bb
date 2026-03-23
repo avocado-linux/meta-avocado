@@ -145,6 +145,10 @@ do_deploy() {
         process_flash_xml ${DEPLOYDIR}/tegraflash-bsp/external-flash.xml
         cp ${DEPLOYDIR}/tegraflash-bsp/external-flash.xml ${DEPLOYDIR}/tegraflash-bsp/external-flash.xml.in
     fi
+    # Deploy eMMC layout variant for "build once, provision to any media"
+    if [ -f ${DEPLOYDIR}/tegraflash-bsp/internal-flash-emmc.xml ]; then
+        process_flash_xml ${DEPLOYDIR}/tegraflash-bsp/internal-flash-emmc.xml
+    fi
     
     # Copy the generic/ directory structure from L4T source
     # The tegraflash scripts expect generic/BCT/ subdirectory for DTS includes
