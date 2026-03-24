@@ -10,4 +10,6 @@ REQUIRED_DISTRO_FEATURES = ""
 
 inherit packagegroup
 
-RDEPENDS:${PN} = ""
+RDEPENDS:${PN} = " \
+  avocado-uboot-env \
+"

@@ -1,0 +1,14 @@
+[Unit]
+Description=Generate fw_env.config for detected boot device
+DefaultDependencies=no
+After=local-fs.target
+Before=avocadoctl.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/avocado-uboot-env
+RemainAfterExit=yes
+RuntimeDirectory=avocado
+
+[Install]
+WantedBy=sysinit.target
