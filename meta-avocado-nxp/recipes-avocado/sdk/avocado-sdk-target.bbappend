@@ -3,5 +3,7 @@ FILESEXTRAPATHS:prepend := "${@':'.join(['%s/stone' % layer for layer in d.getVa
 
 RDEPENDS:${PN}:append = " \
   nativesdk-fwup \
+  nativesdk-libubootenv-bin \
   nativesdk-mkfat \
+  nativesdk-uuu \
 "
