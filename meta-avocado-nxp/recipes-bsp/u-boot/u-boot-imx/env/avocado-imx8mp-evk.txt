@@ -6,6 +6,7 @@ devicetree_file=imx8mp-evk.dtb
 console=ttymxc1,115200
 devtype=mmc
 devnum=1
+mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk1p6
 
@@ -19,12 +20,12 @@ avocado_boot_init=\
     if test "${avocado_boot_slot}" = "a"; then\
       echo "Booting A";\
       setenv bootpart 3;\
-      setenv rootdev /dev/mmcblk1p6;\
+      setenv rootdev /dev/mmcblk${mmcblk}p6;\
     else\
       if test "${avocado_boot_slot}" = "b"; then\
         echo "Booting B";\
         setenv bootpart 4;\
-        setenv rootdev /dev/mmcblk1p7;\
+        setenv rootdev /dev/mmcblk${mmcblk}p7;\
       else\
         if test "${avocado_boot_slot}" = "r"; then\
           echo "Booting Recovery";\
@@ -42,7 +43,7 @@ avocado_boot_init=\
     echo "avocado_boot_slot undefined";\
     echo "Booting A";\
     setenv bootpart 3;\
-    setenv rootdev /dev/mmcblk1p6;\
+    setenv rootdev /dev/mmcblk${mmcblk}p6;\
   fi;\
   if test -n "${rootdev}"; then\
     setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;\
