@@ -35,6 +35,10 @@
       "sd": {
         "script": "stone-provision-sd.sh",
         "envs": ["device_info"]
+      },
+      "uuu-emmc": {
+        "script": "stone-provision-uuu-emmc.sh",
+        "envs": ["device_info"]
       }
     }
   },
@@ -50,6 +54,7 @@
       "uuid": "4bc367b3-5d70-4289-b24d-9b09cb79685c",
       "images": {
         "imx_boot": "imx-boot",
+        "imx_boot_emmc_fastboot": "imx-boot-avocado-imx8mp-evk-sd.bin-flash_evk_emmc_fastboot",
         "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",
