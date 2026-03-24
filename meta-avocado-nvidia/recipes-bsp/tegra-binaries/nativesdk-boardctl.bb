@@ -38,6 +38,6 @@ do_install() {
 FILES:${PN} = "${BOARDCTL_BINDIR} ${SDKPATHNATIVE}${bindir_nativesdk}/boardctl"
 
 # Skip QA for pre-built NVIDIA x86_64 binary
-INSANE_SKIP:${PN} = "already-stripped file-rdeps ldflags libdir"
+INSANE_SKIP:${PN} = "already-stripped arch file-rdeps ldflags libdir"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 INHIBIT_PACKAGE_STRIP = "1"
