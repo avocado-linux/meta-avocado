@@ -64,11 +64,13 @@
       },
       "sd": {
         "script": "stone-provision-sd.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info"],
+        "requires": ["usb"]
       },
       "usb": {
         "script": "stone-provision-usb.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info"],
+        "requires": ["usb"]
       }
     }
   },

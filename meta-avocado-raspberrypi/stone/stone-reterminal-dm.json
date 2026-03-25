@@ -19,7 +19,8 @@
       },
       "usb": {
         "script": "stone-provision-usb.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info"],
+        "requires": ["usb"]
       }
     }
   },
