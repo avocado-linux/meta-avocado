@@ -689,6 +689,12 @@ if [ $want_signing -eq 1 ]; then
     bctfilename=$(echo $sdramcfg_files | cut -d, -f1)
     bctfile1name=$(echo $sdramcfg_files | cut -d, -f2)
     BCTARGS="$bctargs $overlay_dtb_arg $custinfo_args --bct_backup"
+    # DTBARGS is used by odmsign_ext_flash() when it rebuilds FLASHARGS from scratch.
+    # Without this, overlay_dtb_arg is lost and the generated flashcmd.txt / rcmbootcmd.txt
+    # will be missing --overlay_dtb and --dce_overlay_dtb arguments.
+    # Trailing space required: odmsign.func concatenates ${DTBARGS}${MTSARGS}${SOSARGS}...
+    # without separators, so each variable must end with a space.
+    DTBARGS="${overlay_dtb_arg:+$overlay_dtb_arg }"
     L4T_CONF_DTBO="L4TConfiguration.dtbo"
     rootfs_ab=0
     gen_rcmdump=0
@@ -706,11 +712,6 @@ if [ $want_signing -eq 1 ]; then
     FBARGS="--cmd \"$tfcmd\""
     . "$here/odmsign.func"
     (odmsign_ext_sign_and_flash) || exit 1
-    # Workaround: odmsign.func rebuilds BCTARGS/FLASHARGS and loses overlay_dtb_arg
-    # Re-inject it into the generated flashcmd.txt before --bct_backup
-    if [ -n "$overlay_dtb_arg" ] && [ -f flashcmd.txt ]; then
-        sed -i "s|--bct_backup|$overlay_dtb_arg --bct_backup|" flashcmd.txt
-    fi
     if [ $bup_blob -eq 0 -a $no_flash -ne 0 ]; then
         mv flashcmd.txt secureflash.sh || exit 1
         chmod +x secureflash.sh
@@ -722,6 +723,7 @@ if [ $want_signing -eq 1 ]; then
 	rm -f secureflash.xml.save
 	mv secureflash.xml secureflash.xml.save
 	BCTARGS="$bctargs $rcm_overlay_dtb_arg $custinfo_args --bct_backup"
+	DTBARGS="${rcm_overlay_dtb_arg:+$rcm_overlay_dtb_arg }"
 	L4T_CONF_DTBO="$rcm_bootcontrol_overlay"
 	BINSARGS="--bins \"$binsargs_params; kernel $RCMBOOT_KERNEL; kernel_dtb $kernel_dtbfile\""
 	FLASHARGS="--chip 0x23 --bl uefi_jetson_minimal_with_dtb.bin \
