@@ -2,7 +2,52 @@
   "runtime": {
     "platform": "avocado-rzv2n-sr-som",
     "architecture": "arm64",
-    "provision_default": "sd"
+    "provision_default": "img",
+    "update_strategy": "mbr-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{inactive_slot}",
+          "{inactive_slot}.avocado_platform": "{platform}",
+          "{inactive_slot}.avocado_architecture": "{architecture}"
+        }
+      },
+      {
+        "type": "mbr-switch",
+        "devpath": "/dev/mmcblk1",
+        "slot_layouts": {
+          "a": ["boot-a", "rootfs-a", "var"],
+          "b": ["boot-b", "rootfs-b", "var"]
+        }
+      }
+    ],
+    "rollback": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{previous_slot}"
+        }
+      },
+      {
+        "type": "mbr-switch",
+        "devpath": "/dev/mmcblk1",
+        "slot_layouts": {
+          "a": ["boot-a", "rootfs-a", "var"],
+          "b": ["boot-b", "rootfs-b", "var"]
+        }
+      }
+    ]
   },
   "provision": {
     "envs": {
@@ -10,21 +55,34 @@
         "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
         "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
         "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      },
+      "cmdline": {
+        "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
     "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info", "cmdline"]
+      },
       "sd": {
         "script": "stone-provision-sd.sh",
-        "envs": ["device_info"]
+        "envs": ["device_info", "cmdline"],
+        "requires": ["usb"]
       }
     }
   },
   "storage_devices": {
     "rootdisk": {
       "out": "avocado-rzv2n-sr-som-rootdisk.zip",
+      "build_args": {
+        "type": "fwup",
+        "template": "rootdisk.conf"
+      },
       "devpath": "/dev/mmcblk1",
       "block_size": 512,
       "images": {
+        "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",
           "size": 128,
@@ -53,7 +111,18 @@
       },
       "partitions": [
         {
-          "name": "boot",
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "offset": 1,
+          "offset_unit": "mebibytes",
+          "offset_redundant": 1280,
+          "offset_redundant_unit": "kibibytes",
+          "size": 128,
+          "size_unit": "kibibytes",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "boot-a",
           "image": "boot",
           "offset": 2,
           "offset_unit": "mebibytes",
@@ -61,8 +130,26 @@
           "size_unit": "mebibytes"
         },
         {
-          "name": "rootfs",
+          "name": "boot-b",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "recovery",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
           "image": "rootfs",
+          "size": 2048,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "image": "",
           "size": 2048,
           "size_unit": "mebibytes"
         },
