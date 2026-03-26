@@ -67,181 +67,180 @@ echo "Avocado SD Card Provisioning Tool"
 echo "=========================================="
 echo ""
 echo "This tool will write the Avocado system image to an SD card."
-echo "Make sure you have an SD card ready for programming."
 echo ""
 
-# Record existing block devices before inserting SD card
-echo "Recording existing block devices..."
-existing_devices=()
-existing_fwup_devices=$(fwup -D 2>/dev/null | grep "^/dev/sd" || true)
-for device_entry in $existing_fwup_devices; do
-    device_path="${device_entry%,*}"
-    device_name=$(basename "$device_path")
-    existing_devices+=("$device_name")
-done
-if [[ ${#existing_devices[@]} -eq 0 ]]; then
-    echo "Existing devices: none"
-else
-    echo "Existing devices: ${existing_devices[*]}"
+# =============================================================================
+# Device selection helper
+# =============================================================================
+
+# Get device vendor/model info from sysfs
+get_device_info() {
+    local dev_path="$1"
+    local dev_name
+    dev_name=$(basename "$dev_path")
+    local sysblock="/sys/block/${dev_name}"
+    local vendor="" model=""
+    if [[ -d "$sysblock" ]]; then
+        vendor=$(cat "$sysblock/device/vendor" 2>/dev/null | xargs || true)
+        model=$(cat "$sysblock/device/model" 2>/dev/null | xargs || true)
+    fi
+    echo "${vendor:+$vendor }${model:-unknown}"
+}
+
+# Identify boot volume so we never offer to overwrite it
+root_dev=""
+if [[ -f /proc/mounts ]]; then
+    root_mount=$(awk '$2 == "/" {print $1; exit}' /proc/mounts)
+    if [[ -n "$root_mount" && -b "$root_mount" ]]; then
+        root_dev=$(echo "$root_mount" | sed -E 's/p?[0-9]+$//')
+        if [[ "$root_dev" == "$root_mount" ]]; then
+            root_dev=$(echo "$root_mount" | sed 's/[0-9]*$//')
+        fi
+    fi
 fi
 
-echo ""
-read -p "Please insert your SD card and press Enter to continue..." -r
+# =============================================================================
+# Non-interactive mode: AVOCADO_PROVISION_DEVICE
+# =============================================================================
 
-echo "Waiting for new mass storage device to be detected..."
-
-# Wait for new mass storage device to appear
-STORAGE_TIMEOUT=60
-storage_start_time=$(date +%s)
 sd_block_device=""
-last_dot_time=0
 
-while [[ -z "$sd_block_device" ]]; do
-    # Show progress dots every 2 seconds
-    now=$(date +%s)
-    if (( now - last_dot_time >= 2 )); then
-        echo -n "."
-        last_dot_time=$now
-    fi
-    
-    # Use fwup -D to detect available devices
-    available_devices=$(fwup -D 2>/dev/null | grep "^/dev/sd" || true)
-    
-    if [[ -n "$available_devices" ]]; then
-        echo ""  # New line after progress dots
-        
-        # Check each device fwup found (format: /dev/sdX,size_in_bytes)
-        for device_entry in $available_devices; do
-            # Parse device path and size from fwup output
-            device_path="${device_entry%,*}"
-            device_size_bytes="${device_entry#*,}"
-            device_name=$(basename "$device_path")
-            
-            # Skip devices that existed before SD card insertion
-            device_is_new=true
-            for existing_dev in "${existing_devices[@]}"; do
-                if [[ "$device_name" == "$existing_dev" ]]; then
-                    device_is_new=false
-                    break
-                fi
-            done
-            
-            if [[ "$device_is_new" == "true" ]]; then
-                # Use the first new device fwup detects
-                sd_block_device="$device_path"
-                sd_device_size_bytes="$device_size_bytes"
-                echo "Found new mass storage device: $sd_block_device"
-                break
-            fi
-        done
-    fi
-    
-    # Check timeout
-    now=$(date +%s)
-    if (( now - storage_start_time >= STORAGE_TIMEOUT )); then
-        echo ""  # New line after progress dots
-        echo "Timed out after $STORAGE_TIMEOUT seconds waiting for SD card"
-        echo "Diagnostic information:"
-        echo "Block devices currently detected by fwup:"
-        current_fwup_devices=$(fwup -D 2>/dev/null | grep "^/dev/sd" || true)
-        if [[ -n "$current_fwup_devices" ]]; then
-            for device_entry in $current_fwup_devices; do
-                device_path="${device_entry%,*}"
-                device_size="${device_entry#*,}"
-                device_name=$(basename "$device_path")
-                echo "  Device $device_name: $device_path (${device_size} bytes)"
-            done
-        else
-            echo "  No devices detected by fwup -D"
-        fi
+if [[ -n "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
+    echo "Non-interactive mode: AVOCADO_PROVISION_DEVICE=${AVOCADO_PROVISION_DEVICE}"
+    echo ""
+
+    if [[ ! -b "$AVOCADO_PROVISION_DEVICE" ]]; then
+        echo "Error: ${AVOCADO_PROVISION_DEVICE} is not a valid block device"
         exit 1
     fi
-    
-    sleep 1
-done
 
-# Wait for the block device to be fully accessible
-echo "Waiting for block device to be ready for access..."
-DEVICE_READY_TIMEOUT=15
-device_ready_start_time=$(date +%s)
-device_ready=false
+    if [[ -n "$root_dev" && "$AVOCADO_PROVISION_DEVICE" == "$root_dev" ]]; then
+        echo "Error: ${AVOCADO_PROVISION_DEVICE} is the boot volume -- refusing to overwrite"
+        exit 1
+    fi
 
-while [[ "$device_ready" == "false" ]]; do
-    # Check if device exists as a block device
-    if [[ -b "$sd_block_device" ]]; then
-        # Try a simple read test first
-        if timeout 2 dd if="$sd_block_device" of=/dev/null bs=512 count=1 2>/dev/null; then
-            device_ready=true
-            echo ""  # New line after progress dots
-            echo "Block device is ready for access"
-            break
-        else
-            # If dd fails, check if it's just a permission issue by testing file existence
-            if [[ -r "$sd_block_device" ]]; then
-                echo ""  # New line after progress dots
-                echo "Block device exists and is readable, proceeding..."
-                device_ready=true
-                break
-            fi
+    sd_block_device="$AVOCADO_PROVISION_DEVICE"
+    echo "Using device: $sd_block_device ($(get_device_info "$sd_block_device"))"
+else
+    # =============================================================================
+    # Interactive mode: list available devices, let user select
+    # =============================================================================
+
+    echo "Detecting available storage devices..."
+    echo ""
+
+    # Use fwup -D to list devices it considers safe to write to
+    # Output format: /dev/sdX,size_in_bytes
+    fwup_output=$(fwup -D 2>/dev/null || true)
+
+    device_paths=()
+    device_sizes=()
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        dev_path="${line%,*}"
+        dev_size="${line#*,}"
+
+        # Filter out boot volume
+        if [[ -n "$root_dev" && "$dev_path" == "$root_dev" ]]; then
+            continue
+        fi
+
+        device_paths+=("$dev_path")
+        device_sizes+=("$dev_size")
+    done <<< "$fwup_output"
+
+    if [[ ${#device_paths[@]} -eq 0 ]]; then
+        echo "No removable storage devices detected."
+        echo ""
+        echo "Is your SD card inserted? Ensure the SD card reader is connected"
+        echo "and the device is visible to the container."
+        echo ""
+        echo "Diagnostic — raw fwup -D output:"
+        fwup -D 2>/dev/null || echo "  (fwup -D returned an error)"
+        exit 1
+    fi
+
+    echo "--- Available storage devices ---"
+    echo ""
+    for i in "${!device_paths[@]}"; do
+        dev_path="${device_paths[$i]}"
+        dev_size="${device_sizes[$i]}"
+        size_gib=$(echo "scale=1; $dev_size / 1073741824" | bc -l 2>/dev/null || echo "?")
+        info=$(get_device_info "$dev_path")
+        printf "  %-16s %6s GiB   %s\n" "$dev_path" "$size_gib" "$info"
+    done
+
+    if [[ -n "$root_dev" ]]; then
+        echo ""
+        echo "  (boot volume ${root_dev} is hidden)"
+    fi
+    echo ""
+
+    if [[ ${#device_paths[@]} -eq 1 ]]; then
+        # Single device — just confirm
+        sd_block_device="${device_paths[0]}"
+        read -p "Use ${sd_block_device}? (y/N): " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Operation cancelled by user"
+            exit 1
+        fi
+    else
+        # Multiple devices — prompt for selection
+        read -p "Enter the target device path (e.g. /dev/sdX): " -r sd_block_device
+
+        if [[ -z "$sd_block_device" ]]; then
+            echo "Error: No device specified"
+            exit 1
+        fi
+
+        if [[ ! -b "$sd_block_device" ]]; then
+            echo "Error: ${sd_block_device} is not a valid block device"
+            exit 1
+        fi
+
+        if [[ -n "$root_dev" && "$sd_block_device" == "$root_dev" ]]; then
+            echo "Error: ${sd_block_device} is the boot volume -- refusing to overwrite"
+            exit 1
         fi
     fi
-    
-    # Check timeout
-    now=$(date +%s)
-    if (( now - device_ready_start_time >= DEVICE_READY_TIMEOUT )); then
-        echo ""  # New line after progress dots
-        echo "Device status: block device exists: $([[ -b "$sd_block_device" ]] && echo "yes" || echo "no")"
-        echo "Device status: readable: $([[ -r "$sd_block_device" ]] && echo "yes" || echo "no")"
-        echo "Proceeding anyway - device may be ready despite timeout"
-        break
-    fi
-    
-    echo -n "."
-    sleep 0.5
-done
-
-# Ensure we actually found a device
-if [[ -z "$sd_block_device" ]]; then
-    echo "Error: No new SD card was detected"
-    exit 1
 fi
 
-# Calculate device size in GiB
-device_size_gib=$((sd_device_size_bytes / 1024 / 1024 / 1024))
-device_size_gib_decimal=$(echo "scale=2; $sd_device_size_bytes / 1024 / 1024 / 1024" | bc -l 2>/dev/null || echo "$device_size_gib")
+# =============================================================================
+# Confirm and write
+# =============================================================================
 
-echo "SD card successfully detected:"
+# Gather device details for display
+sd_device_size_bytes=$(blockdev --getsize64 "$sd_block_device" 2>/dev/null || echo "unknown")
+if [[ "$sd_device_size_bytes" != "unknown" ]]; then
+    device_size_gib_decimal=$(echo "scale=2; $sd_device_size_bytes / 1073741824" | bc -l 2>/dev/null || echo "?")
+else
+    device_size_gib_decimal="unknown"
+fi
+device_info=$(get_device_info "$sd_block_device")
+
+echo ""
+echo "Target SD card:"
 echo "  Device: $sd_block_device"
-echo "  Size: ${device_size_gib_decimal} GiB (${sd_device_size_bytes} bytes)"
+echo "  Size:   ${device_size_gib_decimal} GiB"
+echo "  Info:   $device_info"
+echo ""
 
-# Get device vendor/model info if available
-block_dev="/sys/block/$(basename "$sd_block_device")"
-if [[ -d "$block_dev" ]]; then
-    vendor_file="$block_dev/device/vendor"
-    model_file="$block_dev/device/model"
-    if [[ -f "$vendor_file" && -f "$model_file" ]]; then
-        vendor=$(cat "$vendor_file" 2>/dev/null | xargs || echo "unknown")
-        model=$(cat "$model_file" 2>/dev/null | xargs || echo "unknown")
-        echo "  Vendor: $vendor"
-        echo "  Model: $model"
+# In non-interactive mode skip the final confirmation
+if [[ -z "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
+    echo "WARNING: This will completely overwrite ${sd_block_device}!"
+    echo "All existing data on this SD card will be lost."
+    echo ""
+    read -p "Are you sure you want to continue? (y/N): " -r
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Operation cancelled by user"
+        exit 1
     fi
 fi
 
-echo ""
-echo "WARNING: This will completely overwrite the device $sd_block_device!"
-echo "All existing data on this ${device_size_gib_decimal} GiB SD card will be lost."
-echo ""
+echo "Proceeding with firmware write..."
 
-read -p "Are you sure you want to continue? (y/N): " -r
-
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Operation cancelled by user"
-    exit 1
-fi
-
-echo "User confirmed. Proceeding with firmware write..."
-
-# Ensure device is not mounted and accessible
+# Unmount any mounted partitions on the target device
 if mount | grep -q "${sd_block_device}"; then
     echo "Unmounting any mounted partitions on ${sd_block_device}..."
     if ! umount "${sd_block_device}"* 2>/dev/null; then
