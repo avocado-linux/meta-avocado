@@ -23,6 +23,7 @@ RDEPENDS:${PN} = " \
   dtc \
   ethtool \
   fwup \
+  git \
   glibc-utils \
   htop \
   i2c-tools \
