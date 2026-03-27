@@ -11,7 +11,7 @@ SRC_URI[sha256sum] = "ef59982abfd32c670862190c22347d8ca3fc39f7140901cf017f58ff0b
 
 S = "${WORKDIR}"
 
-RDEPENDS:${PN} = "openjdk-17-jre"
+RDEPENDS:${PN} = "openjdk-17-jre zip"
 
 do_configure[noexec] = "1"
 do_patch[noexec] = "1"

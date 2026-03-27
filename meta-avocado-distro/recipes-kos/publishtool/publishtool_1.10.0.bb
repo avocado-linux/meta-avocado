@@ -11,7 +11,7 @@ SRC_URI[sha256sum] = "d766771c0b0eca11f03e0f8af63d30496f2429887c5385c41cc63060cf
 
 S = "${WORKDIR}"
 
-RDEPENDS:${PN} = "openjdk-17-jre"
+RDEPENDS:${PN} = "openjdk-17-jre kabtool"
 
 do_configure[noexec] = "1"
 do_patch[noexec] = "1"
