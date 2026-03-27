@@ -24,6 +24,8 @@ SUMMARY = "Runtime control for Avocado Linux"
 HOMEPAGE = "https://github.com/avocado-linux/avocadoctl"
 LICENSE = "Apache-2.0"
 
+RDEPENDS:${PN} += "util-linux-losetup"
+
 include avocadoctl-${PV}.inc
 include avocadoctl.inc
 
