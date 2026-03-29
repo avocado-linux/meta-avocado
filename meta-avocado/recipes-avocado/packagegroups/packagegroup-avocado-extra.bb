@@ -14,12 +14,16 @@ RDEPENDS:${PN} = " \
   avocado-img-var \
   avocado-pkg-rootfs \
   avocado-pkg-initramfs \
+  bind-utils \
+  bubblewrap \
   ca-certificates \
   chrony \
   cifs-utils \
   cockpit \
+  cronie \
   coreutils \
   cryptoauthlib \
+  devmem2 \
   dtc \
   ethtool \
   fwup \
@@ -29,6 +33,7 @@ RDEPENDS:${PN} = " \
   i2c-tools \
   iperf3 \
   iproute2 \
+  jq \
   kabtool \
   less \
   libgpiod \
@@ -48,9 +53,11 @@ RDEPENDS:${PN} = " \
   openssh \
   openssh-sftp-server \
   openssh-sshd \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'optee-client', '', d)} \
   p11-kit \
   parted \
   peridiod \
+  phytool \
   picocom \
   plymouth \
   procps \
@@ -58,15 +65,20 @@ RDEPENDS:${PN} = " \
   qemu-user-static \
   qemu-user-static-binfmt \
   redis \
+  rng-tools \
+  rtc-tools \
   rsync \
+  screen \
   sscg \
   strace \
   tcpdump \
+  tmux \
   tio \
   usbutils \
   uv \
   v4l-utils \
   vim \
+  vnstat \
   wireless-regdb \
   wireless-regdb-static \
   wpa-supplicant \
@@ -144,6 +156,17 @@ PYTHON_PACKAGES = " \
   python3-opencv \
   python3-spidev \
   python3-smbus \
+  python3-cryptography \
+  python3-distro \
+  python3-paho-mqtt \
+  python3-periphery \
+  python3-posix-ipc \
+  python3-psutil \
+  python3-pycurl \
+  python3-pyserial \
+  python3-requests \
+  python3-smbus2 \
+  python3-tzdata \
 "
 
 QT5_PACKAGES = " \

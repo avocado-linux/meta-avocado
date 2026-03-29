@@ -1,3 +1,5 @@
+MACHINE_FEATURES:append = " optee"
+
 STONE_PROVISIONING ?= "tegraflash"
 USE_REDUNDANT_FLASH_LAYOUT_DEFAULT = "1"
 PREFERRED_PROVIDER_virtual/kernel = "linux-yocto"

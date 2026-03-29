@@ -1,0 +1,18 @@
+{
+  "backports": [
+    {
+      "recipe": "python3-tzdata",
+      "version": "2025.3",
+      "source_branch": "master",
+      "source_layer": "meta-python",
+      "backported_at": "2026-03-29T19:34:35.359533Z",
+      "backported_by": "cado",
+      "files": [
+        "recipes-devtools/python/python3-tzdata_2025.3.bb"
+      ],
+      "build_tested": false,
+      "build_success": null,
+      "notes": "Target layer: meta-avocado-distro; Found 8 layer dependencies in KAS files; Found recipe python3-tzdata v2025.3 in layer meta-python; Cloning layer from https://github.com/avocado-linux/vendor-meta-openembedded (branch: master); Searching in subdirectory: meta-python; Found recipe file: meta-python/recipes-devtools/python/python3-tzdata_2025.3.bb; Extracted 1 files associated with the recipe; Copied 1 files to meta-avocado-distro; No syntax adaptations needed"
+    }
+  ]
+}

@@ -69,6 +69,23 @@ do_install:append() {
     # expects root:root. The base recipe does chown before our append runs.
     chown -R root:root $kerneldir/arch/${ARCH}/include/generated 2>/dev/null || :
 
+    # Fix: upstream kernel-devsrc.bb uses explicit file globs for VDSO sources
+    # (e.g., *gettimeofday.*, sigreturn.S, note.S) that miss files added in
+    # newer kernels. Kernel 6.11+ added vgetrandom to the VDSO, requiring
+    # vgetrandom.c and vgetrandom-chacha.S. The vdso_prepare target runs during
+    # modules_prepare on arm64 (and powerpc, loongarch, s390, parisc) and needs
+    # all VDSO source files to compile. Copy the complete VDSO directory to
+    # future-proof against new additions — matching the approach riscv already
+    # uses in the upstream recipe.
+    if [ -d "${S}/arch/${ARCH}/kernel/vdso" ]; then
+        (
+            cd ${S}
+            cp -a --parents arch/${ARCH}/kernel/vdso/* $kerneldir/ 2>/dev/null || :
+        )
+        chown -R root:root $kerneldir/arch/${ARCH}/kernel/vdso 2>/dev/null || :
+        bbnote "kernel-devsrc-fix: Copied complete ${ARCH} VDSO sources for modules_prepare"
+    fi
+
     # Create a version metadata file for Avocado to read.
     # We can't set PV=${KERNEL_VERSION} because it's not available at parse time,
     # but we can embed it in the package for runtime version checking.
