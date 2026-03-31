@@ -11,3 +11,26 @@ SRC_URI += "file://0001-rust-fix-mismatched-lifetime-syntaxes-in-qr_code.patch \
 # clang versions to land in the sysroot with conflicting LLVM static libraries.
 DEPENDS:remove = "clang17-cross-${TARGET_ARCH} compiler-rt17"
 DEPENDS:append = " clang-cross-${TARGET_ARCH}"
+
+# Fix distutils.version removed in Python 3.12 (Ubuntu 22.04+)
+# Replace with packaging.version which is available in the build env
+do_check_llvm_version:prepend() {
+    import sys
+    import types
+    # Inject a shim distutils.version module so existing code doesn't break
+    if 'distutils' not in sys.modules:
+        import packaging.version
+        distutils_mock = types.ModuleType('distutils')
+        version_mock = types.ModuleType('distutils.version')
+        class LooseVersion:
+            def __init__(self, v): self.version = packaging.version.Version(v)
+            def __lt__(self, o): return self.version < o.version
+            def __le__(self, o): return self.version <= o.version
+            def __gt__(self, o): return self.version > o.version
+            def __ge__(self, o): return self.version >= o.version
+            def __eq__(self, o): return self.version == o.version
+        version_mock.LooseVersion = LooseVersion
+        distutils_mock.version = version_mock
+        sys.modules['distutils'] = distutils_mock
+        sys.modules['distutils.version'] = version_mock
+}
