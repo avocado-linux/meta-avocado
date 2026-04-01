@@ -82,6 +82,8 @@ RDEPENDS:${PN} = " \
   wireless-regdb \
   wireless-regdb-static \
   wpa-supplicant \
+  iw \
+  bluez5 \
   ${GSTREAMER_PACKAGES} \
   ${PYTHON_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \

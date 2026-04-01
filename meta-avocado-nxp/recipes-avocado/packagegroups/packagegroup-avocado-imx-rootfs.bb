@@ -1,4 +1,4 @@
-DESCRIPTION = "Packagegroup for inclusion in all Avocado NXP i.MX images"
+DESCRIPTION = "Packagegroup for inclusion in all Avocado NXP i.MX rootfs images"
 LICENSE = "Apache-2.0"
 
 do_image[deptask] = "do_image_complete"
