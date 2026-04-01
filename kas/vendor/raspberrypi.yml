@@ -17,5 +17,6 @@ local_conf_header:
   vendor-raspberrypi: |
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-raspberrypi-extra"
     SDK_PKG_EXTRA_INSTALL:append = " packagegroup-avocado-raspberrypi-sdk"
+    INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-raspberrypi-initramfs"
     BBMASK += "meta-raspberrypi/recipes-bsp/u-boot/"
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"

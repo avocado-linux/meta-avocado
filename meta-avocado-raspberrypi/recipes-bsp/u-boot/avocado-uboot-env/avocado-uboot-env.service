@@ -1,0 +1,14 @@
+[Unit]
+Description=Mount U-Boot env FAT partition and generate fw_env.config
+DefaultDependencies=no
+After=local-fs.target
+Before=avocadoctl.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/avocado-uboot-env
+RemainAfterExit=yes
+RuntimeDirectory=avocado
+
+[Install]
+WantedBy=sysinit.target

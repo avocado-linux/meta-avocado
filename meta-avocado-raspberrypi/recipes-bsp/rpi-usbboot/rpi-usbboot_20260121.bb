@@ -35,6 +35,14 @@ do_compile() {
     done
 }
 
+# Enable PCIe in the mass-storage-gadget64 config so that NVMe drives
+# are exposed alongside SD/eMMC.  Without this the gadget's Linux never
+# initialises the PCIe controller and NVMe devices stay invisible.
+# Harmless on boards without NVMe — link training simply times out.
+do_compile:append() {
+    echo "dtparam=pciex1" >> ${S}/mass-storage-gadget64/config.txt
+}
+
 do_install() {
     # Create standard directories within the staging area first
     install -d ${D}${bindir}

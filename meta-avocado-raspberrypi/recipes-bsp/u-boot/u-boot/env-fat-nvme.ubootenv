@@ -1,0 +1,15 @@
+# U-Boot environment stored on FAT filesystem (NVMe target)
+# Env lives on a dedicated FAT partition separate from boot A/B
+# to survive OTA updates that rewrite boot partitions.
+#
+# For full NVMe boot: EEPROM configured to boot from NVMe,
+# entire system (firmware FAT, U-Boot, env, rootfs) on NVMe.
+# CONFIG_ENV_IS_IN_MMC is not set
+# CONFIG_ENV_IS_IN_FLASH is not set
+CONFIG_ENV_IS_IN_FAT=y
+CONFIG_ENV_FAT_INTERFACE="nvme"
+CONFIG_ENV_FAT_DEVICE_AND_PART="0:2"
+CONFIG_ENV_FAT_FILE="/uboot.env"
+CONFIG_ENV_REDUNDANT=y
+CONFIG_ENV_FAT_FILE_REDUND="/uboot.env.redund"
+CONFIG_ENV_SIZE=0x20000

@@ -8,4 +8,5 @@ RDEPENDS:${PN}:append = " \
   nativesdk-fwup \
   nativesdk-mkfat \
   nativesdk-rpi-usbboot \
+  nativesdk-libubootenv-bin \
 "

@@ -50,6 +50,15 @@ do_deploy:append:seeed() {
     fi
 }
 
+do_deploy:append:raspberrypi5() {
+    CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
+
+    # Enable external PCIe controller for M.2 NVMe HATs.
+    # Without this, the device tree node is disabled and U-Boot
+    # cannot probe the PCIe bus to access NVMe storage.
+    append_config_if_missing "dtparam=pciex1"
+}
+
 do_deploy:append:fr200() {
     CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
 

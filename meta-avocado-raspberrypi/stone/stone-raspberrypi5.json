@@ -27,8 +27,8 @@
         "type": "mbr-switch",
         "devpath": "/dev/mmcblk0",
         "slot_layouts": {
-          "a": ["boot-a", "rootfs-a", "var"],
-          "b": ["boot-b", "rootfs-b", "var"]
+          "a": ["boot-a", "uboot-env", "rootfs-a", "var"],
+          "b": ["boot-b", "uboot-env", "rootfs-b", "var"]
         }
       }
     ],
@@ -43,8 +43,8 @@
         "type": "mbr-switch",
         "devpath": "/dev/mmcblk0",
         "slot_layouts": {
-          "a": ["boot-a", "rootfs-a", "var"],
-          "b": ["boot-b", "rootfs-b", "var"]
+          "a": ["boot-a", "uboot-env", "rootfs-a", "var"],
+          "b": ["boot-b", "uboot-env", "rootfs-b", "var"]
         }
       }
     ]
@@ -71,6 +71,21 @@
         "script": "stone-provision-usb.sh",
         "envs": ["device_info"],
         "requires": ["usb"]
+      },
+      "usb-emmc": {
+        "script": "stone-provision-usb-emmc.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      },
+      "usb-nvme": {
+        "script": "stone-provision-usb-nvme.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      },
+      "usb-sd": {
+        "script": "stone-provision-usb-sd.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
       }
     }
   },
@@ -84,7 +99,19 @@
       "devpath": "/dev/mmcblk0",
       "block_size": 512,
       "images": {
-        "uboot_env": "uboot.env",
+        "uboot_env": {
+          "out": "uboot-env.img",
+          "size": 1,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT12",
+            "files": [
+              { "in": "uboot.env", "out": "uboot.env" },
+              { "in": "uboot.env", "out": "uboot.env.redund" }
+            ]
+          }
+        },
         "boot": {
           "out": "boot.img",
           "size": 128,
@@ -128,7 +155,8 @@
           }
         },
         "rootfs": "avocado-image-rootfs-raspberrypi5.erofs-lz4",
-        "var": "avocado-image-var-raspberrypi5.btrfs"
+        "var": "avocado-image-var-raspberrypi5.btrfs",
+        "uboot-nvme": "u-boot-nvme.bin"
       },
       "partitions": [
         {
@@ -136,11 +164,8 @@
           "image": "uboot_env",
           "offset": 1,
           "offset_unit": "mebibytes",
-          "offset_redundant": 1280,
-          "offset_redundant_unit": "kibibytes",
-          "size": 128,
-          "size_unit": "kibibytes",
-          "in-partition-table": "false"
+          "size": 1,
+          "size_unit": "mebibytes"
         },
         {
           "name": "boot-a",

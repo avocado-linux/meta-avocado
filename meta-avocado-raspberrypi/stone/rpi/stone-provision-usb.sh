@@ -134,20 +134,20 @@ while [[ -z "$rpi_block_device" ]]; do
         echo -n "."
         last_dot_time=$now
     fi
-    
+
     # Use fwup -D to detect available devices
     available_devices=$(fwup -D 2>/dev/null | grep "^/dev/sd" || true)
-    
+
     if [[ -n "$available_devices" ]]; then
         echo ""  # New line after progress dots
-        
+
         # Check each device fwup found (format: /dev/sdX,size_in_bytes)
         for device_entry in $available_devices; do
             # Parse device path and size from fwup output
             device_path="${device_entry%,*}"
             device_size_bytes="${device_entry#*,}"
             device_name=$(basename "$device_path")
-            
+
             # Skip devices that existed before mass storage mode
             device_is_new=true
             for existing_dev in "${existing_devices[@]}"; do
@@ -156,7 +156,7 @@ while [[ -z "$rpi_block_device" ]]; do
                     break
                 fi
             done
-            
+
             if [[ "$device_is_new" == "true" ]]; then
                 # Use the first new device fwup detects
                 rpi_block_device="$device_path"
@@ -166,7 +166,7 @@ while [[ -z "$rpi_block_device" ]]; do
             fi
         done
     fi
-    
+
     # Check timeout
     now=$(date +%s)
     if (( now - storage_start_time >= STORAGE_TIMEOUT )); then
@@ -194,7 +194,7 @@ while [[ -z "$rpi_block_device" ]]; do
         done
         exit 1
     fi
-    
+
     sleep 1
 done
 
@@ -223,7 +223,7 @@ while [[ "$device_ready" == "false" ]]; do
             fi
         fi
     fi
-    
+
     # Check timeout
     now=$(date +%s)
     if (( now - device_ready_start_time >= DEVICE_READY_TIMEOUT )); then
@@ -233,7 +233,7 @@ while [[ "$device_ready" == "false" ]]; do
         echo "Proceeding anyway - device may be ready despite timeout"
         break
     fi
-    
+
     echo -n "."
     sleep 0.5
 done
@@ -278,48 +278,6 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo "User confirmed. Proceeding with firmware write..."
-
-# Extract uboot-env partition info from manifest to clear it
-echo "Clearing uboot-env partition..."
-uboot_offset=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r '.storage_devices.rootdisk.partitions[] | select(.name == "uboot-env") | .offset')
-uboot_offset_unit=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r '.storage_devices.rootdisk.partitions[] | select(.name == "uboot-env") | .offset_unit')
-uboot_size=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r '.storage_devices.rootdisk.partitions[] | select(.name == "uboot-env") | .size')
-uboot_size_unit=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r '.storage_devices.rootdisk.partitions[] | select(.name == "uboot-env") | .size_unit')
-
-# Validate extracted values
-if [[ -z "$uboot_offset" || "$uboot_offset" == "null" ]]; then
-    echo "Error: Could not extract uboot-env offset from manifest"
-    exit 1
-fi
-if [[ -z "$uboot_size" || "$uboot_size" == "null" ]]; then
-    echo "Error: Could not extract uboot-env size from manifest"
-    exit 1
-fi
-
-# Convert offset to bytes
-case "$uboot_offset_unit" in
-    "mebibytes") uboot_offset_bytes=$((uboot_offset * 1024 * 1024)) ;;
-    "kibibytes") uboot_offset_bytes=$((uboot_offset * 1024)) ;;
-    "bytes") uboot_offset_bytes=$uboot_offset ;;
-    *) echo "Error: Unknown offset unit: $uboot_offset_unit"; exit 1 ;;
-esac
-
-# Convert size to bytes
-case "$uboot_size_unit" in
-    "mebibytes") uboot_size_bytes=$((uboot_size * 1024 * 1024)) ;;
-    "kibibytes") uboot_size_bytes=$((uboot_size * 1024)) ;;
-    "bytes") uboot_size_bytes=$uboot_size ;;
-    *) echo "Error: Unknown size unit: $uboot_size_unit"; exit 1 ;;
-esac
-
-echo "Clearing uboot-env at offset ${uboot_offset_bytes} bytes, size ${uboot_size_bytes} bytes"
-# Use skip blocks approach for BusyBox dd compatibility
-uboot_offset_blocks=$((uboot_offset_bytes / 512))
-uboot_size_blocks=$(((uboot_size_bytes + 511) / 512))  # Round up
-if ! dd if=/dev/zero of="${rpi_block_device}" bs=512 seek=${uboot_offset_blocks} count=${uboot_size_blocks} 2>/dev/null; then
-    echo "Error: Failed to clear uboot-env partition"
-    exit 1
-fi
 
 echo "Writing system image to rpi..."
 
