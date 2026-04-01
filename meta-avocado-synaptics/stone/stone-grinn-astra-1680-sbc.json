@@ -3,5 +3,150 @@
     "platform": "avocado-grinn-astra-1680-sbc",
     "architecture": "arm64"
   },
-  "storage_devices": {}
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-grinn-astra-1680-sbc-rootdisk.zip",
+      "build_args": {
+        "type": "fwup",
+        "template": "rootdisk.conf"
+      },
+      "devpath": "/dev/mmcblk0",
+      "block_size": 512,
+      "uuid": "ae5b64e9-d45b-41cc-b3c6-ab767216417f",
+      "images": {
+        "bootloader": "bootloader.subimg",
+        "boot": "linux_bootimgs.subimg",
+        "rootfs": "avocado-image-rootfs-grinn-astra-1680-sbc.erofs-lz4",
+        "var": "avocado-image-var-grinn-astra-1680-sbc.btrfs"
+      },
+      "partitions": [
+        {
+          "name": "factory_settings",
+          "image": "",
+          "offset": 16,
+          "offset_unit": "mebibytes",
+          "size": 16,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "key_a",
+          "image": "",
+          "size": 1,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "tzk_a",
+          "image": "",
+          "size": 7,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "key_b",
+          "image": "",
+          "size": 1,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "tzk_b",
+          "image": "",
+          "size": 7,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "bl_a",
+          "image": "bootloader",
+          "size": 16,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "bl_b",
+          "image": "",
+          "size": 16,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot_a",
+          "image": "boot",
+          "size": 32,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot_b",
+          "image": "boot",
+          "size": 32,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "firmware_a",
+          "image": "",
+          "size": 32,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "firmware_b",
+          "image": "",
+          "size": 32,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs_a",
+          "image": "rootfs",
+          "size": 5120,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs_b",
+          "image": "",
+          "size": 5120,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "fastlogo_a",
+          "image": "",
+          "size": 16,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "fastlogo_b",
+          "image": "",
+          "size": 16,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "devinfo",
+          "image": "",
+          "size": 2,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "misc",
+          "image": "",
+          "size": 2,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "size": 5332,
+          "size_unit": "mebibytes",
+          "expand": "true"
+        }
+      ]
+    }
+  }
 }
