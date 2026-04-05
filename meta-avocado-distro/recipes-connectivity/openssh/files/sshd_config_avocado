@@ -1,0 +1,17 @@
+# Avocado sshd configuration for read-only rootfs
+#
+# Host keys stored on writable /var partition so they persist across boots
+# and don't require a writable /etc/ssh
+HostKey /var/lib/ssh/ssh_host_ed25519_key
+HostKey /var/lib/ssh/ssh_host_ecdsa_key
+HostKey /var/lib/ssh/ssh_host_rsa_key
+
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+
+# Look for authorized_keys on writable /var partition
+AuthorizedKeysFile /var/lib/ssh/authorized_keys/%u .ssh/authorized_keys
+
+UsePAM yes
+Subsystem sftp /usr/libexec/sftp-server

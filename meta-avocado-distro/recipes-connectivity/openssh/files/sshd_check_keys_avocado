@@ -1,0 +1,19 @@
+#!/bin/sh
+# Generate SSH host keys on writable /var partition
+# for Avocado's read-only rootfs
+
+KEYDIR=/var/lib/ssh
+
+mkdir -p "$KEYDIR"
+
+for type in ed25519 ecdsa rsa; do
+    key="$KEYDIR/ssh_host_${type}_key"
+    if [ ! -f "$key" ]; then
+        echo "  generating ssh ${type} host key to ${key}..."
+        ssh-keygen -q -f "$key" -N '' -t "$type"
+    fi
+done
+
+# Create authorized_keys directory for per-user keys
+mkdir -p "$KEYDIR/authorized_keys"
+chmod 755 "$KEYDIR/authorized_keys"
