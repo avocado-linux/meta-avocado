@@ -13,7 +13,12 @@ SRC_URI = " \
   file://shadow \
   file://group \
   file://gshadow \
+  file://var-resize.service \
+  file://var-roothome-init.service \
 "
+
+inherit systemd
+SYSTEMD_SERVICE:${PN} = "var-resize.service var-roothome-init.service"
 
 do_install() {
     install -d ${D}${sysconfdir}
@@ -30,5 +35,19 @@ do_install() {
         # Use default shadow file (root login disabled)
         install -m 0644 ${WORKDIR}/shadow ${D}${sysconfdir}/shadow
     fi
+
+    # sshd privilege separation directory
+    install -d -m 0755 ${D}/var/empty/sshd
+
+    # Root home on writable /var partition (read-only rootfs)
+    install -d -m 0700 ${D}/var/roothome
+
+    # /var/log for lastlog and journal
+    install -d -m 0755 ${D}/var/log
+
+    # Systemd services for first-boot setup
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${WORKDIR}/var-resize.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${WORKDIR}/var-roothome-init.service ${D}${systemd_system_unitdir}/
 }
 do_install[vardeps] += "AVOCADO_DEV_ROOT_LOGIN"

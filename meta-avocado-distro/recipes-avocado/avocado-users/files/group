@@ -5,3 +5,5 @@ systemd-resolve:x:995:
 systemd-journal:x:996:
 messagebus:x:999:
 avocado:x:997:
+sshd:x:74:
+avahi:x:75:

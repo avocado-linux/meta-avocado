@@ -1,0 +1,17 @@
+[Unit]
+Description=Initialize root home directory on /var
+After=local-fs.target var-resize.service
+ConditionPathExists=!/var/roothome/.profile
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '\
+  mkdir -p /var/roothome/.ssh && \
+  chmod 700 /var/roothome/.ssh && \
+  mkdir -p /var/log && \
+  touch /var/log/lastlog && \
+  printf "export EDITOR=vim\nexport TERM=xterm-256color\nalias ll=\"ls -la\"\nalias la=\"ls -A\"\nalias ..=\"cd ..\"\n" > /var/roothome/.profile'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

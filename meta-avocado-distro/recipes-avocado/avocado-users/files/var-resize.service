@@ -1,0 +1,12 @@
+[Unit]
+Description=Expand /var btrfs filesystem to fill partition
+After=local-fs.target
+ConditionPathExists=/var
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/btrfs filesystem resize max /var
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
