@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-aws.git
     path: meta-aws
     branch: scarthgap
-    commit: 1a9605b6c4787bf20fc90c8801c36822760b4bc9
+    commit: 78fc3cf6eb3c8f7501d1ddf05d1787c43526b11b
     layers:
       .:
 

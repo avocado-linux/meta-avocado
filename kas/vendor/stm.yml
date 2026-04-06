@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-st-stm32mp
     path: meta-st-stm32mp
     branch: scarthgap
-    commit: fae1c3bcad05f338da80e69fc150b8697ad874c5
+    commit: bcadba4d92cbfeba7b7a876c2e828f37a70d0d0a
     layers:
       .:
 

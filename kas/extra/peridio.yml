@@ -4,7 +4,7 @@ header:
 repos:
   meta-peridio:
     url: https://github.com/peridio/meta-peridio
-    commit: e068d095feb880e1c4cd2490ab3e38bd33e8a8d6
+    commit: 06435893bc0007a5745ca4c85e237845f45377da
     branch: scarthgap
     layers:
       .:
@@ -12,7 +12,7 @@ repos:
   meta-erlang:
     url: https://github.com/avocado-linux/vendor-meta-erlang
     path: meta-erlang
-    commit: 0b17ad811e40c071a196a2b9393b7ad49c785294
+    commit: 8283d66389c59aad7f22b26d239633d17b280a81
     branch: scarthgap
     layers:
       .:

@@ -5,7 +5,7 @@ repos:
   meta-swupdate:
     url: https://github.com/avocado-linux/vendor-meta-swupdate.git
     path: meta-swupdate
-    commit: 83d78b0946449c0f156dee41c600811cde8ddbb8
+    commit: 81f4faa406e70dfa514e2f7642f97df33d3b84ae
     branch: scarthgap
     layers:
       .:
