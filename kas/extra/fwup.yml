@@ -5,7 +5,7 @@ repos:
   meta-fwup:
     url: https://github.com/avocado-linux/vendor-meta-fwup.git
     path: meta-fwup
-    commit: 2a5cb3b437e61d5dbee4200ec43c59da4a703f8a
-    branch: master
+    commit: 3dceffeae6ef10ae559300bce0ec591e20c2f055
+    branch: scarthgap
     layers:
       .:

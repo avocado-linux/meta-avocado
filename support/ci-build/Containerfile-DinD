@@ -41,6 +41,7 @@ RUN apt-get update -y \
     liblz4-tool \
     locales \
     python3 \
+    python3-packaging \
     python3-git \
     python3-jinja2 \
     python3-pexpect \

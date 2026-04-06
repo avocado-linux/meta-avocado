@@ -13,6 +13,20 @@
       "build_tested": false,
       "build_success": null,
       "notes": "Target layer: meta-avocado-distro; Found 8 layer dependencies in KAS files; Found recipe python3-tzdata v2025.3 in layer meta-python; Cloning layer from https://github.com/avocado-linux/vendor-meta-openembedded (branch: master); Searching in subdirectory: meta-python; Found recipe file: meta-python/recipes-devtools/python/python3-tzdata_2025.3.bb; Extracted 1 files associated with the recipe; Copied 1 files to meta-avocado-distro; No syntax adaptations needed"
+    },
+    {
+      "recipe": "chromium-ozone-wayland",
+      "version": "89.0.4389.90",
+      "source_branch": "master",
+      "source_layer": "meta-browser",
+      "backported_at": "2026-04-05T23:13:28.412805Z",
+      "backported_by": "cado",
+      "files": [
+        "recipes-browser/chromium/chromium-ozone-wayland_146.0.7680.153.bb"
+      ],
+      "build_tested": false,
+      "build_success": null,
+      "notes": "Target layer: meta-avocado-distro; Found 8 layer dependencies in KAS files; Found recipe chromium-ozone-wayland v89.0.4389.90 in layer meta-browser; Layer 'meta-browser' not in KAS files, using URL from Layer Index: https://github.com/OSSystems/meta-browser.git; Cloning layer from https://github.com/OSSystems/meta-browser.git (branch: master); Found recipe file: meta-chromium/recipes-browser/chromium/chromium-ozone-wayland_146.0.7680.153.bb; Extracted 1 files associated with the recipe; Copied 1 files to meta-avocado-distro; No syntax adaptations needed"
     }
   ]
 }
