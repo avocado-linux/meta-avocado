@@ -46,6 +46,7 @@ RDEPENDS:${PN} = " \
   logrotate \
   lsof \
   ltrace \
+  net-snmp \
   net-tools \
   nodejs \
   ntfs-3g-ntfsprogs \

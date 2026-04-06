@@ -1,0 +1,34 @@
+Upstream-Status: Inappropriate [clang version workaround]
+
+With Clang 20 / libc++ the defaulted destructor in the header triggers
+instantiation of unique_ptr<gfx::Transform>::~unique_ptr() where
+gfx::Transform is still an incomplete (forward-declared) type,
+causing a sizeof-on-incomplete-type error.
+
+Move the destructor definition to the .cc file where gfx::Transform
+is fully defined.
+
+Signed-off-by: avocado <avocado@avocadolinux.com>
+
+--- a/third_party/blink/renderer/modules/xr/xr_rigid_transform.h
++++ b/third_party/blink/renderer/modules/xr/xr_rigid_transform.h
+@@ -37,7 +37,7 @@ class MODULES_EXPORT XRRigidTransform : public ScriptWrappable {
+   XRRigidTransform(const XRRigidTransform&) = delete;
+   XRRigidTransform& operator=(const XRRigidTransform&) = delete;
+
+-  ~XRRigidTransform() override = default;
++  ~XRRigidTransform() override;
+
+   DOMPointReadOnly* position() const { return position_.Get(); }
+   DOMPointReadOnly* orientation() const { return orientation_.Get(); }
+--- a/third_party/blink/renderer/modules/xr/xr_rigid_transform.cc
++++ b/third_party/blink/renderer/modules/xr/xr_rigid_transform.cc
+@@ -32,6 +32,8 @@ XRRigidTransform::XRRigidTransform(const gfx::Transform& transformationMatrix)
+   DecomposeMatrix();
+ }
+
++XRRigidTransform::~XRRigidTransform() = default;
++
+ void XRRigidTransform::DecomposeMatrix() {
+   // decompose matrix to position and orientation
+   std::optional<gfx::DecomposedTransform> decomp = matrix_->Decompose();

@@ -442,26 +442,42 @@ do_add_clang_latest () {
     cd "${STAGING_LIBDIR_NATIVE}/clang"
     rm -rf latest
 
-    # Find a directory with runtime libraries and copy it as base
-    for dir in *; do
-        if [ -d "$dir" ] && [ -n "$(find $dir -name 'libclang_rt.builtins*' 2>/dev/null)" ]; then
-            echo "Copying clang directory $dir to latest (runtime libraries)"
-            cp -r "$dir" latest
-            break
-        fi
-    done
+    # Use the active LLVM version directory as the base for "latest".
+    # Multiple compiler-rt versions may be present in the sysroot due to
+    # meta-clang-revival's clang_base_deps() override leaking through
+    # transitive dependencies; always prefer the version matching LLVMVERSION.
+    if [ -d "${LLVMVERSION}" ]; then
+        echo "Copying clang directory ${LLVMVERSION} to latest (runtime libraries)"
+        cp -r "${LLVMVERSION}" latest
+    else
+        # Fallback: find first directory with runtime libraries
+        for dir in *; do
+            if [ -d "$dir" ] && [ -n "$(find $dir -name 'libclang_rt.builtins*' 2>/dev/null)" ]; then
+                echo "Copying clang directory $dir to latest (runtime libraries)"
+                cp -r "$dir" latest
+                break
+            fi
+        done
+    fi
 
-    # Find and copy headers from any versioned directory to ensure bindgen can find them
+    # Copy headers from the active LLVM version, or fall back to any versioned dir
     headers_copied=false
-    for dir in *; do
-        if [ -d "$dir/include" ]; then
-            echo "Found headers in $dir/include, copying to latest/include"
-            mkdir -p latest/include
-            cp -r "$dir/include/"* latest/include/
-            headers_copied=true
-            break
-        fi
-    done
+    if [ -d "${LLVMVERSION}/include" ]; then
+        echo "Found headers in ${LLVMVERSION}/include, copying to latest/include"
+        mkdir -p latest/include
+        cp -r "${LLVMVERSION}/include/"* latest/include/
+        headers_copied=true
+    else
+        for dir in *; do
+            if [ -d "$dir/include" ]; then
+                echo "Found headers in $dir/include, copying to latest/include"
+                mkdir -p latest/include
+                cp -r "$dir/include/"* latest/include/
+                headers_copied=true
+                break
+            fi
+        done
+    fi
 
     if [ "$headers_copied" = false ]; then
         echo "Warning: No Clang headers found in any versioned directories"
@@ -473,7 +489,11 @@ do_copy_clang_library () {
     cp -r "${STAGING_LIBDIR_NATIVE}/clang/latest" "${STAGING_DIR_HOST}${nonarch_libdir}/clang/"
     cd "${STAGING_DIR_HOST}${nonarch_libdir}/clang" || return
 
-    lib_file=$(find $(find . -maxdepth 1 \! \( -name latest -o -name '.' \)) \( -name "libclang_rt.builtins-*" -o -name "liborc_rt-*" \))
+    # Only search the active LLVM version directory. Multiple compiler-rt
+    # versions (e.g. 16.0.6 from meta-clang-revival, 20.1.1 from meta-clang)
+    # may be present in the sysroot due to transitive dependencies; searching
+    # all of them causes cp to fail when duplicate filenames collide.
+    lib_file=$(find ./${LLVMVERSION} \( -name "libclang_rt.builtins-*" -o -name "liborc_rt-*" \))
     echo "lib_file = $lib_file"
     # Replace any vendor string (e.g. -oe-, -avocado-, -poky-) with -unknown-
     # to produce the canonical LLVM triple (e.g. aarch64-unknown-linux-gnu)

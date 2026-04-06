@@ -1,0 +1,24 @@
+Upstream-Status: Inappropriate [clang version workaround]
+
+Clang 20.1 crashes (SIGSEGV in Sema::SetDeclDefaulted) when compiling
+a defaulted operator== for OriginWithPossibleWildcards which contains
+a mojom::CSPSource member. Work around the ICE by spelling out the
+comparison explicitly instead of using = default.
+
+Signed-off-by: avocado <avocado@avocadolinux.com>
+
+--- a/services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.cc
++++ b/services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.cc
+@@ -93,8 +93,10 @@ bool OriginWithPossibleWildcards::DoesMatchOrigin(
+                                  network::CSPSourceContext::PermissionsPolicy);
+ }
+
+-bool operator==(const OriginWithPossibleWildcards& lhs,
+-                const OriginWithPossibleWildcards& rhs) = default;
++bool operator==(const OriginWithPossibleWildcards& lhs,
++                const OriginWithPossibleWildcards& rhs) {
++  return !(lhs.csp_source < rhs.csp_source) && !(rhs.csp_source < lhs.csp_source);
++}
+
+ std::strong_ordering operator<=>(const OriginWithPossibleWildcards& lhs,
+                                  const OriginWithPossibleWildcards& rhs) {
