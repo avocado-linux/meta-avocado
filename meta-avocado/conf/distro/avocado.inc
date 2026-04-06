@@ -36,6 +36,13 @@ SDKIMGARCH = "${MACHINE_SHORT_NAME}-${SDKPKGSUFFIX}"
 
 PACKAGE_CLASSES ?= "package_rpm"
 
+# SPDX SBOM configuration
+# create-spdx is inherited by default via OE-Core INHERIT_DISTRO.
+# These variables customize the metadata in generated SPDX documents.
+SPDX_ORG = "${DISTRO_VENDOR}"
+SPDX_SUPPLIER = "Organization: ${DISTRO_VENDOR}"
+SPDX_PRETTY = "1"
+
 SANITY_TESTED_DISTROS ?= " \
             ubuntu-22.04 \n \
             ubuntu-24.04 \n \
