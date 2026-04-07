@@ -1,0 +1,26 @@
+From b9183bb7454a628dee53562ef706f645707a202e Mon Sep 17 00:00:00 2001
+From: Beniamin Sandu <b.sandu@peridio.com>
+Date: Mon, 6 Apr 2026 16:31:24 +0300
+Subject: [PATCH] fix: use C-style octal literal instead of C++23 0o prefix
+
+Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+---
+ .../named_mojo_server_endpoint_connector_linux.cc               | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/components/named_mojo_ipc_server/named_mojo_server_endpoint_connector_linux.cc b/components/named_mojo_ipc_server/named_mojo_server_endpoint_connector_linux.cc
+index 1cfa150..ed69210 100644
+--- a/components/named_mojo_ipc_server/named_mojo_server_endpoint_connector_linux.cc
++++ b/components/named_mojo_ipc_server/named_mojo_server_endpoint_connector_linux.cc
+@@ -116,7 +116,7 @@ bool NamedMojoServerEndpointConnectorLinux::TryStart() {
+   if (!options_.require_same_peer_user) {
+     // Allow any user to write to the UDS. fchmod doesn't work after bind(), so
+     // we need to call chmod on the socket filename, which is the server name.
+-    if (chmod(options_.server_name.c_str(), 0o666) != 0) {
++    if (chmod(options_.server_name.c_str(), 0666) != 0) {
+       PLOG(ERROR) << "chmod failed";
+       return false;
+     }
+-- 
+2.48.1
+

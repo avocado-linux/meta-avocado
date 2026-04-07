@@ -1,0 +1,29 @@
+From 0f9b2b56e7b878a308160efac392a840c696d610 Mon Sep 17 00:00:00 2001
+From: Beniamin Sandu <b.sandu@peridio.com>
+Date: Mon, 6 Apr 2026 19:19:59 +0300
+Subject: [PATCH] fix: work around clang 20 crash on defaulted non-member
+ operator
+
+Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+---
+ .../cpp/permissions_policy/origin_with_possible_wildcards.cc  | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.cc b/services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.cc
+index e14d79aa57..e969e1612d 100644
+--- a/services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.cc
++++ b/services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.cc
+@@ -94,7 +94,9 @@ bool OriginWithPossibleWildcards::DoesMatchOrigin(
+ }
+ 
+ bool operator==(const OriginWithPossibleWildcards& lhs,
+-                const OriginWithPossibleWildcards& rhs) = default;
++		const OriginWithPossibleWildcards& rhs) {
++  return lhs.csp_source == rhs.csp_source;
++}
+ 
+ std::strong_ordering operator<=>(const OriginWithPossibleWildcards& lhs,
+                                  const OriginWithPossibleWildcards& rhs) {
+-- 
+2.48.1
+

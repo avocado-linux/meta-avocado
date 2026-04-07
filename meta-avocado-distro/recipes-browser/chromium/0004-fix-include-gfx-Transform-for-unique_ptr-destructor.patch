@@ -1,0 +1,25 @@
+From e9e24508367358d14d6bf189f30804a77ad5e02b Mon Sep 17 00:00:00 2001
+From: Beniamin Sandu <b.sandu@peridio.com>
+Date: Mon, 6 Apr 2026 23:09:24 +0300
+Subject: [PATCH] fix: include gfx::Transform for unique_ptr destructor
+
+Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+---
+ third_party/blink/renderer/modules/xr/xr_rigid_transform.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/third_party/blink/renderer/modules/xr/xr_rigid_transform.h b/third_party/blink/renderer/modules/xr/xr_rigid_transform.h
+index 0049b98..202cede 100644
+--- a/third_party/blink/renderer/modules/xr/xr_rigid_transform.h
++++ b/third_party/blink/renderer/modules/xr/xr_rigid_transform.h
+@@ -8,6 +8,7 @@
+ #include <memory>
+ 
+ #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
++#include "ui/gfx/geometry/transform.h"
+ #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+ #include "third_party/blink/renderer/modules/modules_export.h"
+ #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+-- 
+2.48.1
+
