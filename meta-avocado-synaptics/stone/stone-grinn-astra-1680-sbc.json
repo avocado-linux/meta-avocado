@@ -15,6 +15,9 @@
       "img": {
         "script": "stone-provision-img.sh",
         "envs": ["device_info"]
+      },
+      "synaimg": {
+        "script": "stone-provision-synaimg.sh"
       }
     }
   },
