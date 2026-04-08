@@ -6,6 +6,8 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  deepstream-7.1-pyds \
+  deepstream-7.1 \
   tegra-firmware \
   tegra-redundant-boot-base \
   tegra-binaries \
