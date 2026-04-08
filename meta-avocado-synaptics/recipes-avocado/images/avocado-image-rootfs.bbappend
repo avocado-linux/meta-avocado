@@ -76,4 +76,9 @@ IMAGE_CMD:synaimg:append:avocado-synaptics () {
         "${DEPLOY_DIR_IMAGE}/${SYNAIMG_DEPLOY_SUBDIR}/emmc_image_list"
     sed -i 's/^home_s\.subimg/var_s.subimg/' \
         "${DEPLOY_DIR_IMAGE}/${SYNAIMG_DEPLOY_SUBDIR}/emmc_image_list"
+
+    # Rename the partition from 'home' to 'var' in emmc_part_list so the GPT
+    # label matches the AVOCADO_VAR_PART_DEV mount path (/dev/disk/by-partlabel/var).
+    sed -i 's/^home\b/var/' \
+        "${DEPLOY_DIR_IMAGE}/${SYNAIMG_DEPLOY_SUBDIR}/emmc_part_list"
 }
