@@ -103,7 +103,8 @@ do_deploy() {
     done
     
     # Copy UEFI bootloader binaries from deploy directory
-    for f in ${DEPLOY_DIR_IMAGE}/uefi_jetson*.bin; do
+    # Match both old-style (uefi_jetson*) and new-style (uefi_t23x*) naming conventions
+    for f in ${DEPLOY_DIR_IMAGE}/uefi_jetson*.bin ${DEPLOY_DIR_IMAGE}/uefi_t23x*.bin; do
         [ -f "$f" ] && install -m 0644 "$f" ${DEPLOYDIR}/tegraflash-bsp/
     done
     
@@ -162,7 +163,7 @@ do_deploy() {
     fi
     
     # Copy all binaries, firmware, and images from L4T bootloader that may not be in staging
-    # This includes: uefi_jetson*.bin, tos*.img, eks*.img, camera*.img, nvdec*.fw, nvpva*.fw, etc.
+    # This includes: uefi_*.bin, tos*.img, eks*.img, camera*.img, nvdec*.fw, nvpva*.fw, etc.
     if [ -d ${L4T_BSP_DIR}/bootloader ]; then
         bbnote "Copying binaries and firmware from L4T bootloader"
         for f in ${L4T_BSP_DIR}/bootloader/*.bin; do
@@ -181,6 +182,21 @@ do_deploy() {
         bbnote "Copied L4T bootloader files"
     fi
     
+    # Ensure UEFI binaries exist with the names expected by flashvars.
+    # The L4T bootloader ships uefi_jetson.bin / uefi_jetson_minimal.bin (old names),
+    # but flashvars now references them as uefi_t23x_general / uefi_t23x_rcmboot (new names).
+    # Create copies with the new names if they don't already exist from edk2-firmware-tegra.
+    if [ -f ${DEPLOYDIR}/tegraflash-bsp/uefi_jetson.bin ] && \
+       [ ! -f ${DEPLOYDIR}/tegraflash-bsp/${TEGRA_FLASHVAR_UEFI_IMAGE}.bin ]; then
+        cp ${DEPLOYDIR}/tegraflash-bsp/uefi_jetson.bin ${DEPLOYDIR}/tegraflash-bsp/${TEGRA_FLASHVAR_UEFI_IMAGE}.bin
+        bbnote "Created ${TEGRA_FLASHVAR_UEFI_IMAGE}.bin from uefi_jetson.bin"
+    fi
+    if [ -f ${DEPLOYDIR}/tegraflash-bsp/uefi_jetson_minimal.bin ] && \
+       [ ! -f ${DEPLOYDIR}/tegraflash-bsp/${TEGRA_FLASHVAR_RCM_UEFI_IMAGE}.bin ]; then
+        cp ${DEPLOYDIR}/tegraflash-bsp/uefi_jetson_minimal.bin ${DEPLOYDIR}/tegraflash-bsp/${TEGRA_FLASHVAR_RCM_UEFI_IMAGE}.bin
+        bbnote "Created ${TEGRA_FLASHVAR_RCM_UEFI_IMAGE}.bin from uefi_jetson_minimal.bin"
+    fi
+
     # Copy boot.img (runtime kernel+initramfs cboot) for A_kernel partition
     # This is the image that will be booted after flashing completes
     if [ -f ${DEPLOY_DIR_IMAGE}/avocado-image-initramfs-${MACHINE_SHORT_NAME}.cpio.gz.cboot ]; then
