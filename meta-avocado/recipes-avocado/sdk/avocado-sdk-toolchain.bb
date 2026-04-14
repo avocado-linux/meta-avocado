@@ -21,6 +21,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-dnf \
     nativesdk-dosfstools \
     nativesdk-dummy-provides \
+    nativesdk-e2fsprogs \
     nativesdk-flex \
     nativesdk-libtool \
     nativesdk-make \
@@ -38,6 +39,8 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-squashfs-tools \
     nativesdk-systemd-systemctl \
     nativesdk-unfs3 \
+    nativesdk-util-linux-losetup \
+    nativesdk-util-linux-umount \
     packagegroup-cross-canadian-${MACHINE} \
 "
 
