@@ -46,6 +46,7 @@ RDEPENDS:${PN} = " \
   logrotate \
   lsof \
   ltrace \
+  mosquitto \
   net-snmp \
   net-tools \
   nodejs \
