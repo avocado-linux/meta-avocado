@@ -14,7 +14,7 @@ if [ -z "$AVOCADO_REPO_BASE" ]; then
 fi
 
 if [ -z "$DISTRO_CODENAME" ]; then
-    export DISTRO_CODENAME="latest/apollo/edge"
+    export DISTRO_CODENAME="2024/edge"
     echo "Setting DISTRO_CODENAME to default: $DISTRO_CODENAME"
 fi
 
