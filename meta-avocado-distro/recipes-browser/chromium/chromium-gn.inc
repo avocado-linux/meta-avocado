@@ -473,7 +473,13 @@ do_copy_clang_library () {
     cp -r "${STAGING_LIBDIR_NATIVE}/clang/latest" "${STAGING_DIR_HOST}${nonarch_libdir}/clang/"
     cd "${STAGING_DIR_HOST}${nonarch_libdir}/clang" || return
 
-    lib_file=$(find $(find . -maxdepth 1 \! \( -name latest -o -name '.' \)) \( -name "libclang_rt.builtins-*" -o -name "liborc_rt-*" \))
+    # Use only the highest-versioned directory when searching for clang runtime
+    # libraries. Multiple versioned directories can coexist when stale sysroot
+    # entries from a previous build (e.g. compiler-rt15 leaving a 15.0.7/ tree)
+    # were not fully cleaned up by do_prepare_recipe_sysroot. Using sort -rV
+    # ensures we always prefer the newest (most-compatible) runtime.
+    versioned_dirs=$(find . -maxdepth 1 -mindepth 1 \! -name latest -type d | sort -rV)
+    lib_file=$(find $versioned_dirs \( -name "libclang_rt.builtins-*" -o -name "liborc_rt-*" \) | sort -u)
     echo "lib_file = $lib_file"
     # Replace any vendor string (e.g. -oe-, -avocado-, -poky-) with -unknown-
     # to produce the canonical LLVM triple (e.g. aarch64-unknown-linux-gnu)
@@ -481,7 +487,11 @@ do_copy_clang_library () {
 
     mkdir -p "latest/lib/${CHROMIUM_TARGET_TRIPLET}"
     echo "Executing cp $lib_file latest/lib/${CHROMIUM_TARGET_TRIPLET}/"
-    cp $lib_file "latest/lib/${CHROMIUM_TARGET_TRIPLET}/"
+    # Use cp -n (no-clobber) so higher-version files (sorted first above) win
+    # and duplicates from stale lower-version directories are silently skipped.
+    for f in $lib_file; do
+        cp -n "$f" "latest/lib/${CHROMIUM_TARGET_TRIPLET}/"
+    done
     cd "latest/lib/${CHROMIUM_TARGET_TRIPLET}/" || return
 
     for file in *-"${TARGET_ARCH}".a *-"${TARGET_ARCH}hf".a; do
