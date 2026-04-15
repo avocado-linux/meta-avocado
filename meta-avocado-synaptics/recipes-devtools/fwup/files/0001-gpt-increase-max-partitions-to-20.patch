@@ -1,0 +1,17 @@
+diff --git a/src/gpt.h b/src/gpt.h
+index 5f279e6..b13b910 100644
+--- a/src/gpt.h
++++ b/src/gpt.h
+@@ -23,10 +23,10 @@
+ 
+ #include "util.h"
+ 
+-// fwup only supports 16 partitions even though GPT supports more.
++// fwup only supports 20 partitions even though GPT supports more.
+ // There's nothing fundemental limiting this. The partition info
+ // is stored on the stack.
+-#define GPT_MAX_PARTITIONS 16
++#define GPT_MAX_PARTITIONS 20
+ 
+ #define GPT_PARTITION_TABLE_BLOCKS 32
+ #define GPT_SIZE_BLOCKS (1 + GPT_PARTITION_TABLE_BLOCKS)
