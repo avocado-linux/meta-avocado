@@ -3,12 +3,12 @@
     "platform": "avocado-raspberrypi4",
     "architecture": "arm64",
     "provision_default": "img",
-    "update_strategy": "mbr-ab"
+    "update_strategy": "rpi-tryboot"
   },
   "update": {
     "slot_detection": {
-      "type": "uboot-env",
-      "var": "avocado_boot_slot"
+      "type": "command",
+      "command": ["sh", "-c", "sed -n 's/.*root=PARTLABEL=rootfs-\\([ab]\\).*/\\1/p' /proc/cmdline"]
     },
     "os_artifacts": {
       "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
@@ -18,34 +18,13 @@
       {
         "type": "uboot-env",
         "set": {
-          "avocado_boot_slot": "{inactive_slot}",
           "{inactive_slot}.avocado_platform": "{platform}",
           "{inactive_slot}.avocado_architecture": "{architecture}"
         }
       },
       {
-        "type": "mbr-switch",
-        "devpath": "/dev/mmcblk0",
-        "slot_layouts": {
-          "a": ["boot-a", "uboot-env", "rootfs-a", "var"],
-          "b": ["boot-b", "uboot-env", "rootfs-b", "var"]
-        }
-      }
-    ],
-    "rollback": [
-      {
-        "type": "uboot-env",
-        "set": {
-          "avocado_boot_slot": "{previous_slot}"
-        }
-      },
-      {
-        "type": "mbr-switch",
-        "devpath": "/dev/mmcblk0",
-        "slot_layouts": {
-          "a": ["boot-a", "uboot-env", "rootfs-a", "var"],
-          "b": ["boot-b", "uboot-env", "rootfs-b", "var"]
-        }
+        "type": "rpi-tryboot",
+        "boot_partitions": { "a": 1, "b": 2 }
       }
     ]
   },
@@ -60,6 +39,10 @@
         "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
+    "files": [
+      "stone-tryboot-common.sh",
+      "stone-rpiboot-common.sh"
+    ],
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
@@ -89,10 +72,9 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-raspberrypi4-rootdisk.zip",
+      "out": "avocado-raspberrypi4-rootdisk.tar",
       "build_args": {
-        "type": "fwup",
-        "template": "rootdisk.conf"
+        "type": "archive"
       },
       "devpath": "/dev/mmcblk0",
       "block_size": 512,
@@ -104,6 +86,7 @@
           "build_args": {
             "type": "fat",
             "variant": "FAT12",
+            "label": "UBOOT-ENV",
             "files": [
               { "in": "uboot.env", "out": "uboot.env" },
               { "in": "uboot.env", "out": "uboot.env.redund" }
@@ -118,10 +101,12 @@
             "type": "fat",
             "variant": "FAT32",
             "files": [
-              { "in": "u-boot.bin", "out": "kernel8.img" },
+              { "in": "Image", "out": "kernel8.img" },
               { "in": "bootfiles/bootcode.bin", "out": "bootcode.bin" },
               { "in": "bootfiles/cmdline.txt", "out": "cmdline.txt" },
               { "in": "bootfiles/config.txt", "out": "config.txt" },
+              { "in": "bootfiles/autoboot.txt", "out": "autoboot.txt" },
+              { "in": "bootfiles/tryboot.txt", "out": "tryboot.txt" },
               { "in": "bootfiles/fixup_cd.dat", "out": "fixup_cd.dat" },
               { "in": "bootfiles/fixup_db.dat", "out": "fixup_db.dat" },
               { "in": "bootfiles/fixup_x.dat", "out": "fixup_x.dat" },
@@ -150,34 +135,19 @@
           }
         },
         "rootfs": "avocado-image-rootfs-raspberrypi4.erofs-lz4",
-        "var": "avocado-image-var-raspberrypi4.btrfs",
-        "uboot-nvme": "u-boot-nvme.bin"
+        "var": "avocado-image-var-raspberrypi4.btrfs"
       },
       "partitions": [
         {
-          "name": "uboot-env",
-          "image": "uboot_env",
-          "offset": 1,
-          "offset_unit": "mebibytes",
-          "size": 1,
-          "size_unit": "mebibytes"
-        },
-        {
           "name": "boot-a",
           "image": "boot",
-          "offset": 2,
+          "offset": 1,
           "offset_unit": "mebibytes",
           "size": 128,
           "size_unit": "mebibytes"
         },
         {
           "name": "boot-b",
-          "image": "",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
-          "name": "recovery",
           "image": "",
           "size": 128,
           "size_unit": "mebibytes"
@@ -195,8 +165,15 @@
           "size_unit": "mebibytes"
         },
         {
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "size": 1,
+          "size_unit": "mebibytes"
+        },
+        {
           "name": "var",
           "image": "var",
+          "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d",
           "size": 512,
           "size_unit": "mebibytes",
           "expand": "true"

@@ -50,13 +50,27 @@ do_deploy:append:seeed() {
     fi
 }
 
+do_deploy:append:raspberrypi4() {
+    CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
+
+    # For direct kernel boot (no U-Boot), tell the EEPROM to load the initramfs
+    if [ "${RPI_USE_U_BOOT}" = "0" ]; then
+        append_config_if_missing "initramfs avocado-image-initramfs-${MACHINE_SHORT_NAME}.cpio.zst followkernel"
+        append_config_if_missing "disable_splash=1"
+    fi
+}
+
 do_deploy:append:raspberrypi5() {
     CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
 
     # Enable external PCIe controller for M.2 NVMe HATs.
-    # Without this, the device tree node is disabled and U-Boot
-    # cannot probe the PCIe bus to access NVMe storage.
     append_config_if_missing "dtparam=pciex1"
+
+    # For direct kernel boot (no U-Boot), tell the EEPROM to load the initramfs
+    if [ "${RPI_USE_U_BOOT}" = "0" ]; then
+        append_config_if_missing "initramfs avocado-image-initramfs-${MACHINE_SHORT_NAME}.cpio.zst followkernel"
+        append_config_if_missing "disable_splash=1"
+    fi
 }
 
 do_deploy:append:fr200() {

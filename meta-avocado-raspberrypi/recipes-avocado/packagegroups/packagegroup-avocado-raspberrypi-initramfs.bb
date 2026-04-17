@@ -10,4 +10,6 @@ PACKAGES = "${PN}"
 # This packagegroup exists as a hook for any future initramfs additions
 # (e.g., out-of-tree kernel modules or userspace tools needed at early boot).
 
-RDEPENDS:${PN} = ""
+RDEPENDS:${PN} = " \
+  avocado-uboot-env \
+"

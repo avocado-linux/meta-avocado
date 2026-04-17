@@ -1,10 +1,13 @@
 do_compile[depends] += "u-boot:do_deploy"
 do_compile[depends] += "rpi-bootfiles:do_deploy"
+do_compile[depends] += "${@'rpi-tryboot-files:do_deploy' if d.getVar('RPI_USE_U_BOOT') == '0' else ''}"
 
 DEPENDS += " jq-native mkfat-native fwup-native"
 
 SRC_URI:append = " \
     file://rootdisk.conf \
+    file://stone-tryboot-common.sh \
+    file://stone-rpiboot-common.sh \
 "
 
 SRC_URI:append:stone-usb-emmc = " \
@@ -26,6 +29,8 @@ SRC_URI:append:stone-usb-sd = " \
 do_deploy:append() {
   install -d ${DEPLOYDIR}
   install -m 0644 ${WORKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  install -m 0755 ${WORKDIR}/stone-tryboot-common.sh ${DEPLOYDIR}/stone-tryboot-common.sh
+  install -m 0755 ${WORKDIR}/stone-rpiboot-common.sh ${DEPLOYDIR}/stone-rpiboot-common.sh
 }
 
 do_deploy:append:stone-usb-emmc() {

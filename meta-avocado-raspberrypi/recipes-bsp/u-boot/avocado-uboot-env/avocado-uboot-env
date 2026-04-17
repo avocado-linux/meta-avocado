@@ -19,8 +19,37 @@ USER_OVERRIDE="/var/lib/avocado/fw_env.config"
 ENV_MOUNTPOINT="/run/avocado/uboot-env"
 ENV_SIZE="0x20000"
 
-# Partition number for the env FAT partition (always partition 2)
-ENV_PART_NUM=2
+# Determine env partition:
+#   1. GPT PARTLABEL: /dev/disk/by-partlabel/uboot-env
+#   2. Kernel cmdline: avocado.env_part=N
+#   3. Filesystem label: "UBOOT-ENV" (via blkid)
+#   4. Default: partition 2 (legacy U-Boot layout)
+ENV_PART_NUM=""
+env_dev=""
+
+# Try GPT PARTLABEL first (tryboot targets with GPT)
+if [ -b /dev/disk/by-partlabel/uboot-env ]; then
+    env_dev=$(readlink -f /dev/disk/by-partlabel/uboot-env)
+fi
+
+# Try kernel cmdline parameter
+if [ -z "$env_dev" ]; then
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            avocado.env_part=*) ENV_PART_NUM="${arg#avocado.env_part=}" ;;
+        esac
+    done
+fi
+
+# Try filesystem label
+if [ -z "$env_dev" ] && [ -z "$ENV_PART_NUM" ]; then
+    label_dev=$(blkid -L "UBOOT-ENV" 2>/dev/null || true)
+    if [ -n "$label_dev" ]; then
+        env_dev="$label_dev"
+    else
+        ENV_PART_NUM=2  # Legacy default
+    fi
+fi
 
 mkdir -p /run/avocado
 
@@ -31,51 +60,53 @@ if [ -f "$USER_OVERRIDE" ]; then
     exit 0
 fi
 
-# Auto-detect boot device from kernel cmdline
-root_dev=""
-for arg in $(cat /proc/cmdline); do
-    case "$arg" in
-        root=/dev/mmcblk*)
-            root_dev="${arg#root=}"
+# If env_dev was already set (via blkid label), skip auto-detection.
+# Otherwise, derive env partition from kernel cmdline root= device.
+if [ -z "$env_dev" ]; then
+    root_dev=""
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            root=/dev/mmcblk*)
+                root_dev="${arg#root=}"
+                ;;
+            root=/dev/nvme*)
+                root_dev="${arg#root=}"
+                ;;
+            root=/dev/sd*)
+                root_dev="${arg#root=}"
+                ;;
+        esac
+    done
+
+    if [ -z "$root_dev" ]; then
+        echo "avocado-uboot-env: ERROR: could not determine boot device from /proc/cmdline" >&2
+        exit 1
+    fi
+
+    # Extract the base device and determine the env partition device
+    case "$root_dev" in
+        /dev/mmcblk*p*)
+            # /dev/mmcblk0p3 -> /dev/mmcblk0
+            base_dev=$(echo "$root_dev" | sed 's|p[0-9]*$||')
+            env_dev="${base_dev}p${ENV_PART_NUM}"
             ;;
-        root=/dev/nvme*)
-            root_dev="${arg#root=}"
+        /dev/nvme*p*)
+            # /dev/nvme0n1p3 -> /dev/nvme0n1
+            base_dev=$(echo "$root_dev" | sed 's|p[0-9]*$||')
+            env_dev="${base_dev}p${ENV_PART_NUM}"
             ;;
-        root=/dev/sd*)
-            root_dev="${arg#root=}"
+        /dev/sd*)
+            # /dev/sda3 -> /dev/sda
+            base_dev=$(echo "$root_dev" | sed 's|[0-9]*$||')
+            env_dev="${base_dev}${ENV_PART_NUM}"
+            ;;
+        *)
+            echo "avocado-uboot-env: ERROR: unsupported root device format: $root_dev" >&2
+            exit 1
             ;;
     esac
-done
-
-if [ -z "$root_dev" ]; then
-    echo "avocado-uboot-env: ERROR: could not determine boot device from /proc/cmdline" >&2
-    exit 1
 fi
 
-# Extract the base device and determine the env partition device
-case "$root_dev" in
-    /dev/mmcblk*p*)
-        # /dev/mmcblk0p3 -> /dev/mmcblk0
-        base_dev=$(echo "$root_dev" | sed 's|p[0-9]*$||')
-        env_dev="${base_dev}p${ENV_PART_NUM}"
-        ;;
-    /dev/nvme*p*)
-        # /dev/nvme0n1p3 -> /dev/nvme0n1
-        base_dev=$(echo "$root_dev" | sed 's|p[0-9]*$||')
-        env_dev="${base_dev}p${ENV_PART_NUM}"
-        ;;
-    /dev/sd*)
-        # /dev/sda3 -> /dev/sda
-        base_dev=$(echo "$root_dev" | sed 's|[0-9]*$||')
-        env_dev="${base_dev}${ENV_PART_NUM}"
-        ;;
-    *)
-        echo "avocado-uboot-env: ERROR: unsupported root device format: $root_dev" >&2
-        exit 1
-        ;;
-esac
-
-echo "avocado-uboot-env: boot device is $base_dev"
 echo "avocado-uboot-env: env partition is $env_dev"
 
 # Verify the env partition exists

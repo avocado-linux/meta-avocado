@@ -1,25 +1,6 @@
+# Avocado device identity and boot slot tracking.
+# This environment is stored on a dedicated FAT partition and accessed
+# via fw_printenv/fw_setenv (libubootenv). U-Boot is not used as a
+# bootloader on tryboot targets — the EEPROM loads the kernel directly.
+
 machine=avocado-reterminal
-initramfs_file=avocado-image-initramfs-reterminal.cpio.zst
-kernel_file=Image
-
-stderr=serial,vidconsole
-stdin=serial,usbkbd
-stdout=serial,vidconsole
-serial#=1000000088c98f3b
-
-initrd_high=ffffffffffffffff
-kernel_addr_r=0x00080000
-ramdisk_addr_r=0x02700000
-
-devtype=mmc
-devnum=0
-mmcblk=0
-bootpart=1
-bootdelay=-2
-rootdev=/dev/mmcblk${mmcblk}p3
-
-load_image=load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} ${kernel_file}
-load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} ${initramfs_file}
-avocado_boot=booti ${kernel_addr_r} ${ramdisk_addr_r}:${filesize} ${fdt_addr};
-
-bootcmd=run load_image load_initramfs avocado_boot

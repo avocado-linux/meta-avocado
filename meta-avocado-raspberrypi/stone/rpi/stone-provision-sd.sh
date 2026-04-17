@@ -15,7 +15,9 @@ set -o pipefail
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
 
-archive_name=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r .storage_devices.rootdisk.out)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+archive_name=$(jq -r .storage_devices.rootdisk.out "$AVOCADO_STONE_MANIFEST")
 if [[ -z "$archive_name" || "$archive_name" == "null" ]]; then
     echo "Error: Could not extract archive name from manifest"
     exit 1
@@ -28,6 +30,7 @@ if [[ ! -f "$archive_file" ]]; then
 fi
 
 archive_image="${archive_file%%.*}.img"
+build_type=$(jq -r '.storage_devices.rootdisk.build_args.type // "fwup"' "$AVOCADO_STONE_MANIFEST")
 
 # When USB passthrough is unavailable (Docker Desktop on macOS/Windows),
 # produce a disk image for host-side burning instead of flashing directly.
@@ -45,7 +48,13 @@ if [ "${AVOCADO_USB_PASSTHROUGH:-1}" = "0" ]; then
     mkdir -p "$AVOCADO_PROVISION_OUT"
 
     echo "Creating raw disk image from archive..."
-    fwup -a -i "${archive_file}" -d "${archive_image}" -t complete
+    if [[ "$build_type" == "archive" ]]; then
+        source "${SCRIPT_DIR}/stone-tryboot-common.sh"
+        extract_archive "$archive_file" "$AVOCADO_STONE_BUILD_DIR"
+        create_tryboot_disk_image "$AVOCADO_STONE_MANIFEST" "$AVOCADO_STONE_BUILD_DIR" "$archive_image"
+    else
+        fwup -a -i "${archive_file}" -d "${archive_image}" -t complete
+    fi
 
     echo "Copying image to provision output..."
     cp -v "${archive_image}" "$AVOCADO_PROVISION_OUT/"
@@ -260,9 +269,22 @@ fi
 
 echo "Writing system image to SD card..."
 
-if ! fwup -a -u -i "${archive_file}" -d "${sd_block_device}" -t complete 2>&1; then
-    echo "Error: fwup failed to write system image"
-    exit 1
+if [[ "$build_type" == "archive" ]]; then
+    # Tryboot path: create image then dd to device
+    if [[ ! -f "$archive_image" ]]; then
+        source "${SCRIPT_DIR}/stone-tryboot-common.sh"
+        extract_archive "$archive_file" "$AVOCADO_STONE_BUILD_DIR"
+        create_tryboot_disk_image "$AVOCADO_STONE_MANIFEST" "$AVOCADO_STONE_BUILD_DIR" "$archive_image"
+    fi
+    if ! dd if="${archive_image}" of="${sd_block_device}" bs=4M status=progress conv=fsync; then
+        echo "Error: Failed to write system image to SD card"
+        exit 1
+    fi
+else
+    if ! fwup -a -u -i "${archive_file}" -d "${sd_block_device}" -t complete 2>&1; then
+        echo "Error: fwup failed to write system image"
+        exit 1
+    fi
 fi
 
 echo "System image successfully written to SD card!"
