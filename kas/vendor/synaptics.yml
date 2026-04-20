@@ -22,5 +22,6 @@ repos:
 local_conf_header:
   vendor-synaptics: |
     LICENSE_FLAGS_ACCEPTED:append = " commercial Synaptics-EULA"
-    DISTRO_FEATURES_EXTRA:append = " opengl wayland"
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-synaptics"
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-synaptics-extra"
