@@ -60,3 +60,68 @@ do_install:append() {
         done
     )
 }
+
+# Override upstream oot_update_rprovides so OOT shim packages emit
+# kernel-version-qualified RCONFLICTS/RREPLACES. Upstream emits unqualified
+# "kernel-module-<X>" Conflicts/Replaces, which collide across kernel versions
+# when multiple kernels' RPMs coexist in Avocado's rolling $releasever feeds
+# (solver sees parallel-installable shims as mutually exclusive).
+#
+# The unqualified RPROVIDES are preserved — install-by-name paths (both dnf
+# user commands and avocado-bsp RDEPENDS that reference bare module names)
+# depend on them. This mirrors kernel-module-split.bbclass, which emits both
+# unqualified and versioned Provides for in-tree modules.
+python oot_update_rprovides() {
+    import re
+    override_drivers = set(d.getVar('TEGRA_OOT_REPLACEMENT_DRIVERS').split())
+    pkg_prefix = d.getVar('KERNEL_MODULE_PACKAGE_PREFIX')
+    if not pkg_prefix:
+        return
+    kernel_version = d.getVar('KERNEL_VERSION')
+    module_prefix = pkg_prefix + (d.getVar('KERNEL_PACKAGE_NAME') or 'kernel') + '-module-'
+    virt_module_prefix = (d.getVar('KERNEL_PACKAGE_NAME') or 'kernel') + '-module-'
+    module_suffix = d.getVar('KERNEL_MODULE_PACKAGE_SUFFIX')
+    packages = d.getVar('PACKAGES').split()
+    enumerated_drivers = set(d.getVar('TEGRA_OOT_ALL_DRIVER_PACKAGES').split())
+    pkg_pat = re.compile(re.escape(module_prefix) + r'(.*)' + re.escape(module_suffix))
+    for oot_pkg in d.getVar('PACKAGES').split():
+        m = pkg_pat.match(oot_pkg)
+        if m is None:
+            continue
+        basename = m.group(1)
+        bb.debug(1, "Processing: %s (driver %s)" % (oot_pkg, basename))
+        if module_prefix + basename not in enumerated_drivers:
+            bb.warn("out-of-tree kernel module %s not listed in TEGRA_OOT_ALL_DRIVER_PACKAGES" % (module_prefix + basename))
+        unprefixed = oot_pkg[len(pkg_prefix):]
+        virt_unqual = virt_module_prefix + basename
+        unprefixed_ver = unprefixed + '-' + kernel_version
+        virt_ver = virt_unqual + '-' + kernel_version
+        # Keep unqualified Provides so install-by-name still resolves; add
+        # versioned forms so the solver can distinguish kernel versions.
+        newprovides = ' '.join([unprefixed, virt_unqual, unprefixed_ver, virt_ver])
+        bb.note("Adding %s to RPROVIDES:%s" % (newprovides, oot_pkg))
+        d.appendVar('RPROVIDES:' + oot_pkg, ' ' + newprovides)
+        if basename in override_drivers:
+            # Scope conflicts/replaces by kernel version so a shim only
+            # displaces the in-tree module of its own kernel, not a co-resident
+            # module for a different kernel version in the same feed.
+            versioned_only = unprefixed_ver + ' ' + virt_ver
+            d.setVar('RREPLACES:' + oot_pkg, versioned_only)
+            d.setVar('RCONFLICTS:' + oot_pkg, versioned_only)
+        rdepstr = d.getVar('RDEPENDS:' + oot_pkg)
+        if not rdepstr:
+            continue
+        rdeps = rdepstr.split()
+        newdeps = []
+        changed = False
+        for dep in rdeps:
+            if pkg_pat.match(dep) and dep not in packages:
+                newdeps.append(dep[len(pkg_prefix):])
+                changed = True
+            else:
+                newdeps.append(dep)
+        if changed:
+            newdepstr = ' '.join(newdeps)
+            bb.note("Updating RDEPENDS:%s to %s" % (oot_pkg, newdepstr))
+            d.setVar('RDEPENDS:' + oot_pkg, newdepstr)
+}
