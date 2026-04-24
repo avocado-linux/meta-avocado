@@ -15,3 +15,10 @@ SRC_URI += " \
 # working for manual flows.
 PKG:${KERNEL_PACKAGE_NAME}-devsrc = "${KERNEL_PACKAGE_NAME}-devsrc-${KERNEL_VERSION}"
 RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc += "kernel-devsrc kernel-devsrc-${KERNEL_VERSION}"
+
+# Publish a well-known virtual that avocado-cli's kernel resolver queries
+# with `dnf repoquery --whatprovides 'avocado-kernel-*' --provides`. Encodes
+# KERNEL_VERSION in the Provide name so the resolver can enumerate every
+# kernel available in the feed without fishing through package NAMEs or
+# relying on kernel.bbclass's (nonexistent) unqualified `kernel` Provide.
+RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"
