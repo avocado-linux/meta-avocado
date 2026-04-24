@@ -54,6 +54,11 @@ require conf/distro/include/yocto-uninative.inc
 require conf/distro/include/security_flags.inc
 INHERIT += "uninative"
 
+# Conditionally upload RPMs to Pulp as they are written during the build.
+# Gated by the AVOCADO_PULP_UPLOAD env var (set by kas/ci/pulp-upload.yml in CI).
+AVOCADO_PULP_UPLOAD ??= "0"
+INHERIT += "${@'avocado-pulp-upload' if d.getVar('AVOCADO_PULP_UPLOAD') == '1' else ''}"
+
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
 BB_HASHSERVE ??= "${@os.getenv('BB_HASHSERVE') or 'auto'}"
 

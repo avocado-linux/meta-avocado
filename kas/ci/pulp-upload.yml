@@ -1,0 +1,30 @@
+header:
+  version: 16
+
+# CI overlay that enables the avocado-pulp-upload bbclass. Layered on top of
+# the machine config (and usually mirrors.yml) to upload RPMs to Pulp as they
+# are written during the build, rather than in a post-build pass.
+#
+# Usage: kas build machine.yml:ci/mirrors.yml:ci/pulp-upload.yml --target TARGET
+#
+# Required environment (passed through from the caller, e.g. a Tekton task
+# with envFrom ci-pulp-credentials):
+#   PULP_BASE_URL
+#   PULP_USERNAME
+#   PULP_PASSWORD
+#   DISTRO_CODENAME   (release/channel, e.g. "2024/edge")
+#
+# Nothing is hardcoded. If PULP_BASE_URL is empty, the bbclass aborts with
+# bb.fatal rather than falling back to any default.
+
+env:
+  AVOCADO_PULP_UPLOAD: "1"
+  PULP_BASE_URL: ""
+  PULP_USERNAME: ""
+  PULP_PASSWORD: ""
+  # Space-separated list of recipe PNs whose RPMs should NOT be published to
+  # Pulp. Use for aggregator metapackages (packagegroups, etc.) whose binary
+  # output is machine-dependent/non-deterministic but which no one should
+  # install directly — yocto still builds and packages them locally so image
+  # construction works, we just skip the Pulp upload.
+  AVOCADO_PULP_UPLOAD_EXCLUDE: "packagegroup-avocado-sdk-all"
