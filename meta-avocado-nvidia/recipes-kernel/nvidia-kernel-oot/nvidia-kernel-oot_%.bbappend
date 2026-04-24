@@ -61,27 +61,36 @@ do_install:append() {
     )
 }
 
-# Override upstream oot_update_rprovides to drop the unqualified Provides +
-# Conflicts it would otherwise add to each OOT shim. Under Path B's naming
-# discipline (every kernel-family package identified by its full versioned
-# PN `nv-kernel-module-<X>-<KERNEL_VERSION>`, no unqualified virtuals), OOT
-# shims no longer need to publish `kernel-module-<X>` as a virtual or conflict
-# on it — kernels coexist via installonlypkgs, and callers select modules
-# explicitly by versioned name (via `{{ avocado.kernel.version }}` templating
-# in BSP yamls or per-kernel packagegroups). Upstream's unqualified
-# Provides/Conflicts are the source of all the cross-kernel tie-break pain in
-# rolling multi-kernel feeds.
+# Override upstream oot_update_rprovides to strip the RCONFLICTS / RREPLACES
+# from OOT shim packages. Upstream marks shims in TEGRA_OOT_REPLACEMENT_DRIVERS
+# with an unqualified `Conflicts: kernel-module-<X>` so the shim displaces
+# its in-tree counterpart; that works fine in a single-kernel image but
+# explodes across kernel versions in a rolling feed (two different-named
+# shims both Conflict with the same virtual name, so installing one refuses
+# to coexist with the other already in @System).
 #
-# The RDEPENDS-rewrite block from upstream is preserved: deps referring to
-# in-tree modules via the `nv-` prefix convention still get the prefix
-# stripped so they resolve against `kernel-module-split.bbclass`'s Provides
-# on the in-tree package.
+# Kept from upstream:
+#   - Unqualified `Provides: kernel-module-<X>` — BSP yamls and transitive
+#     RDEPENDS reference modules by bare name; these Provides make that
+#     resolve. OOT-only modules (capture-ivc, nvgpu, host1x-fence, etc.)
+#     have no in-tree sibling, so nothing else can provide them.
+#   - The RDEPENDS rewrite — deps referring to in-tree modules via the
+#     `nv-` prefix convention get the prefix stripped.
+#
+# Dropped:
+#   - Unqualified `Conflicts: kernel-module-<X>` on TEGRA_OOT_REPLACEMENT_DRIVERS.
+#     Kernel-version coexistence is handled by installonlypkgs instead; when
+#     multiple kernels provide the same unqualified virtual, dnf tie-breaks
+#     by NVR (latest wins), which is the desired install-latest behavior.
+#     Pin-to-older requires explicit `{{ avocado.kernel.version }}` templating
+#     in the user's avocado.yaml.
 python oot_update_rprovides() {
     import re
     pkg_prefix = d.getVar('KERNEL_MODULE_PACKAGE_PREFIX')
     if not pkg_prefix:
         return
     module_prefix = pkg_prefix + (d.getVar('KERNEL_PACKAGE_NAME') or 'kernel') + '-module-'
+    virt_module_prefix = (d.getVar('KERNEL_PACKAGE_NAME') or 'kernel') + '-module-'
     module_suffix = d.getVar('KERNEL_MODULE_PACKAGE_SUFFIX')
     packages = d.getVar('PACKAGES').split()
     pkg_pat = re.compile(re.escape(module_prefix) + r'(.*)' + re.escape(module_suffix))
@@ -89,6 +98,13 @@ python oot_update_rprovides() {
         m = pkg_pat.match(oot_pkg)
         if m is None:
             continue
+        basename = m.group(1)
+        # Preserve upstream's unqualified Provides emission. Matches what
+        # `oot_update_rprovides` emits by default — we just skip the
+        # override_drivers Conflicts/Replaces block.
+        newprovides = oot_pkg[len(pkg_prefix):] + " " + virt_module_prefix + basename
+        d.appendVar('RPROVIDES:' + oot_pkg, ' ' + newprovides)
+        # RDEPENDS rewrite (preserved from upstream).
         rdepstr = d.getVar('RDEPENDS:' + oot_pkg)
         if not rdepstr:
             continue
