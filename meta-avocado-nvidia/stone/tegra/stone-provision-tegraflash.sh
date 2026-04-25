@@ -245,6 +245,32 @@ chmod +x "$temp_bin_dir/cpp"
 # Add temporary directory and tegraflash tools to PATH
 export PATH="$temp_bin_dir:$build_dir:$PATH"
 
+# When avocado-cli has staged a kernel Image from the resolver-pinned rootfs
+# sysroot, repack boot.img on the host so the booted kernel matches the
+# resolver's kernel.version pin. Without this, the prebuilt boot.img copied
+# from the BSP dir (default-mc kernel) wins and the runtime kernel mismatches
+# the rootfs modules. Falls back to the prebuilt boot.img when the env var is
+# unset (legacy / no kernel pin).
+if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
+    if [ ! -f "$AVOCADO_PROVISION_KERNEL_IMAGE" ]; then
+        echo "ERROR: AVOCADO_PROVISION_KERNEL_IMAGE=$AVOCADO_PROVISION_KERNEL_IMAGE not found"
+        exit 1
+    fi
+    initramfs_in_build="$build_dir/$(basename "$initramfs_file")"
+    if [ ! -f "$initramfs_in_build" ]; then
+        echo "ERROR: initramfs cpio not staged at $initramfs_in_build"
+        exit 1
+    fi
+    echo "Packing boot.img from kernel ${AVOCADO_PROVISION_KERNEL_VERSION:-?} (Image=$AVOCADO_PROVISION_KERNEL_IMAGE)"
+    mkbootimg \
+        --kernel "$AVOCADO_PROVISION_KERNEL_IMAGE" \
+        --ramdisk "$initramfs_in_build" \
+        --output "$build_dir/boot.img"
+    echo "boot.img repacked at provision time"
+else
+    echo "AVOCADO_PROVISION_KERNEL_IMAGE not set — using prebuilt boot.img from BSP"
+fi
+
 # Check if any NVIDIA device is in RCM mode (vendor 0955).
 # All Jetson boards in RCM use NVIDIA vendor ID 0955 with varying product IDs.
 check_rcm() {
