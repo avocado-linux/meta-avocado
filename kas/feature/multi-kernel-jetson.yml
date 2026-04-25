@@ -1,0 +1,58 @@
+header:
+  version: 16
+
+# Feature overlay: build the L4T 5.15 kernel (linux-jammy-nvidia-tegra) and its
+# OOT-shim recipes alongside the default linux-yocto kernel for the active
+# Jetson MACHINE, so the published feed contains BOTH kernels' RPMs (kernel-
+# ${KERNEL_VERSION}, kernel-module-*-${KERNEL_VERSION},
+# nv-kernel-module-*-${KERNEL_VERSION}, kernel-devsrc-${KERNEL_VERSION}, and
+# the per-kernel packagegroup-avocado-{rootfs,initramfs}-modules-${KERNEL_VERSION}).
+#
+# The default multiconfig still drives the bootable image with linux-yocto;
+# the mc:jetson-l4t multiconfig only contributes its kernel + OOT RPMs to the
+# same feed so avocado-cli's kernel.version resolver + lockfile pinning +
+# auto-append of the per-kernel module packagegroup can be exercised against a
+# real two-kernel feed.
+#
+# CI usage (distro/sdk built as separate tasks):
+#   distro task:
+#     kas build kas/machine/jetson-orin-nano-devkit.yml:kas/feature/multi-kernel-jetson.yml
+#   sdk task (kernel-version-agnostic — no multi-kernel overlay needed):
+#     kas build kas/machine/jetson-orin-nano-devkit.yml:kas/target/sdk.yml
+#
+# Dev usage (build everything in one shot via avocado-complete = distro + sdk,
+# plus the mc:jetson-l4t alt-kernel + OOT):
+#   kas build kas/machine/jetson-orin-nano-devkit.yml:kas/target/sdk.yml:kas/feature/multi-kernel-jetson.yml \
+#     --target avocado-complete \
+#     --target mc:jetson-l4t:linux-jammy-nvidia-tegra \
+#     --target mc:jetson-l4t:nvidia-kernel-oot
+#
+# IMPORTANT: After kas finishes, mc:jetson-l4t's RPMs live in
+# tmp-jetson-l4t/deploy/rpm/ (per-mc TMPDIR isolation; see jetson-l4t.conf for
+# why). For a unified local _repo, merge them into tmp/deploy/rpm/ after the
+# build:
+#   rsync -a build/tmp-jetson-l4t/deploy/rpm/ build/tmp/deploy/rpm/
+# Production Pulp uploads handle the merge naturally because
+# avocado-pulp-upload.bbclass keys repos on release/channel + arch (not on
+# TMPDIR) and both mcs upload to the same Pulp repo per-recipe.
+#
+# Pattern (per target family that needs multi-kernel feeds):
+#   - meta-avocado-<family>/conf/multiconfig/<family>-<kernel-tag>.conf
+#     pins PREFERRED_PROVIDER_virtual/kernel to the alternate kernel recipe and
+#     sets a per-mc TMPDIR. MACHINE inherits from the default mc, so one conf
+#     works across every machine in that family.
+#   - kas/feature/multi-kernel-<family>.yml (this file's analogue)
+#     activates the multiconfig via BBMULTICONFIG and names the alternate
+#     kernel + family-specific OOT recipes as mc:<tag>:<recipe> bitbake targets.
+#   - Compose into the build with an additional :kas/feature/multi-kernel-<family>.yml
+#     argument on the kas command line. BBMULTICONFIG += allows multiple
+#     family overlays to compose without conflict.
+
+local_conf_header:
+  feature/multi-kernel-jetson: |
+    BBMULTICONFIG += "jetson-l4t"
+
+target:
+  - avocado-distro
+  - mc:jetson-l4t:linux-jammy-nvidia-tegra
+  - mc:jetson-l4t:nvidia-kernel-oot
