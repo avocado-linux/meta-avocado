@@ -15,10 +15,10 @@ RDEPENDS:${PN} = " \
   avocado-users \
   btrfs-tools \
   ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
-  ${@bb.utils.contains('DISTRO_FEATURES','zram','kernel-module-zram','',d)} \
   ${VIRTUAL-RUNTIME_base-utils} \
   ${VIRTUAL-RUNTIME_login_manager} \
   ${MACHINE_ESSENTIAL_EXTRA_RDEPENDS} \
+  packagegroup-avocado-rootfs-modules \
 "
 
 RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"

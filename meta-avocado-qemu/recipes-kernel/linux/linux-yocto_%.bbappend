@@ -17,3 +17,5 @@ SRC_URI:append:avocado-qemuarm64 = " \
 "
 
 YOCTO_BUILD_DIR = "${TOPDIR}"
+
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

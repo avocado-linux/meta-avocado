@@ -7,3 +7,5 @@ SRC_URI:append = " \
 
 SRC_URI:append:reterminal = " file://reterminal.cfg"
 SRC_URI:append:reterminal-dm = " file://reterminal.cfg"
+
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

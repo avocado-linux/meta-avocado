@@ -29,3 +29,5 @@ do_configure:append() {
 }
 
 KERNEL_CONFIG_FRAGMENTS:append = " ${S}/arch/arm64/configs/rubikpi3.config"
+
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

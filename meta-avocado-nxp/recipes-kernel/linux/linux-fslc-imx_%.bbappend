@@ -9,3 +9,5 @@ SRC_URI += " \
 do_configure:append() {
   cat ${WORKDIR}/*.cfg >> ${B}/.config
 }
+
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

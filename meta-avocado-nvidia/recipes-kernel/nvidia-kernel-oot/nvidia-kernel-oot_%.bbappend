@@ -122,3 +122,21 @@ python oot_update_rprovides() {
             bb.note("Updating RDEPENDS:%s to %s" % (oot_pkg, newdepstr))
             d.setVar('RDEPENDS:' + oot_pkg, newdepstr)
 }
+
+# Emit supplementary OOT rootfs/initramfs module packagegroups. Symmetric
+# with the kernel-owned packagegroups emitted from linux-jammy-nvidia-tegra_%.bbappend:
+# each recipe contributes only what it builds, and the kernel-owned
+# packagegroup RRECOMMENDS its OOT sibling so they install together when OOT
+# is present. Empty RDEPENDS initially; populate as OOT modules become
+# rootfs/initramfs-critical.
+PACKAGES:append = " packagegroup-avocado-rootfs-modules-oot packagegroup-avocado-initramfs-modules-oot"
+PKG:packagegroup-avocado-rootfs-modules-oot = "packagegroup-avocado-rootfs-modules-oot-${KERNEL_VERSION}"
+PKG:packagegroup-avocado-initramfs-modules-oot = "packagegroup-avocado-initramfs-modules-oot-${KERNEL_VERSION}"
+ALLOW_EMPTY:packagegroup-avocado-rootfs-modules-oot = "1"
+ALLOW_EMPTY:packagegroup-avocado-initramfs-modules-oot = "1"
+FILES:packagegroup-avocado-rootfs-modules-oot = ""
+FILES:packagegroup-avocado-initramfs-modules-oot = ""
+SUMMARY:packagegroup-avocado-rootfs-modules-oot = "OOT kernel modules pulled into the Avocado rootfs for kernel ${KERNEL_VERSION}"
+SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled into the Avocado initramfs for kernel ${KERNEL_VERSION}"
+RDEPENDS:packagegroup-avocado-rootfs-modules-oot = ""
+RDEPENDS:packagegroup-avocado-initramfs-modules-oot = ""
