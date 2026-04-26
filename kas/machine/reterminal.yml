@@ -7,6 +7,8 @@ header:
     - repo: meta-avocado
       file: kas/vendor/raspberrypi.yml
     - repo: meta-avocado
+      file: kas/feature/multi-kernel-raspberrypi.yml
+    - repo: meta-avocado
       file: kas/target/distro.yml
 
 repos:

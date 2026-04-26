@@ -6,6 +6,8 @@ header:
     - repo: meta-avocado
       file: kas/vendor/nvidia.yml
     - repo: meta-avocado
+      file: kas/feature/multi-kernel-jetson.yml
+    - repo: meta-avocado
       file: kas/feature/virtualization.yml
     - repo: meta-avocado
       file: kas/target/distro.yml
