@@ -63,7 +63,8 @@ kas/machine/<machine>.yml          KAS build entry point
 | 6 | SDK target bbappend | `meta-avocado-<target>/recipes-avocado/sdk/avocado-sdk-target.bbappend` | Yes |
 | 7 | Extra packagegroup | `meta-avocado-<target>/recipes-avocado/packagegroups/packagegroup-avocado-<target>-extra.bb` | Recommended |
 | 8 | Kernel config fragments | `meta-avocado-<target>/recipes-kernel/linux/files/*.cfg` | If custom kernel |
-| 9 | BSP extension | `bsp/<machine-short-name>/avocado.yaml` | Recommended |
+| 9 | Kernel bbappend with avocado boilerplate | `meta-avocado-<target>/recipes-kernel/linux/<kernel>_%.bbappend` | Yes — see [Section 10](#10-kernel-configuration) |
+| 10 | BSP extension | `bsp/<machine-short-name>/avocado.yaml` | Recommended |
 
 ---
 
@@ -294,7 +295,11 @@ extended to include additional nativesdk packages in the SDK.
 
 ### Appending to the kernel recipe
 
-Create a `linux-yocto_%.bbappend` (or appropriate kernel recipe append):
+Create a `linux-yocto_%.bbappend` (or appropriate kernel recipe append).
+**Every avocado kernel bbappend must include the boilerplate shown below**;
+it wires the kernel into the avocado-cli kernel resolver, the auto-appended
+per-kernel module packagegroups, and the fully-qualified kernel-devsrc
+packaging that lets multiple kernel versions coexist in a rolling feed.
 
 ```bitbake
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
@@ -307,7 +312,49 @@ SRC_URI:append:<machine> = " \
     file://avocado-extra.cfg \
     file://<machine-specific>.cfg \
 "
+
+# Rename kernel-devsrc to include KERNEL_VERSION so multiple kernel versions
+# can coexist in a rolling feed without colliding on the unversioned package
+# name. Publish both the unqualified and the versioned virtual Provides so
+# existing callers (e.g. `packagegroup-avocado-sdk-extra.bb` listing
+# `kernel-devsrc`) keep working, and explicit pinners can target
+# `kernel-devsrc-{{ avocado.kernel.version }}` via interpolation.
+PKG:${KERNEL_PACKAGE_NAME}-devsrc = "${KERNEL_PACKAGE_NAME}-devsrc-${KERNEL_VERSION}"
+RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc += "kernel-devsrc kernel-devsrc-${KERNEL_VERSION}"
+
+# Publish a well-known virtual that avocado-cli's kernel resolver queries
+# with `dnf repoquery --whatprovides 'avocado-kernel-*' --provides`. Encodes
+# KERNEL_VERSION in the Provide name so the resolver can enumerate every
+# kernel available in the feed without fishing through package NAMEs or
+# relying on kernel.bbclass's (nonexistent) unqualified `kernel` Provide.
+RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"
+
+# Emit per-kernel rootfs/initramfs module packagegroups (renamed at packaging
+# time to include KERNEL_VERSION). avocado-cli auto-appends the matching
+# variant at install time so transitive module pulls resolve to this kernel's
+# modules rather than dnf's NVR tie-break across the feed.
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 ```
+
+### Per-kernel boilerplate — what each piece does
+
+| Block | Purpose | Required? |
+|-------|---------|-----------|
+| `SRC_URI` with `avocado-core.cfg` / `avocado-extra.cfg` | Avocado-required kernel config (CONFIG_RD_ZSTD, CONFIG_OVERLAY_FS, etc. — see "Required Kernel Options" below) | Yes |
+| `PKG:${KERNEL_PACKAGE_NAME}-devsrc` rename | Fully-qualified `kernel-devsrc-${KERNEL_VERSION}` package name so multiple kernel versions can ship in the same feed without dnf NVR collision | Yes |
+| `RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc` unqualified+versioned | Backward-compat for callers listing the unqualified `kernel-devsrc` (e.g. `packagegroup-avocado-sdk-extra.bb`) | Yes |
+| `RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"` | avocado-cli kernel resolver contract — without this, the resolver can't enumerate this kernel in the feed | Yes |
+| `require .../avocado-kernel-modules-packagegroup.inc` | Emits `packagegroup-avocado-{rootfs,initramfs}-modules-${KERNEL_VERSION}` so avocado-cli can auto-append the correct kernel's modules at install time | Yes |
+
+The boilerplate is additive and harmless in single-kernel feeds — it only
+becomes load-bearing when the family adds an alt-kernel multiconfig (see
+[multi-kernel.md](multi-kernel.md)). Adding it from day one means the
+groundwork is in place if the family ever gains a second kernel.
+
+If the family ships kernel-version-critical modules in the rootfs or
+initramfs (block drivers, network for early boot, etc.), append them to
+the auto-emitted packagegroup with versioned NAMEs — see
+[multi-kernel.md](multi-kernel.md) for the pattern.
 
 ### Required Kernel Options for Avocado
 
