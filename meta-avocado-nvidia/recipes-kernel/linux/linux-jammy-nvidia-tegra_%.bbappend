@@ -18,9 +18,13 @@ SRC_URI:append = " \
 # module builds, leaving shim RDEPENDS pointing at a kernel name that nothing
 # provides. SRCREV is pinned, so no version info is lost.
 SCMVERSION = "n"
-set_scmversion() {
-    # Empty .scmversion preempts Kbuild's scripts/setlocalversion git lookup
-    # (it cat's and returns immediately when the file exists).
+# SCMVERSION="n" only prevents the kernel-yocto class from calling its own
+# set_scmversion (which is gated on SCMVERSION="y"). Kbuild's
+# scripts/setlocalversion is a separate path: it detects .git in ${S} and
+# appends +g<sha> independently. Creating an empty .scmversion before compile
+# causes setlocalversion to cat the file and return immediately without a git
+# lookup, suppressing the suffix at the Kbuild level too.
+do_kernel_configme:append() {
     : > ${S}/.scmversion
 }
 
