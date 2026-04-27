@@ -1,3 +1,13 @@
+# nvidia-kernel-oot is built in both the default mc (linux-yocto 6.6) and the
+# jetson-l4t alt mc (linux-jammy-nvidia-tegra 5.15). Both builds share a single
+# PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION
+# → different task signature → independent PR counter). The shared PR service
+# then has r0.0 and r0.1 for the same package name, causing do_packagedata_setscene
+# to fire "version-going-backwards" when the lower-PR mc restores from sstate.
+# This is structural — not a bug — so demote it from a fatal error to a warning.
+ERROR_QA:remove = "version-going-backwards"
+WARN_QA:append = " version-going-backwards"
+
 # Extend the default -src package with Makefiles and build configuration files
 # These help understand which source files and headers build which modules
 # The default -src package from splitdebug only includes .c/.h files referenced in debug info
