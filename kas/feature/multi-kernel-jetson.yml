@@ -19,10 +19,6 @@ header:
 #     defined at meta-avocado-nvidia/conf/multiconfig/jetson-l4t.conf
 #     (per-mc TMPDIR; PREFERRED_PROVIDER_virtual/kernel forced to
 #     linux-jammy-nvidia-tegra).
-#   - INHERIT += "avocado-multikernel" pulls in
-#     meta-avocado-distro/classes/avocado-multikernel.bbclass, which adds
-#     do_multikernel_merge to the avocado-distro recipe and synthesizes
-#     do_multikernel_merge[mcdepends] from AVOCADO_MULTIKERNEL_MC_RECIPES.
 #   - AVOCADO_MULTIKERNEL_MC_RECIPES lists both the kernel and the OOT shim
 #     so nvidia-kernel-oot's RPMs land in the unified feed too.
 #
@@ -39,5 +35,4 @@ header:
 local_conf_header:
   feature/multi-kernel-jetson: |
     BBMULTICONFIG += "jetson-l4t"
-    INHERIT += "avocado-multikernel"
     AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:linux-jammy-nvidia-tegra jetson-l4t:nvidia-kernel-oot"

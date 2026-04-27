@@ -17,10 +17,6 @@ header:
 #     defined at meta-avocado-raspberrypi/conf/multiconfig/raspberrypi-6_6.conf
 #     (per-mc TMPDIR + BUILDHISTORY_DIR; PREFERRED_VERSION_linux-raspberrypi
 #     pinned to 6.6.%).
-#   - INHERIT += "avocado-multikernel" pulls in
-#     meta-avocado-distro/classes/avocado-multikernel.bbclass, which adds
-#     do_multikernel_merge to the avocado-distro recipe and synthesizes
-#     do_multikernel_merge[mcdepends] from AVOCADO_MULTIKERNEL_MC_RECIPES.
 #   - AVOCADO_MULTIKERNEL_MC_RECIPES tells the bbclass which alt-mc recipes
 #     to depend on and whose tmp-${mc}/deploy/ tree to merge into the
 #     default mc's ${DEPLOY_DIR}.
@@ -46,5 +42,4 @@ header:
 local_conf_header:
   feature/multi-kernel-raspberrypi: |
     BBMULTICONFIG += "raspberrypi-6_6"
-    INHERIT += "avocado-multikernel"
     AVOCADO_MULTIKERNEL_MC_RECIPES += "raspberrypi-6_6:linux-raspberrypi"

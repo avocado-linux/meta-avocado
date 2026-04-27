@@ -1,12 +1,16 @@
 # Cross-mc kernel-feed assembly on the avocado-distro meta-target.
 #
-# Activated by feature ymls (kas/feature/multi-kernel-<family>.yml) which
-# `INHERIT += "avocado-multikernel"` and set AVOCADO_MULTIKERNEL_MC_RECIPES
-# to a space-separated list of "<mc>:<recipe>" pairs identifying the
-# alternate-kernel recipes that should be built and merged into the
-# unified feed.
+# Inherited directly by avocado-distro.bb (`inherit avocado-multikernel`).
+# Feature ymls (kas/feature/multi-kernel-<family>.yml) set
+# AVOCADO_MULTIKERNEL_MC_RECIPES to a space-separated list of
+# "<mc>:<recipe>" pairs identifying the alternate-kernel recipes that should
+# be built and merged into the unified feed.
 #
-# Two effects on the avocado-distro recipe:
+# Inheriting only in avocado-distro.bb (not via global INHERIT) keeps this
+# class out of every other recipe's basehash, avoiding a full sstate miss
+# when the class or AVOCADO_MULTIKERNEL_MC_RECIPES changes.
+#
+# Two effects on avocado-distro:
 #   1. do_multikernel_merge[mcdepends] is synthesized from the variable,
 #      so `bitbake avocado-distro` transitively builds each alt-mc recipe
 #      (no caller-side --target mc:... flags needed).
@@ -17,14 +21,8 @@
 #      from every mc are unified into ${DEPLOY_DIR}/pulp-uploads/, and
 #      the Tekton CI task (which only reads from the default mc's
 #      tmp/deploy/) sees everything without any per-target awareness.
-#
-# The bbclass is intended to be inherited globally (via INHERIT in
-# local_conf_header) but only takes effect on the avocado-distro recipe;
-# every other recipe gets a noexec'd do_multikernel_merge stub.
 
 python () {
-    if d.getVar('PN') != 'avocado-distro':
-        return
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()
     mcdeps = []
     for pair in pairs:
@@ -34,13 +32,10 @@ python () {
                     "(want '<mc>:<recipe>')" % pair)
             continue
         mcdeps.append("mc::%s:%s:do_build" % (mc, recipe))
-    if not mcdeps:
-        return
-    d.delVarFlag('do_multikernel_merge', 'noexec')
-    d.appendVarFlag('do_multikernel_merge', 'mcdepends', ' ' + ' '.join(mcdeps))
+    if mcdeps:
+        d.appendVarFlag('do_multikernel_merge', 'mcdepends', ' ' + ' '.join(mcdeps))
 }
 
-do_multikernel_merge[noexec] = "1"
 do_multikernel_merge[nostamp] = "1"
 do_multikernel_merge() {
     for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
