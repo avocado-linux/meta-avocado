@@ -93,7 +93,8 @@ rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}"
 
 # Tag file (mirrors the TAG--<image-name>--TAG file written by image_synaimg.bbclass)
-touch "${OUT_DIR}/TAG--${MACHINE}--TAG"
+timestamp=$(date -u +%Y%m%d%H%M%S)
+touch "${OUT_DIR}/TAG--avocado-image-${MACHINE}-${timestamp}--TAG"
 
 # ---------------------------------------------------------------------------
 # Static copies (already in their final form)
