@@ -11,7 +11,7 @@
 #      so `bitbake avocado-distro` transitively builds each alt-mc recipe
 #      (no caller-side --target mc:... flags needed).
 #   2. do_multikernel_merge runs after do_configure and before do_compile
-#      (which calls avocado-repo-map's do_create_repo_map). It rsyncs each
+#      (which calls avocado-repo-map's do_create_repo_map). It copies each
 #      ${TOPDIR}/tmp-${mc}/deploy/ tree into ${DEPLOY_DIR}. The repo-map
 #      task then sees a unified arch tree, the per-recipe Pulp manifests
 #      from every mc are unified into ${DEPLOY_DIR}/pulp-uploads/, and
@@ -48,7 +48,7 @@ do_multikernel_merge() {
         src="${TOPDIR}/tmp-${mc}/deploy/"
         if [ -d "${src}" ]; then
             bbnote "avocado-multikernel: merging alt-mc ${mc} deploy tree into ${DEPLOY_DIR}"
-            rsync -a "${src}" "${DEPLOY_DIR}/"
+            cp -a "${src}/." "${DEPLOY_DIR}/"
         fi
     done
 }
