@@ -138,5 +138,18 @@ FILES:packagegroup-avocado-rootfs-modules-oot = ""
 FILES:packagegroup-avocado-initramfs-modules-oot = ""
 SUMMARY:packagegroup-avocado-rootfs-modules-oot = "OOT kernel modules pulled into the Avocado rootfs for kernel ${KERNEL_VERSION}"
 SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled into the Avocado initramfs for kernel ${KERNEL_VERSION}"
-RDEPENDS:packagegroup-avocado-rootfs-modules-oot = ""
+# nvidia-kernel-oot-base aggregates the OOT base drivers required for any
+# Tegra rootfs running the L4T kernel (TEGRA_OOT_BASE_DRIVERS — host1x,
+# nvgpu, tegra-bpmp, mc-utils, nvethernet, etc.). Pull it in via this
+# kernel-version-qualified packagegroup rather than via meta-tegra's
+# unconditional MACHINE_ESSENTIAL_EXTRA_RDEPENDS — the latter leaks 5.15
+# OOT modules into 6.6 builds because nvidia-kernel-oot is only built by
+# the alt mc (linux-jammy-nvidia-tegra 5.15). With this routing, the OOT
+# modules only land in the rootfs when avocado-cli auto-appends this
+# packagegroup, which only happens when an OOT-using kernel is pinned.
+#
+# packagegroup-avocado-rootfs.bbappend and packagegroup-core-boot.bbappend
+# strip nvidia-kernel-oot-base from MACHINE_ESSENTIAL_EXTRA_RDEPENDS-
+# expanded RDEPENDS, so this is now the only path.
+RDEPENDS:packagegroup-avocado-rootfs-modules-oot = "nvidia-kernel-oot-base"
 RDEPENDS:packagegroup-avocado-initramfs-modules-oot = ""
