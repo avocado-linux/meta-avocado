@@ -15,12 +15,13 @@
 #      so `bitbake avocado-distro` transitively builds each alt-mc recipe
 #      (no caller-side --target mc:... flags needed).
 #   2. do_multikernel_merge runs after do_configure and before do_compile
-#      (which calls avocado-repo-map's do_create_repo_map). It copies each
-#      ${TOPDIR}/tmp-${mc}/deploy/ tree into ${DEPLOY_DIR}. The repo-map
-#      task then sees a unified arch tree, the per-recipe Pulp manifests
-#      from every mc are unified into ${DEPLOY_DIR}/pulp-uploads/, and
-#      the Tekton CI task (which only reads from the default mc's
-#      tmp/deploy/) sees everything without any per-target awareness.
+#      (which calls avocado-repo-map's do_create_repo_map). It copies only
+#      the rpm/ and pulp-uploads/ subtrees from each alt-mc deploy dir into
+#      ${DEPLOY_DIR}. spdx/ is intentionally excluded: both kernels produce
+#      SPDX files with the same unversioned package names (kernel.spdx.json
+#      etc.), so merging them into the shared deploy area causes a "files
+#      already exist" collision in do_create_spdx. Each mc's spdx/ stays in
+#      its own tmp-<mc>/deploy/spdx/ and is collected separately if needed.
 
 python () {
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()
@@ -40,11 +41,14 @@ do_multikernel_merge[nostamp] = "1"
 do_multikernel_merge() {
     for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
         mc="${pair%%:*}"
-        src="${TOPDIR}/tmp-${mc}/deploy/"
-        if [ -d "${src}" ]; then
-            bbnote "avocado-multikernel: merging alt-mc ${mc} deploy tree into ${DEPLOY_DIR}"
-            cp -a "${src}/." "${DEPLOY_DIR}/"
-        fi
+        base="${TOPDIR}/tmp-${mc}/deploy"
+        for subdir in rpm pulp-uploads; do
+            src="${base}/${subdir}"
+            if [ -d "${src}" ]; then
+                bbnote "avocado-multikernel: merging alt-mc ${mc} deploy/${subdir} into ${DEPLOY_DIR}/${subdir}"
+                cp -a "${src}/." "${DEPLOY_DIR}/${subdir}/"
+            fi
+        done
     done
 }
 addtask multikernel_merge after do_configure before do_compile
