@@ -167,6 +167,16 @@ python do_pulp_rpm_push() {
     machine = d.getVar('MACHINE') or ''
     sdkmachine = d.getVar('SDKMACHINE') or ''
 
+    # When the same MACHINE is used across multiconfigs (e.g. jetson-l4t shares
+    # MACHINE with the default mc), manifests would collide on the same filename.
+    # TMPDIR is per-mc by convention (tmp-<mc> vs tmp), so derive the mc name
+    # from it to produce unique filenames without any new variable plumbing.
+    tmpdir = d.getVar('TMPDIR') or ''
+    topdir = d.getVar('TOPDIR') or ''
+    _rel = tmpdir[len(topdir):].lstrip('/')
+    _mc_name = _rel[4:] if _rel.startswith('tmp-') else ''
+    mc_suffix = f"-{_mc_name}" if _mc_name else ''
+
     # Recipes in AVOCADO_PULP_UPLOAD_EXCLUDE (e.g. aggregator metapackages
     # whose binary bytes are machine-dependent) still get manifest entries
     # so the parity check's disk-count matches; those entries are marked
@@ -186,7 +196,7 @@ python do_pulp_rpm_push() {
 
     manifest_dir = os.path.join(deploy_dir, 'pulp-uploads')
     bb.utils.mkdirhier(manifest_dir)
-    manifest_path = os.path.join(manifest_dir, f"{pn}-{pv}-{pr}-{machine}.jsonl")
+    manifest_path = os.path.join(manifest_dir, f"{pn}-{pv}-{pr}-{machine}{mc_suffix}.jsonl")
 
     # Truncate on open: the addtask task and the setscene postfunc may both
     # fire for setscene-satisfied recipes, and both produce the same set of
