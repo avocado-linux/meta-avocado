@@ -9,9 +9,8 @@ SRC_URI:append = " \
 "
 
 # Enable NVMe support for Raspberry Pi 5 (has PCIe)
-SRC_URI:append:raspberrypi5 = " \
-  file://nvme.cfg \
-"
+SRC_URI:append:raspberrypi5 = " file://0001-pci-add-initial-support-for-Broadcom-BCM2712-SoC-PCI.patch \
+  file://nvme.cfg"
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
