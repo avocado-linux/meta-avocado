@@ -17,3 +17,5 @@ do_deploy:prepend() {
 		syna-mkbootimg "$@"
 	}
 }
+
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
