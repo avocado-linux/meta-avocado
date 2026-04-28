@@ -1,0 +1,111 @@
+diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
+index ab3d65a..0a52476 100644
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -1,26 +1,7 @@
+-include(ExternalProject)
+-include(FetchContent)
+-
+-ExternalProject_Add(libusb
+-    GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
+-    GIT_TAG v1.0.26
+-    PREFIX ${CMAKE_BINARY_DIR}/libusb
+-    CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
+-               -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/libusb
+-               -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+-               -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+-)
+-
+-ExternalProject_Add(yaml-cpp
+-    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+-    GIT_TAG yaml-cpp-0.7.0
+-    PREFIX ${CMAKE_BINARY_DIR}/yaml-cpp
+-    CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
+-               -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/yaml-cpp
+-               -DYAML_CPP_BUILD_TESTS=OFF
+-               -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+-               -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+-)
++# Use system-provided dependencies (Yocto SDK / nativesdk recipes).
++find_package(PkgConfig REQUIRED)
++pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
++find_package(yaml-cpp REQUIRED)
+ 
+ file(GLOB SRC astra_boot_image.cpp
+                 astra_console.cpp
+@@ -43,25 +24,6 @@ endif()
+ 
+ add_library(astraupdate STATIC ${SRC})
+ 
+-add_dependencies(astraupdate yaml-cpp)
+-add_dependencies(astraupdate libusb)
+-
+-message(CMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME})
+-
+-if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+-        set(YAML_CPP_LIB_NAME "yaml-cppd")
+-    else()
+-        set(YAML_CPP_LIB_NAME "yaml-cpp")
+-    endif()
+-else()
+-    set(YAML_CPP_LIB_NAME "libyaml-cpp")
+-endif()
+-
+ target_include_directories(astraupdate PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+-target_include_directories(astraupdate PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/include)
+-target_include_directories(astraupdate PRIVATE ${CMAKE_BINARY_DIR}/libusb/include)
+-
+ 
+-target_link_libraries(astraupdate PRIVATE ${CMAKE_BINARY_DIR}/libusb/lib/libusb-1.0${CMAKE_STATIC_LIBRARY_SUFFIX} ${PLATFORM_LINK_LIBRARIES})
+-target_link_libraries(astraupdate PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/lib/${YAML_CPP_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX})
++target_link_libraries(astraupdate PRIVATE PkgConfig::LIBUSB yaml-cpp ${PLATFORM_LINK_LIBRARIES})
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 3487ae4..cc64661 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,36 +1,16 @@
+-include(ExternalProject)
+-
+-ExternalProject_Add(cxxopts
+-    GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
+-    GIT_TAG v3.0.0
+-    PREFIX ${CMAKE_BINARY_DIR}/cxxopts
+-    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/cxxopts
+-               -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+-               -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+-)
+-
+-ExternalProject_Add(indicators
+-    GIT_REPOSITORY https://github.com/p-ranav/indicators.git
+-    GIT_TAG ac6c93ea2b1f97a220d10a0729a625b3f51e320b
+-    PREFIX ${CMAKE_BINARY_DIR}/indicators
+-    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/indicators
+-               -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+-               -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+-)
++find_package(cxxopts REQUIRED)
++find_path(INDICATORS_INCLUDE_DIR indicators/progress_bar.hpp REQUIRED)
+ 
+ add_executable(astra-update astra-update.cpp)
+ add_dependencies(astra-update astraupdate)
+-add_dependencies(astra-update cxxopts)
+-add_dependencies(astra-update indicators)
+ 
+ add_executable(astra-boot astra-boot.cpp)
+ add_dependencies(astra-boot astraupdate)
+-add_dependencies(astra-boot cxxopts)
+-add_dependencies(astra-boot indicators)
+ 
+ include_directories(../include)
+-include_directories(${CMAKE_BINARY_DIR}/cxxopts/include)
+-include_directories(${CMAKE_BINARY_DIR}/indicators/include)
++include_directories(${INDICATORS_INCLUDE_DIR})
++
++target_link_libraries(astra-update astraupdate cxxopts::cxxopts)
++target_link_libraries(astra-boot astraupdate cxxopts::cxxopts)
+ 
+-target_link_libraries(astra-update astraupdate)
+-target_link_libraries(astra-boot astraupdate)
+\ No newline at end of file
++install(TARGETS astra-update astra-boot RUNTIME DESTINATION bin)

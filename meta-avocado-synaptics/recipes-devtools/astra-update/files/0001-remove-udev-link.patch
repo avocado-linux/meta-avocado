@@ -1,0 +1,15 @@
+diff --git a/cmake/CMakeLists.linux.txt b/cmake/CMakeLists.linux.txt
+index fd7da7e..b3ecd6b 100644
+--- a/cmake/CMakeLists.linux.txt
++++ b/cmake/CMakeLists.linux.txt
+@@ -1,4 +1,7 @@
+ add_definitions(-DPLATFORM_LINUX)
+-set(PLATFORM_LINK_LIBRARIES udev)
++# udev removed: not used in source, only added unused libudev.so.1 to NEEDED.
++# All USB enumeration/hotplug uses libusb-1.0 directly (lib/usb_transport.cpp).
++set(PLATFORM_LINK_LIBRARIES "")
+ 
+-set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++ -static-libgcc")
+\ No newline at end of file
++# Static stdlib linking dropped for SDK builds; the Yocto SDK provides a
++# matching libstdc++ and we want shared linkage against system libusb-1.0.
