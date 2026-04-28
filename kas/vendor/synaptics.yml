@@ -3,7 +3,7 @@ header:
 
 repos:
   meta-synaptics:
-    url: https://github.com/synaptics-astra/meta-synaptics
+    url: https://github.com/avocado-linux/vendor-meta-synaptics
     path: meta-synaptics
     branch: scarthgap_6.12_v2.2.1
     commit: 5e8a73f54b8a3dd0e5e9a8fd5b765178a22f0d4a
@@ -11,7 +11,7 @@ repos:
       .:
 
   meta-grinn-astra:
-    url: https://github.com/grinn-global/meta-grinn-astra.git
+    url: https://github.com/avocado-linux/vendor-meta-grinn-astra
     path: meta-grinn-astra
     branch: scarthgap_6.12_v2.2.0
     commit: c055fad1d8d3b992f4f774fecc7ffc391ec1ebd0
