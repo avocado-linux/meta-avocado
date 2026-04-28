@@ -6,7 +6,11 @@ header:
     - repo: meta-avocado
       file: kas/vendor/synaptics.yml
     - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    - repo: meta-avocado
       file: kas/target/distro.yml
+    - repo: meta-avocado
+      file: kas/extra/deepx.yml
 
 repos:
   meta-avocado:
@@ -16,5 +20,6 @@ repos:
 
 local_conf_header:
   machine-avocado-grinn-astra-1680-sbc: |
+    DISTRO_FEATURES_EXTRA:append = "seccomp virtualization"
 
 machine: avocado-grinn-astra-1680-sbc
