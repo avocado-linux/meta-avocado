@@ -18,6 +18,9 @@
       },
       "synaimg": {
         "script": "stone-provision-synaimg.sh"
+      },
+      "usb-emmc": {
+        "script": "stone-provision-usb-emmc.sh"
       }
     }
   },
