@@ -25,6 +25,7 @@ RDEPENDS:${PN} = " \
   cryptoauthlib \
   devmem2 \
   dtc \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'deepx', "${DEEPX_PACKAGES}", '', d)} \
   ethtool \
   fwup \
   git \
@@ -95,6 +96,13 @@ RDEPENDS:${PN} = " \
   ${JAVA_PACKAGES} \
   ${AWS_PACKAGES} \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl wayland', "${BROWSER_PACKAGES}", '', d)} \
+"
+
+DEEPX_PACKAGES = " \
+  dx-driver \
+  dx-rt \
+  dx-stream \
+  dx-stream-sample \
 "
 
 AWS_PACKAGES = " \
