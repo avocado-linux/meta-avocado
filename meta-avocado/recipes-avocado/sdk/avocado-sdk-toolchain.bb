@@ -14,6 +14,7 @@ TOOLCHAIN_HOST_TASK = " \
     avocado-sdk-target \
     nativesdk-autoconf \
     nativesdk-automake \
+    nativesdk-bc \
     nativesdk-bison \
     nativesdk-btrfs-tools \
     nativesdk-cmake \
@@ -41,6 +42,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-unfs3 \
     nativesdk-util-linux-losetup \
     nativesdk-util-linux-umount \
+    nativesdk-util-linux-blockdev \
     packagegroup-cross-canadian-${MACHINE} \
 "
 

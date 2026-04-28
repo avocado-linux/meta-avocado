@@ -128,6 +128,9 @@ else
     echo "Detecting available storage devices..."
     echo ""
 
+    # fwup -D enumerates devices it considers safe to write to. Its size
+    # field is unreliable for some USB readers, so always re-query with
+    # blockdev.
     fwup_output=$(fwup -D 2>/dev/null || true)
 
     device_paths=()
@@ -136,7 +139,6 @@ else
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         dev_path="${line%,*}"
-        dev_size="${line#*,}"
 
         # Filter out boot volume
         if [[ -n "$root_dev" && "$dev_path" == "$root_dev" ]]; then
@@ -144,7 +146,7 @@ else
         fi
 
         device_paths+=("$dev_path")
-        device_sizes+=("$dev_size")
+        device_sizes+=("$(blockdev --getsize64 "$dev_path" 2>/dev/null || echo 0)")
     done <<< "$fwup_output"
 
     if [[ ${#device_paths[@]} -eq 0 ]]; then
@@ -163,7 +165,11 @@ else
     for i in "${!device_paths[@]}"; do
         dev_path="${device_paths[$i]}"
         dev_size="${device_sizes[$i]}"
-        size_gib=$(echo "scale=1; $dev_size / 1073741824" | bc -l 2>/dev/null || echo "?")
+        if [[ "$dev_size" -gt 0 ]]; then
+            size_gib=$(echo "scale=1; $dev_size / 1073741824" | bc -l)
+        else
+            size_gib="?"
+        fi
         info=$(get_device_info "$dev_path")
         printf "  %-16s %6s GiB   %s\n" "$dev_path" "$size_gib" "$info"
     done
