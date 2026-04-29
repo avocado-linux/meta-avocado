@@ -3,6 +3,8 @@ From: Justin Schneck <j.schneck@peridio.com>
 Date: Thu, 12 Jun 2025 13:46:58 -0400
 Subject: [PATCH 2/2] fix functions with no return value
 
+Upstream-Status: Pending
+
 ---
  src/log/log_functions.c | 6 ++++--
  1 file changed, 4 insertions(+), 2 deletions(-)

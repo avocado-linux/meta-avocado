@@ -21,7 +21,7 @@ RDEPENDS:${PN}:append:qemux86-64 = " \
 "
 
 do_install:append() {
-    install -m 0755 ${WORKDIR}/vm ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/vm ${D}${SDKPATHNATIVE}${bindir}
 }
 
 # Substitute QB_MACHINE value for qemuarm64 (strip "-machine " prefix from QB_MACHINE)

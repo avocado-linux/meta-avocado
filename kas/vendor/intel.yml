@@ -5,8 +5,8 @@ repos:
   meta-intel:
     url: https://github.com/avocado-linux/vendor-meta-intel.git
     path: meta-intel
-    branch: scarthgap
-    commit: 5d153e35b4e752505efeae368f188fac5e31cf33
+    branch: master
+    commit: 413f4312cd1fe3684f5a19db1dd97d0550bbef54
     layers:
       .:
 

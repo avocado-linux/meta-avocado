@@ -4,6 +4,9 @@ Date: Wed, 16 Aug 2023 15:38:43 +0800
 Subject: [PATCH] adapt makefile to support KALAMA Platform
 
 Signed-off-by: Jialong Chen <quic_jialchen@quicinc.com>
+
+Upstream-Status: Inappropriate [vendor BSP-specific — Qualcomm KALAMA platform support]
+
 ---
  Makefile | 14 ++++++++++++--
  1 file changed, 12 insertions(+), 2 deletions(-)

@@ -9,10 +9,10 @@ inherit systemd
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/avocado-uboot-env ${D}${sbindir}/avocado-uboot-env
+    install -m 0755 ${UNPACKDIR}/avocado-uboot-env ${D}${sbindir}/avocado-uboot-env
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/avocado-uboot-env.service \
+    install -m 0644 ${UNPACKDIR}/avocado-uboot-env.service \
         ${D}${systemd_system_unitdir}/avocado-uboot-env.service
 }
 

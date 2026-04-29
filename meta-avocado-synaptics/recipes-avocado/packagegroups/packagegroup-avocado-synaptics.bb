@@ -7,6 +7,6 @@ inherit features_check
 
 REQUIRED_DISTRO_FEATURES = ""
 
-inherit packagegroup
+inherit packagegroup nospdx
 
 RDEPENDS:${PN} = ""

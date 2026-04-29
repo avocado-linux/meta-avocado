@@ -9,7 +9,7 @@ SRC_URI = " \
     file://dnf.conf \
 "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 REPO_BASE = "${AVOCADO_REPO_BASE}"
 
@@ -30,11 +30,11 @@ ALTERNATIVE_LINK_NAME[rpmrc] = "${sysconfdir}/rpmrc"
 do_install() {
     # Add Avocado SDK repo
     install -d ${D}${sysconfdir}/yum.repos.d
-    install -m 0644 ${WORKDIR}/avocado-sdk.repo ${D}${sysconfdir}/yum.repos.d/avocado-sdk.repo
+    install -m 0644 ${UNPACKDIR}/avocado-sdk.repo ${D}${sysconfdir}/yum.repos.d/avocado-sdk.repo
     sed -i "s|{REPO_BASE}|${REPO_BASE}|g" ${D}${sysconfdir}/yum.repos.d/avocado-sdk.repo
 
     install -d ${D}${sysconfdir}/dnf
-    install -m 644 ${WORKDIR}/dnf.conf ${D}${sysconfdir}/dnf/dnf.conf.${PN}
+    install -m 644 ${UNPACKDIR}/dnf.conf ${D}${sysconfdir}/dnf/dnf.conf.${PN}
 
     install -d ${D}${sysconfdir}/dnf/vars
     echo "${TARGET_ARCH}_avocadosdk:all_avocadosdk:avocado_nativesdk" > ${D}${sysconfdir}/dnf/vars/arch.${PN}

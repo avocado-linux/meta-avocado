@@ -10,7 +10,6 @@ PV = "20260121"
 SRC_URI = "gitsm://github.com/raspberrypi/usbboot.git;branch=master;protocol=https"
 SRCREV = "36baa69fc2783d9df2ff5d28e2fb4bc179bd1d1b"
 
-S = "${WORKDIR}/git"
 
 inherit nativesdk
 

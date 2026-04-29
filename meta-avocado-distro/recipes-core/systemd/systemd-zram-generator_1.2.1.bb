@@ -15,7 +15,6 @@ SRC_URI = "git://github.com/systemd/zram-generator.git;protocol=https;branch=mai
 
 require ${BPN}-crates.inc
 
-S = "${WORKDIR}/git"
 B = "${S}"
 
 CARGO_SRC_DIR = ""

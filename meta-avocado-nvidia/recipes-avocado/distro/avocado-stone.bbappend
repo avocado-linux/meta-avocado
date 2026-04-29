@@ -18,6 +18,6 @@ STONE_BUILD_TASK = "do_stone_validate"
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-tegraflash.sh ${DEPLOYDIR}/stone-provision-tegraflash.sh
-  install -m 0755 ${WORKDIR}/stone-provision-noop.sh ${DEPLOYDIR}/stone-provision-noop.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-tegraflash.sh ${DEPLOYDIR}/stone-provision-tegraflash.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-noop.sh ${DEPLOYDIR}/stone-provision-noop.sh
 }

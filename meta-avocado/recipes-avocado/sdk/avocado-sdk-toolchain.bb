@@ -92,7 +92,7 @@ python package:prepend() {
 do_package[depends] += "virtual/libc:do_packagedata"
 
 # Ensure this is considered an SDK recipe
-inherit nativesdk
+inherit nativesdk nospdx
 
 SDK_VERSION = "${DISTRO_VERSION}"
 PV = "${SDK_VERSION}"

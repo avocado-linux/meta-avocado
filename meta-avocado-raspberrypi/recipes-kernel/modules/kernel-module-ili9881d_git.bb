@@ -17,7 +17,7 @@ SRC_URI = "\
 
 SRC_URI[ili9881d.sha256sum] = "f6e43e192efdc6af4bf23e9f49acfe7d3eb7d7b46940e0055993423a8440d7e5"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # Build the ili9881d kernel module
 inherit module

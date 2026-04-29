@@ -8,8 +8,8 @@ SRC_URI += "file://disable_uboot.cfg \
 
 do_deploy() {
         install -d ${DEPLOYDIR}
-        install -m 0755 ${WORKDIR}/rootfs-post.sh ${DEPLOYDIR}/
-        install -m 0755 ${WORKDIR}/rootfs-pre.sh ${DEPLOYDIR}/
+        install -m 0755 ${UNPACKDIR}/rootfs-post.sh ${DEPLOYDIR}/
+        install -m 0755 ${UNPACKDIR}/rootfs-pre.sh ${DEPLOYDIR}/
 }
 
 addtask deploy after do_compile before do_package

@@ -2,7 +2,7 @@ DESCRIPTION = "Packagegroup for extra inclusions in Avocado Synaptics images"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 
 require recipes-bsp/images/astra-media-common-ips.inc
 

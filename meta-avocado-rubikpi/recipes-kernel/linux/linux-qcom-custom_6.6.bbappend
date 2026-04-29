@@ -11,7 +11,6 @@ SRC_URI = "git://git@github.com/rubikpi-ai/linux;protocol=https;nobranch=1 \
 
 SRCREV = "8c1599030840bcca335c12a08c7485a885345d62"
 
-S = "${WORKDIR}/git"
 
 do_configure:append() {
     kernel_conf_variable BTRFS_FS y

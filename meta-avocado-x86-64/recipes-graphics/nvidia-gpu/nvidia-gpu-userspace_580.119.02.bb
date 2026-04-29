@@ -122,7 +122,7 @@ do_install() {
 
     # ---- systemd service ----
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/nvidia-persistenced.service \
+    install -m 0644 ${UNPACKDIR}/nvidia-persistenced.service \
         ${D}${systemd_system_unitdir}/nvidia-persistenced.service
 }
 

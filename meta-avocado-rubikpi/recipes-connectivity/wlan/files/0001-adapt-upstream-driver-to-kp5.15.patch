@@ -7,6 +7,9 @@ kp5.15's api have some gap with kernel.org 5.15.
 Adapt some api to fix compilation issue.
 
 Signed-off-by: Jialong Chen <quic_jialchen@quicinc.com>
+
+Upstream-Status: Inappropriate [vendor BSP-specific — adapts driver to Qualcomm 5.15 kernel patches]
+
 ---
  include/xmit_osdep.h          |  6 ++++--
  os_dep/linux/ioctl_cfg80211.c | 20 +++++++++++++++-----

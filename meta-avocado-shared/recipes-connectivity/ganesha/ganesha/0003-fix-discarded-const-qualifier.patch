@@ -1,0 +1,36 @@
+From c1b80554a6dd710dcc4c81586db310909b62f5e9 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Tue, 28 Apr 2026 22:45:00 -0400
+Subject: [PATCH] fix discarded const qualifier from strchr in bsd-base64.c
+
+GCC 15 / glibc 2.40+ propagate const-ness through strchr() per the
+C23 type-generic forms, so passing a const char * returns a
+const char *. Base64 is static const char Base64[], so the result
+of strchr(Base64, ch) is const char *. Storing it in a plain
+char *pos now trips -Werror=discarded-qualifiers.
+
+Promote pos to const char *. Every use site does pointer arithmetic
+with Base64 (also const), so const-correctness is fine.
+
+Upstream-Status: Pending
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ src/support/bsd-base64.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/support/bsd-base64.c b/src/support/bsd-base64.c
+index cb37b30..0854761 100644
+--- a/src/support/bsd-base64.c
++++ b/src/support/bsd-base64.c
+@@ -216,7 +216,7 @@ int base64url_encode(u_char const *src, size_t srclength, char *target,
+ int b64_pton(char const *src, u_char *target, size_t targsize)
+ {
+ 	int tarindex, state, ch;
+-	char *pos;
++	const char *pos;
+ 
+ 	state = 0;
+ 	tarindex = 0;
+-- 
+2.53.0
+

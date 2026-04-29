@@ -1,3 +1,6 @@
+Upstream-Status: Inappropriate [avocado build integration — use system libs instead of bundled]
+
+---
 diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
 index ab3d65a..0a52476 100644
 --- a/lib/CMakeLists.txt

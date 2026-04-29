@@ -8,8 +8,8 @@ repos:
   meta-qcom:
     url: https://github.com/qualcomm-linux/meta-qcom
     path: meta-qcom
-    branch: scarthgap
-    commit: ec80a36bce11d8182b4bb2a6fa0359adfeccde0a
+    branch: wrynose
+    commit: 624ea64a3acb048740e6e0c1939e3bb1da82bfcb
 
   meta-qcom-hwe:
     url: https://github.com/qualcomm-linux/meta-qcom-hwe
@@ -22,8 +22,8 @@ repos:
   meta-qcom-distro:
     url: https://github.com/qualcomm-linux/meta-qcom-distro
     path: meta-qcom-distro
-    branch: scarthgap
-    commit: 5cede695df3b6a1e22bfd26fbccaea1685ff742f
+    branch: wrynose
+    commit: fe659f5ae0155deeadd414b1a678cd78353b885a
     layers:
       .:
 

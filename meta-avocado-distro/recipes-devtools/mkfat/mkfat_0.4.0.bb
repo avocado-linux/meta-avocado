@@ -8,7 +8,6 @@ SRC_URI[sha256sum] = "3ebfa61108b7f31db116a647c21a547a15210bc005c16c04598f9e2b91
 
 require ${BPN}-crates.inc
 
-S = "${WORKDIR}/git"
 
 CARGO_SRC_DIR = ""
 

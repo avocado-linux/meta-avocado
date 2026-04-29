@@ -1,7 +1,7 @@
 SRC_URI:append:bootvars-ubootenv = " file://${MACHINE}.txt"
 
 ENV_FILENAME = "uboot.env"
-ENV_FILEPATH = "${WORKDIR}/${MACHINE}.txt"
+ENV_FILEPATH = "${UNPACKDIR}/${MACHINE}.txt"
 
 DEPENDS += "u-boot-mkenvimage-native"
 UBOOT_MKENVIMAGE ?= "uboot-mkenvimage"

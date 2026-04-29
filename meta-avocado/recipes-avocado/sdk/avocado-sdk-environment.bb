@@ -71,7 +71,7 @@ do_install() {
 }
 
 PACKAGES = "${PN}"
-FILES:${PN}= " \
+FILES:${PN} = " \
     ${SDKPATHNATIVE}/* \
     "
 

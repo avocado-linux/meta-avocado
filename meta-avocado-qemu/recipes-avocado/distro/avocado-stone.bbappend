@@ -11,6 +11,6 @@ SRC_URI += " \
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0644 ${WORKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
-  install -m 0755 ${WORKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
+  install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  install -m 0755 ${UNPACKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
 }

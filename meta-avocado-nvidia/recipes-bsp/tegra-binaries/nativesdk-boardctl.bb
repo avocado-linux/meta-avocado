@@ -6,7 +6,7 @@ PV = "${L4T_VERSION}"
 
 inherit l4t_bsp nativesdk
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # Ensure the L4T BSP tarball is unpacked before we install
 do_install[depends] += "tegra-binaries:do_preconfigure"

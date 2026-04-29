@@ -9,7 +9,7 @@ SRC_URI = "${PUBLISHTOOL_MAVEN_BASE}/${PV}/${PUBLISHTOOL_JAR};downloadfilename=$
 
 SRC_URI[sha256sum] = "d766771c0b0eca11f03e0f8af63d30496f2429887c5385c41cc63060cf5ddc39"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 RDEPENDS:${PN} = "openjdk-17-jre kabtool"
 
@@ -21,10 +21,10 @@ PUBLISHTOOL_LIBDIR = "${libdir}/publishtool"
 
 do_install() {
     install -d ${D}${PUBLISHTOOL_LIBDIR}
-    install -m 0644 ${WORKDIR}/${PUBLISHTOOL_JAR} ${D}${PUBLISHTOOL_LIBDIR}/publishtool.jar
+    install -m 0644 ${UNPACKDIR}/${PUBLISHTOOL_JAR} ${D}${PUBLISHTOOL_LIBDIR}/publishtool.jar
 
     install -d ${D}${bindir}
-    sed -e 's|@LIBDIR@|${PUBLISHTOOL_LIBDIR}|g' ${WORKDIR}/publishtool.sh > ${D}${bindir}/publishtool
+    sed -e 's|@LIBDIR@|${PUBLISHTOOL_LIBDIR}|g' ${UNPACKDIR}/publishtool.sh > ${D}${bindir}/publishtool
     chmod 0755 ${D}${bindir}/publishtool
 }
 

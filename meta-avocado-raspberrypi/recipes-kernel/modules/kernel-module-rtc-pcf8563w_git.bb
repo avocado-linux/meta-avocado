@@ -17,7 +17,7 @@ SRC_URI = "\
 
 SRC_URI[rtc-pcf8563w.sha256sum] = "4d75efac1b586fe2f62bac9719987078a46a4f3f4dff18b40df6b00f4c26fbe3"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # Build the rtc-pcf8563w kernel module
 inherit module

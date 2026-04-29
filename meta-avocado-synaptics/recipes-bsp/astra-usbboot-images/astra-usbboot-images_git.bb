@@ -8,7 +8,6 @@ PV = "1.0.6+git"
 SRCREV = "c054106f4b113858039155d495f7837c66247ca4"
 SRC_URI = "git://github.com/synaptics-astra/usb-tool.git;branch=main;protocol=https"
 
-S = "${WORKDIR}/git"
 
 do_configure[noexec] = "1"
 do_compile[noexec] = "1"

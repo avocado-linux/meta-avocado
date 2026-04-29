@@ -1,3 +1,6 @@
+Upstream-Status: Inappropriate [avocado build integration — drops udev symlink install we don't ship]
+
+---
 diff --git a/cmake/CMakeLists.linux.txt b/cmake/CMakeLists.linux.txt
 index fd7da7e..b3ecd6b 100644
 --- a/cmake/CMakeLists.linux.txt

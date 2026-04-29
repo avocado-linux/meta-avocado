@@ -7,7 +7,7 @@
 
 NVIDIA_DRIVER_VERSION = "${PV}"
 NVIDIA_ARCHIVE = "NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}"
-NVIDIA_SRC = "${WORKDIR}/${NVIDIA_ARCHIVE}"
+NVIDIA_SRC = "${UNPACKDIR}/${NVIDIA_ARCHIVE}"
 
 # unpack=0 prevents bitbake from trying to extract the .run file itself;
 # we handle extraction in do_unpack:append below.

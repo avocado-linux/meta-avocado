@@ -11,6 +11,9 @@ since we don't need or install lxpanelctl scripts.
 
 Upstream-status: Inappropriate [configuration]
 Signed-off-by: Alexandru Costache <alexandru@balena.io>
+
+Upstream-Status: Pending
+
 ---
  .../linux/apps/dtoverlay/dtoverlay_main.c              | 10 ++++++----
  1 file changed, 6 insertions(+), 4 deletions(-)

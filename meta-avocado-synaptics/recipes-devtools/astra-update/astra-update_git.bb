@@ -13,7 +13,6 @@ SRC_URI = "git://github.com/synaptics-astra/astra-update.git;branch=main;protoco
            file://0002-use-system-deps.patch \
 "
 
-S = "${WORKDIR}/git"
 
 DEPENDS = "libusb1 yaml-cpp cxxopts indicators"
 

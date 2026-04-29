@@ -7,6 +7,9 @@ Conditionally disable icnss driver for realtime kernel.
 
 Change-Id: Ibf852fd9c70d8b18ca16558a029fe94aebe52c16
 Signed-off-by: Sahil Chandna <quic_chandna@quicinc.com>
+
+Upstream-Status: Inappropriate [machine-specific device-tree override]
+
 ---
  qcm6490-wlan-idp.dtsi | 1 +
  qcm6490-wlan-rb3.dtsi | 1 +

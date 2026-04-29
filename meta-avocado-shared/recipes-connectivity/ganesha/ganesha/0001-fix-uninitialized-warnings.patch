@@ -3,6 +3,8 @@ From: Justin Schneck <j.schneck@peridio.com>
 Date: Fri, 13 Jun 2025 14:25:38 -0400
 Subject: [PATCH 1/2] fix uninitialized warnings
 
+Upstream-Status: Pending
+
 ---
  src/FSAL/FSAL_GPFS/fsal_ds.c                            | 3 ++-
  src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_helpers.c | 2 +-

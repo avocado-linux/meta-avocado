@@ -14,8 +14,8 @@ do_deploy:append:icam-540() {
     # This runs after the main do_deploy, so these files override the upstream versions
     # Note: Install with the base name expected by KERNEL_DEVICETREE (without -nv suffix)
     # but use the -nv content which has proper CSI/NVCSI camera configuration
-    install -m 0644 ${WORKDIR}/tegra234-p3768-0000+p3767-0001-nv.dtb ${DEPLOYDIR}/devicetree/tegra234-p3768-0000+p3767-0001-nv.dtb
+    install -m 0644 ${UNPACKDIR}/tegra234-p3768-0000+p3767-0001-nv.dtb ${DEPLOYDIR}/devicetree/tegra234-p3768-0000+p3767-0001-nv.dtb
     # Install overlay DTBOs (overrides upstream with ICAM-540 specific versions)
-    install -m 0644 ${WORKDIR}/tegra234-p3768-0000+p3767-0000-dynamic.dtbo ${DEPLOYDIR}/devicetree/
-    install -m 0644 ${WORKDIR}/tegra234-dcb-p3767-0000-hdmi.dtbo ${DEPLOYDIR}/devicetree/
+    install -m 0644 ${UNPACKDIR}/tegra234-p3768-0000+p3767-0000-dynamic.dtbo ${DEPLOYDIR}/devicetree/
+    install -m 0644 ${UNPACKDIR}/tegra234-dcb-p3767-0000-hdmi.dtbo ${DEPLOYDIR}/devicetree/
 }

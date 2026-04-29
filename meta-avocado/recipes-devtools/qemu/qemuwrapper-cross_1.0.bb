@@ -2,7 +2,7 @@ SUMMARY = "QEMU wrapper script"
 HOMEPAGE = "http://qemu.org"
 LICENSE = "MIT"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 DEPENDS += "qemu-native"
 

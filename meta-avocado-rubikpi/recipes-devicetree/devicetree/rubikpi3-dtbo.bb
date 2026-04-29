@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/${LICENSE};md5=550794465ba0ec53
 inherit deploy
 
 SRC_URI = "git://git@github.com/rubikpi-ai/device-tree;nobranch=1;protocol=https \
-    git://git@git.codelinaro.org/clo/le/platform/vendor/opensource/camera-kernel;nobranch=1;protocol=https;destsuffix=${WORKDIR}/camera-kernel;name=camera"
+    git://git@git.codelinaro.org/clo/le/platform/vendor/opensource/camera-kernel;nobranch=1;protocol=https;destsuffix=${UNPACKDIR}/camera-kernel;name=camera"
 
 SRCREV_FORMAT .= "_camera"
 
@@ -15,11 +15,11 @@ SRCREV = "f5999b281d9073bba495139c14ceadc18ffa0db2"
 DEPENDS += "virtual/kernel dtc-native"
 do_compile[depends] += "virtual/kernel:do_shared_workdir"
 
-S = "${WORKDIR}/git/rubikpi3"
+S = "${UNPACKDIR}/git/rubikpi3"
 
 DTC ?= "dtc"
 
-CAMERA_INCLUDE := "${WORKDIR}/camera-kernel/camera/"
+CAMERA_INCLUDE := "${UNPACKDIR}/camera-kernel/camera/"
 KERNEL_INCLUDE := "${STAGING_KERNEL_DIR}/include/  -I ${CAMERA_INCLUDE}"
 EXTRA_OEMAKE += "DTC='${DTC}' KERNEL_INCLUDE='${KERNEL_INCLUDE}'"
 

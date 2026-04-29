@@ -2,7 +2,7 @@ DESCRIPTION = "Packagegroup for Intel x86-64 base rootfs packages (loaded before
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 # EFI boot management - required for A/B slot activation via efibootmgr

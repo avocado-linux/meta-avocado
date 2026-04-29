@@ -16,6 +16,10 @@ SRC_URI = "\
   file://stone-${MACHINE_SHORT_NAME}.json \
 "
 
+# Only file:// fetches — wrynose no longer auto-creates ${S}, so set
+# it explicitly to UNPACKDIR (where bitbake places file:// files).
+S = "${UNPACKDIR}"
+
 FILES:${PN}   = "\
   ${SDKPATHNATIVE}${bindir}/avocado-build-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}${bindir}/avocado-provision-${MACHINE_SHORT_NAME} \
@@ -33,7 +37,7 @@ RDEPENDS:${PN}:append:stone-usb = " nativesdk-libusb1"
 do_install() {
     install -d ${D}${SDKPATHNATIVE}${bindir}
     install -d ${D}${SDKPATHNATIVE}/stone
-    install -m 0755 ${WORKDIR}/avocado-build-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
-    install -m 0755 ${WORKDIR}/avocado-provision-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
-    install -m 0755 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${D}${SDKPATHNATIVE}/stone/stone-${MACHINE_SHORT_NAME}.json
+    install -m 0755 ${UNPACKDIR}/avocado-build-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/avocado-provision-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/stone-${MACHINE_SHORT_NAME}.json ${D}${SDKPATHNATIVE}/stone/stone-${MACHINE_SHORT_NAME}.json
 }

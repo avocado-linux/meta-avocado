@@ -1,3 +1,6 @@
+Upstream-Status: Inappropriate [avocado-specific — raises fwup GPT partition limit for Synaptics layout]
+
+---
 diff --git a/src/gpt.h b/src/gpt.h
 index 5f279e6..b13b910 100644
 --- a/src/gpt.h

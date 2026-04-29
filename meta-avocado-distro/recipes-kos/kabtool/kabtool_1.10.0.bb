@@ -9,7 +9,7 @@ SRC_URI = "${KABTOOL_MAVEN_BASE}/${PV}/${KABTOOL_JAR};downloadfilename=${KABTOOL
 
 SRC_URI[sha256sum] = "ef59982abfd32c670862190c22347d8ca3fc39f7140901cf017f58ff0b9a3421"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 RDEPENDS:${PN} = "openjdk-17-jre zip"
 
@@ -21,10 +21,10 @@ KABTOOL_LIBDIR = "${libdir}/kabtool"
 
 do_install() {
     install -d ${D}${KABTOOL_LIBDIR}
-    install -m 0644 ${WORKDIR}/${KABTOOL_JAR} ${D}${KABTOOL_LIBDIR}/kabtool.jar
+    install -m 0644 ${UNPACKDIR}/${KABTOOL_JAR} ${D}${KABTOOL_LIBDIR}/kabtool.jar
 
     install -d ${D}${bindir}
-    sed -e 's|@LIBDIR@|${KABTOOL_LIBDIR}|g' ${WORKDIR}/kabtool.sh > ${D}${bindir}/kabtool
+    sed -e 's|@LIBDIR@|${KABTOOL_LIBDIR}|g' ${UNPACKDIR}/kabtool.sh > ${D}${bindir}/kabtool
     chmod 0755 ${D}${bindir}/kabtool
 }
 

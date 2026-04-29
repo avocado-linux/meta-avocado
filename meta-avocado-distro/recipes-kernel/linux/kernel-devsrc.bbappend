@@ -33,6 +33,13 @@ do_install:append() {
     if [ -d "${B}/arch/${ARCH}/include/generated" ]; then
         mkdir -p $kerneldir/arch/${ARCH}/include/generated
         cp -a ${B}/arch/${ARCH}/include/generated/* $kerneldir/arch/${ARCH}/include/generated/
+        # kbuild leaves .<file>.h.cmd shadow files next to each generated header.
+        # They record literal make command lines containing ${TMPDIR}, which the
+        # wrynose `buildpaths` QA check (now fatal) rejects. They're only used
+        # for in-tree incremental rebuilds — external module builds don't need
+        # them. Upstream already deletes a few specific .cmd files (vdso-offsets);
+        # this strips the rest under our generated/ copy.
+        find $kerneldir/arch/${ARCH}/include/generated -type f -name '.*.cmd' -delete 2>/dev/null || :
         bbnote "kernel-devsrc-fix: Copied arch/${ARCH}/include/generated/ from build directory"
     else
         bbwarn "kernel-devsrc-fix: No generated headers found at ${B}/arch/${ARCH}/include/generated"

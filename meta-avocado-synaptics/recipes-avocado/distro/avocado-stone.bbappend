@@ -10,7 +10,7 @@ SRC_URI += " \
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0644 ${WORKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
-  install -m 0755 ${WORKDIR}/stone-provision-synaimg.sh ${DEPLOYDIR}/stone-provision-synaimg.sh
-  install -m 0755 ${WORKDIR}/stone-provision-usb-emmc.sh ${DEPLOYDIR}/stone-provision-usb-emmc.sh
+  install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  install -m 0755 ${UNPACKDIR}/stone-provision-synaimg.sh ${DEPLOYDIR}/stone-provision-synaimg.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-usb-emmc.sh ${DEPLOYDIR}/stone-provision-usb-emmc.sh
 }

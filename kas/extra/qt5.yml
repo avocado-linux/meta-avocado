@@ -5,8 +5,8 @@ repos:
   meta-qt5:
     url: https://github.com/avocado-linux/vendor-meta-qt5.git
     path: meta-qt5
-    commit: 227cf5e7b64c93dfc1a45f235c466db8c3fd8707
-    branch: scarthgap
+    commit: 06b898916ddfbf2e758450be737bf4b505eeeeff
+    branch: master
     layers:
       .:
 

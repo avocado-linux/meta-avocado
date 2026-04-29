@@ -6,7 +6,7 @@ inherit features_check
 IMAGE_FEATURES += ""
 REQUIRED_DISTRO_FEATURES = ""
 
-inherit packagegroup
+inherit packagegroup nospdx
 
 RDEPENDS:${PN} = " \
   kernel-module-ili9881d \

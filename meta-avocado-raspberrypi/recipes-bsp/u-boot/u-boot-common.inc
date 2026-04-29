@@ -28,7 +28,6 @@ SRC_URI_RISCV = "\
 SRC_URI:append:riscv32 = "${SRC_URI_RISCV}"
 SRC_URI:append:riscv64 = "${SRC_URI_RISCV}"
 
-S = "${WORKDIR}/git"
 B = "${WORKDIR}/build"
 
 inherit pkgconfig

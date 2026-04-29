@@ -13,10 +13,10 @@ DEPENDS = "util-linux udev"
 # install into the initramfs image
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/avocado-tegra-init ${D}${sbindir}/avocado-tegra-init
+    install -m 0755 ${UNPACKDIR}/avocado-tegra-init ${D}${sbindir}/avocado-tegra-init
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/avocado-tegra-init.service \
+    install -m 0644 ${UNPACKDIR}/avocado-tegra-init.service \
         ${D}${systemd_system_unitdir}/avocado-tegra-init.service
 
     # systemd 258+ uses initrd-preset/ instead of system-preset/ when

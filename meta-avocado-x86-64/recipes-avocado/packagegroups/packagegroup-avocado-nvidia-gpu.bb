@@ -3,7 +3,7 @@ SUMMARY = "NVIDIA GPU compute support (all supported series)"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 
 PACKAGES = " \
     ${PN}-rtx-40 \

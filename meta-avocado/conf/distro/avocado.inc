@@ -7,7 +7,6 @@ DISTRO_DOCUMENTATION_URL = "https://docs.avocadolinux.org"
 SDK_VENDOR = "-avocadosdk"
 SDK_VERSION := "${@'${DISTRO_VERSION}'.replace('snapshot-${METADATA_REVISION}','snapshot')}"
 SDK_VERSION[vardepvalue] = "${SDK_VERSION}"
-TCLIBCAPPEND = ""
 
 MAINTAINER = "Avocado Developers <info@avocadolinux.org>"
 HOMEPAGE = "${DISTRO_VENDOR_URL}"
@@ -49,11 +48,6 @@ SANITY_TESTED_DISTROS ?= " \
             fedora-40 \n \
             "
 
-require conf/distro/include/no-static-libs.inc
-require conf/distro/include/yocto-uninative.inc
-require conf/distro/include/security_flags.inc
-INHERIT += "uninative"
-
 # Conditionally upload RPMs to Pulp as they are written during the build.
 # Gated by the AVOCADO_PULP_UPLOAD env var (set by kas/ci/pulp-upload.yml in CI).
 AVOCADO_PULP_UPLOAD ??= "0"
@@ -61,6 +55,12 @@ INHERIT += "${@'avocado-pulp-upload' if d.getVar('AVOCADO_PULP_UPLOAD') == '1' e
 
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
 BB_HASHSERVE ??= "${@os.getenv('BB_HASHSERVE') or 'auto'}"
+
+# Keep the hash equivalency database alongside the shared SSTATE_DIR so
+# every machine build sees the same equivalence records and can hit each
+# other's sstate. Without this, each build dir has its own DB and the
+# shared sstate cache is mostly wasted.
+BB_HASHSERVE_DB_DIR ??= "${SSTATE_DIR}"
 
 VIRTUAL-RUNTIME_avocado-sdk-metadata = "avocado-sdk-${MACHINE_SHORT_NAME}"
 VIRTUAL-RUNTIME_dbus ?= "dbus"

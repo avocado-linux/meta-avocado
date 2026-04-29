@@ -3,6 +3,8 @@ From: Kuldip Gor <kuldip.gor@synaptics.com>
 Date: Wed, 1 Oct 2025 22:46:33 +0530
 Subject: [PATCH] linux, dri: skip check for mali
 
+Upstream-Status: Inappropriate [machine-specific — Synaptics Mali DRI workaround]
+
 ---
  build/config/BUILDCONFIG.gn     |  5 +++++
  build/config/linux/BUILD.gn     |  1 +

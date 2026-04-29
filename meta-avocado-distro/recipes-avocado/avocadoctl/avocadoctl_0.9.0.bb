@@ -12,7 +12,6 @@ SRC_URI = " \
 
 require ${BPN}-crates.inc
 
-S = "${WORKDIR}/git"
 
 CARGO_SRC_DIR = ""
 
@@ -46,17 +45,17 @@ FILES:${PN} += " \
 
 do_install:append() {
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/avocado-extension.service ${D}${systemd_system_unitdir}/
-    install -m 0644 ${WORKDIR}/avocado-extension-initrd.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/avocado-extension.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/avocado-extension-initrd.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${S}/systemd/avocadoctl.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${S}/systemd/avocadoctl.socket ${D}${systemd_system_unitdir}/
 
     # Ensure sshdgenkeys runs after extensions are merged (openssh needs /usr overlay)
     install -d ${D}${systemd_system_unitdir}/sshdgenkeys.service.d
-    install -m 0644 ${WORKDIR}/sshdgenkeys-after-extensions.conf ${D}${systemd_system_unitdir}/sshdgenkeys.service.d/avocado.conf
+    install -m 0644 ${UNPACKDIR}/sshdgenkeys-after-extensions.conf ${D}${systemd_system_unitdir}/sshdgenkeys.service.d/avocado.conf
 
     install -d ${D}${sysconfdir}/systemd/system-preset
-    install -m 0644 ${WORKDIR}/00-avocado.preset ${D}${sysconfdir}/systemd/system-preset/00-avocado.preset
+    install -m 0644 ${UNPACKDIR}/00-avocado.preset ${D}${sysconfdir}/systemd/system-preset/00-avocado.preset
 
     # systemd 258+ uses initrd-preset/ instead of system-preset/ when
     # /etc/initrd-release exists (i.e. in initramfs images).  The bbclass

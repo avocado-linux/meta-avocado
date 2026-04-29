@@ -9,13 +9,13 @@ FILES:${PN}:append:class-target:bootvars-ubootenv = "${sysconfdir}/fw_env.config
 
 do_install:append:class-target:bootvars-ubootenv() {
   install -d ${D}${sysconfdir}
-  install -m 644 ${WORKDIR}/fw_env.config ${D}${sysconfdir}/fw_env.config
+  install -m 644 ${UNPACKDIR}/fw_env.config ${D}${sysconfdir}/fw_env.config
 }
 
 inherit deploy
 
 do_deploy:bootvars-ubootenv() {
-    install -m 644 ${WORKDIR}/fw_env.config ${DEPLOYDIR}/fw_env.config
+    install -m 644 ${UNPACKDIR}/fw_env.config ${DEPLOYDIR}/fw_env.config
 }
 
 do_deploy() {

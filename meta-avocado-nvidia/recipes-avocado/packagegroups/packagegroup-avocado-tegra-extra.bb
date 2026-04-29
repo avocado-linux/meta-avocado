@@ -2,7 +2,7 @@ DESCRIPTION = "Packagegroup for inclusion in extra Avocado tegra images"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \

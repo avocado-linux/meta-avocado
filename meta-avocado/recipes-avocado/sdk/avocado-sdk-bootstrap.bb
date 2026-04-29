@@ -6,7 +6,13 @@ PV = "${SDK_VERSION}"
 
 PACKAGE_ARCH = "${SDKPKGARCH}"
 PACKAGES = "${PN}"
-inherit packagegroup
+inherit packagegroup nospdx
+
+# Wrynose tightened the build-deps QA check to fatal. This recipe is a
+# metadata-only aggregator (RDEPENDS-only) — its rdeps are intentionally
+# not build-time deps. Same pattern as avocado-sdk-toolchain.bb and
+# avocado-sdk-target.bb in this tree.
+INSANE_SKIP:${PN} += "build-deps"
 
 RDEPENDS:${PN} += " \
   avocado-sdk-environment \

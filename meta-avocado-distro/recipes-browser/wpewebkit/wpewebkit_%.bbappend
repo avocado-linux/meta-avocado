@@ -1,1 +1,0 @@
-inherit parallel-make-highmem

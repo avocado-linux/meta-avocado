@@ -10,6 +10,6 @@ SRC_URI:append = " \
 
 do_install() {
 	install -d ${D}${bindir}
-	install -m 0755 ${WORKDIR}/image-sensor-start.sh.${GRINN_MACHINE} \
+	install -m 0755 ${UNPACKDIR}/image-sensor-start.sh.${GRINN_MACHINE} \
 		${D}${bindir}/image-sensor-start.sh
 }

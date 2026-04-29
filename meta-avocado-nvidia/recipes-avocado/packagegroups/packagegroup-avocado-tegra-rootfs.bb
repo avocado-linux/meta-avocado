@@ -10,7 +10,7 @@ IMAGE_FEATURES += "splash hwcodecs"
 REQUIRED_DISTRO_FEATURES = "opengl virtualization"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = ""

@@ -1,22 +1,26 @@
 header:
   version: 16
   includes:
-  - repo: meta-avocado
-    file: kas/extra/atecc.yml
-  - repo: meta-avocado
-    file: kas/extra/peridio.yml
-  - repo: meta-avocado
-    file: kas/extra/webkit.yml
+  # wrynose: blocked extras commented out below — see
+  # docs/migrations/scarthgap-to-wrynose.md for the per-layer reason and
+  # the condition for re-enabling each one.
+  #
+  # - repo: meta-avocado
+  #   file: kas/extra/atecc.yml      # meta-atmel: LAYERSERIES_COMPAT=nanbield
+  # - repo: meta-avocado
+  #   file: kas/extra/peridio.yml    # meta-peridio=scarthgap, meta-erlang=whinlatter
+  # - repo: meta-avocado
+  #   file: kas/extra/webkit.yml     # meta-webkit: scarthgap whinlatter
   - repo: meta-avocado
     file: kas/extra/fwup.yml
-  - repo: meta-avocado
-    file: kas/extra/basler.yml
-  - repo: meta-avocado
-    file: kas/extra/ros.yml
+  # - repo: meta-avocado
+  #   file: kas/extra/basler.yml     # meta-basler-tools: scarthgap-only branch, no wrynose
+  # - repo: meta-avocado
+  #   file: kas/extra/ros.yml        # meta-ros (all sublayers): whinlatter
+  # - repo: meta-avocado
+  #   file: kas/extra/realsense.yml  # meta-intel-realsense: scarthgap
   - repo: meta-avocado
     file: kas/extra/qt5.yml
-  - repo: meta-avocado
-    file: kas/extra/realsense.yml
   - repo: meta-avocado
     file: kas/extra/clang.yml
   - repo: meta-avocado

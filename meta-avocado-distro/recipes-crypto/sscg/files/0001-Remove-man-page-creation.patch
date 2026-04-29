@@ -3,6 +3,8 @@ From: Justin Schneck <j.schneck@peridio.com>
 Date: Fri, 21 Nov 2025 20:19:43 -0500
 Subject: [PATCH] Remove man page creation
 
+Upstream-Status: Inappropriate [avocado-side build simplification — disables man page generation]
+
 ---
  meson.build | 21 ---------------------
  1 file changed, 21 deletions(-)

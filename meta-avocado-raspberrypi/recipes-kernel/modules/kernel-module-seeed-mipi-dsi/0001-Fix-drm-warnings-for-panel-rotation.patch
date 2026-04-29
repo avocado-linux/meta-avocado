@@ -3,6 +3,8 @@ From: Justin Schneck <j.schneck@peridio.com>
 Date: Thu, 21 Aug 2025 21:53:04 -0400
 Subject: [PATCH] Fix drm warnings for panel rotation
 
+Upstream-Status: Pending
+
 ---
  panel-ili9881x.c | 7 ++++++-
  1 file changed, 6 insertions(+), 1 deletion(-)

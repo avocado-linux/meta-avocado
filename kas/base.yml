@@ -18,8 +18,8 @@ repos:
   meta-openembedded:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
-    branch: scarthgap
-    commit: 06f846a325fde423bb0a6d49d771d8c1e144d7eb
+    branch: master
+    commit: 6bc36f105c562e48b0feba2a026416d0942f2bd3
     layers:
       meta-oe:
       meta-perl:
@@ -29,13 +29,17 @@ repos:
       meta-webserver:
       meta-multimedia:
 
-  meta-lts-mixins:
-    url: https://github.com/avocado-linux/vendor-meta-lts-mixins
-    path: meta-lts-mixins
-    branch: scarthgap/rust
-    commit: c19b6da5a3afd3c892b3b1b44983e993ac6d5308
-    layers:
-      .:
+  # wrynose: meta-lts-mixins backports rust to scarthgap; rust is in
+  # OE-core natively from walnascar onward, so this layer is obsolete on
+  # wrynose. Re-evaluate (and likely delete outright) once the wrynose
+  # build is green. See docs/migrations/scarthgap-to-wrynose.md.
+  # meta-lts-mixins:
+  #   url: https://github.com/avocado-linux/vendor-meta-lts-mixins
+  #   path: meta-lts-mixins
+  #   branch: scarthgap/rust
+  #   commit: c19b6da5a3afd3c892b3b1b44983e993ac6d5308
+  #   layers:
+  #     .:
 
   meta-avocado:
     path: meta-avocado
@@ -46,11 +50,11 @@ repos:
 distro: avocado
 
 local_conf_header:
+  # wrynose: removed PREFERRED_VERSION_qemu* pins to "9%". They were
+  # holding meta-avocado's local qemu 9.2.0 backport above OE-core
+  # scarthgap's qemu. The backport has been deleted; OE-core wrynose
+  # ships qemu 10.2.0 which we want unmodified.
   qemu: |
-    PREFERRED_VERSION_qemu = "9%"
-    PREFERRED_VERSION_qemu-native = "9%"
-    PREFERRED_VERSION_qemu-user-static = "9%"
-    PREFERRED_VERSION_nativesdk-qemu = "9%"
 
   meta-avocado: |
     USER_CLASSES:append = "${@ ' rm_work' if os.environ.get('AVOCADO_RM_WORK', '1') == '1' else ''} buildhistory buildstats buildstats-summary"

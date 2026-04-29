@@ -12,7 +12,6 @@ SRC_URI = " \
 "
 SRCREV = "de3d54abf3dacfb9293d96ed1aa31b449e0d6518"
 
-S = "${WORKDIR}/git"
 
 inherit module
 
@@ -45,7 +44,7 @@ do_install() {
 
     # Install modules-load.d config for automatic loading at boot
     install -d ${D}${sysconfdir}/modules-load.d
-    install -m 0644 ${WORKDIR}/nvidia-gpu-modules-load.conf \
+    install -m 0644 ${UNPACKDIR}/nvidia-gpu-modules-load.conf \
         ${D}${sysconfdir}/modules-load.d/nvidia-gpu-modules.conf
 }
 

@@ -11,6 +11,6 @@ AVOCADO_PROVISION_PROFILE = "noop"
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-ufs.sh ${DEPLOYDIR}/stone-provision-ufs.sh
-  install -m 0755 ${WORKDIR}/stone-provision-noop.sh ${DEPLOYDIR}/stone-provision-noop.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-ufs.sh ${DEPLOYDIR}/stone-provision-ufs.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-noop.sh ${DEPLOYDIR}/stone-provision-noop.sh
 }

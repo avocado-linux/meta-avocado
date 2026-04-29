@@ -2,7 +2,7 @@ DESCRIPTION = "Packagegroup for extra packages in Avocado Intel x86-64 builds"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 # WiFi firmware - Intel

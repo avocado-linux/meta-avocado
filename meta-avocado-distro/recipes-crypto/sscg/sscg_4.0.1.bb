@@ -13,7 +13,6 @@ SRC_URI = "git://github.com/sgallagher/sscg.git;branch=main;protocol=https \
 "
 SRCREV = "9708ebc93d829c705b8204769d0ffeb9671b8397"
 
-S = "${WORKDIR}/git"
 
 inherit meson pkgconfig
 

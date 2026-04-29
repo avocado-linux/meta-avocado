@@ -1,7 +1,7 @@
 DESCRIPTION = "Packagegroup for Avocado SDK"
 LICENSE = "Apache-2.0"
 
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \

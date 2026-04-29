@@ -7,7 +7,7 @@ SRC_URI += " \
 "
 
 do_configure:append() {
-  cat ${WORKDIR}/*.cfg >> ${B}/.config
+  cat ${UNPACKDIR}/*.cfg >> ${B}/.config
 }
 
 # Rename kernel-devsrc to include KERNEL_VERSION so multiple kernel versions

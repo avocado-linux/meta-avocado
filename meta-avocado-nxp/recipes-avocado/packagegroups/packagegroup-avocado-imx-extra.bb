@@ -2,7 +2,7 @@ DESCRIPTION = "Packagegroup for extra packages in Avocado NXP i.MX builds"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 # NXP 88W8997 WiFi driver (out-of-tree mwifiex fork)

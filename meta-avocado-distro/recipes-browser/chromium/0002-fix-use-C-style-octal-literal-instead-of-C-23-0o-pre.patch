@@ -4,6 +4,9 @@ Date: Mon, 6 Apr 2026 16:31:24 +0300
 Subject: [PATCH] fix: use C-style octal literal instead of C++23 0o prefix
 
 Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+
+Upstream-Status: Pending
+
 ---
  .../named_mojo_server_endpoint_connector_linux.cc               | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

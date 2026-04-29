@@ -9,7 +9,7 @@ IMAGE_FEATURES += "post-install-logging"
 REQUIRED_DISTRO_FEATURES = "pam systemd wayland vulkan"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = "${MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS} \

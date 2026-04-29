@@ -9,5 +9,5 @@ SRC_URI:append = " \
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0644 ${WORKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
 }

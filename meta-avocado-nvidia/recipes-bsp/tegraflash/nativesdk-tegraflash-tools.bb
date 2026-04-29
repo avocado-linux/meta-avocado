@@ -17,7 +17,7 @@ SRC_URI = "\
     file://tegra-signimage-helper.sh \
 "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # We need access to the flash tools from tegra-binaries
 # These are built as native and need to be copied to SDK
@@ -42,13 +42,13 @@ do_install() {
     install -d ${D}${TEGRAFLASH_BINDIR}
     
     # Install helper scripts from avocado customizations
-    install -m 0755 ${WORKDIR}/initrd-flash.sh ${D}${TEGRAFLASH_BINDIR}/initrd-flash
-    install -m 0755 ${WORKDIR}/find-jetson-usb.sh ${D}${TEGRAFLASH_BINDIR}/find-jetson-usb
-    install -m 0755 ${WORKDIR}/make-sdcard.sh ${D}${TEGRAFLASH_BINDIR}/make-sdcard
-    install -m 0755 ${WORKDIR}/nvflashxmlparse.py ${D}${TEGRAFLASH_BINDIR}/nvflashxmlparse
-    install -m 0755 ${WORKDIR}/rewrite-tegraflash-args.py ${D}${TEGRAFLASH_BINDIR}/rewrite-tegraflash-args
-    install -m 0755 ${WORKDIR}/tegra-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra-flash-helper.sh
-    install -m 0755 ${WORKDIR}/tegra-signimage-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra-signimage-helper.sh
+    install -m 0755 ${UNPACKDIR}/initrd-flash.sh ${D}${TEGRAFLASH_BINDIR}/initrd-flash
+    install -m 0755 ${UNPACKDIR}/find-jetson-usb.sh ${D}${TEGRAFLASH_BINDIR}/find-jetson-usb
+    install -m 0755 ${UNPACKDIR}/make-sdcard.sh ${D}${TEGRAFLASH_BINDIR}/make-sdcard
+    install -m 0755 ${UNPACKDIR}/nvflashxmlparse.py ${D}${TEGRAFLASH_BINDIR}/nvflashxmlparse
+    install -m 0755 ${UNPACKDIR}/rewrite-tegraflash-args.py ${D}${TEGRAFLASH_BINDIR}/rewrite-tegraflash-args
+    install -m 0755 ${UNPACKDIR}/tegra-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra-flash-helper.sh
+    install -m 0755 ${UNPACKDIR}/tegra-signimage-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra-signimage-helper.sh
     
     # Determine flash tools source directory from native staging
     # Use STAGING_DIR_NATIVE since nativesdk can't access native tools via STAGING_BINDIR_NATIVE

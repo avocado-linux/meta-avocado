@@ -26,7 +26,7 @@ SRC_URI[ili9881x.sha256sum] = "eeae8750f2bf1ba4da56da00eff431f4bd87bd571fff5bfda
 SRC_URI[touch_panel.sha256sum] = "01adf23cfae63b9cdd8467db7e37ba6d35069cd7cf60586cf9a5abe488631d33"
 SRC_URI[mipi_dsi.sha256sum] = "676a441e0d937a0c8c3d2f91519b20b86e3a2262fb8a039645f844484774a183"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit module
 

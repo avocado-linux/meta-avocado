@@ -5,7 +5,6 @@ SRC_URI = "git://github.com/astral-sh/uv.git;protocol=https;nobranch=1"
 
 require ${BPN}-crates.inc
 
-S = "${WORKDIR}/git"
 
 CARGO_SRC_DIR = ""
 

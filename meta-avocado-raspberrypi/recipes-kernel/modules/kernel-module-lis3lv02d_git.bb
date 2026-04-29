@@ -17,7 +17,7 @@ SRC_URI = "\
 
 SRC_URI[lis3lv02d.sha256sum] = "c1aaf749144ce78711d88a8955efc17d1434c681398a303cf2f481011e5deff7"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # Build the lis3lv02d kernel module
 inherit module

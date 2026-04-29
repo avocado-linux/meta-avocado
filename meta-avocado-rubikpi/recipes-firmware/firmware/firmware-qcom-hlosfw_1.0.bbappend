@@ -11,7 +11,6 @@ SRC_URI = "git://github.com/rubikpi-ai/prebuilt;protocol=https;branch=BP-BINs \
 
 SRCREV = "582e89422b3efd5a09aba3d584beef4083b70d14"
 
-S = "${WORKDIR}/git"
 
 DEPENDS += "unzip-native"
 
@@ -26,13 +25,13 @@ do_install[postfuncs] += "install_fw_blobs"
 
 install_fw_blobs() {
     install -d ${D}${nonarch_base_libdir}/firmware
-    install -m 0644 ${WORKDIR}/aw882xx_acf.bin ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/config.txt ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/fw_bcm43456c5_ag.bin ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/lt9611uxc_fw.bin ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/nvram.txt ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/renesas_usb_fw.mem ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/sduart8987_combo.bin ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/aw882xx_acf.bin ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/config.txt ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/fw_bcm43456c5_ag.bin ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/lt9611uxc_fw.bin ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/nvram.txt ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/renesas_usb_fw.mem ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/sduart8987_combo.bin ${D}${nonarch_base_libdir}/firmware/
     chown -R root:root ${D}${nonarch_base_libdir}/firmware || true
 }
 

@@ -17,7 +17,7 @@ SRC_URI = "\
 
 SRC_URI[ltr30x.sha256sum] = "c9106e35b85a87bd4c1ae11e69c6f2609913b515e445805c144707642c21b728"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # Build the ltr30x kernel module
 inherit module

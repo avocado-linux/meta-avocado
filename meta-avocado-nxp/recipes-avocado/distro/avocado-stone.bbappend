@@ -13,10 +13,10 @@ SRC_URI:append:stone-uuu-emmc = " \
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0644 ${WORKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
 }
 
 do_deploy:append:stone-uuu-emmc() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-uuu-emmc.sh ${DEPLOYDIR}/stone-provision-uuu-emmc.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-uuu-emmc.sh ${DEPLOYDIR}/stone-provision-uuu-emmc.sh
 }

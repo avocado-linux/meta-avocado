@@ -10,6 +10,10 @@ SRC_URI = " \
     file://avocado-hitl-server \
 "
 
+# Only file:// fetches — wrynose no longer auto-creates ${S}, so set
+# it explicitly to UNPACKDIR (where bitbake places file:// files).
+S = "${UNPACKDIR}"
+
 RDEPENDS:${PN} += " \
   nativesdk-ganesha \
 "
@@ -20,8 +24,8 @@ do_install() {
     install -d ${D}${bindir}
     install -d ${D}${sysconfdir}/avocado
 
-    install -m 0755 ${WORKDIR}/avocado-hitl-server ${D}${bindir}/avocado-hitl-server
-    install -m 0644 ${WORKDIR}/hitl-nfs.conf ${D}${sysconfdir}/avocado/hitl-nfs.conf
+    install -m 0755 ${UNPACKDIR}/avocado-hitl-server ${D}${bindir}/avocado-hitl-server
+    install -m 0644 ${UNPACKDIR}/hitl-nfs.conf ${D}${sysconfdir}/avocado/hitl-nfs.conf
 }
 
 FILES:${PN} += " \

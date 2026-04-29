@@ -1,7 +1,6 @@
 SRC_URI = "git://github.com/rubikpi-ai/prebuilt;protocol=https;branch=BP-BINs"
 SRCREV = "582e89422b3efd5a09aba3d584beef4083b70d14"
 
-S = "${WORKDIR}/git"
 
 DEPENDS += "unzip-native"
 

@@ -42,7 +42,7 @@ SRC_URI = " \
 "
 SRC_URI += "file://qcacld-kbuild.patch"
 
-S = "${WORKDIR}/wlan/qcacld-3.0"
+S = "${UNPACKDIR}/wlan/qcacld-3.0"
 
 RPROVIDES:${PN} += "kernel-module-${MODULE_NAME}"
 
@@ -71,7 +71,7 @@ python __anonymous () {
 
 do_patch() {
      cd ${S}
-     patch -p1 < ${WORKDIR}/qcacld-kbuild.patch
+     patch -p1 < ${UNPACKDIR}/qcacld-kbuild.patch
 }
 
 do_install:append() {

@@ -11,9 +11,9 @@ SRC_URI = " \
   git://github.com/nfs-ganesha/nfs-ganesha.git;protocol=https;branch=V6-stable \
   file://0001-fix-uninitialized-warnings.patch \
   file://0002-fix-functions-with-no-return-value.patch \
+  file://0003-fix-discarded-const-qualifier.patch \
 "
 SRCREV = "952fb93373a6f9f9e187bf9bc35c41a9fc25efa6"
-S = "${WORKDIR}/git"
 
 DEPENDS = "flex-native bison-native util-linux libunwind ntirpc"
 RDEPENDS:${PN} = "netbase ntirpc rpcbind"
@@ -41,6 +41,7 @@ EXTRA_OECMAKE = "\
     -DCMAKE_INSTALL_LIBDIR=${libdir} \
     -DUSE_SYSTEM_NTIRPC=ON \
     -DUSE_GSS=OFF \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 "
 
 # install the systemd unit

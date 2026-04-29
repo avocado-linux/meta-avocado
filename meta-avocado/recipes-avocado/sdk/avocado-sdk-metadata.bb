@@ -31,6 +31,13 @@ PLATFORM = "${MACHINEARCH}-avocado-linux"
 # Skip QA checks like ldflags, alreadyinstalled, etc. that are not relevant for this config package
 INSANE_SKIP:${PN} = "ldflags alreadyinstalled"
 
+# Wrynose's create-spdx requires a static SPDX document for recipes
+# with no upstream source. This recipe just generates config files
+# (.repo, dnf/vars/arch, rpm/platform, rpmrc) from bitbake variables —
+# no software, no licenses to track, no CVE surface. Opt out of SPDX
+# rather than fabricate a static doc.
+inherit nospdx
+
 inherit avocado-arch-utils
 
 # The repo file is packaged

@@ -3,7 +3,7 @@ DESCRIPTION = "Packagegroup for extra qcom features"
 LICENSE = "BSD-3-Clause-Clear"
 
 PACKAGE_ARCH = "${TUNE_PKGARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PROVIDES = "${PACKAGES}"
 PACKAGES = "${PN}"
 

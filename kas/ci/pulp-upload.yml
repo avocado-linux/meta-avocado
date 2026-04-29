@@ -12,7 +12,7 @@ header:
 #   PULP_BASE_URL
 #   PULP_USERNAME
 #   PULP_PASSWORD
-#   DISTRO_CODENAME   (release/channel, e.g. "2024/edge")
+#   DISTRO_CODENAME   (release/channel, e.g. "2026/edge")
 #
 # Nothing is hardcoded. If PULP_BASE_URL is empty, the bbclass aborts with
 # bb.fatal rather than falling back to any default.

@@ -21,6 +21,10 @@ do_package_write_rpm[noexec] = "1"
 
 SRC_URI = "file://stone-${MACHINE_SHORT_NAME}.json"
 
+# Only file:// fetches — wrynose no longer auto-creates ${S}, so set
+# it explicitly to UNPACKDIR (where bitbake places file:// files).
+S = "${UNPACKDIR}"
+
 SRC_URI:append:stone-img = " \
     file://stone-provision-img.sh \
 "
@@ -63,30 +67,30 @@ do_configure() {
 
 do_deploy() {
     install -d ${DEPLOYDIR}
-    install -m 0644 ${WORKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
+    install -m 0644 ${UNPACKDIR}/stone-${MACHINE_SHORT_NAME}.json ${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json
 }
 
 do_deploy:append:stone-sd() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-sd.sh ${DEPLOYDIR}/stone-provision-sd.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-sd.sh ${DEPLOYDIR}/stone-provision-sd.sh
 }
 
 do_deploy:append:stone-usb() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-usb.sh ${DEPLOYDIR}/stone-provision-usb.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-usb.sh ${DEPLOYDIR}/stone-provision-usb.sh
 }
 
 do_deploy:append:stone-img() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-img.sh ${DEPLOYDIR}/stone-provision-img.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-img.sh ${DEPLOYDIR}/stone-provision-img.sh
 }
 
 do_deploy:append:stone-peridio() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/peridio-bundle.sh ${DEPLOYDIR}/peridio-bundle.sh
-  install -m 0755 ${WORKDIR}/peridio-provision.sh ${DEPLOYDIR}/peridio-provision.sh
-  install -m 0755 ${WORKDIR}/peridio-state.sh ${DEPLOYDIR}/peridio-state.sh
-  install -m 0755 ${WORKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
+  install -m 0755 ${UNPACKDIR}/peridio-bundle.sh ${DEPLOYDIR}/peridio-bundle.sh
+  install -m 0755 ${UNPACKDIR}/peridio-provision.sh ${DEPLOYDIR}/peridio-provision.sh
+  install -m 0755 ${UNPACKDIR}/peridio-state.sh ${DEPLOYDIR}/peridio-state.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
 }
 
 do_stone_validate() {

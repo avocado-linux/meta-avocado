@@ -10,7 +10,11 @@ inherit deploy
 
 do_deploy() {
     install -d ${DEPLOYDIR}
-    install -m 0644 ${WORKDIR}/${PN}-${PV}/os-release ${DEPLOYDIR}/os-release
+    # Upstream do_compile writes to ${B}/os-release. Wrynose stopped
+    # auto-creating ${WORKDIR}/${PN}-${PV} for recipes with no SRC_URI
+    # (do_fetch/do_unpack are noexec for os-release), so the old
+    # ${WORKDIR}/${PN}-${PV}/os-release path is gone.
+    install -m 0644 ${B}/os-release ${DEPLOYDIR}/os-release
 }
 
 addtask deploy after do_compile before do_package

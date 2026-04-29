@@ -23,9 +23,9 @@ SRC_URI[reTerminal.sha256sum] = "bc82b77cf82388c48254a9b34451d549fe4d6d486095ea4
 SRC_URI[reTerminal-bridge.sha256sum] = "ab3226807fdf2e22338cf136ec2c94e1365e7c633f0f4e97d8ae484ebec7bcef"
 SRC_URI[reTerminal-DM.sha256sum] = "66287767357dc3675c7bb383a4567b8e175753631f2a963a52fca79cf3e1f640"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
-DT_FILES_PATH = "${WORKDIR}"
+DT_FILES_PATH = "${UNPACKDIR}"
 
 # Install the .dtbo files to the boot partition overlays directory
 do_install() {

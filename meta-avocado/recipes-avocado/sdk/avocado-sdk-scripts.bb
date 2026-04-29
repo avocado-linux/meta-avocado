@@ -8,7 +8,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI = "file://avocado-env"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 COMPATIBLE_MACHINE = "avocado-container"
 

@@ -5,6 +5,9 @@ Subject: [PATCH] fix: work around clang 20 crash on defaulted non-member
  operator
 
 Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+
+Upstream-Status: Pending
+
 ---
  .../cpp/permissions_policy/origin_with_possible_wildcards.cc  | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)

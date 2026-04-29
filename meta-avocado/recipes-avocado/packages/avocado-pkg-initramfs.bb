@@ -5,6 +5,6 @@ PV = "${DISTRO_VERSION}"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 PACKAGES = "${PN}"
-inherit packagegroup
+inherit packagegroup nospdx
 
 RDEPENDS:${PN} = "packagegroup-avocado-initramfs ${INITRAMFS_IMAGE_EXTRA_INSTALL}"

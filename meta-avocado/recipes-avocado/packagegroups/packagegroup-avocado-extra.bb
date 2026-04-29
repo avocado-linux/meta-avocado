@@ -2,7 +2,7 @@ DESCRIPTION = "Packagegroup for Avocado extra"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-inherit packagegroup
+inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
@@ -22,7 +22,6 @@ RDEPENDS:${PN} = " \
   cockpit \
   cronie \
   coreutils \
-  cryptoauthlib \
   devmem2 \
   dtc \
   ${@bb.utils.contains('MACHINE_FEATURES', 'deepx', "${DEEPX_PACKAGES}", '', d)} \
@@ -43,7 +42,6 @@ RDEPENDS:${PN} = " \
   libv4l \
   libwebsockets \
   linux-firmware \
-  livebook \
   logrotate \
   lsof \
   ltrace \
@@ -59,14 +57,11 @@ RDEPENDS:${PN} = " \
   ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'optee-client', '', d)} \
   p11-kit \
   parted \
-  peridiod \
   phytool \
   picocom \
   plymouth \
   procps \
   pstree \
-  qemu-user-static \
-  qemu-user-static-binfmt \
   redis \
   rng-tools \
   rtc-tools \
@@ -116,9 +111,6 @@ JAVA_PACKAGES = " \
 "
 
 OPENGL_PACKAGES = " \
-  wpewebkit \
-  wpebackend-fdo \
-  cog \
   cage \
   weston \
   weston-init \
@@ -153,7 +145,6 @@ GSTREAMER_PACKAGES = " \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly \
   gstreamer1.0-libav \
-  mpeg2dec \
 "
 
 PYTHON_PACKAGES = " \

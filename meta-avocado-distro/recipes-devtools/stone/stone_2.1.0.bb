@@ -6,7 +6,6 @@ SRC_URI = "git://git@github.com/avocado-linux/stone.git;protocol=https;nobranch=
 
 require ${BPN}-crates.inc
 
-S = "${WORKDIR}/git"
 
 CARGO_SRC_DIR = ""
 

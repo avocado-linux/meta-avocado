@@ -5,16 +5,16 @@ repos:
   meta-python-ai:
     url: https://github.com/avocado-linux/vendor-meta-python-ai.git
     path: meta-python-ai
-    commit: 47e39d760ce2ecd99bbbc0fbefde4a96ed32a85a
-    branch: scarthgap
+    commit: ad660ebadca6368e8cb8a705d2daf8b2682867a6
+    branch: master
     layers:
       .:
 
   meta-clang-revival:
     url: https://github.com/avocado-linux/vendor-meta-clang-revival.git
     path: meta-clang-revival
-    commit: f34e150f6def4f7a9226bad517b6f6b4dcadb516
-    branch: scarthgap
+    commit: 54b4e3444ea865585bbff2e7c99097c2680b1881
+    branch: main
     layers:
       .:
 

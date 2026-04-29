@@ -8,7 +8,6 @@ PV = "2.3+git"
 SRCREV = "ac6c93ea2b1f97a220d10a0729a625b3f51e320b"
 SRC_URI = "git://github.com/p-ranav/indicators.git;branch=master;protocol=https"
 
-S = "${WORKDIR}/git"
 
 inherit cmake
 

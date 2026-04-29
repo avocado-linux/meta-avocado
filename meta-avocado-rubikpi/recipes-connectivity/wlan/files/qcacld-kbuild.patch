@@ -1,3 +1,6 @@
+Upstream-Status: Inappropriate [vendor BSP-specific — Qualcomm WLAN driver kbuild adapt]
+
+---
 diff --git a/Kbuild b/Kbuild
 index ea59c3a925..cc5ef7181b 100644
 --- a/Kbuild

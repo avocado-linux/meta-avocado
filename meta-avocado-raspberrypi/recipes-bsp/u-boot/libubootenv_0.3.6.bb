@@ -14,7 +14,6 @@ SRC_URI = "git://github.com/sbabic/libubootenv;protocol=https;branch=master \
            file://0001-Update-cmake_minimum_required-to-3.5.patch \
            "
 SRCREV = "5507339628b5caf244e1ff9d58cb3fa534b16beb"
-S = "${WORKDIR}/git"
 
 inherit cmake lib_package
 

@@ -1,3 +1,6 @@
+Upstream-Status: Inappropriate [machine-specific device-tree override]
+
+---
 diff --git a/display/qcm6490-sde.dtsi b/display/qcm6490-sde.dtsi
 index 27461c3..63a3cda 100644
 --- a/display/qcm6490-sde.dtsi

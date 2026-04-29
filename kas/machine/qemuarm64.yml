@@ -19,5 +19,9 @@ repos:
 local_conf_header:
   machine-avocado-qemuarm64: |
     DISTRO_FEATURES_EXTRA:append = "seccomp virtualization"
+    # Avocado qemu targets are always headless — drop display/GPU stacks
+    # so chromium, qt5, weston, mesa, vulkan, etc. don't get pulled into
+    # the image via packagegroup-avocado-extra's opengl/wayland gates.
+    DISTRO_FEATURES:remove = "opengl wayland vulkan"
 
 machine: avocado-qemuarm64
