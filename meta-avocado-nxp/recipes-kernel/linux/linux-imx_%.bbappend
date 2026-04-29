@@ -4,6 +4,7 @@ SRC_URI += " \
   file://avocado-core.cfg \
   file://avocado-extra.cfg \
   file://avocado-wireless.cfg \
+  file://avocado-netfilter.cfg \
 "
 
 do_configure:append() {
