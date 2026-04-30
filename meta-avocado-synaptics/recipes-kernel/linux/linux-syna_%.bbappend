@@ -23,6 +23,14 @@ do_deploy:prepend() {
 PKG:${KERNEL_PACKAGE_NAME}-devsrc = "${KERNEL_PACKAGE_NAME}-devsrc-${KERNEL_VERSION}"
 RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc += "kernel-devsrc kernel-devsrc-${KERNEL_VERSION}"
 
+# Same multi-kernel feed-collision rationale as kernel-devsrc above. The
+# kernel-devicetree package emitted by kernel-devicetree.bbclass is not auto-
+# renamed by kernel.bbclass, so two kernels' RPMs would land on the same NAME
+# and dnf would NVR-tiebreak. Fully-qualify it so avocado-cli's `-${KERNEL_VERSION}`
+# auto-suffix resolves to the resolver-pinned kernel.
+PKG:${KERNEL_PACKAGE_NAME}-devicetree = "${KERNEL_PACKAGE_NAME}-devicetree-${KERNEL_VERSION}"
+RPROVIDES:${KERNEL_PACKAGE_NAME}-devicetree += "kernel-devicetree kernel-devicetree-${KERNEL_VERSION}"
+
 # avocado-cli kernel resolver contract: enumerates available kernels via
 # `dnf repoquery --whatprovides 'avocado-kernel-*' --provides`.
 RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"
