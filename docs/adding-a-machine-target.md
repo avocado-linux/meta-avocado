@@ -322,14 +322,6 @@ SRC_URI:append:<machine> = " \
 PKG:${KERNEL_PACKAGE_NAME}-devsrc = "${KERNEL_PACKAGE_NAME}-devsrc-${KERNEL_VERSION}"
 RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc += "kernel-devsrc kernel-devsrc-${KERNEL_VERSION}"
 
-# Same multi-kernel feed-collision rationale as kernel-devsrc above. The
-# kernel-devicetree package emitted by kernel-devicetree.bbclass is not auto-
-# renamed by kernel.bbclass, so two kernels' RPMs would land on the same NAME
-# and dnf would NVR-tiebreak. Fully-qualify it so avocado-cli's `-${KERNEL_VERSION}`
-# auto-suffix resolves to the resolver-pinned kernel.
-PKG:${KERNEL_PACKAGE_NAME}-devicetree = "${KERNEL_PACKAGE_NAME}-devicetree-${KERNEL_VERSION}"
-RPROVIDES:${KERNEL_PACKAGE_NAME}-devicetree += "kernel-devicetree kernel-devicetree-${KERNEL_VERSION}"
-
 # Publish a well-known virtual that avocado-cli's kernel resolver queries
 # with `dnf repoquery --whatprovides 'avocado-kernel-*' --provides`. Encodes
 # KERNEL_VERSION in the Provide name so the resolver can enumerate every
@@ -351,7 +343,6 @@ require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 | `SRC_URI` with `avocado-core.cfg` / `avocado-extra.cfg` | Avocado-required kernel config (CONFIG_RD_ZSTD, CONFIG_OVERLAY_FS, etc. — see "Required Kernel Options" below) | Yes |
 | `PKG:${KERNEL_PACKAGE_NAME}-devsrc` rename | Fully-qualified `kernel-devsrc-${KERNEL_VERSION}` package name so multiple kernel versions can ship in the same feed without dnf NVR collision | Yes |
 | `RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc` unqualified+versioned | Backward-compat for callers listing the unqualified `kernel-devsrc` (e.g. `packagegroup-avocado-sdk-extra.bb`) | Yes |
-| `PKG:${KERNEL_PACKAGE_NAME}-devicetree` rename + `RPROVIDES` | Same as kernel-devsrc but for the device tree package emitted by `kernel-devicetree.bbclass`; harmless on x86 where the package is empty | Yes |
 | `RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"` | avocado-cli kernel resolver contract — without this, the resolver can't enumerate this kernel in the feed | Yes |
 | `require .../avocado-kernel-modules-packagegroup.inc` | Emits `packagegroup-avocado-{rootfs,initramfs}-modules-${KERNEL_VERSION}` so avocado-cli can auto-append the correct kernel's modules at install time | Yes |
 
