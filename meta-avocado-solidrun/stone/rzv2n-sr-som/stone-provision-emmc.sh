@@ -64,7 +64,7 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
     img_key=$(jq -r ".storage_devices.rootdisk.partitions[$i].image // \"\"" "$AVOCADO_STONE_MANIFEST")
     [ -z "$img_key" ] && continue
 
-    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$AVOCADO_STONE_MANIFEST")
+    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\" | if type == \"object\" then .build_args.type // \"\" else \"\" end" "$AVOCADO_STONE_MANIFEST")
     if [ "$build_type" = "fat" ]; then
         out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$AVOCADO_STONE_MANIFEST")
         src="${AVOCADO_STONE_BUILD_DIR}/${out}"

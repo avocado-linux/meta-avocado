@@ -13,4 +13,6 @@ RDEPENDS:${PN}:append = " \
   nativesdk-gptfdisk \
   nativesdk-mtools \
   nativesdk-dosfstools \
+  nativesdk-util-linux-lsblk \
+  nativesdk-util-linux-blockdev \
 "

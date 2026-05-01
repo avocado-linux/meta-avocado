@@ -1,0 +1,64 @@
+From 3ddf3ed8c4e42e087d5612e054242db17a715526 Mon Sep 17 00:00:00 2001
+From: Avocado Linux <info@avocadolinux.org>
+Date: Thu, 30 Apr 2026 20:11:16 -0400
+Subject: [PATCH] rzv2n: xspi_setup: settle SPI flash before memory-map reads
+
+After xspi_reset() + xspi_read_identification() complete, the SPI flash
+is responsive to manual commands but has not finished entering memory-
+mapped read mode. The XSPI controller's BMCTL0 path is up, but the chip
+itself needs at least tRPH (~32 us per IS25WP032D datasheet) plus a
+mode-latch window before XIP reads return real data instead of zeros.
+
+BL2 does not respect that window: rz_io_setup() calls xspi_setup() and
+the very next consumer (fip_dev_init) issues a memmap read at
+RZV2N_SPIROM_FIP_BASE. The first 16 bytes come back zero, fip_file_open
+treats TOC entry 0's all-zero UUID as the null terminator, and returns
+-ENOENT. BL2 prints 'Failed to load image id 3 (-2)' and panics.
+
+The race is masked at LOG_LEVEL=50 because the INFO()/VERBOSE() prints
+between DDR init and FIP load clock out ~4 ms of UART traffic at 115200
+baud, providing enough incidental settling time. Bit-identical builds
+at LOG_LEVEL=20 reliably hit the failure.
+
+Add a 10 ms mdelay after xspi_setup completes its init+probe sequence.
+This is far longer than the chip-spec'd tRPH but guarantees deterministic
+behavior across LOG_LEVEL settings and is invisible at boot scale.
+
+Signed-off-by: Avocado Linux <info@avocadolinux.org>
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ plat/renesas/rz/common/drivers/xspi.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/plat/renesas/rz/common/drivers/xspi.c b/plat/renesas/rz/common/drivers/xspi.c
+index 9340f9838..ea3fa52b9 100644
+--- a/plat/renesas/rz/common/drivers/xspi.c
++++ b/plat/renesas/rz/common/drivers/xspi.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <stdint.h>
++#include <drivers/delay_timer.h>
+ #include <lib/utils_def.h>
+ #include <lib/mmio.h>
+ #include <arch_helpers.h>
+@@ -247,5 +248,16 @@ int xspi_setup(void)
+ 	if (ret == XSPI_SUCCESS)
+ 		ret = xspi_read_identification();
+ 
++	/*
++	 * Allow the SPI flash to fully settle into memory-mapped read mode after
++	 * RESET + RDID before any consumer issues an XIP read. Without this,
++	 * BL2's FIP TOC walk at the SPI XIP base races the chip and reads zeros,
++	 * causing fip_file_open() to hit an all-zero UUID at TOC entry 0
++	 * (mistaken for the null terminator) and return -ENOENT for BL31. The
++	 * datasheet tRPH for IS25WP032D is ~32 us; 10 ms is conservative and
++	 * dwarfed by overall boot time.
++	 */
++	mdelay(10);
++
+ 	return ret;
+ }
+-- 
+2.53.0
+

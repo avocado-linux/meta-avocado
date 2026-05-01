@@ -1,0 +1,71 @@
+From 2675a47c1507e855ac8338fedc5721e2c1e57914 Mon Sep 17 00:00:00 2001
+From: Avocado Linux <info@avocadolinux.org>
+Date: Thu, 30 Apr 2026 20:29:48 -0400
+Subject: [PATCH] rzv2n: bl31_platform_setup: settle SoC fabric before TZC/GIC
+ init
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+bl31_platform_setup() executes a sequence of MMIO writes to the SoC's
+TrustZone Controllers (TZC400 SRAM_0_1 and SRAM_2 instances), GIC
+distributor, and bus QoS registers. The upstream tzc400 driver
+(drivers/arm/tzc/tzc400.c) does not include barriers, polls, or delays
+between disable_filters / configure_region0 / enable_filters; it relies
+on the caller to ensure adequate hardware settling time.
+
+At LOG_LEVEL=50, the four INFO() prints inside plat_security_setup
+('Configuring TrustZone Controller' x2 + 'Total N regions set.' x2)
+clock out roughly 10 ms of UART traffic at 115200 baud between TZC
+operations, which happens to be enough settling time for the rzv2n
+fabric. At the release-default LOG_LEVEL=20 those prints are compiled
+out, the writes proceed back-to-back, and BL31 hangs immediately after
+its banner — before any subsequent NOTICE-level output appears.
+
+Add an explicit 10 ms mdelay() at the start of bl31_platform_setup as
+the deterministic settling window. Mirrors the analogous fix applied
+to xspi_setup() in BL2 for the same root-cause class of races on this
+SoC. 10 ms is conservative (real settling time is sub-millisecond on
+typical fabric IP) but invisible at boot scale.
+
+Signed-off-by: Avocado Linux <info@avocadolinux.org>
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ plat/renesas/rz/soc/v2n/bl31_plat_setup.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/plat/renesas/rz/soc/v2n/bl31_plat_setup.c b/plat/renesas/rz/soc/v2n/bl31_plat_setup.c
+index f5b130f08..562d6f4df 100644
+--- a/plat/renesas/rz/soc/v2n/bl31_plat_setup.c
++++ b/plat/renesas/rz/soc/v2n/bl31_plat_setup.c
+@@ -16,6 +16,7 @@
+ #include <rz_private.h>
+ #include <rz_soc_def.h>
+ #include <pwrc.h>
++#include <drivers/delay_timer.h>
+ #include <drivers/generic_delay_timer.h>
+ #include <syc.h>
+ 
+@@ -115,6 +116,19 @@ void bl31_plat_arch_setup(void)
+ 
+ void bl31_platform_setup(void)
+ {
++	/*
++	 * Settling delay before touching SoC bus interconnect / TZC / GIC.
++	 * The release-default LOG_LEVEL=20 build hangs in this function on
++	 * rzv2n-sr-som; LOG_LEVEL=50 boots through because the ~10 ms of
++	 * incidental UART traffic from plat_security_setup's INFO prints
++	 * provides settling time the upstream tzc400 driver lacks (no
++	 * barriers/polls between disable_filters / configure / enable_filters).
++	 * 10 ms here is the same conservative value used to fix the analogous
++	 * BL2 xspi_setup race; far longer than the actual hardware needs but
++	 * dwarfed by overall boot time.
++	 */
++	mdelay(10);
++
+ 	plat_security_setup();
+ 
+ 	/* initialize GIC-600 */
+-- 
+2.53.0
+
