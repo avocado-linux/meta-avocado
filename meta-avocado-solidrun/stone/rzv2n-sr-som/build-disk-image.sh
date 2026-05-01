@@ -105,7 +105,7 @@ resolve_image_filename() {
 for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
     img_key="${PART_IMAGES[i]}"
     [ -z "$img_key" ] && continue
-    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\" | if type == \"object\" then .build_args.type // \"\" else \"\" end" "$MANIFEST")
     [ "$build_type" != "fat" ] && continue
 
     img_out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$MANIFEST")
@@ -142,7 +142,7 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
     img_key="${PART_IMAGES[i]}"
     [ -z "$img_key" ] && continue
 
-    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\" | if type == \"object\" then .build_args.type // \"\" else \"\" end" "$MANIFEST")
     if [ "$build_type" = "fat" ]; then
         img_out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$MANIFEST")
         src="${BUILD_DIR}/${img_out}"
