@@ -76,5 +76,11 @@ local_conf_header:
     RUNTIMETARGET:append:pn-gcc-runtime = " libquadmath"
     HOSTTOOLS += "gfortran"
 
+  fetch: |
+    # crates.io (per RFC 3463) blocks library-only User-Agents like the wget
+    # default. Identify ourselves with an app name + contact so fetches aren't
+    # rejected. Applies to all wget-based fetches, including the crate fetcher.
+    FETCHCMD_wget = "/usr/bin/env wget -t 2 -T 100 --user-agent='avocado-linux-ci (j.schneck@peridio.com)'"
+
   sdk: |
     CONF_VERSION = "2"
