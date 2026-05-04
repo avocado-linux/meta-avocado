@@ -1,0 +1,149 @@
+{
+  "runtime": {
+    "platform": "avocado-orangepi-5-plus",
+    "architecture": "arm64",
+    "provision_default": "img",
+    "update_strategy": "gpt-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{inactive_slot}",
+          "{inactive_slot}.avocado_platform": "{platform}",
+          "{inactive_slot}.avocado_architecture": "{architecture}"
+        }
+      },
+      {
+        "type": "gpt-switch",
+        "devpath": "/dev/mmcblk1",
+        "slot_partitions": {
+          "a": ["boot-a", "rootfs-a"],
+          "b": ["boot-b", "rootfs-b"]
+        }
+      }
+    ],
+    "rollback": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{previous_slot}"
+        }
+      }
+    ]
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": { "script": "stone-provision-img.sh" },
+      "sd":  { "script": "stone-provision-sd.sh", "envs": ["device_info"], "requires": ["usb"] }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-orangepi-5-plus-rootdisk.img",
+      "devpath": "/dev/mmcblk1",
+      "block_size": 512,
+      "images": {
+        "idbloader": "idbloader.img",
+        "uboot_itb": "u-boot.itb",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "label": "BOOT",
+            "files": [
+              { "in": "Image", "out": "Image" },
+              { "in": "rk3588-orangepi-5-plus.dtb", "out": "rockchip/rk3588-orangepi-5-plus.dtb" },
+              { "in": "avocado-image-initramfs-orangepi-5-plus.cpio.zst", "out": "avocado-initramfs.cpio.zst" },
+              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" }
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-orangepi-5-plus.erofs-lz4",
+        "var": "avocado-image-var-orangepi-5-plus.btrfs",
+        "kernel": "Image",
+        "initramfs": "avocado-image-initramfs-orangepi-5-plus.cpio.zst"
+      },
+      "partitions": [
+        {
+          "name": "idbloader",
+          "image": "idbloader",
+          "offset": 64,
+          "offset_unit": "sectors",
+          "size": 8128,
+          "size_unit": "sectors",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "uboot-itb",
+          "image": "uboot_itb",
+          "offset": 16384,
+          "offset_unit": "sectors",
+          "size": 16384,
+          "size_unit": "sectors",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "boot-a",
+          "image": "boot",
+          "partition_type": "EF00",
+          "partition_uuid": "2d778ba0-d115-41b3-af80-0f66209cf6c5",
+          "offset": 32,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot-b",
+          "partition_type": "EF00",
+          "partition_uuid": "6bec4404-479b-41dd-b857-c5f6d7bf5ab6",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
+          "image": "rootfs",
+          "partition_type": "8305",
+          "partition_uuid": "28e6c982-d097-43ce-a3ab-b9baba37de78",
+          "size": 320,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "partition_type": "8305",
+          "partition_uuid": "214466f9-50e2-4ee2-ac38-eb1dd269000d",
+          "size": 320,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "partition_type": "8300",
+          "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d",
+          "size": 512,
+          "size_unit": "mebibytes",
+          "expand": "true"
+        }
+      ]
+    }
+  }
+}
