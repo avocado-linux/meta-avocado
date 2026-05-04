@@ -33,13 +33,6 @@ SRC_URI:append:stone-usb = " \
     file://stone-provision-usb.sh \
 "
 
-SRC_URI:append:stone-peridio = " \
-    file://peridio-bundle.sh \
-    file://peridio-provision.sh \
-    file://peridio-state.sh \
-    file://stone-provision-peridio.sh \
-"
-
 inherit stone
 inherit deploy
 
@@ -79,14 +72,6 @@ do_deploy:append:stone-usb() {
 do_deploy:append:stone-img() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${WORKDIR}/stone-provision-img.sh ${DEPLOYDIR}/stone-provision-img.sh
-}
-
-do_deploy:append:stone-peridio() {
-  install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/peridio-bundle.sh ${DEPLOYDIR}/peridio-bundle.sh
-  install -m 0755 ${WORKDIR}/peridio-provision.sh ${DEPLOYDIR}/peridio-provision.sh
-  install -m 0755 ${WORKDIR}/peridio-state.sh ${DEPLOYDIR}/peridio-state.sh
-  install -m 0755 ${WORKDIR}/stone-provision-peridio.sh ${DEPLOYDIR}/stone-provision-peridio.sh
 }
 
 do_stone_validate() {

@@ -4,7 +4,7 @@ header:
   - repo: meta-avocado
     file: kas/extra/atecc.yml
   - repo: meta-avocado
-    file: kas/extra/peridio.yml
+    file: kas/extra/erlang.yml
   - repo: meta-avocado
     file: kas/extra/webkit.yml
   - repo: meta-avocado
