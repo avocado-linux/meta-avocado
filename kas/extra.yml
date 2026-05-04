@@ -8,7 +8,7 @@ header:
   # - repo: meta-avocado
   #   file: kas/extra/atecc.yml      # meta-atmel: LAYERSERIES_COMPAT=nanbield
   # - repo: meta-avocado
-  #   file: kas/extra/peridio.yml    # meta-peridio=scarthgap, meta-erlang=whinlatter
+  #   file: kas/extra/erlang.yml     # meta-erlang: LAYERSERIES_COMPAT=whinlatter
   # - repo: meta-avocado
   #   file: kas/extra/webkit.yml     # meta-webkit: scarthgap whinlatter
   - repo: meta-avocado
