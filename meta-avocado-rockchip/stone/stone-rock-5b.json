@@ -1,7 +1,0 @@
-{
-  "runtime": {
-    "platform": "avocado-rock-5b",
-    "architecture": "arm64"
-  },
-  "storage_devices": {}
-}

@@ -3,6 +3,11 @@ header:
   includes:
   - repo: meta-avocado
     file: kas/vendor/arm.yml
+  # meta-virtualization provides the docker recipe that
+  # packagegroup-avocado-extra (in meta-avocado) RDEPENDs on. Required for
+  # any avocado-distro target build to resolve.
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
 
 repos:
   meta-avocado:
@@ -14,9 +19,12 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-rockchip
     path: meta-rockchip
     branch: scarthgap
-    commit: 5218d6330f5c49724650e63902e569c909df0889
+    commit: 9690180b7e9953361958c962b80d891eda8c1028
     layers:
       .:
 
 local_conf_header:
   vendor-rockchip: |
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-rockchip-extra"
+    SDK_PKG_EXTRA_INSTALL:append = " packagegroup-avocado-rockchip-sdk"
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland seccomp virtualization"
