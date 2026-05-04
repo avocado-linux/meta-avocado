@@ -1,0 +1,26 @@
+{
+  "_comment": "Alif SETOOLS ATOC template for the Alif Ensemble E8 DevKit OSPI flash layout.",
+  "_comment_addresses": "TF-A bl32 lands at OSPI offset 0x00000000; DTB at the value of KERNEL_DTB_ADDR offset within OSPI (default 0x80010000 mapped to OSPI 0x00010000); xipImage at XIP_KERNEL_LOAD_ADDR offset (default 0x80020000 -> OSPI 0x00020000). Override at flash time via the wrapper script if a different OSPI base map is used.",
+  "device": "OSPI1",
+  "objects": [
+    {
+      "name": "tfa",
+      "binary": "${TFA_BIN}",
+      "address": "0x80000000",
+      "version": "0.0.0.1"
+    },
+    {
+      "name": "dtb",
+      "binary": "${KERNEL_DTB}",
+      "address": "0x80010000",
+      "version": "0.0.0.1"
+    },
+    {
+      "name": "kernel",
+      "binary": "${KERNEL_BIN}",
+      "address": "0x80020000",
+      "version": "0.0.0.1",
+      "loadAddress": "0x80020000"
+    }
+  ]
+}
