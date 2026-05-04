@@ -1,8 +1,13 @@
-# Stone bundle deps: TF-A FIP, OP-TEE, U-Boot artifacts, and the boot-partition
-# extlinux.conf must all be in DEPLOYDIR before stone runs.
+# Stone bundle deps: TF-A FSBL, FIP (combines TF-A BL31 + OP-TEE + U-Boot),
+# the kernel Image + DTB, and the boot-partition extlinux.conf must all be
+# in DEPLOY_DIR_IMAGE before stone runs. We don't ride the upstream BSP's
+# core-image WIC pipeline (which would have wired EXTRA_IMAGEDEPENDS for
+# us), so name the producers explicitly.
 do_compile[depends] += "tf-a-stm32mp:do_deploy"
+do_compile[depends] += "fip-stm32mp:do_deploy"
 do_compile[depends] += "optee-os-stm32mp:do_deploy"
 do_compile[depends] += "u-boot-stm32mp:do_deploy"
+do_compile[depends] += "virtual/kernel:do_deploy"
 do_compile[depends] += "extlinux-stm32mp25-dk:do_deploy"
 
 DEPENDS += " jq-native"
