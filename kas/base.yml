@@ -6,7 +6,7 @@ header:
 
 env:
   AVOCADO_REPO_BASE: "http://package-repo"
-  DISTRO_CODENAME: "dev"
+  DISTRO_CODENAME: "dev/local"
   DISTRO_VERSION: "0.0.0"
   BUILD_ID: "0"
   PARALLEL_MAKE_HIGHMEM: ""
