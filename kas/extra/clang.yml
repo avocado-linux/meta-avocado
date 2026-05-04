@@ -3,7 +3,7 @@ header:
 
 repos:
   meta-clang:
-    url: https://github.com/kraj/meta-clang.git
+    url: https://github.com/avocado-linux/vendor-meta-clang.git
     path: meta-clang
     commit: 78c5e12f08198f4f257a9348516d2103cd617c1d
     branch: master
