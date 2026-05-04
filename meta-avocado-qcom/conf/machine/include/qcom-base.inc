@@ -1,6 +1,17 @@
 SOC_FAMILY:prepend = "qcom:"
 require conf/machine/include/soc-family.inc
 
+# Skip chromium-ozone-wayland on qcom: chromium 146 (backported into
+# meta-avocado-distro on 2026-04-05, see distro/backports.json) requires
+# wayland-server >= 1.24.0 for ANGLE's wayland_egl, but OE-core scarthgap
+# ships wayland 1.22.0. Drop chromium from packagegroup-avocado-extra's
+# BROWSER_PACKAGES until either wayland is bumped distro-wide or chromium
+# is downgraded back to 138 (the meta-browser/scarthgap shipped version).
+# Uses :qcom override (applied at expansion) so it trumps the recipe-level
+# BROWSER_PACKAGES = "chromium-ozone-wayland" set in packagegroup-avocado-
+# extra.bb.
+BROWSER_PACKAGES:qcom = ""
+
 #Define and add SOC_ARCH to the list of architectures compatible with the given target.
 SOC_ARCH = "${@ d.getVar('SOC_FAMILY').replace('-', '_').replace('qcom:', '')}"
 PACKAGE_EXTRA_ARCHS:append = "${@['', ' ${SOC_ARCH}']['${SOC_ARCH}' != "${MACHINE_ARCH}"]}"
@@ -27,6 +38,7 @@ PREFERRED_PROVIDER_virtual/egl-native      = "mesa-native"
 PREFERRED_PROVIDER_virtual/libgl-native    = "mesa-native"
 PREFERRED_PROVIDER_virtual/libgles1-native = "mesa-native"
 PREFERRED_PROVIDER_virtual/libgles2-native = "mesa-native"
+PREFERRED_PROVIDER_virtual/libgbm-native   = "mesa-native"
 
 # Provider for libgbm
 PREFERRED_PROVIDER_virtual/libqbm ?= "qbm"
@@ -48,10 +60,11 @@ PREFERRED_PROVIDER_virtual/partconf ?= "firmware-qcom-partconf"
 
 PREFERRED_PROVIDER_android-tools-conf = "android-tools-conf-configfs"
 
-# Use qcom specific version of modemmanger in custom-bsp
-PREFERRED_VERSION_modemmanager:qcom-custom-bsp ?= "1.22.0.qcom"
-PREFERRED_VERSION_libqmi:qcom-custom-bsp ?= "1.34.0.qcom"
-PREFERRED_VERSION_libqrtr-glib:qcom-custom-bsp ?= "1.2.0.qcom"
+# qcom-flavored modemmanager / libqmi / libqrtr-glib (cellular modem stack)
+# were carried by older meta-qcom-hwe; current upstream ships vanilla
+# versions only. The rubikpi3 dev kit has no onboard cellular modem, so the
+# vanilla upstream versions are sufficient. Re-pin if a future qcom machine
+# needs the qcom-flavored stack.
 
 #Use qcom specific version of wpa-supplicant in custom-bsp
 PREFERRED_VERSION_wpa-supplicant = "2.11"

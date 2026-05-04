@@ -13,7 +13,7 @@ repos:
   meta-avocado:
     path: meta-avocado
     layers:
-      meta-avocado-rubikpi:
+      meta-avocado-qcom:
 
 local_conf_header:
   machine-avocado-rubikpi3: |

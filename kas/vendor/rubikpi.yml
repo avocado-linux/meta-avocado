@@ -6,13 +6,13 @@ header:
 
 repos:
   meta-qcom:
-    url: https://github.com/qualcomm-linux/meta-qcom
+    url: https://github.com/avocado-linux/vendor-meta-qcom
     path: meta-qcom
     branch: scarthgap
     commit: ec80a36bce11d8182b4bb2a6fa0359adfeccde0a
 
   meta-qcom-hwe:
-    url: https://github.com/qualcomm-linux/meta-qcom-hwe
+    url: https://github.com/avocado-linux/vendor-meta-qcom-hwe
     path: meta-qcom-hwe
     branch: scarthgap
     commit: 8e03a1928f0a0c91e4eafe4536b365872498aed2
@@ -20,7 +20,7 @@ repos:
       .:
 
   meta-qcom-distro:
-    url: https://github.com/qualcomm-linux/meta-qcom-distro
+    url: https://github.com/avocado-linux/vendor-meta-qcom-distro
     path: meta-qcom-distro
     branch: scarthgap
     commit: 5cede695df3b6a1e22bfd26fbccaea1685ff742f
@@ -29,10 +29,8 @@ repos:
 
 local_conf_header:
   meta-qcom: |
-    DISTRO_FEATURES_EXTRA:append= " opengl vulkan wayland seccomp virtualization"
+    DISTRO_FEATURES_EXTRA:append = " opengl vulkan wayland seccomp virtualization"
     INITRAMFS_IMAGE_BUNDLE ?= "1"
-    INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-initramfs"
-    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-base"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-extra"
     PACKAGECONFIG:remove:pn-qtbase = " eglfs"
     PACKAGECONFIG:remove:pn-qtwayland = " xcomposite-egl"
