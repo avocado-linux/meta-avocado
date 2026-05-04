@@ -5,7 +5,7 @@ do_compile[depends] += "linux-alif:do_deploy"
 DEPENDS += " jq-native"
 
 # Shared GPT-image-builder used by the sd / img profiles. The base
-# avocado-stone.bb only auto-stages files for stone-img/sd/usb/peridio
+# avocado-stone.bb only auto-stages files for stone-img/sd/usb
 # overrides; wire the custom stone-serial profile here, plus the helper
 # sourced by the sd / img profile scripts.
 SRC_URI += " \

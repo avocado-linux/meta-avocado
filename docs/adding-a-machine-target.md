@@ -104,7 +104,7 @@ The machine `.conf` file defines hardware-specific settings:
 #@DESCRIPTION: <One-line description>
 
 # Provisioning methods this machine supports
-STONE_PROVISIONING ?= "img peridio"
+STONE_PROVISIONING ?= "img usb"
 
 # Machine overrides for conditional logic
 MACHINEOVERRIDES =. "<machine-short>:"
@@ -127,7 +127,7 @@ MACHINE_FEATURES += "<features>"
 
 | Variable | Purpose |
 |----------|---------|
-| `STONE_PROVISIONING` | Space-separated list of provisioning profiles (`img`, `pxe`, `usb`, `peridio`) |
+| `STONE_PROVISIONING` | Space-separated list of provisioning profiles (`img`, `pxe`, `usb`) |
 | `MACHINEOVERRIDES` | Enables conditional recipe sections (e.g., `:append:<override>`) |
 | `DEFAULTTUNE` | CPU instruction set target |
 | `PREFERRED_PROVIDER_virtual/kernel` | Which kernel recipe to use |
@@ -233,7 +233,7 @@ The stone manifest (`stone-<machine>.json`) defines:
 This is the pattern current bring-ups (`rzv2n-sr-som`, `imx93-frdm`, `stm32mp25-dk`)
 use. The kernel + DTB + initramfs + extlinux config live in a FAT boot
 partition the bootloader probes; the rootfs is delivered as an A/B pair so
-`peridio`-driven OTA updates can flip slots without touching the bootloader.
+OTA updates can flip slots without touching the bootloader.
 
 ```json
 {
@@ -330,9 +330,9 @@ bootloader directly (no FAT staging):
 ## 7. Stone Provisioning Scripts
 
 Each provisioning profile maps to a shell script. The base
-`avocado-stone.bb` recipe ships SRC_URI overrides for `img`, `sd`, `usb`,
-`peridio`. Profiles outside that set (e.g. `serial`, `emmc`) need to be
-wired up in `avocado-stone.bbappend` — see Section 8a.
+`avocado-stone.bb` recipe ships SRC_URI overrides for `img`, `sd`, `usb`.
+Profiles outside that set (e.g. `serial`, `emmc`) need to be wired up in
+`avocado-stone.bbappend` — see Section 8a.
 
 | Profile | Script | Purpose |
 |---------|--------|---------|
@@ -341,7 +341,6 @@ wired up in `avocado-stone.bbappend` — see Section 8a.
 | `usb` | `stone-provision-usb.sh` | Creates image + writes to USB device |
 | `emmc` | `stone-provision-emmc.sh` | Flashes onboard eMMC via U-Boot fastboot |
 | `serial` | `stone-provision-serial.sh` | Bootloader bootstrap via UART/USB-DFU |
-| `peridio` | `stone-provision-peridio.sh` | Creates a Peridio bundle for OTA |
 
 For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
 `serial` (bootstrap bootloader) → `emmc`/`sd` (install OS image).
@@ -408,7 +407,7 @@ target and only rename the file (the avocado-cli tooling looks them up by
 ### 8a. Distro `avocado-stone.bbappend`
 
 Targets that declare profiles outside the base recipe set (`img`, `sd`,
-`usb`, `peridio`) must wire those profiles' scripts into the build via an
+`usb`) must wire those profiles' scripts into the build via an
 `avocado-stone.bbappend`:
 
 ```bitbake
@@ -679,13 +678,13 @@ To add a new machine called `acme-widget`:
 
 | Machine | Layer | Bootloader | Provisioning | Notes |
 |---------|-------|-----------|-------------|-------|
-| `raspberrypi5` | `meta-avocado-raspberrypi` | U-Boot | img, peridio | Reference ARM target |
-| `jetson-orin-nano-devkit` | `meta-avocado-nvidia` | U-Boot (CBoot) | img, peridio | NVIDIA Jetson, uses swupdate |
-| `intel-x86-64-v2` | `meta-avocado-x86-64` | systemd-boot | img, pxe, usb, peridio | x86-64-v2 EFI target (SSE4.2, Atom-class) |
-| `intel-x86-64-v3` | `meta-avocado-x86-64` | systemd-boot | img, pxe, usb, peridio | x86-64-v3 EFI target (AVX2, Core-class) |
-| `intel-x86-64-v4` | `meta-avocado-x86-64` | systemd-boot | img, pxe, usb, peridio | x86-64-v4 EFI target (AVX-512) |
-| `qemux86-64` | `meta-avocado-qemu` | U-Boot | img, peridio | QEMU testing |
-| `imx93-evk` | `meta-avocado-nxp` | U-Boot | img, peridio | NXP i.MX93 |
-| `imx93-frdm` | `meta-avocado-nxp` | U-Boot | img, peridio | NXP FRDM-IMX93, FAT boot + GPT-AB |
+| `raspberrypi5` | `meta-avocado-raspberrypi` | U-Boot | img, sd, usb | Reference ARM target |
+| `jetson-orin-nano-devkit` | `meta-avocado-nvidia` | U-Boot (CBoot) | tegraflash | NVIDIA Jetson, uses swupdate |
+| `intel-x86-64-v2` | `meta-avocado-x86-64` | systemd-boot | img, usb | x86-64-v2 EFI target (SSE4.2, Atom-class) |
+| `intel-x86-64-v3` | `meta-avocado-x86-64` | systemd-boot | img, usb | x86-64-v3 EFI target (AVX2, Core-class) |
+| `intel-x86-64-v4` | `meta-avocado-x86-64` | systemd-boot | img, usb | x86-64-v4 EFI target (AVX-512) |
+| `qemux86-64` | `meta-avocado-qemu` | U-Boot | img | QEMU testing |
+| `imx93-evk` | `meta-avocado-nxp` | U-Boot | img, sd | NXP i.MX93 |
+| `imx93-frdm` | `meta-avocado-nxp` | U-Boot | img, sd, uuu-emmc | NXP FRDM-IMX93, FAT boot + GPT-AB |
 | `rzv2n-sr-som` | `meta-avocado-renesas` | U-Boot (TF-A FIP) | sd, emmc, serial | SolidRun RZ/V2N SoM, FAT boot + GPT-AB, USB-OTG fastboot |
 | `stm32mp25-dk` | `meta-avocado-stm` | U-Boot (TF-A FIP + OP-TEE) | sd, emmc, serial | ST STM32MP257F-DK, FAT boot + GPT-AB, USB-DFU bootstrap |
