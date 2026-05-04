@@ -11,7 +11,7 @@ repos:
       meta-avocado:
 
   meta-renesas:
-    url: https://github.com/renesas-rz/meta-renesas
+    url: https://github.com/avocado-linux/vendor-meta-renesas
     path: meta-renesas
     branch: scarthgap/rz
     commit: b396a94cc9c0a1e491c3a0426416cb8a1dfcb04f
@@ -20,7 +20,7 @@ repos:
       meta-rz-distro:
   
   meta-solidrun-arm-rzg2lc:
-    url: https://github.com/solidrun/meta-solidrun-arm-rzg2lc
+    url: https://github.com/avocado-linux/vendor-meta-solidrun-arm-rzg2lc
     path: meta-solidrun-arm-rzg2lc
     branch: scarthgap_rzv2n_dev
     commit: 91d0eecba625c4a8beda731c4246be6c7da7c998

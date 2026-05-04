@@ -12,7 +12,7 @@ repos:
   meta-avocado:
     path: meta-avocado
     layers:
-      meta-avocado-solidrun:
+      meta-avocado-renesas:
 
 local_conf_header:
   machine-avocado-rzv2n-sr-som: |
