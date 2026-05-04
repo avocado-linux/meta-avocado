@@ -1,0 +1,2 @@
+enable wireplumber.service
+enable pipewire-pulse.service

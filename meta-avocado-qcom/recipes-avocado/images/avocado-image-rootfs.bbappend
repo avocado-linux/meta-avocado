@@ -36,11 +36,13 @@ do_deploy_fixup:append() {
         install -m 0644 ${DEPLOY_DIR_IMAGE}/linuxaa64.efi.stub linuxaa64.efi.stub
     fi
 
-    # copy avocado-image-var BTRFS image
-    if [ -f ${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs ]; then
-        install -m 0644 ${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs avocado-image-var-${MACHINE_SHORT_NAME}.btrfs
-    fi
+    # The rootfs (system.img) and /var (avocado-image-var-${MACHINE_SHORT_NAME}.btrfs)
+    # are NOT bundled here — those are runtime-built by avocado-cli (extensions
+    # applied, users configured) and injected at provision time by
+    # stone-provision-ufs.sh, per the manifest's `images.rootfs` / `images.var`
+    # entries. This tarball is the per-machine static "bootfiles" set: bootloader,
+    # firmware blobs, GPT, partition_ufs/, programmers, dtb/efi/etc partitions,
+    # initramfs, and Thundercomm board-specific blobs.
 
-    # create final provision image
-    tar -caf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.ufs.tar.gz -C ${DEPLOY_DIR_IMAGE} ${IMAGE_BASENAME}
+    tar -caf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.bootfiles.tar.gz -C ${DEPLOY_DIR_IMAGE} ${IMAGE_BASENAME}
 }

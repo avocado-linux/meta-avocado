@@ -16,14 +16,14 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-rootfs-rubikpi3.ufs.tar.gz",
+      "out": "avocado-image-rootfs-rubikpi3.bootfiles.tar.gz",
       "devpath": "/dev/disk/by-partlabel/system",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "ufs": "avocado-image-rootfs-rubikpi3.ufs.tar.gz",
-        "rootfs": "avocado-image-rootfs-rubikpi3.erofs-lz4",
-        "var": "avocado-image-var-rubikpi3.btrfs"
+        "bootfiles": "avocado-image-rootfs-rubikpi3.bootfiles.tar.gz",
+        "rootfs":    "avocado-image-rootfs-rubikpi3.erofs-lz4",
+        "var":       "avocado-image-var-rubikpi3.btrfs"
       }
     }
   }

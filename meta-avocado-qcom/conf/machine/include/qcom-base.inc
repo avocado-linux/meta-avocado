@@ -84,10 +84,21 @@ PREFERRED_VERSION_android-tools ?= "5.1.1.r37"
 # For module signing
 INHERIT += " qmodule"
 
-# QDL expects 4096 aligned ext4 image for flashing
-IMAGE_FSTYPES = "ext4"
+# UFS LBA alignment — qdl writes raw bytes per rawprogram XML and the firehose
+# programmer requires partition source files to be a multiple of 4096 bytes.
 IMAGE_ROOTFS_ALIGNMENT = "4096"
-EXTRA_IMAGECMD:ext4 = "-i 4096 -b 4096"
+
+# meta-ros's libcamera 0.5.2 (the version BitBake picks via highest-PV) defaults
+# LIBCAMERA_PIPELINES to "auto", which probes the rpi/pisp pipeline. That
+# pipeline requires libpisp from meta-raspberrypi (not in our build), and
+# meson's wrap-fallback subproject download is disabled in OE, so configure
+# fails. Restrict to pipelines that don't drag in board-specific deps.
+LIBCAMERA_PIPELINES = "simple,uvcvideo,vimc"
+
+# system.img (rootfs) is no longer staged at yocto time — stone-provision-ufs.sh
+# injects avocado-cli's runtime-built erofs-lz4 at provision time. So the
+# `SYSTEMIMAGE_TYPE` knob in image-avocado-qcom-deploy.bbclass (defaulting to
+# "squashfs") is unused for our flow; left untouched.
 
 #Add options to ota-esp
 EXTRA_IMAGECMD:ota-ext4:append = " -O encrypt,stable_inodes"
