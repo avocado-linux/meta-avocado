@@ -1,0 +1,17 @@
+[Unit]
+Description=WPA supplicant for wlan0
+Requires = sys-subsystem-net-devices-wlan0.device
+After=sys-subsystem-net-devices-wlan0.device
+# wpa_supplicant.conf is user-supplied (network credentials live in the
+# project's `config` extension, not the BSP). Without a config, silently
+# skip rather than fail — the service activates as soon as the user
+# provides one and triggers a restart.
+ConditionPathExists=/etc/wpa_supplicant.conf
+
+[Service]
+Type=forking
+ExecStart=/etc/initscripts/wifi.sh start
+ExecStop=/etc/initscripts/wifi.sh stop
+
+[Install]
+WantedBy=multi-user.target

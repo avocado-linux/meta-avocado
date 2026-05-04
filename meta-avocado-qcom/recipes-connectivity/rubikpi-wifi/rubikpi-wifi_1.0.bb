@@ -1,0 +1,17 @@
+SUMMARY = "systemd-networkd DHCP profile for the RUBIK Pi 3 onboard Wi-Fi (wlan0)"
+LICENSE = "Apache-2.0"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
+
+# Source: https://github.com/rubikpi-ai/meta-rubikpi-bsp @ 227631ce94bb
+SRC_URI = "file://00-wireless-dhcp.network"
+
+S = "${WORKDIR}"
+
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
+do_install() {
+    install -d ${D}${sysconfdir}/systemd/network
+    install -m 0644 ${WORKDIR}/00-wireless-dhcp.network ${D}${sysconfdir}/systemd/network/00-wireless-dhcp.network
+}
+
+FILES:${PN} += "${sysconfdir}/systemd/network/00-wireless-dhcp.network"

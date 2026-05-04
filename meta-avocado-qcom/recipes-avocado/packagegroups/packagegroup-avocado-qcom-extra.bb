@@ -36,6 +36,18 @@ RDEPENDS:${PN}:append:qcm6490 = " \
     v4l-utils \
 "
 
-# RUBIK Pi 3 onboard peripheral firmware (Wi-Fi, HDMI bridge, audio amp,
-# USB hub) — packaged from board-supplied blobs (recipes-firmware/firmware-rubikpi3).
-RDEPENDS:${PN}:append:rubikpi3 = " firmware-rubikpi3"
+# RUBIK Pi 3 board-specific packages — peripheral firmware, BSA Bluetooth
+# stack, Wi-Fi config, fan controller, GPIO library, init services. All
+# published to the feed; BSP extension picks which to install on the device.
+RDEPENDS:${PN}:append:rubikpi3 = " \
+    firmware-rubikpi3 \
+    qcom-pw-pal-plugin \
+    rubikpi-bt-staticdev \
+    rubikpi-wifi \
+    rubikpi3-init-services-bt \
+    rubikpi3-init-services-wifi \
+    rubikpi3-thermal \
+    wiringrp \
+    wiringrp-gpio \
+    wiringrp-python \
+"

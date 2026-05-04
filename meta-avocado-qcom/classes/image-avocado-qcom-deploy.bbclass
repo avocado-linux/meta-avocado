@@ -87,10 +87,11 @@ do_deploy_fixup () {
         install -m 0644 ${DEPLOY_DIR_IMAGE}/dtb-el2-qcom-image-${MACHINE}.rootfs.vfat el2-dtb.bin
     fi
 
-    # copy system.img
-    if [ -f ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.${SYSTEMIMAGE_TYPE} ]; then
-        install -m 0644 ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.${SYSTEMIMAGE_TYPE} ${SYSTEMIMAGE_TARGET}
-    fi
+    # The rootfs partition file (system.img) is NOT staged here. Avocado-cli
+    # rebuilds the rootfs at runtime (with extensions applied + user configs),
+    # so the yocto-baked rootfs would always be stale. stone-provision-ufs.sh
+    # injects avocado-cli's runtime-built rootfs as system.img at provision
+    # time, per the stone manifest's `images.rootfs` entry.
 
     #Copy gpt_main.bin
     for gmbf in ${DEPLOY_DIR_IMAGE}/gpt_main[0-9].bin; do

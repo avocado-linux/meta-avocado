@@ -1,0 +1,10 @@
+[Unit]
+SourcePath=/etc/initscripts/bt.sh
+Description=Rubik Pi bt service
+
+[Service]
+ExecStart=/etc/initscripts/bt.sh start
+ExecStop=/etc/initscripts/bt.sh stop
+
+[Install]
+WantedBy=multi-user.target
