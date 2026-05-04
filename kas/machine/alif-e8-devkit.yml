@@ -1,0 +1,21 @@
+
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/alif.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-alif:
+
+local_conf_header:
+  machine-avocado-alif-e8-devkit: |
+
+machine: avocado-alif-e8-devkit

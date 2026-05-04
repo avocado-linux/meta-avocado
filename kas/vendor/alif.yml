@@ -3,14 +3,14 @@ header:
 
 repos:
   meta-alif:
-    url: https://github.com/alifsemi/meta-alif.git
+    url: https://github.com/avocado-linux/vendor-meta-alif.git
     path: meta-alif
     branch: scarthgap
     commit: ba08f359d911b74fa3bbf3b6321e811c2141455c
     layers:
       .:
   meta-alif-ensemble:
-    url: https://github.com/alifsemi/meta-alif-ensemble.git
+    url: https://github.com/avocado-linux/vendor-meta-alif-ensemble.git
     path: meta-alif-ensemble
     branch: scarthgap
     commit: 0dae08547b22c81edec37f2e2d90ff4836e4074a
@@ -18,5 +18,17 @@ repos:
       .:
 
 local_conf_header:
-  meta-alif: |
+  vendor-alif: |
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-alif-extra"
 
+    # The vendor recipes (linux-alif, trusted-firmware-a, a32-linux-dd-testcases)
+    # leave SRC_URI as ${VAR_TREE};branch=${VAR_BRANCH} placeholders. Upstream's
+    # alif_linux-apss-build-setup wrapper writes these into conf/auto.conf;
+    # avocado bakes them in via the vendor kas file instead. Values track
+    # alif_linux-apss-build-setup/scripts/setup.sh on scarthgap_yocto_5.0.
+    TFA_TREE = "git://github.com/alifsemi/trusted-firmware-a_alif;protocol=https"
+    TFA_BRANCH = "alif_lts-v2.10.8"
+    ALIF_KERNEL_TREE = "git://github.com/alifsemi/linux_alif;protocol=https"
+    ALIF_KERNEL_BRANCH = "v6.12-dev"
+    LINUX_DD_TC_TREE = "git://github.com/alifsemi/alif_a32_linux_DD_testcases;protocol=https"
+    LINUX_DD_TC_BRANCH = "scarthgap"

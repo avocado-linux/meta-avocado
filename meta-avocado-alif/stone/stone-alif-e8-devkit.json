@@ -1,0 +1,64 @@
+{
+  "runtime": {
+    "platform": "avocado-alif-e8-devkit",
+    "architecture": "arm",
+    "provision_default": "sd",
+    "update_strategy": "gpt-ab"
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      },
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      },
+      "serial": {
+        "script": "stone-provision-serial.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      }
+    }
+  },
+  "storage_devices": {
+    "ospi": {
+      "out": "avocado-alif-e8-devkit-ospi.bin",
+      "devpath": "/dev/mtd0",
+      "block_size": 512,
+      "images": {
+        "tfa": "bl32.bin",
+        "kernel": "xipImage",
+        "dtb": "alif/ensemble/devkit/devkit-e8.dtb"
+      },
+      "partitions": [
+        { "name": "tfa",    "image": "tfa",    "partition_type": "8301", "partition_uuid": "a1f0c001-0001-4001-8001-0a1f0c000001", "offset": 0,    "offset_unit": "kibibytes", "size": 64,   "size_unit": "kibibytes" },
+        { "name": "dtb",    "image": "dtb",    "partition_type": "8301", "partition_uuid": "a1f0c001-0002-4001-8001-0a1f0c000002", "offset": 64,   "offset_unit": "kibibytes", "size": 64,   "size_unit": "kibibytes" },
+        { "name": "kernel", "image": "kernel", "partition_type": "8301", "partition_uuid": "a1f0c001-0003-4001-8001-0a1f0c000003", "offset": 128,  "offset_unit": "kibibytes", "size": 2048, "size_unit": "kibibytes" }
+      ]
+    },
+    "rootdisk": {
+      "out": "avocado-alif-e8-devkit-rootdisk.img",
+      "devpath": "/dev/mmcblk1",
+      "block_size": 512,
+      "images": {
+        "rootfs": "avocado-image-rootfs-alif-e8-devkit.erofs-lz4",
+        "var": "avocado-image-var-alif-e8-devkit.btrfs"
+      },
+      "partitions": [
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "a1f0c001-0010-4001-8001-0a1f0c000010", "offset": 1,   "offset_unit": "mebibytes", "size": 512,  "size_unit": "mebibytes" },
+        { "name": "rootfs-b",                    "partition_type": "8305", "partition_uuid": "a1f0c001-0011-4001-8001-0a1f0c000011", "size": 512,  "size_unit": "mebibytes" },
+        { "name": "var",      "image": "var",    "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 1024, "size_unit": "mebibytes", "expand": "true" }
+      ]
+    }
+  }
+}
