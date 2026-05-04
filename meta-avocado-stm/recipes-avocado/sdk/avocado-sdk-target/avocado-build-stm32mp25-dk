@@ -3,8 +3,67 @@
 set -e
 
 hook="avocado-build"
-target="stm32mp25-dk"
+target="$AVOCADO_TARGET"
 
-echo -e "\033[94m[INFO]\033[0m SDK lifecycle hook '$hook' for target '$target' is a no-op."
+RUNTIME_NAME="$1"
+
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
+
+mkdir -p "$output_dir"
+
+input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
+
+# Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
+build_include_flags() {
+    local main_input_dir="$1"
+    local include_flags=""
+
+    if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                include_flags="$include_flags -i \"$path\""
+            fi
+        done
+    fi
+
+    include_flags="$include_flags -i \"$main_input_dir\""
+    echo "$include_flags"
+}
+
+# Build display string of all include paths
+build_include_display() {
+    local main_input_dir="$1"
+    local display=""
+
+    if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                display="${display}\n    - ${path}"
+            fi
+        done
+    fi
+
+    display="${display}\n    - ${main_input_dir}"
+    echo -e "$display"
+}
+
+echo -e "\033[94m[INFO]\033[0m Running stone validate.
+  Manifest:          ${manifest}
+  Input directories:$(build_include_display "$input_dir")"
+
+include_flags=$(build_include_flags "$input_dir")
+eval stone validate -m \"${manifest}\" $include_flags
+
+echo -e "\033[94m[INFO]\033[0m Running stone create.
+  Manifest:          ${manifest}
+  Input directories:$(build_include_display "$input_dir")
+  Output directory:  ${output_dir}"
+
+eval stone create --os-release \"${AVOCADO_PREFIX}/rootfs/usr/lib/os-release\" -m \"$manifest\" $include_flags -o \"$output_dir\"
+
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0

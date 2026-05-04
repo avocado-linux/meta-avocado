@@ -38,12 +38,14 @@ kas/machine/<machine>.yml          KAS build entry point
               |
               +-- conf/layer.conf                        Layer registration
               +-- conf/machine/avocado-<machine>.conf    Machine definition
-              +-- conf/machine/include/<target>.inc       Shared machine settings (optional)
-              +-- recipes-avocado/distro/                 Stone recipe append
-              +-- recipes-avocado/sdk/                    SDK target scripts + append
+              +-- conf/machine/include/<family>.inc       Family-shared machine settings (optional)
+              +-- recipes-avocado/distro/                 avocado-stone.bbappend (profile wiring)
+              +-- recipes-avocado/sdk/                    SDK target append + lifecycle scripts
               +-- recipes-avocado/packagegroups/          Target-specific packagegroups
+              +-- recipes-bsp/                            U-Boot / extlinux / TF-A appends
               +-- recipes-kernel/linux/                   Kernel appends + config fragments
-              +-- stone/                                  Stone manifest + provisioning scripts
+              +-- stone/stone-<machine>.json              Stone manifest
+              +-- stone/<machine>/                        Per-profile provisioning scripts + helpers
         |
         +-- bsp/<machine-short-name>/
               +-- avocado.yaml                           BSP extension definition
@@ -57,14 +59,17 @@ kas/machine/<machine>.yml          KAS build entry point
 |---|-----------|-------------|-----------|
 | 1 | Meta-layer `conf/layer.conf` | `meta-avocado-<target>/conf/layer.conf` | Yes |
 | 2 | Machine configuration | `meta-avocado-<target>/conf/machine/avocado-<machine>.conf` | Yes |
-| 3 | KAS machine YAML | `kas/machine/<machine>.yml` | Yes |
-| 4 | Stone manifest JSON | `meta-avocado-<target>/stone/stone-<machine>.json` | Yes |
-| 5 | Provisioning scripts | `meta-avocado-<target>/stone/<machine>/stone-provision-*.sh` | Yes |
-| 6 | SDK target bbappend | `meta-avocado-<target>/recipes-avocado/sdk/avocado-sdk-target.bbappend` | Yes |
-| 7 | Extra packagegroup | `meta-avocado-<target>/recipes-avocado/packagegroups/packagegroup-avocado-<target>-extra.bb` | Recommended |
-| 8 | Kernel config fragments | `meta-avocado-<target>/recipes-kernel/linux/files/*.cfg` | If custom kernel |
-| 9 | Kernel bbappend with avocado boilerplate | `meta-avocado-<target>/recipes-kernel/linux/<kernel>_%.bbappend` | Yes — see [Section 10](#10-kernel-configuration) |
-| 10 | BSP extension | `bsp/<machine-short-name>/avocado.yaml` | Recommended |
+| 3 | Family include (multi-board layer) | `meta-avocado-<target>/conf/machine/include/<family>.inc` | Recommended for multi-board layers |
+| 4 | KAS machine YAML | `kas/machine/<machine>.yml` | Yes |
+| 5 | Stone manifest JSON | `meta-avocado-<target>/stone/stone-<machine>.json` | Yes |
+| 6 | Provisioning scripts | `meta-avocado-<target>/stone/<machine>/stone-provision-*.sh` | Yes (for non-base profiles) |
+| 7 | Distro `avocado-stone.bbappend` | `meta-avocado-<target>/recipes-avocado/distro/avocado-stone.bbappend` | If declaring stone profiles outside the base recipe set (e.g. `serial`, `emmc`) |
+| 8 | SDK target bbappend | `meta-avocado-<target>/recipes-avocado/sdk/avocado-sdk-target.bbappend` | Yes |
+| 9 | SDK lifecycle scripts | `meta-avocado-<target>/recipes-avocado/sdk/avocado-sdk-target/avocado-{build,provision}-<machine>` | Yes |
+| 10 | Extra packagegroup | `meta-avocado-<target>/recipes-avocado/packagegroups/packagegroup-avocado-<target>-extra.bb` | Recommended |
+| 11 | Kernel config fragments | `meta-avocado-<target>/recipes-kernel/linux/files/*.cfg` | If custom kernel |
+| 12 | Kernel bbappend with avocado boilerplate | `meta-avocado-<target>/recipes-kernel/linux/<kernel>_%.bbappend` | Yes — see [Section 10](#10-kernel-configuration) |
+| 13 | BSP extension | `bsp/<machine-short-name>/avocado.yaml` | Recommended |
 
 ---
 
@@ -166,6 +171,18 @@ and sets any needed variables:
 ```yaml
 header:
   version: 16
+  includes:
+    # meta-virtualization is REQUIRED -- packagegroup-avocado-extra in the
+    # base meta-avocado layer RDEPENDs on docker, which lives in
+    # meta-virtualization. Omitting this triggers a parse error:
+    #   ERROR: Nothing RPROVIDES 'docker' (... packagegroup-avocado-extra
+    #   RDEPENDS on or otherwise requires it)
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    # arm.yml pulls meta-arm + meta-arm-toolchain; only needed if the vendor
+    # BSP requires meta-arm (most ARM64 BSPs do).
+    - repo: meta-avocado
+      file: kas/vendor/arm.yml
 
 repos:
   <vendor-layer>:
@@ -177,7 +194,28 @@ repos:
 local_conf_header:
   vendor-<vendor>: |
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-<target>-extra"
+    # virtualization + seccomp are REQUIRED for the avocado-extra packagegroup
+    # to resolve (the meta-virtualization layer above is necessary but not
+    # sufficient -- the DISTRO_FEATURES flag activates docker's PACKAGECONFIG).
+    # opengl + wayland are conventional defaults; drop on headless targets.
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland seccomp virtualization"
 ```
+
+### Hard requirements that bite first builds
+
+Every avocado-distro target needs:
+
+| Requirement | What it provides | Symptom if missing |
+|---|---|---|
+| `kas/feature/virtualization.yml` in vendor.yml `header.includes` | meta-virtualization layer (docker recipe) | `Nothing RPROVIDES 'docker'` from `packagegroup-avocado-extra` |
+| `virtualization seccomp` in `DISTRO_FEATURES_EXTRA` | docker PACKAGECONFIG enablement | docker builds but fails QA, or runtime fails to launch containers |
+| `kas/vendor/arm.yml` for ARM64 BSPs that need meta-arm | meta-arm + meta-arm-toolchain | LAYERDEPENDS unsatisfied during parse |
+| Per-machine `avocado-build-${MACHINE_SHORT_NAME}` and `avocado-provision-${MACHINE_SHORT_NAME}` SDK lifecycle scripts under `meta-avocado-<target>/recipes-avocado/sdk/avocado-sdk-target/` | SDK-side `stone validate`/`create`/`provision` invocations | `Unable to get checksum for avocado-sdk-target SRC_URI entry avocado-build-<machine>` at do_fetch |
+
+The SDK lifecycle scripts are machine-agnostic boilerplate -- copy any
+existing one (e.g. `meta-avocado-raspberrypi/recipes-avocado/sdk/avocado-sdk-target/avocado-build-rpi`)
+and rename to your machine. No edits to script body needed unless your
+family does something exotic.
 
 ---
 
@@ -185,37 +223,105 @@ local_conf_header:
 
 The stone manifest (`stone-<machine>.json`) defines:
 
-- **Runtime metadata** (platform name, architecture, default provisioning profile)
-- **Provisioning profiles** (script mappings)
-- **Storage device layout** (image names, partitions)
+- **Runtime metadata** — platform name, architecture, default provisioning profile, update strategy
+- **Provisioning envs** — env-var bundles surfaced to the provisioning scripts (device identity, kernel cmdline overrides)
+- **Provisioning profiles** — script mappings, declared envs, and host-side requirements
+- **Storage device layout** — partition table, image filenames, optional FAT-image build args
+
+### Modern (rolling/edge) layout — GPT A/B with FAT boot partition
+
+This is the pattern current bring-ups (`rzv2n-sr-som`, `imx93-frdm`, `stm32mp25-dk`)
+use. The kernel + DTB + initramfs + extlinux config live in a FAT boot
+partition the bootloader probes; the rootfs is delivered as an A/B pair so
+`peridio`-driven OTA updates can flip slots without touching the bootloader.
 
 ```json
 {
   "runtime": {
     "platform": "avocado-<machine>",
     "architecture": "<arch>",
-    "provision_default": "img"
+    "provision_default": "sd",
+    "update_strategy": "gpt-ab"
   },
   "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY":  "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID":   "${AVOCADO_DEVICE_ID}"
+      },
+      "cmdline": {
+        "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
+      }
+    },
     "profiles": {
-      "img": { "script": "stone-provision-img.sh" },
-      "peridio": { "script": "stone-provision-peridio.sh" }
+      "sd":     { "script": "stone-provision-sd.sh",     "envs": ["device_info", "cmdline"], "requires": ["usb"] },
+      "emmc":   { "script": "stone-provision-emmc.sh",   "envs": ["device_info", "cmdline"], "requires": ["usb"] },
+      "serial": { "script": "stone-provision-serial.sh", "envs": ["device_info"],            "requires": ["usb"] }
     }
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-<machine>",
+      "out": "avocado-<machine>-rootdisk.img",
       "devpath": "/dev/mmcblk0",
       "block_size": 512,
       "images": {
-        "rootfs": "avocado-image-rootfs-<machine>.squashfs",
-        "var": "avocado-image-var-<machine>.btrfs",
+        "boot": {
+          "out": "boot.img",
+          "size": 256,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "label": "BOOT",
+            "files": [
+              { "in": "Image", "out": "Image" },
+              { "in": "<dtb>", "out": "<dtb>" },
+              { "in": "avocado-image-initramfs-<machine>.cpio.zst", "out": "avocado-image-initramfs-<machine>.cpio.zst" },
+              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" }
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-<machine>.erofs-lz4",
+        "var":    "avocado-image-var-<machine>.btrfs",
         "initramfs": "avocado-image-initramfs-<machine>.cpio.zst",
-        "kernel": "bzImage",
-        "bootloader": "systemd-bootx64.efi"
-      }
+        "kernel": "Image"
+      },
+      "partitions": [
+        { "name": "boot-a",   "image": "boot",   "partition_type": "EF00", "partition_uuid": "<uuid>", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
+        { "name": "boot-b",                      "partition_type": "EF00", "partition_uuid": "<uuid>", "size": 256,  "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "<uuid>", "size": 512,  "size_unit": "mebibytes" },
+        { "name": "rootfs-b",                    "partition_type": "8305", "partition_uuid": "<uuid>", "size": 512,  "size_unit": "mebibytes" },
+        { "name": "var",      "image": "var",    "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 1024, "size_unit": "mebibytes", "expand": "true" }
+      ]
     }
   }
+}
+```
+
+### Notes on partition layout
+
+- The `var` partition UUID is canonical (`4d21b016-b534-45c2-a9fb-5c16e091fd2d`)
+  across all Avocado machines — it's baked into the rootfs `/etc/fstab`. Do not
+  generate a new one.
+- Boot partitions use type `EF00` (EFI System) so the bootloader's distroboot
+  scan finds them by GUID; rootfs slots use `8305` (Linux ARM root). For SoCs
+  with a fixed first-stage offset (stm32mp2 FSBL, jetson tegra-bct, etc.) add
+  the FSBL/FIP partitions before the GPT-AB block with explicit `offset` keys
+  — `build-disk-image.sh` honours per-partition offsets.
+- `rootfs-b` does NOT carry an `image` key; it's allocated empty and populated
+  by the OTA agent on first slot flip.
+
+### Legacy / EFI flat layout (x86-64, qemu)
+
+Older targets without GPT-AB use a single rootfs partition and reference the
+bootloader directly (no FAT staging):
+
+```json
+"images": {
+  "rootfs": "avocado-image-rootfs-<machine>.squashfs",
+  "kernel": "bzImage",
+  "bootloader": "systemd-bootx64.efi"
 }
 ```
 
@@ -223,40 +329,122 @@ The stone manifest (`stone-<machine>.json`) defines:
 
 ## 7. Stone Provisioning Scripts
 
-Each provisioning profile maps to a shell script. Common profiles:
+Each provisioning profile maps to a shell script. The base
+`avocado-stone.bb` recipe ships SRC_URI overrides for `img`, `sd`, `usb`,
+`peridio`. Profiles outside that set (e.g. `serial`, `emmc`) need to be
+wired up in `avocado-stone.bbappend` — see Section 8a.
 
 | Profile | Script | Purpose |
 |---------|--------|---------|
 | `img` | `stone-provision-img.sh` | Creates a raw disk image |
+| `sd` | `stone-provision-sd.sh` | Builds GPT image + writes to host-attached SD |
 | `usb` | `stone-provision-usb.sh` | Creates image + writes to USB device |
-| `pxe` | `stone-provision-pxe.sh` | Prepares PXE/iPXE boot artifacts |
-| `peridio` | `stone-provision-peridio.sh` | Creates swupdate .swu for OTA |
+| `emmc` | `stone-provision-emmc.sh` | Flashes onboard eMMC via U-Boot fastboot |
+| `serial` | `stone-provision-serial.sh` | Bootloader bootstrap via UART/USB-DFU |
+| `peridio` | `stone-provision-peridio.sh` | Creates a Peridio bundle for OTA |
+
+For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
+`serial` (bootstrap bootloader) → `emmc`/`sd` (install OS image).
 
 ### Environment variables available to scripts
 
 | Variable | Description |
 |----------|-------------|
 | `AVOCADO_STONE_MANIFEST` | Path to the stone manifest JSON |
-| `AVOCADO_STONE_BUILD_DIR` | Build output directory |
-| `AVOCADO_STONE_DATA_DIR` | Directory containing built images |
-| `AVOCADO_PROVISION_OUT` | Optional output directory |
+| `AVOCADO_STONE_BUILD_DIR` | Directory the script may write assembled images into |
+| `AVOCADO_STONE_DATA_DIR` | Directory containing pre-built images (deploy dir) |
+| `AVOCADO_PROVISION_OUT` | Output directory for deferred-write flows (Docker Desktop) |
+| `AVOCADO_USB_PASSTHROUGH` | `1` if `/dev/ttyUSB*`/`/dev/sd*` are passthrough'd into the SDK; `0` for image-only output |
+| `AVOCADO_DEVICE_CERT` / `AVOCADO_DEVICE_KEY` / `AVOCADO_DEVICE_ID` | Surfaced when the profile lists `device_info` in `envs` |
+| `AVOCADO_CMDLINE_EXTRA` | Surfaced when the profile lists `cmdline` in `envs` |
+
+### Sharing image-build logic across profiles
+
+When sd / emmc / serial all need the same GPT image, factor the partition-
+table walk into a `build-disk-image.sh` helper alongside the per-profile
+scripts and ship it via `avocado-stone.bbappend` (see Section 8a).
+[meta-avocado-renesas/stone/rzv2n-sr-som/build-disk-image.sh](../meta-avocado-renesas/stone/rzv2n-sr-som/build-disk-image.sh)
+and
+[meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh](../meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh)
+are the reference implementations.
 
 ---
 
 ## 8. SDK Target Scripts
 
-The SDK target bbappend adds nativesdk dependencies needed by the
-provisioning scripts:
+The SDK target bbappend wires up two things:
+- `do_compile[depends]` on whichever recipes' `do_deploy` artifacts the
+  provisioning scripts need to find at flash time (TF-A, OP-TEE, U-Boot,
+  extlinux config).
+- `RDEPENDS` on the nativesdk packages those scripts shell out to (jq,
+  mtools/dosfstools, gptfdisk, dfu-util, fastboot).
 
 ```bitbake
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 FILESEXTRAPATHS:prepend := "${@':'.join(['%s/stone' % layer for layer in d.getVar('BBLAYERS').split()])}:"
 
+# Stone bundle artifacts the provisioning scripts ship to the host.
+do_compile[depends] += "u-boot-<vendor>:do_deploy"
+do_compile[depends] += "trusted-firmware-a-<vendor>:do_deploy"
+do_compile[depends] += "extlinux-<machine>:do_deploy"
+
 RDEPENDS:${PN}:append = " \
   nativesdk-mtools \
+  nativesdk-dosfstools \
   nativesdk-gptfdisk \
+  nativesdk-util-linux-lsblk \
+  nativesdk-util-linux-blockdev \
+  nativesdk-dfu-util \
 "
 ```
+
+The two SDK lifecycle scripts (`avocado-build-<machine>` and
+`avocado-provision-<machine>`) live under `${PN}/` and are target-agnostic in
+content — they shell out to the stone CLI which dispatches to the
+profile-specific provisioning script. Copy them verbatim from a reference
+target and only rename the file (the avocado-cli tooling looks them up by
+`MACHINE_SHORT_NAME` suffix).
+
+### 8a. Distro `avocado-stone.bbappend`
+
+Targets that declare profiles outside the base recipe set (`img`, `sd`,
+`usb`, `peridio`) must wire those profiles' scripts into the build via an
+`avocado-stone.bbappend`:
+
+```bitbake
+# In-tree deps the provisioning scripts pull from DEPLOYDIR.
+do_compile[depends] += "u-boot-<vendor>:do_deploy"
+do_compile[depends] += "trusted-firmware-a-<vendor>:do_deploy"
+do_compile[depends] += "extlinux-<machine>:do_deploy"
+
+DEPENDS += " jq-native"
+
+# Shared image-builder helper used by every profile script.
+SRC_URI += " file://build-disk-image.sh"
+
+# Per-profile script overrides for profiles not in the base recipe.
+SRC_URI:append:stone-emmc   = " file://stone-provision-emmc.sh"
+SRC_URI:append:stone-serial = " file://stone-provision-serial.sh"
+
+do_deploy:append() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${WORKDIR}/build-disk-image.sh ${DEPLOYDIR}/build-disk-image.sh
+}
+
+do_deploy:append:stone-emmc() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${WORKDIR}/stone-provision-emmc.sh ${DEPLOYDIR}/stone-provision-emmc.sh
+}
+
+do_deploy:append:stone-serial() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${WORKDIR}/stone-provision-serial.sh ${DEPLOYDIR}/stone-provision-serial.sh
+}
+```
+
+`stone-<profile>` is a `MACHINEOVERRIDES` element synthesized by `avocado.inc`
+from the machine's `STONE_PROVISIONING` value, so the `:append:stone-<profile>`
+overrides only fire when the corresponding profile is enabled.
 
 ---
 
@@ -296,9 +484,10 @@ extended to include additional nativesdk packages in the SDK.
 ### Appending to the kernel recipe
 
 Create a `linux-yocto_%.bbappend` (or appropriate kernel recipe append).
-**Every avocado kernel bbappend must include the boilerplate shown below**;
-it wires the kernel into the avocado-cli kernel resolver, the auto-appended
-per-kernel module packagegroups, and the fully-qualified kernel-devsrc
+**Every avocado kernel bbappend must `inherit avocado-kernel-feed`** and pull
+in the per-kernel module packagegroup `.inc`. Together they wire the kernel
+into the avocado-cli kernel resolver, the auto-appended per-kernel module
+packagegroups, and the fully-qualified `kernel-{devsrc,devicetree,modules}`
 packaging that lets multiple kernel versions coexist in a rolling feed.
 
 ```bitbake
@@ -313,21 +502,12 @@ SRC_URI:append:<machine> = " \
     file://<machine-specific>.cfg \
 "
 
-# Rename kernel-devsrc to include KERNEL_VERSION so multiple kernel versions
-# can coexist in a rolling feed without colliding on the unversioned package
-# name. Publish both the unqualified and the versioned virtual Provides so
-# existing callers (e.g. `packagegroup-avocado-sdk-extra.bb` listing
-# `kernel-devsrc`) keep working, and explicit pinners can target
-# `kernel-devsrc-{{ avocado.kernel.version }}` via interpolation.
-PKG:${KERNEL_PACKAGE_NAME}-devsrc = "${KERNEL_PACKAGE_NAME}-devsrc-${KERNEL_VERSION}"
-RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc += "kernel-devsrc kernel-devsrc-${KERNEL_VERSION}"
-
-# Publish a well-known virtual that avocado-cli's kernel resolver queries
-# with `dnf repoquery --whatprovides 'avocado-kernel-*' --provides`. Encodes
-# KERNEL_VERSION in the Provide name so the resolver can enumerate every
-# kernel available in the feed without fishing through package NAMEs or
-# relying on kernel.bbclass's (nonexistent) unqualified `kernel` Provide.
-RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"
+# Renames kernel-{devsrc,devicetree,modules} to include KERNEL_VERSION,
+# republishes the unqualified Provide for back-compat callers, and emits the
+# avocado-cli kernel-resolver virtual (`avocado-kernel-${KERNEL_VERSION}`).
+# All four boilerplate blocks live in the bbclass; see
+# meta-avocado/classes/avocado-kernel-feed.bbclass.
+inherit avocado-kernel-feed
 
 # Emit per-kernel rootfs/initramfs module packagegroups (renamed at packaging
 # time to include KERNEL_VERSION). avocado-cli auto-appends the matching
@@ -341,9 +521,7 @@ require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 | Block | Purpose | Required? |
 |-------|---------|-----------|
 | `SRC_URI` with `avocado-core.cfg` / `avocado-extra.cfg` | Avocado-required kernel config (CONFIG_RD_ZSTD, CONFIG_OVERLAY_FS, etc. — see "Required Kernel Options" below) | Yes |
-| `PKG:${KERNEL_PACKAGE_NAME}-devsrc` rename | Fully-qualified `kernel-devsrc-${KERNEL_VERSION}` package name so multiple kernel versions can ship in the same feed without dnf NVR collision | Yes |
-| `RPROVIDES:${KERNEL_PACKAGE_NAME}-devsrc` unqualified+versioned | Backward-compat for callers listing the unqualified `kernel-devsrc` (e.g. `packagegroup-avocado-sdk-extra.bb`) | Yes |
-| `RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"` | avocado-cli kernel resolver contract — without this, the resolver can't enumerate this kernel in the feed | Yes |
+| `inherit avocado-kernel-feed` | Provides: fully-qualified `kernel-{devsrc,devicetree,modules}-${KERNEL_VERSION}` PKG renames, unqualified+versioned `RPROVIDES` for back-compat, and `RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"` so avocado-cli's resolver can enumerate this kernel in the feed | Yes |
 | `require .../avocado-kernel-modules-packagegroup.inc` | Emits `packagegroup-avocado-{rootfs,initramfs}-modules-${KERNEL_VERSION}` so avocado-cli can auto-append the correct kernel's modules at install time | Yes |
 
 The boilerplate is additive and harmless in single-kernel feeds — it only
@@ -433,16 +611,15 @@ supported_targets:
   - <machine-short-name>
 
 distro:
-  version: 0.1.0
-  channel: apollo-edge
+  release: 2024
+  channel: edge
 
 extensions:
   avocado-bsp-<machine-short-name>:
-    version: '{{ avocado.distro.version }}'
+    version: 2024.1.0
     release: r0
     summary: Board support for <description>
-    description: >
-      <Longer description of what this BSP provides.>
+    description: Board support for <description>
     license: Apache-2.0
     url: https://github.com/avocadolinux/avocado-os
     vendor: Avocado Linux <info@avocadolinux.org>
@@ -457,13 +634,13 @@ extensions:
       - udevadm trigger --type=devices --action=add --settle
 
     packages:
-      # List kernel-module-<name> packages, firmware, and tools
-      kernel-module-<driver>: '*'
+      # Bring-up: ship every kernel module via the kernel-modules meta-package.
+      # Trim down to the lsmod set once the board boots cleanly.
+      kernel-modules: '*'
       linux-firmware-<chip>: '*'
-      <userspace-tool>: '*'
 
 sdk:
-  image: docker.io/avocadolinux/sdk:{{ avocado.distro.channel }}
+  image: docker.io/avocadolinux/sdk:{{ avocado.distro.release }}-{{ avocado.distro.channel }}
 ```
 
 ### Important notes on BSP extension packages
@@ -482,17 +659,19 @@ sdk:
 To add a new machine called `acme-widget`:
 
 1. **Create the meta-layer**: `meta-avocado-acme/conf/layer.conf`
-2. **Create the machine config**: `meta-avocado-acme/conf/machine/avocado-acme-widget.conf`
+2. **Create the machine config**: `meta-avocado-acme/conf/machine/avocado-acme-widget.conf` (set `STONE_PROVISIONING ?= "..."`, `MACHINEOVERRIDES`, then `require conf/machine/include/avocado.inc`)
 3. **Create the KAS config**: `kas/machine/acme-widget.yml`
 4. **Create the stone manifest**: `meta-avocado-acme/stone/stone-acme-widget.json`
-5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-img.sh` (etc.)
-6. **Create SDK target append**: `meta-avocado-acme/recipes-avocado/sdk/avocado-sdk-target.bbappend`
-7. **Create extra packagegroup**: `meta-avocado-acme/recipes-avocado/packagegroups/packagegroup-avocado-acme-extra.bb`
-8. **Create kernel config fragments**: `meta-avocado-acme/recipes-kernel/linux/files/avocado-core.cfg` etc.
-9. **Create kernel bbappend**: `meta-avocado-acme/recipes-kernel/linux/linux-yocto_%.bbappend`
-10. **Create BSP extension**: `bsp/acme-widget/avocado.yaml`
-11. **Build**: `kas build kas/machine/acme-widget.yml`
-12. **Test**: Provision a device and verify boot, then test BSP extension installation.
+5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-*.sh` and (if shared) `build-disk-image.sh`
+6. **Create distro `avocado-stone.bbappend`** (only if you declared profiles outside the base set): `meta-avocado-acme/recipes-avocado/distro/avocado-stone.bbappend`
+7. **Create SDK target append**: `meta-avocado-acme/recipes-avocado/sdk/avocado-sdk-target.bbappend` plus the two SDK lifecycle scripts (`avocado-build-acme-widget`, `avocado-provision-acme-widget`) under `${PN}/`
+8. **Create extra packagegroup**: `meta-avocado-acme/recipes-avocado/packagegroups/packagegroup-avocado-acme-extra.bb`
+9. **Wire `PKG_EXTRA_INSTALL`**: edit `kas/vendor/<vendor>.yml` to append `packagegroup-avocado-acme-extra`
+10. **Create kernel config fragments**: `meta-avocado-acme/recipes-kernel/linux/files/avocado-core.cfg` etc.
+11. **Create kernel bbappend**: `meta-avocado-acme/recipes-kernel/linux/<kernel>_%.bbappend` with `inherit avocado-kernel-feed` and `require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc`
+12. **Create BSP extension**: `bsp/acme-widget/avocado.yaml`
+13. **Build**: `kas build distro/kas/machine/acme-widget.yml`
+14. **Test**: Provision a device and verify boot, then test BSP extension installation with `avocado ext install bsp-acme-widget`.
 
 ---
 
@@ -507,3 +686,6 @@ To add a new machine called `acme-widget`:
 | `intel-x86-64-v4` | `meta-avocado-x86-64` | systemd-boot | img, pxe, usb, peridio | x86-64-v4 EFI target (AVX-512) |
 | `qemux86-64` | `meta-avocado-qemu` | U-Boot | img, peridio | QEMU testing |
 | `imx93-evk` | `meta-avocado-nxp` | U-Boot | img, peridio | NXP i.MX93 |
+| `imx93-frdm` | `meta-avocado-nxp` | U-Boot | img, peridio | NXP FRDM-IMX93, FAT boot + GPT-AB |
+| `rzv2n-sr-som` | `meta-avocado-renesas` | U-Boot (TF-A FIP) | sd, emmc, serial | SolidRun RZ/V2N SoM, FAT boot + GPT-AB, USB-OTG fastboot |
+| `stm32mp25-dk` | `meta-avocado-stm` | U-Boot (TF-A FIP + OP-TEE) | sd, emmc, serial | ST STM32MP257F-DK, FAT boot + GPT-AB, USB-DFU bootstrap |

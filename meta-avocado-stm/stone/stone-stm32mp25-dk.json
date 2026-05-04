@@ -1,7 +1,79 @@
 {
   "runtime": {
     "platform": "avocado-stm32mp25-dk",
-    "architecture": "arm64"
+    "architecture": "arm64",
+    "provision_default": "sd",
+    "update_strategy": "gpt-ab"
   },
-  "storage_devices": {}
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      },
+      "cmdline": {
+        "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
+      }
+    },
+    "profiles": {
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info", "cmdline"],
+        "requires": ["usb"]
+      },
+      "emmc": {
+        "script": "stone-provision-emmc.sh",
+        "envs": ["device_info", "cmdline"],
+        "requires": ["usb"]
+      },
+      "serial": {
+        "script": "stone-provision-serial.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-stm32mp25-dk-rootdisk.img",
+      "devpath": "/dev/mmcblk0",
+      "block_size": 512,
+      "images": {
+        "fsbl": "tf-a-stm32mp257f-dk.stm32",
+        "fip": "fip-stm32mp257f-dk-optee.bin",
+        "boot": {
+          "out": "boot.img",
+          "size": 256,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "label": "BOOT",
+            "files": [
+              { "in": "Image", "out": "Image" },
+              { "in": "stm32mp257f-dk-ca35tdcid-ostl.dtb", "out": "stm32mp257f-dk-ca35tdcid-ostl.dtb" },
+              { "in": "avocado-image-initramfs-stm32mp25-dk.cpio.zst", "out": "avocado-image-initramfs-stm32mp25-dk.cpio.zst" },
+              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" }
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-stm32mp25-dk.erofs-lz4",
+        "var": "avocado-image-var-stm32mp25-dk.btrfs",
+        "initramfs": "avocado-image-initramfs-stm32mp25-dk.cpio.zst",
+        "kernel": "Image"
+      },
+      "partitions": [
+        { "name": "fsbl-a",   "image": "fsbl", "partition_type": "8301", "partition_uuid": "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d", "offset": 17,   "offset_unit": "kibibytes", "size": 256, "size_unit": "kibibytes" },
+        { "name": "fsbl-b",   "image": "fsbl", "partition_type": "8301", "partition_uuid": "b2c3d4e5-f6a7-4b6c-9d0e-1f2a3b4c5d6e", "size": 256,  "size_unit": "kibibytes" },
+        { "name": "fip-a",    "image": "fip",  "partition_type": "8302", "partition_uuid": "c3d4e5f6-a7b8-4c7d-ae0f-2a3b4c5d6e7f", "size": 4,    "size_unit": "mebibytes" },
+        { "name": "fip-b",    "image": "fip",  "partition_type": "8302", "partition_uuid": "d4e5f6a7-b8c9-4d8e-af10-3b4c5d6e7f80", "size": 4,    "size_unit": "mebibytes" },
+        { "name": "boot-a",   "image": "boot", "partition_type": "EF00", "partition_uuid": "e5f6a7b8-c9da-4e9f-b011-4c5d6e7f8091", "size": 256,  "size_unit": "mebibytes" },
+        { "name": "boot-b",                    "partition_type": "EF00", "partition_uuid": "f6a7b8c9-dae0-4fa0-b112-5d6e7f8091a2", "size": 256,  "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "a7b8c9da-e0f1-40b1-a213-6e7f8091a2b3", "size": 512, "size_unit": "mebibytes" },
+        { "name": "rootfs-b",                    "partition_type": "8305", "partition_uuid": "b8c9dae0-f102-41c2-a314-7f8091a2b3c4", "size": 512, "size_unit": "mebibytes" },
+        { "name": "var",      "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 1024, "size_unit": "mebibytes", "expand": "true" }
+      ]
+    }
+  }
 }
