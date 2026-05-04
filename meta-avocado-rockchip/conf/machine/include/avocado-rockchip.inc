@@ -26,3 +26,13 @@ IMAGE_FSTYPES:remove = "wic.bmap"
 # rk3588s.inc sets KERNEL_IMAGETYPE = "fitImage" with ?=; override here.
 KERNEL_IMAGETYPE = "Image"
 KERNEL_IMAGETYPES = "Image"
+
+# Override the extlinux.conf u-boot's extlinux.bbclass auto-generates (via
+# rockchip-extlinux.inc, transitively required from rk3588.inc). Defaults
+# in rockchip-extlinux.inc don't match our partition layout or rootfs type:
+#   UBOOT_EXTLINUX_ROOT        defaults to "root=PARTLABEL=rootfsA" (our label is "rootfs-a")
+#   UBOOT_EXTLINUX_KERNEL_ARGS defaults to "rootwait rw rootfstype=ext4" (we use erofs)
+# Avocado conventions: PARTLABEL with hyphen, erofs read-only rootfs, audit=0.
+UBOOT_EXTLINUX_ROOT        = "root=PARTLABEL=rootfs-a"
+UBOOT_EXTLINUX_KERNEL_ARGS = "rootwait ro rootfstype=erofs audit=0"
+UBOOT_EXTLINUX_INITRD      = "/avocado-initramfs.cpio.zst"

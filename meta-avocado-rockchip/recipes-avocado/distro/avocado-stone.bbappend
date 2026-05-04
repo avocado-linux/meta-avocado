@@ -12,16 +12,20 @@ do_compile[depends] += "u-boot:do_deploy"
 # coreutils-native which is in DEPENDS via inherit deploy.
 DEPENDS += " jq-native gptfdisk-native dosfstools-native mtools-native"
 
-# Shared GPT image-build helper + boot-FAT extlinux.conf shipped in the
-# layer's stone/${MACHINE_SHORT_NAME}/ directory (auto-discovered by
-# stone.bbclass's FILESEXTRAPATHS prepend).
+# Shared GPT image-build helper shipped in the layer's
+# stone/${MACHINE_SHORT_NAME}/ directory (auto-discovered by stone.bbclass's
+# FILESEXTRAPATHS prepend).
+#
+# extlinux.conf is NOT shipped here -- u-boot's extlinux.bbclass (pulled
+# in by meta-rockchip's rockchip-extlinux.inc via rk3588.inc) auto-generates
+# and deploys it from UBOOT_EXTLINUX_* variables. avocado-rockchip.inc
+# overrides those vars to match our partition layout. Two recipes deploying
+# the same file would collide on do_deploy.
 SRC_URI += " \
     file://build-disk-image.sh \
-    file://extlinux.conf \
 "
 
 do_deploy:append() {
     install -d ${DEPLOYDIR}
     install -m 0755 ${WORKDIR}/build-disk-image.sh ${DEPLOYDIR}/build-disk-image.sh
-    install -m 0644 ${WORKDIR}/extlinux.conf ${DEPLOYDIR}/extlinux.conf
 }
