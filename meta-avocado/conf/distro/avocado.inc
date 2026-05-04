@@ -48,10 +48,15 @@ SANITY_TESTED_DISTROS ?= " \
             fedora-40 \n \
             "
 
-# Conditionally upload RPMs to Pulp as they are written during the build.
-# Gated by the AVOCADO_PULP_UPLOAD env var (set by kas/ci/pulp-upload.yml in CI).
+# Always inherit avocado-pulp-upload so per-recipe manifests are written even
+# in dev builds. The bbclass body gates Pulp HTTP traffic on
+# AVOCADO_PULP_UPLOAD=1 (set by kas/ci/pulp-upload.yml in CI); other builds
+# get dry-run manifest entries that distro/scripts/check-pulp-parity.sh can
+# audit locally. The Pulp env vars are excluded from basehashes so toggling
+# upload mode and rotating creds do not invalidate sstate.
 AVOCADO_PULP_UPLOAD ??= "0"
-INHERIT += "${@'avocado-pulp-upload' if d.getVar('AVOCADO_PULP_UPLOAD') == '1' else ''}"
+INHERIT += "avocado-pulp-upload"
+BB_BASEHASH_IGNORE_VARS:append = " AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD"
 
 BB_SIGNATURE_HANDLER ?= "OEEquivHash"
 BB_HASHSERVE ??= "${@os.getenv('BB_HASHSERVE') or 'auto'}"

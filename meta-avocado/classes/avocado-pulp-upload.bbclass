@@ -4,34 +4,41 @@
 # manifests this class emits and performs the single modify/publication/
 # distribution update per repo.
 #
-# Activation: set AVOCADO_PULP_UPLOAD=1 in the environment (via a kas CI
-# overlay). Also requires PULP_BASE_URL, PULP_USERNAME, PULP_PASSWORD, and
-# DISTRO_CODENAME to be set. Nothing is hardcoded - all endpoints come from
-# the environment.
+# Modes:
+#   AVOCADO_PULP_UPLOAD=1   real upload + manifest. Requires PULP_BASE_URL,
+#                           PULP_USERNAME, PULP_PASSWORD, DISTRO_CODENAME.
+#                           Activated by distro/kas/ci/pulp-upload.yml.
+#   anything else           dry run: manifest only, no HTTP, no sha256. Lets
+#                           local developers run distro/scripts/check-pulp-parity.sh
+#                           against the same shape of manifests CI produces,
+#                           without needing Pulp credentials.
 #
-# Failure mode: fail-closed. Any upload or lookup error raises bb.fatal, which
-# fails the recipe and the build.
+# Hook point: SSTATEPOSTINSTFUNCS, not do_package_write_rpm[postfuncs]. The
+# postfunc-on-the-task approach was tried first and failed silently on the
+# live-build path: sstate.bbclass reorders user postfuncs ahead of
+# sstate_task_postfunc, so they fire before the file copy from PKGWRITEDIRRPM
+# to DEPLOY_DIR_RPM and before the SSTATE manifest is written. addtask was
+# tried next and works for normal recipes, but kernel.bbclass's task-graph
+# manipulation causes bitbake's scheduler to silently skip a separately-added
+# task even with [nostamp] and a clear after-do_package_write_rpm dependency.
+# SSTATEPOSTINSTFUNCS sidesteps both: it fires from inside sstate_install
+# AFTER files are in DEPLOY_DIR_RPM and the SSTATE manifest is written, on
+# both the live-build path (via sstate_task_postfunc) and the setscene path
+# (via sstate_setscene). It is invoked from within the parent task, so the
+# scheduler cannot drop it.
+#
+# Failure mode: fail-closed. Any upload or lookup error in real-upload mode
+# raises bb.fatal, which fails the recipe and the build.
 
 inherit avocado-arch-utils
 
-# For recipes that actually build, run the upload as a separate task AFTER
-# do_package_write_rpm — so the sstate-outputdirs copy from ${WORKDIR}/
-# deploy-rpms to ${DEPLOY_DIR_RPM} has completed by the time we scan.
-addtask pulp_rpm_push after do_package_write_rpm before do_build
-do_pulp_rpm_push[nostamp] = "1"
-# Bitbake sandboxes tasks in a network-restricted namespace by default for
-# reproducibility. This task legitimately needs to reach Pulp.
-do_pulp_rpm_push[network] = "1"
+SSTATEPOSTINSTFUNCS:append = " avocado_pulp_postinst"
 
-# For recipes satisfied entirely by sstate, the separate task gets pruned
-# by the scheduler. Hook the same logic as a postfunc on the setscene
-# task, which extracts RPMs directly to DEPLOY_DIR_RPM during its run —
-# so the postfunc fires after files are in place. Gated by
-# AVOCADO_PULP_UPLOAD so non-CI builds don't need Pulp access.
-python() {
-    if d.getVar('AVOCADO_PULP_UPLOAD') == '1':
-        d.appendVarFlag('do_package_write_rpm_setscene', 'postfuncs', ' do_pulp_rpm_push')
-}
+# Pulp credentials and the upload-mode toggle are environment, not build
+# inputs. Excluding them from vardeps keeps task hashes stable when creds
+# rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
+# (AVOCADO_PULP_UPLOAD=1) builds.
+avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD"
 
 def _avocado_pulp_env(d):
     # Read via the bitbake datastore rather than os.environ: bitbake filters
@@ -129,8 +136,9 @@ def _avocado_rpms_for_recipe(d):
     # do_package_write_rpm task. ${SSTATE_MANFILEPREFIX} expands to the exact
     # per-recipe file prefix (no globbing needed), so sibling recipes with
     # similar names (native, nativesdk variants) don't get their manifests
-    # mis-attributed to this one. Populated for both real and setscene paths
-    # before any task depending on do_package_write_rpm runs.
+    # mis-attributed to this one. The manifest is written by sstate_install
+    # before SSTATEPOSTINSTFUNCS is invoked, so it is reliably present here
+    # on both live-build and setscene paths.
     import os
     manfile = d.expand('${SSTATE_MANFILEPREFIX}.package_write_rpm')
     if not manfile or not os.path.isfile(manfile):
@@ -149,16 +157,30 @@ def _avocado_rpms_for_recipe(d):
             results.append((pkg_arch, arch_dir, line))
     return results
 
-python do_pulp_rpm_push() {
+python avocado_pulp_postinst() {
     import os, hashlib, json, bb
 
-    if d.getVar('AVOCADO_PULP_UPLOAD') != '1':
+    # SSTATEPOSTINSTFUNCS fires for every sstate task. Filter to
+    # package_write_rpm only - we don't care about populate_sysroot etc.
+    # BB_CURRENTTASK is set by bitbake-worker to taskname.replace("do_", "").
+    task = d.getVar('BB_CURRENTTASK') or ''
+    if task not in ('package_write_rpm', 'package_write_rpm_setscene'):
         return
 
+    do_upload = d.getVar('AVOCADO_PULP_UPLOAD') == '1'
+
     distro_codename = d.getVar('DISTRO_CODENAME') or ''
-    if '/' not in distro_codename:
-        bb.fatal("avocado-pulp-upload: DISTRO_CODENAME must be set as 'release/channel'")
-    release, channel = distro_codename.split('/', 1)
+    if '/' in distro_codename:
+        release, channel = distro_codename.split('/', 1)
+    elif do_upload:
+        bb.fatal("avocado-pulp-upload: AVOCADO_PULP_UPLOAD=1 but DISTRO_CODENAME must be set as 'release/channel'")
+    else:
+        # Dry-run path: tolerate a non-canonical DISTRO_CODENAME (or none) so
+        # local dev builds without the CI overlay still emit manifests for the
+        # parity check. The repo_path/repo_name fields end up with placeholder
+        # values, which is fine — dry-run entries are flagged dry_run=true and
+        # the parity check only counts lines.
+        release, channel = (distro_codename or 'dev'), 'local'
 
     deploy_dir = d.getVar('DEPLOY_DIR')
     pn = d.getVar('PN')
@@ -188,20 +210,19 @@ python do_pulp_rpm_push() {
     if not rpms:
         return
 
-    # Look up Pulp creds only when we actually need them (not for excluded
-    # recipes, so those can't fail on missing env either).
+    # Look up Pulp creds only when we actually need them (real upload + not
+    # excluded), so dry-run and excluded-only paths can't fail on missing env.
     base = user = pw = None
-    if not excluded:
+    if do_upload and not excluded:
         base, user, pw = _avocado_pulp_env(d)
 
     manifest_dir = os.path.join(deploy_dir, 'pulp-uploads')
     bb.utils.mkdirhier(manifest_dir)
     manifest_path = os.path.join(manifest_dir, f"{pn}-{pv}-{pr}-{machine}{mc_suffix}.jsonl")
 
-    # Truncate on open: the addtask task and the setscene postfunc may both
-    # fire for setscene-satisfied recipes, and both produce the same set of
-    # entries. Last writer wins — either is authoritative and the content is
-    # identical, so no data loss.
+    # Truncate on open: SSTATEPOSTINSTFUNCS may fire on both the live and
+    # setscene path for the same recipe in unusual scenarios. Last writer
+    # wins - the content is identical, so no data loss.
     with open(manifest_path, 'w') as mf:
         for pkg_arch, arch_dir, path in rpms:
             if arch_dir.startswith('sdk_provides_dummy') or pkg_arch.startswith('sdk-provides-dummy'):
@@ -217,51 +238,44 @@ python do_pulp_rpm_push() {
             tail = repo_path[len(prefix):] if repo_path.startswith(prefix) else repo_path
             repo_name = f"{release}-{channel}-" + tail.replace('/', '-')
 
-            if excluded:
-                entry = {
-                    "rpm_name": os.path.basename(path),
-                    "sha256": "",
-                    "arch_dir": arch_dir,
-                    "repo_name": repo_name,
-                    "repo_path": repo_path,
-                    "pulp_href": "",
-                    "machine": machine,
-                    "sdkmachine": sdkmachine,
-                    "uploaded": False,
-                    "excluded": True,
-                }
-                mf.write(json.dumps(entry) + "\n")
-                mf.flush()
-                bb.note(f"avocado-pulp-upload: {entry['rpm_name']} (excluded, not published)")
-                continue
-
-            h = hashlib.sha256()
-            with open(path, 'rb') as f:
-                for chunk in iter(lambda: f.read(1 << 20), b''):
-                    h.update(chunk)
-            sha256_hex = h.hexdigest()
-
-            existing = _avocado_pulp_lookup(base, user, pw, sha256_hex)
-            if existing:
-                pulp_href = existing
-                uploaded = False
-            else:
-                pulp_href = _avocado_pulp_upload(base, user, pw, path)
-                uploaded = True
-
             entry = {
                 "rpm_name": os.path.basename(path),
-                "sha256": sha256_hex,
+                "sha256": "",
                 "arch_dir": arch_dir,
                 "repo_name": repo_name,
                 "repo_path": repo_path,
-                "pulp_href": pulp_href,
+                "pulp_href": "",
                 "machine": machine,
                 "sdkmachine": sdkmachine,
-                "uploaded": uploaded,
-                "excluded": False,
+                "uploaded": False,
+                "excluded": excluded,
+                "dry_run": not do_upload,
             }
+
+            if not excluded and do_upload:
+                h = hashlib.sha256()
+                with open(path, 'rb') as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b''):
+                        h.update(chunk)
+                sha256_hex = h.hexdigest()
+
+                existing = _avocado_pulp_lookup(base, user, pw, sha256_hex)
+                if existing:
+                    pulp_href = existing
+                    uploaded_flag = False
+                else:
+                    pulp_href = _avocado_pulp_upload(base, user, pw, path)
+                    uploaded_flag = True
+
+                entry["sha256"] = sha256_hex
+                entry["pulp_href"] = pulp_href
+                entry["uploaded"] = uploaded_flag
+
             mf.write(json.dumps(entry) + "\n")
             mf.flush()
-            bb.note(f"avocado-pulp-upload: {entry['rpm_name']} -> {pulp_href} ({'uploaded' if uploaded else 'reused'})")
+
+            if excluded:
+                bb.note(f"avocado-pulp-upload: {entry['rpm_name']} (excluded, not published)")
+            elif do_upload:
+                bb.note(f"avocado-pulp-upload: {entry['rpm_name']} -> {entry['pulp_href']} ({'uploaded' if entry['uploaded'] else 'reused'})")
 }
