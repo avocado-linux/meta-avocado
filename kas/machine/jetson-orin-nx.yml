@@ -1,0 +1,21 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/nvidia.yml
+    - repo: meta-avocado
+      file: kas/feature/multi-kernel-jetson.yml
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-nvidia:
+
+machine: avocado-jetson-orin-nx

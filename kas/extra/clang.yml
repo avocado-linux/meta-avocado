@@ -3,7 +3,7 @@ header:
 
 repos:
   meta-clang:
-    url: https://github.com/kraj/meta-clang.git
+    url: https://github.com/avocado-linux/vendor-meta-clang.git
     path: meta-clang
     commit: f26bab34e6c208149fe1ad04521864b663489f4d
     branch: scarthgap-clang20
