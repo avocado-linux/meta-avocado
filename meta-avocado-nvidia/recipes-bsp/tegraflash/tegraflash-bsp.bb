@@ -63,7 +63,25 @@ do_deploy[depends] += "tegra-initrd-flash-initramfs:do_image_complete"
 # Creates both a directory (for SDK stone path) and a tarball (for stone manifest inclusion)
 do_deploy() {
     install -d ${DEPLOYDIR}/tegraflash-bsp
-    
+
+    # Empty carrier-bsp stub. Stone manifests for SOM-style targets
+    # (jetson-orin-nx, etc.) declare `tegraflash_carrier_bsp: "carrier-bsp"`
+    # so that BSP extensions can contribute carrier overrides at
+    # avocado-cli build time via stone_include_paths. The Yocto-time
+    # `do_stone_validate` / `do_stone_bundle` tasks run against
+    # ${DEPLOY_DIR_IMAGE} only and have no extension content; without
+    # this stub, validation fails with "1 file(s) not found:
+    # device: rootdisk, image: tegraflash_carrier_bsp -> carrier-bsp".
+    #
+    # The .placeholder file ensures the directory survives the sstate
+    # copy from DEPLOYDIR to DEPLOY_DIR_IMAGE (some copy mechanisms drop
+    # empty directories). At avocado-cli build time, the carrier
+    # extension's stone_include_paths puts its own carrier-bsp/ earlier
+    # in stone's `-i` search order, so the real carrier files win and
+    # this stub is harmless.
+    install -d ${DEPLOYDIR}/carrier-bsp
+    touch ${DEPLOYDIR}/carrier-bsp/.placeholder
+
     # Copy all tegraflash files from staging (includes binaries, configs, firmware, DTBs, etc.)
     if [ -d ${STAGING_DATADIR}/tegraflash ]; then
         bbnote "Copying all files from staging tegraflash directory"
