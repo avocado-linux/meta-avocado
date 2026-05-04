@@ -1,5 +1,8 @@
 header:
   version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/arm.yml
 
 repos:
   meta-stm:
@@ -12,3 +15,4 @@ repos:
 
 local_conf_header:
   vendor-stm: |
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-stm-extra"
