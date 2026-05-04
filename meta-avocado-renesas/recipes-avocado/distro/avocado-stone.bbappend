@@ -8,7 +8,7 @@ do_compile[depends] += "extlinux-rzv2n-sr-som:do_deploy"
 DEPENDS += " jq-native"
 
 # Shared GPT-image-build helper used by both the sd and emmc profiles. The
-# base avocado-stone.bb only auto-stages files for stone-img/sd/usb/peridio
+# base avocado-stone.bb only auto-stages files for stone-img/sd/usb
 # overrides, so we wire stone-serial and stone-emmc here, plus the helper
 # that both profile scripts source.
 SRC_URI += " \

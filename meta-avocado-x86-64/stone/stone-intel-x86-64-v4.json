@@ -33,9 +33,6 @@
       },
       "usb": {
         "script": "stone-provision-usb.sh"
-      },
-      "peridio": {
-        "script": "stone-provision-peridio.sh"
       }
     }
   },
