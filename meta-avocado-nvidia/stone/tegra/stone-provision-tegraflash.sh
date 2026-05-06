@@ -37,6 +37,7 @@ tegraflash_esp_file=$(jq -r '.storage_devices.rootdisk.images.tegraflash_esp // 
 tegraflash_tos_file=$(jq -r '.storage_devices.rootdisk.images.tegraflash_tos // empty' "$AVOCADO_STONE_MANIFEST")
 tegraflash_bsp_dir=$(jq -r '.storage_devices.rootdisk.images.tegraflash_bsp // empty' "$AVOCADO_STONE_MANIFEST")
 tegraflash_tools_dir=$(jq -r '.storage_devices.rootdisk.images.tegraflash_tools // empty' "$AVOCADO_STONE_MANIFEST")
+tegraflash_carrier_bsp_dir=$(jq -r '.storage_devices.rootdisk.images.tegraflash_carrier_bsp // empty' "$AVOCADO_STONE_MANIFEST")
 
 # Optional device tree files (may be in BSP or specified explicitly)
 dtb_file=$(jq -r '.storage_devices.rootdisk.images.dtb // empty' "$AVOCADO_STONE_MANIFEST")
@@ -59,6 +60,7 @@ echo "  tegraflash_esp: $tegraflash_esp_file"
 echo "  tegraflash_tos: $tegraflash_tos_file"
 echo "  tegraflash_bsp: $tegraflash_bsp_dir"
 echo "  tegraflash_tools: $tegraflash_tools_dir"
+echo "  tegraflash_carrier_bsp: $tegraflash_carrier_bsp_dir"
 echo "  dtb: $dtb_file"
 echo "  bpmp_dtb: $bpmp_dtb_file"
 echo "  overlays: $tegraflash_overlays"
@@ -116,6 +118,93 @@ else
     else
         echo "WARNING: Tegraflash tools not found in manifest or SDK"
         echo "Provisioning may fail without flash tools"
+    fi
+fi
+
+# ─── Carrier-BSP overlay ─────────────────────────────────────────────
+# SOM-style targets (jetson-orin-nx, jetson-orin-nano, jetson-agx-orin)
+# layer carrier customization via a `carrier-bsp/` slot in the stone
+# bundle. avocado-cli composes the slot from the active runtime's BSP
+# extensions (`stone_include_paths`); the Yocto-side tegraflash-bsp
+# ships only an empty `.placeholder` stub, so any extension files win.
+#
+# Two-step apply:
+#   1. Flatten carrier-bsp/* into build_dir/, clobbering any same-named
+#      MACHINE-baked file (e.g. a carrier-modified DTB shadows the
+#      stock DevKit DTB). This is the filename-shadowing path that
+#      works without any knobs.
+#   2. If carrier-bsp/carrier.env declares CARRIER_FV_<NAME>=<value>
+#      or CARRIER_ENV_<NAME>=<value>, rewrite the corresponding
+#      <NAME>= line in flashvars / .env.initrd-flash. This lets a
+#      carrier ship files under any name (including renamed-with-suffix
+#      variants like `*-adv.dtb`) and redirect the flash flow at them.
+if [ -n "$tegraflash_carrier_bsp_dir" ]; then
+    carrier_source="${AVOCADO_STONE_DATA_DIR}/${tegraflash_carrier_bsp_dir}"
+    if [ -d "$carrier_source" ]; then
+        carrier_files=$(find "$carrier_source" -maxdepth 1 -type f ! -name '.placeholder' | wc -l)
+        if [ "$carrier_files" -gt 0 ]; then
+            echo "Carrier-BSP overlay: $carrier_source ($carrier_files file(s))"
+            # cp -a "$src"/. preserves attrs and copies hidden files,
+            # matching the BSP/tools copy pattern above.
+            cp -a "$carrier_source"/. "$build_dir/"
+
+            carrier_env="$build_dir/carrier.env"
+            if [ -f "$carrier_env" ]; then
+                # Print the human-readable label first so the active
+                # carrier is obvious in provision logs.
+                _label=$(grep -E '^CARRIER_LABEL=' "$carrier_env" | head -1 \
+                            | sed -E 's/^CARRIER_LABEL=//; s/^"//; s/"$//')
+                if [ -n "$_label" ]; then
+                    echo "  Carrier: $_label"
+                fi
+
+                # Apply CARRIER_FV_/CARRIER_ENV_ rewrites. Each knob
+                # patches an existing <NAME>= line; if <NAME> isn't in
+                # the target file we WARN rather than append, since a
+                # spurious new line can break the flash flow.
+                while IFS= read -r line; do
+                    key="${line%%=*}"
+                    val="${line#*=}"
+                    # Strip surrounding double or single quotes.
+                    val="${val#\"}"; val="${val%\"}"
+                    val="${val#\'}"; val="${val%\'}"
+                    # Escape sed delimiter occurrences (defensive — '|'
+                    # is unlikely in DTB filenames or ODMDATA values).
+                    esc_val="${val//|/\\|}"
+
+                    case "$key" in
+                        CARRIER_FV_*)
+                            fv_key="${key#CARRIER_FV_}"
+                            if [ -f "$build_dir/flashvars" ] && \
+                               grep -qE "^${fv_key}=" "$build_dir/flashvars"; then
+                                sed -i -E "s|^(${fv_key})=.*|\\1=\"${esc_val}\"|" \
+                                    "$build_dir/flashvars"
+                                echo "  flashvars: ${fv_key}=${val}"
+                            else
+                                echo "  WARNING: CARRIER_FV_${fv_key} target not found in flashvars; skipped"
+                            fi
+                            ;;
+                        CARRIER_ENV_*)
+                            env_key="${key#CARRIER_ENV_}"
+                            if [ -f "$build_dir/.env.initrd-flash" ] && \
+                               grep -qE "^${env_key}=" "$build_dir/.env.initrd-flash"; then
+                                sed -i -E "s|^(${env_key})=.*|\\1=\"${esc_val}\"|" \
+                                    "$build_dir/.env.initrd-flash"
+                                echo "  .env.initrd-flash: ${env_key}=${val}"
+                            else
+                                echo "  WARNING: CARRIER_ENV_${env_key} target not found in .env.initrd-flash; skipped"
+                            fi
+                            ;;
+                        # CARRIER_LABEL handled above.
+                        # CARRIER_SIGNED_* reserved for Phase 2 (signed flash).
+                    esac
+                done < <(grep -E '^[[:space:]]*CARRIER_(FV|ENV)_' "$carrier_env")
+            fi
+        else
+            echo "Carrier-BSP slot empty (no overrides; using MACHINE-baked defaults)"
+        fi
+    else
+        echo "Carrier-BSP source not found: $carrier_source (skipping overlay)"
     fi
 fi
 

@@ -8,10 +8,12 @@ generic `jetson-orin-nx` MACHINE.
 
 ## Why this pattern
 
-Historically each Jetson product got its own Yocto MACHINE
-(`avocado-icam-540`, `avocado-jetson-agx-orin-devkit`, …). That works,
-but every new carrier required a meta-tegra recipe, a stone manifest, a
-kas yml, and SDK-target hooks. Customers couldn't really add their own.
+Historically each Jetson product got its own Yocto MACHINE — one
+per carrier-on-SOM combination (e.g. the now-retired
+`avocado-jetson-agx-orin-devkit` and `avocado-icam-540`, each with
+their own kas yml, stone manifest, and SDK-target hooks). That works,
+but every new carrier required a fresh recipe set and customers
+couldn't really add their own.
 
 The new pattern splits the BSP at the SOM/carrier boundary:
 
@@ -289,22 +291,27 @@ Watch for these lines in the provision output to confirm the carrier
 overlay took effect:
 
 ```
-[carrier overlay: active] source=...
-Overlaid <N> carrier files onto BSP
-Carrier overrides loaded from carrier.env:
-  CARRIER_FV_*=...
-  CARRIER_ENV_*=...
-Applying <NAME>=<value> to flashvars
-Applying <NAME>=<value> to .env.initrd-flash
+Carrier-BSP overlay: /opt/_avocado/<target>/.../carrier-bsp (<N> file(s))
+  Carrier: <label from CARRIER_LABEL>
+  flashvars: <NAME>=<value>
+  .env.initrd-flash: <NAME>=<value>
+  ...
 ```
 
-If you see `[carrier overlay: active]` but `Overlaid 1 carrier files
-onto BSP` (just the `.placeholder` from the Yocto stub), the
-extension's `stone/carrier-bsp/` didn't reach the bundle — typically
-because the consumer project's `extensions:` array doesn't include
-your BSP extension, or because the avocado-cli binary is older than
-the version that emits absolute container paths for remote-extension
-include paths.
+If you see `Carrier-BSP slot empty (no overrides; using MACHINE-baked
+defaults)`, the extension's `stone/carrier-bsp/` didn't reach the
+bundle — typically because the consumer project's `extensions:` array
+doesn't include your BSP extension, or because the avocado-cli binary
+is older than the version that emits absolute container paths for
+remote-extension include paths.
+
+If you see `WARNING: CARRIER_FV_<NAME> target not found in flashvars;
+skipped`, the carrier.env declared a knob whose target variable isn't
+present in the MACHINE-baked `flashvars` (or `.env.initrd-flash`).
+The parser refuses to append new lines defensively — silently adding
+unknown vars can break the flash flow. Either remove the unused knob
+from carrier.env, or fix the variable name (a typo is the most common
+cause).
 
 ## Caveats
 
