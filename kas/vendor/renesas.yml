@@ -3,6 +3,8 @@ header:
   includes:
   - repo: meta-avocado
     file: kas/vendor/arm.yml
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
 
 repos:
   meta-avocado:
@@ -18,7 +20,7 @@ repos:
     layers:
       meta-rz-bsp:
       meta-rz-distro:
-  
+
   meta-solidrun-arm-rzg2lc:
     url: https://github.com/avocado-linux/vendor-meta-solidrun-arm-rzg2lc
     path: meta-solidrun-arm-rzg2lc
@@ -27,8 +29,8 @@ repos:
     layers:
       meta-rzv2n:
       meta:
-  
+
 local_conf_header:
   vendor-renesas: |
-    DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan"
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan virtualization seccomp"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-solidrun-extra"

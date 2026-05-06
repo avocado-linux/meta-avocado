@@ -1,5 +1,8 @@
 header:
   version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
 
 repos:
   meta-synaptics:
@@ -22,6 +25,6 @@ repos:
 local_conf_header:
   vendor-synaptics: |
     LICENSE_FLAGS_ACCEPTED:append = " commercial Synaptics-EULA"
-    DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan"
+    DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan virtualization seccomp"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-synaptics"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-synaptics-extra"
