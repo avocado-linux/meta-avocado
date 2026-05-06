@@ -88,7 +88,7 @@ if check_sdp; then
     echo "Device detected in serial download mode"
 else
     echo "Please put device into serial download mode..."
-    echo "(Hold BOOT button, press and release RESET, then release BOOT)"
+    echo "(Set the board's boot-mode switches to serial download and power-cycle; see the board user manual for the exact positions)"
     for i in $(seq 1 60); do
         if check_sdp; then
             echo "Device detected in serial download mode"
