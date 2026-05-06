@@ -16,6 +16,9 @@
         "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
+    "files": [
+      "build-disk-image.sh"
+    ],
     "profiles": {
       "serial": {
         "script": "stone-provision-serial.sh",
