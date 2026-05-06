@@ -11,7 +11,8 @@ RRECOMMENDS:${PN} = "kernel-module-zram kernel-module-lz4 kernel-module-lz4-comp
 
 PV = "1.2.1"
 SRCREV = "7855941d1a06257075e7f5a268b1f7bb702d5466"
-SRC_URI = "git://github.com/systemd/zram-generator.git;protocol=https;branch=main"
+SRC_URI = "git://github.com/systemd/zram-generator.git;protocol=https;branch=main \
+           file://zram.conf"
 
 require ${BPN}-crates.inc
 
@@ -36,6 +37,9 @@ do_compile() {
 
 do_install() {
 	oe_runmake install NOBUILD=true NOMAN=true BUILDTYPE="${RUST_HOST_SYS}/release" DESTDIR="${D}" PREFIX="${prefix}"
+
+	install -d ${D}${sysconfdir}/modules-load.d
+	install -m 0644 ${WORKDIR}/zram.conf ${D}${sysconfdir}/modules-load.d/zram.conf
 }
 
-FILES:${PN} += "${systemd_unitdir}"
+FILES:${PN} += "${systemd_unitdir} ${sysconfdir}/modules-load.d/zram.conf"
