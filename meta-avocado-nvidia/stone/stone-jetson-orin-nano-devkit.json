@@ -74,7 +74,8 @@
         "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano-devkit.esp",
         "tegraflash_tos": "tos-avocado-jetson-orin-nano-devkit.img",
         "tegraflash_bsp": "tegraflash-bsp",
-        "tegraflash_tools": "tegraflash-tools"
+        "tegraflash_tools": "tegraflash-tools",
+        "tegraflash_carrier_bsp": "carrier-bsp"
       }
     }
   }
