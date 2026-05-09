@@ -20,25 +20,30 @@ RDEPENDS:${PN} = " \
   chrony \
   cifs-utils \
   cockpit \
+  cockpit-networkmanager \
   cronie \
   coreutils \
   cryptoauthlib \
   devmem2 \
+  dnsmasq \
   dtc \
   ${@bb.utils.contains('MACHINE_FEATURES', 'deepx', "${DEEPX_PACKAGES}", '', d)} \
   ethtool \
   fwup \
   git \
   glibc-utils \
+  hostapd \
   htop \
   i2c-tools \
   iperf3 \
   iproute2 \
+  iptables \
   jq \
   kabtool \
   less \
   libgpiod \
   libgpiod-tools \
+  libimobiledevice \
   libnss-mdns \
   libv4l \
   libwebsockets \
@@ -50,6 +55,9 @@ RDEPENDS:${PN} = " \
   mosquitto \
   net-snmp \
   net-tools \
+  networkmanager \
+  networkmanager-daemon \
+  networkmanager-nmcli \
   nodejs \
   ntfs-3g-ntfsprogs \
   opencv \
@@ -76,6 +84,7 @@ RDEPENDS:${PN} = " \
   tcpdump \
   tmux \
   tio \
+  usbmuxd \
   usbutils \
   uv \
   v4l-utils \

@@ -28,9 +28,109 @@ if [[ ! -f "$archive_file" ]]; then
 fi
 
 VID=0a5c
-# Supported boot device PIDs: BCM2711 (Pi4) and BCM2712 (Pi5)
+# Supported boot device PIDs: BCM2711 (Pi4/CM4) and BCM2712 (Pi5)
 PIDS=("2711" "2712")
 TIMEOUT=20
+
+# --- Step 0: Configure EEPROM BOOT_ORDER (optional) ---
+# BOOT_ORDER nibbles read right-to-left (first attempt -> last):
+#   1=SD, 2=network, 4=USB, 5=BCM-USB, 6=NVMe/SATA(PCIe), f=restart
+# Default 0xf41 = SD -> USB -> restart. Useful when re-flashing SD on a
+# board whose EEPROM was previously set NVMe/PCIe-first.
+#   AVOCADO_SKIP_EEPROM_CONFIG=1  - skip this step
+#   AVOCADO_BOOT_ORDER=0x...      - override BOOT_ORDER value
+if [[ "${AVOCADO_SKIP_EEPROM_CONFIG:-0}" != "1" ]]; then
+    BOOT_ORDER="${AVOCADO_BOOT_ORDER:-0xf41}"
+    echo "=== Step 0: Configure EEPROM BOOT_ORDER=${BOOT_ORDER} ==="
+
+    rpiboot_path=$(which rpiboot)
+    if [[ -z "$rpiboot_path" ]]; then
+        echo "Error: rpiboot not found in PATH"
+        exit 1
+    fi
+    if [[ "$rpiboot_path" =~ ^(.*)/usr/ ]]; then
+        sysroot_prefix="${BASH_REMATCH[1]}"
+    else
+        echo "Error: Could not determine sysroot prefix from rpiboot path: $rpiboot_path"
+        exit 1
+    fi
+
+    echo "Waiting for rpi boot device for EEPROM flash..."
+    eeprom_start=$(date +%s)
+    detected_pid=""
+    while :; do
+        now=$(date +%s)
+        if (( now - eeprom_start >= TIMEOUT )); then
+            echo ""
+            echo "Timed out after $TIMEOUT seconds waiting for rpi boot device"
+            exit 1
+        fi
+        for d in /sys/bus/usb/devices/*; do
+            [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
+            device_vid=$(<"$d/idVendor")
+            device_pid=$(<"$d/idProduct")
+            if [[ "$device_vid" == "$VID" ]]; then
+                for pid in "${PIDS[@]}"; do
+                    if [[ "$device_pid" == "$pid" ]]; then
+                        detected_pid="$pid"
+                        break 3
+                    fi
+                done
+            fi
+        done
+        echo -n "."
+        sleep 0.5
+    done
+    echo ""
+    echo "rpi boot device detected (${VID}:${detected_pid})"
+
+    # PID 2712 (Pi5) uses recovery5; PID 2711 (Pi4/CM4) uses recovery.
+    if [[ "$detected_pid" == "2712" ]]; then
+        recovery_subdir="recovery5"
+    else
+        recovery_subdir="recovery"
+    fi
+    recovery_dir="${sysroot_prefix}/usr/share/rpiboot/${recovery_subdir}"
+    if [[ ! -d "$recovery_dir" ]]; then
+        echo "Error: recovery directory not found at: $recovery_dir"
+        exit 1
+    fi
+
+    # Build a workdir copy with the desired BOOT_ORDER baked into boot.conf.
+    # -L dereferences pieeprom.original.bin, which ships as a symlink.
+    eeprom_workdir="${AVOCADO_STONE_BUILD_DIR}/eeprom-config"
+    rm -rf "$eeprom_workdir"
+    cp -rL "$recovery_dir" "$eeprom_workdir"
+
+    if [[ -f "$eeprom_workdir/boot.conf" ]]; then
+        sed -i "s/^BOOT_ORDER=.*/BOOT_ORDER=${BOOT_ORDER}/" "$eeprom_workdir/boot.conf"
+    else
+        echo "BOOT_ORDER=${BOOT_ORDER}" > "$eeprom_workdir/boot.conf"
+    fi
+    grep "BOOT_ORDER" "$eeprom_workdir/boot.conf"
+
+    tools_dir="${sysroot_prefix}/usr/share/rpiboot/tools"
+    if [[ ! -f "$tools_dir/update-pieeprom.sh" ]]; then
+        echo "Error: update-pieeprom.sh not found at $tools_dir/update-pieeprom.sh"
+        exit 1
+    fi
+    echo "Regenerating pieeprom.bin..."
+    (cd "$eeprom_workdir" && "$tools_dir/update-pieeprom.sh")
+
+    echo "Flashing EEPROM..."
+    if ! "$rpiboot_path" -d "$eeprom_workdir"; then
+        echo "Error: rpiboot EEPROM flash failed"
+        exit 1
+    fi
+    rm -rf "$eeprom_workdir"
+
+    echo ""
+    echo "EEPROM flashed with BOOT_ORDER=${BOOT_ORDER}."
+    echo "Power-cycle the device and put it back into USB boot mode,"
+    read -p "then press Enter to continue. " 2>&1
+else
+    echo "Skipping EEPROM configuration (AVOCADO_SKIP_EEPROM_CONFIG=1)"
+fi
 
 start_time=$(date +%s)
 last_boot_dot_time=0
