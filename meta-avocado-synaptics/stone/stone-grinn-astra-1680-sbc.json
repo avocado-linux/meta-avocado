@@ -38,7 +38,14 @@
         "bootloader": "bootloader.subimg",
         "boot": "linux_bootimgs.subimg",
         "rootfs": "avocado-image-rootfs-grinn-astra-1680-sbc.erofs-lz4",
-        "var": "avocado-image-var-grinn-astra-1680-sbc.btrfs"
+        "var": "avocado-image-var-grinn-astra-1680-sbc.btrfs",
+        "firmware": "firmware.subimg",
+        "key": "key.subimg",
+        "preboot": "preboot.subimg",
+        "tee": "tee.subimg",
+        "fastlogo": "fastlogo.subimg.gz",
+        "emmc_image_list": "emmc_image_list",
+        "emmc_part_list": "emmc_part_list"
       },
       "partitions": [
         {

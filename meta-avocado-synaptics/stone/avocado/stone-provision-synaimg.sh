@@ -30,15 +30,13 @@ for tool in gzip img2simg jq; do
 done
 
 # ---------------------------------------------------------------------------
-# Derive zip path and fallback directory
+# Prepare input files: extract bootloader/boot/rootfs/var from the rootdisk zip
+# (built by stone fwup); SYNAIMG sub-images are staged into AVOCADO_STONE_DATA_DIR
+# by `stone bundle` from their Image::String entries in the manifest.
 # ---------------------------------------------------------------------------
 ROOTDISK_ZIP=$(jq -r '.storage_devices.rootdisk.out' "${AVOCADO_STONE_MANIFEST}")
 ZIP_PATH="${BUILD_DIR}/${ROOTDISK_ZIP}"
-FALLBACK_DIR="$(realpath "${AVOCADO_STONE_DATA_DIR}/../../../../runtimes/dev")"
 
-# ---------------------------------------------------------------------------
-# Prepare input files: extract from zip, fall back to runtimes/dev for the rest
-# ---------------------------------------------------------------------------
 if [ -f "${ZIP_PATH}" ]; then
     echo "Extracting images from ${ZIP_PATH}..."
     unzip -p "${ZIP_PATH}" data/bootloader.img > "${BUILD_DIR}/${BOOTLOADER_IMAGE}"
@@ -50,9 +48,7 @@ else
 fi
 
 for f in firmware.subimg key.subimg preboot.subimg tee.subimg emmc_image_list emmc_part_list fastlogo.subimg.gz; do
-    if [ ! -f "${BUILD_DIR}/${f}" ] && [ -f "${FALLBACK_DIR}/${f}" ]; then
-        cp "${FALLBACK_DIR}/${f}" "${BUILD_DIR}/${f}"
-    fi
+    cp "${AVOCADO_STONE_DATA_DIR}/${f}" "${BUILD_DIR}/${f}"
 done
 
 # ---------------------------------------------------------------------------
