@@ -27,3 +27,10 @@ SRC_URI:append:rzv2n-sr-som = " \
     file://0001-rzv2n-xspi_setup-settle-SPI-flash-before-memory-map-.patch \
     file://0001-rzv2n-bl31_platform_setup-settle-SoC-fabric-before-T.patch \
 "
+
+# meta-rz-drpai (renesas-rz/rzv2n_drp-ai_driver) carries an LPDDR4 DDR-param
+# patch targeting Renesas's vanilla TF-A 2.10. SolidRun's fork
+# (github.com/SolidRun/arm-trusted-firmware branch rzv2n_1.2.0) already has
+# those DDR fixes baked into the source tree — applying the upstream patch
+# reverse-applies and breaks do_patch. Drop it on rzv2n-sr-som.
+SRC_URI:remove:rzv2n-sr-som = "file://0000-ddr_param_def_lpddr4-rzv2n_1.patch"
