@@ -14,7 +14,17 @@ repos:
     layers:
       meta-avocado-renesas:
 
+  meta-solidrun-arm-rzg2lc:
+    url: https://github.com/avocado-linux/vendor-meta-solidrun-arm-rzg2lc
+    path: meta-solidrun-arm-rzg2lc
+    branch: scarthgap_rzv2n_dev
+    commit: 91d0eecba625c4a8beda731c4246be6c7da7c998
+    layers:
+      meta-rzv2n:
+      meta:
+
 local_conf_header:
   machine-avocado-rzv2n-sr-som: |
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-solidrun-extra"
 
 machine: avocado-rzv2n-sr-som
