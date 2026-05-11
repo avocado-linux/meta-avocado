@@ -25,7 +25,19 @@ SRC_URI += " \
     file://build-disk-image.sh \
 "
 
+# avocado-stone.bb auto-pulls stone-provision-{img,sd,usb,peridio}.sh from
+# their stone-${profile} overrides. emmc isn't one of those, so we wire it
+# explicitly here. (sd is auto-wired by the base recipe.)
+SRC_URI:append:stone-emmc = " \
+    file://stone-provision-emmc.sh \
+"
+
 do_deploy:append() {
     install -d ${DEPLOYDIR}
     install -m 0755 ${WORKDIR}/build-disk-image.sh ${DEPLOYDIR}/build-disk-image.sh
+}
+
+do_deploy:append:stone-emmc() {
+    install -d ${DEPLOYDIR}
+    install -m 0755 ${WORKDIR}/stone-provision-emmc.sh ${DEPLOYDIR}/stone-provision-emmc.sh
 }
