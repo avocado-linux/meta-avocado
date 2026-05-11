@@ -8,4 +8,5 @@ SRC_URI:append:devkit-e8 = " \
 "
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

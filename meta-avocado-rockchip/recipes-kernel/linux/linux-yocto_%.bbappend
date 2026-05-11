@@ -17,4 +17,5 @@ SRC_URI:append:rk3588 = " \
 # per-kernel rootfs/initramfs module packagegroups. Additive in single-kernel
 # feeds, load-bearing if/when an alt kernel is added later.
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

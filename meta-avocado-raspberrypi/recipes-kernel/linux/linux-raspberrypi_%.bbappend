@@ -9,4 +9,5 @@ SRC_URI:append:reterminal = " file://reterminal.cfg"
 SRC_URI:append:reterminal-dm = " file://reterminal.cfg"
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

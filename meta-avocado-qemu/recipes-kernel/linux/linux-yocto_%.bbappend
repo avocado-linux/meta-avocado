@@ -19,4 +19,5 @@ SRC_URI:append:avocado-qemuarm64 = " \
 YOCTO_BUILD_DIR = "${TOPDIR}"
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
