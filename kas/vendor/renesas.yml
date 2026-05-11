@@ -21,16 +21,14 @@ repos:
       meta-rz-bsp:
       meta-rz-distro:
 
-  meta-solidrun-arm-rzg2lc:
-    url: https://github.com/avocado-linux/vendor-meta-solidrun-arm-rzg2lc
-    path: meta-solidrun-arm-rzg2lc
-    branch: scarthgap_rzv2n_dev
-    commit: 91d0eecba625c4a8beda731c4246be6c7da7c998
+  rzv2n-drp-ai-driver:
+    url: https://github.com/renesas-rz/rzv2n_drp-ai_driver
+    path: rzv2n_drp-ai_driver
+    branch: main
+    commit: bb3e6a9283e2dda2bb4a3c25986a0a309f1db905
     layers:
-      meta-rzv2n:
-      meta:
+      meta-rz-features/meta-rz-drpai:
 
 local_conf_header:
   vendor-renesas: |
     DISTRO_FEATURES_EXTRA:append = " opengl wayland vulkan virtualization seccomp"
-    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-solidrun-extra"
