@@ -12,4 +12,5 @@ SRC_URI:append = " \
 KERNEL_CONFIG_FRAGMENTS:append = " ${WORKDIR}/avocado-core.cfg ${WORKDIR}/avocado-extra.cfg"
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

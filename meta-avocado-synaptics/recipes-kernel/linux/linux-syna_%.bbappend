@@ -19,4 +19,5 @@ do_deploy:prepend() {
 }
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

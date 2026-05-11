@@ -14,6 +14,7 @@ KERNEL_CONFIG_FRAGMENTS:append = " ${WORKDIR}/avocado-core.cfg ${WORKDIR}/avocad
 KERNEL_CONFIG_FRAGMENTS:append:rubikpi3 = " ${WORKDIR}/rubikpi3-wifi.cfg"
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 
 # Note: upstream qcom_defconfig builds the rubikpi3 storage stack

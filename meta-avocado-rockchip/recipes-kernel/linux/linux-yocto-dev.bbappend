@@ -31,4 +31,5 @@ SRC_URI:append:rk3588 = " \
 "
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc

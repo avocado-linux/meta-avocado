@@ -29,6 +29,7 @@ do_kernel_configme:append() {
 }
 
 inherit avocado-kernel-feed
+inherit avocado-kernel-builtin-provides
 
 # Emit per-kernel rootfs/initramfs module packagegroups. avocado-cli auto-
 # appends these at install time (keyed on whether avocado-pkg-rootfs /
@@ -56,7 +57,28 @@ SUMMARY:packagegroup-avocado-initramfs-modules = "Kernel modules pulled into the
 RPROVIDES:packagegroup-avocado-rootfs-modules = "packagegroup-avocado-rootfs-modules"
 RPROVIDES:packagegroup-avocado-initramfs-modules = "packagegroup-avocado-initramfs-modules"
 
+# Tegra hardware modules previously contributed via meta-tegra's unversioned
+# MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS in tegra-common.inc. Routed here as
+# fully-qualified ${KERNEL_VERSION}-suffixed RDEPENDS so dnf installs this
+# kernel's modules instead of NVR-tiebreaking against another kernel in the
+# rolling feed. avocado-cli auto-appends this packagegroup whenever the
+# rootfs is being installed and this kernel is the lockfile-pinned one.
 RDEPENDS:packagegroup-avocado-rootfs-modules = " \
+    kernel-module-ina3221-${KERNEL_VERSION} \
+    kernel-module-lm90-${KERNEL_VERSION} \
+    kernel-module-tegra-bpmp-thermal-${KERNEL_VERSION} \
+    kernel-module-spi-tegra114-${KERNEL_VERSION} \
+    kernel-module-pwm-fan-${KERNEL_VERSION} \
+    kernel-module-governor-userspace-${KERNEL_VERSION} \
+    kernel-module-ucsi-ccg-${KERNEL_VERSION} \
+    kernel-module-pcie-tegra194-${KERNEL_VERSION} \
+    kernel-module-phy-tegra194-p2u-${KERNEL_VERSION} \
+    kernel-module-nvme-${KERNEL_VERSION} \
+    kernel-module-pwm-tegra-${KERNEL_VERSION} \
+    kernel-module-tegra-xudc-${KERNEL_VERSION} \
+    kernel-module-lz4-${KERNEL_VERSION} \
+    kernel-module-lz4-compress-${KERNEL_VERSION} \
+    kernel-module-sch-fq-codel-${KERNEL_VERSION} \
     ${@bb.utils.contains('DISTRO_FEATURES','zram','kernel-module-zram-${KERNEL_VERSION}','',d)} \
 "
 RDEPENDS:packagegroup-avocado-initramfs-modules = " \
