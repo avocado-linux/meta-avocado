@@ -32,14 +32,16 @@ VID=0a5c
 PIDS=("2711" "2712")
 TIMEOUT=20
 
-# --- Step 0: Configure EEPROM BOOT_ORDER (optional) ---
+# --- Step 0: Configure EEPROM BOOT_ORDER (opt-in) ---
+# Off by default — most users only need to write the storage media. Opt in
+# when re-flashing on a board whose EEPROM is set to a different boot source
+# (e.g. NVMe/PCIe-first) and you need to point it back at SD/USB.
 # BOOT_ORDER nibbles read right-to-left (first attempt -> last):
 #   1=SD, 2=network, 4=USB, 5=BCM-USB, 6=NVMe/SATA(PCIe), f=restart
-# Default 0xf41 = SD -> USB -> restart. Useful when re-flashing SD on a
-# board whose EEPROM was previously set NVMe/PCIe-first.
-#   AVOCADO_SKIP_EEPROM_CONFIG=1  - skip this step
-#   AVOCADO_BOOT_ORDER=0x...      - override BOOT_ORDER value
-if [[ "${AVOCADO_SKIP_EEPROM_CONFIG:-0}" != "1" ]]; then
+# Default 0xf41 = SD -> USB -> restart.
+#   AVOCADO_FLASH_EEPROM=1   - opt in to writing the EEPROM
+#   AVOCADO_BOOT_ORDER=0x... - override BOOT_ORDER value (requires opt-in)
+if [[ "${AVOCADO_FLASH_EEPROM:-0}" == "1" ]]; then
     BOOT_ORDER="${AVOCADO_BOOT_ORDER:-0xf41}"
     echo "=== Step 0: Configure EEPROM BOOT_ORDER=${BOOT_ORDER} ==="
 
@@ -129,7 +131,7 @@ if [[ "${AVOCADO_SKIP_EEPROM_CONFIG:-0}" != "1" ]]; then
     echo "Power-cycle the device and put it back into USB boot mode,"
     read -p "then press Enter to continue. " 2>&1
 else
-    echo "Skipping EEPROM configuration (AVOCADO_SKIP_EEPROM_CONFIG=1)"
+    echo "Skipping EEPROM configuration (set AVOCADO_FLASH_EEPROM=1 to enable)"
 fi
 
 start_time=$(date +%s)
