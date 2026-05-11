@@ -22,14 +22,6 @@
           "{inactive_slot}.avocado_platform": "{platform}",
           "{inactive_slot}.avocado_architecture": "{architecture}"
         }
-      },
-      {
-        "type": "gpt-switch",
-        "devpath": "/dev/mmcblk1",
-        "slot_partitions": {
-          "a": ["boot-a", "rootfs-a"],
-          "b": ["boot-b", "rootfs-b"]
-        }
       }
     ],
     "rollback": [
@@ -50,8 +42,9 @@
       }
     },
     "profiles": {
-      "img": { "script": "stone-provision-img.sh" },
-      "sd":  { "script": "stone-provision-sd.sh", "envs": ["device_info"], "requires": ["usb"] }
+      "img":  { "script": "stone-provision-img.sh" },
+      "sd":   { "script": "stone-provision-sd.sh",   "envs": ["device_info"], "requires": ["usb"] },
+      "emmc": { "script": "stone-provision-emmc.sh", "envs": ["device_info"], "requires": ["usb"] }
     }
   },
   "storage_devices": {
