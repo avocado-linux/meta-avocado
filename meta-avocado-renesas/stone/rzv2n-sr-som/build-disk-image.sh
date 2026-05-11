@@ -155,6 +155,20 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
         exit 1
     fi
 
+    # Guard: refuse to write a source image larger than the partition slot.
+    # Without this, dd silently truncates the image and produces a corrupt
+    # filesystem — for btrfs this surfaces at first mount as
+    #   BTRFS error: device total_bytes should be at most X but found Y
+    # which is unhelpful for diagnosing the build-time sizing mismatch.
+    src_bytes=$(stat -c '%s' "$src")
+    slot_bytes=$(( PART_SIZES_MIB[i] * 1024 * 1024 ))
+    if [ "$src_bytes" -gt "$slot_bytes" ]; then
+        src_mib=$(( src_bytes / 1024 / 1024 ))
+        echo "ERROR: image '${img_key}' (${src_mib} MiB / ${src_bytes} bytes) exceeds partition '${PART_NAMES[i]}' slot (${PART_SIZES_MIB[i]} MiB / ${slot_bytes} bytes)" >&2
+        echo "       bump partitions[].size for '${PART_NAMES[i]}' in the stone manifest, or shrink the image." >&2
+        exit 1
+    fi
+
     echo "  writing ${PART_NAMES[i]} from ${src} at ${PART_OFFSETS_MIB[i]} MiB" >&2
     dd if="$src" of="$IMAGE_FILE" bs=1M seek="${PART_OFFSETS_MIB[i]}" conv=notrunc status=none
 done
