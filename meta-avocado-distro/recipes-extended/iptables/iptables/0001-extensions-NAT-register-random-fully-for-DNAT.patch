@@ -1,0 +1,35 @@
+From a60a1c547379d2ded74b2dd450ffa8a7102f4f59 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sat, 9 May 2026 21:51:24 -0400
+Subject: [PATCH] extensions: NAT: register --random-fully for DNAT
+
+The O_RANDOM_FULLY id, parse handler (XTOPT_NAT_RANGE_PROTO_RANDOM_FULLY
+in NAT_parse), and print path are already present in libxt_NAT.c and
+shared with SNAT/MASQUERADE. Only DNAT_opts[] was missing the option
+entry, so the userspace parser rejects '--random-fully' on DNAT even
+though the kernel xt_nat target supports the underlying flag.
+
+kube-proxy in Kubernetes 1.28+ probes the kernel for RANDOM_FULLY
+support and, on success, emits the flag on every ClusterIP DNAT rule.
+Without this entry every iptables-restore sync aborts at the first
+DNAT line, leaving KUBE-SERVICES empty and ClusterIPs unroutable.
+
+Upstream-Status: Pending
+
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ extensions/libxt_NAT.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/extensions/libxt_NAT.c b/extensions/libxt_NAT.c
+index 2a63439..afa7a28 100644
+--- a/extensions/libxt_NAT.c
++++ b/extensions/libxt_NAT.c
+@@ -111,6 +111,7 @@ static const struct xt_option_entry DNAT_opts[] = {
+ 	{.name = "to-destination", .id = O_TO_DEST, .type = XTTYPE_STRING,
+ 	 .flags = XTOPT_MAND},
+ 	{.name = "random", .id = O_RANDOM, .type = XTTYPE_NONE},
++	{.name = "random-fully", .id = O_RANDOM_FULLY, .type = XTTYPE_NONE},
+ 	{.name = "persistent", .id = O_PERSISTENT, .type = XTTYPE_NONE},
+ 	XTOPT_TABLEEND,
+ };
