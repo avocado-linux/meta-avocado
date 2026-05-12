@@ -18,8 +18,8 @@ repos:
   meta-openembedded:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
-    branch: master
-    commit: 6bc36f105c562e48b0feba2a026416d0942f2bd3
+    branch: wrynose
+    commit: 420222862f5a6d95023b8f5f3b7e1808b2264ef9
     layers:
       meta-oe:
       meta-perl:

@@ -5,7 +5,7 @@ repos:
   meta-wayland:
     url: https://github.com/avocado-linux/vendor-meta-wayland.git
     path: meta-wayland
-    branch: master
-    commit: e45f1c345353c795e984417eb6874c2158e6bfb0
+    branch: wrynose
+    commit: 059d0a3a31be857d1fbf464dd6ebf7b5f175a621
     layers:
       .:
