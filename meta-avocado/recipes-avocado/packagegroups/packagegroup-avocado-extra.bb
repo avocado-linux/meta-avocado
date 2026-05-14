@@ -111,11 +111,13 @@ DEEPX_PACKAGES = " \
 
 # AWS Greengrass and openjdk-17 RDEPEND on a JRE/JDK; Amazon Corretto and
 # OpenJDK only build for aarch64 and x86_64. Skip on aarch32 (Cortex-A32 /
-# Cortex-A7 etc.) where TARGET_ARCH == "arm".
+# Cortex-A7 etc.) where TARGET_ARCH == "arm". Also empty when meta-aws is
+# disabled in kas (e.g. while waiting on upstream wrynose support); the
+# packages come from meta-aws and would otherwise be unbuildable.
 AWS_PACKAGES = "${@' \
   greengrass-bin \
   aws-iot-device-client \
-' if d.getVar('TARGET_ARCH') in ('aarch64', 'x86_64') else ''}"
+' if d.getVar('TARGET_ARCH') in ('aarch64', 'x86_64') and 'meta-aws' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else ''}"
 
 JAVA_PACKAGES = "${@' \
   openjdk-17-jdk \
@@ -143,12 +145,14 @@ CONATINER_PACKAGES = " \
   k3s \
 "
 
-# Basler Pylon SDK is only available for aarch64
+# Basler Pylon SDK is only available for aarch64. Also empty when
+# meta-basler-tools is disabled in kas (the layer's collection name is
+# "basler-common"); waiting on an upstream wrynose branch.
 BASLER_PACKAGES = "${@' \
   pylon \
   python3-pypylon \
   gst-plugin-pylon \
-' if d.getVar('TARGET_ARCH') == 'aarch64' else ''}"
+' if d.getVar('TARGET_ARCH') == 'aarch64' and 'basler-common' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else ''}"
 
 GSTREAMER_PACKAGES = " \
   gstreamer1.0 \

@@ -31,7 +31,7 @@ header:
     file: kas/extra/openjdk.yml
   - repo: meta-avocado
     file: kas/extra/browser.yml
-  - repo: meta-avocado
-    file: kas/extra/aws.yml
+  # - repo: meta-avocado
+  #   file: kas/extra/aws.yml          # meta-aws: no wrynose branch upstream (still on master); top-level wic/ trips wrynose sanity check
   - repo: meta-avocado
     file: kas/extra/wayland.yml
