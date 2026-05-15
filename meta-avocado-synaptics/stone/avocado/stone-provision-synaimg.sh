@@ -48,7 +48,7 @@ else
 fi
 
 for f in firmware.subimg key.subimg preboot.subimg tee.subimg emmc_image_list emmc_part_list fastlogo.subimg.gz; do
-    cp "${AVOCADO_STONE_DATA_DIR}/${f}" "${BUILD_DIR}/${f}"
+    cp "${AVOCADO_RUNTIME_BUILD_DIR}/${f}" "${BUILD_DIR}/${f}"
 done
 
 # ---------------------------------------------------------------------------
