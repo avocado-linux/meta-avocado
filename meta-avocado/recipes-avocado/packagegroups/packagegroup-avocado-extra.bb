@@ -74,6 +74,7 @@ RDEPENDS:${PN} = " \
   pstree \
   qemu-user-static \
   qemu-user-static-binfmt \
+  qemu-guest-agent \
   redis \
   rng-tools \
   rtc-tools \
@@ -84,6 +85,7 @@ RDEPENDS:${PN} = " \
   tcpdump \
   tmux \
   tio \
+  usbip-tools \
   usbmuxd \
   usbutils \
   uv \
