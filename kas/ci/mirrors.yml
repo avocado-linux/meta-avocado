@@ -8,8 +8,8 @@ header:
 # This overlays the CI mirror configuration on top of any machine config
 
 env:
-  SOURCE_MIRROR_URL: "file:///mnt/src/cache/downloads"
-  SSTATE_MIRROR_URL: "file:///mnt/src/cache/sstate/PATH;downloadfilename=PATH"
+  SOURCE_MIRROR_URL: "http://molcajete:30082/downloads"
+  SSTATE_MIRROR_URL: "http://molcajete:30082/sstate/PATH;downloadfilename=PATH"
   CI_MIRROR_ONLY: "0"
 
 local_conf_header:
@@ -17,10 +17,10 @@ local_conf_header:
     DL_DIR = "${TMPDIR}/downloads"
     SSTATE_DIR = "${TMPDIR}/sstate-cache"
 
-    SOURCE_MIRROR_URL ?= "${@os.getenv('SOURCE_MIRROR_URL', 'file:///mnt/src/cache/downloads')}"
+    SOURCE_MIRROR_URL ?= "${@os.getenv('SOURCE_MIRROR_URL', 'http://molcajete:30082/downloads')}"
     PREMIRRORS:prepend = "git://.*/.* ${SOURCE_MIRROR_URL} ftp://.*/.* ${SOURCE_MIRROR_URL} http://.*/.* ${SOURCE_MIRROR_URL} https://.*/.* ${SOURCE_MIRROR_URL} "
 
-    SSTATE_MIRRORS ?= "file://.* ${@os.getenv('SSTATE_MIRROR_URL', 'file:///mnt/src/cache/sstate/PATH;downloadfilename=PATH')}"
+    SSTATE_MIRRORS ?= "file://.* ${@os.getenv('SSTATE_MIRROR_URL', 'http://molcajete:30082/sstate/PATH;downloadfilename=PATH')}"
 
     BB_FETCH_PREMIRRORONLY = "${@'1' if os.getenv('CI_MIRROR_ONLY', '0') == '1' else '0'}"
 
