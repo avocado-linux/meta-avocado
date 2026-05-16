@@ -11,15 +11,15 @@
 # Environment variables provided by avocado:
 #   AVOCADO_STONE_MANIFEST   - path to stone-<target>.json
 #   AVOCADO_STONE_BUILD_DIR  - build output directory (where we stage by default)
-#   AVOCADO_STONE_DATA_DIR   - stone data directory
-#   AVOCADO_SDK_RUNTIME_DIR  - SDK images directory (source of the artifacts)
+#   AVOCADO_STONE_DATA_DIR   - stone data directory (source of the artifacts;
+#                              stone create copies them here from the SDK)
 #   AVOCADO_PROVISION_OUT    - (optional) final output directory
 #   AVOCADO_CMDLINE_EXTRA    - (optional) extra kernel cmdline appended to default
 
 set -euo pipefail
 
 manifest="$AVOCADO_STONE_MANIFEST"
-src="${AVOCADO_SDK_RUNTIME_DIR:?AVOCADO_SDK_RUNTIME_DIR must be set}"
+src="${AVOCADO_STONE_DATA_DIR:?AVOCADO_STONE_DATA_DIR must be set}"
 stage="${AVOCADO_STONE_BUILD_DIR}/direct"
 
 mkdir -p "$stage"
