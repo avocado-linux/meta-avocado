@@ -39,5 +39,18 @@ FILES:${PN} = "${BOARDCTL_BINDIR} ${SDKPATHNATIVE}${bindir_nativesdk}/boardctl"
 
 # Skip QA for pre-built NVIDIA x86_64 binary
 INSANE_SKIP:${PN} = "already-stripped arch file-rdeps ldflags libdir"
+
+# Prebuilt x86_64 ELFs ship inside this package and are executed on aarch64 SDK
+# hosts via host-kernel binfmt_misc + qemu-user-static (configured on the build
+# host, not the SDK container). Suppress auto-generated dependency Requires so
+# rpmdeps doesn't emit unsatisfiable libc.so.6 symbol-version Requires -- the
+# ELFs' GLIBC_2.2.5 / GLIBC_2.3 / libm.so.6 needs don't exist on aarch64, which
+# only ships GLIBC_2.17+.
+#
+# EXCLUDE_FROM_SHLIBS disables the shlibs scanner; SKIP_FILEDEPS disables the
+# per-file rpmdeps ELF scan (FILERDEPENDS) -- both paths emit Requires.
+EXCLUDE_FROM_SHLIBS = "1"
+SKIP_FILEDEPS:${PN} = "1"
+
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 INHIBIT_PACKAGE_STRIP = "1"
