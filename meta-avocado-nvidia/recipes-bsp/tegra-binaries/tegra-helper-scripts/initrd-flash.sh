@@ -171,15 +171,76 @@ find_device_by_session() {
     return 1
 }
 
+# Ask the avocado-vm-agent (running outside the SDK container, inside the
+# avocado-vm) to perform a real USB disconnect/reconnect cycle by
+# bouncing the device on the macOS host. Used when this script is running
+# inside the avocado-vm and the Linux `authorized=0` toggle would be a
+# no-op (vhci_hcd doesn't propagate it to the actual USB device).
+#
+# Returns 0 if the host completed the twiddle (status "ok" or "manual"),
+# 1 otherwise (agent unreachable, response malformed, host gave up).
+_twiddle_via_agent() {
+    local usb_instance="$1"
+    local sock="${AVOCADO_AGENT_SOCK:-}"
+
+    if [ -z "$sock" ] || [ ! -S "$sock" ]; then
+        return 1   # agent not available — caller falls back to sysfs path
+    fi
+
+    local req
+    req=$(printf '{"loc_hint":"%s"}' "$usb_instance")
+    local resp=""
+
+    # Two transports — prefer nc -U for terseness, fall back to python3.
+    # Either should be available in the SDK container. 130s overall
+    # timeout: the host has a 120s waiter for user replug, +10s slack.
+    if command -v nc >/dev/null 2>&1; then
+        resp=$(printf "%s\n" "$req" | timeout 130 nc -U "$sock" 2>/dev/null) || return 1
+    elif command -v python3 >/dev/null 2>&1; then
+        resp=$(REQ="$req" python3 -c "
+import os, socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(130)
+s.connect('$sock')
+s.sendall((os.environ['REQ'] + '\n').encode())
+data = b''
+while True:
+    chunk = s.recv(4096)
+    if not chunk: break
+    data += chunk
+    if b'\n' in chunk: break
+sys.stdout.write(data.decode(errors='replace'))
+") || return 1
+    else
+        echo "WARN: agent transport unavailable (no nc, no python3); cannot reach $sock" >&2
+        return 1
+    fi
+
+    case "$resp" in
+        *'"status":"ok"'*|*'"status":"manual"'*)
+            echo "Agent twiddle succeeded: $resp" >&2
+            return 0
+            ;;
+        *)
+            echo "WARN: agent twiddle returned non-success: $resp" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Shared function to disconnect USB device by toggling authorized attribute
-# This is the reliable method for triggering Jetson devices to detect disconnect
+# (or, when AVOCADO_AGENT_SOCK is set, by asking the avocado-vm-agent to
+# do a real disconnect/reconnect cycle on the host — which is the only
+# thing that advances staging-protocol firmwares like the Jetson MB1→MB2
+# transition when the script runs inside the avocado-vm).
+#
 # Parameters:
 #   $1: usb_instance - The USB bus path (e.g., "3-1")
 #   $2: session_id (optional) - If provided, will rescan to find current USB instance
 disconnect_usb_device() {
     local usb_instance="$1"
     local sessid="$2"
-    
+
     # If session ID is provided, rescan to find current device and USB instance
     # This handles the case where device reconnected with a different USB path
     if [ -n "$sessid" ]; then
@@ -197,34 +258,42 @@ disconnect_usb_device() {
             echo "WARN: Could not find device with session ID $sessid for disconnect" >&2
         fi
     fi
-    
+
     if [ -z "$usb_instance" ]; then
         echo "WARN: No USB instance available for disconnect" >&2
         return 1
     fi
-    
+
+    # Prefer the agent-driven path when available. Falls through to the
+    # sysfs toggle on any failure so this remains a non-breaking change
+    # for non-avocado-vm contexts (bare Linux flashing, CI, etc).
+    if _twiddle_via_agent "$usb_instance"; then
+        echo "USB device $usb_instance twiddled via agent" >&2
+        return 0
+    fi
+
     local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
-    
+
     if [ ! -w "$authorized_path" ]; then
         echo "WARN: Cannot write to $authorized_path (device may not exist or path changed)" >&2
         return 1
     fi
-    
+
     echo "Disconnecting USB device $usb_instance by toggling authorized..." >&2
     # Set authorized to 0 (disconnect)
     echo 0 > "$authorized_path" 2>/dev/null || {
         echo "ERR: Failed to deauthorize USB device $usb_instance" >&2
         return 1
     }
-    
+
     # Wait a moment for the disconnect to be processed
     sleep 1
-    
+
     # Set authorized back to 1 (reconnect) - path may no longer exist after deauthorization
     if [ -e "$authorized_path" ]; then
         echo 1 > "$authorized_path" 2>/dev/null || true
     fi
-    
+
     echo "USB device $usb_instance disconnected and reconnected" >&2
     return 0
 }
@@ -995,12 +1064,10 @@ if [ -n "$usb_instance" ] || [ -n "$session_id" ]; then
     fi
     
     if [ -n "$final_usb_instance" ]; then
-        authorized_path="/sys/bus/usb/devices/$final_usb_instance/authorized"
-        if [ -w "$authorized_path" ]; then
-            echo 0 > "$authorized_path" 2>/dev/null || true
-        else
-            echo "WARN: Cannot write to $authorized_path (device may not exist)" | tee -a "$logfile"
-        fi
+        # Route through the shared helper so the agent path applies here
+        # too when running inside the avocado-vm. The helper handles the
+        # AVOCADO_AGENT_SOCK / sysfs fallback dispatch.
+        disconnect_usb_device "$final_usb_instance" "$session_id" || true
     fi
 fi
 
