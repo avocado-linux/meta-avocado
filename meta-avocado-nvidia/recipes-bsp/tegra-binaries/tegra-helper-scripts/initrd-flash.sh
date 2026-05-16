@@ -241,8 +241,13 @@ disconnect_usb_device() {
     local usb_instance="$1"
     local sessid="$2"
 
-    # If session ID is provided, rescan to find current device and USB instance
-    # This handles the case where device reconnected with a different USB path
+    # If session ID is provided, rescan to find current device and USB instance.
+    # This handles the case where the device reconnected with a different USB
+    # path. When the device is *gone* entirely, the disconnect is already in
+    # effect — return success without re-issuing a twiddle. This is the
+    # idempotency contract that lets generate_flash_package call us a second
+    # time (after unmount_and_release already cycled the device) without
+    # accidentally blocking on a 120s replug-waiter for a phantom request.
     if [ -n "$sessid" ]; then
         echo "Rescanning for device with session ID $sessid..." >&2
         local current_dev=$(find_device_by_session "$sessid")
@@ -255,7 +260,8 @@ disconnect_usb_device() {
                 echo "WARN: Could not find USB instance for rescanned device $current_dev" >&2
             fi
         else
-            echo "WARN: Could not find device with session ID $sessid for disconnect" >&2
+            echo "Device with session ID $sessid already gone — disconnect already in effect" >&2
+            return 0
         fi
     fi
 
