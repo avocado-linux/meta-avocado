@@ -30,12 +30,15 @@ local_conf_header:
     # Values are microseconds of stall per second (1000000 = 100% stall).
     # In-flight tasks always finish; only NEW task starts are paused.
     # See bitbake/lib/bb/runqueue.py exceeds_max_pressure() for the implementation.
-    BB_PRESSURE_MAX_MEMORY = "20000"   ;# 2% memory stall — pause early to head off OOM during chromium-class links
-    BB_PRESSURE_MAX_CPU    = "500000"  ;# 50% CPU stall — OK to push CPU; only pause under heavy contention
-    BB_PRESSURE_MAX_IO     = "100000"  ;# 10% IO stall — prevent thrashing on tmpdir / cache writes
+    # BB_PRESSURE_MAX_MEMORY=20000  -> 2% memory stall, pause early to head off OOM during chromium-class links
+    # BB_PRESSURE_MAX_CPU=500000    -> 50% CPU stall, OK to push CPU; only pause under heavy contention
+    # BB_PRESSURE_MAX_IO=100000     -> 10% IO stall, prevent thrashing on tmpdir / cache writes
+    BB_PRESSURE_MAX_MEMORY = "20000"
+    BB_PRESSURE_MAX_CPU    = "500000"
+    BB_PRESSURE_MAX_IO     = "100000"
 
     # Chromium's link phase is memory-heavy: max_jobs_per_link is bound to PARALLEL_MAKE
-    # in chromium-gn.inc (line 315). Globally we run -j4 (see iac build task env);
+    # in chromium-gn.inc. Globally we run -j4 (see iac build task env);
     # cap chromium tighter to bound peak link-time memory.
     PARALLEL_MAKE:pn-chromium-ozone-wayland = "-j 2"
     PARALLEL_MAKE:pn-chromium-x11 = "-j 2"
