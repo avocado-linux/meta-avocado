@@ -28,9 +28,6 @@
       },
       "cmdline": {
         "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
-      },
-      "sdk_paths": {
-        "AVOCADO_SDK_RUNTIME_DIR": "${AVOCADO_SDK_RUNTIME_DIR}"
       }
     },
     "profiles": {
@@ -40,7 +37,7 @@
       },
       "direct": {
         "script": "stone-provision-direct.sh",
-        "envs": ["sdk_paths", "cmdline"]
+        "envs": ["cmdline"]
       }
     }
   },
