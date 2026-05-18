@@ -23,6 +23,7 @@ RDEPENDS:${PN} = " \
   cockpit-networkmanager \
   cronie \
   coreutils \
+  curl \
   devmem2 \
   dnsmasq \
   dtc \
@@ -31,6 +32,7 @@ RDEPENDS:${PN} = " \
   fwup \
   git \
   glibc-utils \
+  gnutls \
   gptfdisk \
   hostapd \
   htop \
@@ -40,6 +42,7 @@ RDEPENDS:${PN} = " \
   iptables \
   jq \
   kabtool \
+  keyutils \
   less \
   libgpiod \
   libgpiod-tools \
@@ -53,6 +56,7 @@ RDEPENDS:${PN} = " \
   logrotate \
   lsof \
   ltrace \
+  modemmanager \
   mosquitto \
   net-snmp \
   net-tools \
