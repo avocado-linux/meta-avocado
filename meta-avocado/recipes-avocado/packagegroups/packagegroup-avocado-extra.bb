@@ -44,6 +44,7 @@ RDEPENDS:${PN} = " \
   libgpiod-tools \
   libimobiledevice \
   libnss-mdns \
+  librealsense2 \
   libqmi \
   libv4l \
   libwebsockets \
