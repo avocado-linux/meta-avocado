@@ -16,6 +16,30 @@
         "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
+    "fields": {
+      "AVOCADO_DEVICE_CERT": {
+        "type": "file",
+        "label": "Device certificate",
+        "description": "X.509 device certificate in PEM format."
+      },
+      "AVOCADO_DEVICE_KEY": {
+        "type": "file",
+        "label": "Device private key",
+        "description": "PEM-encoded private key paired with the device certificate.",
+        "secret": true
+      },
+      "AVOCADO_DEVICE_ID": {
+        "type": "string",
+        "label": "Device ID",
+        "description": "Stable identifier registered with Peridio."
+      },
+      "AVOCADO_CMDLINE_EXTRA": {
+        "type": "multiline",
+        "label": "Extra kernel command-line",
+        "description": "Appended to the default kernel cmdline.",
+        "required": false
+      }
+    },
     "profiles": {
       "sd": {
         "script": "stone-provision-sd.sh",
@@ -72,7 +96,7 @@
         { "name": "boot-b",                    "partition_type": "EF00", "partition_uuid": "f6a7b8c9-dae0-4fa0-b112-5d6e7f8091a2", "size": 256,  "size_unit": "mebibytes" },
         { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "a7b8c9da-e0f1-40b1-a213-6e7f8091a2b3", "size": 512, "size_unit": "mebibytes" },
         { "name": "rootfs-b",                    "partition_type": "8305", "partition_uuid": "b8c9dae0-f102-41c2-a314-7f8091a2b3c4", "size": 512, "size_unit": "mebibytes" },
-        { "name": "var",      "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 1024, "size_unit": "mebibytes", "expand": "true" }
+        { "name": "var",      "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "expand": "true" }
       ]
     }
   }

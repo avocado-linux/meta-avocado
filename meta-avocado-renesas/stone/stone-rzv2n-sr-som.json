@@ -16,6 +16,30 @@
         "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
       }
     },
+    "fields": {
+      "AVOCADO_DEVICE_CERT": {
+        "type": "file",
+        "label": "Device certificate",
+        "description": "X.509 device certificate in PEM format."
+      },
+      "AVOCADO_DEVICE_KEY": {
+        "type": "file",
+        "label": "Device private key",
+        "description": "PEM-encoded private key paired with the device certificate.",
+        "secret": true
+      },
+      "AVOCADO_DEVICE_ID": {
+        "type": "string",
+        "label": "Device ID",
+        "description": "Stable identifier registered with Peridio."
+      },
+      "AVOCADO_CMDLINE_EXTRA": {
+        "type": "multiline",
+        "label": "Extra kernel command-line",
+        "description": "Appended to the default kernel cmdline.",
+        "required": false
+      }
+    },
     "files": [
       "build-disk-image.sh"
     ],
@@ -74,7 +98,7 @@
         { "name": "boot-b", "partition_type": "EF00", "partition_uuid": "7ba34e50-0b05-4323-8283-9af74af17bc1", "size": 256, "size_unit": "mebibytes" },
         { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "bb6c0eca-50a4-4b9d-80d5-6f6ec33bdf66", "size": 128, "size_unit": "mebibytes" },
         { "name": "rootfs-b", "partition_type": "8305", "partition_uuid": "02969f9b-d2c1-45f7-a90a-c36da86d576e", "size": 128, "size_unit": "mebibytes" },
-        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 512, "size_unit": "mebibytes", "expand": "true" }
+        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "expand": "true" }
       ]
     }
   }

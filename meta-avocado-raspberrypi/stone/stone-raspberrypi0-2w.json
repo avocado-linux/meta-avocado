@@ -57,6 +57,24 @@
         "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
       }
     },
+    "fields": {
+      "AVOCADO_DEVICE_CERT": {
+        "type": "file",
+        "label": "Device certificate",
+        "description": "X.509 device certificate in PEM format."
+      },
+      "AVOCADO_DEVICE_KEY": {
+        "type": "file",
+        "label": "Device private key",
+        "description": "PEM-encoded private key paired with the device certificate.",
+        "secret": true
+      },
+      "AVOCADO_DEVICE_ID": {
+        "type": "string",
+        "label": "Device ID",
+        "description": "Stable identifier registered with Peridio."
+      }
+    },
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
@@ -166,8 +184,6 @@
         {
           "name": "var",
           "image": "var",
-          "size": 512,
-          "size_unit": "mebibytes",
           "expand": "true"
         }
       ]

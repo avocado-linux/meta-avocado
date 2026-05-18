@@ -86,19 +86,30 @@ do_stone_validate() {
 }
 
 do_stone_bundle() {
+    # The var partition omits size in stone manifests so its size is computed
+    # from the freshly-built var image and rounded up to size_alignment (stone
+    # default 4 MiB). avocado-image-var deploys the btrfs into DEPLOY_DIR_IMAGE.
+    var_image="${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
+    var_image_bytes=$(stat -c%s "$var_image")
+
     stone \
         bundle \
         --os-release "${DEPLOY_DIR_IMAGE}/os-release" \
         -m "${DEPLOY_DIR_IMAGE}/stone-${MACHINE_SHORT_NAME}.json" \
         -i "${DEPLOY_DIR_IMAGE}" \
+        --partition-size "var=$var_image_bytes" \
         -o "${DEPLOY_DIR}/stone/os-bundle.aos" \
         --build-dir "${DEPLOY_DIR}/stone"
 }
 
 do_stone_provision() {
+    var_image="${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
+    var_image_bytes=$(stat -c%s "$var_image")
+
     ${@'AVOCADO_PROVISION_PROFILE="' + d.getVar('AVOCADO_PROVISION_PROFILE') + '"' if d.getVar('AVOCADO_PROVISION_PROFILE') else ''} stone \
         provision \
-        -i "${DEPLOY_DIR}/stone"
+        -i "${DEPLOY_DIR}/stone" \
+        --partition-size "var=$var_image_bytes"
 }
 
 addtask configure after do_patch before do_compile

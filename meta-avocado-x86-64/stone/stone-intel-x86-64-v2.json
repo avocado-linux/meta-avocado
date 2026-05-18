@@ -70,7 +70,7 @@
         { "name": "recovery", "partition_type": "EF00", "size": 256, "size_unit": "mebibytes" },
         { "name": "rootfs-a", "image": "rootfs", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
         { "name": "rootfs-b", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
-        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 512, "size_unit": "mebibytes", "expand": "true" }
+        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "expand": "true" }
       ]
     }
   }
