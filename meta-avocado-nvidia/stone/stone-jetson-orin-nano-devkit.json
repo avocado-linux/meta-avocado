@@ -34,6 +34,29 @@
         "ERASE_ONLY": "${ERASE_ONLY}"
       }
     },
+    "fields": {
+      "ERASE_NVME": {
+        "type": "boolean",
+        "label": "Erase NVMe before flash",
+        "description": "When enabled, the target's NVMe storage is wiped before flashing.",
+        "required": false,
+        "default": false
+      },
+      "ERASE_EMMC": {
+        "type": "boolean",
+        "label": "Erase eMMC before flash",
+        "description": "When enabled, the target's eMMC storage is wiped before flashing.",
+        "required": false,
+        "default": false
+      },
+      "ERASE_ONLY": {
+        "type": "boolean",
+        "label": "Erase only (skip flash)",
+        "description": "When enabled, erase the selected storage and do not flash a new image.",
+        "required": false,
+        "default": false
+      }
+    },
     "profiles": {
       "tegraflash": {
         "script": "stone-provision-tegraflash.sh",
