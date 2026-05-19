@@ -1,0 +1,18 @@
+[Unit]
+Description=Reload manager and retrigger activation targets after Avocado extensions are merged
+Documentation=https://github.com/flatcar/init/pull/65
+BindsTo=avocado-extension.service
+After=avocado-extension.service
+DefaultDependencies=no
+Before=sysinit.target
+Conflicts=shutdown.target initrd-switch-root.target
+Before=shutdown.target initrd-switch-root.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/systemctl daemon-reload
+ExecStart=/usr/bin/systemctl restart --no-block sockets.target timers.target paths.target multi-user.target
+
+[Install]
+WantedBy=sysinit.target
