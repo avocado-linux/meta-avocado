@@ -1,0 +1,20 @@
+header:
+  version: 16
+
+# Enable stone's disk image provisioning step for local QEMU development.
+#
+# By default the build only runs do_stone_bundle, producing os-bundle.aos for
+# OTA testing. This overlay promotes STONE_BUILD_TASK to do_stone_provision so
+# the build also assembles a bootable avocado-os-qemux86-64.img in
+# build/tmp/deploy/stone/_build/, ready for run-qemux86-64 / run-qemux86-64-swtpm.
+#
+# Usage:
+#   bspctl build kas/machine/qemux86-64.yml:kas/target/qemu-provision.yml
+#
+# Not intended for CI -- the 1 GB disk image creation adds ~2 min and the
+# artifact is only useful for local QEMU boots.
+
+local_conf_header:
+  qemu-provision: |
+    STONE_BUILD_TASK = "do_stone_provision"
+    AVOCADO_DEV_ROOT_LOGIN = "1"
