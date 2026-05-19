@@ -99,6 +99,7 @@ RDEPENDS:${PN} = " \
   v4l-utils \
   vim \
   vnstat \
+  wireguard-tools \
   wireless-regdb \
   wireless-regdb-static \
   wpa-supplicant \
