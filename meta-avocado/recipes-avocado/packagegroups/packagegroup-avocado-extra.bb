@@ -46,7 +46,7 @@ RDEPENDS:${PN} = " \
   libgpiod-tools \
   libimobiledevice \
   libnss-mdns \
-  librealsense2 \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'librealsense2', '', d)} \
   libqmi \
   libv4l \
   libwebsockets \
