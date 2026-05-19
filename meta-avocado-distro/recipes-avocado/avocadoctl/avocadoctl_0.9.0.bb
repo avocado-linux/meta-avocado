@@ -7,6 +7,7 @@ SRC_URI = " \
     file://00-avocado.preset \
     file://avocado-extension.service \
     file://avocado-extension-initrd.service \
+    file://avocado-ensure-extensions.service \
     file://sshdgenkeys-after-extensions.conf \
 "
 
@@ -28,7 +29,7 @@ RDEPENDS:${PN} += "util-linux-losetup"
 include avocadoctl-${PV}.inc
 include avocadoctl.inc
 
-SYSTEMD_SERVICE:${PN} = "avocado-extension.service avocadoctl.socket avocadoctl.service"
+SYSTEMD_SERVICE:${PN} = "avocado-extension.service avocado-ensure-extensions.service avocadoctl.socket avocadoctl.service"
 SYSTEMD_AUTO_ENABLE = "enable"
 
 USERADD_PACKAGES = "${PN}"
@@ -47,6 +48,7 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/avocado-extension.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${UNPACKDIR}/avocado-extension-initrd.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/avocado-ensure-extensions.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${S}/systemd/avocadoctl.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${S}/systemd/avocadoctl.socket ${D}${systemd_system_unitdir}/
 
