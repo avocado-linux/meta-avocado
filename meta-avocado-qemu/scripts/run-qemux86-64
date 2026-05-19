@@ -1,36 +1,46 @@
 #!/usr/bin/env bash
-# Script to run QEMU with TPM support via kas
-# Usage: ./run-qemu-tpm
-# Assumes pwd is build directory
+# Run QEMU x86-64 without TPM.
+# Usage: ./run-qemux86-64
+# Assumes pwd is the build directory (sources/build-qemux86-64).
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -euo pipefail
+
 BUILD_DIR="$(pwd)/build"
+[ -d "$BUILD_DIR/tmp" ] || { echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"; exit 1; }
 SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
-# Image paths relative to build directory
 MACHINE_SHORT_NAME="qemux86-64"
-MACHINE="avocado-${MACHINE_SHORT_NAME}"
 STONE_DEPLOY_DIR="$BUILD_DIR/tmp/deploy/stone"
 STONE_BUILD_DIR="$STONE_DEPLOY_DIR/_build"
-IMAGE_NAME="${MACHINE}-rootdisk.img"
-IMAGE_FILE="$STONE_BUILD_DIR/$IMAGE_NAME"
+IMAGE_FILE="$STONE_BUILD_DIR/avocado-os-${MACHINE_SHORT_NAME}.img"
 QEMU_BIOS="${STONE_DEPLOY_DIR}/u-boot.rom"
-QEMU_IMG="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-img"
-QEMU_EXEC="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-x86_64"
-LIB_PATH=$("$SCRIPT_DIR/find-library-path" $QEMU_EXEC $SYSROOT_COMPONENTS_DIR $SYSROOT_UNINATIVE_DIR)
-echo "LIB_PATH=$LIB_PATH"
+
+QEMU_IMG="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/bin/qemu-img"
+QEMU_EXEC="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/bin/qemu-system-x86_64"
+QEMU_DATA_DIR="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/share/qemu"
+
+# Bitbake native binaries use the uninative glibc loader as their ELF interpreter.
+# Invoke them via that loader with --library-path covering all native sysroot lib dirs.
+UNINATIVE_LOADER="$SYSROOT_UNINATIVE_DIR/x86_64-linux/lib/ld-linux-x86-64.so.2"
+LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev/null | tr '\n' ':')
+LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
+
+run_native() {
+    "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
+}
+
+echo "Resizing image to 1024M..."
+run_native "$QEMU_IMG" resize -f raw "$IMAGE_FILE" 1024M
+
 echo "Starting QEMU..."
 echo "-------------------------------------"
-
-LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_IMG" resize -f raw "$IMAGE_FILE" 1024M
-
-# Run QEMU with TPM support
-LD_LIBRARY_PATH="$LIB_PATH" "$QEMU_EXEC" \
-  -bios "${QEMU_BIOS}" \
-  -device sdhci-pci \
-  -device sd-card,drive=mmc \
-  -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
-  -m 256 \
-  -cpu max \
-  -nographic
+run_native "$QEMU_EXEC" \
+    -L "$QEMU_DATA_DIR" \
+    -bios "${QEMU_BIOS}" \
+    -device sdhci-pci \
+    -device sd-card,drive=mmc \
+    -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
+    -m 256 \
+    -cpu max \
+    -nographic

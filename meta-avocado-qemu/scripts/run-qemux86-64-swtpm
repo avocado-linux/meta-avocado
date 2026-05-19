@@ -1,52 +1,85 @@
 #!/usr/bin/env bash
-# This script creates a new tmux session with two panes:
-# - Left pane: Runs start-swtpm to start swtpm.
-# - Right pane: Waits for the TPM socket to become available and then runs run-qemux86-64-swtpm.
-#
+# Run QEMU x86-64 with software TPM 2.0 (swtpm daemonized, no tmux required).
 # Usage: ./run-qemux86-64-swtpm
-#
-# Assumes the current working directory is the build directory.
-# The script's own directory contains start-swtpm and run-qemux86-64-swtpm.
-# Derive the directory where this script resides
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# The build directory is assumed to be the current working directory
-BUILD_DIR="$(pwd)"
-SESSION_NAME="tpm-qemu"
-# Create a new detached tmux session in the build directory
-tmux new-session -d -s "$SESSION_NAME" -c "$BUILD_DIR"
-# Split the window vertically (left/right) and set the working directory
-tmux split-window -h -p 80 -t "$SESSION_NAME:0" -c "$BUILD_DIR"
+# Assumes pwd is the build directory (sources/build-qemux86-64).
 
-# Build the command for the right pane that waits for the TPM socket before running run-qemux86-64
-RIGHT_CMD="\
-TPM_DIR=\"$BUILD_DIR/build/tmp/tpm-state\"; \
-TPM_SOCK_FILE=\"\$TPM_DIR/socket-path\"; \
-echo 'Waiting for swtpm socket to be available...'; \
-TIMEOUT=30; SECONDS_ELAPSED=0; \
-while [ \$SECONDS_ELAPSED -lt \$TIMEOUT ]; do \
- if [ -f \"\$TPM_SOCK_FILE\" ]; then \
- TPM_SOCK=\$(cat \"\$TPM_SOCK_FILE\"); \
- if [ -S \"\$TPM_SOCK\" ]; then \
- echo \"TPM socket is available at \$TPM_SOCK\"; \
- break; \
- fi; \
- fi; \
- sleep 1; \
- SECONDS_ELAPSED=\$((SECONDS_ELAPSED + 1)); \
-done; \
-if [ \$SECONDS_ELAPSED -ge \$TIMEOUT ]; then \
- echo \"Error: TPM socket did not become available within \$TIMEOUT seconds.\"; \
- exit 1; \
-fi; \
-echo 'Waiting 1 seconds for socket to stabilize...'; \
-sleep 1; \
-echo 'Starting QEMU with TPM support...'; \
-$SCRIPT_DIR/run-qemux86-64"
+set -euo pipefail
 
-# Send the waiting command to the right pane
-tmux send-keys -t "$SESSION_NAME:0.1" "$RIGHT_CMD" C-m
+BUILD_DIR="$(pwd)/build"
+[ -d "$BUILD_DIR/tmp" ] || { echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"; exit 1; }
+SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
+SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
-# In the left pane, run start-swtpm
-tmux send-keys -t "$SESSION_NAME:0.0" "$SCRIPT_DIR/start-swtpm" C-m
-# Attach to the new tmux session
-tmux attach-session -t "$SESSION_NAME"
+MACHINE_SHORT_NAME="qemux86-64"
+STONE_DEPLOY_DIR="$BUILD_DIR/tmp/deploy/stone"
+STONE_BUILD_DIR="$STONE_DEPLOY_DIR/_build"
+IMAGE_FILE="$STONE_BUILD_DIR/avocado-os-${MACHINE_SHORT_NAME}.img"
+QEMU_BIOS="${STONE_DEPLOY_DIR}/u-boot.rom"
+
+QEMU_IMG="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/bin/qemu-img"
+QEMU_EXEC="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/bin/qemu-system-x86_64"
+QEMU_DATA_DIR="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/share/qemu"
+SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
+
+TPM_DIR="$BUILD_DIR/tmp/tpm-state"
+TPM_SOCK="$TPM_DIR/swtpm-sock"
+TPM_LOG="$TPM_DIR/swtpm.log"
+
+# Bitbake native binaries use the uninative glibc loader as their ELF interpreter.
+# Invoke them via that loader with --library-path covering all native sysroot lib dirs.
+UNINATIVE_LOADER="$SYSROOT_UNINATIVE_DIR/x86_64-linux/lib/ld-linux-x86-64.so.2"
+LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev/null | tr '\n' ':')
+LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
+
+run_native() {
+    "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
+}
+
+trap 'pkill -f "swtpm socket.*${TPM_DIR}" 2>/dev/null || true' EXIT INT TERM
+
+# ---------------------------------------------------------------------------
+# swtpm
+# ---------------------------------------------------------------------------
+
+# Kill any leftover swtpm from a previous run
+pkill -f "swtpm socket.*${TPM_DIR}" 2>/dev/null || true
+
+mkdir -p "$TPM_DIR"
+[ -S "$TPM_SOCK" ] && rm -f "$TPM_SOCK"
+
+echo "Starting swtpm daemon (log: $TPM_LOG)"
+run_native "$SWTPM_BIN" socket \
+    --tpmstate dir="$TPM_DIR" \
+    --ctrl type=unixio,path="$TPM_SOCK" \
+    --log file="$TPM_LOG",level=5 \
+    --tpm2 \
+    --daemon
+
+# Wait up to 10 s for the socket
+for i in $(seq 1 10); do
+    [ -S "$TPM_SOCK" ] && break
+    sleep 1
+done
+[ -S "$TPM_SOCK" ] || { echo "Error: swtpm socket did not appear after 10 s"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# QEMU
+# ---------------------------------------------------------------------------
+
+echo "Resizing image to 1024M..."
+run_native "$QEMU_IMG" resize -f raw "$IMAGE_FILE" 1024M
+
+echo "Starting QEMU..."
+echo "-------------------------------------"
+run_native "$QEMU_EXEC" \
+    -L "$QEMU_DATA_DIR" \
+    -bios "${QEMU_BIOS}" \
+    -device sdhci-pci \
+    -device sd-card,drive=mmc \
+    -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
+    -chardev socket,id=chrtpm,path="$TPM_SOCK" \
+    -tpmdev emulator,id=tpm0,chardev=chrtpm \
+    -device tpm-tis,tpmdev=tpm0 \
+    -m 256 \
+    -cpu max \
+    -nographic
