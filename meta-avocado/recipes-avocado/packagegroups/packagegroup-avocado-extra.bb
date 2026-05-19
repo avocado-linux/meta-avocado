@@ -31,6 +31,7 @@ RDEPENDS:${PN} = " \
   fwup \
   git \
   glibc-utils \
+  gptfdisk \
   hostapd \
   htop \
   i2c-tools \
