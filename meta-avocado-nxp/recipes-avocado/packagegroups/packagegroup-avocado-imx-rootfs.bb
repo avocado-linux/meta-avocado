@@ -12,4 +12,7 @@ inherit packagegroup
 
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
+  kernel-module-usbnet \
+  kernel-module-qmi-wwan \
+  kernel-module-cdc-wdm \
 "
