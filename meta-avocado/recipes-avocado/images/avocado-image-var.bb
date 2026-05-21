@@ -7,6 +7,12 @@ inherit deploy
 
 DEPENDS += "btrfs-tools-native"
 
+# Wrynose's OE-core switched pseudo to an allowlist (PSEUDO_INCLUDE_PATHS)
+# scoped to ${WORKDIR}/{image,package,rootfs,...}. Our btrfs source tree
+# lives outside that set, so the install -o root -g root calls below
+# fall through to the real syscall and fail. Extend the allowlist.
+PSEUDO_INCLUDE_PATHS .= ",${WORKDIR}/btrfs_root"
+
 fakeroot do_compile() {
     # Create a temporary directory for the btrfs image
     install -o root -g root -d ${WORKDIR}/btrfs_root/lib/extensions
