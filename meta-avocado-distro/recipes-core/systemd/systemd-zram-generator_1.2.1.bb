@@ -38,7 +38,7 @@ do_install() {
 	oe_runmake install NOBUILD=true NOMAN=true BUILDTYPE="${RUST_HOST_SYS}/release" DESTDIR="${D}" PREFIX="${prefix}"
 
 	install -d ${D}${sysconfdir}/modules-load.d
-	install -m 0644 ${WORKDIR}/zram.conf ${D}${sysconfdir}/modules-load.d/zram.conf
+	install -m 0644 ${UNPACKDIR}/zram.conf ${D}${sysconfdir}/modules-load.d/zram.conf
 }
 
 FILES:${PN} += "${systemd_unitdir} ${sysconfdir}/modules-load.d/zram.conf"

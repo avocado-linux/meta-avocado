@@ -22,5 +22,5 @@ do_deploy:append() {
 
 do_deploy:append:stone-direct() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-direct.sh ${DEPLOYDIR}/stone-provision-direct.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-direct.sh ${DEPLOYDIR}/stone-provision-direct.sh
 }
