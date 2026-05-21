@@ -6,13 +6,11 @@ COMPATIBLE_MACHINE = "avocado-rzv2n-sr-som"
 
 SRC_URI = "file://extlinux.conf"
 
-S = "${WORKDIR}"
-
 inherit deploy
 
 do_compile[noexec] = "1"
 
 do_deploy() {
-    install -D -m 0644 ${WORKDIR}/extlinux.conf ${DEPLOYDIR}/extlinux.conf
+    install -D -m 0644 ${UNPACKDIR}/extlinux.conf ${DEPLOYDIR}/extlinux.conf
 }
 addtask deploy after do_compile before do_build

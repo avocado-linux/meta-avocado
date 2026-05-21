@@ -16,17 +16,15 @@ SRC_URI = " \
     file://sduart8987_combo.bin \
 "
 
-S = "${WORKDIR}"
-
 do_install() {
     install -d ${D}${nonarch_base_libdir}/firmware
-    install -m 0644 ${WORKDIR}/aw882xx_acf.bin       ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/config.txt            ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/fw_bcm43456c5_ag.bin  ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/lt9611uxc_fw.bin      ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/nvram.txt             ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/renesas_usb_fw.mem    ${D}${nonarch_base_libdir}/firmware/
-    install -m 0644 ${WORKDIR}/sduart8987_combo.bin  ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/aw882xx_acf.bin       ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/config.txt            ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/fw_bcm43456c5_ag.bin  ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/lt9611uxc_fw.bin      ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/nvram.txt             ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/renesas_usb_fw.mem    ${D}${nonarch_base_libdir}/firmware/
+    install -m 0644 ${UNPACKDIR}/sduart8987_combo.bin  ${D}${nonarch_base_libdir}/firmware/
 
     # brcmfmac firmware for the rubikpi3's BCM43456 (BCM4345/9 silicon rev).
     # Upstream `linux-firmware-bcm43455` is BCM4345/6 — a different rev; the
@@ -41,8 +39,8 @@ do_install() {
     # via wireless-regdb-static; if specific channels misbehave we can add
     # a CLM blob later.
     install -d ${D}${nonarch_base_libdir}/firmware/brcm
-    install -m 0644 ${WORKDIR}/fw_bcm43456c5_ag.bin ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43456-sdio.bin
-    install -m 0644 ${WORKDIR}/nvram.txt            ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43456-sdio.txt
+    install -m 0644 ${UNPACKDIR}/fw_bcm43456c5_ag.bin ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43456-sdio.bin
+    install -m 0644 ${UNPACKDIR}/nvram.txt            ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43456-sdio.txt
     # CLM regulatory blob: BCMDHD bundles CLM inside the .bin; brcmfmac wants
     # it separate. We don't have a 43456 CLM, but the closely-related 43455
     # blob from upstream linux-firmware-bcm43455 works in practice (same

@@ -13,8 +13,6 @@ SRCREV = "4bfb0de9f6605978e55ee2e89374b2eb2a84358d"
 
 SRC_URI = "${SRCPROJECT};branch=${SRCBRANCH}"
 
-S = "${WORKDIR}/git"
-
 INSANE_SKIP:${PN} += "ldflags"
 
 do_configure() {

@@ -9,7 +9,7 @@ SRC_URI:append = " \
 # standard kernel.bbclass SRC_URI-auto-merge) so .cfg fragments must be
 # explicitly appended to KERNEL_CONFIG_FRAGMENTS or they're staged into
 # WORKDIR but never merged into .config.
-KERNEL_CONFIG_FRAGMENTS:append = " ${WORKDIR}/avocado-core.cfg ${WORKDIR}/avocado-extra.cfg"
+KERNEL_CONFIG_FRAGMENTS:append = " ${UNPACKDIR}/avocado-core.cfg ${UNPACKDIR}/avocado-extra.cfg"
 
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides

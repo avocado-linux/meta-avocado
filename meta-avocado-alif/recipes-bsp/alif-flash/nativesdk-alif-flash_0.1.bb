@@ -13,19 +13,17 @@ SRC_URI = " \
     file://README.md \
 "
 
-S = "${WORKDIR}"
-
 inherit nativesdk
 
 do_compile[noexec] = "1"
 
 do_install() {
     install -d ${D}${bindir}
-    install -m 0755 ${WORKDIR}/flash-alif.sh ${D}${bindir}/avocado-alif-flash
+    install -m 0755 ${UNPACKDIR}/flash-alif.sh ${D}${bindir}/avocado-alif-flash
 
     install -d ${D}${datadir}/avocado-alif-flash
-    install -m 0644 ${WORKDIR}/atoc-alif-e8-devkit.json ${D}${datadir}/avocado-alif-flash/atoc-alif-e8-devkit.json
-    install -m 0644 ${WORKDIR}/README.md ${D}${datadir}/avocado-alif-flash/README.md
+    install -m 0644 ${UNPACKDIR}/atoc-alif-e8-devkit.json ${D}${datadir}/avocado-alif-flash/atoc-alif-e8-devkit.json
+    install -m 0644 ${UNPACKDIR}/README.md ${D}${datadir}/avocado-alif-flash/README.md
 }
 
 FILES:${PN} = "${bindir}/* ${datadir}/avocado-alif-flash"

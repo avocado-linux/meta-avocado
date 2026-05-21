@@ -16,7 +16,7 @@ SRCREV_c = "4bfb0de9f6605978e55ee2e89374b2eb2a84358d"
 
 SRCREV_FORMAT = "python_c"
 
-S = "${WORKDIR}/git/python"
+S = "${UNPACKDIR}/git/python"
 
 inherit setuptools3 pkgconfig
 

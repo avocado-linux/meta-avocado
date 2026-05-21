@@ -10,8 +10,8 @@ SRC_URI += " \
 # onboard BCM43455 SDIO Wi-Fi can probe.
 SRC_URI:append:rubikpi3 = " file://rubikpi3-wifi.cfg"
 
-KERNEL_CONFIG_FRAGMENTS:append = " ${WORKDIR}/avocado-core.cfg ${WORKDIR}/avocado-extra.cfg"
-KERNEL_CONFIG_FRAGMENTS:append:rubikpi3 = " ${WORKDIR}/rubikpi3-wifi.cfg"
+KERNEL_CONFIG_FRAGMENTS:append = " ${UNPACKDIR}/avocado-core.cfg ${UNPACKDIR}/avocado-extra.cfg"
+KERNEL_CONFIG_FRAGMENTS:append:rubikpi3 = " ${UNPACKDIR}/rubikpi3-wifi.cfg"
 
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides

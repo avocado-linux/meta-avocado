@@ -8,7 +8,7 @@ LIC_FILES_CHKSUM = "file://../LICENSE.md;md5=e4c8ad3b0ba7659157573c0d9d4bd496"
 SRC_URI = "git://github.com/SolidRun/rzg2_flash_writer.git;branch=rz_v2n;protocol=https"
 SRCREV = "e9e0ae0a5b194a2d68dc5413d29b15f190f2a350"
 
-S = "${WORKDIR}/git/flash-tools"
+S = "${UNPACKDIR}/${BP}/flash-tools"
 
 inherit nativesdk
 

@@ -11,8 +11,6 @@ LIC_FILES_CHKSUM = "file://license.txt;md5=ea9445d9cc03d508cf6bb769d15a54ef"
 SRC_URI = "git://github.com/rockchip-linux/rkdeveloptool.git;branch=master;protocol=https"
 SRCREV = "304f073752fd25c854e1bcf05d8e7f925b1f4e14"
 
-S = "${WORKDIR}/git"
-
 DEPENDS = "libusb1"
 
 inherit autotools pkgconfig

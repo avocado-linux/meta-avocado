@@ -27,8 +27,6 @@ SRC_URI = " \
     file://wifi.service \
 "
 
-S = "${WORKDIR}"
-
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 # Note: SYSTEMD_AUTO_ENABLE is intentionally NOT set. These packages ship via
@@ -54,13 +52,13 @@ do_install() {
     install -d ${D}${libexecdir}/rubikpi3
     install -d ${D}${systemd_system_unitdir}
 
-    install -m 0755 ${WORKDIR}/bt.sh   ${D}${libexecdir}/rubikpi3/bt.sh
-    install -m 0644 ${WORKDIR}/bt.service ${D}${systemd_system_unitdir}/bt.service
+    install -m 0755 ${UNPACKDIR}/bt.sh   ${D}${libexecdir}/rubikpi3/bt.sh
+    install -m 0644 ${UNPACKDIR}/bt.service ${D}${systemd_system_unitdir}/bt.service
     sed -i 's|/etc/initscripts/bt.sh|${libexecdir}/rubikpi3/bt.sh|g' \
         ${D}${systemd_system_unitdir}/bt.service
 
-    install -m 0755 ${WORKDIR}/wifi.sh ${D}${libexecdir}/rubikpi3/wifi.sh
-    install -m 0644 ${WORKDIR}/wifi.service ${D}${systemd_system_unitdir}/wifi.service
+    install -m 0755 ${UNPACKDIR}/wifi.sh ${D}${libexecdir}/rubikpi3/wifi.sh
+    install -m 0644 ${UNPACKDIR}/wifi.service ${D}${systemd_system_unitdir}/wifi.service
     sed -i 's|/etc/initscripts/wifi.sh|${libexecdir}/rubikpi3/wifi.sh|g' \
         ${D}${systemd_system_unitdir}/wifi.service
 }

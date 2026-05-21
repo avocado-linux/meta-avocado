@@ -27,8 +27,8 @@ SRC_URI += " \
     file://0001-modify-pipewire-configuration-for-rubikpi3.patch;patchdir=${RUBIKPI3_S} \
 "
 
-S = "${WORKDIR}/audio/opensource/pulseaudio-plugins/pipewire-plugin"
-RUBIKPI3_S = "${WORKDIR}/audio/opensource/pulseaudio-plugins"
+S = "${UNPACKDIR}/audio/opensource/pulseaudio-plugins/pipewire-plugin"
+RUBIKPI3_S = "${UNPACKDIR}/audio/opensource/pulseaudio-plugins"
 
 DEPENDS = "qcom-agm pipewire qcom-pal qcom-pal-headers"
 TARGET_CFLAGS += "-I ${STAGING_DIR_TARGET}/usr/include/spa-0.2"
@@ -45,9 +45,9 @@ do_install:append:qcom () {
     install -d ${D}${systemd_system_unitdir}
     install -d ${D}${nonarch_libdir}/systemd/system-preset
     install -d ${D}/usr/lib/pipewire-0.3
-    install -m 0644 ${WORKDIR}/pipewire-pulse.service ${D}${systemd_system_unitdir}/pipewire-pulse.service
-    install -Dm0644 ${WORKDIR}/98-qcom-pipewire.preset ${D}${nonarch_libdir}/systemd/system-preset/98-qcom-pipewire.preset
-    install -Dm0644 ${WORKDIR}/pipewire-pulse.socket ${D}${systemd_system_unitdir}/pipewire-pulse.socket
+    install -m 0644 ${UNPACKDIR}/pipewire-pulse.service ${D}${systemd_system_unitdir}/pipewire-pulse.service
+    install -Dm0644 ${UNPACKDIR}/98-qcom-pipewire.preset ${D}${nonarch_libdir}/systemd/system-preset/98-qcom-pipewire.preset
+    install -Dm0644 ${UNPACKDIR}/pipewire-pulse.socket ${D}${systemd_system_unitdir}/pipewire-pulse.socket
     install -d ${D}${systemd_system_unitdir}/multi-user.target.wants/
     install -m 0755  ${D}/usr/lib/libpipewire-module-pal.so ${D}/usr/lib/pipewire-0.3/
     rm -f ${D}/usr/lib/libpipewire-module-pal.so

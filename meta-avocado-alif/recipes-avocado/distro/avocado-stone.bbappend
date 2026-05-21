@@ -18,10 +18,10 @@ SRC_URI:append:stone-serial = " \
 
 do_deploy:append() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/build-disk-image.sh ${DEPLOYDIR}/build-disk-image.sh
+  install -m 0755 ${UNPACKDIR}/build-disk-image.sh ${DEPLOYDIR}/build-disk-image.sh
 }
 
 do_deploy:append:stone-serial() {
   install -d ${DEPLOYDIR}
-  install -m 0755 ${WORKDIR}/stone-provision-serial.sh ${DEPLOYDIR}/stone-provision-serial.sh
+  install -m 0755 ${UNPACKDIR}/stone-provision-serial.sh ${DEPLOYDIR}/stone-provision-serial.sh
 }
