@@ -71,6 +71,56 @@ python avocado_kernel_emit_builtin_provides() {
     if not provides:
         return
 
+    # Drop any Provides that would shadow a modular kernel-module-* rpm this
+    # same kernel recipe is also producing.
+    #
+    # Why: kernel-module-split.bbclass names a split package after the .ko
+    # basename. The kernel source tree can contain two distinct .ko files
+    # that share a basename (e.g. drivers/bus/arm-cci.ko built-in via
+    # CONFIG_ARM_CCI=y and drivers/perf/arm-cci.ko modular via
+    # CONFIG_ARM_CCI_PMU=m; same shape for net/tls/tls.ko vs
+    # crypto/tls.ko). In that case modules.builtin lists `arm-cci.ko` and
+    # kernel-module-split simultaneously emits `kernel-module-arm-cci.rpm`
+    # for the modular sibling. Without this filter we'd emit
+    # `Provides: kernel-module-arm-cci` on kernel-base AND publish a
+    # separate kernel-module-arm-cci rpm — dnf sees two candidates for the
+    # same name and may pick the kernel package, leaving the modular rpm
+    # uninstallable.
+    #
+    # PACKAGES is populated by kernel-module-split's split_kernel_module_packages
+    # before emit_pkgdata. In Avocado kernel recipes the module split names
+    # already include the KERNEL_VERSION suffix ("kernel-module-X-${kver}")
+    # because KERNEL_MODULE_PACKAGE_SUFFIX is set on multi-kernel builds.
+    # Strip that suffix to recover the bare module name and use it as the
+    # collision key against both the unqualified and qualified Provides
+    # we're about to emit.
+    pkg_list = (d.getVar("PACKAGES") or "").split()
+    kver_suffix = "-%s" % kver
+    modular = set()
+    for p in pkg_list:
+        if not p.startswith("kernel-module-"):
+            continue
+        bare = p[: -len(kver_suffix)] if p.endswith(kver_suffix) else p
+        modular.add(bare)
+
+    if modular:
+        dropped = []
+        kept = []
+        for p in provides:
+            bare = p[: -len(kver_suffix)] if p.endswith(kver_suffix) else p
+            if bare in modular:
+                dropped.append(p)
+            else:
+                kept.append(p)
+        if dropped:
+            bb.note("avocado-kernel-builtin-provides: dropped %d Provides "
+                    "shadowing modular kernel-module rpms: %s"
+                    % (len(dropped), " ".join(sorted(dropped))))
+        provides = kept
+
+    if not provides:
+        return
+
     existing = (d.getVar("RPROVIDES:%s" % base_pkg) or "").split()
     merged = list(dict.fromkeys(existing + provides))
     d.setVar("RPROVIDES:%s" % base_pkg, " ".join(merged))
