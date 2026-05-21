@@ -48,7 +48,7 @@ RDEPENDS:${PN} = " \
   libgpiod-tools \
   libimobiledevice \
   libnss-mdns \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', 'librealsense2', '', d)} \
+  ${@'librealsense2' if 'opengl' in (d.getVar('DISTRO_FEATURES') or '').split() and 'intel-realsense' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else ''} \
   libqmi \
   libv4l \
   libwebsockets \
