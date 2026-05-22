@@ -63,6 +63,7 @@ RDEPENDS:${PN} = " \
   networkmanager \
   networkmanager-daemon \
   networkmanager-nmcli \
+  networkmanager-wwan \
   nodejs \
   ntfs-3g-ntfsprogs \
   opencv \
