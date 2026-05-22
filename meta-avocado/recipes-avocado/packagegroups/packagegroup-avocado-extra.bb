@@ -6,6 +6,7 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  audit \
   avahi-daemon \
   avocado-hitl \
   avocado-img-bootfiles \
