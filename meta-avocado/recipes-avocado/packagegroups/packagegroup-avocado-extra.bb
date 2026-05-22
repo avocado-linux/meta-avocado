@@ -6,6 +6,7 @@ inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+  audit \
   avahi-daemon \
   avocado-hitl \
   avocado-img-bootfiles \
