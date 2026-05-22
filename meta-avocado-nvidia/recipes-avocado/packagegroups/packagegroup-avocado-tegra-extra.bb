@@ -8,6 +8,7 @@ PACKAGES = "${PN}"
 RDEPENDS:${PN} = " \
   deepstream-7.1-pyds \
   deepstream-7.1 \
+  python3-tensorrt \
   tegra-firmware \
   tegra-redundant-boot-base \
   tegra-binaries \
@@ -33,6 +34,9 @@ RDEPENDS:${PN} = " \
   tegra-libraries-pva \
   tegra-nvpower \
   tegra-mmapi \
+  tensorrt-samples \
+  tensorrt-trtexec \
+  tensorrt-trtexec-prebuilt \
   nvidia-docker \
   linux-firmware-rtl8168 \
   kernel-module-r8168 \
