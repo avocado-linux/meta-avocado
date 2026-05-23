@@ -1,0 +1,10 @@
+
+# FRDM-IMX95 device trees (kernel 6.12, added by meta-avocado-nxp)
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm.dtb
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-boe-wxga-lvds-panel.dtb
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-aud-hat.dtb
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-8mic-reve.dtb
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-waveshare-7inch-c-panel.dtbo
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-os08a20.dtbo
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-os08a20-combo.dtbo
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-frdm-ap1302.dtbo

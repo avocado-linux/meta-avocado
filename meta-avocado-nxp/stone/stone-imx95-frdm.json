@@ -1,0 +1,142 @@
+{
+  "runtime": {
+    "platform": "avocado-imx95-frdm",
+    "architecture": "arm64",
+    "provision_default": "img",
+    "update_strategy": "uboot-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": {
+      "type": "uboot-env",
+      "set": { "avocado_boot_slot": "{inactive_slot}" }
+    }
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      },
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      },
+      "uuu-emmc": {
+        "script": "stone-provision-uuu-emmc.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"],
+        "config": {
+          "emmc_uboot_dev": 0,
+          "emmc_mmcblk": 0
+        }
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-imx95-frdm-rootdisk.zip",
+      "build_args": {
+        "type": "fwup",
+        "template": "rootdisk.conf"
+      },
+      "devpath": "/dev/mmcblk1",
+      "block_size": 512,
+      "uuid": "4bc367b3-5d70-4289-b24d-9b09cb79685c",
+      "images": {
+        "imx_boot": "imx-boot",
+        "uboot_env": "uboot.env",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": [
+              "avocado-image-initramfs-imx95-frdm.cpio.zst",
+              "Image",
+              "imx95-15x15-frdm.dtb"
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-imx95-frdm.erofs-lz4",
+        "var": "avocado-image-var-imx95-frdm.btrfs"
+      },
+      "partitions": [
+        {
+          "name": "imx-boot",
+          "image": "imx_boot",
+          "offset": 32,
+          "offset_unit": "kibibytes",
+          "size": 3072,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "offset": 4,
+          "offset_unit": "mebibytes",
+          "offset_redundant": 4352,
+          "offset_redundant_unit": "kibibytes",
+          "size": 128,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "boot-a",
+          "image": "boot",
+          "offset": 6,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot-b",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "recovery",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
+          "image": "rootfs",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "image": "",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "size": 512,
+          "size_unit": "mebibytes",
+          "expand": "true"
+        }
+      ]
+    }
+  }
+}
