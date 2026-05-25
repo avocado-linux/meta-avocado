@@ -6,6 +6,6 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-virtualization
     path: meta-virtualization
     branch: scarthgap
-    commit: 3dd635f613f7299d986a8ab6bc9f584370f8ed1d
+    commit: 8409bc0c8b9209327add72d8fa72571cdeb5521e
     layers:
       .:

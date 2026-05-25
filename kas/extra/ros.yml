@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-ros.git
     path: meta-ros
     branch: scarthgap
-    commit: 4aaaf8b98b05374be6ee26d18920f6a5c3e4cbbb
+    commit: faba0b8658b1c2416f2380cd1671daa60ced6481
     layers:
       meta-ros-common:
       meta-ros2-jazzy:

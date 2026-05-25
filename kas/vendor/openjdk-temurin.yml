@@ -6,6 +6,6 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openjdk-temurin.git
     path: meta-openjdk-temurin
     branch: scarthgap
-    commit: 703ab477bbd8d9c13e96d25fa3381066eaea083d
+    commit: 5804d9a8b33c40b7a6c6ecae9fc8799b8df61108
     layers:
       .:

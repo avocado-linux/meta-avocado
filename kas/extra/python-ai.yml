@@ -13,7 +13,7 @@ repos:
   meta-clang-revival:
     url: https://github.com/avocado-linux/vendor-meta-clang-revival.git
     path: meta-clang-revival
-    commit: f34e150f6def4f7a9226bad517b6f6b4dcadb516
+    commit: 15bbb8a25648da1e591a596e7643d0a3c060e441
     branch: scarthgap
     layers:
       .:

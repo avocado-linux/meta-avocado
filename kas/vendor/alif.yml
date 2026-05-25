@@ -6,14 +6,14 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-alif.git
     path: meta-alif
     branch: scarthgap
-    commit: ba08f359d911b74fa3bbf3b6321e811c2141455c
+    commit: 4a9a90f43adb383d2505d07029566eeae7dcc3ef
     layers:
       .:
   meta-alif-ensemble:
     url: https://github.com/avocado-linux/vendor-meta-alif-ensemble.git
     path: meta-alif-ensemble
     branch: scarthgap
-    commit: 0dae08547b22c81edec37f2e2d90ff4836e4074a
+    commit: 105716cff4a5eb0fa50f0c7e428de082e1bda69c
     layers:
       .:
 
