@@ -324,13 +324,63 @@ that one is correct, not drift.)
 
 ## Open Questions / Follow-ups
 
-- [ ] Decide on bitbake `2.18-avocado` vs unpatched `2.18` (audit
-      `2.8-avocado` patches above upstream `2.8` and forward-port).
-- [ ] Decide on openembedded-core `wrynose-avocado` vs unpatched
-      `master` (audit `scarthgap-avocado` patches above upstream
-      `scarthgap`).
+- [ ] bitbake: the fork now tracks a `2.18` branch, but it still carries
+      the **old top-level-only `_contains_lfs`** and is missing the
+      subdir-`.gitattributes` LFS fix + clonedir lfs-store propagation
+      from scarthgap-avocado `2.8-avocado` (`3cc47121`, ported in
+      scarthgap commit `3fb9561`). Fork-port it onto `2.18` (or a
+      `2.18-avocado`) and re-pin [kas/vendor/oe.yml](../../kas/vendor/oe.yml).
+      Blocks grinn-astra torq LFS repos.
+- [ ] openembedded-core: the fork now tracks a `wrynose` branch, but it
+      is **missing the "allow identical symlinks from different recipes
+      in sysroot" staging patch** (`b9936e48`, re-pinned in scarthgap
+      commit `f347c52`). `staging.bbclass` still `bb.fatal`s on the
+      collision with no `is_same` allow-branch. Fork-port it onto the
+      `wrynose` branch and re-pin. Needed for multi-version clang-cross
+      coexistence.
 - [ ] Confirm whether meta-lts-mixins is still needed under wrynose.
 - [ ] Track upstream wrynose support PRs / issues for each blocked
       layer; bump pins as they land.
 - [ ] First clean `kas build` of the distro target on wrynose pins
       (expect fetcher / parsing churn).
+
+---
+
+## Forward-Port Round — 2026-05-28
+
+`wrynose` was fast-forwarded onto `jschneck/wrynose-forwardport` (the
+branch where forward-port work had continued past the original
+2026-04-29 squash — 93 commits), then the scarthgap commits landed
+since that branch's HEAD (2026-05-21) were swept in. Comparison was by
+commit subject (`scarthgap` vs the forward-port history).
+
+### Ported (cherry-picked with `-x`)
+
+| scarthgap | wrynose | Note |
+|---|---|---|
+| `a713758` feat(networkmanager): modemmanager + networkmanager-wwan | `f18c0740` | clean |
+| `b7628f6` feat(nvidia): TensorRT runtime + samples | `eeec475d` | clean |
+| `6839f6c` feat(qemu): USB CDC ACM/Ethernet kernel modules | `76dfb081` | clean |
+| `6809679` feat: add audit to packagegroup-avocado-extra | `d7611baf` | clean |
+| `3d22f68` kas/target: qemu-provision.yml overlay | `158a76c8` | clean |
+| `64c30e2` meta-avocado-qemu/scripts: uninative loader | `a6c80aba` | clean |
+| `82e672e` fix(grinn-astra): syna-u-boot SRC_URI dts handling | `a1c26612` | **conflict** — kept wrynose `${UNPACKDIR}` convention while taking scarthgap's drop of the `_defconfig` juggling |
+| `8e6a5cf` fix(grinn-astra): rescue suboot_defconfig existence check | `09cd1415` | clean (pure append) |
+| `f4121f0` fix(qcom): seed recipe-sysroot passwd for property-vault | `895b1a03` | clean |
+
+### Skipped
+
+- `e0d50eb` kas/extra: add trailing newline — **no-op on wrynose**. The
+  file already ends in a newline here; the apparent conflict was only
+  because wrynose comments out the `aws.yml` include
+  ([kas/extra.yml](../../kas/extra.yml)).
+
+### Not applicable (scarthgap-only)
+
+- `882c7b8` kas: bump vendor layer pins to latest — bumps
+  scarthgap-compatible branch pins. wrynose pins track `wrynose` /
+  `master` / vendor wrynose branches, so a literal port is wrong; do a
+  separate wrynose-side pin refresh instead.
+- `f347c52`, `3fb9561` — vendor-fork re-pins; see the two concrete
+  fork-port items under Open Questions above (oe-core symlink patch,
+  bitbake LFS subdir fix). Not distro cherry-picks.
