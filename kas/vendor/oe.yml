@@ -16,7 +16,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-bitbake
     path: bitbake
     branch: "2.18"
-    commit: d1f775f266610a79d5fbfe420b2843288c0011fe
+    commit: 22021758e66737bcf68dfd2b74adc6a0cb1d42d9
     layers:
       .: disabled
 
