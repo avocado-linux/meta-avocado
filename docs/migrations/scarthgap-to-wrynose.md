@@ -324,20 +324,24 @@ that one is correct, not drift.)
 
 ## Open Questions / Follow-ups
 
-- [ ] bitbake: the fork now tracks a `2.18` branch, but it still carries
-      the **old top-level-only `_contains_lfs`** and is missing the
-      subdir-`.gitattributes` LFS fix + clonedir lfs-store propagation
-      from scarthgap-avocado `2.8-avocado` (`3cc47121`, ported in
-      scarthgap commit `3fb9561`). Fork-port it onto `2.18` (or a
-      `2.18-avocado`) and re-pin [kas/vendor/oe.yml](../../kas/vendor/oe.yml).
-      Blocks grinn-astra torq LFS repos.
-- [ ] openembedded-core: the fork now tracks a `wrynose` branch, but it
-      is **missing the "allow identical symlinks from different recipes
-      in sysroot" staging patch** (`b9936e48`, re-pinned in scarthgap
-      commit `f347c52`). `staging.bbclass` still `bb.fatal`s on the
-      collision with no `is_same` allow-branch. Fork-port it onto the
-      `wrynose` branch and re-pin. Needed for multi-version clang-cross
-      coexistence.
+- [x] **openembedded-core — DONE.** Created `wrynose-avocado` on the fork
+      (`upstream/wrynose` + two avocado patches absent from upstream
+      wrynose/master: `sstatesig` nativesdk→target manifest fallback, and
+      `staging` allow-identical-symlinks for multi-version clang-cross).
+      Re-pinned [kas/vendor/oe.yml](../../kas/vendor/oe.yml) to
+      `wrynose-avocado`. `update.sh` auto-rebases it onto `upstream/wrynose`.
+- [x] **bitbake — decided: no patch branch, bump to latest `2.18`.**
+      bitbake 2.18 added `lfs_fetch()` (`git lfs fetch --all` into
+      clonedir/dest), which **supersedes the propagation half** of the old
+      `2.8-avocado` LFS patch (`_copy_clonedir_lfs` + `clone_shallow_local`
+      rewrite). The residual gap — `_contains_lfs` still greps only the
+      **top-level** `.gitattributes`, so repos with subdir-only LFS rules
+      (e.g. synaptics-torq) skip pre-staging and fail offline `do_unpack` —
+      is left **unpatched**. `avocado-grinn-astra-1680-sbc` defaults
+      `SYNA_NPU_ENABLE=1` (torq path on), so if that board enters the
+      wrynose build matrix and its offline `do_unpack` fails, revisit with a
+      minimal `2.18-avocado` carrying only the `_contains_lfs` subdir-walk
+      hunk. Pin bumped to upstream `2.18` head `22021758`.
 - [ ] Confirm whether meta-lts-mixins is still needed under wrynose.
 - [ ] Track upstream wrynose support PRs / issues for each blocked
       layer; bump pins as they land.
