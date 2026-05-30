@@ -137,9 +137,23 @@ def _avocado_pulp_wait_task(base, user, pw, task_href, ca=''):
                 bb.fatal(f"avocado-pulp-upload: task {task_href} completed with no resources")
             return created[0]
         if state in ('failed', 'canceled'):
-            bb.fatal(f"avocado-pulp-upload: task {task_href} {state}: {data.get('error')}")
+            err = data.get('error') or {}
+            reason = ' '.join(str(err.get(k, '')) for k in ('reason', 'description', 'traceback')).lower()
+            # Transient infra failures — a Pulp worker that died / was OOM-killed /
+            # was scaled-down mid-task ("Worker has gone missing"), a cancellation,
+            # or a lock/deadlock — are RETRYABLE: the caller re-submits rather than
+            # failing the whole recipe (and the build). A canceled task is ~always
+            # worker churn. Signalled via a RuntimeError prefix the dispatcher
+            # catches; real failures still bb.fatal. See _avocado_pulp_upload.
+            markers = ('gone missing', 'worker shutting down', 'connection reset',
+                       'temporarily unavailable', 'timed out', 'deadlock', 'lock timeout')
+            if state == 'canceled' or any(m in reason for m in markers):
+                raise RuntimeError(f"AVOCADO_PULP_TRANSIENT: task {task_href} {state}: {err}")
+            bb.fatal(f"avocado-pulp-upload: task {task_href} {state}: {err}")
         time.sleep(0.5)
-    bb.fatal(f"avocado-pulp-upload: task {task_href} did not complete within 600s")
+    # A task that never completes within the window is most likely a wedged/lost
+    # worker — treat as transient so the caller retries instead of failing.
+    raise RuntimeError(f"AVOCADO_PULP_TRANSIENT: task {task_href} did not complete within 600s")
 
 def _avocado_multipart(file_field, filename, filebytes, extra_fields=None):
     # Build a multipart/form-data body: optional plain fields + one file part.
@@ -241,13 +255,40 @@ def _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca='', ch
     return _avocado_pulp_wait_task(base, user, pw, task_href, ca=ca)
 
 def _avocado_pulp_upload(base, user, pw, rpm_path, sha256_hex='', ca='', chunk_size=16 << 20, parallel=4):
-    import os
+    import os, time, random, bb
     # Chunk only files large enough to benefit; small RPMs stay single-request
     # (1 task) to avoid multiplying load on the Pulp workers.
-    if os.path.getsize(rpm_path) > chunk_size:
-        return _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca=ca,
-                                            chunk_size=chunk_size, parallel=parallel)
-    return _avocado_pulp_upload_singleshot(base, user, pw, rpm_path, ca=ca)
+    big = os.path.getsize(rpm_path) > chunk_size
+    # Retry the whole upload on TRANSIENT task failures — a Pulp worker that was
+    # scaled-down / OOM-killed / restarted mid content-create surfaces as "Worker
+    # has gone missing" and would otherwise fail the recipe (and a 12k-task build)
+    # over one infra blip. The artifact is content-addressed, so a re-upload
+    # dedups; and before each retry we check whether the content actually landed
+    # despite the worker error (the task can fail *after* creating the package).
+    attempts = 4
+    last = None
+    for i in range(attempts):
+        try:
+            if big:
+                return _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca=ca,
+                                                    chunk_size=chunk_size, parallel=parallel)
+            return _avocado_pulp_upload_singleshot(base, user, pw, rpm_path, ca=ca)
+        except RuntimeError as e:
+            if not str(e).startswith("AVOCADO_PULP_TRANSIENT"):
+                raise           # real failure (or bb.fatal) — propagate
+            last = e
+            if sha256_hex:
+                href = _avocado_pulp_lookup(base, user, pw, sha256_hex, ca=ca)
+                if href:
+                    bb.warn(f"avocado-pulp-upload: transient task error but content is present, "
+                            f"using it ({sha256_hex[:12]})")
+                    return href
+            if i < attempts - 1:
+                bb.warn(f"avocado-pulp-upload: transient Pulp failure, retry {i + 1}/{attempts} "
+                        f"for {os.path.basename(rpm_path)}: {e}")
+                time.sleep(min(30, 2 ** i) + random.uniform(0, 1))
+    bb.fatal(f"avocado-pulp-upload: gave up after {attempts} transient Pulp failures "
+             f"for {os.path.basename(rpm_path)}: {last}")
 
 def _avocado_rpms_from_pkgwrite(d):
     # Live-build path. Our postfunc runs before sstate moves the RPMs out of
