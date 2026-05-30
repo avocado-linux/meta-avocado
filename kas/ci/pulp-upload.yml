@@ -22,6 +22,12 @@ env:
   PULP_BASE_URL: ""
   PULP_USERNAME: ""
   PULP_PASSWORD: ""
+  # Path to a CA bundle (system roots + the internal package-ca) the bbclass
+  # trusts when uploading over TLS. Passed through to the bitbake datastore
+  # because bitbake strips SSL_CERT_FILE from the worker env, so urllib (running
+  # inside the worker) would otherwise fail to verify the package-ca cert. Empty
+  # = use the ambient default trust store (fine for a publicly-trusted Pulp).
+  PULP_CA_BUNDLE: ""
   # Space-separated list of recipe PNs whose RPMs should NOT be published to
   # Pulp. Use for aggregator metapackages (packagegroups, etc.) whose binary
   # output is machine-dependent/non-deterministic but which no one should

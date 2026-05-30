@@ -61,7 +61,7 @@ do_package_write_rpm_setscene[vardepsexclude] += "avocado_pulp_postinst"
 # inputs. Excluding them from vardeps keeps the function body stable when creds
 # rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
 # (AVOCADO_PULP_UPLOAD=1) builds.
-avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD"
+avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE"
 
 def _avocado_pulp_env(d):
     # Read via the bitbake datastore rather than os.environ: bitbake filters
@@ -71,12 +71,23 @@ def _avocado_pulp_env(d):
     base = (d.getVar('PULP_BASE_URL') or '').rstrip('/')
     user = d.getVar('PULP_USERNAME') or ''
     pw = d.getVar('PULP_PASSWORD') or ''
+    # CA bundle for TLS verification. The same env-filtering that drops the creds
+    # also drops SSL_CERT_FILE from the bitbake worker, and urllib runs INSIDE the
+    # worker — so we cannot rely on the ambient default trust store (it lacks the
+    # internal package-ca and TLS verification fails). Read the bundle path from
+    # the datastore and hand it to ssl explicitly. Prefer an explicit
+    # PULP_CA_BUNDLE, fall back to SSL_CERT_FILE if the build exported it.
+    ca = d.getVar('PULP_CA_BUNDLE') or d.getVar('SSL_CERT_FILE') or ''
     if not base:
         bb.fatal("avocado-pulp-upload: AVOCADO_PULP_UPLOAD=1 but PULP_BASE_URL is empty")
-    return base, user, pw
+    return base, user, pw, ca
 
-def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='', pw='', timeout=120):
-    import urllib.request, urllib.error, base64, time, random
+def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='', pw='', timeout=120, ca=''):
+    import urllib.request, urllib.error, base64, time, random, ssl
+    # Verify against the supplied CA bundle (package-ca + system roots) when
+    # given; otherwise fall back to urllib's default context. Built once,
+    # outside the retry loop.
+    ctx = ssl.create_default_context(cafile=ca) if ca else None
     attempts = 8
     last_err = None
     for i in range(attempts):
@@ -87,7 +98,7 @@ def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='',
             if user:
                 token = base64.b64encode(f"{user}:{pw}".encode()).decode()
                 req.add_header('Authorization', f'Basic {token}')
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 return resp.status, resp.read()
         except urllib.error.HTTPError as e:
             last_err = e
@@ -101,21 +112,21 @@ def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='',
             time.sleep(min(30, 2 ** i) + random.uniform(0, 1))
     raise last_err
 
-def _avocado_pulp_lookup(base, user, pw, sha256_hex):
+def _avocado_pulp_lookup(base, user, pw, sha256_hex, ca=''):
     import json
     url = f"{base}/pulp/api/v3/content/rpm/packages/?sha256={sha256_hex}&fields=pulp_href,sha256"
-    _, body = _avocado_pulp_http(url, user=user, pw=pw)
+    _, body = _avocado_pulp_http(url, user=user, pw=pw, ca=ca)
     data = json.loads(body)
     if data.get('count', 0) > 0:
         return data['results'][0]['pulp_href']
     return None
 
-def _avocado_pulp_wait_task(base, user, pw, task_href):
+def _avocado_pulp_wait_task(base, user, pw, task_href, ca=''):
     import json, time, bb
     url = f"{base}{task_href}"
     deadline = time.time() + 600
     while time.time() < deadline:
-        _, body = _avocado_pulp_http(url, user=user, pw=pw)
+        _, body = _avocado_pulp_http(url, user=user, pw=pw, ca=ca)
         data = json.loads(body)
         state = data.get('state', '')
         if state == 'completed':
@@ -128,7 +139,7 @@ def _avocado_pulp_wait_task(base, user, pw, task_href):
         time.sleep(0.5)
     bb.fatal(f"avocado-pulp-upload: task {task_href} did not complete within 600s")
 
-def _avocado_pulp_upload(base, user, pw, rpm_path):
+def _avocado_pulp_upload(base, user, pw, rpm_path, ca=''):
     import os, uuid, json, bb
     boundary = f"----avocado{uuid.uuid4().hex}"
     with open(rpm_path, 'rb') as f:
@@ -146,13 +157,13 @@ def _avocado_pulp_upload(base, user, pw, rpm_path):
     _, resp_body = _avocado_pulp_http(
         url, method='POST', data=body,
         content_type=f'multipart/form-data; boundary={boundary}',
-        user=user, pw=pw, timeout=600,
+        user=user, pw=pw, timeout=600, ca=ca,
     )
     resp = json.loads(resp_body)
     task_href = resp.get('task', '')
     if not task_href:
         bb.fatal(f"avocado-pulp-upload: POST returned no task href: {resp}")
-    return _avocado_pulp_wait_task(base, user, pw, task_href)
+    return _avocado_pulp_wait_task(base, user, pw, task_href, ca=ca)
 
 def _avocado_rpms_from_pkgwrite(d):
     # Live-build path. Our postfunc runs before sstate moves the RPMs out of
@@ -261,9 +272,9 @@ python avocado_pulp_postinst() {
 
     # Look up Pulp creds only when we actually need them (real upload + not
     # excluded), so dry-run and excluded-only paths can't fail on missing env.
-    base = user = pw = None
+    base = user = pw = ca = None
     if do_upload and not excluded:
-        base, user, pw = _avocado_pulp_env(d)
+        base, user, pw, ca = _avocado_pulp_env(d)
 
     manifest_dir = os.path.join(deploy_dir, 'pulp-uploads')
     bb.utils.mkdirhier(manifest_dir)
@@ -315,12 +326,12 @@ python avocado_pulp_postinst() {
                         h.update(chunk)
                 sha256_hex = h.hexdigest()
 
-                existing = _avocado_pulp_lookup(base, user, pw, sha256_hex)
+                existing = _avocado_pulp_lookup(base, user, pw, sha256_hex, ca=ca)
                 if existing:
                     pulp_href = existing
                     uploaded_flag = False
                 else:
-                    pulp_href = _avocado_pulp_upload(base, user, pw, path)
+                    pulp_href = _avocado_pulp_upload(base, user, pw, path, ca=ca)
                     uploaded_flag = True
 
                 entry["sha256"] = sha256_hex
