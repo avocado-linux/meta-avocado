@@ -35,6 +35,11 @@ env:
   # POST. Empty = bbclass defaults (16 MiB chunks / 4 parallel).
   AVOCADO_PULP_CHUNK_SIZE: ""
   AVOCADO_PULP_UPLOAD_PARALLEL: ""
+  # How many of a single recipe's RPMs to dedup+upload concurrently. Fan-out
+  # recipes (glibc-locale ~1900 tiny RPMs, kernel modules) otherwise serialize
+  # thousands of small WAN round-trips and dominate the build tail. Empty =
+  # bbclass default (8).
+  AVOCADO_PULP_RECIPE_PARALLEL: ""
   # Space-separated list of recipe PNs whose RPMs should NOT be published to
   # Pulp. Use for aggregator metapackages (packagegroups, etc.) whose binary
   # output is machine-dependent/non-deterministic but which no one should

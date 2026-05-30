@@ -61,7 +61,7 @@ do_package_write_rpm_setscene[vardepsexclude] += "avocado_pulp_postinst"
 # inputs. Excluding them from vardeps keeps the function body stable when creds
 # rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
 # (AVOCADO_PULP_UPLOAD=1) builds.
-avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL"
+avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL AVOCADO_PULP_RECIPE_PARALLEL"
 
 def _avocado_pulp_env(d):
     # Read via the bitbake datastore rather than os.environ: bitbake filters
@@ -362,75 +362,87 @@ python avocado_pulp_postinst() {
     # Chunked-upload tuning (large files only): chunk size + parallel streams.
     chunk_size = int(d.getVar('AVOCADO_PULP_CHUNK_SIZE') or (16 << 20))
     parallel = int(d.getVar('AVOCADO_PULP_UPLOAD_PARALLEL') or 4)
+    # Per-recipe parallelism: how many of THIS recipe's RPMs to dedup+upload
+    # concurrently. Fan-out recipes (glibc-locale emits ~1900 tiny RPMs, kernel
+    # modules, *-locale) otherwise serialize thousands of small WAN round-trips
+    # and dominate the build tail; running them concurrently is the biggest win.
+    recipe_parallel = int(d.getVar('AVOCADO_PULP_RECIPE_PARALLEL') or 8)
 
     manifest_dir = os.path.join(deploy_dir, 'pulp-uploads')
     bb.utils.mkdirhier(manifest_dir)
     manifest_path = os.path.join(manifest_dir, f"{pn}-{pv}-{pr}-{machine}{mc_suffix}.jsonl")
 
-    # Truncate on open: SSTATEPOSTINSTFUNCS may fire on both the live and
-    # setscene path for the same recipe in unusual scenarios. Last writer
-    # wins - the content is identical, so no data loss.
+    # Phase 1 (serial, local only): build a manifest entry per RPM. Resolve the
+    # per-machine Pulp repo and skip dummies / unmapped arches. No network here.
+    items = []
+    for pkg_arch, arch_dir, path in rpms:
+        if arch_dir.startswith('sdk_provides_dummy') or pkg_arch.startswith('sdk-provides-dummy'):
+            continue
+        repo_details = avocado_determine_repo_paths(d, pkg_arch, arch_dir)
+        # Key the Pulp repo off repo_url_path (the repo root / repomd baseurl), NOT
+        # map_value_path (the per-arch package dir). They are identical in the legacy
+        # 2024 layout, but under W1 (AVOCADO_PERTARGET_REPOS=1) repo_url_path is the
+        # single per-machine root ($releasever/target/<machine>) while map_value_path
+        # is the arch subdir beneath it -- so all of a machine's arches (machine arch,
+        # shared tunes, noarch) land in ONE Pulp repo + ONE repomd. Falls back to
+        # map_value_path if repo_url_path is unset.
+        repo_root = repo_details.get('repo_url_path') or repo_details.get('map_value_path')
+        if not repo_root:
+            continue
+        repo_path = repo_root.replace('$releasever', f"{release}/{channel}")
+        prefix = f"{release}/{channel}/"
+        tail = repo_path[len(prefix):] if repo_path.startswith(prefix) else repo_path
+        repo_name = f"{release}-{channel}-" + tail.replace('/', '-')
+        items.append({
+            "rpm_name": os.path.basename(path),
+            "sha256": "",
+            "arch_dir": arch_dir,
+            "repo_name": repo_name,
+            "repo_path": repo_path,
+            "pulp_href": "",
+            "machine": machine,
+            "sdkmachine": sdkmachine,
+            "uploaded": False,
+            "excluded": excluded,
+            "dry_run": not do_upload,
+            "_path": path,
+        })
+
+    # Phase 2 (concurrent): hash + dedup + upload each publishable RPM. Workers
+    # mutate their own entry dict (no shared state). Fail-closed: the first
+    # worker error re-raises out of the map and fails the task. Skipped for
+    # excluded recipes and dry runs (no network in either).
+    def _process(entry):
+        path = entry["_path"]
+        h = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                h.update(chunk)
+        sha256_hex = h.hexdigest()
+        existing = _avocado_pulp_lookup(base, user, pw, sha256_hex, ca=ca)
+        if existing:
+            entry["pulp_href"], entry["uploaded"] = existing, False
+        else:
+            entry["pulp_href"] = _avocado_pulp_upload(
+                base, user, pw, path, sha256_hex=sha256_hex, ca=ca,
+                chunk_size=chunk_size, parallel=parallel)
+            entry["uploaded"] = True
+        entry["sha256"] = sha256_hex
+
+    if do_upload and not excluded and items:
+        import concurrent.futures as cf
+        with cf.ThreadPoolExecutor(max_workers=min(recipe_parallel, len(items))) as ex:
+            list(ex.map(_process, items))   # re-raises the first failure
+
+    # Phase 3: write the manifest (drop the private _path key) + emit notes.
+    # Last writer wins on re-fire (live + setscene) -- identical content.
     with open(manifest_path, 'w') as mf:
-        for pkg_arch, arch_dir, path in rpms:
-            if arch_dir.startswith('sdk_provides_dummy') or pkg_arch.startswith('sdk-provides-dummy'):
-                continue
-
-            repo_details = avocado_determine_repo_paths(d, pkg_arch, arch_dir)
-            # Key the Pulp repo off repo_url_path (the repo root / repomd baseurl), NOT
-            # map_value_path (the per-arch package dir). They are identical in the legacy
-            # 2024 layout, but under W1 (AVOCADO_PERTARGET_REPOS=1) repo_url_path is the
-            # single per-machine root ($releasever/target/<machine>) while map_value_path
-            # is the arch subdir beneath it -- so all of a machine's arches (machine arch,
-            # shared tunes, noarch) land in ONE Pulp repo + ONE repomd. Falls back to
-            # map_value_path if repo_url_path is unset.
-            repo_root = repo_details.get('repo_url_path') or repo_details.get('map_value_path')
-            if not repo_root:
-                continue
-
-            repo_path = repo_root.replace('$releasever', f"{release}/{channel}")
-            prefix = f"{release}/{channel}/"
-            tail = repo_path[len(prefix):] if repo_path.startswith(prefix) else repo_path
-            repo_name = f"{release}-{channel}-" + tail.replace('/', '-')
-
-            entry = {
-                "rpm_name": os.path.basename(path),
-                "sha256": "",
-                "arch_dir": arch_dir,
-                "repo_name": repo_name,
-                "repo_path": repo_path,
-                "pulp_href": "",
-                "machine": machine,
-                "sdkmachine": sdkmachine,
-                "uploaded": False,
-                "excluded": excluded,
-                "dry_run": not do_upload,
-            }
-
-            if not excluded and do_upload:
-                h = hashlib.sha256()
-                with open(path, 'rb') as f:
-                    for chunk in iter(lambda: f.read(1 << 20), b''):
-                        h.update(chunk)
-                sha256_hex = h.hexdigest()
-
-                existing = _avocado_pulp_lookup(base, user, pw, sha256_hex, ca=ca)
-                if existing:
-                    pulp_href = existing
-                    uploaded_flag = False
-                else:
-                    pulp_href = _avocado_pulp_upload(base, user, pw, path, sha256_hex=sha256_hex,
-                                                     ca=ca, chunk_size=chunk_size, parallel=parallel)
-                    uploaded_flag = True
-
-                entry["sha256"] = sha256_hex
-                entry["pulp_href"] = pulp_href
-                entry["uploaded"] = uploaded_flag
-
-            mf.write(json.dumps(entry) + "\n")
-            mf.flush()
-
-            if excluded:
-                bb.note(f"avocado-pulp-upload: {entry['rpm_name']} (excluded, not published)")
-            elif do_upload:
-                bb.note(f"avocado-pulp-upload: {entry['rpm_name']} -> {entry['pulp_href']} ({'uploaded' if entry['uploaded'] else 'reused'})")
+        for e in items:
+            mf.write(json.dumps({k: v for k, v in e.items() if not k.startswith('_')}) + "\n")
+        mf.flush()
+    for e in items:
+        if e["excluded"]:
+            bb.note(f"avocado-pulp-upload: {e['rpm_name']} (excluded, not published)")
+        elif do_upload:
+            bb.note(f"avocado-pulp-upload: {e['rpm_name']} -> {e['pulp_href']} ({'uploaded' if e['uploaded'] else 'reused'})")
 }
