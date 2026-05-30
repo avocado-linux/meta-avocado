@@ -28,6 +28,13 @@ env:
   # inside the worker) would otherwise fail to verify the package-ca cert. Empty
   # = use the ambient default trust store (fine for a publicly-trusted Pulp).
   PULP_CA_BUNDLE: ""
+  # Large-RPM upload tuning. Files bigger than AVOCADO_PULP_CHUNK_SIZE bytes are
+  # uploaded via Pulp's chunked /uploads/ API in AVOCADO_PULP_UPLOAD_PARALLEL
+  # concurrent streams (resilient, no per-request gunicorn-timeout risk, and
+  # fills the VPN pipe a single stream leaves idle). Smaller files stay a single
+  # POST. Empty = bbclass defaults (16 MiB chunks / 4 parallel).
+  AVOCADO_PULP_CHUNK_SIZE: ""
+  AVOCADO_PULP_UPLOAD_PARALLEL: ""
   # Space-separated list of recipe PNs whose RPMs should NOT be published to
   # Pulp. Use for aggregator metapackages (packagegroups, etc.) whose binary
   # output is machine-dependent/non-deterministic but which no one should

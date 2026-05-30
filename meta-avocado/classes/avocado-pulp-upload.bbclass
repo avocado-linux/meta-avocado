@@ -61,7 +61,7 @@ do_package_write_rpm_setscene[vardepsexclude] += "avocado_pulp_postinst"
 # inputs. Excluding them from vardeps keeps the function body stable when creds
 # rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
 # (AVOCADO_PULP_UPLOAD=1) builds.
-avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE"
+avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL"
 
 def _avocado_pulp_env(d):
     # Read via the bitbake datastore rather than os.environ: bitbake filters
@@ -82,7 +82,7 @@ def _avocado_pulp_env(d):
         bb.fatal("avocado-pulp-upload: AVOCADO_PULP_UPLOAD=1 but PULP_BASE_URL is empty")
     return base, user, pw, ca
 
-def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='', pw='', timeout=120, ca=''):
+def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='', pw='', timeout=120, ca='', headers=None):
     import urllib.request, urllib.error, base64, time, random, ssl
     # Verify against the supplied CA bundle (package-ca + system roots) when
     # given; otherwise fall back to urllib's default context. Built once,
@@ -95,6 +95,8 @@ def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='',
             req = urllib.request.Request(url, data=data, method=method)
             if content_type:
                 req.add_header('Content-Type', content_type)
+            for hk, hv in (headers or {}).items():
+                req.add_header(hk, hv)
             if user:
                 token = base64.b64encode(f"{user}:{pw}".encode()).decode()
                 req.add_header('Authorization', f'Basic {token}')
@@ -139,31 +141,113 @@ def _avocado_pulp_wait_task(base, user, pw, task_href, ca=''):
         time.sleep(0.5)
     bb.fatal(f"avocado-pulp-upload: task {task_href} did not complete within 600s")
 
-def _avocado_pulp_upload(base, user, pw, rpm_path, ca=''):
-    import os, uuid, json, bb
+def _avocado_multipart(file_field, filename, filebytes, extra_fields=None):
+    # Build a multipart/form-data body: optional plain fields + one file part.
+    import uuid
     boundary = f"----avocado{uuid.uuid4().hex}"
-    with open(rpm_path, 'rb') as f:
-        filedata = f.read()
-    filename = os.path.basename(rpm_path)
-    parts = [
+    parts = []
+    for k, v in (extra_fields or {}).items():
+        parts += [
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode(),
+            f"{v}\r\n".encode(),
+        ]
+    parts += [
         f"--{boundary}\r\n".encode(),
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode(),
-        b'Content-Type: application/x-rpm\r\n\r\n',
-        filedata,
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode(),
+        b'Content-Type: application/octet-stream\r\n\r\n',
+        filebytes,
         f"\r\n--{boundary}--\r\n".encode(),
     ]
-    body = b''.join(parts)
-    url = f"{base}/pulp/api/v3/content/rpm/packages/"
+    return b''.join(parts), f'multipart/form-data; boundary={boundary}'
+
+def _avocado_pulp_upload_singleshot(base, user, pw, rpm_path, ca=''):
+    # One multipart POST with the whole file. Fine for small RPMs; avoids the
+    # 3-extra-requests + 2-tasks overhead of the chunked path.
+    import os, json, bb
+    with open(rpm_path, 'rb') as f:
+        filedata = f.read()
+    body, ctype = _avocado_multipart('file', os.path.basename(rpm_path), filedata)
     _, resp_body = _avocado_pulp_http(
-        url, method='POST', data=body,
-        content_type=f'multipart/form-data; boundary={boundary}',
-        user=user, pw=pw, timeout=600, ca=ca,
+        f"{base}/pulp/api/v3/content/rpm/packages/", method='POST', data=body,
+        content_type=ctype, user=user, pw=pw, timeout=600, ca=ca,
     )
-    resp = json.loads(resp_body)
-    task_href = resp.get('task', '')
+    task_href = json.loads(resp_body).get('task', '')
     if not task_href:
-        bb.fatal(f"avocado-pulp-upload: POST returned no task href: {resp}")
+        bb.fatal(f"avocado-pulp-upload: POST returned no task href")
     return _avocado_pulp_wait_task(base, user, pw, task_href, ca=ca)
+
+def _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca='', chunk_size=16 << 20, parallel=4):
+    # Resilient large-file upload via Pulp's chunked uploads API:
+    #   POST /uploads/ {size} -> PUT each Content-Range chunk (in parallel) ->
+    #   commit {sha256} -> create the rpm package from the resulting artifact.
+    # Each request is bounded (one chunk), so the gunicorn worker timeout is
+    # never at risk; parallel chunks fill the VPN's bandwidth-delay product that
+    # a single stream leaves idle; and only `parallel` chunks are ever held in
+    # memory at once (vs. the whole file + a copy in the single-shot path).
+    import os, json, bb, urllib.parse
+    import concurrent.futures as cf
+    size = os.path.getsize(rpm_path)
+    _, body = _avocado_pulp_http(
+        f"{base}/pulp/api/v3/uploads/", method='POST',
+        data=json.dumps({"size": size}).encode(), content_type='application/json',
+        user=user, pw=pw, ca=ca,
+    )
+    upload_href = json.loads(body)['pulp_href']
+
+    ranges = []
+    off = 0
+    while off < size:
+        end = min(off + chunk_size, size) - 1
+        ranges.append((off, end))
+        off = end + 1
+
+    fname = os.path.basename(rpm_path)
+    def _put(rng):
+        start, end = rng
+        with open(rpm_path, 'rb') as f:
+            f.seek(start)
+            chunk = f.read(end - start + 1)
+        cbody, ctype = _avocado_multipart('file', fname, chunk)
+        _avocado_pulp_http(
+            f"{base}{upload_href}", method='PUT', data=cbody, content_type=ctype,
+            user=user, pw=pw, timeout=600, ca=ca,
+            headers={'Content-Range': f'bytes {start}-{end}/{size}'},
+        )
+    if parallel > 1 and len(ranges) > 1:
+        with cf.ThreadPoolExecutor(max_workers=parallel) as ex:
+            list(ex.map(_put, ranges))   # re-raises the first chunk failure
+    else:
+        for rng in ranges:
+            _put(rng)
+
+    # commit (assemble + verify the full sha256) -> artifact href
+    _, body = _avocado_pulp_http(
+        f"{base}{upload_href}commit/", method='POST',
+        data=json.dumps({"sha256": sha256_hex}).encode(), content_type='application/json',
+        user=user, pw=pw, ca=ca,
+    )
+    artifact_href = _avocado_pulp_wait_task(base, user, pw, json.loads(body)['task'], ca=ca)
+
+    # create the rpm package from the committed artifact
+    form = urllib.parse.urlencode({'artifact': artifact_href, 'relative_path': fname}).encode()
+    _, body = _avocado_pulp_http(
+        f"{base}/pulp/api/v3/content/rpm/packages/", method='POST', data=form,
+        content_type='application/x-www-form-urlencoded', user=user, pw=pw, timeout=600, ca=ca,
+    )
+    task_href = json.loads(body).get('task', '')
+    if not task_href:
+        bb.fatal(f"avocado-pulp-upload: package create returned no task href")
+    return _avocado_pulp_wait_task(base, user, pw, task_href, ca=ca)
+
+def _avocado_pulp_upload(base, user, pw, rpm_path, sha256_hex='', ca='', chunk_size=16 << 20, parallel=4):
+    import os
+    # Chunk only files large enough to benefit; small RPMs stay single-request
+    # (1 task) to avoid multiplying load on the Pulp workers.
+    if os.path.getsize(rpm_path) > chunk_size:
+        return _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca=ca,
+                                            chunk_size=chunk_size, parallel=parallel)
+    return _avocado_pulp_upload_singleshot(base, user, pw, rpm_path, ca=ca)
 
 def _avocado_rpms_from_pkgwrite(d):
     # Live-build path. Our postfunc runs before sstate moves the RPMs out of
@@ -275,6 +359,9 @@ python avocado_pulp_postinst() {
     base = user = pw = ca = None
     if do_upload and not excluded:
         base, user, pw, ca = _avocado_pulp_env(d)
+    # Chunked-upload tuning (large files only): chunk size + parallel streams.
+    chunk_size = int(d.getVar('AVOCADO_PULP_CHUNK_SIZE') or (16 << 20))
+    parallel = int(d.getVar('AVOCADO_PULP_UPLOAD_PARALLEL') or 4)
 
     manifest_dir = os.path.join(deploy_dir, 'pulp-uploads')
     bb.utils.mkdirhier(manifest_dir)
@@ -331,7 +418,8 @@ python avocado_pulp_postinst() {
                     pulp_href = existing
                     uploaded_flag = False
                 else:
-                    pulp_href = _avocado_pulp_upload(base, user, pw, path, ca=ca)
+                    pulp_href = _avocado_pulp_upload(base, user, pw, path, sha256_hex=sha256_hex,
+                                                     ca=ca, chunk_size=chunk_size, parallel=parallel)
                     uploaded_flag = True
 
                 entry["sha256"] = sha256_hex
