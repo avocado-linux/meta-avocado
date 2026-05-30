@@ -229,11 +229,18 @@ python avocado_pulp_postinst() {
                 continue
 
             repo_details = avocado_determine_repo_paths(d, pkg_arch, arch_dir)
-            map_value_path = repo_details.get('map_value_path')
-            if not map_value_path:
+            # Key the Pulp repo off repo_url_path (the repo root / repomd baseurl), NOT
+            # map_value_path (the per-arch package dir). They are identical in the legacy
+            # 2024 layout, but under W1 (AVOCADO_PERTARGET_REPOS=1) repo_url_path is the
+            # single per-machine root ($releasever/target/<machine>) while map_value_path
+            # is the arch subdir beneath it -- so all of a machine's arches (machine arch,
+            # shared tunes, noarch) land in ONE Pulp repo + ONE repomd. Falls back to
+            # map_value_path if repo_url_path is unset.
+            repo_root = repo_details.get('repo_url_path') or repo_details.get('map_value_path')
+            if not repo_root:
                 continue
 
-            repo_path = map_value_path.replace('$releasever', f"{release}/{channel}")
+            repo_path = repo_root.replace('$releasever', f"{release}/{channel}")
             prefix = f"{release}/{channel}/"
             tail = repo_path[len(prefix):] if repo_path.startswith(prefix) else repo_path
             repo_name = f"{release}-{channel}-" + tail.replace('/', '-')
