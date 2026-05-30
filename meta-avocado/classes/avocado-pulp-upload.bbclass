@@ -13,29 +13,52 @@
 #                           against the same shape of manifests CI produces,
 #                           without needing Pulp credentials.
 #
-# Hook point: SSTATEPOSTINSTFUNCS, not do_package_write_rpm[postfuncs]. The
-# postfunc-on-the-task approach was tried first and failed silently on the
-# live-build path: sstate.bbclass reorders user postfuncs ahead of
-# sstate_task_postfunc, so they fire before the file copy from PKGWRITEDIRRPM
-# to DEPLOY_DIR_RPM and before the SSTATE manifest is written. addtask was
-# tried next and works for normal recipes, but kernel.bbclass's task-graph
-# manipulation causes bitbake's scheduler to silently skip a separately-added
-# task even with [nostamp] and a clear after-do_package_write_rpm dependency.
-# SSTATEPOSTINSTFUNCS sidesteps both: it fires from inside sstate_install
-# AFTER files are in DEPLOY_DIR_RPM and the SSTATE manifest is written, on
-# both the live-build path (via sstate_task_postfunc) and the setscene path
-# (via sstate_setscene). It is invoked from within the parent task, so the
-# scheduler cannot drop it.
+# Hook point: do_package_write_rpm[postfuncs] (+ the _setscene twin). This is the
+# mechanism OE mandates since SSTATEPOSTINSTFUNCS was removed in oe-core
+# 74e08170a5 ("sstate: Drop SSTATEPOSTINSTFUNC support" — deprecated by general
+# task postfunc support; buildhistory, its last user, migrated the same way).
+# The class previously used SSTATEPOSTINSTFUNCS specifically because it fired
+# AFTER files were in DEPLOY_DIR_RPM and the sstate manifest was written, on both
+# the live and setscene paths. With postfuncs the timing differs per path, so we
+# read the RPMs from the right place for each:
+#
+#   * Live build (do_package_write_rpm): sstate.bbclass orders non-"buildhistory"
+#     postfuncs AHEAD of sstate_task_postfunc, so this fires BEFORE the RPMs are
+#     moved PKGWRITEDIRRPM -> DEPLOY_DIR_RPM and before any sstate manifest is
+#     written. We read this recipe's freshly written RPMs straight from
+#     PKGWRITEDIRRPM (${WORKDIR}/deploy-rpms/<arch>).
+#   * Setscene (do_package_write_rpm_setscene): this fires AFTER the sstate
+#     unpack, so the RPMs are in DEPLOY_DIR_RPM and the per-recipe sstate manifest
+#     exists; we read that manifest to select exactly this recipe's RPMs
+#     (DEPLOY_DIR_RPM is shared across recipes).
+#
+# Both paths upload + record the pulp_href, with a sha256 lookup first so a
+# setscene-restored recipe that was already uploaded in a prior build is reused,
+# not re-pushed. addtask is still NOT viable: kernel.bbclass's task-graph
+# manipulation makes bitbake silently skip a separately-added task.
 #
 # Failure mode: fail-closed. Any upload or lookup error in real-upload mode
-# raises bb.fatal, which fails the recipe and the build.
+# raises bb.fatal, which fails the recipe and the build. The build/finalize
+# Tekton task additionally parity-checks RPMs-on-disk against manifest entries,
+# so a silently-disconnected hook fails the pipeline rather than shipping a
+# partial feed (this is the regression guard for exactly the SSTATEPOSTINSTFUNCS
+# removal that broke the first wrynose build).
 
 inherit avocado-arch-utils
 
-SSTATEPOSTINSTFUNCS:append = " avocado_pulp_postinst"
+do_package_write_rpm[postfuncs] += "avocado_pulp_postinst"
+do_package_write_rpm_setscene[postfuncs] += "avocado_pulp_postinst"
+
+# avocado_pulp_postinst is a side-effect-only emitter (uploads to Pulp + writes a
+# manifest under DEPLOY_DIR); it must NOT influence task signatures, or toggling
+# AVOCADO_PULP_UPLOAD — or merely inheriting this class — would invalidate sstate
+# and rebuild the world. Exclude it from both tasks' dependency calculation, the
+# same pattern buildhistory uses for buildhistory_list_pkg_files.
+do_package_write_rpm[vardepsexclude] += "avocado_pulp_postinst"
+do_package_write_rpm_setscene[vardepsexclude] += "avocado_pulp_postinst"
 
 # Pulp credentials and the upload-mode toggle are environment, not build
-# inputs. Excluding them from vardeps keeps task hashes stable when creds
+# inputs. Excluding them from vardeps keeps the function body stable when creds
 # rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
 # (AVOCADO_PULP_UPLOAD=1) builds.
 avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD"
@@ -131,14 +154,31 @@ def _avocado_pulp_upload(base, user, pw, rpm_path):
         bb.fatal(f"avocado-pulp-upload: POST returned no task href: {resp}")
     return _avocado_pulp_wait_task(base, user, pw, task_href)
 
-def _avocado_rpms_for_recipe(d):
-    # Read bitbake's own sstate manifest for this recipe's
-    # do_package_write_rpm task. ${SSTATE_MANFILEPREFIX} expands to the exact
-    # per-recipe file prefix (no globbing needed), so sibling recipes with
-    # similar names (native, nativesdk variants) don't get their manifests
-    # mis-attributed to this one. The manifest is written by sstate_install
-    # before SSTATEPOSTINSTFUNCS is invoked, so it is reliably present here
-    # on both live-build and setscene paths.
+def _avocado_rpms_from_pkgwrite(d):
+    # Live-build path. Our postfunc runs before sstate moves the RPMs out of
+    # PKGWRITEDIRRPM (sstate.bbclass orders non-"buildhistory" postfuncs ahead of
+    # sstate_task_postfunc), so no sstate manifest exists yet. PKGWRITEDIRRPM
+    # (${WORKDIR}/deploy-rpms) is per-recipe, so everything under it belongs to
+    # this recipe — no risk of mis-attributing a sibling's RPMs. RPMs are laid
+    # out as <PKGWRITEDIRRPM>/<PACKAGE_ARCH_EXTEND>/<name>.rpm, the same
+    # arch-subdir shape they keep once moved to DEPLOY_DIR_RPM.
+    import os, glob
+    base = d.getVar('PKGWRITEDIRRPM')
+    if not base or not os.path.isdir(base):
+        return []
+    results = []
+    for path in sorted(glob.glob(os.path.join(base, '*', '*.rpm'))):
+        arch_dir = os.path.basename(os.path.dirname(path))
+        pkg_arch = arch_dir.replace('_', '-')
+        results.append((pkg_arch, arch_dir, path))
+    return results
+
+def _avocado_rpms_from_manifest(d):
+    # Setscene path. Our postfunc runs after the sstate unpack, so the RPMs are
+    # in DEPLOY_DIR_RPM and bitbake's per-recipe sstate manifest is present.
+    # ${SSTATE_MANFILEPREFIX} expands to the exact per-recipe file prefix (no
+    # globbing), so sibling recipes with similar names (native, nativesdk
+    # variants) sharing DEPLOY_DIR_RPM don't get their RPMs mis-attributed here.
     import os
     manfile = d.expand('${SSTATE_MANFILEPREFIX}.package_write_rpm')
     if not manfile or not os.path.isfile(manfile):
@@ -157,12 +197,21 @@ def _avocado_rpms_for_recipe(d):
             results.append((pkg_arch, arch_dir, line))
     return results
 
+def _avocado_rpms_for_recipe(d):
+    # Pick the source by which task we're a postfunc of: the live build writes
+    # to PKGWRITEDIRRPM (read it before sstate relocates it); the setscene task
+    # unpacks into DEPLOY_DIR_RPM and writes the sstate manifest (read that).
+    task = d.getVar('BB_CURRENTTASK') or ''
+    if task == 'package_write_rpm_setscene':
+        return _avocado_rpms_from_manifest(d)
+    return _avocado_rpms_from_pkgwrite(d)
+
 python avocado_pulp_postinst() {
     import os, hashlib, json, bb
 
-    # SSTATEPOSTINSTFUNCS fires for every sstate task. Filter to
-    # package_write_rpm only - we don't care about populate_sysroot etc.
-    # BB_CURRENTTASK is set by bitbake-worker to taskname.replace("do_", "").
+    # Defensive guard: we are only attached as a postfunc of do_package_write_rpm
+    # and its _setscene twin, but assert it so a stray attachment can't run this
+    # against an unexpected task. BB_CURRENTTASK is the do_-stripped task name.
     task = d.getVar('BB_CURRENTTASK') or ''
     if task not in ('package_write_rpm', 'package_write_rpm_setscene'):
         return
