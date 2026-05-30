@@ -40,6 +40,11 @@ env:
   # thousands of small WAN round-trips and dominate the build tail. Empty =
   # bbclass default (8).
   AVOCADO_PULP_RECIPE_PARALLEL: ""
+  # SDK-build filter. Set to "1" for `avocado-sdk` builds so only the SDK-arch
+  # packages (*-avocadosdk + all_avocadosdk) are published — the target/cross RPMs
+  # an SDK build produces as deps belong to the distro feed, not the SDK repo.
+  # Empty/"0" = publish everything the build produced (correct for distro builds).
+  AVOCADO_PULP_UPLOAD_SDK_ONLY: ""
   # Space-separated list of recipe PNs whose RPMs should NOT be published to
   # Pulp. Use for aggregator metapackages (packagegroups, etc.) whose binary
   # output is machine-dependent/non-deterministic but which no one should

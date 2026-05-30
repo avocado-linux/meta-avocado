@@ -61,7 +61,7 @@ do_package_write_rpm_setscene[vardepsexclude] += "avocado_pulp_postinst"
 # inputs. Excluding them from vardeps keeps the function body stable when creds
 # rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
 # (AVOCADO_PULP_UPLOAD=1) builds.
-avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL AVOCADO_PULP_RECIPE_PARALLEL"
+avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL AVOCADO_PULP_RECIPE_PARALLEL AVOCADO_PULP_UPLOAD_SDK_ONLY"
 
 def _avocado_pulp_env(d):
     # Read via the bitbake datastore rather than os.environ: bitbake filters
@@ -350,6 +350,17 @@ python avocado_pulp_postinst() {
     exclude_list = (d.getVar('AVOCADO_PULP_UPLOAD_EXCLUDE') or '').split()
     excluded = pn in exclude_list
 
+    # SDK-build mode: an `avocado-sdk` build also packages target/cross RPMs as
+    # deps, but those belong to the distro feed (and re-uploading them risks
+    # variant duplicates in the target repo). When AVOCADO_PULP_UPLOAD_SDK_ONLY=1
+    # we publish ONLY the SDK-arch packages (the *-avocadosdk arches + the
+    # all_avocadosdk noarch SDK packages); target-arch RPMs are skipped entirely.
+    sdk_only = d.getVar('AVOCADO_PULP_UPLOAD_SDK_ONLY') == '1'
+    sdk_archs = set(
+        (d.getVar('AVOCADO_SDK_REPO_ARCHS') or '').split()
+        + (d.getVar('AVOCADO_SDK_REPO_ARCHS_UNDERSCORE') or '').split()
+        + ['all_avocadosdk', 'all-avocadosdk'])
+
     rpms = _avocado_rpms_for_recipe(d)
     if not rpms:
         return
@@ -377,6 +388,9 @@ python avocado_pulp_postinst() {
     items = []
     for pkg_arch, arch_dir, path in rpms:
         if arch_dir.startswith('sdk_provides_dummy') or pkg_arch.startswith('sdk-provides-dummy'):
+            continue
+        # In SDK-only mode, publish only the SDK-arch packages; skip target/cross RPMs.
+        if sdk_only and arch_dir not in sdk_archs and pkg_arch not in sdk_archs:
             continue
         repo_details = avocado_determine_repo_paths(d, pkg_arch, arch_dir)
         # Key the Pulp repo off repo_url_path (the repo root / repomd baseurl), NOT
