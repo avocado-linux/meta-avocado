@@ -61,7 +61,7 @@ do_package_write_rpm_setscene[vardepsexclude] += "avocado_pulp_postinst"
 # inputs. Excluding them from vardeps keeps the function body stable when creds
 # rotate or when toggling between dev (AVOCADO_PULP_UPLOAD=0) and CI
 # (AVOCADO_PULP_UPLOAD=1) builds.
-avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL AVOCADO_PULP_RECIPE_PARALLEL AVOCADO_PULP_UPLOAD_SDK_ONLY"
+avocado_pulp_postinst[vardepsexclude] = "AVOCADO_PULP_UPLOAD AVOCADO_PULP_UPLOAD_EXCLUDE PULP_BASE_URL PULP_USERNAME PULP_PASSWORD PULP_CA_BUNDLE SSL_CERT_FILE AVOCADO_PULP_CHUNK_SIZE AVOCADO_PULP_UPLOAD_PARALLEL AVOCADO_PULP_RECIPE_PARALLEL AVOCADO_PULP_UPLOAD_SDK_ONLY AVOCADO_BUILD_ID"
 
 def _avocado_pulp_env(d):
     # Read via the bitbake datastore rather than os.environ: bitbake filters
@@ -82,15 +82,25 @@ def _avocado_pulp_env(d):
         bb.fatal("avocado-pulp-upload: AVOCADO_PULP_UPLOAD=1 but PULP_BASE_URL is empty")
     return base, user, pw, ca
 
-def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='', pw='', timeout=120, ca='', headers=None):
+def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='', pw='', timeout=30, ca='', headers=None):
     import urllib.request, urllib.error, base64, time, random, ssl
     # Verify against the supplied CA bundle (package-ca + system roots) when
     # given; otherwise fall back to urllib's default context. Built once,
     # outside the retry loop.
     ctx = ssl.create_default_context(cafile=ca) if ca else None
-    attempts = 8
+    # Retry schedule = inter-attempt delays in seconds. A blip is almost always
+    # momentary (a dropped keepalive, an NLB/nginx reconnect, a VPN hiccup), so
+    # BURST several FAST retries first — recover in <~1s without penalty — and only
+    # if it persists (a real netsplit) fall back to exponential backoff at a
+    # reasonable rate. Total is bounded (~10 tries, ~80s of waits + a short per-try
+    # socket timeout) so one dead/half-open connection can't stall a build thread
+    # for many minutes. (The old 8×120s + expo could cost ~18 min on one hung
+    # socket, which wedged long fan-out recipes like glibc-locale.) Override the
+    # per-try timeout per call: small/metadata ops keep the short default; only the
+    # large chunk PUTs get a longer one.
+    backoff = [0.2, 0.4, 0.8, 1.5, 3, 6, 12, 24, 30]   # fast burst -> capped exponential
     last_err = None
-    for i in range(attempts):
+    for i in range(len(backoff) + 1):
         try:
             req = urllib.request.Request(url, data=data, method=method)
             if content_type:
@@ -104,14 +114,13 @@ def _avocado_pulp_http(url, method='GET', data=None, content_type=None, user='',
                 return resp.status, resp.read()
         except urllib.error.HTTPError as e:
             last_err = e
-            if 400 <= e.code < 500:
+            if 400 <= e.code < 500:   # client error (4xx) is not transient
                 raise
         except (urllib.error.URLError, OSError) as e:
+            # network / timeout / connection-reset / half-open socket -> retry
             last_err = e
-        if i < attempts - 1:
-            # Exponential backoff with jitter. DNS rate-limits under many
-            # parallel bitbake task subprocesses; spread retries out.
-            time.sleep(min(30, 2 ** i) + random.uniform(0, 1))
+        if i < len(backoff):
+            time.sleep(backoff[i] + random.uniform(0, 0.2))
     raise last_err
 
 def _avocado_pulp_lookup(base, user, pw, sha256_hex, ca=''):
@@ -184,7 +193,7 @@ def _avocado_pulp_upload_singleshot(base, user, pw, rpm_path, ca=''):
     body, ctype = _avocado_multipart('file', os.path.basename(rpm_path), filedata)
     _, resp_body = _avocado_pulp_http(
         f"{base}/pulp/api/v3/content/rpm/packages/", method='POST', data=body,
-        content_type=ctype, user=user, pw=pw, timeout=600, ca=ca,
+        content_type=ctype, user=user, pw=pw, timeout=90, ca=ca,   # small file (<chunk_size); fail fast on hang
     )
     task_href = json.loads(resp_body).get('task', '')
     if not task_href:
@@ -225,7 +234,7 @@ def _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca='', ch
         cbody, ctype = _avocado_multipart('file', fname, chunk)
         _avocado_pulp_http(
             f"{base}{upload_href}", method='PUT', data=cbody, content_type=ctype,
-            user=user, pw=pw, timeout=600, ca=ca,
+            user=user, pw=pw, timeout=120, ca=ca,   # one chunk (<=chunk_size); bounded
             headers={'Content-Range': f'bytes {start}-{end}/{size}'},
         )
     if parallel > 1 and len(ranges) > 1:
@@ -247,7 +256,7 @@ def _avocado_pulp_upload_chunked(base, user, pw, rpm_path, sha256_hex, ca='', ch
     form = urllib.parse.urlencode({'artifact': artifact_href, 'relative_path': fname}).encode()
     _, body = _avocado_pulp_http(
         f"{base}/pulp/api/v3/content/rpm/packages/", method='POST', data=form,
-        content_type='application/x-www-form-urlencoded', user=user, pw=pw, timeout=600, ca=ca,
+        content_type='application/x-www-form-urlencoded', user=user, pw=pw, timeout=30, ca=ca,  # tiny metadata POST
     )
     task_href = json.loads(body).get('task', '')
     if not task_href:
@@ -447,7 +456,19 @@ python avocado_pulp_postinst() {
         repo_path = repo_root.replace('$releasever', f"{release}/{channel}")
         prefix = f"{release}/{channel}/"
         tail = repo_path[len(prefix):] if repo_path.startswith(prefix) else repo_path
-        repo_name = f"{release}-{channel}-" + tail.replace('/', '-')
+        # Per-build DELTA repo (per-build-distribution model — see
+        # infra/pipeline-organization.md). When AVOCADO_BUILD_ID is set, this build's
+        # RPMs go into an isolated delta repo <rel>-build-<id>-target-<machine> instead
+        # of straight into edge; the cloud build_distribution.py then composes
+        # (edge + delta) for isolated test and, on approval, promotes the delta into
+        # edge (delta-only, watermark-guarded). Unset => legacy edge keying (the build
+        # writes edge directly, i.e. the pre-build-distribution flow). Backward-compat:
+        # a no-op until the build Task/kas passes AVOCADO_BUILD_ID through.
+        build_id = (d.getVar('AVOCADO_BUILD_ID') or '').strip()
+        if build_id:
+            repo_name = f"{release}-build-{build_id}-" + tail.replace('/', '-')
+        else:
+            repo_name = f"{release}-{channel}-" + tail.replace('/', '-')
         items.append({
             "rpm_name": os.path.basename(path),
             "sha256": "",
