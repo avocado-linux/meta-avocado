@@ -1,32 +1,34 @@
-From 8c580a5977dd6842bed0a93a534dc940cd264126 Mon Sep 17 00:00:00 2001
+From 03b1d1d38ed1ac49ad0ed87366d7f6b6271ff58d Mon Sep 17 00:00:00 2001
 From: Justin Schneck <j.schneck@peridio.com>
-Date: Sat, 3 Jan 2026 18:58:23 -0500
+Date: Tue, 2 Jun 2026 16:40:11 -0400
 Subject: [PATCH] linux-user: Fix USBDEVFS_CONTROL and USBDEVFS_BULK ioctls for
  user-mode emulation
 
-The USBDEVFS_CONTROL and USBDEVFS_BULK ioctls contain embedded data
-pointers that need special handling in QEMU user-mode emulation.
-Without this, the kernel receives guest addresses that are not valid
-in the host address space, resulting in EFAULT errors.
+The USBDEVFS_CONTROL and USBDEVFS_BULK ioctls carry an embedded data
+pointer (struct usbdevfs_ctrltransfer::data / usbdevfs_bulktransfer::data)
+that the generic thunking does not translate. In user-mode emulation the
+kernel therefore receives a guest address that is not valid in the host
+address space and the ioctl fails with EFAULT.
 
-This patch adds special handlers (do_ioctl_usbdevfs_control and
-do_ioctl_usbdevfs_bulk) that properly:
-1. Convert the target struct to host format
-2. Lock the user data buffer to get a valid host pointer
-3. Call the ioctl with the host pointer
-4. Unlock and write back for IN transfers
+Add IOCTL_SPECIAL handlers (do_ioctl_usbdevfs_control and
+do_ioctl_usbdevfs_bulk) that convert the target struct to host layout,
+lock the user data buffer to obtain a valid host pointer, issue the
+ioctl, then unlock (writing the buffer back for IN transfers). Transfer
+direction is taken from bRequestType (control) / ep (bulk).
 
-This fixes USB device access when running i386/x86_64 binaries that
-use libusb on aarch64 hosts via qemu-user-static.
+This fixes USB device access (libusb) when running i386/x86_64 binaries
+on aarch64 hosts via qemu-user-static binfmt registration.
 
-Signed-off-by: Avocado Linux <avocado@example.com>
+Upstream-Status: Pending
+
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
 ---
  linux-user/ioctls.h  |   4 +-
  linux-user/syscall.c | 118 +++++++++++++++++++++++++++++++++++++++++++
  2 files changed, 120 insertions(+), 2 deletions(-)
 
 diff --git a/linux-user/ioctls.h b/linux-user/ioctls.h
-index 3b41128fd..6598e6099 100644
+index 2f62fd2..34e3ff6 100644
 --- a/linux-user/ioctls.h
 +++ b/linux-user/ioctls.h
 @@ -286,9 +286,9 @@
@@ -42,10 +44,10 @@ index 3b41128fd..6598e6099 100644
    IOCTL(USBDEVFS_RESETEP, IOC_W, MK_PTR(TYPE_INT))
    IOCTL(USBDEVFS_SETINTERFACE, IOC_W,
 diff --git a/linux-user/syscall.c b/linux-user/syscall.c
-index 1ce4c7978..b97922e20 100644
+index 2060e56..268b694 100644
 --- a/linux-user/syscall.c
 +++ b/linux-user/syscall.c
-@@ -5000,6 +5000,124 @@ do_ioctl_usbdevfs_submiturb(const IOCTLEntry *ie, uint8_t *buf_temp,
+@@ -5030,6 +5030,124 @@ do_ioctl_usbdevfs_submiturb(const IOCTLEntry *ie, uint8_t *buf_temp,
  
      return ret;
  }
@@ -171,5 +173,5 @@ index 1ce4c7978..b97922e20 100644
  
  static abi_long do_ioctl_dm(const IOCTLEntry *ie, uint8_t *buf_temp, int fd,
 -- 
-2.49.0
+2.54.0
 
