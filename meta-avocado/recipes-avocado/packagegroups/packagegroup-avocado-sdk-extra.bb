@@ -156,14 +156,14 @@ SDK_TOOLCHAIN_DEPENDS = " \
   ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'nativesdk-wayland-tools nativesdk-wayland-dev', '', d)} \
 "
 
-SDK_SYSROOT_DEPENDS = " \
-  avocado-sdk-target-sysroot \
-  kernel-devsrc \
-  ${@multilib_pkg_extend(d, 'libstd-rs')} \
-  ${@multilib_pkg_extend(d, 'packagegroup-go-sdk-target')} \
-"
+# NOTE: the target-arch SDK sysroot (avocado-sdk-target-sysroot, kernel-devsrc,
+# libstd-rs, packagegroup-go-sdk-target) used to live here, but it is MACHINE_ARCH and
+# this is a host/nativesdk packagegroup that the SDK build's feed routing only uploads as
+# *_avocadosdk — so those target-arch packages were built but never reached a feed.
+# They now live in packagegroup-avocado-extra (the distro/target feed): distro builds
+# target-arch, sdk builds host. The CLI installs avocado-sdk-target-sysroot from the
+# target feed via its combined repo conf.
 
 RDEPENDS:${PN} = " \
   ${SDK_TOOLCHAIN_DEPENDS} \
-  ${SDK_SYSROOT_DEPENDS} \
 "
