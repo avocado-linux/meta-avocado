@@ -12,6 +12,7 @@ SRC_URI:append:avocado-qemux86-64 = " \
 
 SRC_URI:append:avocado-qemuarm64 = " \
   ${SRC_URI_SHARED} \
+  file://cpuidle.cfg \
   file://mmc.cfg \
   file://ftpm.cfg \
 "
