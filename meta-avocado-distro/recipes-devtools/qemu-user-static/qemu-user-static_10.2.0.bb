@@ -61,6 +61,12 @@ EXTRA_OECONF += " \
     --disable-tcg-interpreter \
 "
 
+# no-static-libs.inc appends "--disable-static" to EXTRA_OECONF for every recipe,
+# but qemu's configure aborts on unrecognised options (it's not autotools). oe-core
+# opts its own qemu PNs out (DISABLE_STATIC:pn-qemu = "" etc.); this recipe's PN is
+# qemu-user-static, so it must opt out too — and we link --static here anyway.
+DISABLE_STATIC = ""
+
 PTEST_ENABLED = "0"
 
 do_install() {
