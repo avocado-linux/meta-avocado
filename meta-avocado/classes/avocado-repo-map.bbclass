@@ -48,6 +48,16 @@ python do_create_repo_map() {
     # Build the map file content
     map_entries = []
 
+    # Distinct repository roots — the directories where a single repomd lives.
+    # Target arches nest their packages in arch subdirs UNDER the machine root, so
+    # many `arch_dir=` package lines collapse to one `repo=` root. Flat repos
+    # (sdk/<machine>, sdk/all) have root == package path. The staging scripts use
+    # the `arch_dir=` lines to place packages; the metadata + targets.json scripts
+    # use the `repo=` lines to createrepo ONCE per root and list one repo per
+    # machine (W1: one `[<machine>-target]` repo @ target/<machine>).
+    repo_roots = []
+    seen_roots = set()
+
     for arch_dir in sorted(existing_dirs):
         # Convert directory name back to arch format (underscores to hyphens for lookup)
         # But for the map file, we use the directory name as-is
@@ -63,6 +73,13 @@ python do_create_repo_map() {
         if repo_details["map_value_path"]:
             map_entries.append(f"{arch_dir}={repo_details['map_value_path']}")
             bb.note(f"Map entry: {arch_dir}={repo_details['map_value_path']}")
+
+            # Record the repo root: repo_url_path when set (target arches nest
+            # beneath it), else the package path itself (flat sdk repos).
+            root = repo_details["repo_url_path"] or repo_details["map_value_path"]
+            if root and root not in seen_roots:
+                seen_roots.add(root)
+                repo_roots.append(root)
         else:
             bb.warn(f"No map path determined for arch_dir '{arch_dir}'")
 
@@ -72,8 +89,10 @@ python do_create_repo_map() {
     with open(map_file_path, 'w') as map_f:
         for entry in map_entries:
             map_f.write(entry + '\n')
+        for root in sorted(repo_roots):
+            map_f.write(f"repo={root}\n")
 
-    bb.note(f"Wrote {len(map_entries)} entries to {map_file_path}")
+    bb.note(f"Wrote {len(map_entries)} package entries and {len(repo_roots)} repo roots to {map_file_path}")
 }
 
 # Task should always run (no stamp) since it reflects current state of deploy directory

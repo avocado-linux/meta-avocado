@@ -21,9 +21,15 @@ fi
 
 echo "Using map file: ${MAP_FILE}"
 
-# Process mappings from the map file
+# Two passes over the map:
+#   1. `arch_dir=<pkg_path>` lines -> rsync packages into place (no per-arch repomd).
+#   2. `repo=<root>` lines         -> createrepo_c ONCE per repo root, recursing into
+#      any arch subdirs (W1: one `[<machine>-target]` repo @ target/<machine>).
+# Metadata lives only at the declared repo roots, matching the production per-machine
+# layout (the avocado-cli target repo is target/<machine>, not target/<machine>/<arch>).
+
+# Pass 1: stage packages.
 while IFS='=' read -r key value || [ -n "$key" ]; do
-    # Skip empty lines or lines without an equals sign
     value=$(eval "echo \"${value}\"")
 
     if [ -z "$key" ] || [ -z "$value" ]; then
@@ -31,7 +37,10 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
         continue
     fi
 
-    value=$(eval "echo \"${value}\"")
+    # repo= lines are repo roots, handled in pass 2.
+    if [ "$key" = "repo" ]; then
+        continue
+    fi
 
     source_dir="${YOCTO_DEPLOY_DIR}/${key}"
     # Target dir uses the full path specified in the map value
@@ -51,11 +60,22 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
     # Use rsync to ensure destination is an exact mirror of source
     echo "Syncing files from ${source_dir} to ${target_dir} (with deletion of extra files)"
     rsync -av --delete "${source_dir}/" "${target_dir}/"
+done < "${MAP_FILE}"
 
-    # Create repository metadata
-    echo "Creating repository metadata in ${target_dir}"
-    createrepo_c "${target_dir}"
+# Pass 2: one repomd per repo root (recurses into arch subdirs).
+while IFS='=' read -r key value || [ -n "$key" ]; do
+    [ "$key" = "repo" ] || continue
+    value=$(eval "echo \"${value}\"")
+    [ -n "$value" ] || continue
 
+    repo_dir="/var/www/html/${value}"
+    if [ ! -d "${repo_dir}" ]; then
+        echo "Warning: repo root ${repo_dir} not found, skipping." >&2
+        continue
+    fi
+
+    echo "Creating repository metadata in ${repo_dir} (covering arch subdirs)"
+    createrepo_c "${repo_dir}"
 done < "${MAP_FILE}"
 
 echo "Repository setup complete based on map file!"
