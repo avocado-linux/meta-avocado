@@ -94,6 +94,8 @@ RDEPENDS:${PN} = " \
   procps \
   pstree \
   qemu-guest-agent \
+  qemu-user-static \
+  qemu-user-static-binfmt \
   redis \
   rng-tools \
   rtc-tools \
