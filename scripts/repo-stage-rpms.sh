@@ -34,6 +34,12 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
         continue
     fi
 
+    # `repo=<root>` lines describe repository roots for the metadata step, not
+    # package source dirs — staging ignores them.
+    if [ "$key" = "repo" ]; then
+        continue
+    fi
+
     source_dir="${SOURCE_DEPLOY_DIR}/${key}"
     # Target dir uses the full path specified in the map value
     target_dir="${TARGET_DEPLOY_DIR}/${value}"
