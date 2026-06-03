@@ -2,10 +2,26 @@
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
+# Force line-buffered stdout so progress is visible in container logs
+if command -v stdbuf &>/dev/null && [ -z "$_STAGE_RPMS_UNBUFFERED" ]; then
+    export _STAGE_RPMS_UNBUFFERED=1
+    exec stdbuf -oL "$0" "$@"
+fi
+
 # Main script
+METADATA_ONLY=0
+if [ "${1:-}" = "--metadata-only" ]; then
+    METADATA_ONLY=1
+    shift
+fi
+
 if [ $# -ne 3 ]; then
-    echo "Usage: $0 <source-deploy-directory> <target-deploy-directory> <releasever>"
+    echo "Usage: $0 [--metadata-only] <source-deploy-directory> <target-deploy-directory> <releasever>"
     echo "Example: $0 /path/to/build/tmp/deploy/rpm /path/to/target/repo latest/apollo/edge"
+    echo ""
+    echo "  --metadata-only  Validate the map and per-entry source dirs, but skip"
+    echo "                   the bulk tar-pipe of RPMs. Use when RPMs are uploaded"
+    echo "                   directly from the build (avocado-pulp-upload bbclass)."
     exit 1
 fi
 
@@ -25,17 +41,17 @@ echo "Source deploy directory: ${SOURCE_DEPLOY_DIR}"
 echo "Target deploy directory: ${TARGET_DEPLOY_DIR}"
 
 # Process mappings from the map file
-while IFS='=' read -r key value || [ -n "$key" ]; do   
+while IFS='=' read -r key value || [ -n "$key" ]; do
     value=$(eval "echo \"${value}\"")
-    
+
     # Skip empty lines or lines without an equals sign
     if [ -z "$key" ] || [ -z "$value" ]; then
         echo "Skipping invalid line: $key=$value"
         continue
     fi
 
-    # `repo=<root>` lines describe repository roots for the metadata step, not
-    # package source dirs — staging ignores them.
+    # `repo=<root>` lines describe repository roots for the metadata/targets.json
+    # steps, not package source dirs — staging ignores them.
     if [ "$key" = "repo" ]; then
         continue
     fi
@@ -51,13 +67,21 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
         continue
     fi
 
+    if [ "${METADATA_ONLY}" = "1" ]; then
+        file_count=$(find "${source_dir}" -type f | wc -l)
+        echo "Metadata-only: skipping tar-pipe of ${file_count} files from ${source_dir}"
+        continue
+    fi
+
     # Create target directory structure
     mkdir -p "${target_dir}"
 
-    # Sync RPMs from source to target using rsync with checksum comparison
-    echo "Syncing files from ${source_dir} to ${target_dir}"
-    rsync -avc "${source_dir}/" "${target_dir}/"
+    # Stream files via tar pipe — avoids per-file NFS round-trips
+    file_count=$(find "${source_dir}" -type f | wc -l)
+    echo "Staging ${file_count} files from ${source_dir} to ${target_dir}"
+    tar cf - -C "${source_dir}" . | tar xf - -C "${target_dir}"
+    echo "Done: ${source_dir} -> ${target_dir}"
 
 done < "${MAP_FILE}"
 
-echo "RPM file syncing complete!" 
+echo "RPM file syncing complete!"
