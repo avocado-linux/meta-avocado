@@ -80,7 +80,7 @@
         "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",
-          "size": 64,
+          "size": 128,
           "size_unit": "mebibytes",
           "build_args": {
             "type": "fat",
@@ -107,13 +107,13 @@
           "image": "boot",
           "offset": 2,
           "offset_unit": "mebibytes",
-          "size": 64,
+          "size": 128,
           "size_unit": "mebibytes"
         },
         {
           "name": "boot-b",
           "image": "",
-          "size": 64,
+          "size": 128,
           "size_unit": "mebibytes"
         },
         {
