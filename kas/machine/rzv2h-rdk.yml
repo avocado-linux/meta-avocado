@@ -23,4 +23,8 @@ repos:
   #     layers:
   #       meta-rz-features/meta-rz-drpai:
 
+local_conf_header:
+  machine-avocado-rzv2h-rdk: |
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-rzv2h-rdk-extra"
+
 machine: avocado-rzv2h-rdk
