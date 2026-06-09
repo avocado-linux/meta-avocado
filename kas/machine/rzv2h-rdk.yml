@@ -1,0 +1,26 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/renesas.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-renesas:
+
+  # TODO(gap-4): the RZ/V2H DRP-AI3 driver is not wired yet. When added, put it
+  # here per-machine (mirroring rzv2n-sr-som.yml's rzv2n_drp-ai_driver), e.g.:
+  #   rzv2h-drp-ai-driver:
+  #     url: https://github.com/renesas-rz/rzv2h_drp-ai_driver
+  #     branch: main
+  #     commit: <pin>
+  #     layers:
+  #       meta-rz-features/meta-rz-drpai:
+
+machine: avocado-rzv2h-rdk
