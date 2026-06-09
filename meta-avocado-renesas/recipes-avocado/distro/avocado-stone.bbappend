@@ -3,7 +3,11 @@
 do_compile[depends] += "firmware-pack:do_deploy"
 do_compile[depends] += "flash-writer:do_deploy"
 do_compile[depends] += "u-boot:do_deploy"
-do_compile[depends] += "extlinux-rzv2n-sr-som:do_deploy"
+# Per-machine extlinux provider (board id != ${MACHINE}); gate on MACHINEOVERRIDES.
+EXTLINUX_PROVIDER ?= ""
+EXTLINUX_PROVIDER:rzv2n-sr-som = "extlinux-rzv2n-sr-som"
+EXTLINUX_PROVIDER:rzv2h-rdk = "extlinux-rzv2h-rdk"
+do_compile[depends] += "${EXTLINUX_PROVIDER}:do_deploy"
 
 DEPENDS += " jq-native"
 
