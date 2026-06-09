@@ -27,6 +27,17 @@ meta-avocado/meta-avocado-qemu/scripts/run-qemux86-64-swtpm
 
 This will open a tmux session.
 
+## Local package feed
+
+To serve a local package feed from your build outputs (sync packages, package
+extensions, and start a browsable repo server in one command):
+
+```bash
+./scripts/dev-repo.sh 2026 qemux86-64
+```
+
+See [docs/local-package-feed.md](docs/local-package-feed.md) for the full guide.
+
 ## Testing
 
 See [support/sdk-test/README.md](support/sdk-test/README.md) for testing instructions.
