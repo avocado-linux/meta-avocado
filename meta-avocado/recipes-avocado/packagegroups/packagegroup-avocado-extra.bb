@@ -117,6 +117,7 @@ RDEPENDS:${PN} = " \
   wireless-regdb \
   wireless-regdb-static \
   wpa-supplicant \
+  zeromq \
   iw \
   bluez5 \
   ${GSTREAMER_PACKAGES} \
