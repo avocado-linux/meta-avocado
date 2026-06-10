@@ -1,0 +1,16 @@
+# Feed-validation test suite cases.
+#
+# One case per line, pipe-separated:
+#
+#   name | packages | expected-libs | boot
+#
+#   name           short case id (used for the per-case project dir)
+#   packages       space-separated feed package names to install
+#   expected-libs  space-separated shared-lib basenames to assert (optional)
+#   boot           "yes" to also run the boot e2e (heavy: one image cycle), else "no"
+#
+# Adding a test = adding a line. Names are the real feed package names
+# (e.g. zeromq, not libzmq - debian renaming is not active here).
+#
+# name    | packages | expected-libs | boot
+zeromq    | zeromq   | libzmq.so.5   | yes
