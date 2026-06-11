@@ -1,0 +1,12 @@
+header:
+  version: 16
+
+# Adds the QEMU guest agent to the rootfs so a host-side driver can exec
+# commands and read exit codes over the org.qemu.guest_agent.0 virtio-serial
+# channel - used by the feed-validation boot tier to verify an extension
+# merged on the booted target without ssh (the local distro+SDK feed has no
+# sshd extension). The agent is only useful inside a VM, so this overlay is
+# included by the qemux86-64 machine config, not the shared distro target.
+local_conf_header:
+  qemu-guest-agent: |
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " qemu-guest-agent"
