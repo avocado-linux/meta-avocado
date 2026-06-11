@@ -9,6 +9,7 @@ MEMORY="1024"
 SMP="2"
 ENABLE_KVM=false
 HOST_FWD_ARGS=()
+QGA_PORT=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --host-fwd)
             HOST_FWD_ARGS+=("$2")
+            shift 2
+            ;;
+        --qga-port)
+            QGA_PORT="$2"
             shift 2
             ;;
         -*)
@@ -147,6 +152,18 @@ fi
 # Add KVM flag if enabled
 if [ "$ENABLE_KVM" = true ]; then
     QEMU_ARGS+=(-enable-kvm)
+fi
+
+# Add the QEMU guest agent channel (opt-in via --qga-port). Lets a host-side
+# driver exec commands in the guest over org.qemu.guest_agent.0 without ssh. A
+# TCP chardev is host-reachable because `avocado sdk run` uses --network=host,
+# so the host connects to 127.0.0.1:${QGA_PORT}.
+if [ -n "$QGA_PORT" ]; then
+    QEMU_ARGS+=(
+        -chardev "socket,id=qga,host=127.0.0.1,port=${QGA_PORT},server=on,wait=off"
+        -device virtio-serial
+        -device virtserialport,chardev=qga,name=org.qemu.guest_agent.0
+    )
 fi
 
 "${QEMU_BINARY}" "${QEMU_ARGS[@]}"
