@@ -1,0 +1,13 @@
+# Shell formatting and linting. Runs only on changed files by default;
+# use `pre-commit run --all-files` to sweep the whole tree.
+repos:
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        args: [-i, "2", -ci, -bn]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
