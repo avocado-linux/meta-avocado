@@ -7,7 +7,7 @@ PUBLISHTOOL_JAR = "studio.v1.client.tools.publishtool-${PV}.jar"
 SRC_URI = "${PUBLISHTOOL_MAVEN_BASE}/${PV}/${PUBLISHTOOL_JAR};downloadfilename=${PUBLISHTOOL_JAR};unpack=false \
     file://publishtool.sh"
 
-SRC_URI[sha256sum] = "d766771c0b0eca11f03e0f8af63d30496f2429887c5385c41cc63060cf5ddc39"
+SRC_URI[sha256sum] = "1453074160fab1267a93ad417f2e6d0553e3206d4cc9c9f86566191c630f7b35"
 
 S = "${UNPACKDIR}"
 
