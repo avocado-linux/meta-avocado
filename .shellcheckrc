@@ -1,0 +1,5 @@
+# Resolve `# shellcheck source=...` directives relative to each script's own
+# directory so sibling sources (e.g. scripts/feed-validation-lib.sh) are
+# followed instead of reported as SC1091.
+source-path=SCRIPTDIR
+external-sources=true
