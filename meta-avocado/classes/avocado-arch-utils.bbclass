@@ -27,6 +27,16 @@ def avocado_determine_repo_paths(d, arch, arch_dir):
     sdk_repo_archs = (d.getVar('AVOCADO_SDK_REPO_ARCHS') or "").split()
     sdk_repo_archs_underscore = (d.getVar('AVOCADO_SDK_REPO_ARCHS_UNDERSCORE') or "").split()
 
+    # W1 (2026 per-target topology, plan.md Workstream 1). When AVOCADO_PERTARGET_REPOS=1,
+    # EVERY target arch (machine arch, shared tunes, AND noarch) nests UNDER the machine
+    # and collapses into ONE per-machine repo: repo_name '<machine>-target', a single
+    # repomd at '$releasever/target/<machine>/', packages in arch subdirs underneath.
+    # This is the root fix for cross-target contamination: the legacy 'else' branch keyed
+    # shared tunes + noarch by arch ALONE ($releasever/target/<arch>), pooling N machines
+    # of the same arch into one distribution/repomd. Gated so the 2024 pooled layout is
+    # byte-for-byte unchanged until backport.
+    pertarget = (d.getVar('AVOCADO_PERTARGET_REPOS') or '0') == '1'
+
     map_value_path = None
     repo_url_path = None
     repo_name = None
@@ -47,6 +57,16 @@ def avocado_determine_repo_paths(d, arch, arch_dir):
         repo_name = f"{machine_short_name}-sdk"
         repo_section_name = repo_name
         bb.note(f"Mapping dedicated SDK arch '{arch}' (dir: {arch_dir}) to path '{map_value_path}', repo name '{repo_name}'")
+
+    elif pertarget:
+        # W1: any non-SDK target arch -> the single per-machine repo. Packages nest in an
+        # arch subdir under the machine; the repo root (repomd/baseurl) is the machine dir,
+        # so machine arch, shared tunes, and noarch all share ONE repo + ONE repomd.
+        map_value_path = f"$releasever/target/{machine_short_name}/{arch_dir}"
+        repo_url_path = f"$releasever/target/{machine_short_name}"
+        repo_name = f"{machine_short_name}-target"
+        repo_section_name = repo_name
+        bb.note(f"W1 per-target: arch '{arch}' (dir: {arch_dir}) -> packages '{map_value_path}', repo '{repo_name}' @ '{repo_url_path}'")
 
     elif arch_dir == machine.replace('-', '_'):
         # Rule: MACHINE -> DISTRO/target/MACHINE_SHORT

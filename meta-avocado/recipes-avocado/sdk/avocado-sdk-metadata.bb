@@ -61,11 +61,24 @@ python do_compile() {
 
     # Track archs for which repo entries are written (for dnf/vars/arch file)
     repo_archs = []
+    # Section names already emitted. Under W1 (AVOCADO_PERTARGET_REPOS=1) several archs
+    # (machine arch, shared tunes, noarch) collapse to the SAME per-machine repo section
+    # ([<machine>-target]); emit that section once but still record every arch so dnf's
+    # arch list stays complete. No collapses occur in the legacy 2024 layout, so this is
+    # a no-op there.
+    written_sections = set()
 
     def _write_repo_entry(repo_f, repo_url_path, repo_name, repo_section_name, priority, arch):
-        """Writes a repository section to the repo file. Appends arch to repo_archs on success."""
-        nonlocal repo_archs
+        """Writes a repository section to the repo file. Appends arch to repo_archs (always,
+        for the dnf arch list); the section block itself is written once per section name."""
+        nonlocal repo_archs, written_sections
         if repo_url_path and repo_name and repo_section_name:
+            repo_archs.append(arch)
+            if repo_section_name in written_sections:
+                # Same per-machine repo already emitted (another arch); don't duplicate the
+                # section or bump priority, but the arch is tracked above.
+                return False
+            written_sections.add(repo_section_name)
             repo_f.write(f"[{repo_section_name}]\n")
             repo_f.write(f"name={repo_name}\n")
             repo_f.write(f"baseurl=${{repo_url}}/{repo_url_path}\n")
@@ -73,7 +86,6 @@ python do_compile() {
             repo_f.write(f"gpgcheck={gpg_check}\n")
             repo_f.write(f"priority={priority}\n")
             repo_f.write("\n")
-            repo_archs.append(arch)
             return True
         elif arch != "all_avocadosdk":
             bb.warn(f"Repo entry details not fully determined for arch '{arch}'. Skipping repo entry.")
