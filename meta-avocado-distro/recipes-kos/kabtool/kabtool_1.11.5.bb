@@ -7,7 +7,7 @@ KABTOOL_JAR = "studio.v1.client.tools.kabtool-${PV}.jar"
 SRC_URI = "${KABTOOL_MAVEN_BASE}/${PV}/${KABTOOL_JAR};downloadfilename=${KABTOOL_JAR};unpack=false \
     file://kabtool.sh"
 
-SRC_URI[sha256sum] = "ef59982abfd32c670862190c22347d8ca3fc39f7140901cf017f58ff0b9a3421"
+SRC_URI[sha256sum] = "19d3574f7a99841c3bd3dcec8c91304ee703ecc3db2e9898302a83b067a07bb1"
 
 S = "${UNPACKDIR}"
 
