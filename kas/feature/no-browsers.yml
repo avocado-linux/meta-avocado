@@ -1,0 +1,11 @@
+header:
+  version: 16
+
+# Opt-in overlay for minimal dev images: drop the browser engines from
+# packagegroup-avocado-extra so avocado-complete does not pay the Chromium/WPE
+# compile (the heaviest recipes in the tree). The default build keeps them -
+# clients use them - so include this overlay only for a dev build, e.g.:
+#   kas build kas/machine/<machine>.yml:kas/feature/no-browsers.yml
+local_conf_header:
+  no-browsers: |
+    RDEPENDS:packagegroup-avocado-extra:remove = " chromium-ozone-wayland wpewebkit wpebackend-fdo cog"

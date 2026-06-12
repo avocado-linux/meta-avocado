@@ -1,0 +1,15 @@
+header:
+  version: 16
+
+# Opt-in overlay for minimal dev images: drop the Qt5 stack from
+# packagegroup-avocado-extra, including qtwebengine - a second Chromium-sized
+# build. The default build keeps Qt - clients use it - so include this overlay
+# only for a dev build, e.g.:
+#   kas build kas/machine/<machine>.yml:kas/feature/no-qt.yml
+#
+# The list mirrors QT5_PACKAGES in
+# meta-avocado/recipes-avocado/packagegroups/packagegroup-avocado-extra.bb;
+# keep it in sync if that recipe's list changes.
+local_conf_header:
+  no-qt: |
+    RDEPENDS:packagegroup-avocado-extra:remove = " qtbase qtbase-plugins qtbase-tools qtdeclarative qtdeclarative-plugins qtdeclarative-tools qtquickcontrols2 qtmultimedia qtmultimedia-plugins qtgraphicaleffects qtsvg qtimageformats qtserialport qtsensors qtconnectivity qtlocation qtnetworkauth qtwebsockets qtwebengine qtxmlpatterns qttools qttools-plugins qtcharts qtvirtualkeyboard qt3d qtgamepad qtwayland qtwayland-plugins"
