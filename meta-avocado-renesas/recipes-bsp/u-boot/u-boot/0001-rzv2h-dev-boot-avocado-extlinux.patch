@@ -1,0 +1,46 @@
+From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
+From: Javier Tia <anthropic@jetm.me>
+Date: Fri, 12 Jun 2026 12:00:00 -0600
+Subject: [PATCH] rzv2h-dev: boot Avocado extlinux from SD, not vendor
+ ext4/booti
+
+The Avocado image (stone) provisions a FAT boot partition carrying
+extlinux.conf, the kernel Image and the RDK dtb, plus an erofs rootfs
+addressed by PARTUUID. The vendor CONFIG_BOOTCOMMAND instead runs
+`ext4load mmc 0:2 boot/Image` + booti against a single ext4 rootfs with a
+fixed EVK dtb name, so it cannot boot the Avocado layout at all.
+
+Point CONFIG_BOOTCOMMAND at sysboot (CONFIG_CMD_SYSBOOT, already enabled)
+to parse extlinux.conf on the FAT boot partition (partition 1), trying
+mmc 1 then mmc 0 so it does not depend on which controller the microSD
+enumerates on. The kernel/fdt/ramdisk load addresses match the vendor
+booti (kernel 0x48080000, fdt 0x48000000); scriptaddr sits inside the
+0x48000000-0x58000000 bootm window.
+
+Build-verified only: the sysboot path/prefix, mmc index and load
+addresses are board-specific and must be confirmed at the u-boot prompt
+on real hardware.
+
+Upstream-Status: Inappropriate [Avocado board integration]
+Signed-off-by: Javier Tia <anthropic@jetm.me>
+---
+ include/configs/rzv2h-dev.h | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/include/configs/rzv2h-dev.h b/include/configs/rzv2h-dev.h
+index 1111111..2222222 100644
+--- a/include/configs/rzv2h-dev.h
++++ b/include/configs/rzv2h-dev.h
+@@ -80,7 +80,11 @@
+ 	"bootcmd_check=if mmc dev 1; then run sd1load; else run sd0load; fi \0"
+ #endif
+ 
+-#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;run bootimage"
++#define CONFIG_BOOTCOMMAND \
++	"setenv scriptaddr 0x50000000; setenv kernel_addr_r 0x48080000; " \
++	"setenv fdt_addr_r 0x48000000; setenv ramdisk_addr_r 0x4a000000; " \
++	"sysboot mmc 1:1 any ${scriptaddr} /extlinux/extlinux.conf; " \
++	"sysboot mmc 0:1 any ${scriptaddr} /extlinux/extlinux.conf"
+ 
+ /* For board */
+ /* Ethernet RAVB */

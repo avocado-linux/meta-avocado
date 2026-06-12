@@ -13,3 +13,11 @@ SRC_URI:append = " \
 # fallback token in BOOTCOMMAND, but the board config header overrides
 # BOOTCOMMAND anyway, so nothing references the removed command at runtime.)
 SRC_URI:remove:rzv2h-rdk = "file://fastboot.cfg"
+
+# The vendor rzv2h-dev.h hardcodes a CONFIG_BOOTCOMMAND that ext4loads the
+# kernel + EVK dtb from a single ext4 rootfs and boots with booti - it cannot
+# boot the Avocado layout (FAT boot partition with extlinux.conf + erofs rootfs
+# by PARTUUID). Patch CONFIG_BOOTCOMMAND to sysboot the extlinux.conf instead.
+# See the patch header; the bootcmd is build-verified only and must be
+# confirmed at the u-boot prompt on hardware.
+SRC_URI:append:rzv2h-rdk = " file://0001-rzv2h-dev-boot-avocado-extlinux.patch"
