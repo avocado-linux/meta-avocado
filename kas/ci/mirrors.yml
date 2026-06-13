@@ -38,7 +38,7 @@ local_conf_header:
     BB_PRESSURE_MAX_IO     = "100000"
 
     # Chromium's link phase is memory-heavy: max_jobs_per_link is bound to PARALLEL_MAKE
-    # in chromium-gn.inc. Globally we run -j4 (see iac build task env);
-    # cap chromium tighter to bound peak link-time memory.
-    PARALLEL_MAKE:pn-chromium-ozone-wayland = "-j 2"
-    PARALLEL_MAKE:pn-chromium-x11 = "-j 2"
+    # in chromium-gn.inc. Cap chromium below the global -j to bound peak link-time memory —
+    # -j2 was over-conservative (slow); -j4 fits within the build pod's 48Gi limit.
+    PARALLEL_MAKE:pn-chromium-ozone-wayland = "-j 4"
+    PARALLEL_MAKE:pn-chromium-x11 = "-j 4"
