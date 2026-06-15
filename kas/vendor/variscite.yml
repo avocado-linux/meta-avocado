@@ -1,0 +1,36 @@
+header:
+  version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/nxp.yml
+
+repos:
+  # Variscite family pins meta-imx to the NXP 6.6.52-2.2.2 release (the latest
+  # scarthgap Variscite BSP, scarthgap_6.6.52-2.2.2_var01, builds against it --
+  # rel_imx_6.6.52_2.2.2). url/path/layers come from kas/vendor/nxp.yml. This is
+  # a newer point release than the CompuLab family (6.6.52-2.2.0); the two
+  # families intentionally do not lock-step.
+  meta-imx:
+    branch: scarthgap-6.6.52-2.2.2
+    commit: e1ec1a20d573e3913f4ad90fa36546ed2bc87715
+
+  # Variscite i.MX BSP: machines (imx8mp-var-dart, ...), u-boot-variscite,
+  # linux-variscite-fslc-imx. Its hard LAYERDEPENDS are variscite-bsp-common
+  # (below) + fsl-bsp-release (meta-imx). The sdk/hab/demo layers from
+  # Variscite's repo manifest are omitted for the headless Avocado base.
+  meta-variscite-bsp-imx:
+    url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-imx.git
+    path: meta-variscite-bsp-imx
+    branch: scarthgap_6.6.52-2.2.2_var01
+    commit: e403babc8727cff8523f2173e5ec72f642bbdf81
+    layers:
+      .:
+
+  # Shared machine-agnostic Variscite BSP bits (LAYERDEPENDS of bsp-imx).
+  meta-variscite-bsp-common:
+    url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-common.git
+    path: meta-variscite-bsp-common
+    branch: scarthgap_6.6.52-2.2.2_var01
+    commit: 8fa83af3b9c8d3894597cf75a7b2806957d1358a
+    layers:
+      .:

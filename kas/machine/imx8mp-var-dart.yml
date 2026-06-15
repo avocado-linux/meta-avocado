@@ -1,0 +1,31 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    # Community FSLC base (meta-freescale + 3rdparty): imx-base.inc, firmware-imx,
+    # imx-mkimage / imx-boot. Variscite's BSP layers meta-imx on top of this.
+    - repo: meta-avocado
+      file: kas/vendor/freescale.yml
+    # NXP proprietary meta-imx (pinned to 6.6.52-2.2.2 here) + Variscite
+    # meta-variscite-bsp-{imx,common}. Also pulls kas/vendor/nxp.yml (arm.yml for
+    # the Cortex-M7 bare-metal toolchain + virtualization.yml).
+    - repo: meta-avocado
+      file: kas/vendor/variscite.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      # Variscite i.MX8M Plus lives in the shared NXP i.MX layer (same silicon /
+      # NXP BSP base as the EVK/FRDM/CompuLab). u-boot-variscite + linux-variscite
+      # bbappends coexist with the others (bbappends are recipe-scoped).
+      meta-avocado-nxp:
+
+local_conf_header:
+  machine-avocado-imx8mp-var-dart: |
+    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
+
+machine: avocado-imx8mp-var-dart

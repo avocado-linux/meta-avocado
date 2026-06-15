@@ -1,0 +1,151 @@
+{
+  "runtime": {
+    "platform": "avocado-imx8mp-var-dart",
+    "architecture": "arm64",
+    "provision_default": "img",
+    "update_strategy": "uboot-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": {
+      "type": "uboot-env",
+      "set": { "avocado_boot_slot": "{inactive_slot}" }
+    }
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "fields": {
+      "AVOCADO_DEVICE_CERT": {
+        "type": "file",
+        "label": "Device certificate",
+        "description": "X.509 device certificate in PEM format."
+      },
+      "AVOCADO_DEVICE_KEY": {
+        "type": "file",
+        "label": "Device private key",
+        "description": "PEM-encoded private key paired with the device certificate.",
+        "secret": true
+      },
+      "AVOCADO_DEVICE_ID": {
+        "type": "string",
+        "label": "Device ID",
+        "description": "Stable identifier registered with Peridio."
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh",
+        "envs": ["device_info"]
+      },
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-imx8mp-var-dart-rootdisk.zip",
+      "build_args": {
+        "type": "fwup",
+        "template": "rootdisk.conf"
+      },
+      "devpath": "/dev/mmcblk2",
+      "block_size": 512,
+      "uuid": "8b3f1c9e-2d4a-4f7b-9c6e-0a1b2c3d4e5f",
+      "images": {
+        "imx_boot": "imx-boot",
+        "uboot_env": "uboot.env",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": [
+              "avocado-image-initramfs-imx8mp-var-dart.cpio.zst",
+              "Image",
+              "imx8mp-var-dart-sonata.dtb",
+              "imx8mp-var-dart-1.x-sonata.dtb",
+              "imx8mp-var-dart-sonata-m7.dtb"
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-imx8mp-var-dart.erofs-lz4",
+        "var": "avocado-image-var-imx8mp-var-dart.btrfs"
+      },
+      "partitions": [
+        {
+          "name": "imx-boot",
+          "image": "imx_boot",
+          "offset": 32,
+          "offset_unit": "kibibytes",
+          "size": 3072,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "offset": 4,
+          "offset_unit": "mebibytes",
+          "offset_redundant": 4352,
+          "offset_redundant_unit": "kibibytes",
+          "size": 128,
+          "size_unit": "kibibytes"
+        },
+        {
+          "name": "boot-a",
+          "image": "boot",
+          "offset": 6,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot-b",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "recovery",
+          "image": "",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
+          "image": "rootfs",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "image": "",
+          "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "expand": "true"
+        }
+      ]
+    }
+  }
+}
