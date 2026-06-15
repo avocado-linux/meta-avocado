@@ -9,6 +9,7 @@ RUN apt-get update && \
   libnss-wrapper \
   sudo \
   tmux \
+  bison \
   build-essential \
   chrpath \
   cpio \
@@ -34,6 +35,8 @@ RUN apt-get update && \
   python3-subunit \
   python3-ruamel.yaml \
   python3-wheel \
+  rsync \
+  sharutils \
   socat \
   texinfo \
   unzip \

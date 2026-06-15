@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Avocado UCM-iMX8M-Plus, HDMI-only display variant.
+ *
+ * CompuLab's stock ucm-imx8m-plus.dts pulls in ALL THREE display outputs
+ * (MIPI-DSI + HDMI + LVDS). On a board with no MIPI/LVDS panel wired, those
+ * encoders fail to attach their bridges:
+ *
+ *   [drm:drm_bridge_attach] *ERROR* failed to attach bridge mipi_dsi ... -19
+ *   imx8mp-ldb ldb-display-controller: Failed to create device link with phy-lvds
+ *
+ * imx-drm is a component aggregate, so those -ENODEV failures abort the whole
+ * DRM device registration -> no KMS card -> weston "no drm device found", even
+ * though the HDMI pipe is healthy. This variant composes the headless SOM +
+ * carrier base with ONLY the HDMI output, so the aggregate completes and a KMS
+ * card comes up on HDMI. Select it at boot with:
+ *
+ *   fw_setenv devicetree_file ucm-imx8m-plus-hdmi.dtb
+ *
+ * (Mirrors the include set of ucm-imx8m-plus-headless.dts + ucm-imx8m-plus-hdmi.dtsi.)
+ */
+
+/dts-v1/;
+
+#include "ucm-imx8m-plus-som.dts"
+#include "ucm-imx8m-plus-mmc.dtsi"
+#include "ucm-imx8m-plus-pcie.dtsi"
+#include "sb-ucmimx8plus.dtsi"
+#include "ucm-imx8m-plus-hdmi.dtsi"
+
+/ {
+	model = "CompuLab UCM-iMX8M-Plus (HDMI)";
+	compatible = "compulab,ucm-imx8m-plus", "fsl,imx8mp";
+};

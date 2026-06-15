@@ -1,0 +1,50 @@
+#!/bin/sh
+# Reconcile composable device-tree selection into the u-boot environment.
+#
+# Reads KEY=VALUE fragments from /etc/avocado/devicetree.d/*.conf (sorted), where
+# extensions/configs declare:
+#     DEVICETREE=<base.dtb>          # base DTB; highest-sorted fragment wins
+#     OVERLAYS="a.dtbo b.dtbo"        # accumulated across fragments (union, in order)
+# and writes them to the u-boot env (devicetree_file + fdt_overlays). The u-boot
+# apply_overlays loop applies the overlays onto the base at boot, so changes take
+# effect on the NEXT reboot. Idempotent: only calls fw_setenv when a value differs.
+#
+# Run at extension merge time (on_merge) and once per boot (avocado-devicetree.service)
+# so both declarative confext fragments and hand edits converge.
+set -eu
+
+DROPDIR=/etc/avocado/devicetree.d
+base=""
+overlays=""
+
+[ -d "$DROPDIR" ] || exit 0
+
+for f in $(ls "$DROPDIR"/*.conf 2>/dev/null | sort); do
+	d=""
+	o=""
+	while IFS='=' read -r k v; do
+		case "$k" in
+			DEVICETREE) d=$(printf '%s' "$v" | tr -d ' "') ;;
+			OVERLAYS)   o=$(printf '%s' "$v" | tr -d '"') ;;
+		esac
+	done < "$f"
+	[ -n "$d" ] && base="$d"
+	for ov in $o; do
+		case " $overlays " in
+			*" $ov "*) ;;                                  # already present
+			*) overlays="${overlays:+$overlays }$ov" ;;
+		esac
+	done
+done
+
+# Only touch devicetree_file if a fragment set one; otherwise leave the u-boot
+# default (machine env) in place.
+if [ -n "$base" ]; then
+	cur_dt=$(fw_printenv -n devicetree_file 2>/dev/null || echo "")
+	[ "$cur_dt" = "$base" ] || fw_setenv devicetree_file "$base"
+fi
+
+cur_ov=$(fw_printenv -n fdt_overlays 2>/dev/null || echo "")
+[ "$cur_ov" = "$overlays" ] || fw_setenv fdt_overlays "$overlays"
+
+echo "avocado-devicetree: base=${base:-<unchanged>} overlays=[$overlays] (effective next boot)"

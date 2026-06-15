@@ -1,0 +1,13 @@
+[Unit]
+Description=Reconcile Avocado composable device-tree selection into the u-boot env
+# fw_setenv needs the env partition + /etc/fw_env.config (avocado-uboot-env).
+After=local-fs.target
+ConditionPathExists=/etc/fw_env.config
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/avocado-devicetree-apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

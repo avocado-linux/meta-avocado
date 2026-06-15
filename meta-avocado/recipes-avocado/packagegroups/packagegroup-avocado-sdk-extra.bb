@@ -11,10 +11,12 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-bmaptool \
   nativesdk-bzip2 \
   nativesdk-ca-certificates \
+  nativesdk-cmake \
   nativesdk-coreutils \
   nativesdk-cpio \
   nativesdk-diffutils \
   ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', 'nativesdk-docker', '', d)} \
+  nativesdk-dtc \
   nativesdk-elfutils \
   nativesdk-elixir \
   nativesdk-erlang \
@@ -26,6 +28,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-git \
   nativesdk-go \
   nativesdk-go-runtime \
+  nativesdk-gperf \
   nativesdk-gptfdisk \
   nativesdk-grep \
   nativesdk-gzip \
@@ -36,6 +39,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-libgfortran \
   nativesdk-mkfat \
   nativesdk-ncurses \
+  nativesdk-ninja \
   nativesdk-nodejs \
   nativesdk-nodejs-npm \
   nativesdk-openjdk-17-jdk \
@@ -157,7 +161,21 @@ SDK_SYSROOT_DEPENDS = " \
   ${@multilib_pkg_extend(d, 'packagegroup-go-sdk-target')} \
 "
 
+# Bare-metal ARM (Cortex-M) cross toolchain for compiling microcontroller /
+# co-processor firmware in the SDK. The compiler is framework-agnostic, so
+# this enables Zephyr, Nordic's nRF Connect SDK, STM32Cube, FreeRTOS, and
+# plain bare-metal builds alike. cmake/ninja/dtc/gperf above (added for the
+# same purpose) ship on every SDK; the compiler is large and only meaningful
+# on boards that actually have an M-core, so it is gated on the 'cortex-m'
+# MACHINE_FEATURE (set e.g. by avocado-imx8mp-evk for its Cortex-M7).
+# Targets without that feature, or without meta-arm-toolchain in their build,
+# are unaffected. Provided by meta-arm-toolchain (nativesdk-gcc-arm-none-eabi).
+SDK_MCU_TOOLCHAIN_DEPENDS = " \
+  ${@bb.utils.contains('MACHINE_FEATURES', 'cortex-m', 'nativesdk-gcc-arm-none-eabi', '', d)} \
+"
+
 RDEPENDS:${PN} = " \
   ${SDK_TOOLCHAIN_DEPENDS} \
   ${SDK_SYSROOT_DEPENDS} \
+  ${SDK_MCU_TOOLCHAIN_DEPENDS} \
 "

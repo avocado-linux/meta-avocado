@@ -1,0 +1,31 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    # Community FSLC base (meta-freescale + 3rdparty): imx-base.inc, firmware-imx,
+    # imx-mkimage / imx-boot. CompuLab's BSP layers meta-imx on top of this.
+    - repo: meta-avocado
+      file: kas/vendor/freescale.yml
+    # NXP proprietary meta-imx (pinned to 6.6.52-2.2.0 here) + CompuLab
+    # meta-bsp-imx8mp. Also pulls kas/vendor/nxp.yml (arm.yml for the Cortex-M7
+    # bare-metal toolchain + virtualization.yml).
+    - repo: meta-avocado
+      file: kas/vendor/compulab.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      # CompuLab i.MX8M Plus lives in the shared NXP i.MX layer (same silicon /
+      # NXP BSP base as the EVK/FRDM). u-boot-compulab + linux-compulab bbappends
+      # coexist with the u-boot-imx/linux-imx ones (bbappends are recipe-scoped).
+      meta-avocado-nxp:
+
+local_conf_header:
+  machine-avocado-ucm-imx8m-plus: |
+    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
+
+machine: avocado-ucm-imx8m-plus

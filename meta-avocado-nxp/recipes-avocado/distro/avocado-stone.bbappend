@@ -1,4 +1,7 @@
-do_compile[depends] += "u-boot-imx:do_deploy"
+# Depend on whichever bootloader the machine selects (u-boot-imx for the NXP
+# EVK/FRDM, u-boot-compulab for CompuLab boards), not a hardcoded recipe -
+# forcing u-boot-imx on a CompuLab machine fails (no defconfig for it).
+do_compile[depends] += "${IMX_DEFAULT_BOOTLOADER}:do_deploy"
 do_compile[depends] += "imx-boot:do_deploy"
 
 DEPENDS += " jq-native mkfat-native fwup-native"
