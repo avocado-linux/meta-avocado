@@ -2,25 +2,14 @@ header:
   version: 16
   includes:
   - repo: meta-avocado
-    file: kas/vendor/arm.yml
-  - repo: meta-avocado
-    file: kas/feature/virtualization.yml
+    file: kas/vendor/nxp.yml
 
 repos:
-  meta-avocado:
-    path: meta-avocado
-    layers:
-      meta-avocado:
-
+  # FRDM family pins meta-imx to the NXP 6.6.36-2.1.0 release. The url/path/
+  # layers come from kas/vendor/nxp.yml; only the refspec is set here.
   meta-imx:
-    url: https://github.com/avocado-linux/vendor-meta-imx.git
-    path: meta-imx
     branch: scarthgap-6.6.36-2.1.0
     commit: 92ad51ef3cc7f132238f1ae6c8e81432f2a69cc7
-    layers:
-      meta-imx-bsp:
-      meta-imx-ml:
-      meta-imx-v2x:
 
   meta-imx-frdm:
     url: https://github.com/avocado-linux/vendor-meta-imx-frdm.git
@@ -29,13 +18,3 @@ repos:
     commit: 0391d7457a9f044f2b38ed3f91570926a669261b
     layers:
       meta-imx-bsp:
-
-
-local_conf_header:
-  vendor-nxp-frdm: |
-    IMX_DEFAULT_BSP = "nxp"
-    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
-    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx-rootfs"
-    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-extra"
-    BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
-    BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"

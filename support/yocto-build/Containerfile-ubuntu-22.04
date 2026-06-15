@@ -9,6 +9,7 @@ RUN apt-get update && \
   libnss-wrapper \
   sudo \
   tmux \
+  bison \
   build-essential \
   chrpath \
   cpio \
@@ -31,6 +32,8 @@ RUN apt-get update && \
   python3-pexpect \
   python3-pip \
   python3-subunit \
+  rsync \
+  sharutils \
   socat \
   texinfo \
   unzip \

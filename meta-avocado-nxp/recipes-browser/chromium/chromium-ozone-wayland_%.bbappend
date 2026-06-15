@@ -10,4 +10,11 @@ DEPENDS:append:avocado-imx = " virtual/libgbm"
 #
 # The Vivante GPU provides libgbm but not minigbm, and the EGL surface
 # implementation requires consistent GBM handling.
-GN_ARGS:append:imx8mp-evk = " use_system_minigbm=false"
+#
+# Keyed on the i.MX8MP SoC override so it covers every i.MX8MP board (NXP EVK,
+# CompuLab UCM-iMX8M-Plus, future boards). NOTE: the bare "mx8mp" token is NOT
+# a usable override -- imx-base.inc's MACHINEOVERRIDES_EXTENDER rewrites the SoC
+# tokens into BSP-suffixed forms (mx8mp-generic-bsp / mx8mp-nxp-bsp) and drops
+# the bare ones. "mx8mp-generic-bsp" is present for all i.MX8MP regardless of
+# IMX_DEFAULT_BSP. (Verify with: bitbake -e chromium-ozone-wayland | grep ^OVERRIDES=)
+GN_ARGS:append:mx8mp-generic-bsp = " use_system_minigbm=false"

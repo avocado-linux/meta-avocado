@@ -1,0 +1,38 @@
+header:
+  version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/arm.yml
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado:
+
+  # NXP proprietary i.MX BSP base (meta-imx). This file intentionally does NOT
+  # pin a branch/commit: each board family that needs the NXP BSP sets its own
+  # meta-imx pin (see nxp-frdm.yml, compulab.yml) so families can track
+  # different NXP releases without forcing cross-family revalidation. kas deep
+  # -merges the per-family {branch, commit} onto this {url, path, layers}.
+  meta-imx:
+    url: https://github.com/avocado-linux/vendor-meta-imx.git
+    path: meta-imx
+    layers:
+      meta-imx-bsp:
+      meta-imx-ml:
+      meta-imx-v2x:
+
+local_conf_header:
+  vendor-nxp: |
+    IMX_DEFAULT_BSP = "nxp"
+    DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx-rootfs"
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-extra"
+    # NPU/eIQ ML stack -> feed. Machine-gated: only populated on mx8mp-nxp-bsp
+    # (i.MX8MP VIP9000); empty on the FRDM / non-8MP boards, so harmless here.
+    PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-ml"
+    BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
+    BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"

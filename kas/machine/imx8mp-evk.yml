@@ -5,6 +5,10 @@ header:
       file: kas/base.yml
     - repo: meta-avocado
       file: kas/vendor/freescale.yml
+    # meta-arm-toolchain provides nativesdk-gcc-arm-none-eabi, the bare-metal
+    # ARM compiler used to build Zephyr / Cortex-M7 firmware in the SDK.
+    - repo: meta-avocado
+      file: kas/vendor/arm.yml
     - repo: meta-avocado
       file: kas/feature/virtualization.yml
     - repo: meta-avocado

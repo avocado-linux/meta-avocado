@@ -17,6 +17,7 @@ RUN apt-get update -y \
     && add-apt-repository -y ppa:git-core/ppa \
     && apt-get update -y \
     && apt-get install -y --no-install-recommends \
+    bison \
     build-essential \
     ca-certificates \
     chrpath \
@@ -48,6 +49,7 @@ RUN apt-get update -y \
     python3-pip \
     python3-subunit \
     rsync \
+    sharutils \
     socat \
     software-properties-common \
     sudo \
