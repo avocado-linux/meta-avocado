@@ -31,6 +31,7 @@ RDEPENDS:${PN} = " \
   dtc \
   ${@bb.utils.contains('MACHINE_FEATURES', 'deepx', "${DEEPX_PACKAGES}", '', d)} \
   ethtool \
+  executorch-staticdev \
   fwup \
   git \
   glibc-utils \
