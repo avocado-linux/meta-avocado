@@ -1,7 +1,12 @@
 # Depend on whichever bootloader the machine selects (u-boot-imx for the NXP
-# EVK/FRDM, u-boot-compulab for CompuLab boards), not a hardcoded recipe -
-# forcing u-boot-imx on a CompuLab machine fails (no defconfig for it).
-do_compile[depends] += "${IMX_DEFAULT_BOOTLOADER}:do_deploy"
+# EVK/FRDM, u-boot-compulab for CompuLab, u-boot-variscite for Variscite), not a
+# hardcoded recipe -- forcing u-boot-imx on those fails (no defconfig for it).
+# Use virtual/bootloader, which resolves via PREFERRED_PROVIDER_virtual/bootloader
+# (set per-machine). NOTE: do NOT use ${IMX_DEFAULT_BOOTLOADER} here --
+# imx-base.inc pins IMX_DEFAULT_BOOTLOADER:mx8 = "u-boot-imx" as an override-form
+# assignment, which beats a plain machine-conf assignment regardless of order, so
+# it resolves to u-boot-imx even when the real provider is u-boot-variscite.
+do_compile[depends] += "virtual/bootloader:do_deploy"
 do_compile[depends] += "imx-boot:do_deploy"
 
 DEPENDS += " jq-native mkfat-native fwup-native"
