@@ -12,5 +12,9 @@
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
 #
-# name    | packages | expected-libs | boot
-zeromq    | zeromq   | libzmq.so.5   | yes
+# name       | packages             | expected-libs   | boot
+zeromq       | zeromq               | libzmq.so.5     | yes
+# executorch ships only static libs + headers (-staticdev), so the SDK tier
+# asserts libexecutorch.a lands in the ext sysroot; there is no runtime .so to
+# load on a booted device, so boot is no.
+executorch   | executorch-staticdev | libexecutorch.a | no
