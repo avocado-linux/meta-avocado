@@ -8,6 +8,8 @@ header:
     - repo: meta-avocado
       file: kas/feature/virtualization.yml
     - repo: meta-avocado
+      file: kas/feature/qemu-guest-agent.yml
+    - repo: meta-avocado
       file: kas/target/distro.yml
 
 repos:

@@ -9,7 +9,7 @@
 # failure, so it drops into CI / goal loops cleanly.
 #
 # Usage: run-feed-validation.sh [-m MACHINE] [-c CASES_FILE]
-# Defaults: MACHINE=qemux86-64  CASES_FILE=<scripts>/feed-validation-cases
+# Defaults: MACHINE=qemuarm64  CASES_FILE=<scripts>/feed-validation-cases
 #
 # Build front-end via AVOCADO_LOCAL_BUILD_CMD (default kas; override locally).
 # See feed-validation-lib.sh for env overrides.
@@ -19,7 +19,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=feed-validation-lib.sh
 source "$DIR/feed-validation-lib.sh"
 
-MACHINE=qemux86-64
+MACHINE=qemuarm64
 CASES_FILE="$DIR/feed-validation-cases"
 while getopts "m:c:" opt; do
   case "$opt" in
