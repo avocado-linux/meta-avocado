@@ -9,7 +9,7 @@
 #
 # Usage:
 #   validate-feed-local.sh [-m MACHINE] [-l LIB_CSV] [-b] PKG [PKG...]
-# Defaults: MACHINE=qemux86-64  LIB_CSV=""  boot=off
+# Defaults: MACHINE=qemuarm64  LIB_CSV=""  boot=off
 # Packages install into the scaffolded project's default `app` extension.
 #
 # Build front-end via AVOCADO_LOCAL_BUILD_CMD (default kas; override locally,
@@ -20,7 +20,7 @@ set -euo pipefail
 # shellcheck source=feed-validation-lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/feed-validation-lib.sh"
 
-MACHINE=qemux86-64
+MACHINE=qemuarm64
 LIB_CSV=""
 BOOT=0
 while getopts "m:l:b" opt; do
