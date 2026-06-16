@@ -38,6 +38,28 @@ fvl_die() {
   exit 1
 }
 
+# Run one avocado step under a fresh pseudo-tty when stdin is not a terminal.
+# avocado's container steps run `docker run -t`, which aborts with "cannot
+# attach stdin to a TTY-enabled container" when there is no controlling
+# terminal (CI, cron, a goal loop, a backgrounded run). A single shared pty for
+# the whole runner is not enough: each interactive `docker` step (the build,
+# then each install) consumes the pty's stdin and leaves the next step without
+# a terminal. Allocating a fresh pty per command via `script` makes each step
+# independent. An interactive terminal is passed through untouched.
+fvl_pty() {
+  if [ -t 0 ]; then
+    "$@"
+  else
+    command -v script >/dev/null 2>&1 \
+      || fvl_die "no tty and 'script' (util-linux) is not installed; avocado's docker -t steps need a pty"
+    # </dev/null: script forwards its own stdin to the pty and would otherwise
+    # drain the caller's stdin - e.g. the cases file the suite loops over via
+    # `while read ... done <cases`, which would swallow every case after the
+    # first. The avocado step needs the pty for docker -t, not stdin input.
+    script -qe -c "$(printf '%q ' "$@")" /dev/null </dev/null
+  fi
+}
+
 # fvl_case_pass <case> ; fvl_case_fail <case> <reason>
 fvl_case_pass() {
   FVL_PASS=$((FVL_PASS + 1))
@@ -219,9 +241,9 @@ fvl_install_case() {
     # transaction prompt. Both are required for non-interactive runs: under a
     # pty (needed for the docker -t install steps) dnf would otherwise block
     # on "Is this ok [y/N]:" forever.
-    avocado sdk install -f || exit 1
-    avocado rootfs install -f || exit 1
-    avocado ext dnf -e "$FVL_EXT" --target "$machine" install -y "$@"
+    fvl_pty avocado sdk install -f || exit 1
+    fvl_pty avocado rootfs install -f || exit 1
+    fvl_pty avocado ext dnf -e "$FVL_EXT" --target "$machine" install -y "$@"
   )
 }
 
@@ -240,7 +262,7 @@ fvl_verify_sdk_case() {
       # 2>&1 into a variable (not `2>/dev/null | grep -q .`, which drops the
       # result when it goes to stderr and false-positives on the [INFO] line
       # when it goes to stdout). Match the package token from repoquery output.
-      out=$(avocado ext dnf -e "$FVL_EXT" --target "$machine" -- \
+      out=$(fvl_pty avocado ext dnf -e "$FVL_EXT" --target "$machine" -- \
         repoquery --installed "$pkg" 2>&1 || true)
       printf '%s\n' "$out" | tr -d '\r' | grep -Eq "(^|[^[:alnum:]_])${pkg}-[0-9]" \
         || {
@@ -250,7 +272,7 @@ fvl_verify_sdk_case() {
     done
     for lib in ${lib_csv//,/ }; do
       [ -n "$lib" ] || continue
-      avocado sdk run --target "$machine" -- \
+      fvl_pty avocado sdk run --target "$machine" -- \
         sh -c "ls \"\$AVOCADO_EXT_SYSROOTS/$FVL_EXT\"/usr/lib*/$lib* >/dev/null 2>&1" \
         || {
           printf '%s missing in ext %s sysroot\n' "$lib" "$FVL_EXT" >&2
@@ -270,7 +292,11 @@ fvl_verify_sdk_case() {
 # boot-marked case. Tune via FVL_QGA_PORT / FVL_BOOT_WAIT.
 
 FVL_QGA_PORT="${FVL_QGA_PORT:-4445}"
-FVL_BOOT_WAIT="${FVL_BOOT_WAIT:-180}"
+# Max wait for the guest agent (the wait returns as soon as the agent answers,
+# so a higher value never slows a fast boot). Default headroom covers a
+# cross-arch TCG boot: on an x86_64 host qemu-system-aarch64 has no KVM, so an
+# emulated qemuarm64 boot to userspace is minutes, not seconds.
+FVL_BOOT_WAIT="${FVL_BOOT_WAIT:-600}"
 
 # fvl_qga <args...> -> host-side QGA client against FVL_QGA_PORT
 fvl_qga() {
@@ -314,9 +340,9 @@ fvl_boot_verify_case() {
   (
     cd "$projdir" || exit 1
     export AVOCADO_REPO_URL AVOCADO_RELEASEVER
-    avocado install -f >/dev/null 2>&1 || exit 1
-    avocado build >/dev/null 2>&1 || exit 1
-    avocado provision -r dev >/dev/null 2>&1 || exit 1
+    fvl_pty avocado install -f >/dev/null 2>&1 || exit 1
+    fvl_pty avocado build >/dev/null 2>&1 || exit 1
+    fvl_pty avocado provision -r dev >/dev/null 2>&1 || exit 1
   ) || {
     printf 'boot: build/provision failed\n' >&2
     return 1
