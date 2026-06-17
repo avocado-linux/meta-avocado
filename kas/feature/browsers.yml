@@ -1,0 +1,15 @@
+header:
+  version: 16
+
+repos:
+  meta-browser:
+    url: https://github.com/avocado-linux/vendor-meta-browser.git
+    path: meta-browser
+    commit: 85eeb6b50883d22c977396f5e8fe211a7961cf2e
+    branch: scarthgap
+    layers:
+      meta-chromium:
+
+local_conf_header:
+  feature/browsers: |
+    AVOCADO_FEATURE_GROUPS:append = " browsers"
