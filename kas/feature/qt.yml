@@ -1,0 +1,17 @@
+header:
+  version: 16
+
+repos:
+  meta-qt5:
+    url: https://github.com/avocado-linux/vendor-meta-qt5.git
+    path: meta-qt5
+    commit: 227cf5e7b64c93dfc1a45f235c466db8c3fd8707
+    branch: scarthgap
+    layers:
+      .:
+
+local_conf_header:
+  feature/qt: |
+    AVOCADO_FEATURE_GROUPS:append = " qt"
+    PACKAGECONFIG:append:pn-qtbase = " gles2 eglfs kms gbm harfbuzz"
+    PACKAGECONFIG:append:pn-qtmultimedia = " gstreamer"
