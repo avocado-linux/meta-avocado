@@ -13,6 +13,7 @@ PACKAGES = "${PN}"
 # packages are installable from the feed but not baked into the rootfs.
 SDK_SYSROOT_DEPENDS = " \
   avocado-sdk-target-sysroot \
+  executorch-staticdev \
   kernel-devsrc \
   ${@multilib_pkg_extend(d, 'libstd-rs')} \
   ${@multilib_pkg_extend(d, 'packagegroup-go-sdk-target')} \
@@ -46,7 +47,6 @@ RDEPENDS:${PN} = " \
   dtc \
   ${@bb.utils.contains('MACHINE_FEATURES', 'deepx', "${DEEPX_PACKAGES}", '', d)} \
   ethtool \
-  executorch-staticdev \
   fwup \
   git \
   glibc-utils \

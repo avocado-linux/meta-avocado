@@ -20,6 +20,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-elfutils \
   nativesdk-elixir \
   nativesdk-erlang \
+  nativesdk-executorch \
   nativesdk-file \
   nativesdk-findutils \
   nativesdk-fwup \
@@ -63,6 +64,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-socat \
   nativesdk-strace \
   nativesdk-tar \
+  nativesdk-torchgen \
   nativesdk-util-linux \
   nativesdk-util-linux-agetty \
   nativesdk-util-linux-blkdiscard \
@@ -160,7 +162,8 @@ SDK_TOOLCHAIN_DEPENDS = " \
 # *_avocadosdk — so those target-arch packages were built but never reached a feed.
 # They now live in packagegroup-avocado-extra (the distro/target feed): distro builds
 # target-arch, sdk builds host. The CLI installs avocado-sdk-target-sysroot from the
-# target feed via its combined repo conf.
+# target feed via its combined repo conf. executorch-staticdev is target-arch too, so it
+# rides the same path in packagegroup-avocado-extra.
 
 # Bare-metal ARM (Cortex-M) cross toolchain for compiling microcontroller /
 # co-processor firmware in the SDK. The compiler is framework-agnostic, so

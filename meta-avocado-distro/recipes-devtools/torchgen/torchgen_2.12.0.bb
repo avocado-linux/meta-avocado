@@ -32,5 +32,12 @@ do_install() {
     cp -r ${S}/torchgen ${D}${PYTHON_SITEPACKAGES_DIR}/
 }
 
-# Build-time codegen tool for ExecuTorch; only the native variant is consumed.
-BBCLASSEXTEND = "native"
+# Claim the installed site-packages so the package ships them. The native
+# variant skips the installed-vs-shipped QA, but the nativesdk variant produces
+# a real SDK package and fails do_package without an explicit FILES entry.
+FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR}"
+
+# Build-time codegen tool for ExecuTorch. The native variant is consumed during
+# the image build; the nativesdk variant ships in the Avocado SDK so a developer
+# can run the executorch codegen when cross-compiling against the runtime.
+BBCLASSEXTEND = "native nativesdk"
