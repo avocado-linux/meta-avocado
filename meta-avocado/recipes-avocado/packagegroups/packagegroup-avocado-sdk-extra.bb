@@ -20,6 +20,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-elfutils \
   nativesdk-elixir \
   nativesdk-erlang \
+  nativesdk-executorch \
   nativesdk-file \
   nativesdk-findutils \
   nativesdk-fwup \
@@ -63,6 +64,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-socat \
   nativesdk-strace \
   nativesdk-tar \
+  nativesdk-torchgen \
   nativesdk-util-linux \
   nativesdk-util-linux-agetty \
   nativesdk-util-linux-blkdiscard \
@@ -156,6 +158,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
 
 SDK_SYSROOT_DEPENDS = " \
   avocado-sdk-target-sysroot \
+  executorch-staticdev \
   kernel-devsrc \
   ${@multilib_pkg_extend(d, 'libstd-rs')} \
   ${@multilib_pkg_extend(d, 'packagegroup-go-sdk-target')} \

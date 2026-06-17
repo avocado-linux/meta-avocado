@@ -88,3 +88,8 @@ do_install:append() {
 # ship in -staticdev via the default packaging split.
 FILES:${PN}-dev += "${libdir}/cmake ${libdir}/pkgconfig ${libdir}/cpuinfo.h ${datadir}/cpuinfo"
 ALLOW_EMPTY:${PN} = "1"
+
+# Build a nativesdk variant too so the executorch headers and static runtime are
+# staged in the Avocado SDK host sysroot (per the 6/17 SDK-integration
+# decision); pairs with nativesdk-torchgen for host-side executorch work.
+BBCLASSEXTEND = "nativesdk"
