@@ -26,7 +26,11 @@ header:
   - repo: meta-avocado
     file: kas/feature/cameras.yml
   - repo: meta-avocado
-    file: kas/feature/ai.yml
+    file: kas/feature/python-ai.yml
+  - repo: meta-avocado
+    file: kas/feature/clang.yml
+  - repo: meta-avocado
+    file: kas/feature/ros.yml
   - repo: meta-avocado
     file: kas/feature/cloud-aws.yml
   - repo: meta-avocado
