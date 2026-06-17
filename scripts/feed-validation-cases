@@ -18,3 +18,21 @@ zeromq       | zeromq               | libzmq.so.5     | yes
 # asserts libexecutorch.a lands in the ext sysroot; there is no runtime .so to
 # load on a booted device, so boot is no.
 executorch   | executorch-staticdev | libexecutorch.a | no
+# One representative package per feature group. The always-on groups
+# (system-base, networking, multimedia, python) use packages that land on
+# every arch; the opengl-gated visual groups (graphics, qt, browsers) also run
+# the boot e2e. The remaining groups are arch/distro/machine-feature gated, so
+# they only assert feed presence (boot=no).
+# name              | packages               | expected-libs | boot
+system-base         | vim                    |               | no
+networking          | networkmanager         |               | no
+multimedia          | gstreamer1.0           |               | no
+python              | python3-pip            |               | no
+graphics            | weston                 |               | yes
+qt                  | qtbase                 |               | yes
+browsers            | chromium-ozone-wayland |               | yes
+cameras             | pylon                  |               | no
+ai                  | dx-driver              |               | no
+cloud-aws           | greengrass-bin         |               | no
+java                | openjdk-17-jre         |               | no
+containers          | podman                 |               | no
