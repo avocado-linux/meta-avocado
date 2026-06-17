@@ -1,0 +1,35 @@
+header:
+  version: 16
+
+# Umbrella aggregator: includes every per-group kas/feature/<group>.yml
+# fragment so that including this one file pulls every vendor layer and
+# appends every feature token to AVOCADO_FEATURE_GROUPS. Existing client
+# vendor/machine compositions include this to reproduce today's full image
+# content; dev/minimal targets stack a smaller set of fragments instead.
+# Mirrors the kas/extra.yml repo/file include form so a token is present iff
+# its fragment (and thus its vendor layer) is present.
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/system-base.yml
+  - repo: meta-avocado
+    file: kas/feature/networking.yml
+  - repo: meta-avocado
+    file: kas/feature/multimedia.yml
+  - repo: meta-avocado
+    file: kas/feature/python.yml
+  - repo: meta-avocado
+    file: kas/feature/graphics.yml
+  - repo: meta-avocado
+    file: kas/feature/qt.yml
+  - repo: meta-avocado
+    file: kas/feature/browsers.yml
+  - repo: meta-avocado
+    file: kas/feature/cameras.yml
+  - repo: meta-avocado
+    file: kas/feature/ai.yml
+  - repo: meta-avocado
+    file: kas/feature/cloud-aws.yml
+  - repo: meta-avocado
+    file: kas/feature/java.yml
+  - repo: meta-avocado
+    file: kas/feature/containers.yml
