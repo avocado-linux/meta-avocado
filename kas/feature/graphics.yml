@@ -1,0 +1,15 @@
+header:
+  version: 16
+
+repos:
+  meta-wayland:
+    url: https://github.com/avocado-linux/vendor-meta-wayland.git
+    path: meta-wayland
+    branch: scarthgap
+    commit: 25850e97205eaa1b54882197ceaa6814c0403b4a
+    layers:
+      .:
+
+local_conf_header:
+  feature/graphics: |
+    AVOCADO_FEATURE_GROUPS:append = " graphics"
