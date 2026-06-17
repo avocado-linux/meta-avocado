@@ -1,0 +1,25 @@
+header:
+  version: 16
+
+repos:
+  meta-basler-tools:
+    url: https://github.com/avocado-linux/vendor-meta-basler-tools.git
+    path: meta-basler-tools
+    branch: scarthgap
+    commit: ef4d0a805152f8d6abc4c20272da24f8d7ae54ee
+    layers:
+      .:
+
+  meta-intel-realsense:
+    url: https://github.com/avocado-linux/vendor-meta-intel-realsense.git
+    path: meta-intel-realsense
+    branch: scarthgap
+    commit: 6d585884724b7c0c56c6734949ebde3dbc55f72c
+    layers:
+      .:
+
+local_conf_header:
+  extra-basler: |
+    ACCEPT_BASLER_EULA = "1"
+  feature/cameras: |
+    AVOCADO_FEATURE_GROUPS:append = " cameras"
