@@ -1,8 +1,11 @@
 header:
   version: 16
   includes:
+  
   - repo: meta-avocado
     file: kas/vendor/nxp.yml
+  - repo: meta-avocado
+    file: kas/feature/complete.yml
 
 repos:
   # FRDM family pins meta-imx to the NXP 6.6.36-2.1.0 release. The url/path/
