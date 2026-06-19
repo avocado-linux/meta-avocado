@@ -9,6 +9,7 @@ RDEPENDS:${PN} = " \
   cups \
   cups-filters \
   ghostscript \
+  ipp-usb \
   poppler \
   qpdf \
 "
