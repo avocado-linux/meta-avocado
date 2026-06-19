@@ -1,7 +1,6 @@
 header:
   version: 16
   includes:
-  
   - repo: meta-avocado
     file: kas/vendor/nxp.yml
   - repo: meta-avocado
