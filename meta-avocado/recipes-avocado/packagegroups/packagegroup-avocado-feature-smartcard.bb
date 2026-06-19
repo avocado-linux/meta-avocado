@@ -7,6 +7,9 @@ PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
   ccid \
+  libykpiv \
   pcsc-lite \
   pcsc-lite-lib \
+  yubico-piv-tool \
+  ykcs11 \
 "
