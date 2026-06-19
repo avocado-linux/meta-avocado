@@ -20,6 +20,7 @@ zeromq       | zeromq               | libzmq.so.5     | yes
 executorch   | executorch-staticdev | libexecutorch.a | no
 iperf3       | iperf3               | libiperf.so.0   | no
 smartcard    | pcsc-lite pcsc-lite-lib ccid yubico-piv-tool libykpiv ykcs11 | libpcsclite.so.1 libykpiv.so.2 | no
+printing     | cups cups-filters ghostscript poppler qpdf |                  | no
 # One representative package per feature group. The always-on groups
 # (system-base, networking, multimedia, python) use packages that land on
 # every arch; the opengl-gated visual groups (graphics, qt, browsers) also run
