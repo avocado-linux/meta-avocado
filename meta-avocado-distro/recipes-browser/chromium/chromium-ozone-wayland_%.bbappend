@@ -11,15 +11,34 @@ SRC_URI += "file://0001-rust-fix-mismatched-lifetime-syntaxes-in-qr_code.patch \
 # signatures. Chromium 146 refactored those, so the patch fails to apply.
 SRC_URI:remove:qcom = "file://fix-chromium-launch-crash.patch"
 
-# Fix sysroot conflict between clang-native (meta-clang v20) and clang15/clang17-native
-# (meta-clang-revival). All three layers define clang_base_deps() with the same Python
-# function name; whichever class is parsed last wins and injects its versioned cross
-# compiler (clang15-cross or clang17-cross) into BASE_DEFAULT_DEPS via the
-# toolchain-clang append in meta-clang's clang.bbclass. Meanwhile the :runtime-llvm
-# append pulls in compiler-rt-native/libcxx-native which depend on clang-native (v20),
-# causing both clang versions to land in the sysroot with conflicting LLVM static
-# libraries. Strip all revival-versioned deps and explicitly pin to the v20 cross compiler.
-DEPENDS:remove = "clang15-cross-${TARGET_ARCH} compiler-rt15 clang17-cross-${TARGET_ARCH} compiler-rt17"
+# Deterministically pin chromium to the meta-clang v20 cross-toolchain and strip ALL of
+# meta-clang-revival's versioned clang deps (14/15/16/17).
+#
+# Root cause of the "basehash value changed on reparse / metadata is not deterministic"
+# error AND the "clang installed by both clang-cross-aarch64 and clang16-cross-aarch64"
+# sysroot collision: meta-clang (v20) and meta-clang-revival (14-17) are BOTH active when a
+# target pulls clang.yml (chromium needs v20) and python-ai.yml (DRP-AI brings revival).
+# meta-clang v20 does an override ASSIGNMENT `BASE_DEFAULT_DEPS:toolchain-clang:class-target =
+# ${@clang_base_deps(d)}` (v20 deps), while revival's toolchain/clang.inc does an UNCONDITIONAL
+# `BASE_DEFAULT_DEPS:append = " compiler-rt${CLANGMAJORVERSION} libcxx${CLANGMAJORVERSION}"`.
+# Whether revival's append lands ON TOP of v20's assignment or is RESET by it depends on class
+# parse order — which is NOT stable across a reparse (parser-cache eviction under memory
+# pressure at full fan-out). So BASE_DEFAULT_DEPS flips between "v20" and "v20 + v16" between
+# parse and reparse: that flips the task basehash (the determinism error), and when both land
+# both clang-cross versions hit the sysroot (the collision).
+#
+# Fix: strip revival's versioned deps from BOTH BASE_DEFAULT_DEPS (the racy variable) and
+# DEPENDS. `:remove` is applied at FINALIZATION — after the assignment and the append, whatever
+# the parse order — so the result is deterministically v20-only regardless of which class parsed
+# last. That removes the basehash non-determinism by construction and ends the sysroot collision.
+# Scoped to chromium (which wants v20); recipes that genuinely need revival's clang are untouched.
+CLANG_REVIVAL_DEPS = "\
+    compiler-rt14 libcxx14 clang14-cross-${TARGET_ARCH} \
+    compiler-rt15 libcxx15 clang15-cross-${TARGET_ARCH} \
+    compiler-rt16 libcxx16 clang16-cross-${TARGET_ARCH} \
+    compiler-rt17 libcxx17 clang17-cross-${TARGET_ARCH} "
+BASE_DEFAULT_DEPS:remove = "${CLANG_REVIVAL_DEPS}"
+DEPENDS:remove = "${CLANG_REVIVAL_DEPS}"
 DEPENDS:append = " clang-cross-${TARGET_ARCH}"
 
 # V8's mksnapshot is cross-compiled for aarch64 and run under QEMU user-mode
