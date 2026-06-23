@@ -1,4 +1,7 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+# Kernel config fragments + the HDMI dts live in the in-tree linux files dir
+# (shared with linux-imx); this bbappend sits under dynamic-layers/ so point at
+# it via the layer.conf var rather than ${THISDIR}/files.
+FILESEXTRAPATHS:prepend := "${AVOCADO_NXP_KERNEL_FILESDIR}:"
 
 SRC_URI += " \
   file://avocado-core.cfg \
