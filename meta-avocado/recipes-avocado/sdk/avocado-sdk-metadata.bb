@@ -205,7 +205,18 @@ python do_compile() {
 
     # --- Write /etc/dnf/vars/arch file ---
     sdk_arch_vars_path = os.path.join(arch_vars_work_dir, 'arch')
-    final_archs = avocado_filter_target_archs(d, repo_archs)
+    # Arch COMPATIBILITY (this dnf arch list + the /etc/rpmrc arch_compat below)
+    # must reflect every valid target package arch for this MACHINE -- i.e.
+    # PACKAGE_ARCHS -- NOT just arches that happen to have a DEPLOY_DIR_RPM dir
+    # when this recipe builds. The repo entries above are intentionally gated on
+    # deploy-dir existence (don't advertise empty repos), but reusing that gated
+    # set here drops valid arches whose packages are built after this recipe or
+    # only via a packagegroup the image doesn't pull -- e.g. the NXP-BSP SoC arch
+    # (MACHINE_SOCARCH, cortexa53-crypto-mx8mp). When that arch is missing, rpm
+    # rejects every SoC-arch package ("does not have a compatible architecture")
+    # at `avocado ext install`. Source from PACKAGE_ARCHS so the list is complete
+    # and stable regardless of build order or which packagegroups are enabled.
+    final_archs = avocado_filter_target_archs(d, pkg_archs)
     with open(sdk_arch_vars_path, 'w') as arch_f:
         arch_f.write(':'.join(final_archs))
         bb.note(f"Wrote {len(final_archs)} target archs to {sdk_arch_vars_path}: {':'.join(final_archs)}")
