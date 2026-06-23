@@ -12,11 +12,15 @@ inherit packagegroup
 
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
-  firmware-imx-sdma-imx7d \
 "
 
-# SoC-level SDMA RAM firmware (sdma-imx7d.bin), needed by every i.MX SDMAv3
-# controller (audio/SAI, UART, SPI DMA). On the NXP BSP this lives in
-# firmware-imx (IMX_USE_LINUX_FIRMWARE_SDMA=0); pulling it here builds the
-# package into the feed and installs it on all i.MX rootfs (the FSLC name
-# linux-firmware-imx-sdma-imx7d does not exist on the NXP BSP). noarch.
+# SDMA RAM firmware (sdma-imx7d.bin) for the i.MX SDMAv3 controller (audio/SAI,
+# UART, SPI DMA). On the NXP BSP it lives in firmware-imx (IMX_USE_LINUX_FIRMWARE_SDMA=0);
+# the FSLC name linux-firmware-imx-sdma-imx7d does not exist there. Scope to the
+# i.MX8MP NXP-BSP boards (imx8mp-evk / compulab / variscite) where firmware-imx
+# provides it and the BSP extensions reference it; imx9/FRDM don't build this
+# package, so an unconditional dep breaks their rootfs ("nothing provides
+# firmware-imx-sdma-imx7d"). PACKAGE_ARCH=MACHINE_ARCH so the :mx8mp-nxp-bsp
+# override resolves per-board (this packagegroup is otherwise noarch/shared).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+RDEPENDS:${PN}:append:mx8mp-nxp-bsp = " firmware-imx-sdma-imx7d"
