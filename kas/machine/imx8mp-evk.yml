@@ -3,14 +3,17 @@ header:
   includes:
     - repo: meta-avocado
       file: kas/base.yml
+    # Community FSLC base (meta-freescale + 3rdparty): imx-base.inc, firmware-imx,
+    # imx-mkimage / imx-boot, and the shared SDK extras. meta-imx layers on top.
     - repo: meta-avocado
       file: kas/vendor/freescale.yml
-    # meta-arm-toolchain provides nativesdk-gcc-arm-none-eabi, the bare-metal
-    # ARM compiler used to build Zephyr / Cortex-M7 firmware in the SDK.
+    # NXP proprietary meta-imx (pinned 6.6.52-2.2.0) -> Vivante GPU + VIP9000 NPU
+    # eIQ ML stack (packagegroup-avocado-imx-ml, machine-gated to mx8mp-nxp-bsp).
+    # Transitively pulls kas/vendor/nxp.yml, which sets IMX_DEFAULT_BSP=nxp and
+    # includes arm.yml (nativesdk-gcc-arm-none-eabi for the Cortex-M7 bare-metal
+    # toolchain, gated on the cortex-m MACHINE_FEATURE) + virtualization.yml.
     - repo: meta-avocado
-      file: kas/vendor/arm.yml
-    - repo: meta-avocado
-      file: kas/feature/virtualization.yml
+      file: kas/vendor/nxp-evk.yml
     - repo: meta-avocado
       file: kas/target/distro.yml
 
