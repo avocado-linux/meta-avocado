@@ -8,8 +8,15 @@ SRC_URI += " \
   file://avocado-usb-serial.cfg \
 "
 
+SRC_URI:append:avocado-imx93-frdm = " \
+  file://imx93-frdm/dm-crypt.cfg \
+"
+
 do_configure:append() {
   cat ${UNPACKDIR}/*.cfg >> ${B}/.config
+  for f in ${UNPACKDIR}/imx93-frdm/*.cfg; do
+    [ -e "$f" ] && cat "$f" >> ${B}/.config
+  done
 }
 
 inherit avocado-kernel-feed
