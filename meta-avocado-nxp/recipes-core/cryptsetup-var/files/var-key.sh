@@ -4,8 +4,12 @@
 # Reads a provisioned secret from /var/private/var-key-secret and combines
 # it with a hardware-unique identifier. Output is 64 raw bytes on stdout.
 #
-# This script is designed to be replaced in phase-2 by a TEE/fTPM-sealed
-# key provider — the cryptsetup-var.sh caller only depends on stdout.
+# Phase-2 replaces this with a capability-probe dispatch table:
+#   /dev/tpm0 present -> systemd-cryptenroll (x86, QEMU, fTPM-enabled ARM)
+#   CAAM present      -> caam-keygen black-key blob (i.MX8M Plus)
+#   ELE present       -> ELE/SMW key-derive (i.MX91/93 without fTPM)
+#   fallback          -> this Argon2id path (no hardware key store)
+# The cryptsetup-var.sh caller depends only on stdout - 64 raw bytes.
 set -eu
 
 SECRET_FILE="/var/private/var-key-secret"
