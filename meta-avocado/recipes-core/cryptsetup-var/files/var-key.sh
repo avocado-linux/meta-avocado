@@ -29,10 +29,9 @@ fi
 
 SECRET=$(cat "$SECRET_FILE")
 
-# Key derivation function: argon2id via openssl 3.x. Combine the provisioned
-# secret + hw-id as the password input,
-# fixed salt derived from hw-id (public, per-device, not secret).
-# Parameters: m=65536 (64 MiB), t=3, p=1 — conservative for initramfs timing.
+# Key derivation: argon2id via openssl 3.x. Combines provisioned secret + hw-id
+# as the password. Salt is SHA-256(hw_id) truncated to 16 bytes - public,
+# per-device, non-secret. Parameters: m=65536 (64 MiB), t=3, p=1.
 SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 -binary | head -c 16 | xxd -p -c 256)
 
 openssl kdf \
