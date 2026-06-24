@@ -7,6 +7,7 @@ PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = "\
   cryptsetup \
+  cryptsetup-var \
   systemd \
   systemd-extra-utils \
   os-release-initrd \
