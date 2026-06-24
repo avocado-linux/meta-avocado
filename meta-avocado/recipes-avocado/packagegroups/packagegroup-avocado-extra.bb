@@ -5,7 +5,21 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
+# SDK target sysroot — target-arch (MACHINE_ARCH) build deps for compiling extensions
+# against the target. Moved here from packagegroup-avocado-sdk-extra: the distro build
+# builds target-arch (-> target feed), the SDK build builds host/nativesdk (-> sdk feed).
+# avocado-sdk-target-sysroot lands in the target feed where the CLI's combined repo conf
+# installs it. This is a feed-only packagegroup (via avocado-pkg-extra), so these dev
+# packages are installable from the feed but not baked into the rootfs.
+SDK_SYSROOT_DEPENDS = " \
+  avocado-sdk-target-sysroot \
+  kernel-devsrc \
+  ${@multilib_pkg_extend(d, 'libstd-rs')} \
+  ${@multilib_pkg_extend(d, 'packagegroup-go-sdk-target')} \
+"
+
 RDEPENDS:${PN} = " \
+  ${SDK_SYSROOT_DEPENDS} \
   audit \
   avahi-daemon \
   avocado-hitl \
