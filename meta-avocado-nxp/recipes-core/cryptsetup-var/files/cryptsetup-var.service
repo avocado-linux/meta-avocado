@@ -1,0 +1,16 @@
+[Unit]
+Description=LUKS2 /var unlock and first-boot format
+DefaultDependencies=no
+Before=initrd-root-fs.target
+After=systemd-udevd.service
+Wants=systemd-udevd.service
+ConditionPathExists=/dev/disk/by-partlabel/var
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/cryptsetup-var/cryptsetup-var.sh /dev/disk/by-partlabel/var
+SuccessExitStatus=0
+
+[Install]
+WantedBy=initrd-root-fs.target
