@@ -92,8 +92,15 @@ KERNEL_DEVICETREE:append:imx95-frdm = " \
   freescale/imx95-15x15-frdm-ap1302.dtbo \
 "
 
+SRC_URI:append:avocado-imx93-frdm = " \
+  file://imx93-frdm/dm-crypt.cfg \
+"
+
 do_configure:append() {
   cat ${WORKDIR}/*.cfg >> ${B}/.config
+  for f in ${WORKDIR}/imx93-frdm/*.cfg; do
+    [ -e "$f" ] && cat "$f" >> ${B}/.config
+  done
 }
 
 do_configure:prepend:imx95-frdm() {
