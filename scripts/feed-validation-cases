@@ -2,19 +2,22 @@
 #
 # One case per line, pipe-separated:
 #
-#   name | packages | expected-libs | boot
+#   name | packages | expected-libs | boot | assertions
 #
 #   name           short case id (used for the per-case project dir)
-#   packages       space-separated feed package names to install
+#   packages       space-separated feed package names to install (empty for boot-only)
 #   expected-libs  space-separated shared-lib basenames to assert (optional)
 #   boot           "yes" to also run the boot e2e (heavy: one image cycle), else "no"
+#   assertions     named assertion set for the boot tier (default: ext+libs check)
+#                  "luks-var" -> fvl_assert_luks_var (checks dm-crypt /var active)
 #
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
 #
-# name       | packages             | expected-libs   | boot
-zeromq       | zeromq               | libzmq.so.5     | yes
+# name       | packages             | expected-libs   | boot | assertions
+zeromq       | zeromq               | libzmq.so.5     | yes  |
 # executorch ships only static libs + headers (-staticdev), so the SDK tier
 # asserts libexecutorch.a lands in the ext sysroot; there is no runtime .so to
 # load on a booted device, so boot is no.
-executorch   | executorch-staticdev | libexecutorch.a | no
+executorch   | executorch-staticdev | libexecutorch.a | no   |
+luks-var     |                      |                 | yes  | luks-var
