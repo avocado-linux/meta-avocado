@@ -21,13 +21,13 @@ SCRIPT_DIR="$(dirname "$0")"
 KEY_SCRIPT="${SCRIPT_DIR}/var-key.sh"
 
 # Derive the key (never hardcoded; sourced from var-key.sh).
-# The key is written to a file descriptor to avoid exposure in /proc.
+# The key is written to a temp file to avoid exposure in /proc.
 KEY_FILE=$(mktemp)
 trap 'rm -f "$KEY_FILE"' EXIT
 "$KEY_SCRIPT" > "$KEY_FILE"
 
 if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
-    # Existing LUKS2 container — open it.
+    # Existing LUKS2 container - open it.
     echo "cryptsetup-var: opening existing LUKS2 container on $VAR_DEV"
     cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME"
 
@@ -42,8 +42,8 @@ if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
         btrfs filesystem resize max "$MAPPER"
     fi
 else
-    # First boot — format the partition as LUKS2 (aes-xts-plain64, 512-bit key).
-    echo "cryptsetup-var: first boot — formatting $VAR_DEV as LUKS2"
+    # First boot - format the partition as LUKS2 (aes-xts-plain64, 512-bit key).
+    echo "cryptsetup-var: first boot - formatting $VAR_DEV as LUKS2"
     cryptsetup luksFormat \
         --type luks2 \
         --cipher aes-xts-plain64 \
