@@ -45,32 +45,31 @@ fvl_stage_and_render "$deploy" "$channel"
 fvl_serve "$channel" "$MACHINE"
 
 # Run cases. Redirection (not a pipe) keeps the pass/fail counters in this shell.
-while IFS='|' read -r name pkgs libs boot; do
+while IFS='|' read -r name pkgs libs boot assertions; do
   name="$(echo "${name:-}" | xargs)"
   [ -z "$name" ] && continue
   case "$name" in \#*) continue ;; esac
   pkgs="$(echo "${pkgs:-}" | xargs)"
   libs="$(echo "${libs:-}" | xargs | tr ' ' ',')"
   boot="$(echo "${boot:-}" | xargs)"
-  [ -n "$pkgs" ] || {
-    fvl_case_fail "$name" "no packages listed"
-    continue
-  }
+  assertions="$(echo "${assertions:-}" | xargs)"
   read -ra parr <<<"$pkgs"
   local_csv="${pkgs// /,}"
   proj="$WORK/proj-$name"
 
-  fvl_log "Case: $name (packages: $pkgs)"
-  fvl_scaffold_project "$MACHINE" "$proj"
-  if fvl_install_case "$MACHINE" "$proj" "${parr[@]}" \
-    && fvl_verify_sdk_case "$MACHINE" "$proj" "$local_csv" "$libs"; then
-    fvl_case_pass "sdk:$name"
-  else
-    fvl_case_fail "sdk:$name" "install/verify failed"
+  if [ -n "$pkgs" ]; then
+    fvl_log "Case: $name (packages: $pkgs)"
+    fvl_scaffold_project "$MACHINE" "$proj"
+    if fvl_install_case "$MACHINE" "$proj" "${parr[@]}" \
+      && fvl_verify_sdk_case "$MACHINE" "$proj" "$local_csv" "$libs"; then
+      fvl_case_pass "sdk:$name"
+    else
+      fvl_case_fail "sdk:$name" "install/verify failed"
+    fi
   fi
 
   if [ "$boot" = "yes" ]; then
-    if fvl_boot_verify_case "$MACHINE" "$WORK/proj-$name-boot" "$local_csv" "$libs"; then
+    if fvl_boot_verify_case "$MACHINE" "$WORK/proj-$name-boot" "$local_csv" "$libs" "$assertions"; then
       fvl_case_pass "boot:$name"
     else
       fvl_case_fail "boot:$name" "boot e2e failed"
