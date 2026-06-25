@@ -29,7 +29,23 @@ trap 'rm -f "$KEY_FILE"' EXIT
 if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
     # Existing LUKS2 container - open it.
     echo "cryptsetup-var: opening existing LUKS2 container on $VAR_DEV"
-    cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME"
+
+    # Phase-2: Try TPM2-sealed keyslot first (PCR 7).
+    TPM2_OPENED=0
+    if [ -e /dev/tpm0 ] && command -v systemd-cryptenroll >/dev/null 2>&1; then
+        if cryptsetup open --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+            echo "cryptsetup-var: opened via TPM2 token"
+            TPM2_OPENED=1
+            # Retire Argon2id keyslot only after confirmed TPM2 unseal.
+            # luksKillSlot is never called without this guard.
+            echo "cryptsetup-var: retiring Argon2id keyslot (TPM2 unseal verified)"
+            cryptsetup luksKillSlot --key-file "$KEY_FILE" "$VAR_DEV" 0 || true
+        fi
+    fi
+
+    if [ "$TPM2_OPENED" -eq 0 ]; then
+        cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME"
+    fi
 
     # Resize LUKS container if the partition grew (e.g. after avocado-grow-var).
     PARTITION_SECTORS=$(blockdev --getsz "$VAR_DEV")
