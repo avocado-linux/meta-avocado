@@ -347,6 +347,18 @@ fvl_assert_luks_var_tpm() {
   return 0
 }
 
+# fvl_assert_dm_verity
+# Checks that the rootfs is mounted from an active dm-verity device
+# named vroot. The verity check succeeds only when the rootfs hash
+# matches the root hash embedded in the kernel or passed at boot.
+fvl_assert_dm_verity() {
+  fvl_qga --run "dmsetup status 2>/dev/null | grep -q '^vroot.*verity'" \
+    || { printf 'dm-verity: vroot verity device not active\n' >&2; return 1; }
+  fvl_qga --run "findmnt -n -o SOURCE / 2>/dev/null | grep -q mapper/vroot" \
+    || { printf 'dm-verity: rootfs not mounted from dm-verity device\n' >&2; return 1; }
+  return 0
+}
+
 # _fvl_run_assertions <assertions> <ext> <lib_csv>
 # Dispatches to the named assertion set for the boot tier.
 _fvl_run_assertions() {
