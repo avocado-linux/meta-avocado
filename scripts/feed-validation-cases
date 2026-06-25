@@ -9,11 +9,15 @@
 #   expected-libs  space-separated shared-lib basenames to assert (optional)
 #   boot           "yes" to also run the boot e2e (heavy: one image cycle), else "no"
 #   assertions     named assertion set for the boot tier (default: ext+libs check)
-#                  "luks-var" -> fvl_assert_luks_var (checks dm-crypt /var active)
+#                  "luks-var"     -> fvl_assert_luks_var (checks dm-crypt /var active)
+#                  "luks-var-tpm" -> fvl_assert_luks_var_tpm (luks-var + TPM2 token)
+#                  "dm-verity"    -> fvl_assert_dm_verity (checks vroot verity active)
 #
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
 #
-# name    | packages | expected-libs | boot | assertions
-zeromq    | zeromq   | libzmq.so.5   | yes  |
-luks-var  |          |               | yes  | luks-var
+# name       | packages | expected-libs | boot | assertions
+zeromq       | zeromq   | libzmq.so.5   | yes  |
+luks-var     |          |               | yes  | luks-var
+luks-var-tpm |          |               | yes  | luks-var-tpm
+dm-verity    |          |               | yes  | dm-verity
