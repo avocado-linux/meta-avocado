@@ -48,6 +48,8 @@ SANITY_TESTED_DISTROS ?= " \
             fedora-40 \n \
             "
 
+require conf/distro/include/avocado-security.inc
+
 # DISABLED 2026-05-31: the inline per-RPM upload (hooking do_package_write_rpm)
 # is a Pulp task storm at full-distro scale (1 task + 2 RBAC roles per RPM x ~30k)
 # -> DB bloat -> RDS CPU saturation -> api timeouts. Replaced by end-of-build feed
