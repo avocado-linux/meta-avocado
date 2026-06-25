@@ -8,4 +8,5 @@ PACKAGES = "${PN}"
 RDEPENDS:${PN} = " \
     tpm2-tss \
     tpm2-tools \
+    tpm2-openssl \
 "
