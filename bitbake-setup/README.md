@@ -53,6 +53,20 @@ stay inside the checkout instead of landing in your home directory — the same
 convention as kas's `scripts/init-build`. (The bare `./bitbake/bin/bitbake-setup`
 still works if you'd rather manage the top dir yourself.)
 
+The wrapper keeps the heavy, reusable caches **outside** the repo so the
+checkout doesn't balloon (and so a `rm -rf bitbake-builds` doesn't throw them
+away). Defaults, all overridable via the environment:
+
+| Variable             | Default                              | Controls           |
+|----------------------|--------------------------------------|--------------------|
+| `AVOCADO_BB_CACHE`   | `~/.cache/avocado-bitbake-setup`     | cache root         |
+| `AVOCADO_DL_DIR`     | `$AVOCADO_BB_CACHE/downloads`        | `DL_DIR`           |
+| `AVOCADO_SSTATE_DIR` | `$AVOCADO_BB_CACHE/sstate`           | `SSTATE_DIR`       |
+
+`DL_DIR` is passed as a setting; `SSTATE_DIR` has no bitbake-setup setting
+(site.conf hardcodes `<top_dir>/.sstate-cache`), so the wrapper symlinks that
+path at the external cache.
+
 > Note: kas does **not** use this checkout — kas clones its own bitbake into the
 > build dir per [kas/vendor/oe.yml](../kas/vendor/oe.yml). This clone is only the
 > bootstrap for the bitbake-setup workflow.

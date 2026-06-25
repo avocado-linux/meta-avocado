@@ -1,20 +1,32 @@
 #!/usr/bin/env bash
 # Thin wrapper around the bootstrap bitbake's bitbake-setup that pins the build
-# "top directory" under this repo (meta-avocado/bitbake-builds), regardless of
-# the caller's cwd or their global bitbake-setup settings. This mirrors the kas
-# `scripts/init-build` convention of keeping build trees inside the checkout.
+# "top directory" under this repo (meta-avocado/bitbake-builds), while keeping
+# the heavy, reusable caches (downloads + sstate) OUTSIDE the repo so the
+# checkout doesn't balloon. This mirrors the kas `scripts/init-build` convention
+# of keeping build trees inside the checkout.
 #
 # Usage: ./scripts/bitbake-setup init ./bitbake-setup/avocado-qemux86-64.conf.json
 #        ./scripts/bitbake-setup list
 #        (any bitbake-setup subcommand/argument is passed through)
 #
-# The top dir (layers/, setups, sstate, downloads) is large and gitignored.
-# top-dir-prefix/top-dir-name are GLOBAL_ONLY settings, so they are passed on
-# the command line rather than via a repo-local settings.conf.
+# Cache locations (override via the environment; defaults are shared across all
+# setups, which is exactly what downloads and sstate are designed for):
+#   AVOCADO_BB_CACHE    cache root         (default: ~/.cache/avocado-bitbake-setup)
+#   AVOCADO_DL_DIR      downloads (DL_DIR)  (default: $AVOCADO_BB_CACHE/downloads)
+#   AVOCADO_SSTATE_DIR  sstate (SSTATE_DIR) (default: $AVOCADO_BB_CACHE/sstate)
+#
+# top-dir-prefix/top-dir-name and dl-dir are passed as settings. SSTATE_DIR has
+# no bitbake-setup setting -- site.conf hardcodes it to <top_dir>/.sstate-cache
+# (a `?=` default) -- so we point that path at the external cache with a symlink.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BITBAKE_SETUP="$REPO_DIR/bitbake/bin/bitbake-setup"
+TOP_DIR="$REPO_DIR/bitbake-builds"
+
+CACHE_ROOT="${AVOCADO_BB_CACHE:-$HOME/.cache/avocado-bitbake-setup}"
+DL_DIR="${AVOCADO_DL_DIR:-$CACHE_ROOT/downloads}"
+SSTATE_DIR="${AVOCADO_SSTATE_DIR:-$CACHE_ROOT/sstate}"
 
 if [ ! -x "$BITBAKE_SETUP" ]; then
   echo "error: $BITBAKE_SETUP not found." >&2
@@ -23,7 +35,16 @@ if [ ! -x "$BITBAKE_SETUP" ]; then
   exit 1
 fi
 
+mkdir -p "$DL_DIR" "$SSTATE_DIR" "$TOP_DIR"
+
+# Redirect the in-top-dir sstate path to the external cache. Skip if a real
+# directory is already there (don't orphan an existing in-repo sstate).
+if [ ! -d "$TOP_DIR/.sstate-cache" ] || [ -L "$TOP_DIR/.sstate-cache" ]; then
+  ln -sfn "$SSTATE_DIR" "$TOP_DIR/.sstate-cache"
+fi
+
 exec "$BITBAKE_SETUP" \
   --setting default top-dir-prefix "$REPO_DIR" \
   --setting default top-dir-name bitbake-builds \
+  --setting default dl-dir "$DL_DIR" \
   "$@"
