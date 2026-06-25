@@ -55,6 +55,14 @@ else
     cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME"
     echo "cryptsetup-var: creating BTRFS filesystem inside LUKS container"
     mkfs.btrfs -f "$MAPPER"
+
+    # Phase-2: Enroll TPM2 keyslot sealed to PCR 7 (Secure Boot state).
+    # Slot 0 (Argon2id) is retained as the recovery path until task 3.2
+    # confirms this slot unseals successfully on the next boot.
+    if [ -e /dev/tpm0 ] && command -v systemd-cryptenroll >/dev/null 2>&1; then
+        echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
+        systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"
+    fi
 fi
 
 echo "cryptsetup-var: $MAPPER ready"
