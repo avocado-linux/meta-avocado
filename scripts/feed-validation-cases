@@ -9,7 +9,9 @@
 #   expected-libs  space-separated shared-lib basenames to assert (optional)
 #   boot           "yes" to also run the boot e2e (heavy: one image cycle), else "no"
 #   assertions     named assertion set for the boot tier (default: ext+libs check)
-#                  "luks-var" -> fvl_assert_luks_var (checks dm-crypt /var active)
+#                  "luks-var"     -> fvl_assert_luks_var (checks dm-crypt /var active)
+#                  "luks-var-tpm" -> fvl_assert_luks_var_tpm (luks-var + TPM2 token)
+#                  "dm-verity"    -> fvl_assert_dm_verity (checks vroot verity active)
 #
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
@@ -25,6 +27,8 @@ smartcard    | pcsc-lite pcsc-lite-lib ccid yubico-piv-tool libykpiv ykcs11 | li
 printing     | cups cups-filters ghostscript ipp-usb poppler qpdf |         | no   |
 # Boot-only cases: no feed package to install, the assertion set is the test.
 luks-var     |                      |                 | yes  | luks-var
+luks-var-tpm |                      |                 | yes  | luks-var-tpm
+dm-verity    |                      |                 | yes  | dm-verity
 # One representative package per feature group. The always-on groups
 # (system-base, networking, multimedia, python) use packages that land on
 # every arch; the opengl-gated visual groups (graphics, qt, browsers) also run
