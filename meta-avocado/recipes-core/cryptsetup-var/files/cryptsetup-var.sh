@@ -44,7 +44,12 @@ if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
     fi
 
     if [ "$TPM2_OPENED" -eq 0 ]; then
-        cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME"
+        echo "cryptsetup-var: TPM2 not available or unseal failed - falling back to Argon2id keyslot"
+        if ! cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+            echo "cryptsetup-var: Argon2id open failed - keyslot may have been retired after TPM2 verification" >&2
+            echo "cryptsetup-var: TPM2 unseal required; check PCR 7 state (Secure Boot policy)" >&2
+            exit 1
+        fi
     fi
 
     # Resize LUKS container if the partition grew (e.g. after avocado-grow-var).
