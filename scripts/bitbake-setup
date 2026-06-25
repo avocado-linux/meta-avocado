@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Thin wrapper around the bootstrap bitbake's bitbake-setup that pins the build
+# "top directory" under this repo (meta-avocado/bitbake-builds), regardless of
+# the caller's cwd or their global bitbake-setup settings. This mirrors the kas
+# `scripts/init-build` convention of keeping build trees inside the checkout.
+#
+# Usage: ./scripts/bitbake-setup init ./bitbake-setup/avocado-qemux86-64.conf.json
+#        ./scripts/bitbake-setup list
+#        (any bitbake-setup subcommand/argument is passed through)
+#
+# The top dir (layers/, setups, sstate, downloads) is large and gitignored.
+# top-dir-prefix/top-dir-name are GLOBAL_ONLY settings, so they are passed on
+# the command line rather than via a repo-local settings.conf.
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BITBAKE_SETUP="$REPO_DIR/bitbake/bin/bitbake-setup"
+
+if [ ! -x "$BITBAKE_SETUP" ]; then
+  echo "error: $BITBAKE_SETUP not found." >&2
+  echo "Bootstrap it once with:" >&2
+  echo "  git clone --branch 2.18 https://github.com/avocado-linux/vendor-bitbake $REPO_DIR/bitbake" >&2
+  exit 1
+fi
+
+exec "$BITBAKE_SETUP" \
+  --setting default top-dir-prefix "$REPO_DIR" \
+  --setting default top-dir-name bitbake-builds \
+  "$@"
