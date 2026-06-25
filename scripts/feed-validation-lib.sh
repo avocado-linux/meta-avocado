@@ -337,6 +337,16 @@ fvl_assert_luks_var() {
   return 0
 }
 
+# fvl_assert_luks_var_tpm
+# Extends fvl_assert_luks_var: also checks that a TPM2 LUKS token is
+# enrolled on the var partition (written by systemd-cryptenroll).
+fvl_assert_luks_var_tpm() {
+  fvl_assert_luks_var || return 1
+  fvl_qga --run "cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -q 'systemd-tpm2'" \
+    || { printf 'luks-var-tpm: no TPM2 token in LUKS header\n' >&2; return 1; }
+  return 0
+}
+
 # _fvl_run_assertions <assertions> <ext> <lib_csv>
 # Dispatches to the named assertion set for the boot tier.
 _fvl_run_assertions() {
