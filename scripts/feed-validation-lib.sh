@@ -365,6 +365,8 @@ _fvl_run_assertions() {
   local assertions="$1" ext="$2" lib_csv="$3"
   case "$assertions" in
     luks-var) fvl_assert_luks_var ;;
+    luks-var-tpm) fvl_assert_luks_var_tpm ;;
+    dm-verity) fvl_assert_dm_verity ;;
     *) fvl_assert_in_target "$ext" "$lib_csv" ;;
   esac
 }
