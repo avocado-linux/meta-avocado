@@ -88,8 +88,7 @@
             "files": ["avocado-image-initramfs-qemux86-64.cpio.zst", "bzImage"]
           }
         },
-        "rootfs": "avocado-image-rootfs-qemux86-64.erofs-lz4",
-        "var": "avocado-image-var-qemux86-64.btrfs"
+        "rootfs": "avocado-image-rootfs-qemux86-64.erofs-lz4"
       },
       "partitions": [
         {
@@ -136,7 +135,7 @@
         },
         {
           "name": "var",
-          "image": "var",
+          "image": "",
           "expand": "true"
         }
       ]
