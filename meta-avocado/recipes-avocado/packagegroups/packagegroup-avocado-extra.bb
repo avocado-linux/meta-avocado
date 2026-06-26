@@ -32,6 +32,7 @@ RDEPENDS:${PN} = " \
   bind-utils \
   bubblewrap \
   ca-certificates \
+  can-utils \
   chrony \
   cifs-utils \
   cockpit \
