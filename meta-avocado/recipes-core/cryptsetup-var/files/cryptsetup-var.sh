@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Unlock or first-boot-format the /var LUKS2 container.
 # Called from cryptsetup-var.service in the initramfs.
 #
@@ -8,7 +8,9 @@
 # The script uses var-key.sh (in the same directory) to derive the key.
 # Exit non-zero on any failure so the unit fails rather than silently
 # mounting a plaintext /var.
-set -euo pipefail
+#
+# POSIX sh (not bash) so the initramfs needs no bash dependency.
+set -eu
 
 VAR_DEV="${1:-}"
 MAP_NAME="var"
