@@ -10,7 +10,6 @@ RDEPENDS:${PN} = " \
   tegra-redundant-boot-base \
   tegra-binaries \
   tegra-nvsciipc \
-  tegra-nvstartup \
   tegra-nvfancontrol \
   tegra-configs-udev \
   tegra-redundant-boot \
