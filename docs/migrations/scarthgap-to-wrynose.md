@@ -295,6 +295,38 @@ attempt and what was done to unblock it.
 
 ---
 
+## Build Log — jetson-orin-nano-devkit (NVIDIA)
+
+With qemux86-64 green, turning attention to the NVIDIA Jetson targets.
+meta-tegra and meta-tegra-community are pinned to private early-access
+repos on the `nvidia/master-l4t-r39.0.0` branch (wrynose + JetPack R39).
+
+### Build container: SSH agent forwarding
+
+The private meta-tegra repos require SSH authentication. Updated the
+build container ([Containerfile-ubuntu-24.04](../../support/yocto-build/Containerfile-ubuntu-24.04))
+and [entrypoint.sh](../../support/yocto-build/entrypoint.sh):
+
+- Added `openssh-client` package
+- Added `SSH_AUTH_SOCK` to `BB_ENV_PASSTHROUGH_ADDITIONS`
+- Entrypoint pre-populates `known_hosts` (github.com, gitlab.com) and
+  sets `StrictHostKeyChecking accept-new` for the dynamic avocado user
+
+Run with: `podman run -v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent ...`
+
+### Build iterations
+
+| # | Error | Action |
+|---|---|---|
+| 1 | `No recipes in default available for:` 4 bbappend paths — `tegra-helper-scripts-native_%.bbappend`, `tegra-bluetooth.bbappend`, `tegra-wifi.bbappend`, `linux-jammy-nvidia-tegra_%.bbappend` | Upstream recipe renames in R39.0.0 + bitbake version-matching: (a) `tegra-helper-scripts-native_%.bbappend` → `tegra-helper-scripts_%.bbappend` — recipe now uses `BBCLASSEXTEND = "native"` instead of a separate `-native` recipe. (b) `tegra-bluetooth.bbappend` → `tegra-bluetooth_%.bbappend` and `tegra-wifi.bbappend` → `tegra-wifi_%.bbappend` — need `_%` wildcard to match versioned `_1.0.bb` recipes. (c) `linux-jammy-nvidia-tegra_%.bbappend` → `linux-noble-nvidia-tegra_%.bbappend` — kernel recipe renamed from Ubuntu Jammy (5.15) to Noble (6.8) base |
+| 2 | (proactive) Kernel config fragments and patches stale for 6.8/6.12 | Split shared `files/` directory into per-kernel config directories: `linux-noble-nvidia-tegra/` (6.8), `linux-yocto-6.12/` (6.12). Dropped `linux-yocto_%.bbappend` wildcard → version-specific `linux-yocto_6.12.bbappend`. Removed mailbox tegra-hsp backport patches (applied upstream in 6.8+). Updated config fragments: removed `CONFIG_SQUASHFS_DECOMP_SINGLE`/`CONFIG_SQUASHFS_DECOMP_MULTI` (gone in 6.2), `CONFIG_NFSD_V3` (gone in 6.0), `CONFIG_DRM_KMS_HELPER` (auto-selected in 6.3+); fixed `CONFIG_NET_VENDOR_REALTEK=m` → `=y` (bool). Created missing `avocado-kernel-modules-packagegroup.inc` (was referenced by `require` but never existed) |
+| 3 | `Nothing RPROVIDES 'pylon'` — chain: `avocado-complete` → `packagegroup-avocado-extra` → `pylon` | Basler Pylon SDK recipes (pylon, python3-pypylon, gst-plugin-pylon) not available in wrynose. Removed `BASLER_PACKAGES` block and its reference from `packagegroup-avocado-extra.bb`. Re-add when meta-basler-tools gains wrynose support |
+| 4 | `Nothing RPROVIDES 'tegra-nvphs'` — chain: `packagegroup-avocado-tegra-extra` → `tegra-nvphs` | `tegra-nvphs` and `tegra-nvs-service` dropped as obsolete in the R39.0.0 tegra264-support commit ("drop obsolete recipes for L4T R38.2.0"). Power hint service no longer needed. Removed both from `packagegroup-avocado-tegra-extra.bb` |
+| 5 | `Nothing PROVIDES 'tegra-libraries-video-codec'` (skipped: `incompatible with machine avocado-jetson-orin-nano-devkit (not in COMPATIBLE_MACHINE)`) — chain: `deepstream-8.0` → `libnvvpi4` → `tegra-libraries-video-codec` | Upstream meta-tegra bug: `libnvvpi4` has `COMPATIBLE_MACHINE = "(tegra)"` but unconditionally depends on `tegra-libraries-video-codec` which is `(tegra264)` only. Breaks all tegra234 (Orin) builds. Removed `deepstream-8.0` and `deepstream-8.0-pyds` from `packagegroup-avocado-tegra-extra.bb`. Also removed `linux-firmware-rtl8168` and `kernel-module-r8168` (never in meta-tegra, likely from an unported community layer). Re-add deepstream when upstream fixes the VPI dependency for tegra234 |
+| 6 | `Nothing PROVIDES 'linux-jammy-nvidia-tegra'` — remaining references in multiconfig, kas, and comments | Updated all `linux-jammy-nvidia-tegra` → `linux-noble-nvidia-tegra` and version refs (`5.15` → `6.8`, `6.6` → `6.12`) across: `conf/multiconfig/jetson-l4t.conf` (build-breaking: `PREFERRED_PROVIDER`), `kas/feature/multi-kernel-jetson.yml` (build-breaking: `AVOCADO_MULTIKERNEL_MC_RECIPES`), `conf/machine/avocado-icam-540.conf`, `recipes-avocado/packagegroups/packagegroup-avocado-rootfs.bbappend`, `recipes-kernel/nvidia-kernel-oot/nvidia-kernel-oot_%.bbappend`, `meta-avocado-raspberrypi/conf/multiconfig/raspberrypi-6_6.conf` |
+
+---
+
 ## Known Drift to Revisit
 
 Things that work but look stale or off-pattern relative to wrynose

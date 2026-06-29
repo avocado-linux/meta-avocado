@@ -1,4 +1,4 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/linux-noble-nvidia-tegra:"
 
 SRC_URI:append = " \
   file://avocado-core.cfg \
@@ -31,26 +31,7 @@ do_kernel_configme:append() {
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
 
-# Emit per-kernel rootfs/initramfs module packagegroups. avocado-cli auto-
-# appends these at install time (keyed on whether avocado-pkg-rootfs /
-# avocado-pkg-initramfs is in the effective package list and which kernel is
-# pinned in the lockfile), so transitive module pulls resolve to this
-# kernel's modules rather than dnf's NVR tie-break across the feed. Package
-# names are machine-agnostic — each target publishes to its own repo stream,
-# so contents differ per feed while names stay uniform across machines.
-#
-# RRECOMMENDS on the OOT supplementary packagegroup so OOT-provided modules
-# (emitted from nvidia-kernel-oot_%.bbappend) install alongside without
-# forcing a hard dep when building without OOT.
-PACKAGES:append = " packagegroup-avocado-rootfs-modules packagegroup-avocado-initramfs-modules"
-PKG:packagegroup-avocado-rootfs-modules = "packagegroup-avocado-rootfs-modules-${KERNEL_VERSION}"
-PKG:packagegroup-avocado-initramfs-modules = "packagegroup-avocado-initramfs-modules-${KERNEL_VERSION}"
-ALLOW_EMPTY:packagegroup-avocado-rootfs-modules = "1"
-ALLOW_EMPTY:packagegroup-avocado-initramfs-modules = "1"
-FILES:packagegroup-avocado-rootfs-modules = ""
-FILES:packagegroup-avocado-initramfs-modules = ""
-SUMMARY:packagegroup-avocado-rootfs-modules = "Kernel modules pulled into the Avocado rootfs for kernel ${KERNEL_VERSION}"
-SUMMARY:packagegroup-avocado-initramfs-modules = "Kernel modules pulled into the Avocado initramfs for kernel ${KERNEL_VERSION}"
+require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 
 # See avocado-kernel-modules-packagegroup.inc for why the unqualified Provide
 # is published alongside the versioned PKG NAME.
@@ -86,5 +67,4 @@ RDEPENDS:packagegroup-avocado-initramfs-modules = " \
     kernel-module-pcie-tegra194-${KERNEL_VERSION} \
     kernel-module-phy-tegra194-p2u-${KERNEL_VERSION} \
     kernel-module-tegra-xudc-${KERNEL_VERSION} \
-    ${@bb.utils.contains('DISTRO_FEATURES','zram','kernel-module-zram-${KERNEL_VERSION}','',d)} \
 "

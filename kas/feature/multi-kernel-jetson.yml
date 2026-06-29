@@ -1,7 +1,7 @@
 header:
   version: 16
 
-# Feature overlay: build the L4T 5.15 kernel (linux-jammy-nvidia-tegra) and its
+# Feature overlay: build the L4T 6.8 kernel (linux-noble-nvidia-tegra) and its
 # OOT-shim recipes alongside the default linux-yocto kernel for the active
 # Jetson MACHINE, so the published feed contains BOTH kernels' RPMs (kernel-
 # ${KERNEL_VERSION}, kernel-module-*-${KERNEL_VERSION},
@@ -18,7 +18,7 @@ header:
 #   - BBMULTICONFIG += "jetson-l4t" activates the alt-kernel multiconfig
 #     defined at meta-avocado-nvidia/conf/multiconfig/jetson-l4t.conf
 #     (per-mc TMPDIR; PREFERRED_PROVIDER_virtual/kernel forced to
-#     linux-jammy-nvidia-tegra).
+#     linux-noble-nvidia-tegra).
 #   - AVOCADO_MULTIKERNEL_MC_RECIPES lists both the kernel and the OOT shim
 #     so nvidia-kernel-oot's RPMs land in the unified feed too.
 #
@@ -35,4 +35,4 @@ header:
 local_conf_header:
   feature/multi-kernel-jetson: |
     BBMULTICONFIG += "jetson-l4t"
-    AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:linux-jammy-nvidia-tegra jetson-l4t:nvidia-kernel-oot"
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:linux-noble-nvidia-tegra jetson-l4t:nvidia-kernel-oot"

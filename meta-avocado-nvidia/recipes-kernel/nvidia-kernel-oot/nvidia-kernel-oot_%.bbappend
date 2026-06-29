@@ -1,5 +1,5 @@
-# nvidia-kernel-oot is built in both the default mc (linux-yocto 6.6) and the
-# jetson-l4t alt mc (linux-jammy-nvidia-tegra 5.15). Both builds share a single
+# nvidia-kernel-oot is built in both the default mc (linux-yocto 6.12) and the
+# jetson-l4t alt mc (linux-noble-nvidia-tegra 6.8). Both builds share a single
 # PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION
 # → different task signature → independent PR counter). The shared PR service
 # then has r0.0 and r0.1 for the same package name, causing do_packagedata_setscene
@@ -134,7 +134,7 @@ python oot_update_rprovides() {
 }
 
 # Emit supplementary OOT rootfs/initramfs module packagegroups. Symmetric
-# with the kernel-owned packagegroups emitted from linux-jammy-nvidia-tegra_%.bbappend:
+# with the kernel-owned packagegroups emitted from linux-noble-nvidia-tegra_%.bbappend:
 # each recipe contributes only what it builds, and the kernel-owned
 # packagegroup RRECOMMENDS its OOT sibling so they install together when OOT
 # is present. Empty RDEPENDS initially; populate as OOT modules become
@@ -152,9 +152,9 @@ SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled 
 # Tegra rootfs running the L4T kernel (TEGRA_OOT_BASE_DRIVERS — host1x,
 # nvgpu, tegra-bpmp, mc-utils, nvethernet, etc.). Pull it in via this
 # kernel-version-qualified packagegroup rather than via meta-tegra's
-# unconditional MACHINE_ESSENTIAL_EXTRA_RDEPENDS — the latter leaks 5.15
+# unconditional MACHINE_ESSENTIAL_EXTRA_RDEPENDS — the latter leaks 6.8
 # OOT modules into 6.6 builds because nvidia-kernel-oot is only built by
-# the alt mc (linux-jammy-nvidia-tegra 5.15). With this routing, the OOT
+# the alt mc (linux-noble-nvidia-tegra 6.8). With this routing, the OOT
 # modules only land in the rootfs when avocado-cli auto-appends this
 # packagegroup, which only happens when an OOT-using kernel is pinned.
 #

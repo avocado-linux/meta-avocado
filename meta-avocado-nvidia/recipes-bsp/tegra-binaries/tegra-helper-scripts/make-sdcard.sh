@@ -179,36 +179,36 @@ copy_to_device() {
     return $rc
 }
 
+# Container-aware unmount: uses mount command instead of /proc/mounts,
+# with force/lazy fallback for environments without full udev support.
 unmount_device() {
     local dev="$1"
     # Use mount command instead of /proc/mounts for container compatibility
     # Handle multiple mount points for the same device
     local all_mounts=$(mount | grep "^$dev " | awk '{print $3}')
-    local success=0
-    
+
     for mnt in $all_mounts; do
         echo "Unmounting $mnt..."
         if umount "${mnt}" > /dev/null 2>&1; then
-            success=1
+            :
         else
             # Try force unmount
             echo "Trying force unmount of $mnt..."
             if umount -f "${mnt}" > /dev/null 2>&1; then
-                success=1
+                :
             else
                 # Try lazy unmount as last resort
                 echo "Trying lazy unmount of $mnt..."
                 umount -l "${mnt}" > /dev/null 2>&1 || true
-                success=1
             fi
         fi
-        
+
         # Clean up mount point if it's one we created
         if echo "$mnt" | grep -q "^/tmp/usb_mount"; then
             rmdir "$mnt" 2>/dev/null || true
         fi
     done
-    
+
     return 0
 }
 
@@ -336,6 +336,132 @@ confirm() {
     done
 }
 
+# --- Container-aware sysfs helpers (no udev/udisks2 dependency) ---
+
+# Read USB serial number from sysfs instead of udevadm
+get_device_serial() {
+    local device="$1"
+    local sysfs_path="/sys/block/$(basename "$device")"
+    local result=""
+
+    # Try to get serial number from device/serial
+    if [ -r "$sysfs_path/device/serial" ]; then
+        result=$(cat "$sysfs_path/device/serial" 2>/dev/null | tr -d ' \t\n\r')
+    fi
+
+    echo "$result"
+}
+
+# Walk sysfs to find USB bus-devpath for a block device
+find_usb_instance_from_device() {
+    local dev="$1"
+    local dev_name=$(basename "$dev")
+    local sysfs_path="/sys/block/$dev_name"
+
+    if [ ! -L "$sysfs_path/device" ]; then
+        return 1
+    fi
+
+    # Walk up the device hierarchy to find the USB device
+    local current_path=$(readlink -f "$sysfs_path/device" 2>/dev/null)
+    while [ -n "$current_path" ] && [ "$current_path" != "/" ] && [ "$current_path" != "/sys" ]; do
+        # Check if this is a USB device (has idVendor and idProduct)
+        if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
+            # Extract bus and device number from path (e.g., /sys/devices/pci0000:00/0000:00:14.0/usb2/2-10)
+            local usb_path_info=$(basename "$current_path")
+            if echo "$usb_path_info" | grep -q '^[0-9]\+-[0-9]\+'; then
+                echo "$usb_path_info"
+                return 0
+            fi
+        fi
+        current_path=$(dirname "$current_path")
+    done
+
+    return 1
+}
+
+# Find current /dev/sd[a-z] device by matching USB serial number via sysfs
+find_device_by_serial() {
+    local target_serial="$1"
+
+    if [ -z "$target_serial" ]; then
+        return 1
+    fi
+
+    # Scan all /dev/sd[a-z] devices to find one matching the serial
+    for candidate in /dev/sd[a-z]; do
+        [ -b "$candidate" ] || continue
+        local cand_serial=$(get_device_serial "$candidate")
+        if [ "$cand_serial" = "$target_serial" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Disconnect USB device by toggling the sysfs authorized flag.
+# This replaces udisksctl power-off and works inside containers.
+# Parameters:
+#   $1: usb_instance - The USB bus path (e.g., "3-1")
+#   $2: serial_number (optional) - If provided, will rescan to find current USB instance
+disconnect_usb_device() {
+    local usb_instance="$1"
+    local device_serial="$2"
+
+    # If serial number is provided, rescan to find current device and USB instance
+    # This handles the case where device reconnected with a different USB path
+    if [ -n "$device_serial" ]; then
+        echo "Rescanning for device with serial $device_serial..." >&2
+        local current_dev=$(find_device_by_serial "$device_serial")
+        if [ -n "$current_dev" ]; then
+            local rescanned_instance=$(find_usb_instance_from_device "$current_dev")
+            if [ -n "$rescanned_instance" ]; then
+                echo "Device found at $current_dev with USB instance $rescanned_instance" >&2
+                usb_instance="$rescanned_instance"
+            else
+                echo "WARN: Could not find USB instance for rescanned device $current_dev" >&2
+            fi
+        else
+            echo "WARN: Could not find device with serial $device_serial for disconnect" >&2
+        fi
+    fi
+
+    if [ -z "$usb_instance" ]; then
+        echo "WARN: No USB instance available for disconnect" >&2
+        return 1
+    fi
+
+    local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
+
+    if [ ! -w "$authorized_path" ]; then
+        echo "WARN: Cannot write to $authorized_path (device may not exist or path changed)" >&2
+        return 1
+    fi
+
+    echo "Disconnecting USB device $usb_instance by toggling authorized..." >&2
+    # Set authorized to 0 (disconnect)
+    echo 0 > "$authorized_path" 2>/dev/null || {
+        echo "ERR: Failed to deauthorize USB device $usb_instance" >&2
+        return 1
+    }
+
+    # Wait a moment for the disconnect to be processed
+    sleep 1
+
+    # Set authorized back to 1 (reconnect)
+    echo 1 > "$authorized_path" 2>/dev/null || {
+        echo "WARN: Failed to reauthorize USB device $usb_instance (this may be expected)" >&2
+        return 0  # Still return success as disconnect was achieved
+    }
+
+    echo "USB device $usb_instance disconnected and reconnected" >&2
+    return 0
+}
+
+# --- End container-aware helpers ---
+
 ARGS=$(getopt -l "serial-number:,keep-connection,no-final-part,honor-start-locations" -o "yhs:b:" -n "$me" -- "$@")
 if [ $? -ne 0 ]; then
     usage
@@ -412,130 +538,7 @@ if [ -z "$cfgfile" ]; then
     exit 1
 fi
 
-# Helper function to get device serial from sysfs
-get_device_serial() {
-    local device="$1"
-    local sysfs_path="/sys/block/$(basename "$device")"
-    local result=""
-    
-    # Try to get serial number from device/serial
-    if [ -r "$sysfs_path/device/serial" ]; then
-        result=$(cat "$sysfs_path/device/serial" 2>/dev/null | tr -d ' \t\n\r')
-    fi
-    
-    echo "$result"
-}
-
-# Helper function to find USB device instance (bus-devpath) from a block device
-find_usb_instance_from_device() {
-    local dev="$1"
-    local dev_name=$(basename "$dev")
-    local sysfs_path="/sys/block/$dev_name"
-    
-    if [ ! -L "$sysfs_path/device" ]; then
-        return 1
-    fi
-    
-    # Walk up the device hierarchy to find the USB device
-    local current_path=$(readlink -f "$sysfs_path/device" 2>/dev/null)
-    while [ -n "$current_path" ] && [ "$current_path" != "/" ] && [ "$current_path" != "/sys" ]; do
-        # Check if this is a USB device (has idVendor and idProduct)
-        if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
-            # Extract bus and device number from path (e.g., /sys/devices/pci0000:00/0000:00:14.0/usb2/2-10)
-            local usb_path_info=$(basename "$current_path")
-            if echo "$usb_path_info" | grep -q '^[0-9]\+-[0-9]\+'; then
-                echo "$usb_path_info"
-                return 0
-            fi
-        fi
-        current_path=$(dirname "$current_path")
-    done
-    
-    return 1
-}
-
-# Helper function to find current device and USB instance by serial number
-# This is needed because devices can change their device node (/dev/sdX) and USB path
-# when they reboot or change modes
-find_device_by_serial() {
-    local target_serial="$1"
-    
-    if [ -z "$target_serial" ]; then
-        return 1
-    fi
-    
-    # Scan all /dev/sd[a-z] devices to find one matching the serial
-    for candidate in /dev/sd[a-z]; do
-        [ -b "$candidate" ] || continue
-        local cand_serial=$(get_device_serial "$candidate")
-        if [ "$cand_serial" = "$target_serial" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    
-    return 1
-}
-
-# Shared function to disconnect USB device by toggling authorized attribute
-# This is the reliable method for triggering Jetson devices to detect disconnect
-# Parameters:
-#   $1: usb_instance - The USB bus path (e.g., "3-1")
-#   $2: serial_number (optional) - If provided, will rescan to find current USB instance
-disconnect_usb_device() {
-    local usb_instance="$1"
-    local device_serial="$2"
-    
-    # If serial number is provided, rescan to find current device and USB instance
-    # This handles the case where device reconnected with a different USB path
-    if [ -n "$device_serial" ]; then
-        echo "Rescanning for device with serial $device_serial..." >&2
-        local current_dev=$(find_device_by_serial "$device_serial")
-        if [ -n "$current_dev" ]; then
-            local rescanned_instance=$(find_usb_instance_from_device "$current_dev")
-            if [ -n "$rescanned_instance" ]; then
-                echo "Device found at $current_dev with USB instance $rescanned_instance" >&2
-                usb_instance="$rescanned_instance"
-            else
-                echo "WARN: Could not find USB instance for rescanned device $current_dev" >&2
-            fi
-        else
-            echo "WARN: Could not find device with serial $device_serial for disconnect" >&2
-        fi
-    fi
-    
-    if [ -z "$usb_instance" ]; then
-        echo "WARN: No USB instance available for disconnect" >&2
-        return 1
-    fi
-    
-    local authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"
-    
-    if [ ! -w "$authorized_path" ]; then
-        echo "WARN: Cannot write to $authorized_path (device may not exist or path changed)" >&2
-        return 1
-    fi
-    
-    echo "Disconnecting USB device $usb_instance by toggling authorized..." >&2
-    # Set authorized to 0 (disconnect)
-    echo 0 > "$authorized_path" 2>/dev/null || {
-        echo "ERR: Failed to deauthorize USB device $usb_instance" >&2
-        return 1
-    }
-    
-    # Wait a moment for the disconnect to be processed
-    sleep 1
-    
-    # Set authorized back to 1 (reconnect)
-    echo 1 > "$authorized_path" 2>/dev/null || {
-        echo "WARN: Failed to reauthorize USB device $usb_instance (this may be expected)" >&2
-        return 0  # Still return success as disconnect was achieved
-    }
-    
-    echo "USB device $usb_instance disconnected and reconnected" >&2
-    return 0
-}
-
+# Container-aware USB device lookup: uses sysfs instead of udevadm
 if [ "$wait_for_usb_device" = "yes" ]; then
     echo -n "Looking for USB storage device from $serial_number..."
     output=
@@ -599,45 +602,30 @@ if [ ${#PARTS[@]} -eq 0 ]; then
 fi
 
 echo  "Creating partitions"
+if ! command -v sgdisk >/dev/null 2>&1; then
+    echo "ERR: 'sgdisk' command not found. Please install the 'gdisk' package." >&2
+    exit 1
+fi
 [ -b "$output" ] || dd if=/dev/zero of="$output" bs=512 count=0 seek=$outsize status=none
 
-# Ensure device is not mounted before partitioning
+# Pre-unmount before partitioning (container-aware: avoids stale mounts)
 if [ -b "$output" ]; then
     echo "Ensuring device $output is unmounted..."
     unmount_device "$output" || true
-    
-    # Wait a moment for the device to settle
     sleep 2
-    
-    # Check if sgdisk is available
-    if ! command -v sgdisk >/dev/null 2>&1; then
-        echo "ERR: sgdisk command not found - install gdisk package" >&2
-        echo "Available partitioning tools:" >&2
-        command -v parted >/dev/null 2>&1 && echo "  - parted (available)" >&2 || echo "  - parted (not available)" >&2
-        command -v fdisk >/dev/null 2>&1 && echo "  - fdisk (available)" >&2 || echo "  - fdisk (not available)" >&2
-        command -v sfdisk >/dev/null 2>&1 && echo "  - sfdisk (available)" >&2 || echo "  - sfdisk (not available)" >&2
-        exit 1
-    fi
 fi
 
-# Try GPT initialization with better error reporting
+# Robust GPT initialization with --zap-all retry
 echo "Initializing GPT on $output..."
-if ! sgdisk "$output" --clear --mbrtogpt 2>/tmp/sgdisk_error.log; then
+if ! sgdisk "$output" --clear --mbrtogpt >/dev/null 2>&1; then
     echo "Initial GPT setup failed, trying --zap-all first..."
-    cat /tmp/sgdisk_error.log >&2
-    
-    if ! sgdisk "$output" --zap-all 2>/tmp/sgdisk_error2.log; then
+    if ! sgdisk "$output" --zap-all >/dev/null 2>&1; then
 	echo "ERR: could not initialize GPT on $output" >&2
-	echo "sgdisk --zap-all output:" >&2
-	cat /tmp/sgdisk_error2.log >&2
 	exit 1
     fi
-    
     echo "Retrying GPT initialization after zap-all..."
-    if ! sgdisk "$output" --clear --mbrtogpt 2>/tmp/sgdisk_error3.log; then
+    if ! sgdisk "$output" --clear --mbrtogpt >/dev/null 2>&1; then
 	echo "ERR: could not initialize GPT on $output after --zap-all" >&2
-	echo "sgdisk --clear --mbrtogpt output:" >&2
-	cat /tmp/sgdisk_error3.log >&2
 	exit 1
     fi
 fi
@@ -672,40 +660,39 @@ else
     fi
 fi
 echo "[OK: $output]"
+
+# Container-aware USB disconnect: uses sysfs authorized-toggle instead of udisksctl power-off
 if [ "$wait_for_usb_device" = "yes" -a "$keep_connection" != "yes" ]; then
     echo "Disconnecting $output"
-    # Use sync and sysfs-based device management instead of udisksctl
     sync
-    
-    # Try to flush device buffers using container-friendly methods
-    local dev_name=$(basename "$output")
+
+    # Flush device buffers using container-friendly methods
     if command -v blockdev >/dev/null 2>&1; then
         blockdev --flushbufs "$output" 2>/dev/null || true
     fi
-    
+
     # Find USB device instance and disconnect using authorized toggle
     # Pass serial_number to allow rescanning if device path changed
     if [ -b "$output" ]; then
         usb_instance=$(find_usb_instance_from_device "$output")
         disconnect_usb_device "$usb_instance" "$serial_number"
     fi
-    
+
     echo "Device buffers flushed"
 fi
 
 # Final disconnect of USB device at end of script
 # Rescan using serial number to handle case where device reconnected with different path
-if [ -b "$output" ] && [ "$wait_for_usb_device" = "yes" ]; then
-    # Try to rescan by serial first
-    local current_output="$output"
+if [ -b "$output" ] && [ "$wait_for_usb_device" = "yes" ] && [ "$keep_connection" != "yes" ]; then
+    current_output="$output"
     if [ -n "$serial_number" ]; then
-        local rescanned_dev=$(find_device_by_serial "$serial_number")
+        rescanned_dev=$(find_device_by_serial "$serial_number")
         if [ -n "$rescanned_dev" ]; then
             current_output="$rescanned_dev"
             echo "Final disconnect: device rescanned to $current_output" >&2
         fi
     fi
-    
+
     usb_instance=$(find_usb_instance_from_device "$current_output")
     if [ -n "$usb_instance" ]; then
         authorized_path="/sys/bus/usb/devices/$usb_instance/authorized"

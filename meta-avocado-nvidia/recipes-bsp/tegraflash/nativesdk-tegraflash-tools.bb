@@ -6,15 +6,14 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:${THISDIR}/../tegra-binaries/tegra-
 
 inherit nativesdk
 
-# Flash tools and helper scripts
+# Flash tools and helper scripts (custom overrides of upstream scripts)
+# Scripts not listed here (find-jetson-usb, nvflashxmlparse, nvbct-config) come
+# from the native sysroot via tegra-helper-scripts-native.
 SRC_URI = "\
     file://initrd-flash.sh \
-    file://find-jetson-usb.sh \
     file://make-sdcard.sh \
-    file://nvflashxmlparse.py \
-    file://rewrite-tegraflash-args.py \
-    file://tegra-flash-helper.sh \
-    file://tegra-signimage-helper.sh \
+    file://tegra234-flash-helper.sh \
+    file://tegra264-flash-helper.sh \
 "
 
 S = "${UNPACKDIR}"
@@ -41,14 +40,11 @@ STAGING_DIR_NATIVE_BINDIR = "${STAGING_DIR_NATIVE}${bindir_native}"
 do_install() {
     install -d ${D}${TEGRAFLASH_BINDIR}
     
-    # Install helper scripts from avocado customizations
+    # Install avocado-customized helper scripts
     install -m 0755 ${UNPACKDIR}/initrd-flash.sh ${D}${TEGRAFLASH_BINDIR}/initrd-flash
-    install -m 0755 ${UNPACKDIR}/find-jetson-usb.sh ${D}${TEGRAFLASH_BINDIR}/find-jetson-usb
     install -m 0755 ${UNPACKDIR}/make-sdcard.sh ${D}${TEGRAFLASH_BINDIR}/make-sdcard
-    install -m 0755 ${UNPACKDIR}/nvflashxmlparse.py ${D}${TEGRAFLASH_BINDIR}/nvflashxmlparse
-    install -m 0755 ${UNPACKDIR}/rewrite-tegraflash-args.py ${D}${TEGRAFLASH_BINDIR}/rewrite-tegraflash-args
-    install -m 0755 ${UNPACKDIR}/tegra-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra-flash-helper.sh
-    install -m 0755 ${UNPACKDIR}/tegra-signimage-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra-signimage-helper.sh
+    install -m 0755 ${UNPACKDIR}/tegra234-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra234-flash-helper.sh
+    install -m 0755 ${UNPACKDIR}/tegra264-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra264-flash-helper.sh
     
     # Determine flash tools source directory from native staging
     # Use STAGING_DIR_NATIVE since nativesdk can't access native tools via STAGING_BINDIR_NATIVE
@@ -58,8 +54,7 @@ do_install() {
     bbnote "Looking for tegraflash tools at $FLASH_SRC"
     
     if [ ! -d "$FLASH_SRC" ]; then
-        # Fallback to older path
-        FLASH_SRC="${STAGING_DIR_NATIVE}${bindir_native}/tegra186-flash"
+        bbfatal "No tegraflash tools found at $FLASH_SRC"
     fi
     
     if [ -d "$FLASH_SRC" ]; then
@@ -88,8 +83,8 @@ do_install() {
             fi
         done
         
-        # Copy flash helper scripts from native sysroot
-        for helper in tegra186-flash-helper.sh tegra194-flash-helper.sh tegra234-flash-helper.sh flash-helper.sh; do
+        # Copy flash helper scripts from native sysroot (upstream versions)
+        for helper in tegra234-flash-helper.sh tegra264-flash-helper.sh flash-helper.sh; do
             if [ -f "$FLASH_SRC/$helper" ]; then
                 install -m 0755 "$FLASH_SRC/$helper" ${D}${TEGRAFLASH_BINDIR}/
             fi

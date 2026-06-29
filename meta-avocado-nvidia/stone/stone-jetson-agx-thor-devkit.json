@@ -1,0 +1,83 @@
+{
+  "runtime": {
+    "platform": "avocado-jetson-agx-thor-devkit",
+    "architecture": "arm64",
+    "provision_default": "tegraflash",
+    "update_strategy": "tegra-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "command",
+      "command": ["nvbootctrl", "get-current-slot"]
+    },
+    "os_artifacts": {
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] }
+    },
+    "activate": [
+      {
+        "type": "command",
+        "command": ["nvbootctrl", "set-active-boot-slot", "{inactive_slot}"]
+      }
+    ],
+    "rollback": [
+      {
+        "type": "command",
+        "command": ["nvbootctrl", "set-active-boot-slot", "{previous_slot}"]
+      }
+    ]
+  },
+  "provision": {
+    "envs": {
+      "flash_options": {
+        "ERASE_NVME": "${ERASE_NVME}",
+        "ERASE_EMMC": "${ERASE_EMMC}",
+        "ERASE_ONLY": "${ERASE_ONLY}",
+        "BOARDCTL_TARGET": "${BOARDCTL_TARGET}",
+        "BOARDCTL_SERIAL": "${BOARDCTL_SERIAL}"
+      }
+    },
+    "profiles": {
+      "tegraflash": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-nvme": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-mmc": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-emmc": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "tegraflash-sd": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
+      "noop": {
+        "script": "stone-provision-noop.sh"
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-image-jetson-agx-thor-devkit",
+      "devpath": "/dev/nvme0n1",
+      "block_size": 512,
+      "partitions": [],
+      "images": {
+        "rootfs": "avocado-image-rootfs-jetson-agx-thor-devkit.erofs-lz4",
+        "var": "avocado-image-var-jetson-agx-thor-devkit.btrfs",
+        "initramfs": "avocado-image-initramfs-jetson-agx-thor-devkit.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-thor-devkit.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-thor-devkit.esp",
+        "tegraflash_tos": "tos-avocado-jetson-agx-thor-devkit.img",
+        "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_tools": "tegraflash-tools"
+      }
+    }
+  }
+}

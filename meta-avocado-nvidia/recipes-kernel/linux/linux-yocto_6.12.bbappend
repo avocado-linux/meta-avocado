@@ -1,17 +1,15 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.12:"
 
 SRC_URI += " \
   file://avocado-core.cfg \
   file://avocado-extra.cfg \
-  file://0001-mailbox-tegra-hsp-backport-L4T-shared-interrupt-mapping.patch \
-  file://0002-mailbox-tegra-hsp-enable-per-mailbox-empty-interrupt.patch \
 "
 
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 
-# Tegra-critical modules pulled into rootfs/initramfs via the auto-appended
+# Tegra-critical modules pulled into the initramfs via the auto-appended
 # per-kernel packagegroup. nvme drives root-fs storage on Jetson; the
 # pcie-tegra194 / phy-tegra194-p2u pair brings the PCIe controller up so the
 # nvme controller is reachable; tegra-xudc lets the USB device-controller
