@@ -27,6 +27,20 @@ AVOCADO_VAR_PART_DEV = "none"
 DATAFILE = "avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
 IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_NAME}.btrfs"
 
+# Wrynose oe-core (commit 76316c765d) added a fatal check on every entry in
+# the post-first dot of IMAGE_FSTYPES (image_types.bbclass:imagetypes_getdepends).
+# meta-tegra's IMAGE_FSTYPES += "tegraflash.tar.zst" sets `tegraflash.tar` as
+# the multi-dot basetype (see IMAGE_CMD:tegraflash.tar in image_types_tegra.bbclass),
+# but split_types in image_types.bbclass naively splits on every dot and
+# treats `tar` as a conversion — triggering "No CONVERSION_CMD defined for
+# subtype 'tar'" on every image parse. The actual build flow uses image.bbclass's
+# _image_base_type which correctly walks CONVERSIONTYPES, so `tar` is never
+# in the conversion chain at run time. Provide a CONVERSION_CMD:tar shim so
+# the parse check passes; the body would only be invoked if `tar` were also
+# added to CONVERSIONTYPES (which we deliberately don't do — that would change
+# _image_base_type's basetype resolution and break tegraflash.tar).
+CONVERSION_CMD:tar = "tar --sort=name --format=posix --numeric-owner -cf ${IMAGE_NAME}.${type}.tar -C ${WORKDIR} ${IMAGE_NAME}.${type}"
+
 # Extras Repo Configurations
 PACKAGECONFIG:remove:pn-wpewebkit = "gbm"
 DEPENDS:append:pn-wpewebkit = " libdrm"

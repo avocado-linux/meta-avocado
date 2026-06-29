@@ -20,5 +20,9 @@
 # Prior art: OE4T/meta-tegra#1281 (closed without a recipe-level fix).
 #
 # Verified on L4T R36.5 (JP6.2) Orin NX.
-
-RDEPENDS:${PN} += "tegra-libraries-dla-compiler"
+#
+# Scoped to tegra234 — tegra-libraries-dla-compiler itself declares
+# COMPATIBLE_MACHINE = "(tegra234)" (the DLA hardware + companion compiler
+# blob only ship for Orin in the L4T BSP). On tegra264 (Thor) the package
+# doesn't exist, so an unscoped append makes the rootfs unbuildable.
+RDEPENDS:${PN}:tegra234 += "tegra-libraries-dla-compiler"
