@@ -1,28 +1,22 @@
 # SPDX-License-Identifier: MIT
 #
-# tegra-libraries-cuda ships libnvcudla.so but its DT_NEEDED does not list
-# libnvdla_compiler.so — cuDLA loads the compiler via dlopen at runtime, and
-# the same applies to the TensorRT execution provider. Yocto's automatic
-# shlibdeps scanner therefore misses the dependency and tegra-libraries-dla-compiler
-# never lands in the rootfs.
+# History: on L4T R36.5 (JP6.2) we added
+#   RDEPENDS:${PN}:tegra234 += "tegra-libraries-dla-compiler"
+# because tegra-libraries-cuda ships libnvcudla.so, which dlopen()s
+# libnvdla_compiler.so at runtime (cuDLA / the TensorRT execution provider).
+# That .so isn't in DT_NEEDED, so shlibdeps never pulls the compiler package
+# in automatically, and GPU containers using cuDLA failed at provider init
+# with "libnvdla_compiler.so: cannot open shared object file" (the
+# nvidia-container-toolkit drivers.csv references it, but the host file was
+# absent so the mount was a silent no-op).
 #
-# Symptom: GPU containers using cuDLA / TRT EP fail at provider init with
-#   libnvdla_compiler.so: cannot open shared object file
-# even though the nvidia-container-toolkit CSV at
-#   /etc/nvidia-container-runtime/host-files-for-container.d/drivers.csv
-# references /usr/lib/libnvdla_compiler.so. With the file absent the mount
-# is silently a no-op.
+# L4T R39.2.0 (JP7.x): there is NO tegra-libraries-dla-compiler package in
+# meta-tegra/meta-tegra-community for ANY machine — the recipe was dropped and
+# libnvdla_compiler.so now survives only as a drivers.csv passthrough entry.
+# An RDEPENDS on it is unsatisfiable and makes every tegra234 rootfs
+# unbuildable ("Nothing RPROVIDES 'tegra-libraries-dla-compiler'"), so the dep
+# is intentionally NOT declared here.
 #
-# The runtime sibling (libnvdla_runtime.so) IS in DT_NEEDED and gets picked
-# up by shlibdeps, which is why tegra-libraries-cuda's generated requires
-# include libnvdla_runtime.so()(64bit) but not the compiler.
-#
-# Prior art: OE4T/meta-tegra#1281 (closed without a recipe-level fix).
-#
-# Verified on L4T R36.5 (JP6.2) Orin NX.
-#
-# Scoped to tegra234 — tegra-libraries-dla-compiler itself declares
-# COMPATIBLE_MACHINE = "(tegra234)" (the DLA hardware + companion compiler
-# blob only ship for Orin in the L4T BSP). On tegra264 (Thor) the package
-# doesn't exist, so an unscoped append makes the rootfs unbuildable.
-RDEPENDS:${PN}:tegra234 += "tegra-libraries-dla-compiler"
+# If DLA compilation is needed on JP7 and a future meta-tegra bump reintroduces
+# the package (or ships libnvdla_compiler.so elsewhere), re-add the dependency
+# here, scoped to the machines that actually have the DLA compiler blob.
