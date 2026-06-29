@@ -23,8 +23,12 @@ SCRIPT_DIR="$(dirname "$0")"
 KEY_SCRIPT="${SCRIPT_DIR}/var-key.sh"
 
 # Derive the key (never hardcoded; sourced from var-key.sh).
-# The key is written to a temp file to avoid exposure in /proc.
-KEY_FILE=$(mktemp)
+# The key is written to a temp file to avoid exposure in /proc. Use /run, not
+# /tmp: systemd mounts a fresh tmpfs over /tmp partway through early boot, which
+# would shadow a key file created here before that mount and make cryptsetup's
+# --key-file fail with "Failed to open key file". /run is a stable early tmpfs
+# (RAM-only, never swapped or remounted) - the right place for transient secrets.
+KEY_FILE=$(mktemp -p /run)
 trap 'rm -f "$KEY_FILE"' EXIT
 "$KEY_SCRIPT" > "$KEY_FILE"
 
