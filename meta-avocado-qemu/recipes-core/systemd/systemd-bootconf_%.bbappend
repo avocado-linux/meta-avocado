@@ -15,8 +15,11 @@ do_install:qemux86-64() {
 inherit deploy
 
 do_deploy() {
+    # Names must match the stone manifest's boot.img file list:
+    #   avocado.conf  -> loader/entries/avocado.conf
+    #   loader.conf   -> loader/loader.conf
     if [ -f ${S}/avocado-boot.conf ]; then
-        install -D ${S}/avocado-boot.conf ${DEPLOYDIR}/boot.conf
+        install -D ${S}/avocado-boot.conf ${DEPLOYDIR}/avocado.conf
     fi
 
     if [ -f ${S}/avocado-loader.conf ]; then
