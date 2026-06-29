@@ -6,7 +6,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # present in vendor code we can't reasonably maintain locally.
 EXTRA_PATCHES += "file://0014-Makefile-extend-KCFLAGS-for-Realtek-vendor-driver-wa.patch"
 
-# nvidia-kernel-oot is built in both the default mc (linux-yocto 6.12) and the
+# nvidia-kernel-oot is built in both the default mc (linux-yocto 6.18) and the
 # jetson-l4t alt mc (linux-noble-nvidia-tegra 6.8). Both builds share a single
 # PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION
 # → different task signature → independent PR counter). The shared PR service

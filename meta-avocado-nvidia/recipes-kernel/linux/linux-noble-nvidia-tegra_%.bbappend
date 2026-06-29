@@ -86,7 +86,7 @@ RDEPENDS:packagegroup-avocado-initramfs-modules = " \
 # unqualified RPROVIDES on the OOT packagegroup makes this resolve cleanly.
 #
 # Scoped to this bbappend (not the shared
-# avocado-kernel-modules-packagegroup.inc) because linux-yocto 6.12 has no
+# avocado-kernel-modules-packagegroup.inc) because linux-yocto 6.18 has no
 # nvidia-kernel-oot build and therefore no OOT sibling to depend on.
 RDEPENDS:packagegroup-avocado-initramfs-modules:append = " packagegroup-avocado-initramfs-modules-oot"
 RDEPENDS:packagegroup-avocado-rootfs-modules:append = " packagegroup-avocado-rootfs-modules-oot"

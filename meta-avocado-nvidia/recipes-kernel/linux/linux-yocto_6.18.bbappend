@@ -1,4 +1,4 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.12:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.18:"
 
 SRC_URI += " \
   file://avocado-core.cfg \
@@ -30,11 +30,11 @@ RDEPENDS:packagegroup-avocado-initramfs-modules:append = " \
 # rolling feed. avocado-cli auto-appends this packagegroup whenever the
 # rootfs is being installed and this kernel is the lockfile-pinned one.
 #
-# Same list as linux-jammy-nvidia-tegra_%.bbappend — for modules that are
-# Tegra-vendor-only on the linux-yocto 6.6 side, the OOT layer
-# (nvidia-kernel-oot) provides the package; for in-tree modules, linux-yocto
-# 6.6 provides them directly. Either way, dnf resolves the suffixed name to
-# whichever recipe built it.
+# Same list as linux-noble-nvidia-tegra_%.bbappend — for modules that are
+# Tegra-vendor-only on the linux-yocto side, the OOT layer (nvidia-kernel-oot)
+# provides the package; for in-tree modules, linux-yocto provides them
+# directly. Either way, dnf resolves the suffixed name to whichever recipe
+# built it.
 RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
     kernel-module-ina3221-${KERNEL_VERSION} \
     kernel-module-lm90-${KERNEL_VERSION} \
