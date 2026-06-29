@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-tegra
     path: meta-tegra
     branch: wrynose
-    commit: 4084f29d1bee7ff090895b58a27b70decaf14fcf
+    commit: 6a0294838e8e0180a40cd3d48d7d0fce1deb3ef2
     layers:
       .:
 
@@ -14,7 +14,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-tegra-community
     path: meta-tegra-community
     branch: wrynose
-    commit: d86d1dc598e544e2b840c784f9f3d9718cb63acc
+    commit: 5c2a026204d47398f4a12d750f6ebeef4ac01802
     layers:
       .:
 
