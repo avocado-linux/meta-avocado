@@ -5,20 +5,18 @@ SRC_URI:append = "\
   file://vm \
 "
 
-SHARED_RDEPENDS = "\
-  nativesdk-fwup \
-  nativesdk-mkfat \
-"
-
 DEPENDS:append = " nativesdk-qemu"
-RDEPENDS:${PN}:append:qemuarm64 = " \
-  nativesdk-qemu-system-aarch64 \
-  ${SHARED_RDEPENDS} \
-"
-RDEPENDS:${PN}:append:qemux86-64 = " \
-  nativesdk-qemu-system-x86-64 \
-  ${SHARED_RDEPENDS} \
-"
+
+# The qemu-system emulator is per-arch (genuinely machine-specific).
+RDEPENDS:${PN}:append:qemuarm64 = " nativesdk-qemu-system-aarch64"
+RDEPENDS:${PN}:append:qemux86-64 = " nativesdk-qemu-system-x86-64"
+
+# Disk-assembly tools are boot-method-specific: a U-Boot target assembles with
+# fwup; a UEFI target uses the manifest-driven native GPT builder (sgdisk +
+# mkfs.fat + mtools), mirroring the Intel target's stone-provision-img.sh. Gate
+# on AVOCADO_BOOTLOADER, not the machine name.
+RDEPENDS:${PN} += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uboot', 'nativesdk-fwup nativesdk-mkfat', '', d)}"
+RDEPENDS:${PN} += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uefi', 'nativesdk-gptfdisk nativesdk-mtools nativesdk-dosfstools', '', d)}"
 
 do_install:append() {
     install -m 0755 ${UNPACKDIR}/vm ${D}${SDKPATHNATIVE}${bindir}
