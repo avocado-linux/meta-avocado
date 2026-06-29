@@ -7,6 +7,7 @@ SRC_URI_SHARED = " \
 SRC_URI:append:avocado-qemux86-64 = " \
   ${SRC_URI_SHARED} \
   file://tpm.cfg \
+  file://x86-efi.cfg \
 "
 
 SRC_URI:append:avocado-qemuarm64 = " \
