@@ -164,9 +164,18 @@ OPENGL_PACKAGES = " \
   xkeyboard-config \
 "
 
-BROWSER_PACKAGES = " \
-  chromium-ozone-wayland \
-"
+# TEMP (wrynose): chromium-ozone-wayland is disabled on aarch64 pending the
+# libclang_rt triple mismatch. Chromium's build/config/clang/BUILD.gn hardcodes
+# the aarch64-unknown-linux-gnu triple for libclang_rt.builtins.a, and
+# meta-chromium only bridges OE's default -oe- vendor to -unknown- via sed; our
+# TARGET_VENDOR=-avocado never matches, so the lib stays under
+# aarch64-avocado-linux-gnu/ and chromium's C++ link can't find it. Restore the
+# chromium entry once that's fixed upstream (teach meta-chromium's sed about
+# non--unknown- vendors) or via a working bbappend.
+BROWSER_PACKAGES = ""
+# BROWSER_PACKAGES = " \
+#   chromium-ozone-wayland \
+# "
 
 CONATINER_PACKAGES = " \
   docker \
