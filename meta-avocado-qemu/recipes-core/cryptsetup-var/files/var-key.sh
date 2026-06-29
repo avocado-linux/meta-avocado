@@ -8,7 +8,9 @@
 # flow in the feed-validation harness. Phase-2 re-enrolls to the TPM2-sealed
 # path (PCR 7) on first boot via cryptsetup-var.sh (swtpm on qemu).
 #
-# The cryptsetup-var.sh caller depends only on stdout - 64 raw bytes.
+# The cryptsetup-var.sh caller depends only on stdout - 64 raw bytes. Only the
+# openssl CLI is used (no xxd): the initramfs already carries libcrypto via
+# systemd, so cryptsetup-var RDEPENDS just adds openssl-bin.
 set -eu
 
 if [ -r /sys/firmware/devicetree/base/serial-number ]; then
@@ -18,13 +20,16 @@ else
     [ -n "$HW_ID" ] || HW_ID="qemu-no-serial"
 fi
 
-SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 -binary | head -c 16 | xxd -p -c 256)
+# Deterministic 16-byte salt = first 32 hex chars of SHA-256(HW_ID).
+SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-32)
 
-openssl kdf \
+# Emit exactly 64 raw key bytes via Argon2id. -binary writes raw bytes to
+# stdout, so no hex<->binary conversion (xxd) is needed.
+openssl kdf -binary \
     -keylen 64 \
     -kdfopt pass:"$HW_ID" \
     -kdfopt salt:"$SALT" \
     -kdfopt iter:3 \
     -kdfopt memcost:65536 \
     -kdfopt lanes:1 \
-    ARGON2ID 2>/dev/null | xxd -r -p
+    ARGON2ID
