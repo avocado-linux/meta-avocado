@@ -82,12 +82,29 @@ else
     echo "cryptsetup-var: creating BTRFS filesystem inside LUKS container"
     mkfs.btrfs -f "$MAPPER"
 
-    # Phase-2: Enroll TPM2 keyslot sealed to PCR 7 (Secure Boot state).
-    # Slot 0 (Argon2id) is retained as the recovery path until task 3.2
-    # confirms this slot unseals successfully on the next boot.
+    # Phase-2: Enroll a TPM2 keyslot sealed to PCR 7 (Secure Boot state).
+    # The Argon2id keyslot (slot 0) is retained as the recovery path.
     if [ -e /dev/tpm0 ] && command -v systemd-cryptenroll >/dev/null 2>&1; then
         echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
-        systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"
+        # Unlock the existing Argon2id keyslot non-interactively with its key
+        # file. Without --unlock-key-file systemd-cryptenroll falls back to an
+        # interactive "current passphrase" prompt and blocks forever in the
+        # initramfs (no controlling tty), so the enroll never reaches the TPM.
+        # The key is raw binary, so $PASSWORD (which cannot carry NULs) is no
+        # substitute - a key file is required.
+        #
+        # The enroll is best-effort: it needs firmware that performs measured
+        # boot (the bootloader's LoaderTpm2ActivePcrBanks must report an active
+        # PCR bank, which systemd-cryptenroll requires before binding to PCRs).
+        # Where the firmware does not measure, keep the Argon2id keyslot rather
+        # than failing the unit and dropping /var - the volume is still
+        # encrypted, just not yet TPM-bound.
+        if systemd-cryptenroll --unlock-key-file="$KEY_FILE" \
+                --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"; then
+            echo "cryptsetup-var: TPM2 PCR-7 keyslot enrolled"
+        else
+            echo "cryptsetup-var: TPM2 PCR-7 enroll failed - retaining Argon2id keyslot (firmware measured boot may be unavailable)" >&2
+        fi
     fi
 fi
 
