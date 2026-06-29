@@ -1,34 +1,35 @@
 inherit stone
 
-do_compile[depends] += "u-boot:do_deploy"
+DEPENDS += " jq-native"
 
-# qemuarm64 boots via TF-A secure boot: trusted-firmware-a's do_deploy assembles
-# flash.bin (bl1 + fip) into DEPLOY_DIR_IMAGE, which the stone manifest references
-# as the 'bios' image. Without this edge nothing forces TF-A to compile/deploy
-# before do_stone_validate reads DEPLOY_DIR_IMAGE, so on a clean build validate
-# races ahead (TF-A only fetched/unpacked) and fails with "flash.bin not found".
-# Machine-gated inline (varflags can't take a :append:<machine> override); x86
-# has no TF-A so the dep stays empty there.
-do_compile[depends] += "${@bb.utils.contains('MACHINE', 'avocado-qemuarm64', 'trusted-firmware-a:do_deploy', '', d)}"
+# --- U-Boot targets (AVOCADO_BOOTLOADER=uboot): fwup assembly + TF-A ---------
+# A U-Boot target's stone manifest references flash.bin (TF-A bl1 + fip) as its
+# 'bios' image and assembles the disk with fwup from rootdisk.conf. Force U-Boot
+# and TF-A to deploy before do_stone_validate reads DEPLOY_DIR_IMAGE, otherwise a
+# clean build races ahead (artifacts only fetched/unpacked) and validate fails
+# with "flash.bin not found". Gated on AVOCADO_BOOTLOADER, a machine property, so
+# any U-Boot target inherits it (default uboot; x86 sets uefi).
+do_compile[depends] += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uboot', 'u-boot:do_deploy trusted-firmware-a:do_deploy', '', d)}"
+DEPENDS += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uboot', 'mkfat-native fwup-native', '', d)}"
 
-DEPENDS += " jq-native mkfat-native fwup-native"
-
-SRC_URI += " \
-    file://rootdisk.conf \
-"
-
-# The base avocado-stone.bb only auto-stages scripts for stone-img/sd/usb
-# overrides, so wire stone-direct here. The manifest always declares the
-# 'direct' profile, so validation requires its script in DEPLOY_DIR_IMAGE.
-SRC_URI:append:stone-direct = " \
-    file://stone-provision-direct.sh \
-"
-
+SRC_URI += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uboot', 'file://rootdisk.conf', '', d)}"
 do_deploy:append() {
-  install -d ${DEPLOYDIR}
-  install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  if [ "${AVOCADO_BOOTLOADER}" = "uboot" ]; then
+    install -d ${DEPLOYDIR}
+    install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  fi
 }
 
+# --- UEFI targets (AVOCADO_BOOTLOADER=uefi): systemd-boot, native GPT builder -
+# Mirrors the avocado-x86-64 (Intel) target: the ESP carries systemd-boot plus
+# its loader config, so both must be deployed before stone bundles the boot
+# partition. (ovmf is the QEMU UEFI firmware; real UEFI hardware pulls its own.)
+do_compile[depends] += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uefi', 'systemd-boot:do_deploy systemd-bootconf:do_deploy ovmf:do_deploy', '', d)}"
+
+# --- both qemu machines declare the 'direct' profile ------------------------
+# The base avocado-stone.bb only auto-stages scripts for stone-img/sd/usb
+# overrides, so wire stone-direct here.
+SRC_URI:append:stone-direct = " file://stone-provision-direct.sh"
 do_deploy:append:stone-direct() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${UNPACKDIR}/stone-provision-direct.sh ${DEPLOYDIR}/stone-provision-direct.sh
