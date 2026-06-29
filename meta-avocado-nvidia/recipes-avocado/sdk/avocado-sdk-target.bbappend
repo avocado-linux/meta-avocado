@@ -6,6 +6,7 @@ RDEPENDS:${PN}:append = " \
   nativesdk-util-linux-getopt \
   nativesdk-util-linux-hexdump \
   nativesdk-util-linux-mount \
+  nativesdk-util-linux-losetup \
   nativesdk-gptfdisk \
   nativesdk-qemu-system-x86-64 \
   nativesdk-python3-pyyaml \

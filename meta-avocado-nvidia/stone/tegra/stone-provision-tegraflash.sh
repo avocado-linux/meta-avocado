@@ -13,6 +13,36 @@ set -o pipefail
 # AVOCADO_STONE_DATA_DIR - stone data directory
 # AVOCADO_SDK_PREFIX - SDK installation prefix (for nativesdk tools)
 
+# NVIDIA's tegraflash_impl_t264.py uses `break` inside `finally` blocks
+# (see lines ~2174 / ~2193). Python 3.14 (PEP 765) emits SyntaxWarning for
+# this and Python 3.16 will reject it as a SyntaxError. The warnings are
+# noise in our provisioning output today; remove this when NVIDIA fixes
+# upstream or we localise a patch in tegraflash-tools-deploy.
+export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore::SyntaxWarning}"
+
+# Pre-warm adb. NVIDIA's flash_bsp_images.py runs `adb start-server` once and
+# treats failure as fatal. On a fresh SDK container, the first start-server
+# call triggers ~/.android/adbkey RSA keygen which can race the daemon ACK
+# timeout (so first call returns "failed to start daemon" even though it
+# eventually succeeds). Run start-server here twice to absorb the first-run
+# init race so the actual flashing call later sees an already-running daemon.
+# Wrapped in a subshell with relaxed flags + outer `|| true` so this
+# best-effort warmup cannot abort the script under set -e/-u/pipefail.
+(
+    set +eu
+    _adb_bin="$(command -v adb 2>/dev/null)" || true
+    # tegraflash-tools/ is the BSP source dir (always present at script start);
+    # _build/tegraflash/ doesn't exist yet here (it's populated later by cp -a).
+    if [ -z "${_adb_bin:-}" ] && [ -n "${AVOCADO_STONE_DATA_DIR:-}" ]; then
+        _adb_bin="$(find "$AVOCADO_STONE_DATA_DIR/tegraflash-tools" -name adb -type f 2>/dev/null | head -1)" || true
+    fi
+    if [ -n "${_adb_bin:-}" ]; then
+        mkdir -p "${HOME:-/root}/.android" 2>/dev/null
+        "$_adb_bin" start-server >/dev/null 2>&1
+        "$_adb_bin" start-server >/dev/null 2>&1
+    fi
+) || true
+
 echo "=== Tegraflash Provisioning Script ==="
 echo "Manifest: $AVOCADO_STONE_MANIFEST"
 echo "Data dir: $AVOCADO_STONE_DATA_DIR"
@@ -252,9 +282,16 @@ fi
 
 if [ -n "$tegraflash_tos_file" ]; then
     copy_image "$tegraflash_tos_file" "$(basename "$tegraflash_tos_file")"
-    # Also copy to tos-optee_t234.img as expected by flash.xml TOSFILE placeholder (for tegra234)
-    # TODO: Make this SoC-agnostic using TOSIMGFILENAME from .env.initrd-flash
-    copy_image "$tegraflash_tos_file" "tos-optee_t234.img"
+    # Resolve the SoC-specific TOS image filename from .env.initrd-flash
+    # (TOSIMGFILENAME = tos-optee_t234.img | tos-optee_t264.img | tos-optee.img).
+    # Fall back to the tegra234 name for older BSPs that don't emit the var.
+    tos_dst="tos-optee_t234.img"
+    env_file="$build_dir/.env.initrd-flash"
+    if [ -f "$env_file" ]; then
+        env_tos=$(grep -E '^TOSIMGFILENAME=' "$env_file" | tail -1 | cut -d= -f2- | tr -d '"')
+        [ -n "$env_tos" ] && tos_dst="$env_tos"
+    fi
+    copy_image "$tegraflash_tos_file" "$tos_dst"
 fi
 
 # Copy DTB files (if specified explicitly, otherwise they come from BSP)

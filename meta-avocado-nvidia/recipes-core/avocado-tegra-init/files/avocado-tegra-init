@@ -14,34 +14,75 @@ for bootarg in `cat /proc/cmdline`; do
     esac
 done
 
+rootdev=""
+
+# Path 1: BootChainOsCurrent EFI variable (Orin / older UEFI flows).
+# The 8-byte file is <attributes:4><value:4> little-endian. Attributes are
+# usually 7 (NV+BS+RT) on T26x where the firmware sets NON_VOLATILE, and 6
+# (BS+RT) on older T23x — accept either.
 if [ "$foundslotsfx" != "yes" ]; then
-    # This variable file contains a type (should be 6) followed by the value (should be 0 or 1)
-    bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null))
-    if [ "$(echo "$bcdata" | cut -d' ' -f1)" = "6" ]; then
+    bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null) || true)
+    bctype=$(echo "$bcdata" | cut -d' ' -f1)
+    if [ "$bctype" = "6" ] || [ "$bctype" = "7" ]; then
         slotnum=$(echo "$bcdata" | cut -d' ' -f2)
         [ "$slotnum" != "1" ] || slotsfx="_b"
+        foundslotsfx="yes"
     fi
-  
-    message="Waiting for APP$slotsfx partition..."
-    echo -n "$message"
-    for count in $(seq 1 10); do
-        for dev in $(lsblk -dnpo NAME); do
-          blkid --probe "$dev" || true
-        done
-        rootdev=$(blkid -l -t PARTLABEL=APP$slotsfx | cut -d: -f1)
-        if [ -n "$rootdev" ]; then
-            echo "[OK: $rootdev]"
+fi
+
+# Path 2: locate APP$slotsfx by PARTLABEL (works for both Path 1 and the
+# default empty-slotsfx case). Probe every block device first since blkid's
+# label cache may be stale right after a fresh flash.
+message="Waiting for APP$slotsfx partition..."
+echo -n "$message"
+for count in $(seq 1 10); do
+    for dev in $(lsblk -dnpo NAME); do
+      blkid --probe "$dev" || true
+    done
+    rootdev=$(blkid -l -t PARTLABEL=APP$slotsfx | cut -d: -f1)
+    if [ -n "$rootdev" ]; then
+        echo "[OK: $rootdev]"
+        break
+    fi
+    echo -n "."
+    sleep 0.5
+done
+
+# Path 3: fall back to root= from /proc/cmdline (mirrors upstream
+# meta-tegra/recipes-core/initrdscripts/tegra-minimal-init/platform-preboot.sh).
+if [ -z "$rootdev" ] && [ -n "$mayberoot" ]; then
+    echo "[FAIL] BootChain/PARTLABEL detection failed; trying root=$mayberoot"
+    case "$mayberoot" in
+        UUID=*)      rootdev=$(blkid -t "UUID=${mayberoot#UUID=}" -l | awk -F: '{print $1}') ;;
+        PARTUUID=*)  rootdev=$(blkid -t "PARTUUID=${mayberoot#PARTUUID=}" -l | awk -F: '{print $1}') ;;
+        PARTLABEL=*) rootdev=$(blkid -t "PARTLABEL=${mayberoot#PARTLABEL=}" -l | awk -F: '{print $1}') ;;
+        LABEL=*)     rootdev=$(blkid -t "LABEL=${mayberoot#LABEL=}" -l | awk -F: '{print $1}') ;;
+        /dev/*)      rootdev="$mayberoot" ;;
+        *)           rootdev="$mayberoot" ;;
+    esac
+fi
+
+# Path 4: last-ditch scan — any disk that has an APP / APP_b PARTLABEL.
+if [ -z "$rootdev" ]; then
+    echo "[FAIL] root= fallback empty; scanning all disks for APP partitions"
+    for label in APP APP_b; do
+        cand=$(blkid -l -t "PARTLABEL=$label" | cut -d: -f1)
+        if [ -n "$cand" ]; then
+            rootdev="$cand"
+            slotsfx="${label#APP}"
+            echo "Found $label at $rootdev"
             break
         fi
-        echo -n "$message"
-        message="."
-        sleep 0.5
     done
 fi
 
-# mount it
 if [ -z "$rootdev" ]; then
-    echo "Error: rootdev is not set"
+    echo "Error: could not locate APP rootfs partition"
+    echo "  cmdline: $(cat /proc/cmdline)"
+    echo "  blkid:"
+    blkid || true
+    echo "  lsblk:"
+    lsblk -o NAME,PARTLABEL,SIZE || true
     exit 1
 fi
 

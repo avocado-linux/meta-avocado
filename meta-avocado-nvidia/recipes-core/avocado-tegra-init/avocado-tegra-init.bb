@@ -5,6 +5,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = "file://avocado-tegra-init \
            file://avocado-tegra-init.service"
 
+# Only file:// fetches — wrynose no longer auto-creates ${S}, so set
+# it explicitly to UNPACKDIR (where bitbake places file:// files).
+S = "${UNPACKDIR}"
+
 inherit systemd
 
 # ensure blkid, udev tools are available

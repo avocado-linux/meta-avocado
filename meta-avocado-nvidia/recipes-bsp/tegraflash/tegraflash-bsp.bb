@@ -6,9 +6,16 @@ COMPATIBLE_MACHINE = "(tegra)"
 
 inherit deploy l4t_bsp
 
+# Per-SoC flash helper script name. tegra-flashtools-native deploys both
+# tegra234-flash-helper.sh and tegra264-flash-helper.sh; the .env.initrd-flash
+# file picks the right one for this machine via SOC_FAMILY.
+FLASH_HELPER_SCRIPT = "tegra234-flash-helper.sh"
+FLASH_HELPER_SCRIPT:tegra264 = "tegra264-flash-helper.sh"
+
 # SoC-specific file names - these mirror image_types_tegra.bbclass definitions
 TOSIMGFILENAME = "tos-optee.img"
 TOSIMGFILENAME:tegra234 = "tos-optee_t234.img"
+TOSIMGFILENAME:tegra264 = "tos-optee_t264.img"
 EKSIMGFILENAME = "eks.img"
 EKSIMGFILENAME:tegra234 = "eks_t234.img"
 
@@ -46,14 +53,37 @@ DEPENDS = "tegra-bootfiles tegra-binaries tegra-storage-layout nvidia-kernel-oot
 do_compile[noexec] = "1"
 do_install[noexec] = "1"
 
-# L4T source directory - construct using L4T_VERSION to match tegra-binaries
-# The shared source is at work-shared/L4T-tegra-<L4T_VERSION>-r0/Linux_for_Tegra
-L4T_BSP_DIR = "${TMPDIR}/work-shared/L4T-tegra-${L4T_VERSION}-r0/Linux_for_Tegra"
+# L4T source directory - construct using L4T_VERSION to match tegra-binaries.
+# The shared source unpacks to:
+#   ${TMPDIR}/work-shared/L4T-tegra-<L4T_VERSION>-r0/sources/Linux_for_Tegra/
+# (wrynose changed the unpack layout to nest under sources/ — earlier this
+# path was directly under r0/, which is why all the .bin/.img/.fw/generic
+# copies in do_deploy below silently no-op'd against the wrong path.)
+L4T_BSP_DIR = "${TMPDIR}/work-shared/L4T-tegra-${L4T_VERSION}-r0/sources/Linux_for_Tegra"
 
 # Ensure L4T source is available during deploy
 do_deploy[depends] += "tegra-binaries:do_preconfigure"
-# Depend on edk2-firmware-tegra deploy for L4TConfiguration DTBOs
-do_deploy[depends] += "edk2-firmware-tegra:do_deploy"
+# Depend on the virtual/bootloader provider for L4TConfiguration DTBOs and the
+# uefi_t{23,26}x_general.bin output. Going through virtual/bootloader (rather
+# than naming edk2-firmware-tegra directly) lets PREFERRED_PROVIDER_virtual/
+# bootloader switch between edk2-firmware-tegra (build from source) and
+# tegra-uefi-prebuilt (use the L4T BSP's pre-built UEFI binary) without
+# breaking this dependency chain.
+do_deploy[depends] += "virtual/bootloader:do_deploy"
+# Depend on edk2-firmware-tegra-rcmboot for uefi_t{23,26}x_rcmboot.bin (the
+# minimal UEFI used during RCM-mode flashing). Without this, tegraflash.py
+# silently skips the actual sign step ("Error: Could not find uefi_*_rcmboot.bin"
+# → falls through to --no-flash exit), leaving the signed/ directory empty
+# and breaking provisioning at runtime. Use a virtual to allow swapping in
+# edk2-firmware-tegra-rcmboot-prebuilt via PREFERRED_PROVIDER.
+do_deploy[depends] += "edk2-firmware-tegra-rcmboot:do_deploy"
+# tegra264-only: hafnium SPM and standalone-mm UEFI package are required for
+# the unified flash flow (referenced by flash_l4t_t264_qspi.xml and tegraflash
+# T264 signing). Both are deployed to ${DEPLOY_DIR_IMAGE} by their respective
+# recipes; we copy them into tegraflash-bsp/ in do_deploy below.
+# edk2-nvidia-standalone-mm is named via PROVIDES, so PREFERRED_PROVIDER can
+# swap in the -prebuilt variant.
+do_deploy[depends] += "${@'hafnium:do_deploy edk2-nvidia-standalone-mm:do_deploy' if d.getVar('SOC_FAMILY') == 'tegra264' else ''}"
 # Depend on initramfs for boot.img (runtime kernel+initramfs cboot)
 do_deploy[depends] += "avocado-image-initramfs:do_image_complete"
 # Depend on tegra-initrd-flash-initramfs for tegraflash provisioning
@@ -120,11 +150,27 @@ do_deploy() {
         [ -f "$f" ] && install -m 0644 "$f" ${DEPLOYDIR}/tegraflash-bsp/
     done
     
-    # Copy UEFI bootloader binaries from deploy directory
-    # Match both old-style (uefi_jetson*) and new-style (uefi_t23x*) naming conventions
-    for f in ${DEPLOY_DIR_IMAGE}/uefi_jetson*.bin ${DEPLOY_DIR_IMAGE}/uefi_t23x*.bin; do
+    # Copy UEFI bootloader binaries from deploy directory.
+    # Match old-style (uefi_jetson*) and new-style per-SoC (uefi_t23x* for
+    # tegra234, uefi_t26x* for tegra264) naming conventions.
+    for f in ${DEPLOY_DIR_IMAGE}/uefi_jetson*.bin \
+             ${DEPLOY_DIR_IMAGE}/uefi_t23x*.bin \
+             ${DEPLOY_DIR_IMAGE}/uefi_t26x*.bin; do
         [ -f "$f" ] && install -m 0644 "$f" ${DEPLOYDIR}/tegraflash-bsp/
     done
+
+    # tegra264-only: copy hafnium SPM firmware and standalone-mm UEFI package
+    # from deploy. These are referenced by flash_l4t_t264_qspi.xml and required
+    # by tegraflash signing for T264 (without them, tegrahost_v2 fails with
+    # "Stat for hafnium_t264.fip failed" and signing exits silently with
+    # --no-flash, leaving signed/ empty). Mirrors upstream meta-tegra
+    # image_types_tegra.bbclass tegraflash_populate_package:tegra264.
+    if [ "${SOC_FAMILY}" = "tegra264" ]; then
+        for f in ${DEPLOY_DIR_IMAGE}/hafnium_t264.fip \
+                 ${DEPLOY_DIR_IMAGE}/standalonemm_jetson.pkg; do
+            [ -f "$f" ] && install -m 0644 "$f" ${DEPLOYDIR}/tegraflash-bsp/
+        done
+    fi
     
     # Copy devicetree directory contents from deploy (additional DTBs/DTBOs)
     if [ -d ${DEPLOY_DIR_IMAGE}/devicetree ]; then
@@ -151,7 +197,7 @@ do_deploy() {
             -e"s,APPUUID_b,," -e"s,APPUUID,," \
             -e"s,ESP_FILE,${ESP_FILE}," \
             -e"/RECFILE/d" -e"/RECDTB-FILE/d" -e"/BOOTCTRL-FILE/d" \
-            -e"/IST_UCODE/d" -e"/IST_BPMPFW/d" -e"/IST_ICTBIN/d" -e"/IST_TESTIMG/d" -e"/IST_RTINFO/d" \
+            -e"/IST_UCODE/d" -e"/IST_BPMPFW/d" -e"/IST_ICTBIN/d" -e"/IST_TESTIMG/d" -e"/IST_RTINFO/d" -e"/IST_RTID/d" \
             -e"/VARSTORE_FILE/d" \
             "$xmlfile"
     }
@@ -167,6 +213,24 @@ do_deploy() {
     # Deploy eMMC layout variant for "build once, provision to any media"
     if [ -f ${DEPLOYDIR}/tegraflash-bsp/internal-flash-emmc.xml ]; then
         process_flash_xml ${DEPLOYDIR}/tegraflash-bsp/internal-flash-emmc.xml
+    fi
+    # tegra264: produce rcmboot-flash.xml.in from the SoC's RCM partition layout
+    # template (flash_l4t_t264_rcmboot.xml) so initrd-flash.sh's
+    # prepare_binaries_t264 rcm-boot step can find it. Mirrors upstream
+    # image_types_tegra.bbclass:
+    #   tegraflash_create_flash_config rcmboot-flash.xml.in ${LNXFILE} \
+    #       ${STAGING_DATADIR}/tegraflash/${PARTITION_LAYOUT_RCMBOOT}
+    if [ -n "${PARTITION_LAYOUT_RCMBOOT}" ] && \
+       [ -f ${DEPLOYDIR}/tegraflash-bsp/${PARTITION_LAYOUT_RCMBOOT} ]; then
+        cp ${DEPLOYDIR}/tegraflash-bsp/${PARTITION_LAYOUT_RCMBOOT} ${DEPLOYDIR}/tegraflash-bsp/rcmboot-flash.xml.in
+        process_flash_xml ${DEPLOYDIR}/tegraflash-bsp/rcmboot-flash.xml.in
+        # The RCM-boot layout uses initrd-flash.img instead of boot.img for the
+        # kernel partition (LNXFILE was already substituted to boot.img above —
+        # rewrite back). tegra-storage-layout already does an in-place sed for
+        # this when staging the RCM layout, but our process_flash_xml runs
+        # against the staged copy and replaces LNXFILE generically.
+        sed -i -e 's,<filename> *boot\.img *</filename>,<filename> initrd-flash.img </filename>,g' \
+            ${DEPLOYDIR}/tegraflash-bsp/rcmboot-flash.xml.in
     fi
     
     # Copy the generic/ directory structure from L4T source
@@ -235,7 +299,8 @@ LNXFILE="boot.img"
 EMC_BCT="${EMC_BCT}"
 ODMDATA="${ODMDATA}"
 CHIPID="${NVIDIA_CHIP}"
-FLASH_HELPER="tegra234-flash-helper.sh"
+FLASH_HELPER="${FLASH_HELPER_SCRIPT}"
+TOSIMGFILENAME="${TOSIMGFILENAME}"
 BOOTDEV="${TNSPEC_BOOTDEV}"
 ROOTFS_DEVICE="${ROOTFS_DEVICE_FOR_INITRD_FLASH}"
 EXTERNAL_ROOTFS_DRIVE=${@'1' if d.getVar('TEGRAFLASH_NO_INTERNAL_STORAGE') == '1' else '0'}

@@ -68,3 +68,25 @@ RDEPENDS:packagegroup-avocado-initramfs-modules = " \
     kernel-module-phy-tegra194-p2u-${KERNEL_VERSION} \
     kernel-module-tegra-xudc-${KERNEL_VERSION} \
 "
+
+# Pull the OOT initramfs/rootfs packagegroups in alongside the kernel-owned
+# ones. avocado-cli auto-appends packagegroup-avocado-{rootfs,initramfs}-
+# modules-${KV} but has no native awareness of the OOT siblings emitted
+# from nvidia-kernel-oot_%.bbappend, so without this hard dep the OOT
+# modules (tegra-bpmp, mc-utils, nvmap, host1x, pcie-tegra264 — anything
+# pcie-tegra264 transitively needs to probe) are never installed and the
+# NVMe never enumerates on Thor.
+#
+# Use the unqualified name (not ...-${KERNEL_VERSION}): KERNEL_VERSION is
+# computed from the kernel build dir at do_compile time, so referencing it
+# inside an RDEPENDS string gets the literal "None" at parse-time RDEPENDS
+# resolution (KERNEL_MODULE_PACKAGE_SUFFIX is the late-bound form, but
+# kernel-module-split.bbclass only handles that for kernel-module-* names
+# via do_split_packages — packagegroups have no equivalent magic). The
+# unqualified RPROVIDES on the OOT packagegroup makes this resolve cleanly.
+#
+# Scoped to this bbappend (not the shared
+# avocado-kernel-modules-packagegroup.inc) because linux-yocto 6.12 has no
+# nvidia-kernel-oot build and therefore no OOT sibling to depend on.
+RDEPENDS:packagegroup-avocado-initramfs-modules:append = " packagegroup-avocado-initramfs-modules-oot"
+RDEPENDS:packagegroup-avocado-rootfs-modules:append = " packagegroup-avocado-rootfs-modules-oot"

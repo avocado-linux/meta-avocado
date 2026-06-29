@@ -1,0 +1,45 @@
+From 8bc1987775fbc65fa309059567a06fadb4232d59 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Wed, 29 Apr 2026 21:51:50 -0400
+Subject: [PATCH] Makefile: extend KCFLAGS for Realtek vendor-driver warnings
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The bundled Realtek rtl8822ce / rtl8852ce wireless drivers carry vendor
+code that trips additional GCC warnings the in-tree kernel build
+treats as errors:
+
+  - empty-body              (stray semicolon "/* todo */" stubs)
+  - expansion-to-defined    (#if DUMP_SURVEY_INFO_80211D)
+  - old-style-declaration   ("u32 static foo(...)")
+  - restrict                (rtw_sprintf(buf, n, "%s,...", buf, ...) — vendor
+                             macro passes the destination as both arg 1 and
+                             a %s source)
+
+Extend the hard-coded KCFLAGS for the nvidia-oot sub-make to demote
+these to warnings, alongside the existing -Wno-error=address.
+
+Upstream-Status: Pending
+
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 42cb7ed..52c5f6b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -96,7 +96,7 @@ nvidia-oot: conftest hwpm
+ 		M=$(MAKEFILE_DIR)/nvidia-oot \
+ 		MODLIB=$(MODLIB) \
+ 		CONFIG_TEGRA_OOT_MODULE=m \
+-		KCFLAGS="-Wno-error=address" \
++		KCFLAGS="-Wno-error=address -Wno-error=empty-body -Wno-error=expansion-to-defined -Wno-error=old-style-declaration -Wno-error=restrict" \
+ 		srctree.nvidia-oot=$(MAKEFILE_DIR)/nvidia-oot \
+ 		srctree.hwpm=$(MAKEFILE_DIR)/hwpm \
+ 		srctree.nvconftest=$(NVIDIA_CONFTEST) \
+-- 
+2.53.0
+

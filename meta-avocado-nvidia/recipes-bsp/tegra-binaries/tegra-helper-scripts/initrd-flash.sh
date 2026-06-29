@@ -1508,6 +1508,33 @@ EOF
 
     step_banner "Running unified flash"
     ./out/doflash.sh $uniflash_flags 2>&1 | tee -a "$logfile"
+    uniflash_rc="${PIPESTATUS[0]}"
+
+    # Trigger device exit from the flashing initramfs.
+    #
+    # The legacy T23x initrd-flash device-side init reboots when the host
+    # deauthorizes the USB endpoint. NVIDIA's T264 unified-flash flow
+    # (flash_bsp_images.py -> FlashImages) does not include any reboot step
+    # at the end — the device is left running adbd in the flashing initramfs
+    # until something tells it to reboot. Send `adb reboot` so the freshly
+    # flashed system boots without requiring a manual reset.
+    if [ "${uniflash_rc:-0}" -eq 0 ]; then
+        adb_bin=""
+        if [ -x "./unified_flash/tools/flashtools/flash/adb" ]; then
+            adb_bin="./unified_flash/tools/flashtools/flash/adb"
+        elif command -v adb >/dev/null 2>&1; then
+            adb_bin="$(command -v adb)"
+        fi
+        if [ -n "$adb_bin" ]; then
+            echo "Issuing 'adb reboot' to leave flashing initramfs..." | tee -a "$logfile"
+            # adb reboot returns non-zero because the device disconnects
+            # mid-call; the reboot has already been initiated by then.
+            "$adb_bin" reboot 2>&1 | tee -a "$logfile" || true
+        else
+            echo "WARN: adb binary not found; device may need manual reset" | tee -a "$logfile"
+        fi
+    fi
+
     echo "Finished at $(date -Is)" | tee -a "$logfile"
     echo "Host-side log:              $logfile"
 
@@ -1519,28 +1546,48 @@ fi
 # ===========================================================================
 # Final USB disconnect (chip-independent)
 # ===========================================================================
-# Rescan using session_id to handle case where device reconnected with different path
+# Goal: confirm the device has detached. After a clean flash the device
+# leaves recovery on its own, so finding the path already gone is the
+# success case — not a warning. Only escalate to WARN if a *known-attached*
+# device fails to deauthorize.
 if [ -n "$usb_instance" ] || [ -n "$session_id" ]; then
-    echo "Disconnecting USB device at end of script..." | tee -a "$logfile"
+    echo "Verifying USB device detachment at end of script..." | tee -a "$logfile"
 
-    # Try to rescan by session_id first to get current USB instance
+    # Re-resolve the current USB instance via session_id since the path can
+    # change (or vanish) after the device reboots out of recovery.
     final_usb_instance="$usb_instance"
     if [ -n "$session_id" ]; then
         rescanned_dev=$(find_device_by_session "$session_id")
         if [ -n "$rescanned_dev" ]; then
             rescanned_instance=$(find_usb_instance_from_device "$rescanned_dev")
             if [ -n "$rescanned_instance" ]; then
-                echo "Device rescanned to $rescanned_dev with USB instance $rescanned_instance" | tee -a "$logfile"
+                echo "Device still present at $rescanned_dev with USB instance $rescanned_instance" | tee -a "$logfile"
                 final_usb_instance="$rescanned_instance"
             fi
         fi
     fi
 
-    if [ -n "$final_usb_instance" ]; then
+    # Settle window: wait up to 5s for the device to detach on its own.
+    # On a successful T264 unified flash this typically takes <1s, but USB
+    # enumeration races with our script exit on slower hubs.
+    settle_path=""
+    [ -n "$final_usb_instance" ] && settle_path="/sys/bus/usb/devices/$final_usb_instance"
+    if [ -n "$settle_path" ] && [ -e "$settle_path" ]; then
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            [ -e "$settle_path" ] || break
+            sleep 0.5
+        done
+    fi
+
+    if [ -z "$final_usb_instance" ] || [ ! -e "$settle_path" ]; then
+        echo "Device already detached — flash completed cleanly" | tee -a "$logfile"
+    else
         # Route through the shared helper so the agent path applies here
         # too when running inside the avocado-vm. The helper handles the
         # AVOCADO_AGENT_SOCK / sysfs fallback dispatch.
-        disconnect_usb_device "$final_usb_instance" "$session_id" || true
+        echo "Forcing deauthorize on lingering device $final_usb_instance" | tee -a "$logfile"
+        disconnect_usb_device "$final_usb_instance" "$session_id" || \
+            echo "WARN: failed to deauthorize $final_usb_instance" | tee -a "$logfile"
     fi
 fi
 

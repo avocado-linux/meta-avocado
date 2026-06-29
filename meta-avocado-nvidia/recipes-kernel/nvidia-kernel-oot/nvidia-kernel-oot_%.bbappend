@@ -1,3 +1,11 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+
+# Extend the hard-coded KCFLAGS in the nvidia-kernel-oot top-level Makefile
+# to silence -Werror on the bundled Realtek (rtl8822ce / rtl8852ce) vendor
+# drivers — empty-body, expansion-to-defined, and old-style-declaration are
+# present in vendor code we can't reasonably maintain locally.
+EXTRA_PATCHES += "file://0014-Makefile-extend-KCFLAGS-for-Realtek-vendor-driver-wa.patch"
+
 # nvidia-kernel-oot is built in both the default mc (linux-yocto 6.12) and the
 # jetson-l4t alt mc (linux-noble-nvidia-tegra 6.8). Both builds share a single
 # PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION
@@ -148,6 +156,18 @@ FILES:packagegroup-avocado-rootfs-modules-oot = ""
 FILES:packagegroup-avocado-initramfs-modules-oot = ""
 SUMMARY:packagegroup-avocado-rootfs-modules-oot = "OOT kernel modules pulled into the Avocado rootfs for kernel ${KERNEL_VERSION}"
 SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled into the Avocado initramfs for kernel ${KERNEL_VERSION}"
+
+# Publish both unqualified and kernel-versioned Provides — same pattern the
+# kernel-owned siblings use. The unqualified Provides lets RDEPENDS that
+# don't know which kernel is pinned still resolve; the versioned form is
+# what an explicit kernel pin (or the auto-append in
+# linux-noble-nvidia-tegra_%.bbappend) targets. Without these, bitbake's
+# parse-time RDEPENDS resolver only sees the bare PACKAGES entry —
+# `packagegroup-avocado-*-modules-oot` — and can't satisfy a dep written
+# against `packagegroup-avocado-*-modules-oot-${KERNEL_VERSION}` (the PKG
+# rename only takes effect at packaging time, well after parse).
+RPROVIDES:packagegroup-avocado-rootfs-modules-oot = "packagegroup-avocado-rootfs-modules-oot packagegroup-avocado-rootfs-modules-oot-${KERNEL_VERSION}"
+RPROVIDES:packagegroup-avocado-initramfs-modules-oot = "packagegroup-avocado-initramfs-modules-oot packagegroup-avocado-initramfs-modules-oot-${KERNEL_VERSION}"
 # nvidia-kernel-oot-base aggregates the OOT base drivers required for any
 # Tegra rootfs running the L4T kernel (TEGRA_OOT_BASE_DRIVERS — host1x,
 # nvgpu, tegra-bpmp, mc-utils, nvethernet, etc.). Pull it in via this
@@ -163,3 +183,24 @@ SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled 
 # expanded RDEPENDS, so this is now the only path.
 RDEPENDS:packagegroup-avocado-rootfs-modules-oot = "nvidia-kernel-oot-base"
 RDEPENDS:packagegroup-avocado-initramfs-modules-oot = ""
+
+# Thor (T264) needs the full nvidia-kernel-oot-base set in the boot initramfs,
+# not just pcie-tegra264. The PCIe controller driver alone can't probe — its
+# DT node references clocks/resets/iommu providers that live in OOT modules
+# (tegra-bpmp for clocks+resets, mc-utils + nvmap for the SMMU/IOMMU side,
+# host1x for the broader Tegra device hierarchy). Without those loaded first,
+# pcie-tegra264's probe returns -EPROBE_DEFER forever and the controller never
+# binds — observed as "pci-host-generic d0b0000000.pcie" coming up (the GPU
+# root port that needs no tegra deps) while the a808400000/a808420000/
+# a808480000 controllers (which carry the NVMe) stay unbound.
+#
+# The flashing initramfs (which DOES enumerate NVMe successfully) pulls in
+# nvidia-kernel-oot-base; mirroring that gets parity. Verified by diffing
+# tegra-initrd-flash-initramfs.manifest vs avocado-image-initramfs.manifest.
+#
+# pcie-tegra264 sits in TEGRA_OOT_OTHER_DRIVERS upstream (not BASE), so
+# nvidia-kernel-oot-base does *not* drag it in. Keep the explicit dep.
+RDEPENDS:packagegroup-avocado-initramfs-modules-oot:append:tegra264 = " \
+    nvidia-kernel-oot-base \
+    kernel-module-pcie-tegra264-${KERNEL_VERSION} \
+"
