@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=da6742972636cd56d418bee2df32b873"
 PV = "1.3.1"
 SRCREV = "e2f18eb23c45bd22ca332b0b8b49a81de304b472"
 SRC_URI = "gitsm://github.com/pytorch/executorch.git;protocol=https;branch=release/1.3;destsuffix=executorch \
-           file://0001-use-native-flatc-for-cross-compilation.patch"
+           file://0001-build-bundled-flatc-flatcc-for-the-build-host.patch"
 
 # ExecuTorch's CMakeLists.txt hard-requires the source tree be named exactly
 # `executorch` (upstream issue 6475), so override the fetcher's default `git`
@@ -22,15 +22,19 @@ inherit cmake python3native
 # Build-time code generation needs these host tools, none of which can be the
 # target build:
 #   python3-native      - runs the codegen scripts
-#   flatbuffers-native  - host flatc for schema codegen (see the SRC_URI patch;
-#                         the bundled flatc builds for the target)
 #   torchgen-native     - the ATen schema + codegen modules gen_oplist/codegen.gen
 #                         import. Pinned to torch 2.12.0 (the version ExecuTorch
 #                         1.3.1 requires); the packaged python3-pytorch is 2.4.1,
 #                         too old - its schema lacks ops like mean.dtype_out.
 #   python3-pyyaml-native, python3-typing-extensions-native - torchgen's only
 #                         third-party imports.
-DEPENDS = "python3-native flatbuffers-native torchgen-native python3-pyyaml-native python3-typing-extensions-native"
+# No flatbuffers-native: flatc (and flatcc) are built for the build host from
+# the bundled third-party sources by the SRC_URI patch, so the generator always
+# matches the bundled flatbuffers headers. Depending on an ambient
+# flatbuffers-native instead reintroduces a version skew that breaks the schema
+# version static_assert on targets whose layers pin a different flatbuffers
+# (e.g. the i.MX/meta-ml stack ships 23.5.26 vs ExecuTorch's bundled 24.3.25).
+DEPENDS = "python3-native torchgen-native python3-pyyaml-native python3-typing-extensions-native"
 
 # gen_oplist runs as `python3 -m codegen.tools.gen_oplist`, and cmake resolves
 # that `python3` to the build container's interpreter, not the OE native one -
@@ -77,7 +81,17 @@ do_install:append() {
     if [ -d "${D}${B}/lib" ]; then
         install -m 0644 ${D}${B}/lib/*.a ${D}${libdir}/
     fi
-    rm -rf "${D}/work"
+    # ExecuTorch installs the two static libs above to ${B}/lib - an absolute
+    # in-build path - which leaks that whole directory chain into DESTDIR. It
+    # must be removed or do_package fails the installed-vs-shipped QA on every
+    # leaked dir. Do NOT hardcode the leaf (the old `rm -rf ${D}/work` only
+    # cleaned it when TOPDIR happened to be /work; under a different TOPDIR,
+    # e.g. /avocado-build, the leaked tree survived and broke the build). ${B}
+    # is absolute, so ${D}${B} is the leaked build dir regardless of TOPDIR;
+    # drop it, then rmdir -p walks the now-empty parent chain up to ${D} (which
+    # stops it, being non-empty). nativesdk builds hit this same path.
+    rm -rf "${D}${B}"
+    rmdir -p "$(dirname "${D}${B}")" 2>/dev/null || true
     find ${D}${libdir}/cmake -name '*.cmake' -exec \
         sed -i "s#${B}/lib/#"'${_IMPORT_PREFIX}/lib/#g' {} +
 }

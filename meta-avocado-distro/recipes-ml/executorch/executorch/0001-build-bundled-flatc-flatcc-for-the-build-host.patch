@@ -1,0 +1,100 @@
+From c675bb4a6f790282b0626bb76ab3bdc9bdce5fd4 Mon Sep 17 00:00:00 2001
+From: Javier Tia <javier@peridio.com>
+Date: Mon, 29 Jun 2026 13:51:19 -0400
+Subject: [PATCH] Build bundled flatc/flatcc for the build host under cross
+ builds
+
+ExecuTorch builds flatc (from third-party/flatbuffers) and flatcc (from
+third-party/flatcc) and runs them during the build to generate the schema
+headers. The ExternalProject_Add calls already try to build these for the
+host by clearing CMAKE_TOOLCHAIN_FILE, but that is not enough under build
+systems like OpenEmbedded that export the target/cross toolchain through the
+CC/CXX/CFLAGS/LDFLAGS environment: the inner cmake inherits that environment
+and autodetects the cross compiler, producing target binaries.
+
+For a target (e.g. aarch64) build the generated flatc/flatcc then cannot run
+on the build host. Even when the host and target architectures coincide (an
+SDK/nativesdk build on the same arch), the flatc that gets used can be a
+different flatbuffers version than the bundled third-party/flatbuffers
+headers, which trips the version static_assert emitted into the generated
+*_generated.h schema files:
+
+  error: static assertion failed: Non-compatible flatbuffers version included
+
+Force the build-host compiler and clear the inherited flags for both
+ExternalProject builds, but only when cross-compiling, so native host builds
+(including the macOS/iOS paths) keep their current behavior. The compilers
+default to gcc/g++ (the OpenEmbedded host-tool defaults) and are overridable
+via EXECUTORCH_HOST_C_COMPILER / EXECUTORCH_HOST_CXX_COMPILER for hosts whose
+build compiler is named differently. Because flatc/flatcc are now always
+built from the bundled sources for the build host, the generator and the
+headers they are compiled against are guaranteed to be the same flatbuffers
+version on every target.
+
+Upstream-Status: Pending [https://github.com/pytorch/executorch cross-build host tool fix]
+Signed-off-by: Javier Tia <javier@peridio.com>
+---
+ third-party/CMakeLists.txt | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/third-party/CMakeLists.txt b/third-party/CMakeLists.txt
+index 67da483..9dae457 100644
+--- a/third-party/CMakeLists.txt
++++ b/third-party/CMakeLists.txt
+@@ -31,6 +31,37 @@ else()
+   )
+ endif()
+ 
++# Build flatc/flatcc for the build host, even under a cross/SDK build.
++#
++# Unsetting CMAKE_TOOLCHAIN_FILE (below) is not sufficient on its own: build
++# systems such as OpenEmbedded export the target/cross toolchain through the
++# CC/CXX/CFLAGS/LDFLAGS environment, which the inner ExternalProject cmake
++# inherits and uses to autodetect its compiler. The result is a flatc/flatcc
++# built for the target -- it cannot run on the build host, and its flatbuffers
++# version need not match the bundled headers, which trips the version
++# static_assert in the generated *_generated.h schema files.
++#
++# Forcing the host compiler and clearing the inherited flags makes these
++# build-time codegen tools build, from the bundled sources, for the machine
++# running the build -- so the generator and the compiled-against headers are
++# always the same flatbuffers version. gcc/g++ are the host-tool defaults and
++# are overridable for hosts whose build compiler is named differently. Only
++# applied when cross-compiling, so native host builds keep upstream behavior.
++set(EXECUTORCH_HOST_C_COMPILER "gcc"
++    CACHE STRING "Host C compiler used to build the build-time flatc/flatcc")
++set(EXECUTORCH_HOST_CXX_COMPILER "g++"
++    CACHE STRING "Host C++ compiler used to build the build-time flatc/flatcc")
++if(CMAKE_CROSSCOMPILING)
++  set(_executorch_host_tool_args
++    -DCMAKE_C_COMPILER=${EXECUTORCH_HOST_C_COMPILER}
++    -DCMAKE_CXX_COMPILER=${EXECUTORCH_HOST_CXX_COMPILER}
++    -DCMAKE_C_FLAGS=
++    -DCMAKE_EXE_LINKER_FLAGS=
++  )
++else()
++  set(_executorch_host_tool_args)
++endif()
++
+ # We use ExternalProject to build flatc from source to force it target the host.
+ # Otherwise, flatc will target the project's toolchain (i.e. iOS, or Android).
+ ExternalProject_Add(
+@@ -53,6 +84,7 @@ ExternalProject_Add(
+     # defaults.
+     $<$<AND:$<BOOL:${APPLE}>,$<BOOL:$<FILTER:${PLATFORM},EXCLUDE,^MAC>>>:-DCMAKE_OSX_SYSROOT=>
+     -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET}
++    ${_executorch_host_tool_args}
+   BUILD_BYPRODUCTS <INSTALL_DIR>/bin/flatc
+                    ${_executorch_external_project_additional_args}
+ )
+@@ -109,6 +141,7 @@ ExternalProject_Add(
+     $<$<AND:$<BOOL:${APPLE}>,$<BOOL:$<FILTER:${PLATFORM},EXCLUDE,^MAC>>>:-DCMAKE_OSX_SYSROOT=>
+     -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET}
+     ${_flatcc_extra_cmake_args}
++    ${_executorch_host_tool_args}
+   BUILD_BYPRODUCTS <INSTALL_DIR>/bin/flatcc
+                    ${_executorch_external_project_additional_args}
+ )
+-- 
+2.54.0
+
