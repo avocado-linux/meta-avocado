@@ -2,6 +2,14 @@
 Description=LUKS2 /var unlock and first-boot format
 DefaultDependencies=no
 Before=initrd-root-fs.target
+# Wait for the var partition's by-partlabel symlink to actually exist before
+# running. A bare ConditionPathExists is evaluated once, the instant the service
+# is activated - if udev has not yet created /dev/disk/by-partlabel/var the
+# service is silently skipped, /dev/mapper/var never appears, and var.mount
+# times out into the emergency shell. Ordering after (and requiring) the device
+# unit makes the service block until udev has processed the partition instead.
+Requires=dev-disk-by\x2dpartlabel-var.device
+After=dev-disk-by\x2dpartlabel-var.device
 After=systemd-udevd.service
 Wants=systemd-udevd.service
 ConditionPathExists=/dev/disk/by-partlabel/var
