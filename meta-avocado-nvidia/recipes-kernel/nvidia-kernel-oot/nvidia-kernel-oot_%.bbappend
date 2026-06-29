@@ -1,10 +1,28 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-# Extend the hard-coded KCFLAGS in the nvidia-kernel-oot top-level Makefile
-# to silence -Werror on the bundled Realtek (rtl8822ce / rtl8852ce) vendor
-# drivers — empty-body, expansion-to-defined, and old-style-declaration are
-# present in vendor code we can't reasonably maintain locally.
-EXTRA_PATCHES += "file://0014-Makefile-extend-KCFLAGS-for-Realtek-vendor-driver-wa.patch"
+# Extend the hard-coded KCFLAGS on the nvidia-oot recursive sub-make in the
+# top-level Makefile to silence -Werror on the bundled Realtek (rtl8822ce /
+# rtl8852ce) vendor drivers — empty-body, expansion-to-defined,
+# old-style-declaration and restrict warnings live in vendor code we can't
+# reasonably maintain locally. The Makefile hard-codes KCFLAGS on that sub-make
+# line, so an external KCFLAGS / EXTRA_OEMAKE can't reach it.
+#
+# Done with an in-place sed rather than a context patch: the surrounding
+# Makefile lines churn between L4T releases (the static 0014-*.patch rejected
+# on R39.2.0 when the context around line 96 moved). The sed anchors only on
+# the KCFLAGS value so it survives that churn, and is a no-op extension if the
+# Realtek drivers aren't bundled. Warn loudly if the anchor disappears.
+# Own shell task (do_patch is a python task here, so a shell :append would be
+# concatenated into python and fail to parse). Ordered after do_patch so the
+# Makefile is present/patched, and before do_compile so the flags are in effect.
+do_extend_realtek_kcflags() {
+    if grep -q 'KCFLAGS="-Wno-error=address' ${S}/Makefile; then
+        sed -i 's/KCFLAGS="-Wno-error=address\([^"]*\)"/KCFLAGS="-Wno-error=address\1 -Wno-error=empty-body -Wno-error=expansion-to-defined -Wno-error=old-style-declaration -Wno-error=restrict"/' ${S}/Makefile
+    else
+        bbwarn "nvidia-kernel-oot: KCFLAGS anchor not found in ${S}/Makefile; Realtek -Werror workaround not applied (Makefile layout changed?)"
+    fi
+}
+addtask extend_realtek_kcflags after do_patch before do_compile
 
 # nvidia-kernel-oot is built in both the default mc (linux-yocto 6.18) and the
 # jetson-l4t alt mc (linux-noble-nvidia-tegra 6.8). Both builds share a single
