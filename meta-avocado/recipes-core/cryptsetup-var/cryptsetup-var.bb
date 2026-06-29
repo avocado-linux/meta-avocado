@@ -8,7 +8,16 @@ SRC_URI = " \
     file://cryptsetup-var.service \
 "
 
-RDEPENDS:${PN} = "cryptsetup"
+# Tools cryptsetup-var.sh + var-key.sh invoke in the (minimal) initramfs:
+#   cryptsetup    - luksFormat / open / resize
+#   openssl-bin   - var-key.sh derives the phase-1 key via `openssl kdf ARGON2ID`
+#                   (libcrypto is already present via systemd; this adds the CLI)
+#   btrfs-tools   - mkfs.btrfs on first boot + `btrfs filesystem resize`
+#   gawk          - awk in the cpuinfo-serial lookup and the dm resize check
+#   sed           - strips the `openssl dgst` prefix when deriving the salt
+# (blockdev, dmsetup, systemd-cryptenroll, mktemp, dirname, tr, cut are already
+#  in the avocado initramfs.)
+RDEPENDS:${PN} = "cryptsetup openssl-bin btrfs-tools gawk sed"
 
 inherit systemd
 
