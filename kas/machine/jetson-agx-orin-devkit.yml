@@ -5,12 +5,8 @@ header:
       file: kas/base.yml
     - repo: meta-avocado
       file: kas/vendor/nvidia.yml
-    # TEMP: multi-kernel-jetson disabled while debugging the wrynose nvidia-kernel-oot
-    # build for the default mc. Reinstate once the OOT virt-storage modpost gap
-    # (tegra_vblk → undefined tegra_hv_ivc_* when NV_OOT_TEGRA_HV_SKIP_BUILD=y) is
-    # resolved, so the unified feed regains both kernels.
-    # - repo: meta-avocado
-    #   file: kas/feature/multi-kernel-jetson.yml
+    - repo: meta-avocado
+      file: kas/feature/multi-kernel-jetson.yml
     - repo: meta-avocado
       file: kas/feature/virtualization.yml
     - repo: meta-avocado
@@ -23,12 +19,3 @@ repos:
       meta-avocado-nvidia:
 
 machine: avocado-jetson-agx-orin-devkit
-
-# TEMP: with multi-kernel-jetson disabled, point the default mc at the L4T 6.8
-# kernel so the OOT modules build against a real Tegra kernel (kernel_name=l4t
-# config, which keeps tegra_hv real and resolves the modpost symbols). Drop
-# this override when the multi-kernel overlay is re-enabled — that overlay's
-# alt mc already pins noble via PREFERRED_PROVIDER_virtual/kernel:forcevariable.
-local_conf_header:
-  jetson-agx-orin-devkit-temp-noble-default: |
-    PREFERRED_PROVIDER_virtual/kernel:forcevariable = "linux-noble-nvidia-tegra"
