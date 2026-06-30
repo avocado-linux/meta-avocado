@@ -1,0 +1,15 @@
+# Re-assert /dev/mapper/var after switch-root.
+#
+# cryptsetup-var opens the LUKS /var in the initramfs, where the device-mapper
+# udev rules process the genuine "change" event (with a DM cookie) and create
+# /dev/mapper/var. At switch-root the udev database is cleared, so when the real
+# root's udev coldplugs the still-open device it has no DM_UDEV_PRIMARY_SOURCE_FLAG
+# and the stock dm rules skip it: no /dev/mapper/var, no blkid probe, and
+# 99-systemd.rules then marks the device SYSTEMD_READY=0 (it looks like an empty
+# CRYPT-* device with no filesystem). dev-mapper-var.device never activates and
+# var.mount times out into emergency mode.
+#
+# This file sorts after 99-systemd.rules so our decision is final: match the var
+# dm device by its kernel dm name, run blkid so it no longer looks empty,
+# (re)create the node symlink, and force the device ready so the mount proceeds.
+SUBSYSTEM=="block", ACTION=="add|change", KERNEL=="dm-[0-9]*", ATTR{dm/name}=="var", IMPORT{builtin}="blkid", SYMLINK+="mapper/var", ENV{SYSTEMD_READY}="1"

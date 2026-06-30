@@ -6,6 +6,7 @@ SRC_URI = " \
     file://cryptsetup-var.sh \
     file://var-key.sh \
     file://cryptsetup-var.service \
+    file://99-zz-cryptsetup-var.rules \
 "
 
 # Tools cryptsetup-var.sh + var-key.sh invoke in the (minimal) initramfs:
@@ -43,7 +44,18 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants
     ln -sf ../cryptsetup-var.service \
         ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants/cryptsetup-var.service
+
+    # udev rule that re-creates /dev/mapper/var in the real root (the device is
+    # opened in the initrd; see the rule for why the rootfs coldplug otherwise
+    # drops it). Shipped in its own package so it can be installed into the
+    # rootfs - the rest of cryptsetup-var is initramfs-only.
+    install -d ${D}${nonarch_base_libdir}/udev/rules.d
+    install -m 0644 ${WORKDIR}/99-zz-cryptsetup-var.rules \
+        ${D}${nonarch_base_libdir}/udev/rules.d/99-zz-cryptsetup-var.rules
 }
+
+PACKAGES =+ "${PN}-udev"
+FILES:${PN}-udev = "${nonarch_base_libdir}/udev/rules.d/99-zz-cryptsetup-var.rules"
 
 FILES:${PN} += "${libexecdir}/cryptsetup-var/"
 FILES:${PN} += "${systemd_system_unitdir}/cryptsetup-var.service"
