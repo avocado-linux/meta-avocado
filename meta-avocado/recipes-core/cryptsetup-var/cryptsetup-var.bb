@@ -33,7 +33,18 @@ do_install() {
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/cryptsetup-var.service ${D}${systemd_system_unitdir}/
+
+    # Statically enable the unit for the initrd. SYSTEMD_AUTO_ENABLE relies on
+    # the preset being applied at image time, but the initramfs rootfs build
+    # does not enable a WantedBy=initrd-root-fs.target unit there, so the
+    # .wants symlink is never created and /var unlock never runs (boot drops to
+    # emergency mode). Stage the symlink by hand so the service is pulled into
+    # the initrd regardless of preset handling.
+    install -d ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants
+    ln -sf ../cryptsetup-var.service \
+        ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants/cryptsetup-var.service
 }
 
 FILES:${PN} += "${libexecdir}/cryptsetup-var/"
 FILES:${PN} += "${systemd_system_unitdir}/cryptsetup-var.service"
+FILES:${PN} += "${systemd_system_unitdir}/initrd-root-fs.target.wants/cryptsetup-var.service"
