@@ -17,6 +17,7 @@ RDEPENDS:${PN} = "\
   avocadoctl \
   avocado-users \
   ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
+  ${@bb.utils.contains('MACHINE_FEATURES','optee-ftpm','optee-ftpm-init','',d)} \
   packagegroup-avocado-initramfs-modules \
 "
 
