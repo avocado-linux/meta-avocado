@@ -25,6 +25,7 @@ RDEPENDS:${PN} = " \
   iproute2 \
   iptables \
   ethtool \
+  can-utils \
   tcpdump \
   iperf3 \
   wireguard-tools \
