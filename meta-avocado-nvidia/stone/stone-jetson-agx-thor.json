@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "platform": "avocado-jetson-agx-thor-devkit",
+    "platform": "avocado-jetson-agx-thor",
     "architecture": "arm64",
     "provision_default": "tegraflash",
     "update_strategy": "tegra-ab"
@@ -64,17 +64,17 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-jetson-agx-thor-devkit",
+      "out": "avocado-image-jetson-agx-thor",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-jetson-agx-thor-devkit.erofs-lz4",
-        "var": "avocado-image-var-jetson-agx-thor-devkit.btrfs",
-        "initramfs": "avocado-image-initramfs-jetson-agx-thor-devkit.cpio.gz",
-        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-thor-devkit.cboot",
-        "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-thor-devkit.esp",
-        "tegraflash_tos": "tos-avocado-jetson-agx-thor-devkit.img",
+        "rootfs": "avocado-image-rootfs-jetson-agx-thor.erofs-lz4",
+        "var": "avocado-image-var-jetson-agx-thor.btrfs",
+        "initramfs": "avocado-image-initramfs-jetson-agx-thor.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-thor.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-thor.esp",
+        "tegraflash_tos": "tos-avocado-jetson-agx-thor.img",
         "tegraflash_bsp": "tegraflash-bsp",
         "tegraflash_tools": "tegraflash-tools"
       }

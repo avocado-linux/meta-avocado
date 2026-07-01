@@ -3,7 +3,7 @@
 set -e
 
 hook="avocado-build"
-target="jetson-agx-orin-devkit"
+target="jetson-agx-thor"
 
 RUNTIME_NAME="$1"
 

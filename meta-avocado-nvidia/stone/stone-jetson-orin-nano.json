@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "platform": "avocado-jetson-orin-nano-devkit",
+    "platform": "avocado-jetson-orin-nano",
     "architecture": "arm64",
     "provision_default": "tegraflash",
     "update_strategy": "tegra-ab"
@@ -85,17 +85,17 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-jetson-orin-nano-devkit",
+      "out": "avocado-image-jetson-orin-nano",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-jetson-orin-nano-devkit.erofs-lz4",
-        "var": "avocado-image-var-jetson-orin-nano-devkit.btrfs",
-        "initramfs": "avocado-image-initramfs-jetson-orin-nano-devkit.cpio.gz",
-        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-orin-nano-devkit.cboot",
-        "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano-devkit.esp",
-        "tegraflash_tos": "tos-avocado-jetson-orin-nano-devkit.img",
+        "rootfs": "avocado-image-rootfs-jetson-orin-nano.erofs-lz4",
+        "var": "avocado-image-var-jetson-orin-nano.btrfs",
+        "initramfs": "avocado-image-initramfs-jetson-orin-nano.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-orin-nano.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano.esp",
+        "tegraflash_tos": "tos-avocado-jetson-orin-nano.img",
         "tegraflash_bsp": "tegraflash-bsp",
         "tegraflash_tools": "tegraflash-tools",
         "tegraflash_carrier_bsp": "carrier-bsp"

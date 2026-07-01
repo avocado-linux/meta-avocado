@@ -10,7 +10,7 @@ generic `jetson-orin-nx` MACHINE.
 
 Historically each Jetson product got its own Yocto MACHINE — one
 per carrier-on-SOM combination (e.g. the now-retired
-`avocado-jetson-agx-orin-devkit` and `avocado-icam-540`, each with
+`avocado-jetson-agx-orin` and `avocado-icam-540`, each with
 their own kas yml, stone manifest, and SDK-target hooks). That works,
 but every new carrier required a fresh recipe set and customers
 couldn't really add their own.

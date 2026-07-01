@@ -9,7 +9,7 @@ header:
 # the per-kernel packagegroup-avocado-{rootfs,initramfs}-modules-${KERNEL_VERSION}).
 #
 # This overlay is included from every Jetson machine yml
-# (kas/machine/{jetson-orin-nano-devkit,jetson-agx-orin-devkit,
+# (kas/machine/{jetson-orin-nano,jetson-agx-orin,
 # recomputer-j301x,recomputer-j401x,icam-540}.yml). Callers do not compose
 # it onto the kas command line; multi-kernel is the standard build for the
 # Jetson family.
@@ -23,7 +23,7 @@ header:
 #     so nvidia-kernel-oot's RPMs land in the unified feed too.
 #
 # Build invocation (CI and dev are now identical for the distro target):
-#   kas build kas/machine/jetson-orin-nano-devkit.yml
+#   kas build kas/machine/jetson-orin-nano.yml
 #
 # `bitbake avocado-distro` transitively pulls in the alt-mc kernel + OOT
 # via mcdepends, then do_multikernel_merge runs before do_compile so the

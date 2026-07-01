@@ -8,7 +8,7 @@
 # standard TEGRA_FLASHVAR_* namespace). Upstream image_types_tegra.bbclass's
 # copy_dtb_overlays now reads the new name to know which dtbo to copy into
 # the BSP tarball. We follow the same name here so machines that use the
-# upstream confs (jetson-agx-orin-devkit, jetson-orin-nano-devkit etc.) get
+# upstream confs (jetson-agx-orin, jetson-orin-nano etc.) get
 # DCE_OVERLAY into flashvars. Avocado-specific machine confs (icam-540) were
 # updated to set the new name as well.
 
