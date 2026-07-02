@@ -132,6 +132,7 @@ MACHINE_FEATURES += "<features>"
 | `DEFAULTTUNE` | CPU instruction set target |
 | `PREFERRED_PROVIDER_virtual/kernel` | Which kernel recipe to use |
 | `EFI_PROVIDER` | Set to `"systemd-boot"` for UEFI targets, `""` for U-Boot targets |
+| `AVOCADO_BOOTLOADER` | Boot method: `"uboot"` (U-Boot + TF-A, fwup disk assembly) or `"uefi"` (systemd-boot + GPT). Defaults to `uboot` in `conf/machine/include/avocado.inc`; x86 targets set `uefi`. Boot-artifact deps in the stone / img-bootfiles / SDK bbappends gate on it with `bb.utils.contains('AVOCADO_BOOTLOADER', ...)` rather than the machine name. |
 | `KERNEL_IMAGETYPE` | `"bzImage"` for x86, `"Image"` for ARM64 |
 
 ---
