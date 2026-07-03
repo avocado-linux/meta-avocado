@@ -36,6 +36,17 @@ if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
     # Existing LUKS2 container - open it.
     echo "cryptsetup-var: opening existing LUKS2 container on $VAR_DEV"
 
+    # A prior boot enrolled a TPM2 token, so a TPM is expected. On a reboot there
+    # is no first-boot format to slow us down, so we can reach the check below
+    # before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall back to
+    # Argon2id. Detect the token via luksDump piped to awk (the initrd has no
+    # grep, and gawk mishandles raw binary under some locales). Volumes with no
+    # token skip the wait.
+    if cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/systemd-tpm2/{f=1} END{exit !f}'; then
+        i=0
+        while [ ! -e /dev/tpm0 ] && [ "$i" -lt 60 ]; do i=$((i + 1)); sleep 0.25; done
+    fi
+
     # Phase-2: Try TPM2-sealed keyslot first (PCR 7).
     TPM2_OPENED=0
     if [ -e /dev/tpm0 ] && command -v systemd-cryptenroll >/dev/null 2>&1; then
