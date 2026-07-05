@@ -11,6 +11,15 @@ inherit pkgconfig meson_tags native
 MESON_TARGET = "systemctl:executable"
 MESON_INSTALL_TAGS = "systemctl"
 EXTRA_OEMESON += "-Dlink-systemctl-shared=false"
+
+# systemd's meson pam option defaults to 'auto', so on a host that has libpam the
+# probe enables PAM and libsystemd-shared compiles pam-util.c, which needs
+# security/pam_ext.h and fails when the recipe sysroot has no pam headers. This
+# native helper (systemctl:executable only) never uses PAM, and a dependency
+# cannot supply the header: libpam gates on ANY_OF_DISTRO_FEATURES "pam systemd"
+# and native builds use DISTRO_FEATURES_NATIVE (no pam), so there is no
+# libpam-native provider. Disable the probe; the target systemd keeps PAM.
+EXTRA_OEMESON += "-Dpam=disabled"
 EXTRA_OEMESON += "-Dsysvinit-path= -Dsysvrcnd-path="
 
 # Systemctl is supposed to operate on target, but the target sysroot is not
