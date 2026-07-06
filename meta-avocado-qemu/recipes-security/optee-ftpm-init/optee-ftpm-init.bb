@@ -35,17 +35,17 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "optee-ftpm-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${libexecdir}/optee-ftpm
-    install -m 0750 ${WORKDIR}/optee-ftpm-setup.sh ${D}${libexecdir}/optee-ftpm/
+    install -m 0750 ${UNPACKDIR}/optee-ftpm-setup.sh ${D}${libexecdir}/optee-ftpm/
 
     install -d ${D}${nonarch_base_libdir}/modprobe.d
-    install -m 0644 ${WORKDIR}/optee-ftpm.conf ${D}${nonarch_base_libdir}/modprobe.d/
+    install -m 0644 ${UNPACKDIR}/optee-ftpm.conf ${D}${nonarch_base_libdir}/modprobe.d/
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/optee-ftpm-setup.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/optee-ftpm-setup.service ${D}${systemd_system_unitdir}/
 
     # Statically enable for the initrd (the initramfs build does not apply the
     # preset for a WantedBy=initrd-root-fs.target unit - same as cryptsetup-var).

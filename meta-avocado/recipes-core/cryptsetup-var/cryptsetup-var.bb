@@ -25,15 +25,15 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "cryptsetup-var.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${libexecdir}/cryptsetup-var
-    install -m 0750 ${WORKDIR}/cryptsetup-var.sh ${D}${libexecdir}/cryptsetup-var/
-    install -m 0750 ${WORKDIR}/var-key.sh ${D}${libexecdir}/cryptsetup-var/
+    install -m 0750 ${UNPACKDIR}/cryptsetup-var.sh ${D}${libexecdir}/cryptsetup-var/
+    install -m 0750 ${UNPACKDIR}/var-key.sh ${D}${libexecdir}/cryptsetup-var/
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/cryptsetup-var.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/cryptsetup-var.service ${D}${systemd_system_unitdir}/
 
     # Statically enable the unit for the initrd. SYSTEMD_AUTO_ENABLE relies on
     # the preset being applied at image time, but the initramfs rootfs build
@@ -50,7 +50,7 @@ do_install() {
     # drops it). Shipped in its own package so it can be installed into the
     # rootfs - the rest of cryptsetup-var is initramfs-only.
     install -d ${D}${nonarch_base_libdir}/udev/rules.d
-    install -m 0644 ${WORKDIR}/99-zz-cryptsetup-var.rules \
+    install -m 0644 ${UNPACKDIR}/99-zz-cryptsetup-var.rules \
         ${D}${nonarch_base_libdir}/udev/rules.d/99-zz-cryptsetup-var.rules
 }
 
