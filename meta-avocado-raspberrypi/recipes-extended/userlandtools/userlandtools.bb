@@ -25,8 +25,13 @@ PV = "20210111"
 inherit cmake pkgconfig
 
 ASNEEDED = ""
+# userland's CMakeLists.txt declares cmake_minimum_required below 3.5, which
+# cmake >= 4.0 refuses to configure at all ("Compatibility with CMake < 3.5
+# has been removed from CMake"). Set the floor cmake will treat the project
+# as targeting, per cmake's own suggested workaround.
 EXTRA_OECMAKE = "-DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS='-Wl,--no-as-needed' \
-                 -DVMCS_INSTALL_PREFIX=${exec_prefix} -DARM64=ON "
+                 -DVMCS_INSTALL_PREFIX=${exec_prefix} -DARM64=ON \
+                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "
 
 # Keep only those libs & bins that are actually
 # used during boot EEPROM image update
