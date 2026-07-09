@@ -1,0 +1,42 @@
+Upstream-Status: Inappropriate [oe-core toolchain-version specific]
+
+Under C23 (GCC 15's default -std=gnu23), an empty parameter list "()"
+in a function declaration means "takes no parameters", not "unspecified
+parameters" as under prior C standards. Two declarations in this tree
+relied on the old K&R meaning and now conflict with how they're
+actually called/declared elsewhere:
+
+- gpu_callback_s.func is declared "void (*func)()" but its only call
+  site passes one argument (c->cookie).
+- vchiq_bulk_receive_handle's copy_pagelist parameter is defined as
+  "int (*copy_pagelist)()" but vchiq_if.h's prototype for the same
+  function already declares it with two arguments
+  (char *, const struct pagelist_struct *), so the definition now
+  conflicts with the header's declaration.
+
+Give both their real signatures instead of the empty-parens shorthand.
+
+diff --git a/interface/vchiq_arm/vchiq_lib.c b/interface/vchiq_arm/vchiq_lib.c
+--- a/interface/vchiq_arm/vchiq_lib.c
++++ b/interface/vchiq_arm/vchiq_lib.c
+@@ -537,7 +537,7 @@
+    int size,
+    void *userdata,
+    VCHIQ_BULK_MODE_T mode,
+-   int (*copy_pagelist)())
++   int (*copy_pagelist)(char *vcptr, const struct pagelist_struct *pagelist))
+ {
+    VCHIQ_SERVICE_T *service = find_service_by_handle(handle);
+    VCHIQ_QUEUE_BULK_TRANSFER_T args;
+diff --git a/interface/vmcs_host/vc_vchi_gpuserv.h b/interface/vmcs_host/vc_vchi_gpuserv.h
+--- a/interface/vmcs_host/vc_vchi_gpuserv.h
++++ b/interface/vmcs_host/vc_vchi_gpuserv.h
+@@ -58,7 +58,7 @@
+ 
+ struct gpu_callback_s {
+   // callback to call when complete (can be NULL)
+-  void (*func)();
++  void (*func)(void *);
+   void *cookie;
+ };
+ 
