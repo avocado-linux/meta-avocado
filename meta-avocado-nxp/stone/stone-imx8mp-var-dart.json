@@ -54,6 +54,15 @@
         "script": "stone-provision-sd.sh",
         "envs": ["device_info"],
         "requires": ["usb"]
+      },
+      "uuu-emmc": {
+        "script": "stone-provision-uuu-emmc.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"],
+        "config": {
+          "emmc_uboot_dev": 2,
+          "emmc_mmcblk": 2
+        }
       }
     }
   },
@@ -64,7 +73,7 @@
         "type": "fwup",
         "template": "rootdisk.conf"
       },
-      "devpath": "/dev/mmcblk2",
+      "devpath": "/dev/mmcblk1",
       "block_size": 512,
       "uuid": "8b3f1c9e-2d4a-4f7b-9c6e-0a1b2c3d4e5f",
       "images": {

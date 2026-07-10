@@ -10,9 +10,15 @@ fdt_overlays=
 # DART-MX8M-PLUS debug console is UART1 (/dev/ttymxc0) on the DT8MCustomBoard;
 # it is the first entry in the machine's SERIAL_CONSOLES.
 console=ttymxc0,115200
+# Base device is the SD card: U-Boot mmc 1 / Linux mmcblk1 on the DART-MX8M-PLUS
+# (usdhc2=SD, usdhc3=eMMC -> U-Boot mmc 2 / Linux mmcblk2). The img/sd provision
+# profiles boot from SD with these values; the uuu-emmc profile flashes the eMMC
+# and patches devnum/mmcblk to 2 (see stone-provision-uuu-emmc.sh). Do NOT set the
+# eMMC values here or SD boot loads from the empty eMMC ("Couldn't find partition
+# mmc 2:3").
 devtype=mmc
-devnum=2
-mmcblk=2
+devnum=1
+mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
