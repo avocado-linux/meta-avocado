@@ -18,8 +18,21 @@ do_compile[depends] += "virtual/kernel:do_deploy"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 PACKAGES = "${PN}"
 
-# Default skip patterns for bootfiles collection
-AVOCADO_IMG_BOOTFILES_SKIP_DEFAULT = "rootfs initramfs var. -var-"
+# Default skip patterns for bootfiles collection.
+#
+# These exclude the three partition images the avocado-cli builds itself into
+# the runtime output dir (rootfs / initramfs / var); everything else in the
+# deploy dir (kernel Image, base DTBs, imx-boot, etc.) is what a SOM target
+# must ship so stone bundle can assemble the boot partition.
+#
+# Patterns are matched as a lowercase SUBSTRING of each deploy filename, so they
+# MUST be anchored to the full `avocado-image-<kind>-` basename. A bare token
+# like `-var-` also matches any machine whose name contains it (e.g. every
+# Variscite SOM: imx8mp-var-dart, imx93-var-som, ...), which silently strips the
+# kernel Image--<...>-var-dart-<...>.bin, the imx8mp-var-dart-*.dtb device trees,
+# and imx-boot from the package -- leaving their symlinks dangling and breaking
+# `stone bundle` with "File 'Image' not found in any input directory".
+AVOCADO_IMG_BOOTFILES_SKIP_DEFAULT = "avocado-image-rootfs avocado-image-initramfs avocado-image-var-"
 # Additional skip patterns (can be extended via bbappends)
 AVOCADO_IMG_BOOTFILES_SKIP_EXTRA ?= ""
 # Combined skip patterns
