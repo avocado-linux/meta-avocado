@@ -1,5 +1,17 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}:"
 
+# Re-include our fixed gn-utils.inc so its write_toolchain_file (with the
+# rust-linker cc_wrapper fix) overrides upstream's. Upstream
+# meta-browser/meta-chromium's chromium-gn.inc does a bare `require
+# gn-utils.inc`, which bitbake resolves to the copy in ITS OWN directory - our
+# same-named file under meta-avocado-distro is never consulted by that require.
+# A bbappend is parsed after the base recipe and all its requires, so requiring
+# our copy here re-runs its `def write_toolchain_file` (and the sibling arch
+# helpers) last, and the last python-function definition wins. The
+# GN_TARGET_ARCH_NAME:<arch> lines in the file are override assignments, so the
+# re-include is idempotent for them.
+require ${THISDIR}/gn-utils.inc
+
 SRC_URI += "file://0001-rust-fix-mismatched-lifetime-syntaxes-in-qr_code.patch \
         file://0002-fix-use-C-style-octal-literal-instead-of-C-23-0o-pre.patch \
         file://0003-fix-work-around-clang-20-crash-on-defaulted-non-memb.patch \
