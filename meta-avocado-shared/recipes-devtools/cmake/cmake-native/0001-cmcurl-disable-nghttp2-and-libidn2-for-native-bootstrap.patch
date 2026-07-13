@@ -1,0 +1,30 @@
+Upstream-Status: Inappropriate [oe-core native-build specific]
+
+cmake.bbclass unconditionally prepends cmake-native to DEPENDS for any
+recipe that inherits it (cmake-native_%.bbappend:11). Bundled curl
+(cmcurl) hardcodes USE_NGHTTP2 and USE_LIBIDN2 ON regardless of any -D
+override. Both would require a native DEPENDS that closes back onto
+cmake-native itself:
+
+  - nghttp2 inherits cmake directly.
+  - libidn2 inherits gtk-doc, which needs python3-native, which needs
+    expat-native, which inherits cmake - same cycle, one hop further out.
+
+Disable both in the bundled curl instead; cmake-native has no need for
+HTTP/2 multiplexing or internationalized domain names.
+
+Signed-off-by: Javier Tia <javier@peridio.com>
+
+diff --git a/Utilities/cmcurl/CMakeLists.txt b/Utilities/cmcurl/CMakeLists.txt
+index 1111111..2222222 100644
+--- a/Utilities/cmcurl/CMakeLists.txt
++++ b/Utilities/cmcurl/CMakeLists.txt
+@@ -101,6 +101,6 @@ set(USE_HTTPSRR OFF)
+-set(USE_LIBIDN2 ON)
++set(USE_LIBIDN2 OFF)
+ set(USE_LIBRTMP OFF)
+-set(USE_NGHTTP2 ON)
++set(USE_NGHTTP2 OFF)
+ set(USE_NGTCP2 OFF)
+ set(USE_OPENSSL_QUIC OFF)
+ set(USE_QUICHE OFF)
