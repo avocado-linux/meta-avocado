@@ -57,7 +57,16 @@ local_conf_header:
   qemu: |
 
   meta-avocado: |
-    USER_CLASSES:append = "${@ ' rm_work' if os.environ.get('AVOCADO_RM_WORK', '1') == '1' else ''} buildhistory buildstats buildstats-summary"
+    # buildhistory's version-going-backwards QA check compares each package's
+    # PKGR against BUILDHISTORY_DIR, which persists across branch switches and
+    # config changes in the same TMPDIR. Every time the workspace switches
+    # branches or a distro-level setting changes package versions (e.g. the
+    # removal of GLIBC_GENERATE_LOCALES), buildhistory falsely flags real,
+    # legitimate PR changes as regressions and fails do_packagedata_setscene -
+    # requiring a manual buildhistory wipe to unblock the build. Drop
+    # buildhistory; keep rm_work and buildstats/buildstats-summary, which do
+    # not have this failure mode.
+    USER_CLASSES:append = "${@ ' rm_work' if os.environ.get('AVOCADO_RM_WORK', '1') == '1' else ''} buildstats buildstats-summary"
 
     LICENSE_FLAGS_ACCEPTED:append = " commercial commercial_% synaptics-killswitch"
 
