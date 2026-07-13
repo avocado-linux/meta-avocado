@@ -62,3 +62,21 @@ GN_ARGS += "v8_enable_webassembly=false"
 # Inject a trailing space at parse time so the broken :append lands on
 # whitespace.
 GN_ARGS += " "
+
+# ninja's Rust allocator-error-handler link step (obj/build/rust/allocator/
+# liballoc_error_handler_impl.a) invokes the plain clang-native binary
+# directly as a universal cross-compiler (--target=aarch64-unknown-linux-gnu,
+# LLVM's canonical triple), which looks for compiler-rt's builtins under its
+# OWN resource directory in recipe-sysroot-native. oe-core's compiler-rt
+# recipe already builds and stages this exact per-target-triple layout - but
+# only into the dedicated cross-compiler's sysroot (recipe-sysroot), for use
+# by aarch64-avocado-linux-clang. Mirror the already-built archive into
+# recipe-sysroot-native so the plain clang-native binary finds it too.
+do_compile:prepend () {
+	src="${RECIPE_SYSROOT}/usr/lib/clang/latest/lib/aarch64-unknown-linux-gnu/libclang_rt.builtins.a"
+	dest_dir="${RECIPE_SYSROOT_NATIVE}/usr/lib/clang/latest/lib/aarch64-unknown-linux-gnu"
+	if [ -f "$src" ] && [ ! -f "$dest_dir/libclang_rt.builtins.a" ]; then
+		mkdir -p "$dest_dir"
+		cp "$src" "$dest_dir/libclang_rt.builtins.a"
+	fi
+}
