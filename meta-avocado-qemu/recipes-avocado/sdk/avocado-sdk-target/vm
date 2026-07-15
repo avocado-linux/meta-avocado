@@ -122,7 +122,17 @@ if [ ! -f "$IMAGE_FILE" ]; then
     exit 1
 fi
 
-qemu-img resize -f raw "$IMAGE_FILE" 1024M
+# QEMU's sd-card device requires a power-of-two backing size, so pad the image
+# up to one. Grow to the smallest power-of-two (in MiB) that is at least the
+# current image size, with a 1 GiB floor. Never shrink: qemu-img refuses to
+# shrink a raw image without --shrink (which would truncate the rootfs), so a
+# runtime whose image exceeds 1 GiB used to abort this script here under set -e.
+image_bytes=$(stat -c %s "$IMAGE_FILE")
+resize_mib=1024
+while [ $((resize_mib * 1024 * 1024)) -lt "$image_bytes" ]; do
+    resize_mib=$((resize_mib * 2))
+done
+qemu-img resize -f raw "$IMAGE_FILE" "${resize_mib}M"
 
 QEMU_BIOS="${STONE_DATA_DIR}/${QEMU_BIOS_FILE}"
 
