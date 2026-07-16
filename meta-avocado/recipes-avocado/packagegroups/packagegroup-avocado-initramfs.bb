@@ -6,8 +6,7 @@ inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = "\
-  cryptsetup \
-  cryptsetup-var \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'encrypted-var', 'cryptsetup cryptsetup-var', '', d)} \
   systemd \
   systemd-extra-utils \
   os-release-initrd \
