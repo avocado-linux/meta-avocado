@@ -1,0 +1,6 @@
+header:
+  version: 16
+
+local_conf_header:
+  feature/encrypted-var: |
+    DISTRO_FEATURES:append = " encrypted-var"
