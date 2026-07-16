@@ -32,13 +32,17 @@ SECRET=$(cat "$SECRET_FILE")
 # Key derivation: argon2id via openssl 3.x. Combines provisioned secret + hw-id
 # as the password. Salt is SHA-256(hw_id) truncated to 16 bytes - public,
 # per-device, non-secret. Parameters: m=65536 (64 MiB), t=3, p=1.
-SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 -binary | head -c 16 | xxd -p -c 256)
+SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-32)
 
-openssl kdf \
+# openssl kdf -binary emits the 64 raw key bytes directly (no hex round-trip, so
+# no xxd, which the minimal initramfs does not ship). stderr is left attached so
+# a KDF failure surfaces in the journal and trips set -e in the caller rather
+# than yielding a silent empty key.
+openssl kdf -binary \
     -keylen 64 \
     -kdfopt pass:"$(printf '%s:%s' "$SECRET" "$HW_ID")" \
     -kdfopt salt:"$SALT" \
     -kdfopt iter:3 \
     -kdfopt memcost:65536 \
     -kdfopt lanes:1 \
-    ARGON2ID 2>/dev/null | xxd -r -p
+    ARGON2ID
