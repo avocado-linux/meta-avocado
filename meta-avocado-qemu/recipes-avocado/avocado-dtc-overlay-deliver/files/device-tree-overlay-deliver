@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+
+# QEMU (qemuarm64) device-tree overlay delivery hook.
+#
+# The avocado CLI stages compiled .dtbo files plus an overlays.manifest.json and
+# runs this hook (the single fixed-path hook at
+# usr/libexec/avocado/device-tree-overlay-deliver) before `stone bundle`. Only
+# one BSP's implementation of this path is installed in a given machine build,
+# so this file owns delivery for the QEMU targets.
+#
+# Scope: DELIVERY ONLY. Each <name>.dtbo is placed on the boot FAT under
+# overlays/<name>.dtbo via a stone `files_append` manifest fragment (which the
+# CLI passes to `stone bundle --overlay`), and each overlay is marked
+# claimed_by. Boot-time SELECTION (wiring u-boot's apply_overlays / fdt_overlays
+# so the overlay is actually applied onto the DTB) is a separate step: QEMU's
+# `virt` machine hands u-boot a firmware-generated DTB with no overlay wiring in
+# place today. This hook proves the build/delivery path; the u-boot boot chain
+# is added on top of it.
+
+import json
+import os
+import sys
+
+KERNEL_NAMES = ("Image", "zImage", "uImage", "bzImage", "vmlinux", "vmlinuz")
+
+
+def die(msg):
+    sys.exit(f"[ERROR] device-tree-overlay-deliver (qemu): {msg}")
+
+
+def env(name):
+    value = os.environ.get(name)
+    if not value:
+        die(f"missing required environment variable {name}")
+    return value
+
+
+def find_boot_fat(stone):
+    """Locate the FAT image that carries the kernel, returning
+    (device_key, image_key). QEMU boot FATs have no config.txt, so the boot
+    image is identified by the kernel file it ships."""
+    for dev_key, dev in stone.get("storage_devices", {}).items():
+        for img_key, img in (dev.get("images") or {}).items():
+            if not isinstance(img, dict):
+                continue
+            if img.get("build_args", {}).get("type") != "fat":
+                continue
+            for entry in img["build_args"].get("files", []):
+                out = entry.get("out") if isinstance(entry, dict) else entry
+                base = str(out).rsplit("/", 1)[-1]
+                if base in KERNEL_NAMES:
+                    return dev_key, img_key
+    die("no FAT image ships a kernel in the stone manifest; cannot place overlays")
+
+
+def main():
+    manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
+    fragment_path = env("AVOCADO_DELIVERY_FRAGMENT")
+    stone_path = env("AVOCADO_STONE_MANIFEST")
+
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    if manifest.get("version") != 1:
+        die("overlays.manifest.json: unsupported version")
+    overlays = manifest.get("overlays", [])
+    if not overlays:
+        die("hook invoked with no overlays to deliver")
+
+    with open(stone_path) as f:
+        stone = json.load(f)
+    dev_key, img_key = find_boot_fat(stone)
+    platform = stone.get("runtime", {}).get("platform", "qemu")
+
+    files_append = [
+        {"in": ov["file"], "out": f"overlays/{ov['file']}"} for ov in overlays
+    ]
+    fragment = {
+        "storage_devices": {
+            dev_key: {"images": {img_key: {"build_args": {"files_append": files_append}}}}
+        }
+    }
+    with open(fragment_path, "w") as f:
+        json.dump(fragment, f, indent=2)
+
+    for ov in overlays:
+        ov["claimed_by"] = platform
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    names = ", ".join(ov["name"] for ov in overlays)
+    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) to "
+          f"{dev_key}/{img_key} for {platform}: {names} "
+          f"(delivery only; boot-time application is wired separately)")
+
+
+if __name__ == "__main__":
+    main()
