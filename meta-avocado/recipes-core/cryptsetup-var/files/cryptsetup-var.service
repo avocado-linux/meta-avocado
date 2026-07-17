@@ -10,7 +10,6 @@ ConditionPathExists=/dev/disk/by-partlabel/var
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/libexec/cryptsetup-var/cryptsetup-var.sh /dev/disk/by-partlabel/var
-SuccessExitStatus=0
 
 [Install]
 WantedBy=initrd-root-fs.target
