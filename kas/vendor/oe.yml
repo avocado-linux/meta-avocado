@@ -15,8 +15,11 @@ repos:
   bitbake:
     url: https://github.com/avocado-linux/vendor-bitbake
     path: bitbake
-    branch: "2.8-avocado"
-    commit: 82cf21bc6d1a2941c2dd292ecea327031a247a8b
+    # race-review-fixes = 2.8-avocado + mkdirhier EEXIST/ESTALE retries and the
+    # asyncrpc client connect timeout - cold-review fixes for the cross-node
+    # build race (a stalled hashserv/prserv connect no longer wedges the client).
+    branch: "race-review-fixes"
+    commit: 999cc46ab92b64fb2dc4fbdebf133f1257ced278
     layers:
       .: disabled
 
