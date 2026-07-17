@@ -23,7 +23,9 @@ QEMU_DATA_DIR="$SYSROOT_COMPONENTS_DIR/qemu-system-native/usr/share/qemu"
 # Bitbake native binaries use the uninative glibc loader as their ELF interpreter.
 # Invoke them via that loader with --library-path covering all native sysroot lib dirs.
 UNINATIVE_LOADER="$SYSROOT_UNINATIVE_DIR/x86_64-linux/lib/ld-linux-x86-64.so.2"
-LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev/null | tr '\n' ':')
+# `|| true`: find exits 1 on any unreadable dir, and under `pipefail` that
+# would abort the script here before QEMU ever launches.
+LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev/null | tr '\n' ':' || true)
 LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
 
 run_native() {
