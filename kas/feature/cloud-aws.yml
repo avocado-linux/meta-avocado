@@ -12,3 +12,5 @@ repos:
 
 local_conf_header:
   extra-aws: |
+  feature/cloud-aws: |
+    AVOCADO_FEATURE_GROUPS:append = " cloud-aws"

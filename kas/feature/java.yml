@@ -1,0 +1,9 @@
+header:
+  version: 16
+
+# Token-only: meta-openjdk-temurin is provisioned in base.yml (the always-on
+# KOS tools depend on the JRE). This fragment only opts the image into the
+# full JDK feature content.
+local_conf_header:
+  feature/java: |
+    AVOCADO_FEATURE_GROUPS:append = " java"
