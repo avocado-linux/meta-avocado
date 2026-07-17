@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+
+# avocado-dtc-overlay: build a device-tree overlay (.dtbo) from source (.dtso)
+# the way the kernel does it, inside the Avocado SDK.
+#
+# The correct overlay build is easy to get subtly wrong by hand: the source
+# must be preprocessed by cpp against the kernel's dt-bindings headers, then
+# compiled by dtc with -@ (overlay symbol support). Skip the cpp step and any
+# dt-bindings macro (GPIO_ACTIVE_HIGH, ...) is an undefined token; skip -@ and
+# an overlay that defines labels can never be referenced by the base or a
+# sibling overlay. This wrapper owns that invocation so it versions with the
+# kernel/feed, not with the CLI release.
+#
+# It deliberately does NOT try to prove the overlay will apply to a particular
+# base at boot: an overlay that targets a label the base does not define
+# compiles fine and only fails at apply time. That is a selection/runtime
+# concern, not a build one.
+
+set -euo pipefail
+
+SELF="${0##*/}"
+
+die() { echo "[ERROR] $SELF: $*" >&2; exit 1; }
+
+usage() {
+    cat >&2 <<EOF
+Usage: $SELF --src <file.dtso> --out <file.dtbo> [--kdir <dir>] [--name <n>]
+
+Compile a device-tree overlay source into a .dtbo using the kernel's
+dt-bindings headers.
+
+  --src <file>    Overlay source (.dtso/.dts). Required.
+  --out <file>    Output overlay blob (.dtbo). Required.
+  --kdir <dir>    Kernel dev-source dir (kernel-devsrc). Defaults to
+                  \$AVOCADO_KDIR, then \$OECORE_TARGET_SYSROOT/usr/src/kernel.
+  --name <name>   Informational label used in diagnostics only.
+  -h, --help      This message.
+
+Honors \$CPP and \$DTC to override the preprocessor and compiler.
+EOF
+}
+
+src=""
+out=""
+kdir="${AVOCADO_KDIR:-}"
+name=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --src)  src="${2:-}"; shift 2 ;;
+        --out)  out="${2:-}"; shift 2 ;;
+        --kdir) kdir="${2:-}"; shift 2 ;;
+        --name) name="${2:-}"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown argument: $1 (see --help)" ;;
+    esac
+done
+
+[[ -n "$src" ]] || { usage; die "--src is required"; }
+[[ -n "$out" ]] || { usage; die "--out is required"; }
+[[ -f "$src" ]] || die "source not found: $src"
+[[ -r "$src" ]] || die "source not readable: $src"
+
+label="${name:-$(basename "$src")}"
+
+# An overlay MUST declare /plugin/;. Without it dtc compiles a full device tree
+# that is silently never applied as an overlay - the single most common and
+# most confusing failure. Catch it before doing any work.
+grep -Eq '^[[:space:]]*/plugin/[[:space:]]*;' "$src" \
+    || die "$label: source is not a device-tree overlay (missing '/plugin/;')"
+
+# Resolve the kernel dev-source. kernel-devsrc installs to /usr/src/kernel in
+# the target sysroot; dt-bindings live under include/, and the dtc
+# include-prefixes tree symlinks to them.
+if [[ -z "$kdir" ]]; then
+    if [[ -n "${OECORE_TARGET_SYSROOT:-}" ]]; then
+        kdir="$OECORE_TARGET_SYSROOT/usr/src/kernel"
+    fi
+fi
+[[ -n "$kdir" ]] || die "kernel dev-source dir unknown: pass --kdir or set \$AVOCADO_KDIR / \$OECORE_TARGET_SYSROOT"
+[[ -d "$kdir" ]] || die "kernel dev-source dir not found: $kdir (is kernel-devsrc installed?)"
+
+bindings_inc="$kdir/include"
+prefixes_inc="$kdir/scripts/dtc/include-prefixes"
+[[ -d "$bindings_inc/dt-bindings" || -d "$prefixes_inc/dt-bindings" ]] \
+    || die "no dt-bindings under $kdir (is kernel-devsrc installed and complete?)"
+
+# In the SDK the preprocessor is the cross-canadian toolchain's, reached via
+# $CPP or the $CROSS_COMPILE prefix. Fall back to a plain host cpp (dtso
+# preprocessing is pure text, so any cpp works).
+if [[ -z "${CPP:-}" ]]; then
+    if [[ -n "${CROSS_COMPILE:-}" ]] && command -v "${CROSS_COMPILE}cpp" >/dev/null 2>&1; then
+        CPP="${CROSS_COMPILE}cpp"
+    else
+        CPP="cpp"
+    fi
+fi
+DTC="${DTC:-dtc}"
+command -v "$CPP" >/dev/null 2>&1 || die "preprocessor not found: $CPP"
+command -v "$DTC" >/dev/null 2>&1 || die "device-tree compiler not found: $DTC"
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+pre="$work/preprocessed.dts"
+
+# Preprocess exactly as the kernel build does: assembler-with-cpp so the DTS
+# tokeniser is happy, -nostdinc/-undef so only the kernel headers are visible,
+# -D__DTS__ so dt-bindings headers take their DTS branch.
+cpp_flags=(-nostdinc -undef -x assembler-with-cpp -D__DTS__)
+[[ -d "$prefixes_inc" ]] && cpp_flags+=(-I "$prefixes_inc")
+[[ -d "$bindings_inc" ]] && cpp_flags+=(-I "$bindings_inc")
+
+"$CPP" "${cpp_flags[@]}" "$src" -o "$pre" \
+    || die "$label: preprocessing failed"
+
+# -@ (overlay symbols): emits __symbols__ for labels this overlay defines so a
+# sibling overlay or the base can reference them. dtc warnings are expected on
+# real hardware overlays (reg formatting, etc.) and must not fail the build; a
+# genuine syntax/structure error makes dtc exit non-zero and we surface it.
+"$DTC" -@ -I dts -O dtb -o "$out" "$pre" \
+    || die "$label: dtc failed to compile the overlay"
+
+# Structural check: a real overlay materialises at least one fragment@ node.
+root_nodes="$(fdtget -l "$out" / 2>/dev/null || true)"
+grep -q '^fragment@' <<<"$root_nodes" \
+    || die "$label: compiled blob has no overlay fragments (is this actually an overlay?)"
+
+# If the overlay targets an external label via a fragment (target = <&name>),
+# that reference is resolved at apply time from the base's __symbols__ and MUST
+# be exported as a __fixups__ entry. Its absence means the reference was baked
+# to a literal phandle that can never bind - a silent boot-time failure. Path-
+# targeted and label-free overlays legitimately have no __fixups__, so this
+# only fires when a fragment target phandle is actually present.
+if grep -Eq 'target[[:space:]]*=[[:space:]]*<[[:space:]]*&' "$pre"; then
+    grep -q '^__fixups__$' <<<"$root_nodes" \
+        || die "$label: fragment targets an external phandle but the blob has no __fixups__ (overlay cannot bind to the base)"
+fi
+
+echo "$SELF: built $out from $label"
