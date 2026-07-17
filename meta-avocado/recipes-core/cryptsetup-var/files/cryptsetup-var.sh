@@ -60,7 +60,6 @@ if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
     if [ "$DM_SECTORS" -lt "$EXPECTED_DM" ]; then
         echo "cryptsetup-var: resizing LUKS container to fill partition"
         cryptsetup resize --key-file "$KEY_FILE" "$MAP_NAME"
-        btrfs filesystem resize max "$MAPPER"
     fi
 else
     # First boot - format the partition as LUKS2 (aes-xts-plain64, 512-bit key).
