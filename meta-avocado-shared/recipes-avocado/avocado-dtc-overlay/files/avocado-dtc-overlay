@@ -102,39 +102,51 @@ if [[ "$needs_bindings" == true ]]; then
         || die "no dt-bindings under $kdir (is kernel-devsrc installed and complete?)"
 fi
 
-# In the SDK the preprocessor is the cross-canadian toolchain's, reached via
-# $CPP or the $CROSS_COMPILE prefix. Fall back to a plain host cpp (dtso
-# preprocessing is pure text, so any cpp works).
-if [[ -z "${CPP:-}" ]]; then
-    if [[ -n "${CROSS_COMPILE:-}" ]] && command -v "${CROSS_COMPILE}cpp" >/dev/null 2>&1; then
-        CPP="${CROSS_COMPILE}cpp"
-    else
-        CPP="cpp"
-    fi
-fi
 DTC="${DTC:-dtc}"
-command -v "$CPP" >/dev/null 2>&1 || die "preprocessor not found: $CPP"
 command -v "$DTC" >/dev/null 2>&1 || die "device-tree compiler not found: $DTC"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-pre="$work/preprocessed.dts"
 
-# Preprocess exactly as the kernel build does: assembler-with-cpp so the DTS
-# tokeniser is happy, -nostdinc/-undef so only the kernel headers are visible,
-# -D__DTS__ so dt-bindings headers take their DTS branch.
-cpp_flags=(-nostdinc -undef -x assembler-with-cpp -D__DTS__)
-[[ -d "$prefixes_inc" ]] && cpp_flags+=(-I "$prefixes_inc")
-[[ -d "$bindings_inc" ]] && cpp_flags+=(-I "$bindings_inc")
+# The file dtc consumes: the cpp output for a #include-bearing overlay, or the
+# raw source otherwise. A no-#include overlay carries no cpp macros, so dtc
+# compiles it directly - no preprocessor, hence no SDK toolchain, is required.
+# This matches the dt-bindings relaxation above: skip cpp for exactly the
+# overlays that skip the dt-bindings tree.
+if [[ "$needs_bindings" == true ]]; then
+    # The SDK preprocessor is the cross-canadian toolchain's, reached via $CPP
+    # or the $CROSS_COMPILE prefix. environment-setup exports $CPP as a full
+    # command with arguments (e.g. "aarch64-...-gcc -E -mcpu=... --sysroot=..."),
+    # so treat it as a word-split command, not a single program name.
+    if [[ -n "${CPP:-}" ]]; then
+        read -r -a cpp_cmd <<<"$CPP"
+    elif [[ -n "${CROSS_COMPILE:-}" ]] && command -v "${CROSS_COMPILE}cpp" >/dev/null 2>&1; then
+        cpp_cmd=("${CROSS_COMPILE}cpp")
+    else
+        cpp_cmd=(cpp)
+    fi
+    command -v "${cpp_cmd[0]}" >/dev/null 2>&1 \
+        || die "preprocessor not found: ${cpp_cmd[0]}"
 
-"$CPP" "${cpp_flags[@]}" "$src" -o "$pre" \
-    || die "$label: preprocessing failed"
+    # Preprocess exactly as the kernel build does: assembler-with-cpp so the DTS
+    # tokeniser is happy, -nostdinc/-undef so only the kernel headers are
+    # visible, -D__DTS__ so dt-bindings headers take their DTS branch.
+    cpp_flags=(-nostdinc -undef -x assembler-with-cpp -D__DTS__)
+    [[ -d "$prefixes_inc" ]] && cpp_flags+=(-I "$prefixes_inc")
+    [[ -d "$bindings_inc" ]] && cpp_flags+=(-I "$bindings_inc")
+
+    dtc_src="$work/preprocessed.dts"
+    "${cpp_cmd[@]}" "${cpp_flags[@]}" "$src" -o "$dtc_src" \
+        || die "$label: preprocessing failed"
+else
+    dtc_src="$src"
+fi
 
 # -@ (overlay symbols): emits __symbols__ for labels this overlay defines so a
 # sibling overlay or the base can reference them. dtc warnings are expected on
 # real hardware overlays (reg formatting, etc.) and must not fail the build; a
 # genuine syntax/structure error makes dtc exit non-zero and we surface it.
-"$DTC" -@ -I dts -O dtb -o "$out" "$pre" \
+"$DTC" -@ -I dts -O dtb -o "$out" "$dtc_src" \
     || die "$label: dtc failed to compile the overlay"
 
 # Structural check: a real overlay materialises at least one fragment@ node.
@@ -148,7 +160,7 @@ grep -q '^fragment@' <<<"$root_nodes" \
 # to a literal phandle that can never bind - a silent boot-time failure. Path-
 # targeted and label-free overlays legitimately have no __fixups__, so this
 # only fires when a fragment target phandle is actually present.
-if grep -Eq 'target[[:space:]]*=[[:space:]]*<[[:space:]]*&' "$pre"; then
+if grep -Eq 'target[[:space:]]*=[[:space:]]*<[[:space:]]*&' "$dtc_src"; then
     grep -q '^__fixups__$' <<<"$root_nodes" \
         || die "$label: fragment targets an external phandle but the blob has no __fixups__ (overlay cannot bind to the base)"
 fi

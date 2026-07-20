@@ -135,7 +135,9 @@ fi
 
 # --- Case 6: $CROSS_COMPILE-prefixed preprocessor is used when set ---
 # /usr/bin/cpp exists, so CROSS_COMPILE=/usr/bin/ resolves ${CROSS_COMPILE}cpp.
-if CROSS_COMPILE="/usr/bin/" "$wrapper" --kdir "$kdir" --src "$work/path.dtso" \
+# Uses an #include overlay so the cpp step actually runs (a no-#include overlay
+# skips cpp entirely).
+if CROSS_COMPILE="/usr/bin/" "$wrapper" --kdir "$kdir" --src "$work/phandle.dtso" \
         --out "$work/cross.dtbo" >/dev/null 2>"$work/cross.err"; then
     ok "\$CROSS_COMPILE-prefixed cpp resolves and builds"
 else
@@ -170,6 +172,35 @@ else
     else
         bad "#include overlay failed but not for dt-bindings: $(cat "$work/needbind.err")"
     fi
+fi
+
+# --- Case 9: a no-#include overlay needs no preprocessor at all ---
+# The cpp step is skipped for #include-free overlays, so even a bogus $CPP must
+# not break the build (the SDK ships no host cpp; a simple overlay must still
+# compile via dtc directly).
+if CPP="/nonexistent/definitely-not-a-cpp" "$wrapper" --kdir "$kdir" --src "$work/path.dtso" \
+        --out "$work/nocpp.dtbo" >/dev/null 2>"$work/nocpp.err"; then
+    if fdtget -l "$work/nocpp.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
+        ok "no-#include overlay builds with no usable preprocessor (cpp skipped)"
+    else
+        bad "no-#include overlay built but produced no fragment@ node"
+    fi
+else
+    bad "no-#include overlay failed with a bogus \$CPP (cpp not skipped); stderr: $(cat "$work/nocpp.err")"
+fi
+
+# --- Case 10: a multi-token $CPP is honored (the SDK sets CPP="\$CC -E ...") ---
+# environment-setup exports CPP as a full command with args, not a bare program
+# name; the wrapper must word-split it rather than command -v the whole string.
+if CPP="cpp -DAVOCADO_MULTITOK" "$wrapper" --kdir "$kdir" --src "$work/phandle.dtso" \
+        --out "$work/multitok.dtbo" >/dev/null 2>"$work/multitok.err"; then
+    if fdtget -l "$work/multitok.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
+        ok "multi-token \$CPP is word-split and used"
+    else
+        bad "multi-token \$CPP built but __fixups__ missing"
+    fi
+else
+    bad "multi-token \$CPP rejected (command -v on the whole string?); stderr: $(cat "$work/multitok.err")"
 fi
 
 echo
