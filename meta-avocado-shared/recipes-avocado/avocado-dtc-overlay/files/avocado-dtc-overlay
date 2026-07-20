@@ -43,13 +43,15 @@ EOF
 src=""
 out=""
 kdir="${AVOCADO_KDIR:-}"
+kdir_explicit=false
+[[ -n "$kdir" ]] && kdir_explicit=true    # $AVOCADO_KDIR is a deliberate choice
 name=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --src)  src="${2:-}"; shift 2 ;;
         --out)  out="${2:-}"; shift 2 ;;
-        --kdir) kdir="${2:-}"; shift 2 ;;
+        --kdir) kdir="${2:-}"; kdir_explicit=true; shift 2 ;;
         --name) name="${2:-}"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
@@ -69,21 +71,36 @@ label="${name:-$(basename "$src")}"
 grep -Eq '^[[:space:]]*/plugin/[[:space:]]*;' "$src" \
     || die "$label: source is not a device-tree overlay (missing '/plugin/;')"
 
+# Does the source pull in cpp headers (#include <dt-bindings/...>)? Only then
+# does the overlay need kernel-devsrc's dt-bindings tree. A pure phandle/path
+# overlay with no #include preprocesses without any kernel headers, so
+# requiring kernel-devsrc (and a populated target sysroot) for it is needless
+# coupling that blocks otherwise-valid builds. A native /include/ of a .dtsi is
+# not a cpp header pull, so it does not trip this.
+needs_bindings=false
+grep -Eq '^[[:space:]]*#[[:space:]]*include' "$src" && needs_bindings=true
+
 # Resolve the kernel dev-source. kernel-devsrc installs to /usr/src/kernel in
 # the target sysroot; dt-bindings live under include/, and the dtc
 # include-prefixes tree symlinks to them.
-if [[ -z "$kdir" ]]; then
-    if [[ -n "${OECORE_TARGET_SYSROOT:-}" ]]; then
-        kdir="$OECORE_TARGET_SYSROOT/usr/src/kernel"
-    fi
+if [[ -z "$kdir" && -n "${OECORE_TARGET_SYSROOT:-}" ]]; then
+    kdir="$OECORE_TARGET_SYSROOT/usr/src/kernel"
 fi
-[[ -n "$kdir" ]] || die "kernel dev-source dir unknown: pass --kdir or set \$AVOCADO_KDIR / \$OECORE_TARGET_SYSROOT"
-[[ -d "$kdir" ]] || die "kernel dev-source dir not found: $kdir (is kernel-devsrc installed?)"
 
-bindings_inc="$kdir/include"
-prefixes_inc="$kdir/scripts/dtc/include-prefixes"
-[[ -d "$bindings_inc/dt-bindings" || -d "$prefixes_inc/dt-bindings" ]] \
-    || die "no dt-bindings under $kdir (is kernel-devsrc installed and complete?)"
+# An explicitly supplied --kdir / $AVOCADO_KDIR must resolve to a real dir so a
+# typo surfaces. A #include-bearing overlay additionally requires a resolvable
+# kdir carrying a dt-bindings tree. A no-#include overlay needs neither.
+bindings_inc="${kdir:+$kdir/include}"
+prefixes_inc="${kdir:+$kdir/scripts/dtc/include-prefixes}"
+if [[ "$kdir_explicit" == true ]]; then
+    [[ -d "$kdir" ]] || die "kernel dev-source dir not found: $kdir (is kernel-devsrc installed?)"
+fi
+if [[ "$needs_bindings" == true ]]; then
+    [[ -n "$kdir" ]] || die "source #includes headers but the kernel dev-source dir is unknown: pass --kdir or set \$AVOCADO_KDIR / \$OECORE_TARGET_SYSROOT"
+    [[ -d "$kdir" ]] || die "kernel dev-source dir not found: $kdir (is kernel-devsrc installed?)"
+    [[ -d "$bindings_inc/dt-bindings" || -d "$prefixes_inc/dt-bindings" ]] \
+        || die "no dt-bindings under $kdir (is kernel-devsrc installed and complete?)"
+fi
 
 # In the SDK the preprocessor is the cross-canadian toolchain's, reached via
 # $CPP or the $CROSS_COMPILE prefix. Fall back to a plain host cpp (dtso

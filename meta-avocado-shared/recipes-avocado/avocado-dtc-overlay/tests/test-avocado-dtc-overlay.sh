@@ -142,6 +142,36 @@ else
     bad "\$CROSS_COMPILE resolution broke the build; stderr: $(cat "$work/cross.err")"
 fi
 
+# --- Case 7: no-#include overlay builds without a dt-bindings tree ---
+# A pure path/phandle overlay references no headers, so it must not require
+# kernel-devsrc: the common case where the target sysroot has no dt-bindings.
+nobind="$work/kernel-nobindings"
+mkdir -p "$nobind"                     # exists, but has no include/dt-bindings
+if "$wrapper" --kdir "$nobind" --src "$work/path.dtso" \
+        --out "$work/nobind.dtbo" >/dev/null 2>"$work/nobind.err"; then
+    if fdtget -l "$work/nobind.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
+        ok "no-#include overlay builds without a dt-bindings tree"
+    else
+        bad "no-#include overlay built but produced no fragment@ node"
+    fi
+else
+    bad "no-#include overlay rejected without dt-bindings (relaxation missing); stderr: $(cat "$work/nobind.err")"
+fi
+
+# --- Case 8: #include overlay still requires dt-bindings (relaxation is scoped) ---
+# The relaxation must not leak: an overlay that #includes headers still needs a
+# resolvable dt-bindings tree or the cpp step would fail on undefined tokens.
+if "$wrapper" --kdir "$nobind" --src "$work/phandle.dtso" \
+        --out "$work/needbind.dtbo" >/dev/null 2>"$work/needbind.err"; then
+    bad "#include overlay accepted without dt-bindings (relaxation too broad)"
+else
+    if grep -qi 'dt-bindings' "$work/needbind.err"; then
+        ok "#include overlay still hard-errors when dt-bindings absent"
+    else
+        bad "#include overlay failed but not for dt-bindings: $(cat "$work/needbind.err")"
+    fi
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]
