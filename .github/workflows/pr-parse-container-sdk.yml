@@ -1,0 +1,39 @@
+name: PR-Parse-Container-SDK
+
+# Parse-only guard for the SDK container compositions.
+#
+# avocado-distro.bb lives in the always-enabled meta-avocado layer, so it is
+# parsed in every build. An unconditional `inherit` there (or any always-parsed
+# recipe) can break a composition that does not enable the inherited class's
+# layer -- e.g. the SDK container, which does not enable meta-avocado-distro --
+# while every device build keeps passing. That is what happened with 258fa675d:
+# the container target was unbuildable for months because nothing in CI parses
+# it. This job parses the container compositions on every PR so that class of
+# regression fails fast instead of silently.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  parse-container-sdk:
+    runs-on: molcajete
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: parse avocado-image-container (${{ matrix.arch }})
+        shell: bash
+        env:
+          BB_GIT_SHALLOW: "1"
+          SDKMACHINE: "x86_64"
+          DISTRO_CODENAME: ""
+          CI: "true"
+          SOURCE_MIRROR_URL: "file:///avocado/dl"
+          SSTATE_MIRRORS: "file:///avocado/sstate/PATH;downloadfilename=PATH"
+        run: |
+          . scripts/init-build kas/sdk/container-${{ matrix.arch }}.yml
+          kas shell meta-avocado/kas/sdk/container-${{ matrix.arch }}.yml:meta-avocado/kas/ci/mirrors.yml -c "bitbake -p"
