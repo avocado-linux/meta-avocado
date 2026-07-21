@@ -104,6 +104,12 @@ fi
 
 DTC="${DTC:-dtc}"
 command -v "$DTC" >/dev/null 2>&1 || die "device-tree compiler not found: $DTC"
+# fdtget backs the structural and __fixups__ checks below. Without it, those
+# checks read an empty node list and misreport a valid overlay as having "no
+# fragments", so verify it up front rather than misdiagnose later. It ships in
+# nativesdk-dtc alongside dtc.
+command -v fdtget >/dev/null 2>&1 \
+    || die "device-tree query tool not found: fdtget (expected from nativesdk-dtc)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
