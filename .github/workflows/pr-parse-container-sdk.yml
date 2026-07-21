@@ -15,8 +15,24 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Least privilege: this job only checks out and parses.
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up on
+# the single self-hosted runner.
+concurrency:
+  group: parse-container-sdk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   parse-container-sdk:
+    # `bitbake -p` executes recipe-embedded Python (__anonymous, inline ${@...})
+    # during parse, so untrusted fork code must not run on the persistent
+    # self-hosted runner. Run only on same-repo PRs -- which is also where this
+    # regression lands (an always-parsed recipe changing its inherit), so the
+    # guard keeps full coverage while closing the fork-RCE path.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: molcajete
     strategy:
       fail-fast: false
