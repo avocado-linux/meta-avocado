@@ -2,12 +2,13 @@
 BBCLASSEXTEND = "nativesdk"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
-# Same wazero //go:linkname / DCE issue as nativesdk-containerd
-# (docker vendors the same wazero). Patch adds receiving-side
-# `//go:linkname` opt-in directives so Go's linker keeps the asm
-# entrypoints alive across DCE. patchdir=src/import because docker's
-# vendor tree lives one level deeper than the recipe S.
-SRC_URI:append:class-nativesdk = " file://0001-wazero-Add-go-linkname-opt-in-for-DCE-safety.patch;patchdir=src/import"
+# Same wazero problem as nativesdk-containerd (docker vendors the same NRI +
+# wazero). The SDK docker only pulls images to pre-seed the target /var and
+# never runs WASM/NRI plugins, so gate NRI's generated wasm host bindings behind
+# `nri_no_wasm` (see DOCKER_BUILDTAGS below) -- dropping wazero. Same patch as
+# containerd; patchdir=src/import because docker's vendor tree lives one level
+# deeper than the recipe S.
+SRC_URI:append:class-nativesdk = " file://0001-nri-gate-wasm-host-behind-nri_no_wasm.patch;patchdir=src/import"
 
 # Disable seccomp for nativesdk - not needed on the SDK host
 PACKAGECONFIG:remove:class-nativesdk = "seccomp docker-init"
@@ -58,7 +59,9 @@ do_compile:class-nativesdk() {
     export CGO_ENABLED="1"
     export CGO_CFLAGS="${CFLAGS} --sysroot=${STAGING_DIR_TARGET}"
     export CGO_LDFLAGS="${LDFLAGS} --sysroot=${STAGING_DIR_TARGET}"
-    export DOCKER_BUILDTAGS='${BUILD_TAGS} ${PACKAGECONFIG_CONFARGS}'
+    # nri_no_wasm drops NRI's WASM plugin path and its wazero dependency
+    # (see the SRC_URI patch above).
+    export DOCKER_BUILDTAGS='${BUILD_TAGS} ${PACKAGECONFIG_CONFARGS} nri_no_wasm'
     export GO111MODULE=off
 
     export DISABLE_WARN_OUTSIDE_CONTAINER=1

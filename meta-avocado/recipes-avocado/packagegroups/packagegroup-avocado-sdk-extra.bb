@@ -4,15 +4,15 @@ LICENSE = "Apache-2.0"
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-# WRYNOSE-WIP: nativesdk-docker is intentionally NOT pulled in below.
-# containerd 2.2.x vendors wazero whose wazevo engine cross-package
-# //go:linkname's into asm-defined entrypoints in backend/isa/{amd64,arm64};
-# under Go 1.26.1 those symbols get DCE'd and the external linker fails with
-# "undefined reference to ...amd64.entrypoint". Receiving-side //go:linkname
-# opt-in + var-reference liveness anchor patch is staged in
-# meta-avocado-sdk/recipes-containers/{containerd,docker}/files/ but still
-# doesn't resolve the link error. Re-enable once that's solved (see
-# distro/docs/migrations/scarthgap-to-wrynose.md).
+# nativesdk-docker: RE-ENABLED for the docker_images pre-seed (avocado-cli uses
+# it to pull images into the target /var at build time; the SDK docker never
+# runs containers). Known issue being worked: containerd 2.2.x vendors wazero
+# whose wazevo engine cross-package //go:linkname's into asm-defined entrypoints
+# in backend/isa/{amd64,arm64}; under Go 1.26.1 those symbols can get DCE'd and
+# the external linker fails with "undefined reference to ...amd64.entrypoint".
+# The staged //go:linkname opt-in + var-anchor patch lives in
+# meta-avocado-sdk/recipes-containers/{containerd,docker}/files/.
+# See distro/docs/migrations/scarthgap-to-wrynose.md (#35/#36).
 
 SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-avocado-hitl \
@@ -25,6 +25,7 @@ SDK_TOOLCHAIN_DEPENDS = " \
   nativesdk-coreutils \
   nativesdk-cpio \
   nativesdk-diffutils \
+  ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', 'nativesdk-docker', '', d)} \
   nativesdk-dtc \
   nativesdk-elfutils \
   nativesdk-file \

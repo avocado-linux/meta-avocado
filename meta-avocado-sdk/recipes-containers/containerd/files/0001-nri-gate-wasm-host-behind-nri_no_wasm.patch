@@ -1,0 +1,91 @@
+From 21df7edf22331d294148c7456e1972f01b882d87 Mon Sep 17 00:00:00 2001
+From: Avocado Linux <distro@avocadolinux.org>
+Date: Wed, 22 Jul 2026 23:34:56 -0400
+Subject: [PATCH] nri: gate generated wasm host bindings behind nri_no_wasm
+
+NRI already gates its WASM plugin adapter behind the nri_no_wasm build tag
+(pkg/adaptation/wasm-{enabled,disabled}.go), but the generated go-plugin WASM
+host bindings (api_host.pb.go, api_options.pb.go) are gated only by
+'//go:build !wasip1', so they compile into every non-wasm host build and pull in
+github.com/tetratelabs/wazero (via github.com/knqyf263/go-plugin/wasm). wazero's
+wazevo engine cross-package //go:linkname's into asm entrypoints that Go 1.26's
+linker DCE's -> 'undefined reference to ...wazevo/backend/isa/amd64.entrypoint'.
+
+Gate those two generated files behind !nri_no_wasm too, and add api_host_nowasm.go
+providing the api.PluginPlugin type surface (the type, its Load method returning
+an error, and the unexported plugin interface) that pkg/adaptation references
+unconditionally -- but without the wazero runtime. The Load call in plugin.go is
+guarded by `if r.wasmService == nil`, and getWasmService returns nil under
+nri_no_wasm, so the WASM path never executes. Building with nri_no_wasm now drops
+the wazero dependency entirely. The SDK containerd/docker only pull images to
+pre-seed the target /var and never run WASM/NRI plugins.
+
+Upstream-Status: Pending [submit to github.com/containerd/nri]
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ .../containerd/nri/pkg/api/api_host.pb.go     |  2 +-
+ .../containerd/nri/pkg/api/api_host_nowasm.go | 31 +++++++++++++++++++
+ .../containerd/nri/pkg/api/api_options.pb.go  |  2 +-
+ 3 files changed, 33 insertions(+), 2 deletions(-)
+ create mode 100644 vendor/github.com/containerd/nri/pkg/api/api_host_nowasm.go
+
+diff --git a/vendor/github.com/containerd/nri/pkg/api/api_host.pb.go b/vendor/github.com/containerd/nri/pkg/api/api_host.pb.go
+index a2f901e..2841ded 100644
+--- a/vendor/github.com/containerd/nri/pkg/api/api_host.pb.go
++++ b/vendor/github.com/containerd/nri/pkg/api/api_host.pb.go
+@@ -1,4 +1,4 @@
+-//go:build !wasip1
++//go:build !wasip1 && !nri_no_wasm
+ 
+ //
+ //Copyright The containerd Authors.
+diff --git a/vendor/github.com/containerd/nri/pkg/api/api_host_nowasm.go b/vendor/github.com/containerd/nri/pkg/api/api_host_nowasm.go
+new file mode 100644
+index 0000000..3d70300
+--- /dev/null
++++ b/vendor/github.com/containerd/nri/pkg/api/api_host_nowasm.go
+@@ -0,0 +1,31 @@
++//go:build !wasip1 && nri_no_wasm
++
++package api
++
++import (
++	"context"
++	"fmt"
++)
++
++// Stub for nri_no_wasm builds. The real PluginPlugin, its Load method, and the
++// wazero-backed WASM runtime live in api_host.pb.go, compiled only when
++// nri_no_wasm is NOT set (it pulls in github.com/tetratelabs/wazero). NRI's
++// pkg/adaptation still references this type surface unconditionally:
++//   - adaptation.go declares a `wasmService *PluginPlugin` field,
++//   - wasm-disabled.go's getWasmService returns a nil `*PluginPlugin`,
++//   - plugin.go calls `wasmService.Load(...)` -- but only inside an
++//     `if r.wasmService == nil { return ... }` guard, so with WASM compiled out
++//     (wasmService is always nil) the call never actually runs.
++// So keep the type + Load signature (returning an error) without the wazero
++// dependency. The `plugin` interface mirrors api_host.pb.go's return type; it
++// embeds the exported Plugin (defined in api_service.pb.go).
++type plugin interface {
++	Close(ctx context.Context) error
++	Plugin
++}
++
++type PluginPlugin struct{}
++
++func (p *PluginPlugin) Load(ctx context.Context, pluginPath string, hostFunctions HostFunctions) (plugin, error) {
++	return nil, fmt.Errorf("WASM plugin support is disabled (built with nri_no_wasm)")
++}
+diff --git a/vendor/github.com/containerd/nri/pkg/api/api_options.pb.go b/vendor/github.com/containerd/nri/pkg/api/api_options.pb.go
+index cb2507e..cac9355 100644
+--- a/vendor/github.com/containerd/nri/pkg/api/api_options.pb.go
++++ b/vendor/github.com/containerd/nri/pkg/api/api_options.pb.go
+@@ -1,4 +1,4 @@
+-//go:build !wasip1
++//go:build !wasip1 && !nri_no_wasm
+ 
+ //
+ //Copyright The containerd Authors.
+-- 
+2.55.0
+

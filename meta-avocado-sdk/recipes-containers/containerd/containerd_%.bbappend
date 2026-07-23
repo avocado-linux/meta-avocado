@@ -2,14 +2,15 @@
 BBCLASSEXTEND = "nativesdk"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
-# wazero (vendored by containerd 2.2.x) uses //go:linkname from
-# wazevo/entrypoint_{amd64,arm64}.go to wire to asm-defined entrypoints
-# in a peer package. Go 1.23+ requires the receiving side to opt in
-# with `//go:linkname`, otherwise DCE drops the asm symbol and the
-# external linker fails with "undefined reference to ...amd64.entrypoint".
-# `-checklinkname=0` only relaxes parsing — doesn't keep the symbol
-# alive. This patch adds the opt-in directive on the receiving side.
-SRC_URI:append:class-nativesdk = " file://0001-wazero-Add-go-linkname-opt-in-for-DCE-safety.patch"
+# containerd 2.2.x vendors wazero via NRI's generated go-plugin WASM host
+# bindings, whose wazevo engine cross-package //go:linkname's into asm
+# entrypoints that Go 1.26's linker DCE's -> "undefined reference to
+# ...wazevo/backend/isa/amd64.entrypoint". The SDK containerd only backs
+# avocado-cli image pulls and never runs WASM/NRI plugins, so we build with
+# NRI's `nri_no_wasm` tag (see BUILDTAGS below) AND gate the generated wasm
+# host bindings (api_host/api_options.pb.go, otherwise compiled under
+# `!wasip1`) behind the same tag -- dropping the wazero dependency entirely.
+SRC_URI:append:class-nativesdk = " file://0001-nri-gate-wasm-host-behind-nri_no_wasm.patch"
 
 # Strip target-specific runtime dependencies for nativesdk
 RDEPENDS:${PN}:class-nativesdk = ""
@@ -43,7 +44,9 @@ do_compile:class-nativesdk() {
     # WASM runtime), causing "undefined reference to ...entrypoint"
     # link failures. Static linking adds nothing on the SDK host
     # (we have a runtime sysroot) and breaks cgo+native-asm builds.
-    export BUILDTAGS="no_btrfs netgo"
+    # nri_no_wasm drops NRI's WASM plugin path and its wazero dependency
+    # (see the SRC_URI patch above). We never run NRI plugins on the SDK host.
+    export BUILDTAGS="no_btrfs netgo nri_no_wasm"
 
     export CFLAGS="${CFLAGS}"
     # wazero's amd64 asm has text relocations which conflict with -pie
