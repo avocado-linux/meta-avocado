@@ -16,8 +16,6 @@ header:
       file: kas/vendor/nxp-evk.yml
     - repo: meta-avocado
       file: kas/target/distro.yml
-    - repo: meta-avocado
-      file: kas/feature/complete.yml
 
 repos:
   meta-avocado:

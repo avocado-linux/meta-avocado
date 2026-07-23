@@ -5,8 +5,6 @@ header:
     file: kas/vendor/arm.yml
   - repo: meta-avocado
     file: kas/feature/virtualization.yml
-  - repo: meta-avocado
-    file: kas/feature/complete.yml
 
 repos:
   meta-avocado:
