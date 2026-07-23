@@ -42,10 +42,11 @@ jobs:
       fail-fast: false
       matrix:
         machine: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
+        variant: [minimal, full]
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-      - name: build ${{ matrix.machine }}
+      - name: build ${{ matrix.machine }} (${{ matrix.variant }})
         shell: bash
         env:
           BB_GIT_SHALLOW: "1"
@@ -57,11 +58,37 @@ jobs:
           SOURCE_MIRROR_URL: "file:///avocado/dl"
           SSTATE_MIRRORS: "file:///avocado/sstate/PATH;downloadfilename=PATH"
         run: |
-          echo "TARGET: avocado-distro"
+          echo "TARGET: avocado-complete  VARIANT: ${{ matrix.variant }}"
           echo "SDKMACHINE: x86_64"
-          . scripts/init-build kas/machine/${{ matrix.machine }}.yml
-          # Append kas/feature/complete.yml so labeled PR builds ship the full
-          # image (boards default to minimal now). NOTE: --target avocado-complete
-          # is a BitBake target, unrelated to the kas/feature/complete.yml fragment.
+          # The variant MUST be in the build directory name. init-build derives
+          # "build-<machine>" from the basename alone, so without this both cells
+          # for one machine share a build dir, symlink, TMPDIR and bitbake.lock -
+          # and DL_DIR/SSTATE_DIR too, since kas/ci/mirrors.yml puts them under
+          # ${TMPDIR}, inside the colliding directory. Every matrix cell used to
+          # have a distinct directory by construction; adding the variant
+          # dimension is what removed that, so restore it explicitly.
+          . scripts/init-build kas/machine/${{ matrix.machine }}.yml \
+            "build-${{ matrix.machine }}-${{ matrix.variant }}"
+          # Build each labeled machine twice: minimal (board default, no umbrella)
+          # and full (umbrella appended). The minimal cell is durable per-board A4
+          # coverage - a base packagegroup RDEPENDing on removed feature content
+          # fails here.
+          #
+          # The full cell preserves the pre-existing umbrella coverage for the
+          # boards that already had it, but for alif-e8-devkit, stm32mp25-dk,
+          # imx8mp-var-dart, qemuarm64 and qemux86-64 it is NEW coverage that has
+          # never run: none of the five pulled complete.yml at base, directly or
+          # transitively. packagegroup-avocado-feature-system-base and
+          # -networking do not gate on DISTRO_FEATURES, so those boards will now
+          # build cockpit, nodejs, redis, curl, networkmanager, bluez5 and
+          # wireguard-tools for the first time. A failure in the full cell for
+          # one of them is a first run, not a regression.
+          #
+          # NOTE: --target avocado-complete is a BitBake target, unrelated to the
+          # kas/feature/complete.yml fragment.
+          COMPLETE=""
+          if [ "${{ matrix.variant }}" = "full" ]; then
+            COMPLETE=":meta-avocado/kas/feature/complete.yml"
+          fi
           # Use CI overlay to enable mirrors and avoid directory locking.
-          kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml:meta-avocado/kas/feature/complete.yml:meta-avocado/kas/ci/mirrors.yml --target avocado-complete
+          kas build "meta-avocado/kas/machine/${{ matrix.machine }}.yml${COMPLETE}:meta-avocado/kas/ci/mirrors.yml" --target avocado-complete
