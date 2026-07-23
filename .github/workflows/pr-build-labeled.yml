@@ -60,5 +60,8 @@ jobs:
           echo "TARGET: avocado-distro"
           echo "SDKMACHINE: x86_64"
           . scripts/init-build kas/machine/${{ matrix.machine }}.yml
-          # Use CI overlay to enable mirrors and avoid directory locking
-          kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml:meta-avocado/kas/ci/mirrors.yml --target avocado-complete
+          # Append kas/feature/complete.yml so labeled PR builds ship the full
+          # image (boards default to minimal now). NOTE: --target avocado-complete
+          # is a BitBake target, unrelated to the kas/feature/complete.yml fragment.
+          # Use CI overlay to enable mirrors and avoid directory locking.
+          kas build meta-avocado/kas/machine/${{ matrix.machine }}.yml:meta-avocado/kas/feature/complete.yml:meta-avocado/kas/ci/mirrors.yml --target avocado-complete
