@@ -34,3 +34,10 @@ local_conf_header:
     # do_compile with "Invalid major version".
     BB_GIT_SHALLOW:pn-libnvidia-container = "0"
     BB_GIT_SHALLOW_DEPTH:pn-libnvidia-container = "0"
+
+    # python3-onnx is provided by BOTH the CUDA meta-tegra-community `onnx`
+    # recipe and the generic meta-python-ai `python3-onnx` recipe. Pin the
+    # runtime package to the meta-tegra-community build (recipe PN "onnx") so
+    # the tegra feed ships the CUDA-aligned ONNX, consistent with python3-torch
+    # / torchvision above.
+    PREFERRED_RPROVIDER_python3-onnx = "onnx"
