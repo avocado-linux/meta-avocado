@@ -28,11 +28,13 @@ kas build kas/machine/<machine>.yml:kas/feature/<group>.yml:kas/feature/<group>.
 - At parse time `packagegroup-avocado-extra` expands every token into a
   `packagegroup-avocado-feature-<token>` runtime dependency.
 
-With no feature fragment, `AVOCADO_FEATURE_GROUPS` is empty and the image gets
-the always-on base content only.
+Boards are **minimal by default**: with no feature fragment appended,
+`AVOCADO_FEATURE_GROUPS` is empty and the image gets the always-on base content
+only.
 
 `kas/feature/complete.yml` is an umbrella that includes every group fragment
-except `ai`. Client vendor and machine files include it to ship the full set.
+except `ai`. No board file includes it; append it explicitly to ship the full
+set (see §3).
 
 ## 2. Feature groups
 
@@ -59,7 +61,7 @@ content builds against, not image packages directly): `clang.yml`,
 
 ### Bare minimal (base content only)
 
-A machine with no feature fragment. The smallest bring-up image.
+Any machine with no feature fragment. This is now the default for every board.
 
 ```bash
 kas build kas/machine/qemux86-64.yml
@@ -67,10 +69,12 @@ kas build kas/machine/qemux86-64.yml
 
 ### Minimal plus a few groups
 
-Stack only the groups you want. Always-on groups need no vendor layer:
+Stack only the groups you want. Always-on groups need no vendor layer. A
+workflow that needs a booted, reachable board (networking, ssh, python) composes
+those essentials explicitly:
 
 ```bash
-kas build kas/machine/qemuarm64.yml:kas/feature/system-base.yml:kas/feature/networking.yml:kas/feature/multimedia.yml
+kas build kas/machine/raspberrypi5.yml:kas/feature/system-base.yml:kas/feature/networking.yml:kas/feature/python.yml
 ```
 
 ### Adding graphics / Qt / browsers
@@ -84,13 +88,14 @@ kas build kas/machine/<gpu-machine>.yml:kas/feature/graphics.yml:kas/feature/qt.
 
 ### Full featured
 
-Pull every group through the umbrella (this is what client targets do):
+Every board is minimal by default, so ship the full set by appending the
+umbrella explicitly:
 
 ```bash
-kas build kas/machine/imx8mp-evk.yml
+kas build kas/machine/imx8mp-evk.yml:kas/feature/complete.yml
 ```
 
-To compose it onto a bare machine manually:
+The same append works on any machine:
 
 ```bash
 kas build kas/machine/qemuarm64.yml:kas/feature/complete.yml
@@ -98,15 +103,16 @@ kas build kas/machine/qemuarm64.yml:kas/feature/complete.yml
 
 ### DeepX (NPU) boards
 
-`ai` is excluded from `complete.yml` because it is `MACHINE_FEATURES`-gated. A
-deepx board stacks both (the grinn-astra machine file already includes
-`complete.yml` and `ai.yml`):
+`ai` is excluded from `complete.yml` because it is `MACHINE_FEATURES`-gated.
+Deepx machine files keep their own `ai.yml` include (deepx is machine-specific),
+but no board includes the umbrella. grinn-astra defaults to base + ai; append
+the umbrella for the full set:
 
 ```bash
-kas build kas/machine/grinn-astra-1680-sbc.yml
+kas build kas/machine/grinn-astra-1680-sbc.yml:kas/feature/complete.yml
 ```
 
-To compose it manually onto another deepx machine:
+On a deepx machine whose file does not already include `ai.yml`, append both:
 
 ```bash
 kas build kas/machine/<deepx-machine>.yml:kas/feature/complete.yml:kas/feature/ai.yml
@@ -122,6 +128,6 @@ kas build kas/machine/<deepx-machine>.yml:kas/feature/complete.yml:kas/feature/a
 - The SDK mirrors the target: `avocado-pkg-sdk-extra` pulls the Qt5 nativesdk
   toolchain only when the `qt` token is present, so an SDK build that opts out
   of `qt` does not require meta-qt5.
-- When adding a new client machine that should ship the full set, include
-  `kas/feature/complete.yml` (and `ai.yml` if it is a deepx board) rather than
-  listing groups individually.
+- Board files do not include the umbrella; a board is minimal by default. To
+  ship the full set, append `:kas/feature/complete.yml` at build time (and
+  `:kas/feature/ai.yml` on a deepx board) rather than adding an include.
