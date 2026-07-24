@@ -71,7 +71,7 @@
       "images": {
         "rootfs": "avocado-image-rootfs-jetson-agx-thor.erofs-lz4",
         "var": "avocado-image-var-jetson-agx-thor.btrfs",
-        "initramfs": "avocado-image-initramfs-jetson-agx-thor.cpio.gz",
+        "initramfs": "avocado-image-initramfs-jetson-agx-thor.cpio.zst",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-thor.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-thor.esp",
         "tegraflash_tos": "tos-avocado-jetson-agx-thor.img",
