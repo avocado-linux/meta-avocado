@@ -106,7 +106,7 @@
       "images": {
         "rootfs": "avocado-image-rootfs-jetson-agx-orin.erofs-lz4",
         "var": "avocado-image-var-jetson-agx-orin.btrfs",
-        "initramfs": "avocado-image-initramfs-jetson-agx-orin.cpio.gz",
+        "initramfs": "avocado-image-initramfs-jetson-agx-orin.cpio.zst",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-orin.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-orin.esp",
         "tegraflash_tos": "tos-avocado-jetson-agx-orin.img",
