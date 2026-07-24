@@ -92,7 +92,7 @@
       "images": {
         "rootfs": "avocado-image-rootfs-jetson-orin-nano.erofs-lz4",
         "var": "avocado-image-var-jetson-orin-nano.btrfs",
-        "initramfs": "avocado-image-initramfs-jetson-orin-nano.cpio.gz",
+        "initramfs": "avocado-image-initramfs-jetson-orin-nano.cpio.zst",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-orin-nano.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano.esp",
         "tegraflash_tos": "tos-avocado-jetson-orin-nano.img",
