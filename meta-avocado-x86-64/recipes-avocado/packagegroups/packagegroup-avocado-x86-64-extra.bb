@@ -65,7 +65,10 @@ RDEPENDS:${PN} = " \
   ${CPU_MICROCODE} \
   ${WIRELESS_TOOLS} \
   ${HARDWARE_TOOLS} \
-  packagegroup-avocado-nvidia-gpu \
   kernel-modules \
   swupdate \
 "
+
+# NVIDIA GPU driver is installed unconditionally on every x86-64 target via
+# PKG_EXTRA_INSTALL in conf/machine/include/avocado-x86-64.inc, so it is not
+# duplicated here (single source of truth; avoids the two drifting).
