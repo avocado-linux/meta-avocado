@@ -12,7 +12,7 @@ NVIDIA_SRC = "${WORKDIR}/${NVIDIA_ARCHIVE}"
 # unpack=0 prevents bitbake from trying to extract the .run file itself;
 # we handle extraction in do_unpack:append below.
 SRC_URI = "https://download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_DRIVER_VERSION}/${NVIDIA_ARCHIVE}-no-compat32.run;name=run;unpack=0"
-SRC_URI[run.sha256sum] = "1c4623284d8d3c6b843eadc4a878bff6f894bf99fc48169945e19af470ca6d90"
+SRC_URI[run.sha256sum] = "9e4f5d56e74e1ec12a05b2b0afda893c3187da71cbd8fb14c1a394bbeeeb4148"
 
 LICENSE = "NVIDIA-Proprietary"
 # NOTE: The md5 below must match the LICENSE file extracted from the .run archive.
