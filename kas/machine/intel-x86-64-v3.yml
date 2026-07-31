@@ -18,4 +18,8 @@ repos:
     layers:
       meta-avocado-x86-64:
 
+# NVIDIA driver is now pulled in for all x86-64 targets via
+# conf/machine/include/avocado-x86-64.inc (PKG_EXTRA_INSTALL), so no
+# per-machine override is needed here.
+
 machine: avocado-intel-x86-64-v3
