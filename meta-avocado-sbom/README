@@ -1,0 +1,137 @@
+meta-avocado-sbom
+=================
+
+Produces the package to CVE report that avocado-cli downloads to tell a user
+which CVEs affect the packages installed in their image.
+
+Sources
+-------
+
+Two artifacts a world build already leaves in TMPDIR, both persistent across
+builds:
+
+  ${CVE_CHECK_DIR}/<PN>_cve.json          cve-check results, per recipe
+  ${TMPDIR}/pkgdata/*/runtime-reverse/*   runtime package name -> recipe
+
+cve-check defaults CVE_CHECK_DIR to ${DEPLOY_DIR}/cve; the configuration below
+scopes it per machine.
+
+They are joined on the recipe name. CVEs are stored once per recipe and
+packages only reference it, so a recipe shipping many packages does not
+duplicate its CVE list.
+
+Requirements
+------------
+
+  kas build kas/machine/<machine>.yml:kas/feature/cve-check.yml
+
+That fragment carries this layer and the cve-check configuration. The SPDX
+fragment, kas/feature/sbom.yml, is independent - this report reads
+${DEPLOY_DIR}/cve, not the SPDX documents.
+
+Outside kas, the equivalent in local.conf, with this layer in bblayers.conf:
+
+  INHERIT += "cve-check"
+  CVE_CHECK_DIR = "${DEPLOY_DIR}/cve/${MACHINE}"
+
+Both have to be in place before the build that produces the packages, not just
+before this recipe runs.
+
+Usage
+-----
+
+  bitbake world
+  bitbake avocado-cve-report
+
+Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json.
+
+The same code can run standalone against a build tree, if needed:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --tmpdir build/tmp --machine <machine> -o avocado-cve-report.json
+
+Variables
+---------
+
+  AVOCADO_CVE_REPORT_FILE      output path
+  AVOCADO_CVE_REPORT_STATUS    cve-check status to report, default "Unpatched".
+                               Set to "Ignored" to audit what
+                               cve-extra-exclusions.inc and any local
+                               CVE_STATUS declaration suppress; each issue then
+                               carries "detail" (the CVE_STATUS keyword -
+                               cpe-incorrect is a false positive,
+                               upstream-wontfix is not) and "description" (the
+                               maintainer's rationale), which is the whole
+                               point of running that mode
+  AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
+
+Report format
+-------------
+
+  {
+    "version": "1",
+    "generated": "2026-07-31T12:00:00Z",
+    "machine": "avocado-qemux86-64",
+    "packages_digest": "sha256:0f3c...",
+    "status": "Unpatched",
+    "unscanned_recipes": [ "packagegroup-core-boot", "..." ],
+    "counts": { "recipes": 225, "cves": 2206,
+                "packaged_recipes": 177, "packaged_cves": 1927,
+                "packages": 30747, "cve_files": 3571, "stale_dropped": 0,
+                "unscanned_recipes": 0, "cve_files_unreadable": 0,
+                "pkgdata_unreadable": 0, "package_collisions": 0,
+                "unpatched_cves": 0, "patched_cves": 0, "ignored_cves": 0,
+                "unknown_status_cves": 0 },
+    "recipes": {
+      "openssl": {
+        "version": "3.5.7",
+        "packaged": true,
+        "cves": [ { "id": "CVE-...", "scorev3": "7.5", "vector": "NETWORK",
+                    "summary": "...", "link": "https://nvd.nist.gov/..." } ]
+      }
+    },
+    "packages": {
+      "libssl3": { "recipe": "openssl", "version": "3.5.7-r0.0",
+                   "origin": "avocado-qemux86-64" }
+    }
+  }
+
+"packaged": false marks a recipe absent from pkgdata, i.e. one that produced no
+runtime package. Two different things land there:
+
+  - -native and -cross recipes, which run on the build host and correlate to
+    nothing installed. They are kept because they still describe the build's
+    own exposure.
+  - deploy-only target recipes, which do ship on the device but outside any
+    package: imx-atf and imx-boot (do_install[noexec], inherit deploy),
+    u-boot variants with PACKAGES = "", optee-os, firmware-* recipes. Their
+    CVEs are real and on the device.
+  - recipes this build no longer produces at all, whose <PN>_cve.json is left
+    over from an earlier configuration. Switching
+    PREFERRED_PROVIDER_virtual/kernel, or dropping an AVOCADO_FEATURE_GROUPS
+    entry, leaves the old recipe's file in ${DEPLOY_DIR}/cve forever: nothing
+    upstream removes it, do_cve_check is nostamp with no sstate so cleanall
+    never reaches it, and stale_dropped cannot see it either - that counter
+    only fires when pkgdata knows the recipe at some other version. Delete
+    ${DEPLOY_DIR}/cve when you change what a machine builds.
+
+  cve_files             cve-check files consumed
+  unscanned_recipes     recipes that shipped packages but have no cve-check
+                        result - unscanned, not clean. Named individually in
+                        the top-level "unscanned_recipes" list, so a consumer
+                        can tell a recipe nothing examined from one that was
+                        examined and found clean; both are absent from
+                        "recipes". Normally non-zero: a
+                        recipe opts out with CVE_PRODUCT = "", which
+                        packagegroup.bbclass sets for every packagegroup. A
+                        complete avocado-qemuarm64 world build sits at 68, all
+                        of them opt-outs. Watch for a sharp rise, which means a
+                        world build that stopped early, or
+                        CVE_CHECK_LAYER_EXCLUDELIST / CVE_CHECK_SKIP_RECIPE
+  stale_dropped         cve-check entries discarded because no recipe in
+                        pkgdata built that version
+  cve_files_unreadable  cve-check files that would not parse, including files
+                        that are valid JSON of the wrong shape
+  pkgdata_unreadable    pkgdata entries that would not parse
+  package_collisions    package names claimed by more than one recipe or
+                        version; the first pkgdata directory won
