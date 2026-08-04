@@ -17,6 +17,13 @@ If you have direnv installed, there is a .envrc file added to the build dir to m
 kas build $KAS_YML
 ```
 
+## Feature groups
+
+Image content is opt-in: stack `kas/feature/<group>.yml` fragments onto a
+machine to build anything from a bare-minimal image to the full feature set.
+See [docs/feature-groups.md](docs/feature-groups.md) for the model and worked
+`kas build` recipes.
+
 ## Running in Qemu
 
 Qemu can be run with a swtpm with the following command

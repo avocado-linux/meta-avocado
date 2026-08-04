@@ -43,6 +43,52 @@ repos:
       meta-avocado:
       meta-avocado-shared:
 
+  # Base vendor layers: always provisioned because meta-avocado-distro carries
+  # unconditional bbappends/recipes that customize them (erlang, swupdate) or
+  # always-on packages depend on them (fwup, cryptoauthlib in system-base).
+  meta-atmel:
+    url: https://github.com/avocado-linux/vendor-meta-atmel
+    path: meta-atmel
+    branch: scarthgap
+    commit: b24958f1ef37ef2771e04bd4b2f23e7889466eca
+    layers:
+      .:
+
+  meta-erlang:
+    url: https://github.com/avocado-linux/vendor-meta-erlang
+    path: meta-erlang
+    commit: 62acd0499dc3fc1022b8edcd6f7785fd4255a8c1
+    branch: scarthgap
+    layers:
+      .:
+
+  meta-fwup:
+    url: https://github.com/avocado-linux/vendor-meta-fwup.git
+    path: meta-fwup
+    commit: 3dceffeae6ef10ae559300bce0ec591e20c2f055
+    branch: scarthgap
+    layers:
+      .:
+
+  meta-swupdate:
+    url: https://github.com/avocado-linux/vendor-meta-swupdate.git
+    path: meta-swupdate
+    commit: 8c08983e9c4b47779bfe0f730b210366965afb9d
+    branch: scarthgap
+    layers:
+      .:
+
+  # openjdk is base, not a feature: the always-on KOS tools kabtool and
+  # publishtool (in system-base) RDEPEND on openjdk-17-jre, so their nativesdk
+  # variants in the SDK pull nativesdk-openjdk-17-jre on every build.
+  meta-openjdk-temurin:
+    url: https://github.com/avocado-linux/vendor-meta-openjdk-temurin.git
+    path: meta-openjdk-temurin
+    branch: scarthgap
+    commit: 5804d9a8b33c40b7a6c6ecae9fc8799b8df61108
+    layers:
+      .:
+
 distro: avocado
 
 local_conf_header:
@@ -51,6 +97,32 @@ local_conf_header:
     PREFERRED_VERSION_qemu-native = "9%"
     PREFERRED_VERSION_qemu-user-static = "9%"
     PREFERRED_VERSION_nativesdk-qemu = "9%"
+
+  # meta-atmel ships a full BSP; mask everything except cryptoauthlib (the one
+  # recipe system-base consumes).
+  extra-atecc: |
+    BBMASK += "meta-atmel/recipes-atmel/"
+    BBMASK += "meta-atmel/recipes-bsp/"
+    BBMASK += "meta-atmel/recipes-connectivity/"
+    BBMASK += "meta-atmel/recipes-core/"
+    BBMASK += "meta-atmel/recipes-devtools/"
+    BBMASK += "meta-atmel/recipes-egt/"
+    BBMASK += "meta-atmel/recipes-graphics/"
+    BBMASK += "meta-atmel/recipes-httpd/"
+    BBMASK += "meta-atmel/recipes-kernel/"
+    BBMASK += "meta-atmel/recipes-multimedia/"
+    BBMASK += "meta-atmel/recipes-security/optee"
+    BBMASK += "meta-atmel/recipes-support/"
+    BBMASK += "meta-atmel/recipes-utils/"
+
+  git-lfs: |
+    HOSTTOOLS += "git-lfs"
+    FETCHCMD_git = "git -c core.fsyncobjectfiles=0"
+
+  extra-openjdk: |
+    PREFERRED_VERSION_openjdk-17-jdk ?= "17.0.12+7"
+    PREFERRED_VERSION_openjdk-17-jre ?= "17.0.12+7"
+    PREFERRED_VERSION_openjdk-17-jdk-native ?= "17.0.12+7"
 
   meta-avocado: |
     USER_CLASSES:append = "${@ ' rm_work' if os.environ.get('AVOCADO_RM_WORK', '1') == '1' else ''} buildhistory buildstats buildstats-summary"

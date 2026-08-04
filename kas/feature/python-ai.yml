@@ -17,7 +17,3 @@ repos:
     branch: scarthgap
     layers:
       .:
-
-local_conf_header:
-  extra-python-ai: |
-

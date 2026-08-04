@@ -9,7 +9,3 @@ repos:
     branch: scarthgap-clang20
     layers:
       .:
-
-local_conf_header:
-  extra-clang: |
-

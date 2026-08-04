@@ -9,3 +9,7 @@ repos:
     branch: scarthgap
     layers:
       meta-chromium:
+
+local_conf_header:
+  feature/browsers: |
+    AVOCADO_FEATURE_GROUPS:append = " browsers"
