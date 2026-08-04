@@ -11,6 +11,7 @@ SRC_URI:append:avocado-x86-64 = " \
     file://tpm.cfg \
     file://nvidia-gpu.cfg \
     file://x86-efi.cfg \
+    file://0001-Bluetooth-btmtk-mark-all-stub-functions-as-inline.patch \
 "
 
 inherit avocado-kernel-feed
