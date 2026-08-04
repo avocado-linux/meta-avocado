@@ -132,8 +132,6 @@
         {
           "name": "var",
           "image": "var",
-          "size": 512,
-          "size_unit": "mebibytes",
           "expand": "true"
         }
       ]

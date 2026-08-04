@@ -16,10 +16,19 @@ repos:
     url: https://github.com/avocado-linux/vendor-bitbake
     path: bitbake
     # race-review-fixes = 2.8-avocado + mkdirhier EEXIST/ESTALE retries and the
-    # asyncrpc client connect timeout - cold-review fixes for the cross-node
-    # build race (a stalled hashserv/prserv connect no longer wedges the client).
+    # asyncrpc client connect/handshake budgets - cold-review fixes for the
+    # cross-node build race (a stalled hashserv/prserv connect no longer wedges
+    # the client).
+    #
+    # Rebased onto the current 2.8-avocado tip for this merge. The branch had
+    # been cut from an older base, so pinning it while scarthgap moved forward
+    # would have dropped eleven commits that landed on 2.8-avocado in the
+    # meantime - among them the fetch2 deb/ipk member-name and striplevel
+    # validation, the shallow-ref quoting, RPM --no-absolute-filenames, and the
+    # hashserv unihash validation. Keeping the race fixes is not worth losing
+    # those, so the branch moved rather than the pin.
     branch: "race-review-fixes"
-    commit: 999cc46ab92b64fb2dc4fbdebf133f1257ced278
+    commit: 81d1e0e96a7a9a88ffc4171137b581bf97c33236
     layers:
       .: disabled
 
@@ -27,7 +36,6 @@ repos:
     url: https://github.com/avocado-linux/vendor-openembedded-core
     path: openembedded-core
     branch: scarthgap-avocado
-    commit: e8e93ce1a7a952caf0859f1952eaa9fcb08856f6
+    commit: 06b1c4f636f21d29d0786c79bc325000aa80547e
     layers:
       meta:
-
