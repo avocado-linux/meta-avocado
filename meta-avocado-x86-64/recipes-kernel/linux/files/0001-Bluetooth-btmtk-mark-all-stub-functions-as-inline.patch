@@ -1,0 +1,74 @@
+From a49f567bec75d39a4014c4511c98cdc03d0304db Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Tue, 4 Aug 2026 17:47:39 -0400
+Subject: [PATCH] Bluetooth: btmtk: mark all stub functions as inline
+
+Backport of upstream commit 23e88450bb04 ("Bluetooth: btmtk: Mark all
+stub functions as inline"), which is not yet in linux-stable 6.6.y.
+
+The CONFIG_BT_MTK-disabled #else stubs in btmtk.h are plain `static`, so
+btusb.c -- which includes the header unconditionally -- trips
+-Werror=unused-function on btmtk_fw_get_filename when MTK support is off,
+breaking the kernel build. Mark the stubs `static inline`, matching the
+already-inline btmtk_set_bdaddr stub directly above them.
+
+Upstream-Status: Backport [23e88450bb04]
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ drivers/bluetooth/btmtk.h | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/bluetooth/btmtk.h b/drivers/bluetooth/btmtk.h
+index 3055b97..ae26b5f 100644
+--- a/drivers/bluetooth/btmtk.h
++++ b/drivers/bluetooth/btmtk.h
+@@ -196,39 +196,39 @@ static inline int btmtk_set_bdaddr(struct hci_dev *hdev,
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static int btmtk_setup_firmware_79xx(struct hci_dev *hdev, const char *fwname,
++static inline int btmtk_setup_firmware_79xx(struct hci_dev *hdev, const char *fwname,
+ 				     wmt_cmd_sync_func_t wmt_cmd_sync)
+ {
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static int btmtk_setup_firmware(struct hci_dev *hdev, const char *fwname,
++static inline int btmtk_setup_firmware(struct hci_dev *hdev, const char *fwname,
+ 				wmt_cmd_sync_func_t wmt_cmd_sync)
+ {
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static void btmtk_reset_sync(struct hci_dev *hdev)
++static inline void btmtk_reset_sync(struct hci_dev *hdev)
+ {
+ }
+ 
+-static int btmtk_register_coredump(struct hci_dev *hdev, const char *name,
++static inline int btmtk_register_coredump(struct hci_dev *hdev, const char *name,
+ 				   u32 fw_version)
+ {
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static int btmtk_process_coredump(struct hci_dev *hdev, struct sk_buff *skb)
++static inline int btmtk_process_coredump(struct hci_dev *hdev, struct sk_buff *skb)
+ {
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static void btmtk_fw_get_filename(char *buf, size_t size, u32 dev_id,
++static inline void btmtk_fw_get_filename(char *buf, size_t size, u32 dev_id,
+ 				  u32 fw_ver, u32 fw_flavor)
+ {
+ }
+ 
+-static int btmtk_usb_hci_wmt_sync(struct hci_dev *hdev,
++static inline int btmtk_usb_hci_wmt_sync(struct hci_dev *hdev,
+ 				  struct btmtk_hci_wmt_params *wmt_params)
+ {
+ 	return -EOPNOTSUPP;
+-- 
+2.55.0
+
