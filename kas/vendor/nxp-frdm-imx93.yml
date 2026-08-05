@@ -36,3 +36,36 @@ repos:
   meta-imx:
     branch: wrynose-6.18.20-2.0.0
     commit: 52516b92a70669eb58b805810f2a27a07c874771
+
+    # meta-imx-ml does not parse at this release and contributes nothing to this
+    # board, so it is disabled rather than carried and worked around.
+    #
+    # Two independent breakages, both from the layer expecting a companion set
+    # Avocado does not assemble:
+    #
+    #   ERROR: ParseError at meta-imx-ml/recipes-libraries/neutron/
+    #   neutron_3.1.1.bb:1: Could not include required file
+    #   recipes-libraries/neutron/neutron_1.0.0.bb
+    #
+    # (walnascar carried neutron_1.0.0.bb, whinlatter replaced it with
+    # neutron_2.2.1.bb, and wrynose ships only neutron_3.1.1.bb while still
+    # requiring the 1.0.0 file), and then
+    #
+    #   ERROR: No recipes in default available for:
+    #     .../tim-vx/tim-vx_1.2.2.bbappend
+    #     .../tvm/tvm_0.7.0.bbappend
+    #     .../nnshark/nnshark_2023.11.imx.bbappend
+    #     .../nnstreamer-edge/nnstreamer-edge_0.2.6.bbappend
+    #     .../nnstreamer/nnstreamer_2.4.2.bbappend
+    #
+    # Excluding costs nothing here. packagegroup-avocado-imx-ml states that only
+    # the i.MX8M Plus with its Vivante VIP9000 NPU gets the VX-delegate eIQ
+    # stack and that the group is empty on every other machine, so the layer
+    # already contributed no packages to an i.MX93 image. This board's NPU is an
+    # Ethos-U65, which is not served by that stack.
+    #
+    # Scoped to this file, so the machines still on the 6.6.36 BSP keep the
+    # layer, where its recipes do parse. Revisit if NXP ships a
+    # self-contained meta-imx-ml or Avocado grows an Ethos-U ML feed.
+    layers:
+      meta-imx-ml: disabled
