@@ -3,10 +3,19 @@ header:
   includes:
     - repo: meta-avocado
       file: kas/base.yml
+    # Community FSLC base (meta-freescale + 3rdparty).
     - repo: meta-avocado
       file: kas/vendor/freescale.yml
+    # NXP proprietary meta-imx -> the i.MX93 Arm Ethos-U65 eIQ ML stack
+    # (packagegroup-avocado-imx-ml, machine-gated to mx93-nxp-bsp). The Ethos-U
+    # driver/delegate/firmware/vela live ONLY in meta-imx and require the NXP BSP
+    # (IMX_DEFAULT_BSP=nxp), so the NPU does not work on the community FSLC base.
+    # Transitively pulls kas/vendor/nxp.yml (IMX_DEFAULT_BSP=nxp, arm.yml,
+    # virtualization.yml). NOTE: nxp-evk.yml pins meta-imx 6.6.52-2.2.0, whereas
+    # imx93-frdm pins 6.6.36-2.1.0 -- the two i.MX93 boards track different NXP
+    # releases by design (evk shares the imx8mp-evk pin).
     - repo: meta-avocado
-      file: kas/feature/virtualization.yml
+      file: kas/vendor/nxp-evk.yml
     - repo: meta-avocado
       file: kas/target/distro.yml
     - repo: meta-avocado
