@@ -31,8 +31,9 @@ local_conf_header:
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx-rootfs"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-extra"
-    # NPU/eIQ ML stack -> feed. Machine-gated: only populated on mx8mp-nxp-bsp
-    # (i.MX8MP VIP9000); empty on the FRDM / non-8MP boards, so harmless here.
+    # NPU/eIQ ML runtime stack -> feed. Machine-gated inside the packagegroup:
+    # mx8mp-nxp-bsp gets the Vivante VX delegate stack, mx93-nxp-bsp the Arm
+    # Ethos-U delegate stack; empty on boards with no NPU, so harmless here.
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-ml"
     BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
     BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"
