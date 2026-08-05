@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Unlock or first-boot-format the /var LUKS2 container.
 # Called from cryptsetup-var.service in the initramfs.
 #
@@ -8,7 +8,14 @@
 # The script uses var-key.sh (in the same directory) to derive the key.
 # Exit non-zero on any failure so the unit fails rather than silently
 # mounting a plaintext /var.
-set -euo pipefail
+#
+# Provisioning is idempotent and resumable: each step is gated on observable
+# on-disk state (LUKS header, inner filesystem, TPM2 token), so a first boot
+# interrupted between steps (e.g. a power cut during field provisioning) heals
+# itself on the next boot instead of wedging /var into emergency mode forever.
+#
+# POSIX sh (not bash) so the initramfs needs no bash dependency.
+set -eu
 
 VAR_DEV="${1:-}"
 MAP_NAME="var"
@@ -21,38 +28,105 @@ SCRIPT_DIR="$(dirname "$0")"
 KEY_SCRIPT="${SCRIPT_DIR}/var-key.sh"
 
 # Derive the key (never hardcoded; sourced from var-key.sh).
-# The key is written to a temp file to avoid exposure in /proc.
-KEY_FILE=$(mktemp)
+# The key is written to a temp file to avoid exposure in /proc. Use /run, not
+# /tmp: systemd mounts a fresh tmpfs over /tmp partway through early boot, which
+# would shadow a key file created here before that mount and make cryptsetup's
+# --key-file fail with "Failed to open key file". /run is a stable early tmpfs
+# (RAM-only, never swapped or remounted) - the right place for transient secrets.
+KEY_FILE=$(mktemp -p /run)
 trap 'rm -f "$KEY_FILE"' EXIT
 "$KEY_SCRIPT" > "$KEY_FILE"
 
-if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
-    # Existing LUKS2 container - open it.
-    echo "cryptsetup-var: opening existing LUKS2 container on $VAR_DEV"
+# Return 0 if the LUKS header already carries a systemd-tpm2 token. The initrd
+# has no grep, and gawk mishandles raw binary under some locales, so match the
+# token type via awk over luksDump.
+has_tpm2_token() {
+    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/systemd-tpm2/{f=1} END{exit !f}'
+}
 
-    # Phase-2: Try TPM2-sealed keyslot first (PCR 7).
-    TPM2_OPENED=0
-    if [ -e /dev/tpm0 ] && command -v systemd-cryptenroll >/dev/null 2>&1; then
-        if cryptsetup open --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+# Open the container as /dev/mapper/var: the TPM2-sealed keyslot first (PCR 7),
+# the Argon2id key file as fallback. The Argon2id keyslot (slot 0) is ALWAYS
+# retained as the recovery path - it is never retired. A legitimate PCR 7 change
+# (a routine dbx/Secure Boot policy update, key rotation) makes the TPM2 unseal
+# fail; the recovery key then keeps /var reachable instead of locking it out
+# permanently.
+open_var() {
+    echo "cryptsetup-var: opening LUKS2 container on $VAR_DEV"
+    if has_tpm2_token; then
+        # A token exists, so a TPM is expected. On a fast reboot we can reach the
+        # open before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall
+        # back to Argon2id. Wait briefly for the device before deciding.
+        i=0
+        while [ ! -e /dev/tpm0 ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
+
+        # The token open needs the libcryptsetup TPM2 plugin, not the
+        # systemd-cryptenroll binary - so probe capability by just attempting it
+        # and letting it fall through to the Argon2id recovery key on failure.
+        if [ -e /dev/tpm0 ] && cryptsetup open --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
             echo "cryptsetup-var: opened via TPM2 token"
-            TPM2_OPENED=1
-            # Retire Argon2id keyslot only after confirmed TPM2 unseal.
-            # luksKillSlot is never called without this guard.
-            echo "cryptsetup-var: retiring Argon2id keyslot (TPM2 unseal verified)"
-            cryptsetup luksKillSlot --key-file "$KEY_FILE" "$VAR_DEV" 0 || true
+            return 0
         fi
+        echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
     fi
 
-    if [ "$TPM2_OPENED" -eq 0 ]; then
-        echo "cryptsetup-var: TPM2 not available or unseal failed - falling back to Argon2id keyslot"
-        if ! cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
-            echo "cryptsetup-var: Argon2id open failed - keyslot may have been retired after TPM2 verification" >&2
-            echo "cryptsetup-var: TPM2 unseal required; check PCR 7 state (Secure Boot policy)" >&2
-            exit 1
-        fi
+    if ! cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+        echo "cryptsetup-var: Argon2id open failed on $VAR_DEV" >&2
+        exit 1
     fi
+}
 
-    # Resize LUKS container if the partition grew (e.g. after avocado-grow-var).
+# Ensure a filesystem exists inside the opened container. This is the resume
+# point for a first boot interrupted after luksFormat but before mkfs: the open
+# path would otherwise leave /dev/mapper/var filesystem-less, which udev flags
+# SYSTEMD_READY=0 (an empty CRYPT-* device), so dev-mapper-var.device never
+# activates and var.mount times out into emergency mode - permanently, because
+# the reboot path never re-formats. Probe with blkid so ANY existing filesystem
+# is preserved (not only btrfs), and create the btrfs without -f so an
+# unexpected foreign signature fails loudly rather than being clobbered. mkfs's
+# close-after-write uevent flips SYSTEMD_READY to 1, the path a clean first boot
+# relies on.
+ensure_fs() {
+    if blkid -p "$MAPPER" >/dev/null 2>&1; then
+        return 0
+    fi
+    command -v mkfs.btrfs >/dev/null 2>&1 || {
+        echo "cryptsetup-var: mkfs.btrfs missing; cannot create the /var filesystem" >&2
+        exit 1
+    }
+    echo "cryptsetup-var: no filesystem on $MAPPER - creating BTRFS (first boot or resumed provisioning)"
+    mkfs.btrfs "$MAPPER"
+}
+
+# Ensure a TPM2 keyslot sealed to PCR 7 exists, keeping the Argon2id keyslot
+# (slot 0) as the recovery path. Idempotent and best-effort: skips when a token
+# already exists, when no TPM is present, or when systemd-cryptenroll is absent.
+# A failed enroll (e.g. firmware without measured boot) leaves the volume
+# encrypted under Argon2id rather than failing the unit. Running on every boot
+# also enrolls a device whose first boot happened before /dev/tpm0 existed.
+ensure_tpm2_enroll() {
+    has_tpm2_token && return 0
+    [ -e /dev/tpm0 ] || return 0
+    command -v systemd-cryptenroll >/dev/null 2>&1 || return 0
+
+    echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
+    # --unlock-key-file is required: without it systemd-cryptenroll prompts for a
+    # passphrase and blocks forever in the initrd (no controlling tty), and the
+    # raw binary key cannot pass through $PASSWORD (which cannot carry NULs).
+    if systemd-cryptenroll --unlock-key-file="$KEY_FILE" \
+            --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"; then
+        echo "cryptsetup-var: TPM2 PCR-7 keyslot enrolled"
+    else
+        echo "cryptsetup-var: TPM2 PCR-7 enroll failed - retaining Argon2id keyslot (firmware measured boot may be unavailable)" >&2
+    fi
+    return 0
+}
+
+# Grow the LUKS container to fill the partition (e.g. after avocado-grow-var).
+# Only the dm-crypt mapping is resized here; the btrfs filesystem is grown at
+# mount time via the x-systemd.growfs option on /var (btrfs resize is an online,
+# mounted-fs-only ioctl and cannot run against the not-yet-mounted mapper in the
+# initrd).
+maybe_resize() {
     PARTITION_SECTORS=$(blockdev --getsz "$VAR_DEV")
     DATA_OFFSET=$(dmsetup table "$MAP_NAME" 2>/dev/null | awk '{print $8}')
     DM_SECTORS=$(blockdev --getsz "$MAPPER")
@@ -61,8 +135,10 @@ if cryptsetup isLuks "$VAR_DEV" 2>/dev/null; then
         echo "cryptsetup-var: resizing LUKS container to fill partition"
         cryptsetup resize --key-file "$KEY_FILE" "$MAP_NAME"
     fi
-else
-    # First boot - format the partition as LUKS2 (aes-xts-plain64, 512-bit key).
+}
+
+# 1. Ensure the LUKS2 container exists (format on first boot).
+cryptsetup isLuks "$VAR_DEV" 2>/dev/null || {
     echo "cryptsetup-var: first boot - formatting $VAR_DEV as LUKS2"
     cryptsetup luksFormat \
         --type luks2 \
@@ -72,17 +148,18 @@ else
         --key-file "$KEY_FILE" \
         --batch-mode \
         "$VAR_DEV"
-    cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME"
-    echo "cryptsetup-var: creating BTRFS filesystem inside LUKS container"
-    mkfs.btrfs -f "$MAPPER"
+}
 
-    # Phase-2: Enroll TPM2 keyslot sealed to PCR 7 (Secure Boot state).
-    # Slot 0 (Argon2id) is retained as the recovery path until task 3.2
-    # confirms this slot unseals successfully on the next boot.
-    if [ -e /dev/tpm0 ] && command -v systemd-cryptenroll >/dev/null 2>&1; then
-        echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
-        systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"
-    fi
-fi
+# 2. Ensure it is open as /dev/mapper/var.
+[ -b "$MAPPER" ] || open_var
+
+# 3. Ensure a filesystem exists (self-heal a first boot interrupted before mkfs).
+ensure_fs
+
+# 4. Ensure a TPM2 PCR-7 keyslot exists (best-effort; self-heal / late enroll).
+ensure_tpm2_enroll
+
+# 5. Grow the container to fill the partition if it was expanded.
+maybe_resize
 
 echo "cryptsetup-var: $MAPPER ready"
