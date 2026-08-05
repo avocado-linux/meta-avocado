@@ -19,6 +19,15 @@ S = "${WORKDIR}/git"
 
 inherit module
 
+# The x86-64 kernel runs objtool (ORC/retpoline validation) on external modules.
+# objtool is a host tool the kernel recipe built against its OWN recipe-sysroot-
+# native; that RPATH is stale during this build (rm_work has cleaned the kernel's
+# native sysroot), so objtool aborts at runtime with
+# "libelf.so.1: cannot open shared object file". Depend on elfutils-native so
+# libelf is staged into our native sysroot, and put it on the loader path in
+# do_compile below.
+DEPENDS += "elfutils-native"
+
 # The open kernel modules are built from the kernel-open/ subdirectory.
 # The top-level Makefile dispatches into kernel-open/ when modules= target is used.
 MODULES_MODULE_SYMVERS_LOCATION = "kernel-open"
@@ -46,6 +55,11 @@ EXTRA_OEMAKE += " \
 
 # Build the open modules via the top-level Makefile target
 do_compile() {
+    # Let the kernel's objtool find libelf.so.1 (from elfutils-native) -- its own
+    # RPATH into the kernel's native sysroot no longer resolves here. Guard the
+    # append so an unset LD_LIBRARY_PATH does not leave a trailing ':' (an empty
+    # element the loader treats as the CWD).
+    export LD_LIBRARY_PATH="${STAGING_LIBDIR_NATIVE}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     oe_runmake KERNEL_UNAME=${KERNEL_VERSION} modules
 }
 

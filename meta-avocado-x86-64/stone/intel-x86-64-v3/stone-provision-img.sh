@@ -23,6 +23,17 @@ BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
 BLOCK_SIZE=$(jq -r '.storage_devices.rootdisk.block_size // 512' "$MANIFEST")
 
+# The "* 2048" conversions below are always correct: sgdisk numbers LBAs in
+# 512-byte units for an image file regardless of block_size, which is stone
+# metadata rather than an sgdisk input (same note at
+# meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh:88). What breaks is the
+# product, not the arithmetic - GPT addresses in the disk's own logical sectors,
+# so a 4Kn rootdisk cannot consume the 512-LBA table this emits. Refuse instead.
+if [ "$BLOCK_SIZE" != "512" ]; then
+    echo "ERROR: only 512-byte blocks supported (manifest declares ${BLOCK_SIZE})" >&2
+    exit 1
+fi
+
 echo "=== Creating disk image for ${PLATFORM} ==="
 echo "  Data directory: ${DATA_DIR}"
 echo "  Build directory: ${BUILD_DIR}"
