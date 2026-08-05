@@ -1,0 +1,38 @@
+header:
+  version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/nxp.yml
+
+repos:
+  # imx93-frdm pins meta-imx to the NXP wrynose-6.18.20-2.0.0 release. The
+  # url/path/layers come from kas/vendor/nxp.yml; only the refspec is set here.
+  #
+  # Separate from nxp-frdm.yml, which imx91-frdm and imx95-frdm still share on
+  # 6.6.36-2.1.0. Splitting follows the same per-family pattern as
+  # compulab.yml and the intent nxp.yml states: a family tracks its own NXP
+  # release without forcing revalidation of the others. imx95-frdm in
+  # particular pins linux-imx to 6.6.52 via SRCREV in
+  # meta-avocado-nxp/recipes-kernel/linux/linux-imx_%.bbappend, which a 6.18
+  # base would contradict.
+  #
+  # Why 6.18 for this board: the 6.6.36 SPL does not boot i.MX93 Rev1.2
+  # silicon. It initialises the PMIC and trains DDR, then stops before
+  # selecting a boot device, so the failure is identical whether the boot
+  # container arrives from an SD card or over USB serial download. NXP's own
+  # 6.6.36 FRDM image reproduces it on the same board, and the 6.18.2 firmware
+  # the board ships with boots that same hardware.
+  #
+  # meta-imx-frdm is deliberately absent rather than re-pinned. It exists only
+  # on lf-6.6.36-2.1.0 - its sole branch, already at upstream HEAD - and from
+  # whinlatter onward the FRDM machine configurations, including the
+  # imx93-11x11-lpddr4x-frdm.conf that avocado-imx93-frdm.conf requires, live
+  # in meta-imx-bsp itself. The i.MX93 FRDM device trees that layer supplied as
+  # kernel patches are native to the 6.18 kernel.
+  #
+  # wrynose-6.18.20-2.0.0 rather than whinlatter-6.18.2-1.0.0 because only the
+  # former lists wrynose in LAYERSERIES_COMPAT_fsl-bsp-release, and this branch
+  # tracks the wrynose OE-core series.
+  meta-imx:
+    branch: wrynose-6.18.20-2.0.0
+    commit: 52516b92a70669eb58b805810f2a27a07c874771
