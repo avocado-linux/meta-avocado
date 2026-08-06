@@ -137,17 +137,38 @@ confirm_destructive() {
   [ "$reply" = "$dev" ] || die "mismatch, aborting"
 }
 
+# Look next to the script, then walk up from the working directory. The second
+# half matters because the script is not always run from the checkout it
+# belongs to - a worktree, a copy on a board farm, or a symlink into PATH all
+# leave SCRIPT_DIR pointing somewhere with no build beside it.
 resolve_deploy_dir() {
   [ -n "$DEPLOY_DIR" ] && return 0
 
-  local candidate
-  for candidate in "$SCRIPT_DIR"/../../build*/build/tmp/deploy "$SCRIPT_DIR"/../../build/tmp/deploy; do
-    if [ -d "$candidate" ]; then
-      DEPLOY_DIR=$(cd "$candidate" && pwd)
-      return 0
-    fi
+  # Inside a bitbake or kas shell this is already the answer.
+  if [ -n "${BUILDDIR:-}" ] && [ -d "$BUILDDIR/tmp/deploy" ]; then
+    DEPLOY_DIR=$(cd "$BUILDDIR/tmp/deploy" && pwd)
+    return 0
+  fi
+
+  local root candidate
+  for root in "$SCRIPT_DIR/../.." $(ancestors_of "$PWD"); do
+    for candidate in "$root"/build*/build/tmp/deploy "$root"/build/tmp/deploy "$root"/tmp/deploy; do
+      if [ -d "$candidate" ]; then
+        DEPLOY_DIR=$(cd "$candidate" && pwd)
+        return 0
+      fi
+    done
   done
-  die "could not find a deploy directory; pass --deploy"
+
+  die "could not find a deploy directory; pass --deploy or set BUILDDIR"
+}
+
+ancestors_of() {
+  local dir="$1"
+  while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+    printf '%s\n' "$dir"
+    dir=$(dirname "$dir")
+  done
 }
 
 resolve_machine() {
