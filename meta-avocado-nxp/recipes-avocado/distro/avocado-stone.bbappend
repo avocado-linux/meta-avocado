@@ -6,6 +6,18 @@ do_compile[depends] += "imx-boot:do_deploy"
 
 DEPENDS += " jq-native mkfat-native fwup-native"
 
+# fw_setenv, for stone-provision-uuu-emmc.sh, which patches devnum and mmcblk
+# into the U-Boot environment inside the disk image before writing it. jq and
+# fwup arrive above; fw_setenv had no provider, so do_stone_provision died with
+# "fw_setenv: command not found" the first time that profile was selected.
+# libubootenv ships it (it also PROVIDES u-boot-fw-utils).
+#
+# Scoped to the profile that calls it rather than added to the shared
+# avocado-stone.bb: 5 of the 30 avocado-*.conf machines list uuu-emmc in
+# STONE_PROVISIONING, and the other 25 would build a native package for a
+# script they never deploy.
+DEPENDS:append:stone-uuu-emmc = " libubootenv-native"
+
 SRC_URI += " \
     file://rootdisk.conf \
 "
