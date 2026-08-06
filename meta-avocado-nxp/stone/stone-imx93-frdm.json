@@ -93,7 +93,8 @@
             ]
           }
         },
-        "rootfs": "avocado-image-rootfs-imx93-frdm.erofs-lz4"
+        "rootfs": "avocado-image-rootfs-imx93-frdm.erofs-lz4",
+        "var": "avocado-image-var-imx93-frdm.btrfs"
       },
       "partitions": [
         {
@@ -148,7 +149,7 @@
         },
         {
           "name": "var",
-          "image": "",
+          "image": "var",
           "expand": "true"
         }
       ]
