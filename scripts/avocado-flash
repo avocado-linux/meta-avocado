@@ -1,0 +1,319 @@
+#!/usr/bin/env bash
+
+# Write a built Avocado OS image to a board, over whichever transport the
+# medium needs.
+#
+# Backends are selected from the medium rather than hardcoded, so a board that
+# provisions over a different transport is a new backend rather than a new
+# script. Adding one means adding a resolve_* and a flash_* function; nothing
+# else in here is medium-specific.
+#
+#   sd     removable block device   fwup (default) or bmaptool
+#   emmc   USB serial download      uuu
+#
+# Unlike the sibling dev-* scripts this uses the full strict set rather than a
+# bare `set -e`: it writes raw block devices, so an unset variable expanding to
+# empty or a failure swallowed mid-pipeline can destroy the wrong disk.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+
+usage() {
+  cat <<EOF
+Usage: $0 [OPTIONS] <medium> [device]
+
+Write a built Avocado OS image to a board.
+
+Arguments:
+    medium              sd    - removable block device (SD card, USB stick)
+                        emmc  - on-board eMMC over USB serial download
+    device              Block device for 'sd' (e.g. /dev/sdb). Whole disk,
+                        never a partition. Ignored for 'emmc'.
+
+Options:
+    -m, --machine NAME  Avocado machine (default: \$MACHINE, else autodetect
+                        when exactly one image directory exists)
+    -d, --deploy DIR    Deploy directory (default: autodetect from the build)
+    -b, --backend NAME  Override the backend: fwup, bmaptool, uuu
+    -n, --dry-run       Print what would run; touch nothing
+    -y, --assume-yes    Skip the interactive confirmation. Intended for a
+                        board farm where the device comes from an exporter,
+                        not for interactive use.
+    -h, --help          This text
+
+Backends:
+    fwup      Writes the stone fwup archive. The default for 'sd' because it
+              is the only backend that evaluates the manifest, so partitions
+              marked expand grow to fill the medium. A raw-image backend
+              writes the fixed-size image and leaves the remainder unused.
+    bmaptool  Writes a raw .wic/.img, skipping unmapped blocks and verifying
+              a SHA256 per mapped region. Use for images that are not stone
+              archives. Needs a sibling .bmap to be sparse-aware; without one
+              it falls back to a full copy.
+    uuu       NXP serial-download protocol. The board must be in serial
+              download mode before this runs.
+
+Examples:
+    $0 sd /dev/sdb
+    $0 --machine avocado-imx93-frdm sd /dev/sdb
+    $0 --backend bmaptool sd /dev/sdb
+    $0 emmc
+EOF
+}
+
+die() {
+  echo "avocado-flash: $*" >&2
+  exit 1
+}
+
+# Backends are found in the build's native sysroots rather than assumed on the
+# host: fwup is not packaged for most distributions, and the per-recipe
+# component directories do not resolve their shared libraries because those
+# live in sibling component trees. A recipe sysroot does resolve them, so
+# prefer one and fall back to the host only if the build has not been run.
+find_native_tool() {
+  local tool="$1" sysroot
+  for sysroot in "${DEPLOY_DIR%/deploy*}"/work/*/avocado-stone/*/recipe-sysroot-native; do
+    if [ -x "$sysroot/usr/bin/$tool" ]; then
+      printf '%s' "$sysroot"
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_native_tool() {
+  local tool="$1"
+  shift
+  local sysroot
+  if sysroot=$(find_native_tool "$tool"); then
+    # sudo drops LD_LIBRARY_PATH, so it is passed through env rather than
+    # exported.
+    RUN_CMD=(sudo env "LD_LIBRARY_PATH=$sysroot/usr/lib" "$sysroot/usr/bin/$tool" "$@")
+  elif command -v "$tool" >/dev/null 2>&1; then
+    RUN_CMD=(sudo "$tool" "$@")
+  else
+    die "$tool not found in the build sysroot or on PATH (run a build first)"
+  fi
+}
+
+# Refuse anything that is not an unmounted, removable whole disk. fwup and
+# bmaptool both rewrite the partition table from sector 0, so a mistyped
+# letter destroys whatever it names with no prompt and no undo. Development
+# hosts routinely carry multi-terabyte disks on the same /dev/sd* namespace as
+# the card reader.
+assert_safe_block_device() {
+  local dev="$1" base mounted
+
+  [ -b "$dev" ] || die "not a block device: $dev"
+
+  base=$(basename "$dev")
+  [ -d "/sys/block/$base" ] \
+    || die "refusing a partition: pass the whole disk (e.g. /dev/sdb, not $dev)"
+
+  [ "$(cat "/sys/block/$base/removable" 2>/dev/null)" = "1" ] \
+    || die "refusing $dev: the kernel does not report it removable"
+
+  mounted=$(lsblk -nro MOUNTPOINTS "$dev" | grep -c . || true)
+  [ "$mounted" -eq 0 ] || {
+    lsblk -o NAME,SIZE,TYPE,RM,MOUNTPOINTS "$dev" >&2
+    die "refusing $dev: it has mounted partitions"
+  }
+}
+
+confirm_destructive() {
+  local dev="$1" reply
+
+  # A dry run writes nothing, so requiring confirmation would only make it
+  # hang when called non-interactively.
+  [ "$DRY_RUN" = "1" ] && return 0
+  [ "$ASSUME_YES" = "1" ] && return 0
+
+  echo "=== writing the whole OS to $dev (destructive) ==="
+  lsblk -o NAME,SIZE,TYPE,RM,MODEL "$dev"
+  echo
+  read -r -p "type the device again to confirm: " reply
+  [ "$reply" = "$dev" ] || die "mismatch, aborting"
+}
+
+resolve_deploy_dir() {
+  [ -n "$DEPLOY_DIR" ] && return 0
+
+  local candidate
+  for candidate in "$SCRIPT_DIR"/../../build*/build/tmp/deploy "$SCRIPT_DIR"/../../build/tmp/deploy; do
+    if [ -d "$candidate" ]; then
+      DEPLOY_DIR=$(cd "$candidate" && pwd)
+      return 0
+    fi
+  done
+  die "could not find a deploy directory; pass --deploy"
+}
+
+resolve_machine() {
+  [ -n "$MACHINE_NAME" ] && return 0
+
+  if [ -n "${MACHINE:-}" ]; then
+    MACHINE_NAME="$MACHINE"
+    return 0
+  fi
+
+  local dirs=()
+  local d
+  for d in "$DEPLOY_DIR"/images/*/; do
+    [ -d "$d" ] && dirs+=("$(basename "$d")")
+  done
+
+  case "${#dirs[@]}" in
+    1) MACHINE_NAME="${dirs[0]}" ;;
+    0) die "no images found under $DEPLOY_DIR/images; pass --machine" ;;
+    *) die "several machines built (${dirs[*]}); pass --machine" ;;
+  esac
+}
+
+# The fwup archive is produced by stone provision, not by stone bundle. A
+# bundle-only rebuild refreshes os-bundle.aos and leaves this stale, so its
+# age is worth reporting rather than silently writing yesterday's bootloader.
+resolve_fwup_archive() {
+  local archive="$DEPLOY_DIR/stone/_build/${MACHINE_NAME#avocado-}-rootdisk.zip"
+  [ -f "$archive" ] || archive="$DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.zip"
+  [ -f "$archive" ] || die "no fwup archive under $DEPLOY_DIR/stone/_build (run stone_provision)"
+  printf '%s' "$archive"
+}
+
+resolve_raw_image() {
+  local image
+  for image in "$DEPLOY_DIR/images/$MACHINE_NAME"/*.wic "$DEPLOY_DIR/stone/_build"/*-rootdisk.img; do
+    [ -f "$image" ] && {
+      printf '%s' "$image"
+      return 0
+    }
+  done
+  die "no raw .wic or rootdisk.img found for $MACHINE_NAME"
+}
+
+flash_fwup() {
+  local dev="$1" archive
+  archive=$(resolve_fwup_archive)
+
+  echo "  archive: $archive ($(date -r "$archive" '+%Y-%m-%d %H:%M'))"
+  run_native_tool fwup -a -i "$archive" -d "$dev" -t complete
+  execute
+}
+
+flash_bmaptool() {
+  local dev="$1" image bmap
+  image=$(resolve_raw_image)
+  bmap="${image%.*}.bmap"
+
+  echo "  image: $image"
+  if [ -f "$bmap" ]; then
+    RUN_CMD=(sudo bmaptool copy --bmap "$bmap" "$image" "$dev")
+  else
+    echo "  no $bmap - falling back to a full copy without sparse skipping"
+    RUN_CMD=(sudo bmaptool copy --nobmap "$image" "$dev")
+  fi
+  command -v bmaptool >/dev/null 2>&1 || die "bmaptool not installed"
+  execute
+}
+
+# uuu drives the NXP boot ROM over USB, so it needs the host's USB stack and
+# the board already in serial download mode. There is no block device to
+# guard here - the transport itself selects the target.
+flash_uuu() {
+  local boot="$DEPLOY_DIR/images/$MACHINE_NAME/imx-boot"
+  [ -f "$boot" ] || die "no imx-boot for $MACHINE_NAME"
+
+  if ! lsusb -d 1fc9: >/dev/null 2>&1 && ! lsusb -d 15a2: >/dev/null 2>&1; then
+    die "no NXP device in serial download mode (check the boot switches)"
+  fi
+
+  echo "  bootloader: $boot"
+  RUN_CMD=(sudo uuu -b emmc "$boot")
+  command -v uuu >/dev/null 2>&1 || die "uuu not installed"
+  execute
+}
+
+execute() {
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "dry-run: ${RUN_CMD[*]}"
+    return 0
+  fi
+  "${RUN_CMD[@]}"
+}
+
+MACHINE_NAME=""
+DEPLOY_DIR=""
+BACKEND=""
+DRY_RUN=0
+ASSUME_YES=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m | --machine)
+      MACHINE_NAME="$2"
+      shift 2
+      ;;
+    -d | --deploy)
+      DEPLOY_DIR="$2"
+      shift 2
+      ;;
+    -b | --backend)
+      BACKEND="$2"
+      shift 2
+      ;;
+    -n | --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -y | --assume-yes)
+      ASSUME_YES=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*) die "unknown option: $1 (see --help)" ;;
+    *) break ;;
+  esac
+done
+
+[ $# -ge 1 ] || {
+  usage >&2
+  exit 1
+}
+
+MEDIUM="$1"
+DEVICE="${2:-}"
+
+resolve_deploy_dir
+resolve_machine
+
+echo "machine: $MACHINE_NAME"
+echo "deploy:  $DEPLOY_DIR"
+
+case "$MEDIUM" in
+  sd)
+    [ -n "$DEVICE" ] || die "'sd' needs a device (see --help)"
+    assert_safe_block_device "$DEVICE"
+    confirm_destructive "$DEVICE"
+    case "${BACKEND:-fwup}" in
+      fwup) flash_fwup "$DEVICE" ;;
+      bmaptool) flash_bmaptool "$DEVICE" ;;
+      *) die "backend ${BACKEND} cannot write a block device" ;;
+    esac
+    sync
+    echo "done. set the board's boot switches to the SD position and power on."
+    ;;
+  emmc)
+    case "${BACKEND:-uuu}" in
+      uuu) flash_uuu ;;
+      *) die "backend ${BACKEND} cannot write over serial download" ;;
+    esac
+    echo "done. set the board's boot switches to the eMMC position and power on."
+    ;;
+  *)
+    die "unknown medium: $MEDIUM (see --help)"
+    ;;
+esac
