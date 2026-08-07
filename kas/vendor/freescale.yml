@@ -2,18 +2,28 @@ header:
   version: 16
 
 repos:
+  # Both layers track their wrynose branches. The master commits these
+  # previously pinned predate the wks relocation, and wrynose-era OE-core makes
+  # that fatal: its sanity checker rejects wic/wks files at a layer's root with
+  #
+  #   wic/wks files at .../meta-freescale/wic need to be moved to files/wic
+  #   within the layer to be found/used
+  #
+  # which aborts the build before any task runs. The wrynose branches carry the
+  # relocated files/wic and no longer have the legacy wic/ directory, so the
+  # check passes.
   meta-freescale:
     url: https://github.com/avocado-linux/vendor-meta-freescale.git
     path: meta-freescale
-    branch: master
-    commit: 8ca5ffee50681427b158015335766bf71052763c
+    branch: wrynose
+    commit: 2e2fc69da5e2187f191e8fe16873b8f921fd3e73
     layers:
       .:
   meta-freescale-3rdparty:
     url: https://github.com/avocado-linux/vendor-meta-freescale-3rdparty.git
     path: meta-freescale-3rdparty
-    branch: master
-    commit: 329276005627dd3a8e9e38b963ae7566595a46d2
+    branch: wrynose
+    commit: 26d8b36a72acf1458a2520e4e9f4d654a4ba77e4
     layers:
       .:
 
