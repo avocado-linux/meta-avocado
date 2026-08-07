@@ -27,6 +27,25 @@ PREFERRED_VERSION_gstreamer1.0-plugins-ugly:mx9-nxp-bsp = "1.24.0.imx"
 PREFERRED_VERSION_gstreamer1.0-libav:mx9-nxp-bsp        = "1.24.0.imx"
 PREFERRED_VERSION_gstreamer1.0-rtsp-server:mx9-nxp-bsp  = "1.24.0.imx"
 
+# imx93-frdm carries no meta-avocado gstreamer pin: it is on the wrynose
+# 6.18.20-2.0.0 meta-imx, which ships only 1.28.1.imx recipes. The 1.24.0.imx
+# above matches nothing there, so bitbake warns once and falls back - the pin
+# reads as authoritative while deciding nothing, and the next person to open
+# this file would believe 1.24.0.imx is what ships. Clearing it lets
+# meta-imx-bsp/conf/machine/include/imx-base-extend.inc:69 state the version
+# for its own release, which keeps stating it correctly across BSP bumps.
+#
+# Scoped to the machine because imx91-frdm and imx95-frdm still take
+# nxp-frdm.yml's 6.6.36 meta-imx, where 1.24.0.imx does exist and the pin above
+# is live.
+PREFERRED_VERSION_gstreamer1.0:avocado-imx93-frdm              = ""
+PREFERRED_VERSION_gstreamer1.0-plugins-base:avocado-imx93-frdm = ""
+PREFERRED_VERSION_gstreamer1.0-plugins-good:avocado-imx93-frdm = ""
+PREFERRED_VERSION_gstreamer1.0-plugins-bad:avocado-imx93-frdm  = ""
+PREFERRED_VERSION_gstreamer1.0-plugins-ugly:avocado-imx93-frdm = ""
+PREFERRED_VERSION_gstreamer1.0-libav:avocado-imx93-frdm        = ""
+PREFERRED_VERSION_gstreamer1.0-rtsp-server:avocado-imx93-frdm  = ""
+
 PREFERRED_VERSION_xen-tools = "4.18.imx+stable"
 PREFERRED_VERSION_xen = "4.18.imx+stable"
 
