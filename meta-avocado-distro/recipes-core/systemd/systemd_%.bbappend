@@ -1,8 +1,14 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI:append = " file://zram-generator.conf"
+SRC_URI:append = " file://wait-online-any.conf"
 
 do_install:append () {
     install -m 0644 ${UNPACKDIR}/zram-generator.conf ${D}${sysconfdir}/systemd/
+
+    # Stop network-online.target waiting 120s for an unconnected port.
+    install -d ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d
+    install -m 0644 ${UNPACKDIR}/wait-online-any.conf \
+        ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/
 
     # Mask upstream systemd-sysext/confext units.
     # Avocado replaces these with avocado-extension.service and
