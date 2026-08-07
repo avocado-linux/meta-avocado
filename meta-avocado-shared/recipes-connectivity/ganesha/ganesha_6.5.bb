@@ -47,6 +47,7 @@ EXTRA_OECMAKE = "\
     -DUSE_SYSTEM_NTIRPC=ON \
     -DUSE_GSS=OFF \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DUSE_FSAL_GLUSTER=OFF \
 "
 
 # install the systemd unit
