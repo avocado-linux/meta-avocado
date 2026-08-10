@@ -282,7 +282,7 @@ fvl_verify_sdk_case() {
   )
 }
 
-# --- boot tier (e2e on a booted qemux86-64) -------------------------------
+# --- boot tier (e2e on a booted target) -----------------------------------
 #
 # Verifies an extension merged on a booted target without ssh: the local
 # distro+SDK feed has no sshd extension, so assertions go over the QEMU guest
@@ -324,19 +324,69 @@ fvl_assert_in_target() {
   return 0
 }
 
-# fvl_boot_verify_case <machine> <projdir> <pkg_csv> <lib_csv>
-# One full image cycle: scaffold project -> install packages into the app ext ->
+# fvl_assert_luks_var
+# Checks that /var is mounted from an active LUKS2 dm-crypt container.
+# Requires cryptsetup in the initramfs and a var partition with a LUKS2 header.
+fvl_assert_luks_var() {
+  fvl_qga --run "cryptsetup status var >/dev/null 2>&1" \
+    || { printf 'luks-var: dm-crypt mapping not active\n' >&2; return 1; }
+  fvl_qga --run "findmnt -n -o SOURCE /var 2>/dev/null | grep -q mapper/var" \
+    || { printf 'luks-var: /var not mounted from dm-crypt\n' >&2; return 1; }
+  fvl_qga --run "cryptsetup isLuks /dev/disk/by-partlabel/var 2>/dev/null" \
+    || { printf 'luks-var: no LUKS2 header on var partition\n' >&2; return 1; }
+  return 0
+}
+
+# fvl_assert_luks_var_tpm
+# Extends fvl_assert_luks_var: also checks that a TPM2 LUKS token is
+# enrolled on the var partition (written by systemd-cryptenroll).
+fvl_assert_luks_var_tpm() {
+  fvl_assert_luks_var || return 1
+  fvl_qga --run "cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -q 'systemd-tpm2'" \
+    || { printf 'luks-var-tpm: no TPM2 token in LUKS header\n' >&2; return 1; }
+  return 0
+}
+
+# fvl_assert_dm_verity
+# Checks that the rootfs is mounted from an active dm-verity device
+# named vroot. The verity check succeeds only when the rootfs hash
+# matches the root hash embedded in the kernel or passed at boot.
+fvl_assert_dm_verity() {
+  fvl_qga --run "dmsetup status 2>/dev/null | grep -q '^vroot.*verity'" \
+    || { printf 'dm-verity: vroot verity device not active\n' >&2; return 1; }
+  fvl_qga --run "findmnt -n -o SOURCE / 2>/dev/null | grep -q mapper/vroot" \
+    || { printf 'dm-verity: rootfs not mounted from dm-verity device\n' >&2; return 1; }
+  return 0
+}
+
+# _fvl_run_assertions <assertions> <ext> <lib_csv>
+# Dispatches to the named assertion set for the boot tier.
+_fvl_run_assertions() {
+  local assertions="$1" ext="$2" lib_csv="$3"
+  case "$assertions" in
+    luks-var) fvl_assert_luks_var ;;
+    luks-var-tpm) fvl_assert_luks_var_tpm ;;
+    dm-verity) fvl_assert_dm_verity ;;
+    *) fvl_assert_in_target "$ext" "$lib_csv" ;;
+  esac
+}
+
+# fvl_boot_verify_case <machine> <projdir> <pkg_csv> <lib_csv> [assertions]
+# One full image cycle: scaffold project -> optionally install packages ->
 # build -> provision -> boot -> assert -> reboot -> re-assert. Returns 0/1.
+# When pkg_csv is empty the package install step is skipped (boot-only assertion).
 fvl_boot_verify_case() {
-  local machine="$1" projdir="$2" pkg_csv="$3" lib_csv="$4"
+  local machine="$1" projdir="$2" pkg_csv="$3" lib_csv="$4" assertions="${5:-}"
   local cname="fv-vm-${machine}-$$"
   fvl_scaffold_project "$machine" "$projdir"
-  # shellcheck disable=SC2086  # intentional: split the csv into separate args
-  fvl_install_case "$machine" "$projdir" ${pkg_csv//,/ } \
-    || {
-      printf 'boot: package install failed\n' >&2
-      return 1
-    }
+  if [ -n "$pkg_csv" ]; then
+    # shellcheck disable=SC2086  # intentional: split the csv into separate args
+    fvl_install_case "$machine" "$projdir" ${pkg_csv//,/ } \
+      || {
+        printf 'boot: package install failed\n' >&2
+        return 1
+      }
+  fi
   (
     cd "$projdir" || exit 1
     export AVOCADO_REPO_URL AVOCADO_RELEASEVER
@@ -363,16 +413,16 @@ fvl_boot_verify_case() {
     rc=1
     printf 'boot: guest agent never came up\n' >&2
   fi
-  if [ "$rc" -eq 0 ] && ! fvl_assert_in_target "$FVL_EXT" "$lib_csv"; then rc=1; fi
+  if [ "$rc" -eq 0 ] && ! _fvl_run_assertions "$assertions" "$FVL_EXT" "$lib_csv"; then rc=1; fi
   if [ "$rc" -eq 0 ]; then
     fvl_qga --run "reboot" >/dev/null 2>&1 || true
     sleep 5
     if ! fvl_qga --wait --deadline "$FVL_BOOT_WAIT"; then
       rc=1
       printf 'boot: guest did not return after reboot\n' >&2
-    elif ! fvl_assert_in_target "$FVL_EXT" "$lib_csv"; then
+    elif ! _fvl_run_assertions "$assertions" "$FVL_EXT" "$lib_csv"; then
       rc=1
-      printf 'boot: ext/libs gone after reboot\n' >&2
+      printf 'boot: assertions failed after reboot\n' >&2
     fi
   fi
 

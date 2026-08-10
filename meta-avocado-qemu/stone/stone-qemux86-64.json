@@ -3,20 +3,27 @@
     "platform": "avocado-qemux86-64",
     "architecture": "x86_64",
     "provision_default": "img",
-    "update_strategy": "uboot-ab"
+    "update_strategy": "sdboot-ab"
   },
   "update": {
     "slot_detection": {
-      "type": "uboot-env",
-      "var": "avocado_boot_slot"
+      "type": "sdboot-efi",
+      "partitions": {
+        "a2e0a8c1-0002-4b01-a000-0000000000a1": "a",
+        "a2e0a8c1-0002-4b01-b000-0000000000b1": "b"
+      }
     },
     "os_artifacts": {
       "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
       "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
     },
     "activate": {
-      "type": "uboot-env",
-      "set": { "avocado_boot_slot": "{inactive_slot}" }
+      "type": "efibootmgr",
+      "slot_entries": { "a": "boot-a", "b": "boot-b" }
+    },
+    "rollback": {
+      "type": "efibootmgr",
+      "slot_entries": { "a": "boot-a", "b": "boot-b" }
     }
   },
   "provision": {
@@ -67,78 +74,38 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-os-qemux86-64.zip",
-      "build_args": {
-        "type": "fwup",
-        "template": "rootdisk.conf"
-      },
-      "devpath": "/dev/mmcblk0",
+      "out": "avocado-os-qemux86-64",
+      "devpath": "/dev/vda",
       "block_size": 512,
-      "uuid": "4bc367b3-5d70-4289-b24d-9b09cb79685c",
       "images": {
-        "bios": "u-boot.rom",
-        "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",
-          "size": 128,
+          "size": 256,
           "size_unit": "mebibytes",
           "build_args": {
             "type": "fat",
             "variant": "FAT32",
-            "files": ["avocado-image-initramfs-qemux86-64.cpio.zst", "bzImage"]
+            "files": [
+              { "in": "systemd-bootx64.efi", "out": "EFI/BOOT/BOOTX64.EFI" },
+              { "in": "bzImage", "out": "bzImage" },
+              { "in": "avocado-image-initramfs-qemux86-64.cpio.zst", "out": "initramfs.cpio.zst" },
+              { "in": "loader.conf", "out": "loader/loader.conf" },
+              { "in": "avocado.conf", "out": "loader/entries/avocado.conf" }
+            ]
           }
         },
         "rootfs": "avocado-image-rootfs-qemux86-64.erofs-lz4",
-        "var": "avocado-image-var-qemux86-64.btrfs"
+        "initramfs": "avocado-image-initramfs-qemux86-64.cpio.zst",
+        "kernel": "bzImage",
+        "bootloader": "systemd-bootx64.efi"
       },
       "partitions": [
-        {
-          "name": "uboot-env",
-          "image": "uboot_env",
-          "offset": 1,
-          "offset_unit": "mebibytes",
-          "offset_redundant": 1280,
-          "offset_redundant_unit": "kibibytes",
-          "size": 128,
-          "size_unit": "kibibytes"
-        },
-        {
-          "name": "boot-a",
-          "image": "boot",
-          "offset": 2,
-          "offset_unit": "mebibytes",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
-          "name": "boot-b",
-          "image": "",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
-          "name": "recovery",
-          "image": "",
-          "size": 64,
-          "size_unit": "mebibytes"
-        },
-        {
-          "name": "rootfs-a",
-          "image": "rootfs",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
-          "name": "rootfs-b",
-          "image": "",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
-          "name": "var",
-          "image": "var",
-          "expand": "true"
-        }
+        { "name": "boot-a", "image": "boot", "partition_type": "EF00", "partition_uuid": "a2e0a8c1-0002-4b01-a000-0000000000a1", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
+        { "name": "boot-b", "partition_type": "EF00", "partition_uuid": "a2e0a8c1-0002-4b01-b000-0000000000b1", "size": 256, "size_unit": "mebibytes" },
+        { "name": "recovery", "partition_type": "EF00", "size": 256, "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
+        { "name": "rootfs-b", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
+        { "name": "var", "image": "", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 512, "size_unit": "mebibytes", "expand": "true" }
       ]
     }
   }

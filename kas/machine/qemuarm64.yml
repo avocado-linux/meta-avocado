@@ -5,6 +5,12 @@ header:
       file: kas/base.yml
     - repo: meta-avocado
       file: kas/vendor/arm.yml
+    # tpm2-tss (meta-security/meta-tpm) is required by systemd's tpm2
+    # PACKAGECONFIG and by cryptsetup-var's systemd-cryptenroll. qemuarm64.conf
+    # enables `systemd tpm2` + optee-ftpm, so the layer must be present (mirrors
+    # the x86 machine config, which already includes this feature).
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
     - repo: meta-avocado
       file: kas/feature/virtualization.yml
     - repo: meta-avocado

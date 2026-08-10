@@ -2,18 +2,26 @@
 #
 # One case per line, pipe-separated:
 #
-#   name | packages | expected-libs | boot
+#   name | packages | expected-libs | boot | assertions
 #
 #   name           short case id (used for the per-case project dir)
-#   packages       space-separated feed package names to install
+#   packages       space-separated feed package names to install (empty for boot-only)
 #   expected-libs  space-separated shared-lib basenames to assert (optional)
 #   boot           "yes" to also run the boot e2e (heavy: one image cycle), else "no"
+#   assertions     named assertion set for the boot tier (default: ext+libs check)
+#                  "luks-var"     -> fvl_assert_luks_var (checks dm-crypt /var active)
+#                  "luks-var-tpm" -> fvl_assert_luks_var_tpm (luks-var + TPM2 token)
+#                  "dm-verity"    -> fvl_assert_dm_verity (checks vroot verity active)
 #
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
 #
-# name              | packages               | expected-libs | boot
-zeromq              | zeromq                 | libzmq.so.5   | yes
+# name              | packages               | expected-libs | boot | assertions
+zeromq              | zeromq                 | libzmq.so.5   | yes  |
+# Boot-only cases: no feed package to install, the assertion set is the test.
+luks-var            |                        |               | yes  | luks-var
+luks-var-tpm        |                        |               | yes  | luks-var-tpm
+dm-verity           |                        |               | yes  | dm-verity
 # One representative package per feature group, so a group that stops
 # producing anything fails here rather than silently shipping an empty feed.
 # The visual groups also run the boot e2e; the rest assert feed presence only.
@@ -21,13 +29,13 @@ zeromq              | zeromq                 | libzmq.so.5   | yes
 # No cameras or cloud-aws case: meta-basler-tools, meta-intel-realsense and
 # meta-aws have no wrynose branch, so those groups cannot be selected here yet.
 # Add the case in the same commit that adds the layer back.
-system-base         | vim                    |               | no
-networking          | networkmanager         |               | no
-multimedia          | gstreamer1.0           |               | no
-python              | python3-pip            |               | no
-graphics            | weston                 |               | yes
-qt                  | qtbase                 |               | yes
-browsers            | chromium-ozone-wayland |               | yes
-ai                  | dx-driver              |               | no
-java                | openjdk-17-jre         |               | no
-containers          | podman                 |               | no
+system-base         | vim                    |               | no   |
+networking          | networkmanager         |               | no   |
+multimedia          | gstreamer1.0           |               | no   |
+python              | python3-pip            |               | no   |
+graphics            | weston                 |               | yes  |
+qt                  | qtbase                 |               | yes  |
+browsers            | chromium-ozone-wayland |               | yes  |
+ai                  | dx-driver              |               | no   |
+java                | openjdk-17-jre         |               | no   |
+containers          | podman                 |               | no   |

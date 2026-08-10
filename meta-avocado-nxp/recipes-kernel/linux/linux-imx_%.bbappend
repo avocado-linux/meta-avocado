@@ -92,8 +92,19 @@ KERNEL_DEVICETREE:append:imx95-frdm = " \
   freescale/imx95-15x15-frdm-ap1302.dtbo \
 "
 
+SRC_URI:append:avocado-imx93-frdm = " \
+  file://imx93-frdm/dm-crypt.cfg \
+"
+
 do_configure:append() {
   cat ${UNPACKDIR}/*.cfg >> ${B}/.config
+  # UNPACKDIR, not WORKDIR: the secure-boot stack was written against scarthgap,
+  # where unpacked sources still landed in WORKDIR. Ported as-is the glob would
+  # match nothing and the fragments would be dropped silently, leaving a kernel
+  # with no CONFIG_DM_CRYPT and a /var that cannot be unlocked.
+  for f in ${UNPACKDIR}/imx93-frdm/*.cfg; do
+    [ -e "$f" ] && cat "$f" >> ${B}/.config
+  done
 }
 
 do_configure:prepend:imx95-frdm() {
