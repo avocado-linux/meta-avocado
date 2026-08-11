@@ -57,6 +57,23 @@ Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
 `python-ai.yml`, `ros.yml`, `virtualization.yml`.
 
+### Container Dev Mode
+
+`avocado container dev up` needs two groups in the feed, and neither is in the
+base: `docker` comes from `containers`, and `sshd-dev`'s `openssh` comes from
+`networking`. A board built without them boots and is then unreachable - `up`
+fails at the SSH bootstrap, before the dev loop exists.
+
+`kas/feature/container-dev.yml` aggregates both so this stays one append:
+
+```bash
+kas build kas/machine/imx93-frdm.yml:kas/feature/container-dev.yml
+```
+
+It appends no token of its own and has no packagegroup - it is a convenience
+include, like `complete.yml`. When a container-dev extension starts needing a
+third group, add it there rather than widening the base packagegroup.
+
 ### Groups this branch cannot build
 
 `cameras`, `cloud-aws` and `ros` are in tree but not wired into

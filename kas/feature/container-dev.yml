@@ -1,0 +1,28 @@
+header:
+  version: 16
+
+# Aggregator for the Container Dev Mode workflow, not a feature group of its
+# own - it appends no token and has no packagegroup. It exists so the workflow's
+# feed requirements live in the tree instead of in prose repeated across the
+# hardware guide, the field notes and the demo README.
+#
+# `avocado container dev up` declares extensions that resolve packages from the
+# feed, and two of them are opt-in since image content became a per-group
+# choice:
+#
+#   docker      -> docker            -> containers
+#   sshd-dev    -> openssh, openssh-sshd -> networking
+#
+# Neither is baked into the rootfs (a minimal Avocado image ships no SSH
+# server), so a board built without these two groups boots and is then
+# unreachable, with `up` failing at the SSH bootstrap before the loop exists.
+# That is a confusing failure to debug remotely, which is why this is one
+# append rather than two the caller has to remember.
+#
+# Add a group here when a container-dev extension starts needing it; do not
+# widen the base packagegroup for it.
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/containers.yml
+  - repo: meta-avocado
+    file: kas/feature/networking.yml
