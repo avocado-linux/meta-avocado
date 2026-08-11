@@ -15,8 +15,41 @@ repos:
   bitbake:
     url: https://github.com/avocado-linux/vendor-bitbake
     path: bitbake
-    branch: "2.8-avocado"
-    commit: fc13d7197745017a5c8c274cde82b62a9cc796ce
+    # race-review-fixes = 2.8-avocado + mkdirhier EEXIST/ESTALE retries and the
+    # asyncrpc client connect/handshake budgets - cold-review fixes for the
+    # cross-node build race (a stalled hashserv/prserv connect no longer wedges
+    # the client).
+    #
+    # Rebased onto the current 2.8-avocado tip for this merge. The branch had
+    # been cut from an older base, so pinning it while scarthgap moved forward
+    # would have dropped eleven commits that landed on 2.8-avocado in the
+    # meantime - among them the fetch2 deb/ipk member-name and striplevel
+    # validation, the shallow-ref quoting, RPM --no-absolute-filenames, and the
+    # hashserv unihash validation. Keeping the race fixes is not worth losing
+    # those, so the branch moved rather than the pin.
+    #
+    # Pinned at the branch tip, not two commits behind it. The earlier pin
+    # (81d1e0e9) predated both fixes the paragraph above describes:
+    #
+    #   f06288b4  mkdirhier: never report success without a directory. At
+    #             81d1e0e9 the spent-retry EEXIST path is a bare `return`, so
+    #             mkdirhier reports success with nothing at the path - strictly
+    #             worse than the scarthgap it replaces, which raises.
+    #   7fcf96b2  asyncrpc: bound retries by wall clock. At 81d1e0e9 there is no
+    #             wall-clock bound at all, so the "no longer wedges the client"
+    #             claim above was not true of the pinned tree: a live-but-blocked
+    #             server bills the request budget instead. It also had
+    #             MAX_CONNECT_RETRIES = 1 with no backoff, giving up on a
+    #             hashserv restart faster than upstream's 4-attempt loop.
+    #
+    # Known fragility, tracked rather than fixed here: this pins a SHA on a
+    # branch the fork rebases by policy. When it is next rebased the SHA leaves
+    # the branch and kas raises RepoRefError until someone edits this file -
+    # loud, but the pre-rebase tip is not on the remote, so an orphaned SHA can
+    # be GC'd. The durable shape is an immutable tag (or landing the commits on
+    # 2.8-avocado, which every other consumer already tracks).
+    branch: "race-review-fixes"
+    commit: 7fcf96b2e00e7e41c036a4265820c2b4ef95bfa3
     layers:
       .: disabled
 
@@ -27,4 +60,3 @@ repos:
     commit: 06b1c4f636f21d29d0786c79bc325000aa80547e
     layers:
       meta:
-
