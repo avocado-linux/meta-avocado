@@ -26,25 +26,58 @@
 # mixins layer outright, so re-declare it here rather than inherit it by luck.
 do_rust_setup_snapshot[depends] += "patchelf-native:do_populate_sysroot"
 
+# Ensure every remaining argument appears in $1's RUNPATH, appending only what is
+# missing and never dropping an entry the object already carries. Both loops below
+# go through this, so neither can assert a fixed rpath over one it did not read.
+#
+# Two properties the loops depend on:
+#
+#   Skips an object patchelf cannot read. lib/libLLVM-*.so is a 42-byte ld script
+#   rather than an ELF and patchelf exits non-zero on it. This reads as "not an
+#   ELF" only because the task checks for patchelf itself first - without that
+#   check the same line would swallow a missing tool.
+#
+#   Idempotent. The task carries [dirs], not [cleandirs], so nothing guarantees a
+#   clean ${WORKDIR}/rust-snapshot: `bitbake -f -c rust_setup_snapshot` over a
+#   surviving one would otherwise append a second copy of STAGING_LIBDIR_NATIVE
+#   per forced run, growing the dynstr and making -f non-equivalent to a clean run.
+rust_snapshot_ensure_rpath() {
+    obj=$1
+    shift
+    existing=$(patchelf "$obj" --print-rpath 2>/dev/null) || return 0
+    rpath=$existing
+    for entry in "$@"; do
+        case ":$rpath:" in
+            *":$entry:"*) ;;
+            *) if [ -n "$rpath" ]; then rpath="$rpath:$entry"; else rpath=$entry; fi ;;
+        esac
+    done
+    [ "$rpath" = "$existing" ] && return 0
+    patchelf "$obj" --set-rpath "$rpath"
+}
+
 do_rust_setup_snapshot:append () {
     if [ ! -z "${UNINATIVE_LOADER}" -a -e "${UNINATIVE_LOADER}" ]; then
+        # Checked once, here, so the per-object skip in rust_snapshot_ensure_rpath
+        # cannot stand in for an absent tool.
+        command -v patchelf >/dev/null 2>&1 || bbfatal "patchelf not found; it is in neither HOSTTOOLS nor HOSTTOOLS_NONFATAL, so it resolves only out of recipe-sysroot-native"
+
         for bin in cargo rustc rustdoc; do
-            patchelf ${WORKDIR}/rust-snapshot/bin/$bin \
-                --set-rpath \$ORIGIN/../lib:${STAGING_LIBDIR_NATIVE}
+            rust_snapshot_ensure_rpath ${WORKDIR}/rust-snapshot/bin/$bin \
+                '$ORIGIN/../lib' "${STAGING_LIBDIR_NATIVE}"
         done
+
+        # Only the staging dir is ensured here: these objects already carry
+        # $ORIGIN/../lib, and ensuring it too would be a no-op rather than a fix.
+        found=0
         for lib in ${WORKDIR}/rust-snapshot/lib/*.so*; do
-            # lib/libLLVM-*.so is a 42-byte ld script rather than an ELF, and
-            # patchelf exits non-zero on it. Use patchelf as its own ELF probe so
-            # such stubs are skipped without masking a real failure below, and
-            # keep what it prints: these objects carry $ORIGIN/../lib, so
-            # asserting a bare $ORIGIN would drop an entry rather than add one.
-            existing=$(patchelf "$lib" --print-rpath 2>/dev/null) || continue
-            if [ -n "$existing" ]; then
-                patchelf "$lib" --set-rpath "$existing:${STAGING_LIBDIR_NATIVE}"
-            else
-                patchelf "$lib" --set-rpath "${STAGING_LIBDIR_NATIVE}"
-            fi
+            [ -e "$lib" ] || continue
+            found=1
+            rust_snapshot_ensure_rpath "$lib" "${STAGING_LIBDIR_NATIVE}"
         done
+        if [ "$found" = 0 ]; then
+            bbwarn "rust-snapshot/lib holds no shared libraries: the libz.so.1 edge this append closes is reached through libLLVM's RUNPATH, so a snapshot without them needs a re-audit rather than a silent skip"
+        fi
     fi
 }
 
