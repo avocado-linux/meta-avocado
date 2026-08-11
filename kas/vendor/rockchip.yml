@@ -8,8 +8,6 @@ header:
   # any avocado-distro target build to resolve.
   - repo: meta-avocado
     file: kas/feature/virtualization.yml
-  - repo: meta-avocado
-    file: kas/feature/complete.yml
 
 repos:
   meta-avocado:

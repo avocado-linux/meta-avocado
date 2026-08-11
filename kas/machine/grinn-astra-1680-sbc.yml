@@ -10,8 +10,6 @@ header:
     - repo: meta-avocado
       file: kas/target/distro.yml
     - repo: meta-avocado
-      file: kas/feature/complete.yml
-    - repo: meta-avocado
       file: kas/feature/ai.yml
 
 repos:

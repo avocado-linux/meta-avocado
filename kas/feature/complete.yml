@@ -3,9 +3,10 @@ header:
 
 # Umbrella aggregator: includes every per-group kas/feature/<group>.yml
 # fragment so that including this one file pulls every vendor layer and
-# appends every feature token to AVOCADO_FEATURE_GROUPS. Existing client
-# vendor/machine compositions include this to reproduce today's full image
-# content; dev/minimal targets stack a smaller set of fragments instead.
+# appends every feature token to AVOCADO_FEATURE_GROUPS. Boards are minimal by
+# default and do NOT include this; append it explicitly at build time
+# (machine.yml:kas/feature/complete.yml) to ship the full image. Dev/minimal
+# targets stack a smaller set of fragments instead.
 # Mirrors the kas/extra.yml repo/file include form so a token is present iff
 # its fragment (and thus its vendor layer) is present.
   includes:

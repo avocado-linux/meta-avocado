@@ -1,8 +1,5 @@
 header:
   version: 16
-  includes:
-  - repo: meta-avocado
-    file: kas/feature/complete.yml
 
 repos:
   meta-intel:
