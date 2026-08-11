@@ -210,7 +210,16 @@ resolve_raw_image() {
       return 0
     }
   done
-  die "no raw .wic or rootdisk.img found for $MACHINE_NAME"
+  # Name the producer. Nothing in the Yocto build writes this file: the stone
+  # archive is assembled from rootdisk.conf and then unpacked to a raw image,
+  # both outside bitbake, so a build that succeeded still leaves this missing
+  # and the bare "not found" reads as a broken build rather than a step not run.
+  die "no raw .wic or rootdisk.img found for $MACHINE_NAME
+  expected: $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.img
+  produce it with the provisioning step that builds the stone archive, or from
+  an existing archive with:
+    fwup -a -i $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.zip \\
+         -d $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.img -t complete"
 }
 
 flash_fwup() {
@@ -245,12 +254,28 @@ flash_uuu() {
   local boot="$DEPLOY_DIR/images/$MACHINE_NAME/imx-boot"
   [ -f "$boot" ] || die "no imx-boot for $MACHINE_NAME"
 
+  # emmc_all, not emmc. Both built-ins take two parameters - a bootloader and
+  # an image - and both default the image to the bootloader when it is
+  # omitted. `uuu -b emmc "$boot"` therefore ran
+  #
+  #     FB: flash bootloader _image      # _image == the bootloader
+  #
+  # and wrote imx-boot into the eMMC boot partition and nothing else: no
+  # rootfs, no partition table. The board came back running whatever OS was
+  # already on it, under a new bootloader, which looks like a successful flash
+  # from the host and is how a change under test can appear not to have taken.
+  # emmc_all adds `FB: flash -raw2sparse all _image`, the write that actually
+  # lays the OS down.
+  local image
+  image=$(resolve_raw_image)
+
   if ! lsusb -d 1fc9: >/dev/null 2>&1 && ! lsusb -d 15a2: >/dev/null 2>&1; then
     die "no NXP device in serial download mode (check the boot switches)"
   fi
 
   echo "  bootloader: $boot"
-  RUN_CMD=(sudo uuu -b emmc "$boot")
+  echo "  image:      $image ($(du -h "$image" | cut -f1))"
+  RUN_CMD=(sudo uuu -b emmc_all "$boot" "$image")
   command -v uuu >/dev/null 2>&1 || die "uuu not installed"
   execute
 }
