@@ -1,6 +1,17 @@
 [Unit]
 Description=Reload manager and retrigger activation targets after Avocado extensions are merged
 Documentation=https://github.com/flatcar/init/pull/65
+
+# Mirrored from avocado-extension.service. BindsTo= requires the bound unit to
+# be active, and a condition-skipped unit is inactive - so without these, a
+# device with no extensions installed fails this unit's start job with
+# "Dependency failed" on every boot rather than skipping quietly alongside the
+# merge it exists to follow up. systemd evaluates conditions before the BindsTo
+# check, so matching them here suppresses the job without weakening the binding
+# for the case the merge genuinely fails.
+ConditionDirectoryNotEmpty=|/var/lib/avocado
+ConditionCapability=CAP_SYS_ADMIN
+
 BindsTo=avocado-extension.service
 After=avocado-extension.service
 DefaultDependencies=no
