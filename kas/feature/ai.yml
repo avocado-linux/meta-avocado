@@ -1,6 +1,13 @@
 header:
   version: 14
 
+# Keep both repos below in this one fragment. meta-avocado-deepx carries a
+# dx-driver bbappend on a static recipes-*/ path, so it only parses when
+# meta-deepx-m1 supplies the recipe. Adding meta-avocado-deepx from anywhere
+# else - a machine or vendor file - without meta-deepx-m1 would hard-fail parse
+# with "No recipes in default available for:". The chromium bbappends hit
+# exactly that when the browsers group became opt-in; this one is safe only
+# because the coupling below is the sole path to the layer.
 repos:
   meta-deepx-m1:
     url: https://github.com/avocado-linux/vendor-meta-deepx-m1
