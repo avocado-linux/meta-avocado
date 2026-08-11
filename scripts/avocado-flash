@@ -113,22 +113,39 @@ run_native_tool() {
 # hosts routinely carry multi-terabyte disks on the same /dev/sd* namespace as
 # the card reader.
 assert_safe_block_device() {
-  local dev="$1" base mounted
+  local dev="$1" resolved base mounts
 
   [ -b "$dev" ] || die "not a block device: $dev"
 
-  base=$(basename "$dev")
+  # Resolve before deriving the sysfs name. /dev/disk/by-id and /dev/disk/by-path
+  # entries are symlinks, so they satisfy -b while /sys/block/<link name> does
+  # not exist - which made the whole-disk check below reject them as partitions.
+  # Those are the names a board farm hands out, and the -y path they are used on
+  # is the one with no prompt left to catch a mistake, so refusing them forced
+  # the caller down to a re-enumerable /dev/sdX letter instead.
+  resolved=$(readlink -f "$dev")
+  base=$(basename "$resolved")
   [ -d "/sys/block/$base" ] \
     || die "refusing a partition: pass the whole disk (e.g. /dev/sdb, not $dev)"
 
   [ "$(cat "/sys/block/$base/removable" 2>/dev/null)" = "1" ] \
     || die "refusing $dev: the kernel does not report it removable"
 
-  mounted=$(lsblk -nro MOUNTPOINTS "$dev" | grep -c . || true)
-  [ "$mounted" -eq 0 ] || {
-    lsblk -o NAME,SIZE,TYPE,RM,MOUNTPOINTS "$dev" >&2
+  # Read lsblk's own exit status rather than the pipeline's. `grep -c .` exits 1
+  # on zero lines, which is the legitimate nothing-is-mounted answer, so the old
+  # `|| true` was needed - and it swallowed a failing lsblk too, leaving
+  # mounted=0 and passing the guard. MOUNTPOINT is singular on purpose: the
+  # plural column arrived in util-linux 2.37, and scarthgap's own
+  # SANITY_TESTED_DISTROS still lists hosts on 2.32-2.36, where lsblk exits 1
+  # with `unknown column: MOUNTPOINTS`. On those the guard passed and fwup
+  # rewrote the partition table from sector 0 under a live mount.
+  if ! mounts=$(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null); then
+    die "refusing $dev: cannot read its mount state (lsblk failed)"
+  fi
+  if printf '%s\n' "$mounts" | grep -q .; then
+    lsblk -o NAME,SIZE,TYPE,RM,MOUNTPOINT "$dev" >&2
     die "refusing $dev: it has mounted partitions"
-  }
+  fi
 }
 
 confirm_destructive() {
@@ -298,6 +315,24 @@ execute() {
   "${RUN_CMD[@]}"
 }
 
+# Close out a write, or say plainly that none happened. Neither `sync` nor the
+# completion message used to be guarded, so `-n -y sd /dev/sdb` printed `done.
+# set the board's boot switches...` and exited 0 having written nothing: an
+# operator sanity-checking a job definition powers the board, sees the previous
+# image, and concludes the flash failed rather than that it never ran. `sync` is
+# also a real syscall against every mounted filesystem, so running it broke the
+# --dry-run promise to touch nothing.
+finish() {
+  local next_step="$1" target="$2"
+
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "dry run: nothing was written to $target."
+    return 0
+  fi
+  sync
+  echo "done. $next_step"
+}
+
 MACHINE_NAME=""
 DEPLOY_DIR=""
 BACKEND=""
@@ -349,6 +384,15 @@ done
   exit 1
 }
 
+# `*) break` above stops the option loop at the first non-option, and nothing
+# read past $2, so every option written after the medium was discarded without
+# a word - including the ones that decide what gets written. `sd /dev/sdb
+# --machine avocado-imx93-frdm` fell through to autodetect and wrote whatever it
+# guessed; a trailing `--backend bmaptool` wrote with fwup instead; a trailing
+# `-y` left the board-farm path prompting at EOF. Refusing the surplus closes
+# all of them at once, and says where the option belongs.
+[ $# -le 2 ] || die "unexpected argument: $3 (options go before the medium; see --help)"
+
 MEDIUM="$1"
 DEVICE="${2:-}"
 
@@ -377,15 +421,14 @@ case "$MEDIUM" in
       bmaptool) flash_bmaptool "$DEVICE" ;;
       *) die "backend ${BACKEND} cannot write a block device" ;;
     esac
-    sync
-    echo "done. set the board's boot switches to the SD position and power on."
+    finish "set the board's boot switches to the SD position and power on." "$DEVICE"
     ;;
   emmc)
     case "${BACKEND:-uuu}" in
       uuu) flash_uuu ;;
       *) die "backend ${BACKEND} cannot write over serial download" ;;
     esac
-    echo "done. set the board's boot switches to the eMMC position and power on."
+    finish "set the board's boot switches to the eMMC position and power on." "the board"
     ;;
   *)
     die "unknown medium: $MEDIUM (see --help)"
