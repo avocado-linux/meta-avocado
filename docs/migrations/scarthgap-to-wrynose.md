@@ -6,6 +6,17 @@ upcoming Wrynose Yocto release. Branch: `wrynose` (forked from
 
 Survey date: 2026-04-28.
 
+> **Paths below are historical.** The feature-groups port replaced
+> `kas/extra.yml` and `kas/extra/<name>.yml` with per-group
+> `kas/feature/<group>.yml` fragments, and moved the layers that are needed
+> unconditionally (meta-fwup, meta-swupdate, meta-openjdk-temurin) into
+> [kas/base.yml](../../kas/base.yml). The `kas/extra/...` links in the tables
+> that follow no longer resolve. They are left as written so the record of what
+> was decided on 2026-04-28, and why, stays intact - the blocked-layer reasoning
+> in particular is still the live justification for what
+> [kas/feature/complete.yml](../../kas/feature/complete.yml) omits. See
+> [feature-groups.md](../feature-groups.md) for the current layout.
+
 ---
 
 ## Survey Method

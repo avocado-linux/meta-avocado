@@ -11,12 +11,16 @@ echo "SCRIPT_DIR: $SCRIPT_DIR"
 
 # Store original arguments passed to this script
 CLEAN_BUILD=false
+COMPLETE_BUILD=false
 SDKMACHINE="x86_64"
 PASSTHRU_ARGS=()
 for arg in "$@"; do
     case $arg in
         --clean)
         CLEAN_BUILD=true
+        ;;
+        --complete)
+        COMPLETE_BUILD=true
         ;;
         --sdkmachine=*)
         SDKMACHINE="${arg#*=}"
@@ -26,7 +30,7 @@ for arg in "$@"; do
         ;;
     esac
 done
-ARGS="${PASSTHRU_ARGS[@]}"
+ARGS="${PASSTHRU_ARGS[*]}"
 
 # Arrays to track build results
 SUCCESSFUL_BUILDS=()
@@ -48,7 +52,7 @@ for machine_config in "$PROJECT_ROOT"/kas/machine/*.yml; do
         
         # Source the init-build script with the machine config
         # This creates the build directory and sets up the environment
-        cd "$PROJECT_ROOT"
+        cd "$PROJECT_ROOT" || exit 1
         
         # Try to source init-build and handle potential errors
         if . scripts/init-build "$machine_config"; then
@@ -59,9 +63,16 @@ for machine_config in "$PROJECT_ROOT"/kas/machine/*.yml; do
                 rm -rf ./build
             fi
             
+            # Compose the build config; --complete appends the full-feature
+            # umbrella so this build ships the full image (default is minimal).
+            build_config="$machine_config"
+            if [ "$COMPLETE_BUILD" = true ]; then
+                build_config="$machine_config:$PROJECT_ROOT/kas/feature/complete.yml"
+            fi
+
             # Run kas build with the original arguments
-            echo "Running: SDKMACHINE=$SDKMACHINE kas build $machine_config $ARGS"
-            if SDKMACHINE=$SDKMACHINE kas build $machine_config $ARGS; then
+            echo "Running: SDKMACHINE=$SDKMACHINE kas build $build_config ${PASSTHRU_ARGS[*]}"
+            if SDKMACHINE="$SDKMACHINE" kas build "$build_config" "${PASSTHRU_ARGS[@]}"; then
                 echo "✅ Build SUCCEEDED for $machine_name"
                 SUCCESSFUL_BUILDS+=("$machine_name")
             else

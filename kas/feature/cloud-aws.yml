@@ -1,0 +1,21 @@
+header:
+# NOT WIRED UP ON WRYNOSE. kas/feature/complete.yml deliberately omits this
+# fragment: its vendor layer(s) below are pinned to a scarthgap branch and the
+# fork has no wrynose equivalent. Including it will fail the layer
+# compatibility check at parse time - loudly, which is the intent. Repin to a
+# wrynose branch and add the include back to complete.yml together.
+  version: 16
+
+repos:
+  meta-aws:
+    url: https://github.com/avocado-linux/vendor-meta-aws.git
+    path: meta-aws
+    branch: master
+    commit: 0d79b11ee06ef48c26d5477e34770825f8795afc
+    layers:
+      .:
+
+local_conf_header:
+  extra-aws: |
+  feature/cloud-aws: |
+    AVOCADO_FEATURE_GROUPS:append = " cloud-aws"

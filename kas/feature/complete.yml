@@ -1,0 +1,43 @@
+header:
+  version: 16
+
+# Umbrella aggregator: includes every per-group kas/feature/<group>.yml
+# fragment so that including this one file pulls every vendor layer and
+# appends every feature token to AVOCADO_FEATURE_GROUPS. Boards are minimal by
+# default and do NOT include this; append it explicitly at build time
+# (machine.yml:kas/feature/complete.yml) to ship the full image. Dev/minimal
+# targets stack a smaller set of fragments instead.
+#
+# Three fragments scarthgap lists here are omitted on wrynose - cameras
+# (meta-basler-tools, meta-intel-realsense), ros (meta-ros) and cloud-aws
+# (meta-aws). None of those forks has a wrynose branch, so including them
+# would fail the layer compatibility check and take the whole build down
+# rather than just skipping a group. The fragment files are still in tree with
+# their scarthgap pins; add the line back here when the fork gains a branch.
+#
+# ai is absent for a different reason: scarthgap does not list it either, even
+# though kas/feature/ai.yml and its packagegroup both exist. Left as-is rather
+# than fixed here so this branch stays a port and not a redesign.
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/system-base.yml
+  - repo: meta-avocado
+    file: kas/feature/networking.yml
+  - repo: meta-avocado
+    file: kas/feature/multimedia.yml
+  - repo: meta-avocado
+    file: kas/feature/python.yml
+  - repo: meta-avocado
+    file: kas/feature/graphics.yml
+  - repo: meta-avocado
+    file: kas/feature/qt.yml
+  - repo: meta-avocado
+    file: kas/feature/browsers.yml
+  - repo: meta-avocado
+    file: kas/feature/python-ai.yml
+  - repo: meta-avocado
+    file: kas/feature/clang.yml
+  - repo: meta-avocado
+    file: kas/feature/java.yml
+  - repo: meta-avocado
+    file: kas/feature/containers.yml

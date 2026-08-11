@@ -11,7 +11,7 @@ repos:
       .:
 
 local_conf_header:
-  extra-qt5: |
+  feature/qt: |
+    AVOCADO_FEATURE_GROUPS:append = " qt"
     PACKAGECONFIG:append:pn-qtbase = " gles2 eglfs kms gbm harfbuzz"
     PACKAGECONFIG:append:pn-qtmultimedia = " gstreamer"
-

@@ -17,7 +17,3 @@ repos:
     branch: wrynose
     layers:
       .:
-
-local_conf_header:
-  extra-python-ai: |
-

@@ -1,8 +1,5 @@
 header:
   version: 16
-  includes:
-  - repo: meta-avocado
-    file: kas/extra.yml
 
 repos:
   meta-avocado:
