@@ -34,6 +34,11 @@ PACKAGECONFIG[rdma]    = "-DUSE_RPC_RDMA=ON,-DUSE_RPC_RDMA=OFF,rdma-core"
 
 PACKAGECONFIG ?= "acl dbus"
 
+# The nativesdk build is a host NFS tool for dev-VM provisioning and does not need
+# ganesha's D-Bus management interface; without this it fails do_compile on a
+# missing dbus/dbus.h in the nativesdk sysroot.
+PACKAGECONFIG:remove:class-nativesdk = "dbus"
+
 OECMAKE_SOURCEPATH = "${S}/src"
 
 EXTRA_OECMAKE = "\
