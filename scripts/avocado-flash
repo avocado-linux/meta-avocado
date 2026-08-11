@@ -36,6 +36,15 @@ Options:
                         when exactly one image directory exists)
     -d, --deploy DIR    Deploy directory (default: autodetect from the build)
     -b, --backend NAME  Override the backend: fwup, bmaptool, uuu
+    -t, --task NAME     fwup task (default: complete). 'complete' writes the
+                        whole medium including var, so it provisions a blank
+                        card and discards any state already on one. 'upgrade'
+                        writes only the inactive A/B boot+rootfs slots and
+                        leaves var untouched, which is how you put a new OS
+                        onto a device whose extensions and data must survive.
+                        fwup selects upgrade.a or upgrade.b from the current
+                        slot recorded in uboot-env, so the running slot is
+                        never the one overwritten. fwup backend only.
     -n, --dry-run       Print what would run; touch nothing
     -y, --assume-yes    Skip the interactive confirmation. Intended for a
                         board farm where the device comes from an exporter,
@@ -227,7 +236,8 @@ flash_fwup() {
   archive=$(resolve_fwup_archive)
 
   echo "  archive: $archive ($(date -r "$archive" '+%Y-%m-%d %H:%M'))"
-  run_native_tool fwup -a -i "$archive" -d "$dev" -t complete
+  echo "  task:    $FWUP_TASK"
+  run_native_tool fwup -a -i "$archive" -d "$dev" -t "$FWUP_TASK"
   execute
 }
 
@@ -293,6 +303,11 @@ DEPLOY_DIR=""
 BACKEND=""
 DRY_RUN=0
 ASSUME_YES=0
+# fwup's task, passed through as -t. `complete` writes the whole medium
+# including var; `upgrade` writes only the inactive A/B boot+rootfs slots and
+# leaves var alone, which is the difference between provisioning a blank card
+# and updating a device that already carries state.
+FWUP_TASK="complete"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -306,6 +321,10 @@ while [ $# -gt 0 ]; do
       ;;
     -b | --backend)
       BACKEND="$2"
+      shift 2
+      ;;
+    -t | --task)
+      FWUP_TASK="$2"
       shift 2
       ;;
     -n | --dry-run)
@@ -338,6 +357,15 @@ resolve_machine
 
 echo "machine: $MACHINE_NAME"
 echo "deploy:  $DEPLOY_DIR"
+
+# Only fwup evaluates the manifest's tasks. Refusing here rather than ignoring
+# the flag matters because the two tasks differ in whether /var survives: a
+# --task upgrade silently downgraded to a whole-medium write destroys the state
+# the caller asked to keep, and the write looks successful either way.
+if [ "$FWUP_TASK" != "complete" ] && [ "${BACKEND:-}" != "fwup" ] \
+  && { [ "$MEDIUM" != "sd" ] || [ -n "$BACKEND" ]; }; then
+  die "--task applies to the fwup backend only (got backend '${BACKEND:-default for $MEDIUM}')"
+fi
 
 case "$MEDIUM" in
   sd)
