@@ -1,0 +1,587 @@
+#!/usr/bin/env bash
+
+# Write a built Avocado OS image to a board, over whichever transport the
+# medium needs.
+#
+# Backends are selected from the medium rather than hardcoded, so a board that
+# provisions over a different transport is a new backend rather than a new
+# script. Adding one means adding a resolve_* and a flash_* function; nothing
+# else in here is medium-specific.
+#
+#   sd     removable block device   fwup (default) or bmaptool
+#   emmc   USB serial download      uuu
+#
+# Unlike the sibling dev-* scripts this uses the full strict set rather than a
+# bare `set -e`: it writes raw block devices, so an unset variable expanding to
+# empty or a failure swallowed mid-pipeline can destroy the wrong disk.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+
+usage() {
+  cat <<EOF
+Usage: $0 [OPTIONS] <medium> [device]
+
+Write a built Avocado OS image to a board.
+
+Arguments:
+    medium              sd    - removable block device (SD card, USB stick)
+                        emmc  - on-board eMMC over USB serial download
+    device              Block device for 'sd' (e.g. /dev/sdb). Whole disk,
+                        never a partition. Ignored for 'emmc'.
+
+Options:
+    -m, --machine NAME  Avocado machine (default: \$MACHINE, else autodetect
+                        when exactly one image directory exists)
+    -d, --deploy DIR    Deploy directory (default: autodetect from the build)
+    -b, --backend NAME  Override the backend: fwup, bmaptool, uuu
+    -t, --task NAME     fwup task (default: complete). 'complete' writes the
+                        whole medium including var, so it provisions a blank
+                        card and discards any state already on one. 'upgrade'
+                        writes only the inactive A/B boot+rootfs slots and
+                        leaves var untouched, which is how you put a new OS
+                        onto a device whose extensions and data must survive.
+                        fwup selects upgrade.a or upgrade.b from the current
+                        slot recorded in uboot-env, so the running slot is
+                        never the one overwritten. fwup backend only.
+    -n, --dry-run       Print what would run; touch nothing
+    -y, --assume-yes    Skip the interactive confirmation. Intended for a
+                        board farm where the device comes from an exporter,
+                        not for interactive use.
+    -h, --help          This text
+
+Backends:
+    fwup      Writes the stone fwup archive. The default for 'sd' because it
+              is the only backend that evaluates the manifest, so partitions
+              marked expand grow to fill the medium. A raw-image backend
+              writes the fixed-size image and leaves the remainder unused.
+    bmaptool  Writes a raw .wic/.img, skipping unmapped blocks and verifying
+              a SHA256 per mapped region. Use for images that are not stone
+              archives. Needs a sibling .bmap to be sparse-aware; without one
+              it falls back to a full copy.
+    uuu       NXP serial-download protocol. The board must be in serial
+              download mode before this runs.
+
+Examples:
+    $0 sd /dev/sdb
+    $0 --machine avocado-imx93-frdm sd /dev/sdb
+    $0 --backend bmaptool sd /dev/sdb
+    $0 emmc
+EOF
+}
+
+die() {
+  echo "avocado-flash: $*" >&2
+  exit 1
+}
+
+# Backends are found in the build's native sysroots rather than assumed on the
+# host: fwup is not packaged for most distributions, and the per-recipe
+# component directories do not resolve their shared libraries because those
+# live in sibling component trees. A recipe sysroot does resolve them, so
+# prefer one and fall back to the host only if the build has not been run.
+find_native_tool() {
+  local tool="$1" sysroot
+  for sysroot in "${DEPLOY_DIR%/deploy*}"/work/*/avocado-stone/*/recipe-sysroot-native; do
+    if [ -x "$sysroot/usr/bin/$tool" ]; then
+      printf '%s' "$sysroot"
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_native_tool() {
+  local tool="$1"
+  shift
+  local sysroot
+  if sysroot=$(find_native_tool "$tool"); then
+    # sudo drops LD_LIBRARY_PATH, so it is passed through env rather than
+    # exported.
+    RUN_CMD=(sudo env "LD_LIBRARY_PATH=$sysroot/usr/lib" "$sysroot/usr/bin/$tool" "$@")
+  elif command -v "$tool" >/dev/null 2>&1; then
+    RUN_CMD=(sudo "$tool" "$@")
+  else
+    die "$tool not found in the build sysroot or on PATH (run a build first)"
+  fi
+}
+
+# Refuse anything that is not an unmounted whole disk on a removable bus. fwup
+# and bmaptool both rewrite the partition table from sector 0, so a mistyped
+# letter destroys whatever it names with no prompt and no undo. Development
+# hosts routinely carry multi-terabyte disks on the same /dev/sd* namespace as
+# the card reader.
+#
+# Still coarser than it looks in one direction: a USB enclosure holding a large
+# disk is on a USB bus and passes. The retype-the-device prompt is what stands
+# behind that, and -y removes it, so a size ceiling would be the complement.
+assert_safe_block_device() {
+  local dev="$1" resolved base mounts
+
+  [ -b "$dev" ] || die "not a block device: $dev"
+
+  # Resolve before deriving the sysfs name. /dev/disk/by-id and /dev/disk/by-path
+  # entries are symlinks, so they satisfy -b while /sys/block/<link name> does
+  # not exist - which made the whole-disk check below reject them as partitions.
+  # Those are the names a board farm hands out, and the -y path they are used on
+  # is the one with no prompt left to catch a mistake, so refusing them forced
+  # the caller down to a re-enumerable /dev/sdX letter instead.
+  resolved=$(readlink -f "$dev")
+  base=$(basename "$resolved")
+  [ -d "/sys/block/$base" ] \
+    || die "refusing a partition: pass the whole disk (e.g. /dev/sdb, not $dev)"
+
+  # Ask udev which bus the device is on, rather than the kernel's removable flag.
+  # That flag is wrong in both directions here: drivers/mmc/core/block.c
+  # deliberately never sets GENHD_FL_REMOVABLE, so an SD card in a native SDHCI
+  # reader reports removable=0 and was refused - the case --help documents first -
+  # while scsi_scan.c:928 copies the SCSI RMB bit verbatim with no bus or size
+  # check, so a USB enclosure asserting RMB passed.
+  #
+  # ID_PATH rather than ID_BUS, because ID_BUS is only set for ata/scsi/usb: it is
+  # empty on nvme here, so it is not a property every disk carries and keying on
+  # it would refuse an mmc device for want of a value. ID_PATH comes from udev's
+  # path_id builtin, which names the controller for every bus - `-usb-` for a
+  # reader or stick, `mmc` for a native slot, `-ata-`/`-nvme-` for the host's own
+  # disks.
+  #
+  # udevadm is in neither HOSTTOOLS nor HOSTTOOLS_NONFATAL, so an absent one
+  # refuses instead of falling back to the flag this replaced. A safety guard that
+  # silently degrades to a weaker predicate is the shape of the bug being fixed.
+  command -v udevadm >/dev/null 2>&1 \
+    || die "refusing $dev: udevadm is needed to identify the device's bus and was not found"
+
+  local id_path
+  id_path=$(udevadm info --query=property --property=ID_PATH --value "$resolved" 2>/dev/null) || id_path=""
+  case "$id_path" in
+    *-usb-* | *mmc*) ;;
+    "") die "refusing $dev: udev reports no ID_PATH for it, so its bus cannot be established" ;;
+    *) die "refusing $dev: it is on '$id_path', not a USB or MMC bus - pass a card reader, SD slot or USB stick" ;;
+  esac
+
+  # Read lsblk's own exit status rather than the pipeline's. `grep -c .` exits 1
+  # on zero lines, which is the legitimate nothing-is-mounted answer, so the old
+  # `|| true` was needed - and it swallowed a failing lsblk too, leaving
+  # mounted=0 and passing the guard. MOUNTPOINT is singular on purpose: the
+  # plural column arrived in util-linux 2.37, and scarthgap's own
+  # SANITY_TESTED_DISTROS still lists hosts on 2.32-2.36, where lsblk exits 1
+  # with `unknown column: MOUNTPOINTS`. On those the guard passed and fwup
+  # rewrote the partition table from sector 0 under a live mount.
+  if ! mounts=$(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null); then
+    die "refusing $dev: cannot read its mount state (lsblk failed)"
+  fi
+  if printf '%s\n' "$mounts" | grep -q .; then
+    lsblk -o NAME,SIZE,TYPE,RM,MOUNTPOINT "$dev" >&2
+    die "refusing $dev: it has mounted partitions"
+  fi
+}
+
+# Ask before a destructive write, showing what is about to be written where.
+# `payload` is the artifact already resolved by the caller: the prompt used to
+# come before any of that, so the type-the-device gate - the only thing between a
+# typo and a wiped disk - was cleared as a reflex before the script had
+# established it had anything to write at all.
+#
+# `target` is a block device on the sd path and a USB path on the emmc one, so
+# the lsblk detail is shown only when it applies rather than assumed.
+confirm_destructive() {
+  local target="$1" payload="${2:-}" reply
+
+  # A dry run writes nothing, so requiring confirmation would only make it
+  # hang when called non-interactively.
+  [ "$DRY_RUN" = "1" ] && return 0
+  [ "$ASSUME_YES" = "1" ] && return 0
+
+  echo "=== writing the whole OS to $target (destructive) ==="
+  [ -n "$payload" ] && echo "  payload: $payload"
+  [ -b "$target" ] && lsblk -o NAME,SIZE,TYPE,RM,MODEL "$target"
+  echo
+  read -r -p "type the target again to confirm: " reply
+  [ "$reply" = "$target" ] || die "mismatch, aborting"
+}
+
+# Look next to the script, then walk up from the working directory. The second
+# half matters because the script is not always run from the checkout it
+# belongs to - a worktree, a copy on a board farm, or a symlink into PATH all
+# leave SCRIPT_DIR pointing somewhere with no build beside it.
+resolve_deploy_dir() {
+  [ -n "$DEPLOY_DIR" ] && return 0
+
+  # Inside a bitbake or kas shell this is already the answer.
+  if [ -n "${BUILDDIR:-}" ] && [ -d "$BUILDDIR/tmp/deploy" ]; then
+    DEPLOY_DIR=$(cd "$BUILDDIR/tmp/deploy" && pwd)
+    return 0
+  fi
+
+  # Collect every candidate at the nearest level that has any, then refuse if
+  # there is more than one. Returning the first match made the choice
+  # alphabetically: a workspace holding both build-imx93-frdm and
+  # build-qemuarm64 resolved the i.MX93 tree for a caller who meant qemuarm64
+  # and wrote that machine's fwup archive. resolve_machine's ambiguity guard
+  # never fired, because the directory it landed on held exactly one machine -
+  # so the guard existed and was unreachable in the very layout it was written
+  # for.
+  #
+  # The roots are fed in through a loop rather than word-split from
+  # $(ancestors_of "$PWD"). Unquoted, a path containing a space skipped the real
+  # build tree and a glob metacharacter - proj[1] - resolved to a sibling.
+  # The linter is silent on it too: SC2046 is not raised for a substitution in a
+  # for-list.
+  local root candidate found=()
+  while IFS= read -r root; do
+    found=()
+    for candidate in "$root"/build*/build/tmp/deploy "$root"/build/tmp/deploy "$root"/tmp/deploy; do
+      [ -d "$candidate" ] && found+=("$(cd "$candidate" && pwd -P)")
+    done
+    # `pwd -P` and then de-duplicate, because a `build` symlink pointing at the
+    # active build-<machine> directory is a common layout and both names match the
+    # globs above. Resolved logically they look like two trees and would trip the
+    # ambiguity refusal below over what is really one.
+    if [ "${#found[@]}" -gt 1 ]; then
+      mapfile -t found < <(printf '%s\n' "${found[@]}" | sort -u)
+    fi
+    case "${#found[@]}" in
+      0) continue ;;
+      1)
+        DEPLOY_DIR="${found[0]}"
+        return 0
+        ;;
+      *) die "several build trees under $root (${found[*]}); pass --deploy to choose one" ;;
+    esac
+  done < <(
+    printf '%s\n' "$SCRIPT_DIR/../.."
+    ancestors_of "$PWD"
+  )
+
+  die "could not find a deploy directory; pass --deploy or set BUILDDIR"
+}
+
+ancestors_of() {
+  local dir="$1"
+  while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+    printf '%s\n' "$dir"
+    dir=$(dirname "$dir")
+  done
+}
+
+resolve_machine() {
+  [ -n "$MACHINE_NAME" ] && return 0
+
+  if [ -n "${MACHINE:-}" ]; then
+    MACHINE_NAME="$MACHINE"
+    return 0
+  fi
+
+  local dirs=()
+  local d
+  for d in "$DEPLOY_DIR"/images/*/; do
+    [ -d "$d" ] && dirs+=("$(basename "$d")")
+  done
+
+  case "${#dirs[@]}" in
+    1) MACHINE_NAME="${dirs[0]}" ;;
+    0) die "no images found under $DEPLOY_DIR/images; pass --machine" ;;
+    *) die "several machines built (${dirs[*]}); pass --machine" ;;
+  esac
+}
+
+# The fwup archive is produced by stone provision, not by stone bundle. A
+# bundle-only rebuild refreshes os-bundle.aos and leaves this stale, so its
+# age is worth reporting rather than silently writing yesterday's bootloader.
+resolve_fwup_archive() {
+  # Glob the machine's own name rather than guessing two spellings of it. Every
+  # stone manifest names the artifact avocado-<short>-rootdisk.*, which is
+  # $MACHINE_NAME-rootdisk.* - so the ${MACHINE_NAME#avocado-} probe that used to
+  # run first matched nothing anywhere, and only the fallback did any work. The
+  # extension was hardcoded to .zip too, which is not what every machine
+  # produces.
+  #
+  # .img is deliberately not accepted here. That is the unpacked raw image, which
+  # is what the bmaptool and raw paths take; handing it to fwup as an archive
+  # fails further in and less legibly than saying so now.
+  local build="$DEPLOY_DIR/stone/_build" found=() candidate
+  for candidate in "$build/$MACHINE_NAME"-rootdisk.zip "$build/$MACHINE_NAME"-rootdisk.fw; do
+    [ -f "$candidate" ] && found+=("$candidate")
+  done
+
+  case "${#found[@]}" in
+    1) printf '%s' "${found[0]}" ;;
+    0) die "no fwup archive for $MACHINE_NAME under $build
+  looked for: $MACHINE_NAME-rootdisk.zip, $MACHINE_NAME-rootdisk.fw
+  Not every machine produces a fwup archive. If this one deploys a raw image
+  instead, write it with --backend bmaptool; otherwise run the provisioning step
+  that builds the stone archive." ;;
+    *) die "several fwup archives for $MACHINE_NAME under $build (${found[*]}); remove the stale one" ;;
+  esac
+}
+
+resolve_raw_image() {
+  local image
+  # Both globs are scoped to $MACHINE_NAME. The second used to search the flat,
+  # shared stone/_build with no machine filter, so in a tree where only one
+  # machine had been provisioned, asking for another one missed
+  # images/<machine>/*.wic, fell through, matched whatever *-rootdisk.img was
+  # there, and wrote that machine's image to the card - while the error one line
+  # below claimed per-machine scoping. The only signal was the `image:` echo,
+  # which a -y caller never reads.
+  for image in "$DEPLOY_DIR/images/$MACHINE_NAME"/*.wic "$DEPLOY_DIR/stone/_build/$MACHINE_NAME"-rootdisk.img; do
+    [ -f "$image" ] && {
+      printf '%s' "$image"
+      return 0
+    }
+  done
+  # Name the producer. Nothing in the Yocto build writes this file: the stone
+  # archive is assembled from rootdisk.conf and then unpacked to a raw image,
+  # both outside bitbake, so a build that succeeded still leaves this missing
+  # and the bare "not found" reads as a broken build rather than a step not run.
+  die "no raw .wic or rootdisk.img found for $MACHINE_NAME
+  expected: $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.img
+  produce it with the provisioning step that builds the stone archive, or from
+  an existing archive with:
+    fwup -a -i $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.zip \\
+         -d $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.img -t complete"
+}
+
+flash_fwup() {
+  # The archive is resolved by the caller, before the confirmation, so the prompt
+  # can name what is about to be written. Resolved here if absent so the function
+  # still stands alone.
+  local dev="$1" archive="${2:-}"
+  [ -n "$archive" ] || archive=$(resolve_fwup_archive)
+
+  echo "  archive: $archive ($(date -r "$archive" '+%Y-%m-%d %H:%M'))"
+  echo "  task:    $FWUP_TASK"
+  run_native_tool fwup -a -i "$archive" -d "$dev" -t "$FWUP_TASK"
+  execute
+}
+
+flash_bmaptool() {
+  # Same as flash_fwup: the caller resolves it first so the confirmation can show
+  # it, and this still resolves for itself when called directly.
+  local dev="$1" image="${2:-}" bmap
+  [ -n "$image" ] || image=$(resolve_raw_image)
+  # Append, do not replace the extension. oe-core's image_types.bbclass:357 emits
+  # ${IMAGE_NAME}.${type}.bmap, i.e. <image>.wic.bmap - so stripping .wic first
+  # produced a name Yocto never writes, the file was never found, and every run
+  # took the --nobmap branch. That cost more than sparse skipping: with no bmap,
+  # BmapCopy yields chksum = None, which forfeits the per-region SHA256
+  # verification this script advertises. Passing --nobmap also actively disabled
+  # bmaptool's own find_and_open_bmap(), which looks for exactly this name and
+  # would have found the file unaided.
+  bmap="$image.bmap"
+
+  command -v bmaptool >/dev/null 2>&1 || die "bmaptool not installed"
+
+  echo "  image: $image"
+  if [ -f "$bmap" ]; then
+    echo "  bmap:  $bmap (per-region checksums verified)"
+    RUN_CMD=(sudo bmaptool copy --bmap "$bmap" "$image" "$dev")
+  else
+    # No --nobmap: let bmaptool look for itself, so a bmap this function did not
+    # predict still gets used, and its absence still degrades to a full copy.
+    echo "  no bmap beside the image - full copy, and no per-region verification"
+    RUN_CMD=(sudo bmaptool copy "$image" "$dev")
+  fi
+  execute
+}
+
+# uuu drives the NXP boot ROM over USB, so it needs the host's USB stack and
+# the board already in serial download mode. There is no block device to
+# guard here - the transport itself selects the target.
+flash_uuu() {
+  local boot="$DEPLOY_DIR/images/$MACHINE_NAME/imx-boot"
+  [ -f "$boot" ] || die "no imx-boot for $MACHINE_NAME"
+
+  # emmc_all, not emmc. Both built-ins take two parameters - a bootloader and
+  # an image - and both default the image to the bootloader when it is
+  # omitted. `uuu -b emmc "$boot"` therefore ran
+  #
+  #     FB: flash bootloader _image      # _image == the bootloader
+  #
+  # and wrote imx-boot into the eMMC boot partition and nothing else: no
+  # rootfs, no partition table. The board came back running whatever OS was
+  # already on it, under a new bootloader, which looks like a successful flash
+  # from the host and is how a change under test can appear not to have taken.
+  # emmc_all adds `FB: flash -raw2sparse all _image`, the write that actually
+  # lays the OS down.
+  local image
+  image=$(resolve_raw_image)
+
+  # Pin the target instead of matching a vendor ID and hoping. `lsusb -d 1fc9:`
+  # answers "is any NXP device in SDP mode", and uuu without -m then takes
+  # whichever known device enumerated first - so with a second i.MX board on the
+  # bench for an unrelated bisect, this wrote to that one. A vendor-ID match is
+  # not a target selection, whatever the header used to claim.
+  local devices=() line
+  while IFS= read -r line; do
+    [ -n "$line" ] && devices+=("$line")
+  done < <(lsusb 2>/dev/null | grep -Eo 'Bus ([0-9]+) Device ([0-9]+): ID (1fc9|15a2):[0-9a-f]{4}' | sed -E 's/Bus ([0-9]+) Device ([0-9]+): ID (.*)/\1:\2 \3/')
+
+  case "${#devices[@]}" in
+    0) die "no NXP device in serial download mode (check the boot switches)" ;;
+    1) ;;
+    *) die "several NXP devices in serial download mode:
+$(printf '  %s\n' "${devices[@]}")
+  uuu would take whichever enumerated first, so refusing rather than guessing.
+  Leave exactly one board in serial download mode." ;;
+  esac
+
+  local usb_path="${devices[0]%% *}"
+
+  command -v uuu >/dev/null 2>&1 || die "uuu not installed"
+
+  echo "  bootloader: $boot"
+  echo "  image:      $image ($(du -h "$image" | cut -f1))"
+  echo "  usb path:   $usb_path (${devices[0]#* })"
+
+  # The eMMC write is as destructive as the SD one - it lays down a partition
+  # table and a rootfs - and used to reach uuu with no prompt at all, so -y was
+  # irrelevant on this path because nothing asked.
+  confirm_destructive "$usb_path"
+
+  RUN_CMD=(sudo uuu -m "$usb_path" -b emmc_all "$boot" "$image")
+  execute
+}
+
+execute() {
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "dry-run: ${RUN_CMD[*]}"
+    return 0
+  fi
+  "${RUN_CMD[@]}"
+}
+
+# Close out a write, or say plainly that none happened. Neither `sync` nor the
+# completion message used to be guarded, so `-n -y sd /dev/sdb` printed `done.
+# set the board's boot switches...` and exited 0 having written nothing: an
+# operator sanity-checking a job definition powers the board, sees the previous
+# image, and concludes the flash failed rather than that it never ran. `sync` is
+# also a real syscall against every mounted filesystem, so running it broke the
+# --dry-run promise to touch nothing.
+finish() {
+  local next_step="$1" target="$2"
+
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "dry run: nothing was written to $target."
+    return 0
+  fi
+  sync
+  echo "done. $next_step"
+}
+
+MACHINE_NAME=""
+DEPLOY_DIR=""
+BACKEND=""
+DRY_RUN=0
+ASSUME_YES=0
+# fwup's task, passed through as -t. `complete` writes the whole medium
+# including var; `upgrade` writes only the inactive A/B boot+rootfs slots and
+# leaves var alone, which is the difference between provisioning a blank card
+# and updating a device that already carries state.
+FWUP_TASK="complete"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m | --machine)
+      MACHINE_NAME="$2"
+      shift 2
+      ;;
+    -d | --deploy)
+      DEPLOY_DIR="$2"
+      shift 2
+      ;;
+    -b | --backend)
+      BACKEND="$2"
+      shift 2
+      ;;
+    -t | --task)
+      FWUP_TASK="$2"
+      shift 2
+      ;;
+    -n | --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -y | --assume-yes)
+      ASSUME_YES=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*) die "unknown option: $1 (see --help)" ;;
+    *) break ;;
+  esac
+done
+
+[ $# -ge 1 ] || {
+  usage >&2
+  exit 1
+}
+
+# `*) break` above stops the option loop at the first non-option, and nothing
+# read past $2, so every option written after the medium was discarded without
+# a word - including the ones that decide what gets written. `sd /dev/sdb
+# --machine avocado-imx93-frdm` fell through to autodetect and wrote whatever it
+# guessed; a trailing `--backend bmaptool` wrote with fwup instead; a trailing
+# `-y` left the board-farm path prompting at EOF. Refusing the surplus closes
+# all of them at once, and says where the option belongs.
+[ $# -le 2 ] || die "unexpected argument: $3 (options go before the medium; see --help)"
+
+MEDIUM="$1"
+DEVICE="${2:-}"
+
+resolve_deploy_dir
+resolve_machine
+
+echo "machine: $MACHINE_NAME"
+echo "deploy:  $DEPLOY_DIR"
+
+# Only fwup evaluates the manifest's tasks. Refusing here rather than ignoring
+# the flag matters because the two tasks differ in whether /var survives: a
+# --task upgrade silently downgraded to a whole-medium write destroys the state
+# the caller asked to keep, and the write looks successful either way.
+if [ "$FWUP_TASK" != "complete" ] && [ "${BACKEND:-}" != "fwup" ] \
+  && { [ "$MEDIUM" != "sd" ] || [ -n "$BACKEND" ]; }; then
+  die "--task applies to the fwup backend only (got backend '${BACKEND:-default for $MEDIUM}')"
+fi
+
+case "$MEDIUM" in
+  sd)
+    [ -n "$DEVICE" ] || die "'sd' needs a device (see --help)"
+    assert_safe_block_device "$DEVICE"
+
+    # Resolve the payload before asking, and show it in the prompt. The
+    # confirmation used to come first, so after a bundle-only rebuild the
+    # operator saw the destructive banner, retyped the device, and only then got
+    # `no fwup archive`. The cost is not the keystrokes - it is that the retype
+    # gate is the only thing between a typo and a wiped disk, and clearing it
+    # before the script knows it has anything to write trains people to clear it
+    # by reflex.
+    case "${BACKEND:-fwup}" in
+      fwup) PAYLOAD=$(resolve_fwup_archive) ;;
+      bmaptool) PAYLOAD=$(resolve_raw_image) ;;
+      *) die "backend ${BACKEND} cannot write a block device" ;;
+    esac
+
+    confirm_destructive "$DEVICE" "$PAYLOAD"
+
+    case "${BACKEND:-fwup}" in
+      fwup) flash_fwup "$DEVICE" "$PAYLOAD" ;;
+      bmaptool) flash_bmaptool "$DEVICE" "$PAYLOAD" ;;
+    esac
+    finish "set the board's boot switches to the SD position and power on." "$DEVICE"
+    ;;
+  emmc)
+    case "${BACKEND:-uuu}" in
+      uuu) flash_uuu ;;
+      *) die "backend ${BACKEND} cannot write over serial download" ;;
+    esac
+    finish "set the board's boot switches to the eMMC position and power on." "the board"
+    ;;
+  *)
+    die "unknown medium: $MEDIUM (see --help)"
+    ;;
+esac
