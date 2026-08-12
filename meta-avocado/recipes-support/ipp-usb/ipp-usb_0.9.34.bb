@@ -6,7 +6,7 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=35b61b5975388824d233d3f4
 GO_IMPORT = "github.com/OpenPrinting/ipp-usb"
 
 SRC_URI = "git://github.com/OpenPrinting/ipp-usb.git;protocol=https;branch=master"
-SRCREV = "1fb7787f2cdfd66236c0cc494e6c036b76a7b396"
+SRCREV = "057c7ac8739e557d12796378f3c180136cb3e274"
 
 inherit go-mod systemd
 
