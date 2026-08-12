@@ -38,3 +38,7 @@ header:
     file: kas/feature/java.yml
   - repo: meta-avocado
     file: kas/feature/containers.yml
+  - repo: meta-avocado
+    file: kas/feature/smartcard.yml
+  - repo: meta-avocado
+    file: kas/feature/printing.yml
