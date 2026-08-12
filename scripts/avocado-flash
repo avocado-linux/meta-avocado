@@ -107,11 +107,15 @@ run_native_tool() {
   fi
 }
 
-# Refuse anything that is not an unmounted, removable whole disk. fwup and
-# bmaptool both rewrite the partition table from sector 0, so a mistyped
+# Refuse anything that is not an unmounted whole disk on a removable bus. fwup
+# and bmaptool both rewrite the partition table from sector 0, so a mistyped
 # letter destroys whatever it names with no prompt and no undo. Development
 # hosts routinely carry multi-terabyte disks on the same /dev/sd* namespace as
 # the card reader.
+#
+# Still coarser than it looks in one direction: a USB enclosure holding a large
+# disk is on a USB bus and passes. The retype-the-device prompt is what stands
+# behind that, and -y removes it, so a size ceiling would be the complement.
 assert_safe_block_device() {
   local dev="$1" resolved base mounts
 
@@ -128,8 +132,33 @@ assert_safe_block_device() {
   [ -d "/sys/block/$base" ] \
     || die "refusing a partition: pass the whole disk (e.g. /dev/sdb, not $dev)"
 
-  [ "$(cat "/sys/block/$base/removable" 2>/dev/null)" = "1" ] \
-    || die "refusing $dev: the kernel does not report it removable"
+  # Ask udev which bus the device is on, rather than the kernel's removable flag.
+  # That flag is wrong in both directions here: drivers/mmc/core/block.c
+  # deliberately never sets GENHD_FL_REMOVABLE, so an SD card in a native SDHCI
+  # reader reports removable=0 and was refused - the case --help documents first -
+  # while scsi_scan.c:928 copies the SCSI RMB bit verbatim with no bus or size
+  # check, so a USB enclosure asserting RMB passed.
+  #
+  # ID_PATH rather than ID_BUS, because ID_BUS is only set for ata/scsi/usb: it is
+  # empty on nvme here, so it is not a property every disk carries and keying on
+  # it would refuse an mmc device for want of a value. ID_PATH comes from udev's
+  # path_id builtin, which names the controller for every bus - `-usb-` for a
+  # reader or stick, `mmc` for a native slot, `-ata-`/`-nvme-` for the host's own
+  # disks.
+  #
+  # udevadm is in neither HOSTTOOLS nor HOSTTOOLS_NONFATAL, so an absent one
+  # refuses instead of falling back to the flag this replaced. A safety guard that
+  # silently degrades to a weaker predicate is the shape of the bug being fixed.
+  command -v udevadm >/dev/null 2>&1 \
+    || die "refusing $dev: udevadm is needed to identify the device's bus and was not found"
+
+  local id_path
+  id_path=$(udevadm info --query=property --property=ID_PATH --value "$resolved" 2>/dev/null) || id_path=""
+  case "$id_path" in
+    *-usb-* | *mmc*) ;;
+    "") die "refusing $dev: udev reports no ID_PATH for it, so its bus cannot be established" ;;
+    *) die "refusing $dev: it is on '$id_path', not a USB or MMC bus - pass a card reader, SD slot or USB stick" ;;
+  esac
 
   # Read lsblk's own exit status rather than the pipeline's. `grep -c .` exits 1
   # on zero lines, which is the legitimate nothing-is-mounted answer, so the old
