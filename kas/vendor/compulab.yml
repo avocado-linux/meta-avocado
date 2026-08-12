@@ -16,11 +16,19 @@ repos:
   # meta-compulab / meta-compulab-bsp / meta-imx8mp-isp "extra" layers are
   # desktop/multimedia/camera only and are intentionally omitted for the
   # headless Avocado SOM/gateway base.
+  # Repinned to the current scarthgap tip. The branch was force-pushed, which
+  # orphaned the previous pin (3a279bda) -- same subject and author date as this
+  # commit, but no longer an ancestor of any ref, so kas refused the config:
+  #   ERROR - Branch "scarthgap" in repository "meta-bsp-imx8mp" does not
+  #           contain commit 3a279bda...
+  # Pinning by commit alone is not an option: kas fetches refs and then checks
+  # out, so an unadvertised SHA fails at checkout. The only tree delta vs the
+  # orphaned pin is mx8mp/boot.script -- see the commit message.
   meta-bsp-imx8mp:
     url: https://github.com/avocado-linux/vendor-meta-bsp-imx8mp.git
     path: meta-bsp-imx8mp
     branch: scarthgap
-    commit: 3a279bdab1c63ca62881b7078887245de91a6f75
+    commit: 784b21b888fb0d3bc75d5e5937b94a622cee9786
     layers:
       .:
 
