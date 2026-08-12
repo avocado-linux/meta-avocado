@@ -38,24 +38,40 @@ def env(name):
     return value
 
 
+def fat_outputs(img):
+    """Every output path a FAT image already ships."""
+    outs = []
+    for entry in img.get("build_args", {}).get("files", []):
+        outs.append(entry.get("out") if isinstance(entry, dict) else entry)
+    return outs
+
+
 def find_boot_fat(stone):
     """Locate the FAT image that carries config.txt, returning
     (device_key, image_key). config.txt is the RPi firmware entry point, so the
-    image that ships it is the boot FAT regardless of how it is named."""
-    devices = stone.get("storage_devices", {})
-    for dev_key, dev in devices.items():
-        images = dev.get("images", {})
-        for img_key, img in images.items():
+    image that ships it is the boot FAT regardless of how it is named.
+
+    Every match is collected rather than the first returned: json.load preserves
+    document order, so a second config.txt-bearing FAT (a filled-in recovery
+    slot, say) would silently decide the delivery target by where it happens to
+    sit in the file. Ambiguity here is a manifest bug, not something to resolve
+    by picking one."""
+    matches = []
+    for dev_key, dev in stone.get("storage_devices", {}).items():
+        for img_key, img in (dev.get("images") or {}).items():
             if not isinstance(img, dict):
                 continue
-            build_args = img.get("build_args", {})
-            if build_args.get("type") != "fat":
+            if img.get("build_args", {}).get("type") != "fat":
                 continue
-            for entry in build_args.get("files", []):
-                out = entry.get("out") if isinstance(entry, dict) else entry
-                if out == "config.txt":
-                    return dev_key, img_key
-    die("no FAT image ships config.txt in the stone manifest; cannot place overlays")
+            if "config.txt" in fat_outputs(img):
+                matches.append((dev_key, img_key))
+    if not matches:
+        die("no FAT image ships config.txt in the stone manifest; cannot place overlays")
+    if len(matches) > 1:
+        named = ", ".join(f"{d}/{i}" for d, i in matches)
+        die(f"more than one FAT image ships config.txt ({named}); "
+            "cannot tell which is the boot FAT")
+    return matches[0]
 
 
 def overlay_line(overlay):
@@ -83,6 +99,24 @@ def main():
         stone = json.load(f)
     dev_key, img_key = find_boot_fat(stone)
     platform = stone.get("runtime", {}).get("platform", "raspberrypi")
+
+    # An overlay whose delivered path matches one the BSP already ships cannot
+    # be delivered at all: stone reads an identical (in, out) pair as an
+    # idempotent duplicate and drops the append, then resolves the name from the
+    # SDK's own stone dir, which precedes the staging dir on the input path. The
+    # stock blob ships, the user's is nowhere on the image, and claimed_by has
+    # already been set so the CLI's undelivered check passes. Refuse by name
+    # instead - stone's conflict branch is unreachable for this shape, so it has
+    # to be caught here.
+    boot_img = stone["storage_devices"][dev_key]["images"][img_key]
+    shipped = set(fat_outputs(boot_img))
+    collisions = sorted(
+        ov["name"] for ov in overlays if f"overlays/{ov['file']}" in shipped
+    )
+    if collisions:
+        die(f"{', '.join(collisions)}: the BSP already ships an overlay of this "
+            "name on the boot FAT; rename the overlay (a same-named overlay is "
+            "dropped rather than applied, and the stock one ships instead)")
 
     # Additive delivery: each .dtbo into overlays/, plus the include file.
     files_append = [

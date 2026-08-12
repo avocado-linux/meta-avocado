@@ -38,7 +38,15 @@ def env(name):
 def find_boot_fat(stone):
     """Locate the FAT image that carries the kernel, returning
     (device_key, image_key). QEMU boot FATs have no config.txt, so the boot
-    image is identified by the kernel file it ships."""
+    image is identified by the kernel file it ships.
+
+    Every match is collected rather than the first returned: json.load preserves
+    document order, so a second kernel-bearing FAT (a filled-in recovery slot,
+    say) would silently decide the delivery target by where it happens to sit in
+    the file - overlays would land on the recovery FAT and the booted image
+    would ship without them. Ambiguity here is a manifest bug, not something to
+    resolve by picking one."""
+    matches = []
     for dev_key, dev in stone.get("storage_devices", {}).items():
         for img_key, img in (dev.get("images") or {}).items():
             if not isinstance(img, dict):
@@ -47,10 +55,16 @@ def find_boot_fat(stone):
                 continue
             for entry in img["build_args"].get("files", []):
                 out = entry.get("out") if isinstance(entry, dict) else entry
-                base = str(out).rsplit("/", 1)[-1]
-                if base in KERNEL_NAMES:
-                    return dev_key, img_key
-    die("no FAT image ships a kernel in the stone manifest; cannot place overlays")
+                if str(out).rsplit("/", 1)[-1] in KERNEL_NAMES:
+                    matches.append((dev_key, img_key))
+                    break
+    if not matches:
+        die("no FAT image ships a kernel in the stone manifest; cannot place overlays")
+    if len(matches) > 1:
+        named = ", ".join(f"{d}/{i}" for d, i in matches)
+        die(f"more than one FAT image ships a kernel ({named}); "
+            "cannot tell which is the boot FAT")
+    return matches[0]
 
 
 def main():

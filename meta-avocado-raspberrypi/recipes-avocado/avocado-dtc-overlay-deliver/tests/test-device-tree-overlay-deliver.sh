@@ -127,6 +127,85 @@ else
     fi
 fi
 
+# Negative: an overlay whose delivered name collides with one the BSP already
+# ships must be refused. stone treats an identical (in, out) pair as an
+# idempotent duplicate and drops the append, then resolves the name from the
+# SDK's stone dir first - so the STOCK blob ships and the user's overlay is
+# silently absent from the image while claimed_by still satisfies the CLI gate.
+cat > "$work/stone-stock.json" <<'EOF'
+{
+  "runtime": {"platform": "avocado-raspberrypi5"},
+  "storage_devices": {
+    "rootdisk": {
+      "images": {
+        "boot": {
+          "build_args": {
+            "type": "fat",
+            "files": [
+              {"in": "bootfiles/config.txt", "out": "config.txt"},
+              {"in": "my-spi.dtbo", "out": "overlays/my-spi.dtbo"}
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+if AVOCADO_DTBO_STAGING="$staging" \
+   AVOCADO_OVERLAYS_MANIFEST="$staging/overlays.manifest.json" \
+   AVOCADO_DELIVERY_FRAGMENT="$work/frag-stock.json" \
+   AVOCADO_STONE_MANIFEST="$work/stone-stock.json" \
+       "$hook" >/dev/null 2>"$work/stock.err"; then
+    bad "an overlay colliding with a stock .dtbo was accepted (stone drops it silently)"
+else
+    if grep -qi 'my-spi\|already ships\|collide' "$work/stock.err"; then
+        ok "an overlay colliding with a stock .dtbo is refused by name"
+    else
+        bad "collision failed without naming the overlay: $(cat "$work/stock.err")"
+    fi
+fi
+
+# Negative: two FAT images both shipping config.txt is ambiguous. The loop
+# returns whichever comes first in document order, so the delivery target would
+# be decided by textual position in the stone JSON rather than by intent.
+cat > "$work/stone-twofat.json" <<'EOF'
+{
+  "runtime": {"platform": "avocado-raspberrypi5"},
+  "storage_devices": {
+    "rootdisk": {
+      "images": {
+        "recovery": {
+          "build_args": {
+            "type": "fat",
+            "files": [{"in": "bootfiles/config.txt", "out": "config.txt"}]
+          }
+        },
+        "boot": {
+          "build_args": {
+            "type": "fat",
+            "files": [{"in": "bootfiles/config.txt", "out": "config.txt"}]
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+if AVOCADO_DTBO_STAGING="$staging" \
+   AVOCADO_OVERLAYS_MANIFEST="$staging/overlays.manifest.json" \
+   AVOCADO_DELIVERY_FRAGMENT="$work/frag-twofat.json" \
+   AVOCADO_STONE_MANIFEST="$work/stone-twofat.json" \
+       "$hook" >/dev/null 2>"$work/twofat.err"; then
+    bad "two config.txt-bearing FATs were accepted (target chosen by document order)"
+else
+    if grep -qi 'more than one\|ambiguous\|recovery' "$work/twofat.err"; then
+        ok "two config.txt-bearing FAT images is a hard error naming both"
+    else
+        bad "ambiguous FAT failed without a clear message: $(cat "$work/twofat.err")"
+    fi
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]

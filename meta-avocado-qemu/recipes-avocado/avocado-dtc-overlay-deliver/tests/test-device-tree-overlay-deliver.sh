@@ -104,6 +104,38 @@ else
     fi
 fi
 
+# Negative: two kernel-bearing FAT images is ambiguous. The loop returns the
+# first match in document order, so which FAT receives the overlays would be
+# decided by textual position in the stone JSON - a reserved slot filled in
+# above the boot slot would silently take delivery and the booted image would
+# ship without them.
+cat > "$work/stone-twofat.json" <<'EOF'
+{
+  "runtime": {"platform": "avocado-qemuarm64"},
+  "storage_devices": {
+    "rootdisk": {
+      "images": {
+        "recovery": {"build_args": {"type": "fat", "files": ["Image"]}},
+        "boot": {"build_args": {"type": "fat", "files": ["Image"]}}
+      }
+    }
+  }
+}
+EOF
+if AVOCADO_DTBO_STAGING="$staging" \
+   AVOCADO_OVERLAYS_MANIFEST="$staging/overlays.manifest.json" \
+   AVOCADO_DELIVERY_FRAGMENT="$work/frag-twofat.json" \
+   AVOCADO_STONE_MANIFEST="$work/stone-twofat.json" \
+       "$hook" >/dev/null 2>"$work/twofat.err"; then
+    bad "two kernel-bearing FATs were accepted (target chosen by document order)"
+else
+    if grep -qi 'more than one\|ambiguous\|recovery' "$work/twofat.err"; then
+        ok "two kernel-bearing FAT images is a hard error naming both"
+    else
+        bad "ambiguous FAT failed without a clear message: $(cat "$work/twofat.err")"
+    fi
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]
