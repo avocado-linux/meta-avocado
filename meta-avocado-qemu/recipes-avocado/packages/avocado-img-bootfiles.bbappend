@@ -10,4 +10,11 @@
 # and virtual/kernel, so its task hashes didn't change when u-boot
 # rebuilt and sstate served the prior package output. See
 # docs/migrations/scarthgap-to-wrynose.md #46 for the diagnosis.
-do_compile[depends] += "virtual/bootloader:do_deploy"
+#
+# A UEFI target stages systemd-boot into the ESP through stone rather than
+# bundling a bootloader artifact here, and declares no virtual/bootloader at all -
+# so gate the dep on AVOCADO_BOOTLOADER (a machine property, not the machine name;
+# varflags take no :append:<override>). Ungated, the dep has nothing to resolve
+# against once qemux86-64 moves to UEFI with the encrypted-/var work, and the
+# build stops on "Nothing PROVIDES virtual/bootloader".
+do_compile[depends] += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uboot', 'virtual/bootloader:do_deploy', '', d)}"
