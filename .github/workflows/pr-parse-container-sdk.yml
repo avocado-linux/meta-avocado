@@ -19,8 +19,7 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs so a burst of `synchronize` pushes does not stack up on
-# the single self-hosted runner.
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
 concurrency:
   group: parse-container-sdk-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -28,12 +27,14 @@ concurrency:
 jobs:
   parse-container-sdk:
     # `bitbake -p` executes recipe-embedded Python (__anonymous, inline ${@...})
-    # during parse, so untrusted fork code must not run on the persistent
-    # self-hosted runner. Run only on same-repo PRs -- which is also where this
-    # regression lands (an always-parsed recipe changing its inherit), so the
-    # guard keeps full coverage while closing the fork-RCE path.
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: molcajete
+    # during parse, so this ran same-repo-only while it was on the persistent
+    # self-hosted runner. On an ephemeral GitHub-hosted runner that is the
+    # normal model for fork PRs -- the container is destroyed after the job and
+    # `permissions: contents: read` grants it nothing -- so the guard is gone
+    # and fork PRs are covered too.
+    runs-on: ubuntu-latest
+    container:
+      image: avocadolinux/ci-build:ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -48,8 +49,10 @@ jobs:
           SDKMACHINE: "x86_64"
           DISTRO_CODENAME: ""
           CI: "true"
-          SOURCE_MIRROR_URL: "file:///avocado/dl"
-          SSTATE_MIRRORS: "file:///avocado/sstate/PATH;downloadfilename=PATH"
+        # No mirrors fragment: kas/ci/mirrors.yml is download/sstate/disk-monitor
+        # tuning pointed at http://molcajete:30082, none of which a parse reads
+        # and none of which resolves from a hosted runner. `bitbake -p` fetches
+        # no sources; kas still clones the layers it needs.
         run: |
           . scripts/init-build kas/sdk/container-${{ matrix.arch }}.yml
-          kas shell meta-avocado/kas/sdk/container-${{ matrix.arch }}.yml:meta-avocado/kas/ci/mirrors.yml -c "bitbake -p"
+          kas shell meta-avocado/kas/sdk/container-${{ matrix.arch }}.yml -c "bitbake -p"
