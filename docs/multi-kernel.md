@@ -80,7 +80,7 @@ meta-avocado-<family>/conf/multiconfig/<alt-mc-name>.conf
             OR
             PREFERRED_VERSION_<recipe>:forcevariable (same-recipe variant)
 
-meta-avocado-distro/classes/avocado-multikernel.bbclass
+meta-avocado/classes/avocado-multikernel.bbclass
         |
         +-- on avocado-distro recipe only:
         |     +-- do_multikernel_merge[mcdepends] += "mc::<mc>:<recipe>:do_build" (per pair)
@@ -156,7 +156,7 @@ machine-yml composition).
 | 2 | Feature YML | `kas/feature/multi-kernel-<family>.yml` | Yes |
 | 3 | Machine YML inclusion | `header.includes` in every `kas/machine/<target>.yml` of the family | Yes |
 | 4 | Per-kernel bbappend boilerplate | Already on every avocado kernel bbappend (see [adding-a-machine-target.md §10](adding-a-machine-target.md#10-kernel-configuration)) | Prereq |
-| 5 | `avocado-multikernel.bbclass` | `meta-avocado-distro/classes/avocado-multikernel.bbclass` | Already exists; no per-family work |
+| 5 | `avocado-multikernel.bbclass` | `meta-avocado/classes/avocado-multikernel.bbclass` | Already exists; no per-family work |
 
 ---
 
@@ -282,7 +282,7 @@ family. Callers do not compose multi-kernel onto the kas command line.
 ## 8. The `avocado-multikernel.bbclass`
 
 Already exists at
-`meta-avocado-distro/classes/avocado-multikernel.bbclass`. No per-family
+`meta-avocado/classes/avocado-multikernel.bbclass`. No per-family
 work needed — it's INHERIT'd globally from the feature yml's
 `local_conf_header` and PN-guarded so it only takes effect on the
 `avocado-distro` recipe.
