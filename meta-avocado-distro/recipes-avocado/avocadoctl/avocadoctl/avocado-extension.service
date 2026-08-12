@@ -1,6 +1,24 @@
 [Unit]
 Description=Avocado merge extensions
 
+# Not in the initrd: avocado-extension-initrd.service covers that, gated on the
+# complementary ConditionPathExists=/etc/initrd-release. Without this line the
+# two units are eligible at the same moment - identical Requires, identical
+# After=local-fs.target avocadoctl.socket - so systemd starts both inside the
+# initrd and they race. Each sets up loop devices for every extension (the
+# doubled loop0..loop7 at matching sizes in a boot log is the signature), and
+# whichever reaches systemd-confext second exits 1 with
+#
+#   Command 'systemd-confext' exited with error code Some(1):
+#   Hierarchy '/etc' is already merged.
+#
+# The loser's failure is not cosmetic. The two units race to publish the same
+# hierarchies, so which extensions are actually in place when sysinit.target is
+# reached varies between boots, and anything reading them that early - a user
+# record backing sshd's AuthorizedKeysCommand, for one - sees an inconsistent
+# view depending on who won.
+ConditionPathExists=!/etc/initrd-release
+
 ConditionDirectoryNotEmpty=|/var/lib/avocado
 ConditionCapability=CAP_SYS_ADMIN
 
