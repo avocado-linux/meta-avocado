@@ -20,8 +20,8 @@ do_install[nostamp] = "1"
 
 do_compile() {
     install -d "${AVOCADO_SB_KEYS_DIR}"
-    chmod +x "${WORKDIR}/gen-sbkeys.sh"
-    SBKEYS_DIR="${AVOCADO_SB_KEYS_DIR}" "${WORKDIR}/gen-sbkeys.sh"
+    chmod +x "${UNPACKDIR}/gen-sbkeys.sh"
+    SBKEYS_DIR="${AVOCADO_SB_KEYS_DIR}" "${UNPACKDIR}/gen-sbkeys.sh"
 }
 
 do_install() {
