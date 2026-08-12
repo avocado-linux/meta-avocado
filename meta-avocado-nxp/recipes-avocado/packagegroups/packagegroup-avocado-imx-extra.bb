@@ -26,32 +26,38 @@ NXP_WIFI_FIRMWARE = " \
   firmware-nxp-wifi-nxp8997-sdio \
 "
 
-# imx93-frdm ships no 88W8997 firmware, because at the 6.18 BSP none is
-# reachable from any layer in this set.
+# imx93-frdm names no firmware here. The 88W8997 packages this variable lists
+# are unreachable at the 6.18 BSP, and the part NXP replaced them with already
+# arrives without this packagegroup's help.
 #
-# NXP moved the SoC off the part. meta-imx layer.conf:172 removes the
+# NXP moved the SoC off the 8997. meta-imx layer.conf:172 removes the
 # mrvl8997 / nxp8997-pcie / nxp8997-sdio machine features and :277 adds
 # nxpaw693-sdio for mx93-nxp-bsp, which covers FRDM and not just the EVKs. Its
-# firmware-nxp-wifi bbappend then drops meta-freescale's surviving package:
+# firmware-nxp-wifi bbappend then drops meta-freescale's surviving 8997
+# package:
 #
 #   #-----------------don't upstream, keep in imx ------------------------
 #   PACKAGES:remove = " ${PN}-nxp8997-sdio "
 #
-# and the replacement that machine feature names resolves to nothing either -
-# meta-freescale packages -nxpaw693-pcie, not -nxpaw693-sdio.
+# That same bbappend packages the replacement - ${PN}-nxpaw693-sdio, carrying
+# sdiw693_wlan_v1.bin.se, sduartiw693_combo_v1.bin.se and
+# uartiw693_bt_v1.bin.se - and layer.conf:116 puts it in MACHINE_FIRMWARE,
+# which imx-base.inc:453 folds into MACHINE_EXTRA_RRECOMMENDS. The AW693
+# firmware therefore follows its machine feature on its own; naming it here
+# would duplicate a BSP decision, and naming any 8997 package would fail the
+# taskgraph.
 #
-# oe-core's linux-firmware does not substitute. Its -nxp8997-pcie and
-# -nxp8997-sdio are ALLOW_EMPTY shims carrying no FILES, and the only reachable
-# content behind them is -nxp8997-common's two Bluetooth files
-# (uartuart8997_bt_v4.bin, helper_uart_3000000.bin). The blob the driver loads,
-# mrvl/sdiouart8997_combo_v4.bin, is packaged only by meta-freescale, in the
-# package meta-imx removes above.
+# oe-core's linux-firmware does not substitute for the 8997 either. Its
+# -nxp8997-pcie and -nxp8997-sdio are ALLOW_EMPTY shims carrying no FILES, and
+# the only reachable content behind them is -nxp8997-common's two Bluetooth
+# files (uartuart8997_bt_v4.bin, helper_uart_3000000.bin). The blob the driver
+# loads, mrvl/sdiouart8997_combo_v4.bin, is packaged only by meta-freescale, in
+# the package meta-imx removes above - so pulling the shims in would install
+# two Bluetooth files and read like WiFi coverage that is not there.
 #
-# An empty set states that accurately; pulling the linux-firmware shims would
-# install two Bluetooth files and read like WiFi coverage that is not there.
-# Revisit once a board with a module fitted can say which part to target - this
-# unit's M.2 slot is empty, and the FRDM-IMX93's supported module is an 88W8987,
-# which is a third answer again.
+# Which part to target is moot until a module is fitted: this unit's M.2 slot
+# is empty, and the FRDM-IMX93's supported module is an 88W8987, a third answer
+# again.
 NXP_WIFI_FIRMWARE:avocado-imx93-frdm = ""
 
 RDEPENDS:${PN} = " \
