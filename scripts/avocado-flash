@@ -177,19 +177,28 @@ assert_safe_block_device() {
   fi
 }
 
+# Ask before a destructive write, showing what is about to be written where.
+# `payload` is the artifact already resolved by the caller: the prompt used to
+# come before any of that, so the type-the-device gate - the only thing between a
+# typo and a wiped disk - was cleared as a reflex before the script had
+# established it had anything to write at all.
+#
+# `target` is a block device on the sd path and a USB path on the emmc one, so
+# the lsblk detail is shown only when it applies rather than assumed.
 confirm_destructive() {
-  local dev="$1" reply
+  local target="$1" payload="${2:-}" reply
 
   # A dry run writes nothing, so requiring confirmation would only make it
   # hang when called non-interactively.
   [ "$DRY_RUN" = "1" ] && return 0
   [ "$ASSUME_YES" = "1" ] && return 0
 
-  echo "=== writing the whole OS to $dev (destructive) ==="
-  lsblk -o NAME,SIZE,TYPE,RM,MODEL "$dev"
+  echo "=== writing the whole OS to $target (destructive) ==="
+  [ -n "$payload" ] && echo "  payload: $payload"
+  [ -b "$target" ] && lsblk -o NAME,SIZE,TYPE,RM,MODEL "$target"
   echo
-  read -r -p "type the device again to confirm: " reply
-  [ "$reply" = "$dev" ] || die "mismatch, aborting"
+  read -r -p "type the target again to confirm: " reply
+  [ "$reply" = "$target" ] || die "mismatch, aborting"
 }
 
 # Look next to the script, then walk up from the working directory. The second
@@ -205,15 +214,45 @@ resolve_deploy_dir() {
     return 0
   fi
 
-  local root candidate
-  for root in "$SCRIPT_DIR/../.." $(ancestors_of "$PWD"); do
+  # Collect every candidate at the nearest level that has any, then refuse if
+  # there is more than one. Returning the first match made the choice
+  # alphabetically: a workspace holding both build-imx93-frdm and
+  # build-qemuarm64 resolved the i.MX93 tree for a caller who meant qemuarm64
+  # and wrote that machine's fwup archive. resolve_machine's ambiguity guard
+  # never fired, because the directory it landed on held exactly one machine -
+  # so the guard existed and was unreachable in the very layout it was written
+  # for.
+  #
+  # The roots are fed in through a loop rather than word-split from
+  # $(ancestors_of "$PWD"). Unquoted, a path containing a space skipped the real
+  # build tree and a glob metacharacter - proj[1] - resolved to a sibling.
+  # The linter is silent on it too: SC2046 is not raised for a substitution in a
+  # for-list.
+  local root candidate found=()
+  while IFS= read -r root; do
+    found=()
     for candidate in "$root"/build*/build/tmp/deploy "$root"/build/tmp/deploy "$root"/tmp/deploy; do
-      if [ -d "$candidate" ]; then
-        DEPLOY_DIR=$(cd "$candidate" && pwd)
-        return 0
-      fi
+      [ -d "$candidate" ] && found+=("$(cd "$candidate" && pwd -P)")
     done
-  done
+    # `pwd -P` and then de-duplicate, because a `build` symlink pointing at the
+    # active build-<machine> directory is a common layout and both names match the
+    # globs above. Resolved logically they look like two trees and would trip the
+    # ambiguity refusal below over what is really one.
+    if [ "${#found[@]}" -gt 1 ]; then
+      mapfile -t found < <(printf '%s\n' "${found[@]}" | sort -u)
+    fi
+    case "${#found[@]}" in
+      0) continue ;;
+      1)
+        DEPLOY_DIR="${found[0]}"
+        return 0
+        ;;
+      *) die "several build trees under $root (${found[*]}); pass --deploy to choose one" ;;
+    esac
+  done < <(
+    printf '%s\n' "$SCRIPT_DIR/../.."
+    ancestors_of "$PWD"
+  )
 
   die "could not find a deploy directory; pass --deploy or set BUILDDIR"
 }
@@ -251,15 +290,42 @@ resolve_machine() {
 # bundle-only rebuild refreshes os-bundle.aos and leaves this stale, so its
 # age is worth reporting rather than silently writing yesterday's bootloader.
 resolve_fwup_archive() {
-  local archive="$DEPLOY_DIR/stone/_build/${MACHINE_NAME#avocado-}-rootdisk.zip"
-  [ -f "$archive" ] || archive="$DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.zip"
-  [ -f "$archive" ] || die "no fwup archive under $DEPLOY_DIR/stone/_build (run stone_provision)"
-  printf '%s' "$archive"
+  # Glob the machine's own name rather than guessing two spellings of it. Every
+  # stone manifest names the artifact avocado-<short>-rootdisk.*, which is
+  # $MACHINE_NAME-rootdisk.* - so the ${MACHINE_NAME#avocado-} probe that used to
+  # run first matched nothing anywhere, and only the fallback did any work. The
+  # extension was hardcoded to .zip too, which is not what every machine
+  # produces.
+  #
+  # .img is deliberately not accepted here. That is the unpacked raw image, which
+  # is what the bmaptool and raw paths take; handing it to fwup as an archive
+  # fails further in and less legibly than saying so now.
+  local build="$DEPLOY_DIR/stone/_build" found=() candidate
+  for candidate in "$build/$MACHINE_NAME"-rootdisk.zip "$build/$MACHINE_NAME"-rootdisk.fw; do
+    [ -f "$candidate" ] && found+=("$candidate")
+  done
+
+  case "${#found[@]}" in
+    1) printf '%s' "${found[0]}" ;;
+    0) die "no fwup archive for $MACHINE_NAME under $build
+  looked for: $MACHINE_NAME-rootdisk.zip, $MACHINE_NAME-rootdisk.fw
+  Not every machine produces a fwup archive. If this one deploys a raw image
+  instead, write it with --backend bmaptool; otherwise run the provisioning step
+  that builds the stone archive." ;;
+    *) die "several fwup archives for $MACHINE_NAME under $build (${found[*]}); remove the stale one" ;;
+  esac
 }
 
 resolve_raw_image() {
   local image
-  for image in "$DEPLOY_DIR/images/$MACHINE_NAME"/*.wic "$DEPLOY_DIR/stone/_build"/*-rootdisk.img; do
+  # Both globs are scoped to $MACHINE_NAME. The second used to search the flat,
+  # shared stone/_build with no machine filter, so in a tree where only one
+  # machine had been provisioned, asking for another one missed
+  # images/<machine>/*.wic, fell through, matched whatever *-rootdisk.img was
+  # there, and wrote that machine's image to the card - while the error one line
+  # below claimed per-machine scoping. The only signal was the `image:` echo,
+  # which a -y caller never reads.
+  for image in "$DEPLOY_DIR/images/$MACHINE_NAME"/*.wic "$DEPLOY_DIR/stone/_build/$MACHINE_NAME"-rootdisk.img; do
     [ -f "$image" ] && {
       printf '%s' "$image"
       return 0
@@ -278,8 +344,11 @@ resolve_raw_image() {
 }
 
 flash_fwup() {
-  local dev="$1" archive
-  archive=$(resolve_fwup_archive)
+  # The archive is resolved by the caller, before the confirmation, so the prompt
+  # can name what is about to be written. Resolved here if absent so the function
+  # still stands alone.
+  local dev="$1" archive="${2:-}"
+  [ -n "$archive" ] || archive=$(resolve_fwup_archive)
 
   echo "  archive: $archive ($(date -r "$archive" '+%Y-%m-%d %H:%M'))"
   echo "  task:    $FWUP_TASK"
@@ -288,18 +357,32 @@ flash_fwup() {
 }
 
 flash_bmaptool() {
-  local dev="$1" image bmap
-  image=$(resolve_raw_image)
-  bmap="${image%.*}.bmap"
+  # Same as flash_fwup: the caller resolves it first so the confirmation can show
+  # it, and this still resolves for itself when called directly.
+  local dev="$1" image="${2:-}" bmap
+  [ -n "$image" ] || image=$(resolve_raw_image)
+  # Append, do not replace the extension. oe-core's image_types.bbclass:357 emits
+  # ${IMAGE_NAME}.${type}.bmap, i.e. <image>.wic.bmap - so stripping .wic first
+  # produced a name Yocto never writes, the file was never found, and every run
+  # took the --nobmap branch. That cost more than sparse skipping: with no bmap,
+  # BmapCopy yields chksum = None, which forfeits the per-region SHA256
+  # verification this script advertises. Passing --nobmap also actively disabled
+  # bmaptool's own find_and_open_bmap(), which looks for exactly this name and
+  # would have found the file unaided.
+  bmap="$image.bmap"
+
+  command -v bmaptool >/dev/null 2>&1 || die "bmaptool not installed"
 
   echo "  image: $image"
   if [ -f "$bmap" ]; then
+    echo "  bmap:  $bmap (per-region checksums verified)"
     RUN_CMD=(sudo bmaptool copy --bmap "$bmap" "$image" "$dev")
   else
-    echo "  no $bmap - falling back to a full copy without sparse skipping"
-    RUN_CMD=(sudo bmaptool copy --nobmap "$image" "$dev")
+    # No --nobmap: let bmaptool look for itself, so a bmap this function did not
+    # predict still gets used, and its absence still degrades to a full copy.
+    echo "  no bmap beside the image - full copy, and no per-region verification"
+    RUN_CMD=(sudo bmaptool copy "$image" "$dev")
   fi
-  command -v bmaptool >/dev/null 2>&1 || die "bmaptool not installed"
   execute
 }
 
@@ -325,14 +408,39 @@ flash_uuu() {
   local image
   image=$(resolve_raw_image)
 
-  if ! lsusb -d 1fc9: >/dev/null 2>&1 && ! lsusb -d 15a2: >/dev/null 2>&1; then
-    die "no NXP device in serial download mode (check the boot switches)"
-  fi
+  # Pin the target instead of matching a vendor ID and hoping. `lsusb -d 1fc9:`
+  # answers "is any NXP device in SDP mode", and uuu without -m then takes
+  # whichever known device enumerated first - so with a second i.MX board on the
+  # bench for an unrelated bisect, this wrote to that one. A vendor-ID match is
+  # not a target selection, whatever the header used to claim.
+  local devices=() line
+  while IFS= read -r line; do
+    [ -n "$line" ] && devices+=("$line")
+  done < <(lsusb 2>/dev/null | grep -Eo 'Bus ([0-9]+) Device ([0-9]+): ID (1fc9|15a2):[0-9a-f]{4}' | sed -E 's/Bus ([0-9]+) Device ([0-9]+): ID (.*)/\1:\2 \3/')
+
+  case "${#devices[@]}" in
+    0) die "no NXP device in serial download mode (check the boot switches)" ;;
+    1) ;;
+    *) die "several NXP devices in serial download mode:
+$(printf '  %s\n' "${devices[@]}")
+  uuu would take whichever enumerated first, so refusing rather than guessing.
+  Leave exactly one board in serial download mode." ;;
+  esac
+
+  local usb_path="${devices[0]%% *}"
+
+  command -v uuu >/dev/null 2>&1 || die "uuu not installed"
 
   echo "  bootloader: $boot"
   echo "  image:      $image ($(du -h "$image" | cut -f1))"
-  RUN_CMD=(sudo uuu -b emmc_all "$boot" "$image")
-  command -v uuu >/dev/null 2>&1 || die "uuu not installed"
+  echo "  usb path:   $usb_path (${devices[0]#* })"
+
+  # The eMMC write is as destructive as the SD one - it lays down a partition
+  # table and a rootfs - and used to reach uuu with no prompt at all, so -y was
+  # irrelevant on this path because nothing asked.
+  confirm_destructive "$usb_path"
+
+  RUN_CMD=(sudo uuu -m "$usb_path" -b emmc_all "$boot" "$image")
   execute
 }
 
@@ -444,11 +552,25 @@ case "$MEDIUM" in
   sd)
     [ -n "$DEVICE" ] || die "'sd' needs a device (see --help)"
     assert_safe_block_device "$DEVICE"
-    confirm_destructive "$DEVICE"
+
+    # Resolve the payload before asking, and show it in the prompt. The
+    # confirmation used to come first, so after a bundle-only rebuild the
+    # operator saw the destructive banner, retyped the device, and only then got
+    # `no fwup archive`. The cost is not the keystrokes - it is that the retype
+    # gate is the only thing between a typo and a wiped disk, and clearing it
+    # before the script knows it has anything to write trains people to clear it
+    # by reflex.
     case "${BACKEND:-fwup}" in
-      fwup) flash_fwup "$DEVICE" ;;
-      bmaptool) flash_bmaptool "$DEVICE" ;;
+      fwup) PAYLOAD=$(resolve_fwup_archive) ;;
+      bmaptool) PAYLOAD=$(resolve_raw_image) ;;
       *) die "backend ${BACKEND} cannot write a block device" ;;
+    esac
+
+    confirm_destructive "$DEVICE" "$PAYLOAD"
+
+    case "${BACKEND:-fwup}" in
+      fwup) flash_fwup "$DEVICE" "$PAYLOAD" ;;
+      bmaptool) flash_bmaptool "$DEVICE" "$PAYLOAD" ;;
     esac
     finish "set the board's boot switches to the SD position and power on." "$DEVICE"
     ;;
