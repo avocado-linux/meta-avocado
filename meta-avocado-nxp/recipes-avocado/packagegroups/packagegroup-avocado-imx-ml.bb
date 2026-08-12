@@ -5,19 +5,36 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
-# Only the i.MX8M Plus (Vivante VIP9000 NPU) gets the VX-delegate eIQ stack.
-# tim-vx / tflite-vx-delegate are version-matched to NXP's imx-gpu-viv 6.4.11
-# (libOpenVX/libVSC) + galcore, and are COMPATIBLE only on mx8-nxp-bsp +
-# imxgpu3d -- which the NXP-BSP i.MX8MP boards (e.g. ucm-imx8m-plus) carry.
-# Empty on every other machine so this is safe to wire into the shared NXP
-# PKG_EXTRA_INSTALL. Other NPUs (Ethos-U on mx93, Neutron on mx95) use
-# different delegates and would get their own packagegroup. The NN/OpenVX
-# userspace itself arrives with imx-gpu-viv (already built for the GPU).
+# Each i.MX NPU family carries its own TFLite delegate stack; the right one is
+# selected by MACHINE override so this single packagegroup stays safe to wire
+# into the shared NXP PKG_EXTRA_INSTALL (empty on machines with no NPU).
+#
+#   mx8mp-nxp-bsp -- Vivante VIP9000: VX delegate. tim-vx / tflite-vx-delegate
+#       are version-matched to NXP's imx-gpu-viv 6.4.11 (libOpenVX/libVSC) +
+#       galcore, COMPATIBLE only on mx8-nxp-bsp + imxgpu3d (e.g. imx8mp-evk,
+#       ucm-imx8m-plus). The NN/OpenVX userspace arrives with imx-gpu-viv.
+#
+#   mx93-nxp-bsp -- Arm Ethos-U65 microNPU: Ethos-U delegate. Models are
+#       offline-compiled by Vela (ethos-u-vela; run in the SDK, not shipped)
+#       into an Ethos-U command stream; tflite-ethosu-delegate + the driver
+#       stack run them, and ethos-u-firmware feeds the microNPU. All four
+#       recipes are COMPATIBLE_MACHINE = "(mx93-nxp-bsp)".
+#
+# Neutron (mx95) would add its own NPU_ML_PKGS:mx95-nxp-bsp branch here.
 NPU_ML_PKGS = ""
 NPU_ML_PKGS:mx8mp-nxp-bsp = " \
     tensorflow-lite \
     tensorflow-lite-vx-delegate \
     tim-vx \
+    nnstreamer \
+    nnstreamer-tensorflow-lite \
+    nnstreamer-python3 \
+"
+NPU_ML_PKGS:mx93-nxp-bsp = " \
+    tensorflow-lite \
+    tensorflow-lite-ethosu-delegate \
+    ethos-u-driver-stack \
+    ethos-u-firmware \
     nnstreamer \
     nnstreamer-tensorflow-lite \
     nnstreamer-python3 \
