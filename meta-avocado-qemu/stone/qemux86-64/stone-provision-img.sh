@@ -23,6 +23,15 @@ BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
 BLOCK_SIZE=$(jq -r '.storage_devices.rootdisk.block_size // 512' "$MANIFEST")
 
+# Every size and offset below is computed in 512-byte units. Reading the
+# manifest's block_size and then ignoring it means a manifest declaring 4096
+# produces a silently mis-laid-out image rather than an error. Guard it, the
+# way meta-avocado-rockchip/stone/orangepi-5-plus/build-disk-image.sh does.
+if [ "$BLOCK_SIZE" != "512" ]; then
+    echo "ERROR: only 512-byte blocks supported (manifest declares ${BLOCK_SIZE})" >&2
+    exit 1
+fi
+
 echo "=== Creating disk image for ${PLATFORM} ==="
 echo "  Data directory: ${DATA_DIR}"
 echo "  Build directory: ${BUILD_DIR}"
