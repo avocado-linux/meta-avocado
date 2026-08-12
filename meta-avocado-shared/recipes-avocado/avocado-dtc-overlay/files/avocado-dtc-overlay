@@ -47,12 +47,19 @@ kdir_explicit=false
 [[ -n "$kdir" ]] && kdir_explicit=true    # $AVOCADO_KDIR is a deliberate choice
 name=""
 
+# Consume an option and its value, tolerating the value being absent. Shifting
+# by a flat 2 fails when the option is the last token, and under `set -e` that
+# aborts the script before the required-argument checks below can say anything -
+# the caller gets a bare exit 1 with both streams empty. Shift what is actually
+# there and let those checks produce the diagnostic.
+shift_opt() { (( $# > 1 )) && echo 2 || echo 1; }
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --src)  src="${2:-}"; shift 2 ;;
-        --out)  out="${2:-}"; shift 2 ;;
-        --kdir) kdir="${2:-}"; kdir_explicit=true; shift 2 ;;
-        --name) name="${2:-}"; shift 2 ;;
+        --src)  src="${2:-}"; shift "$(shift_opt "$@")" ;;
+        --out)  out="${2:-}"; shift "$(shift_opt "$@")" ;;
+        --kdir) kdir="${2:-}"; kdir_explicit=true; shift "$(shift_opt "$@")" ;;
+        --name) name="${2:-}"; shift "$(shift_opt "$@")" ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -152,21 +159,56 @@ fi
 # sibling overlay or the base can reference them. dtc warnings are expected on
 # real hardware overlays (reg formatting, etc.) and must not fail the build; a
 # genuine syntax/structure error makes dtc exit non-zero and we surface it.
-"$DTC" -@ -I dts -O dtb -o "$out" "$dtc_src" \
+#
+# -i <source dir>: dtc resolves a native /include/ relative to its input file,
+# and on the cpp branch that input lives in the temp dir, so a .dtsi sitting
+# beside the source stops resolving. Passed unconditionally rather than only on
+# that branch, so whether an overlay happens to #include a header cannot change
+# how its /include/ resolves. This is what the kernel's own dtb rule does
+# (scripts/Makefile.dtbs passes -i for the source dir for the same reason).
+"$DTC" -@ -I dts -O dtb -i "$(dirname "$src")" -o "$out" "$dtc_src" \
     || die "$label: dtc failed to compile the overlay"
 
-# Structural check: a real overlay materialises at least one fragment@ node.
+# Structural check: a real overlay materialises at least one fragment - a
+# top-level node carrying an __overlay__ child. Select on that child rather than
+# on the node's name. `fragment@N` is the name dtc generates for the &label
+# shorthand, not part of the overlay format: the kernel's own
+# init_overlay_changeset() selects on of_get_child_by_name(node, "__overlay__")
+# and its kerneldoc says any other top-level node is ignored, so keying on the
+# name rejected overlays the kernel would happily apply.
+#
+# One walk answers the __fixups__ question below too. Both facts live in the
+# blob, and deriving them separately is how the two could ever disagree about
+# what the same fragment is.
 root_nodes="$(fdtget -l "$out" / 2>/dev/null || true)"
-grep -q '^fragment@' <<<"$root_nodes" \
+has_fragment=false
+targets_external_phandle=false
+while IFS= read -r node; do
+    [[ -n "$node" ]] || continue
+    fdtget -l "$out" "/$node" </dev/null 2>/dev/null | grep -q '^__overlay__$' || continue
+    has_fragment=true
+    # A phandle-targeted fragment carries a `target` property; a path-targeted
+    # one carries `target-path` instead. Match the whole line so the latter
+    # cannot satisfy the former.
+    fdtget -p "$out" "/$node" </dev/null 2>/dev/null | grep -qx 'target' \
+        && targets_external_phandle=true
+done <<<"$root_nodes"
+
+[[ "$has_fragment" == true ]] \
     || die "$label: compiled blob has no overlay fragments (is this actually an overlay?)"
 
-# If the overlay targets an external label via a fragment (target = <&name>),
-# that reference is resolved at apply time from the base's __symbols__ and MUST
-# be exported as a __fixups__ entry. Its absence means the reference was baked
-# to a literal phandle that can never bind - a silent boot-time failure. Path-
-# targeted and label-free overlays legitimately have no __fixups__, so this
-# only fires when a fragment target phandle is actually present.
-if grep -Eq 'target[[:space:]]*=[[:space:]]*<[[:space:]]*&' "$dtc_src"; then
+# A fragment targeting an external label resolves that reference at apply time
+# from the base's __symbols__, which requires a __fixups__ entry. Its absence
+# means the reference was baked to a literal phandle that can never bind - a
+# silent boot-time failure. Path-targeted and label-free overlays legitimately
+# have no __fixups__, so this only fires when a target phandle is really there.
+#
+# Read from the blob rather than the source text. A source grep fires on a
+# commented-out `target = <&spi0>` and misses the `&label { }` shorthand, which
+# carries no `target` token at all - and since cpp strips comments, it gave the
+# same overlay opposite verdicts depending on whether it happened to #include
+# an unrelated header.
+if [[ "$targets_external_phandle" == true ]]; then
     grep -q '^__fixups__$' <<<"$root_nodes" \
         || die "$label: fragment targets an external phandle but the blob has no __fixups__ (overlay cannot bind to the base)"
 fi

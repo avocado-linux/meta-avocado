@@ -203,6 +203,120 @@ else
     bad "multi-token \$CPP rejected (command -v on the whole string?); stderr: $(cat "$work/multitok.err")"
 fi
 
+# --- Case 11: /include/ of a .dtsi resolves even after cpp relocates the unit ---
+# cpp writes its output into a temp dir, so dtc's include search has to be told
+# where the source came from or a native /include/ beside it stops resolving.
+# The pairing matters: it takes a #include to move the compilation unit, and an
+# /include/ to need the source dir, so neither alone reproduces it.
+cat > "$work/frag.dtsi" <<'EOF'
+/ {
+    fragment@9 {
+        target-path = "/";
+        __overlay__ {
+            acme-included-node {
+                compatible = "acme,included";
+            };
+        };
+    };
+};
+EOF
+cat > "$work/withinc.dtso" <<'EOF'
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/gpio/gpio.h>
+/include/ "frag.dtsi"
+EOF
+if run --src "$work/withinc.dtso" --out "$work/withinc.dtbo" >/dev/null 2>"$work/withinc.err"; then
+    ok "/include/ of a sibling .dtsi resolves when cpp has relocated the unit"
+else
+    bad "/include/ beside the source unresolved (dtc missing -i <srcdir>); stderr: $(cat "$work/withinc.err")"
+fi
+
+# --- Case 12: an overlay whose top-level node is not named fragment@N ---
+# fragment@N is dtc's generated name for the &label shorthand, not part of the
+# format. The kernel selects fragments on the presence of an __overlay__ child
+# and ignores every other top-level node, so the wrapper must not be stricter.
+cat > "$work/named.dtso" <<'EOF'
+/dts-v1/;
+/plugin/;
+/ {
+    my_spi_frag {
+        target-path = "/";
+        __overlay__ {
+            acme-named-node {
+                compatible = "acme,named";
+            };
+        };
+    };
+};
+EOF
+if run --src "$work/named.dtso" --out "$work/named.dtbo" >/dev/null 2>"$work/named.err"; then
+    ok "overlay with a non-fragment@ top-level node is accepted"
+else
+    bad "custom-named fragment rejected (structural check greps the node name); stderr: $(cat "$work/named.err")"
+fi
+
+# --- Case 13: a commented-out target = <&label> must not fail the build ---
+# The __fixups__ assertion has to read the compiled blob. Gating it on the
+# source text makes a comment fire it, and makes the verdict depend on whether
+# an unrelated #include caused cpp to strip that comment first.
+cat > "$work/comment.dtso" <<'EOF'
+/dts-v1/;
+/plugin/;
+/* example: target = <&spi0>; */
+/ {
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            acme-comment-node {
+                compatible = "acme,comment";
+            };
+        };
+    };
+};
+EOF
+if run --src "$work/comment.dtso" --out "$work/comment.dtbo" >/dev/null 2>"$work/comment.err"; then
+    ok "a commented-out target = <&label> does not trip the __fixups__ check"
+else
+    bad "comment tripped the __fixups__ check (guard reads source text); stderr: $(cat "$work/comment.err")"
+fi
+
+# --- Case 14: the &label shorthand is still covered by the __fixups__ check ---
+# The other direction of the same defect: this form carries no 'target' token in
+# the source, so a source-text guard skipped the assertion entirely. Reading the
+# blob, the fragment does have a target property and __fixups__ must be present.
+cat > "$work/short.dtso" <<'EOF'
+/dts-v1/;
+/plugin/;
+&spi0 {
+    status = "okay";
+};
+EOF
+if run --src "$work/short.dtso" --out "$work/short.dtbo" >/dev/null 2>"$work/short.err"; then
+    if fdtget -l "$work/short.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
+        ok "&label shorthand builds and its external target is covered by __fixups__"
+    else
+        bad "&label shorthand built without __fixups__"
+    fi
+else
+    bad "&label shorthand rejected; stderr: $(cat "$work/short.err")"
+fi
+
+# --- Case 15: an option given without its value reports the missing argument ---
+# Each arm shifts by two, which fails with a single positional left and, under
+# set -e, kills the script before the required-argument diagnostics can run -
+# so the user gets a bare exit 1 with nothing on either stream.
+if "$wrapper" --kdir "$kdir" --src "$work/path.dtso" --out \
+        >"$work/noval.out" 2>"$work/noval.err"; then
+    bad "a trailing --out with no value was accepted"
+else
+    if grep -qi 'out is required\|usage' "$work/noval.err"; then
+        ok "an option missing its value reports the missing argument"
+    else
+        bad "option missing its value died silently (shift 2 under set -e); stderr: [$(cat "$work/noval.err")]"
+    fi
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]
