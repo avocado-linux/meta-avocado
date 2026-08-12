@@ -6,6 +6,20 @@ append_config_if_missing() {
     fi
 }
 
+# Applied to every Raspberry Pi machine: pull in avocado-overlays.txt if it is
+# present on the boot partition. The avocado CLI writes that file (one
+# `dtoverlay=` line per device-tree overlay declared in avocado.yaml) and
+# delivers it via the overlay pipeline; the firmware skips the directive when
+# the file is absent, so this line is inert until an overlay is delivered.
+# NOTE: the "skip when absent" behavior of `include` is confirmed on hardware
+# during overlay end-to-end validation before this is relied upon.
+do_deploy:append() {
+    CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
+    if [ -f "$CONFIG" ]; then
+        append_config_if_missing "include avocado-overlays.txt"
+    fi
+}
+
 do_deploy:append:seeed() {
     CONFIG=${DEPLOYDIR}/${BOOTFILES_DIR_NAME}/config.txt
     append_config_if_missing "dtoverlay=vc4-kms-v3d-pi4"

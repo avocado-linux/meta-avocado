@@ -5,6 +5,7 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 SDK_TOOLCHAIN_DEPENDS = " \
+  nativesdk-avocado-dtc-overlay \
   nativesdk-avocado-hitl \
   nativesdk-bash \
   nativesdk-bc \

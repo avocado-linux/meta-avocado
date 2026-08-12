@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+
+# avocado-dtc-overlay: build a device-tree overlay (.dtbo) from source (.dtso)
+# the way the kernel does it, inside the Avocado SDK.
+#
+# The correct overlay build is easy to get subtly wrong by hand: the source
+# must be preprocessed by cpp against the kernel's dt-bindings headers, then
+# compiled by dtc with -@ (overlay symbol support). Skip the cpp step and any
+# dt-bindings macro (GPIO_ACTIVE_HIGH, ...) is an undefined token; skip -@ and
+# an overlay that defines labels can never be referenced by the base or a
+# sibling overlay. This wrapper owns that invocation so it versions with the
+# kernel/feed, not with the CLI release.
+#
+# It deliberately does NOT try to prove the overlay will apply to a particular
+# base at boot: an overlay that targets a label the base does not define
+# compiles fine and only fails at apply time. That is a selection/runtime
+# concern, not a build one.
+
+set -euo pipefail
+
+SELF="${0##*/}"
+
+die() { echo "[ERROR] $SELF: $*" >&2; exit 1; }
+
+usage() {
+    cat >&2 <<EOF
+Usage: $SELF --src <file.dtso> --out <file.dtbo> [--kdir <dir>] [--name <n>]
+
+Compile a device-tree overlay source into a .dtbo using the kernel's
+dt-bindings headers.
+
+  --src <file>    Overlay source (.dtso/.dts). Required.
+  --out <file>    Output overlay blob (.dtbo). Required.
+  --kdir <dir>    Kernel dev-source dir (kernel-devsrc). Defaults to
+                  \$AVOCADO_KDIR, then \$OECORE_TARGET_SYSROOT/usr/src/kernel.
+  --name <name>   Informational label used in diagnostics only.
+  -h, --help      This message.
+
+Honors \$CPP and \$DTC to override the preprocessor and compiler.
+EOF
+}
+
+src=""
+out=""
+kdir="${AVOCADO_KDIR:-}"
+kdir_explicit=false
+[[ -n "$kdir" ]] && kdir_explicit=true    # $AVOCADO_KDIR is a deliberate choice
+name=""
+
+# Consume an option and its value, tolerating the value being absent. Shifting
+# by a flat 2 fails when the option is the last token, and under `set -e` that
+# aborts the script before the required-argument checks below can say anything -
+# the caller gets a bare exit 1 with both streams empty. Shift what is actually
+# there and let those checks produce the diagnostic.
+shift_opt() { (( $# > 1 )) && echo 2 || echo 1; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --src)  src="${2:-}"; shift "$(shift_opt "$@")" ;;
+        --out)  out="${2:-}"; shift "$(shift_opt "$@")" ;;
+        --kdir) kdir="${2:-}"; kdir_explicit=true; shift "$(shift_opt "$@")" ;;
+        --name) name="${2:-}"; shift "$(shift_opt "$@")" ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown argument: $1 (see --help)" ;;
+    esac
+done
+
+[[ -n "$src" ]] || { usage; die "--src is required"; }
+[[ -n "$out" ]] || { usage; die "--out is required"; }
+[[ -f "$src" ]] || die "source not found: $src"
+[[ -r "$src" ]] || die "source not readable: $src"
+
+label="${name:-$(basename "$src")}"
+
+# An overlay MUST declare /plugin/;. Without it dtc compiles a full device tree
+# that is silently never applied as an overlay - the single most common and
+# most confusing failure. Catch it before doing any work.
+grep -Eq '^[[:space:]]*/plugin/[[:space:]]*;' "$src" \
+    || die "$label: source is not a device-tree overlay (missing '/plugin/;')"
+
+# Does the source pull in cpp headers (#include <dt-bindings/...>)? Only then
+# does the overlay need kernel-devsrc's dt-bindings tree. A pure phandle/path
+# overlay with no #include preprocesses without any kernel headers, so
+# requiring kernel-devsrc (and a populated target sysroot) for it is needless
+# coupling that blocks otherwise-valid builds. A native /include/ of a .dtsi is
+# not a cpp header pull, so it does not trip this.
+needs_bindings=false
+grep -Eq '^[[:space:]]*#[[:space:]]*include' "$src" && needs_bindings=true
+
+# Resolve the kernel dev-source. kernel-devsrc installs to /usr/src/kernel in
+# the target sysroot; dt-bindings live under include/, and the dtc
+# include-prefixes tree symlinks to them.
+if [[ -z "$kdir" && -n "${OECORE_TARGET_SYSROOT:-}" ]]; then
+    kdir="$OECORE_TARGET_SYSROOT/usr/src/kernel"
+fi
+
+# An explicitly supplied --kdir / $AVOCADO_KDIR must resolve to a real dir so a
+# typo surfaces. A #include-bearing overlay additionally requires a resolvable
+# kdir carrying a dt-bindings tree. A no-#include overlay needs neither.
+bindings_inc="${kdir:+$kdir/include}"
+prefixes_inc="${kdir:+$kdir/scripts/dtc/include-prefixes}"
+if [[ "$kdir_explicit" == true ]]; then
+    [[ -d "$kdir" ]] || die "kernel dev-source dir not found: $kdir (is kernel-devsrc installed?)"
+fi
+if [[ "$needs_bindings" == true ]]; then
+    [[ -n "$kdir" ]] || die "source #includes headers but the kernel dev-source dir is unknown: pass --kdir or set \$AVOCADO_KDIR / \$OECORE_TARGET_SYSROOT"
+    [[ -d "$kdir" ]] || die "kernel dev-source dir not found: $kdir (is kernel-devsrc installed?)"
+    [[ -d "$bindings_inc/dt-bindings" || -d "$prefixes_inc/dt-bindings" ]] \
+        || die "no dt-bindings under $kdir (is kernel-devsrc installed and complete?)"
+fi
+
+DTC="${DTC:-dtc}"
+command -v "$DTC" >/dev/null 2>&1 || die "device-tree compiler not found: $DTC"
+# fdtget backs the structural and __fixups__ checks below. Without it, those
+# checks read an empty node list and misreport a valid overlay as having "no
+# fragments", so verify it up front rather than misdiagnose later. It ships in
+# nativesdk-dtc alongside dtc.
+command -v fdtget >/dev/null 2>&1 \
+    || die "device-tree query tool not found: fdtget (expected from nativesdk-dtc)"
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# The file dtc consumes: the cpp output for a #include-bearing overlay, or the
+# raw source otherwise. A no-#include overlay carries no cpp macros, so dtc
+# compiles it directly - no preprocessor, hence no SDK toolchain, is required.
+# This matches the dt-bindings relaxation above: skip cpp for exactly the
+# overlays that skip the dt-bindings tree.
+if [[ "$needs_bindings" == true ]]; then
+    # The SDK preprocessor is the cross-canadian toolchain's, reached via $CPP
+    # or the $CROSS_COMPILE prefix. environment-setup exports $CPP as a full
+    # command with arguments (e.g. "aarch64-...-gcc -E -mcpu=... --sysroot=..."),
+    # so treat it as a word-split command, not a single program name.
+    if [[ -n "${CPP:-}" ]]; then
+        read -r -a cpp_cmd <<<"$CPP"
+    elif [[ -n "${CROSS_COMPILE:-}" ]] && command -v "${CROSS_COMPILE}cpp" >/dev/null 2>&1; then
+        cpp_cmd=("${CROSS_COMPILE}cpp")
+    else
+        cpp_cmd=(cpp)
+    fi
+    command -v "${cpp_cmd[0]}" >/dev/null 2>&1 \
+        || die "preprocessor not found: ${cpp_cmd[0]}"
+
+    # Preprocess exactly as the kernel build does: assembler-with-cpp so the DTS
+    # tokeniser is happy, -nostdinc/-undef so only the kernel headers are
+    # visible, -D__DTS__ so dt-bindings headers take their DTS branch.
+    cpp_flags=(-nostdinc -undef -x assembler-with-cpp -D__DTS__)
+    [[ -d "$prefixes_inc" ]] && cpp_flags+=(-I "$prefixes_inc")
+    [[ -d "$bindings_inc" ]] && cpp_flags+=(-I "$bindings_inc")
+
+    dtc_src="$work/preprocessed.dts"
+    "${cpp_cmd[@]}" "${cpp_flags[@]}" "$src" -o "$dtc_src" \
+        || die "$label: preprocessing failed"
+else
+    dtc_src="$src"
+fi
+
+# -@ (overlay symbols): emits __symbols__ for labels this overlay defines so a
+# sibling overlay or the base can reference them. dtc warnings are expected on
+# real hardware overlays (reg formatting, etc.) and must not fail the build; a
+# genuine syntax/structure error makes dtc exit non-zero and we surface it.
+#
+# -i <source dir>: dtc resolves a native /include/ relative to its input file,
+# and on the cpp branch that input lives in the temp dir, so a .dtsi sitting
+# beside the source stops resolving. Passed unconditionally rather than only on
+# that branch, so whether an overlay happens to #include a header cannot change
+# how its /include/ resolves. This is what the kernel's own dtb rule does
+# (scripts/Makefile.dtbs passes -i for the source dir for the same reason).
+"$DTC" -@ -I dts -O dtb -i "$(dirname "$src")" -o "$out" "$dtc_src" \
+    || die "$label: dtc failed to compile the overlay"
+
+# Structural check: a real overlay materialises at least one fragment - a
+# top-level node carrying an __overlay__ child. Select on that child rather than
+# on the node's name. `fragment@N` is the name dtc generates for the &label
+# shorthand, not part of the overlay format: the kernel's own
+# init_overlay_changeset() selects on of_get_child_by_name(node, "__overlay__")
+# and its kerneldoc says any other top-level node is ignored, so keying on the
+# name rejected overlays the kernel would happily apply.
+#
+# One walk answers the __fixups__ question below too. Both facts live in the
+# blob, and deriving them separately is how the two could ever disagree about
+# what the same fragment is.
+root_nodes="$(fdtget -l "$out" / 2>/dev/null || true)"
+has_fragment=false
+targets_external_phandle=false
+while IFS= read -r node; do
+    [[ -n "$node" ]] || continue
+    fdtget -l "$out" "/$node" </dev/null 2>/dev/null | grep -q '^__overlay__$' || continue
+    has_fragment=true
+    # A phandle-targeted fragment carries a `target` property; a path-targeted
+    # one carries `target-path` instead. Match the whole line so the latter
+    # cannot satisfy the former.
+    fdtget -p "$out" "/$node" </dev/null 2>/dev/null | grep -qx 'target' \
+        && targets_external_phandle=true
+done <<<"$root_nodes"
+
+[[ "$has_fragment" == true ]] \
+    || die "$label: compiled blob has no overlay fragments (is this actually an overlay?)"
+
+# A fragment targeting an external label resolves that reference at apply time
+# from the base's __symbols__, which requires a __fixups__ entry. Its absence
+# means the reference was baked to a literal phandle that can never bind - a
+# silent boot-time failure. Path-targeted and label-free overlays legitimately
+# have no __fixups__, so this only fires when a target phandle is really there.
+#
+# Read from the blob rather than the source text. A source grep fires on a
+# commented-out `target = <&spi0>` and misses the `&label { }` shorthand, which
+# carries no `target` token at all - and since cpp strips comments, it gave the
+# same overlay opposite verdicts depending on whether it happened to #include
+# an unrelated header.
+if [[ "$targets_external_phandle" == true ]]; then
+    grep -q '^__fixups__$' <<<"$root_nodes" \
+        || die "$label: fragment targets an external phandle but the blob has no __fixups__ (overlay cannot bind to the base)"
+fi
+
+echo "$SELF: built $out from $label"
