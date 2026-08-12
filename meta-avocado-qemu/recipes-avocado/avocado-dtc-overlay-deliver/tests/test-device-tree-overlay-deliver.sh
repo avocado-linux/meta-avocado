@@ -69,11 +69,21 @@ run() {
 
 if run >/dev/null 2>"$work/run.err"; then
     fa='.storage_devices.rootdisk.images.boot.build_args.files_append'
-    if [[ "$(jq -r "${fa} | length" "$fragment")" == "1" ]] \
-        && jq -e "${fa}[] | select(.out == \"overlays/my-spi.dtbo\" and .in == \"my-spi.dtbo\")" "$fragment" >/dev/null; then
-        ok "fragment appends the .dtbo to the kernel-bearing boot FAT"
+    if [[ "$(jq -r "${fa} | length" "$fragment")" == "2" ]] \
+        && jq -e "${fa}[] | select(.out == \"overlays/my-spi.dtbo\" and .in == \"my-spi.dtbo\")" "$fragment" >/dev/null \
+        && jq -e "${fa}[] | select(.out == \"avocado-overlays.txt\")" "$fragment" >/dev/null; then
+        ok "fragment appends the .dtbo and the overlay list to the kernel-bearing boot FAT"
     else
         bad "fragment files_append is wrong: $(jq -c "$fa" "$fragment")"
+    fi
+
+    # The boot script cannot enumerate a directory, so the list it imports has
+    # to name every overlay - by name, since the script owns the overlays/
+    # prefix and the .dtbo suffix.
+    if grep -qx 'avocado_fdt_overlays=my-spi' "$staging/avocado-overlays.txt"; then
+        ok "overlay list names every delivered overlay for the boot script"
+    else
+        bad "overlay list wrong: [$(cat "$staging/avocado-overlays.txt" 2>/dev/null)]"
     fi
 
     claimed="$(jq -r '[.overlays[] | select(.claimed_by == "avocado-qemuarm64")] | length' "$staging/overlays.manifest.json")"
