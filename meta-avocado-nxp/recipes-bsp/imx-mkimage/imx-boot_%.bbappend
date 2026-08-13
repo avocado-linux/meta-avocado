@@ -5,3 +5,8 @@
 # 8.31 and used by the reference build script.
 SRCBRANCH:avocado-imx95-frdm = "lf-6.12.49_2.2.0"
 SRCREV:avocado-imx95-frdm = "be80fadd5e7988214149a2bc48daac1b0950d4c2"
+
+# AHAB signing, i.MX93 only for now. Required rather than conditionally
+# included on an override so that a machine which lacks the wiring but is given
+# the feature fails at parse instead of silently deploying unsigned.
+require ${@ 'imx-boot-ahab-sign.inc' if bb.utils.contains('DISTRO_FEATURES', 'ahab', True, False, d) else ''}
