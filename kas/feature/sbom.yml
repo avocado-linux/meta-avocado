@@ -1,0 +1,27 @@
+header:
+  version: 16
+
+local_conf_header:
+  feature/sbom: |
+    # SBOM SPDX 3.0
+    INHERIT:remove = "create-spdx"
+    INHERIT += "create-spdx-3.0"
+
+    # "current" (the create-spdx-3.0 default, set here deliberately) drops the
+    # CVE_STATUS entries whose detail is fixed-version or cpe-stable-backport,
+    # i.e. those already fixed upstream before the version we ship. In
+    # scarthgap oe-core that is 12475 entries, 12447 of them from the single
+    # file recipes-kernel/linux/cve-exclusion_6.6.inc.
+    #
+    # The VEX relationships are emitted per package, so "all" would add those
+    # ~12.4k CVE elements plus a hasAssociatedVulnerability list to every
+    # kernel package document, on every kernel, pretty-printed.
+    #
+    # What it buys is suppressing false positives in a consumer that does naive
+    # CPE 2.3 matching. Ours is cve-check, which compares versions and reads the
+    # same CVE_STATUS varflags, so it never raises them in the first place.
+    #
+    # "current" still keeps the part that is specific to what we build: the
+    # patch-file backported fixes (Patched) and the Ignored statements with
+    # their justification.
+    SPDX_INCLUDE_VEX = "current"
