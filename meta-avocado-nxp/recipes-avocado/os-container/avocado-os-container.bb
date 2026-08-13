@@ -47,7 +47,14 @@ BOOT_TOOLS = "imx-boot-tools"
 # from the environment - so a mismatch here does not fail the build, it boots a
 # kernel to the wrong address.
 AVOCADO_KERNEL_LOAD_ADDR ?= "0x80200000"
-AVOCADO_DTB_LOAD_ADDR ?= "0x83000000"
+AVOCADO_DTB_LOAD_ADDR ?= "0x94000000"
+
+# Where the environment stages the container before authenticating it. Recorded
+# here only so the layout check below can see it - nothing in the container
+# lands at this address, and nothing asserts the environment agrees. Keeping
+# the two in step is manual, and a drift makes the check below validate an
+# address the board does not use, so change cntr_addr and this together.
+AVOCADO_CNTR_LOAD_ADDR ?= "0xa8000000"
 AVOCADO_CNTR_SOC ?= "IMX9"
 AVOCADO_CNTR_CORE ?= "a55"
 
@@ -82,6 +89,40 @@ do_compile() {
 
     avocado_ahab_sign ${B}/flash_os.bin ${B}/${OS_CONTAINER}
 }
+
+# The addresses were chosen when the kernel was ~33 MB. Bundling the initramfs
+# made it ~170 MB, which put its unpack range over both the device tree and the
+# container's own staging address - U-Boot stopped with "FDT image overlaps OS
+# image", and had it not, authentication would have overwritten the container
+# that container_get_image_dst() reads immediately afterwards.
+#
+# Checking that the addresses merely differ cannot catch that, so compare the
+# ranges the payload actually occupies. Python rather than shell because
+# bitbake's parser rejects $(( in a task body.
+python avocado_os_container_check_layout() {
+    import os
+
+    image = os.path.join(d.getVar('B'), 'Image')
+    if not os.path.exists(image):
+        bb.fatal("no staged kernel to measure; the container was not built")
+
+    size = os.path.getsize(image)
+    kernel = int(d.getVar('AVOCADO_KERNEL_LOAD_ADDR'), 16)
+    fdt = int(d.getVar('AVOCADO_DTB_LOAD_ADDR'), 16)
+    cntr = int(d.getVar('AVOCADO_CNTR_LOAD_ADDR'), 16)
+    end = kernel + size
+
+    if end > fdt:
+        bb.fatal("kernel occupies 0x%x-0x%x, which covers the device tree at "
+                 "0x%x. Raise AVOCADO_DTB_LOAD_ADDR and fdt_addr together."
+                 % (kernel, end, fdt))
+    if end > cntr:
+        bb.fatal("kernel occupies 0x%x-0x%x, which covers the container staged "
+                 "at 0x%x. Authentication would overwrite the container while "
+                 "unpacking it. Raise AVOCADO_CNTR_LOAD_ADDR and cntr_addr "
+                 "together." % (kernel, end, cntr))
+}
+do_compile[postfuncs] += "avocado_os_container_check_layout"
 
 do_deploy() {
     install -Dm 0644 ${B}/${OS_CONTAINER} ${DEPLOYDIR}/${OS_CONTAINER}
