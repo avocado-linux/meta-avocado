@@ -45,10 +45,13 @@ do_deploy:append:stone-uuu-emmc() {
 }
 
 # With AHAB on, the boot partition carries a signed OS container instead of a
-# bare Image and dtb. U-Boot's booti takes the container address and reads the
-# kernel and fdt destinations back out of it (cmd/booti.c), so shipping the raw
-# pair alongside would only waste 35 MB of a 128 MB partition on files nothing
-# loads.
+# bare Image, dtb and initramfs. U-Boot's booti takes the container address and
+# reads the kernel and fdt destinations back out of it (cmd/booti.c), and the
+# initramfs is bundled into the kernel Image, so none of the three is loaded.
+#
+# Dropping the initramfs is not just tidiness. It is 44 MB against a 128 MB
+# partition that now holds an ~80 MB container, and a copy left on disk is one
+# an attacker can point a modified environment at.
 #
 # Rewritten here rather than forked into a second machine JSON: the file list
 # is the only difference, and two near-identical manifests drift.
@@ -59,7 +62,9 @@ do_deploy:append() {
     if ${@bb.utils.contains('DISTRO_FEATURES', 'ahab', 'true', 'false', d)}; then
         _m="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
         jq '(.storage_devices.rootdisk.images.boot.build_args.files) |=
-                (map(select(. != "Image" and (endswith(".dtb") | not)))
+                (map(select(. != "Image"
+                            and (endswith(".dtb") | not)
+                            and (startswith("avocado-image-initramfs") | not)))
                  + ["os_cntr_signed.bin"])' \
             "$_m" > "$_m.ahab" || bbfatal "failed to rewrite the boot file list for AHAB"
         mv "$_m.ahab" "$_m"
@@ -69,6 +74,9 @@ do_deploy:append() {
         fi
         if grep -q '"Image"' "$_m"; then
             bbfatal "AHAB is enabled but the boot partition still ships a bare Image"
+        fi
+        if grep -q 'avocado-image-initramfs' "$_m"; then
+            bbfatal "AHAB is enabled but the boot partition still ships a loose initramfs; it rides inside the signed container, and a second copy is both unauthenticated and 44 MB of a 128 MB partition"
         fi
     fi
 }
