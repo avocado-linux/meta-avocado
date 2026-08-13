@@ -25,6 +25,14 @@ SRC_URI:append:class-target = " \
 SRC_URI:append:imx93-frdm = " file://ahab.cfg"
 SRC_URI:append:imx91-frdm = " file://ahab.cfg"
 
+# Unrelated to AHAB, and not gated on the feature: the FRDM defconfigs enable
+# capsule authentication whether or not signing is on, so a plain build breaks
+# too. avocado-imx95-frdm's defconfig carries the same symbol and is likely
+# broken the same way, but it is not built here and is left alone rather than
+# changed unverified.
+SRC_URI:append:imx93-frdm = " file://no-efi-capsule-auth.cfg"
+SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
+
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
 UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
