@@ -1,0 +1,22 @@
+header:
+  version: 16
+
+# AHAB secure boot for i.MX9. Signs the imx-boot container with an OEM key so
+# the ELE will authenticate SPL, ATF and U-Boot.
+#
+#   bakar build meta-avocado/kas/machine/imx93-frdm.yml:meta-avocado/kas/feature/ahab.yml
+#
+# This needs a PKI tree and SPSDK on the build host; neither has a default that
+# works, and the build fails at parse if either is missing rather than
+# producing an unsigned image for a target that asked to be signed. See
+# meta-avocado-nxp/docs/imx93-srk-pki.md for generating the tree.
+#
+#   AVOCADO_AHAB_KEYS_DIR    - an 'nxpcrypto pki-tree ahab' output directory
+#   AVOCADO_AHAB_SPSDK_BINDIR - the directory holding SPSDK's nxpimage
+#
+# Signing does not close the device. It produces a signed image that an OPEN
+# part will boot without checking, which is the window to validate in: boot it,
+# read `ahab_status`, and only burn SRK fuses once that reports no events.
+local_conf_header:
+  feature/ahab: |
+    DISTRO_FEATURES:append = " ahab"
