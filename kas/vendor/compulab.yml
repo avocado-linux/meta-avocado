@@ -20,7 +20,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-bsp-imx8mp.git
     path: meta-bsp-imx8mp
     branch: scarthgap
-    commit: 3a279bdab1c63ca62881b7078887245de91a6f75
+    commit: 784b21b888fb0d3bc75d5e5937b94a622cee9786
     layers:
       .:
 
