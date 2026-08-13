@@ -30,9 +30,18 @@ DEPENDS = "\
 "
 DEPENDS:append:libc-musl = " fts"
 
+# The sha v5.0.8 resolves to upstream. Carrying `tag=` in SRC_URI as well
+# makes current bitbake refuse to parse the recipe outright:
+#
+#   Conflicting revisions (c2b1cfd… from SRCREV and v5.0.8 from the url)
+#   found, please specify one valid value
+#
+# and because the failure is in fetcher_hashes_dummyfunc at parse time it
+# halts the whole build, not just this recipe. Keep the immutable sha;
+# ${PV} and the header already record the version.
 SRCREV = "c2b1cfd5f5b3530d613c167fc999a7df4eb2eabb"
 SRC_URI = "\
-    git://github.com/fluent/fluent-bit.git;nobranch=1;protocol=https;tag=v${PV} \
+    git://github.com/fluent/fluent-bit.git;nobranch=1;protocol=https \
     file://0001-lib-Do-not-use-private-makefile-targets-in-CMakelist.patch \
     file://0002-flb_info.h.in-Do-not-hardcode-compilation-directorie.patch \
     file://0003-CMakeLists.txt-Revise-init-manager-deduction.patch \
