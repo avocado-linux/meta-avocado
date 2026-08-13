@@ -46,6 +46,7 @@ EXTRA_OECMAKE = "\
     -DCMAKE_INSTALL_LIBDIR=${libdir} \
     -DUSE_SYSTEM_NTIRPC=ON \
     -DUSE_GSS=OFF \
+    -DUSE_FSAL_GLUSTER=OFF \
 "
 
 # install the systemd unit
