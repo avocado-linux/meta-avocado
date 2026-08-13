@@ -89,12 +89,29 @@ nxpcrypto rot calculate-hash -f mimx9352 \
 ```
 
 That writes **32 bytes** - 256 bits, eight 32-bit words, which is what lands in
-i.MX93 fuse bank 16 words 0-7. Read it back big-endian before going anywhere
-near a fuse:
+i.MX93 fuse bank 16 words 0-7.
+
+**Read it back with plain `od -t x4`, native byte order.** Those words are what
+gets programmed, verbatim:
 
 ```bash
-od -t x4 --endian=big srk_fuse.bin
+od -t x4 srk_fuse.bin
 ```
+
+`introduction_ahab.txt` shows the same file under `od -t x4 --endian=big`, and
+it is tempting to copy because the output matches the SHA digest string
+character for character. It is a demonstration that the file contains the hash,
+not the programming order, and the document says so in the next line: *"The
+commands above cannot be used as reference to program the SoC SRK_HASH fuses."*
+The programming order is in `guides/mx8ulp_9x_secure_boot.txt` section 1.6,
+which dumps with `od -t x4` and then programs those exact words.
+
+Getting this backwards burns the hash byte-swapped. It happened here on
+2026-08-13: the words were written correctly and read back correctly, every
+precondition passed, and the ELE still rejected the image - because the checks
+compared the burn against what the operator intended rather than against what
+NXP specifies. The fuses are one-time programmable, so that board can no longer
+validate AHAB. It still boots, because it was left OEM Open.
 
 **Using CST's `srktool` instead is where this gets silently wrong.** i.MX 8/8x
 expect a 512-bit SRK hash while 8ULP and 9x expect 256-bit, so the i.MX93
@@ -186,7 +203,9 @@ reusable:
   `fuse prog -y 16 <word> <value>` line per word for words 0-7 - eight 32-bit
   words, confirming the 256-bit hash above - followed by `ahab_close`.
   Generating these beats transcribing them by hand when each line is
-  irreversible.
+  irreversible. Note it reads the words with `hexdump -e '/4 "%X"'`, which is
+  native byte order and therefore agrees with NXP's `od -t x4` - a second
+  independent vote for the ordering above.
 - **The kernel gets its own signed container.**
   `linux-var-ahab-signature.inc` assembles one by calling `mkimage_imx8` with
   `-soc IMX9 -c -ap Image a55 0x80400000 --data <dtb> a55 0x83000000`, signs it
