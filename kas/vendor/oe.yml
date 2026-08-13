@@ -24,7 +24,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-openembedded-core
     path: openembedded-core
     branch: wrynose-avocado
-    commit: 709c4fd69a3476e79d3c37c2fe504ddc7a7cacbb
+    commit: 0c69588b1d06111911aa91fd8c0dd28c18edcb08
     layers:
       meta:
 
