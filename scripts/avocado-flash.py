@@ -388,6 +388,123 @@ def flash_uuu(deploy: Path, machine: str, dry_run: bool, assume_yes: bool) -> No
     execute(["sudo", "uuu", "-m", usb_path, "-b", "emmc_all", str(boot), str(image)], dry_run)
 
 
+# --------------------------------------------------------------------- ums
+
+
+def block_devices() -> set[str]:
+    return {p.name for p in Path("/sys/block").iterdir()}
+
+
+def usb_gadget_present() -> bool:
+    """Is the board currently enumerated as a USB device?
+
+    U-Boot's UMS exports through the SoC's download gadget (1fc9 on NXP), and
+    Linux's own file-storage gadget uses 0525:a4a5. Checking this separates
+    "nothing is plugged in" from "it is plugged in but exported nothing", which
+    are different problems with the same symptom.
+    """
+    proc = subprocess.run(["lsusb"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return False
+    return bool(re.search(r"ID (1fc9|15a2|0525):", proc.stdout))
+
+
+def ums_expose(ub: "UBoot", controller: int, dev: str, timeout: float = 25.0) -> str:
+    """Ask U-Boot to export a medium as USB mass storage and find it on the host.
+
+    The board keeps the card; the reader moves. `ums` blocks in U-Boot for as long
+    as it is exporting, so this does not wait for a prompt afterwards - it watches
+    /sys/block instead.
+
+    The new device is identified by diffing before against after, never by taking
+    the highest /dev/sd* or the newest by mtime. A development host carries
+    multi-terabyte disks in the same namespace, and this path ends in a write that
+    rewrites the partition table from sector 0.
+    """
+    # Release first, and wait for the device to go. An export left running by an
+    # earlier invocation is already in `before`, so re-exporting it produces no
+    # new name and the diff below reports "nothing appeared" while the device is
+    # sitting right there - a false negative that blames the cable.
+    if usb_gadget_present():
+        info("a UMS export is already running; releasing it first")
+        ums_release(ub, quiet=True)
+        gone = time.monotonic() + 15
+        while time.monotonic() < gone and usb_gadget_present():
+            time.sleep(0.5)
+
+    before = block_devices()
+
+    # ums does not return, so fire it and watch the host rather than the console.
+    ub._drain(quiet=0.2)
+    ub.ser.write(f"ums {controller} {dev}\r".encode())
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        new = block_devices() - before
+        # Ignore loop/ram devices that can appear for unrelated reasons.
+        new = {n for n in new if not n.startswith(("loop", "ram", "zram"))}
+        if len(new) == 1:
+            name = new.pop()
+            # Let partitions settle before anything reads them.
+            time.sleep(2)
+            return f"/dev/{name}"
+        if len(new) > 1:
+            raise Fatal(
+                "several new block devices appeared while exporting UMS "
+                f"({' '.join(sorted(new))}); refusing rather than guessing which is "
+                "the board"
+            )
+
+    # Distinguish "nothing enumerated" from "enumerated but no block device", so
+    # the message names what was actually observed rather than guessing at a cable.
+    if usb_gadget_present():
+        raise Fatal(
+            f"the board enumerated a USB gadget but no new block device appeared "
+            f"within {timeout:.0f}s of 'ums {controller} {dev}'.\n"
+            "  The cable and port are fine. Check that the medium exists - 'mmc list'\n"
+            "  at the U-Boot prompt names which index is the SD card."
+        )
+    raise Fatal(
+        f"no USB gadget and no new block device appeared within {timeout:.0f}s of "
+        f"'ums {controller} {dev}'.\n"
+        "  On the FRDM-IMX93 the OTG port is P2 (USB2.0 Type-C, 'host and device\n"
+        "  controller (USB 1) of target' in UM12181). P1 is power-delivery only and\n"
+        "  carries no data; P16 is the CH342F debug console. A cable in either of\n"
+        "  those enumerates nothing here."
+    )
+
+
+def unmount_all(dev: str) -> None:
+    """Drop any partitions udisks auto-mounted the moment the device appeared.
+
+    Writing under a live mount is what the block-device guard exists to prevent,
+    and on this path the host mounts the device itself a second after U-Boot
+    exports it.
+    """
+    proc = subprocess.run(["lsblk", "-nro", "NAME,MOUNTPOINT", dev],
+                          capture_output=True, text=True)
+    for line in proc.stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[1].strip():
+            target = f"/dev/{parts[0]}"
+            info(f"unmounting {target} from {parts[1].strip()}")
+            subprocess.run(["udisksctl", "unmount", "-b", target],
+                           capture_output=True, text=True)
+
+
+def ums_release(ub: "UBoot", quiet: bool = False) -> None:
+    """Ctrl-C is how ums is stopped; U-Boot returns to its prompt afterwards."""
+    try:
+        ub.ser.write(b"\x03")
+        time.sleep(1)
+        ub.sync()
+    except Fatal:
+        # Worth reporting but not worth failing a completed write over.
+        if not quiet:
+            info("note: the board did not return to a U-Boot prompt after releasing UMS")
+
+
 # ---------------------------------------------------------------- fuse-srk
 
 
@@ -650,6 +767,10 @@ def build_parser() -> argparse.ArgumentParser:
 media:
   sd        removable block device (SD card, USB stick); needs a device
   emmc      on-board eMMC over USB serial download
+  ums       flash the board's own card in place. U-Boot exports it as USB mass
+            storage, so the card never leaves the slot. Needs the board at a
+            U-Boot prompt and a cable on the SoC's OTG port - on the FRDM-IMX93
+            that is P2, not the power-only P1 or the debug P16.
   fuse-srk  program the AHAB SRK hash over the serial console. Never reachable
             from sd/emmc: flashing is repeatable, fuses are not.
 
@@ -685,7 +806,12 @@ examples:
     ap.add_argument("--spsdk-bin", type=Path, help="directory holding nxpimage/nxpcrypto")
     ap.add_argument("--commit", action="store_true",
                     help="fuse-srk: actually program the fuses (irreversible)")
-    ap.add_argument("medium", choices=["sd", "emmc", "fuse-srk"])
+    ap.add_argument("--ums-dev", default="mmc 1",
+                    help="what U-Boot exports for 'ums' (default: %(default)s; "
+                         "'mmc list' names which is the SD)")
+    ap.add_argument("--usb-controller", type=int, default=0,
+                    help="USB controller index for 'ums' (default: %(default)s)")
+    ap.add_argument("medium", choices=["sd", "emmc", "ums", "fuse-srk"])
     ap.add_argument("device", nargs="?", help="block device for 'sd'")
     return ap
 
@@ -731,6 +857,39 @@ def main() -> int:
             flash_bmaptool(deploy, args.device, payload, args.dry_run)
         finish("set the board's boot switches to the SD position and power on.",
                args.device, args.dry_run)
+
+    elif args.medium == "ums":
+        if args.device:
+            raise Fatal(
+                f"ums discovers the device itself (got {args.device}); it is the whole "
+                "point of the verb that the card does not move"
+            )
+        payload = resolve_fwup_archive(deploy, machine)
+
+        ub = UBoot(args.port)
+        target = None
+        try:
+            ub.sync()
+            info("at a U-Boot prompt")
+            info(f"exporting {args.ums_dev} over USB controller {args.usb_controller}")
+            target = ums_expose(ub, args.usb_controller, args.ums_dev)
+            info(f"board appeared as {target}")
+
+            unmount_all(target)
+            # The same guard the sd path uses. The device is on a USB bus here, so
+            # this passes - but it also catches a mount that reappeared and the
+            # case where the discovered node is somehow a partition.
+            assert_safe_block_device(target)
+
+            confirm_destructive(target, str(payload), args.dry_run, args.assume_yes)
+            flash_fwup(deploy, target, payload, args.task, args.dry_run)
+            finish("power-cycle the board; the card was never removed.",
+                   target, args.dry_run)
+        finally:
+            if target:
+                os.sync()
+            ums_release(ub)
+            ub.close()
 
     elif args.medium == "emmc":
         backend = args.backend or "uuu"
