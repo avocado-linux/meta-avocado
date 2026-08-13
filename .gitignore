@@ -3,3 +3,9 @@ _repo
 # Python bytecode from helper scripts
 __pycache__/
 *.pyc
+
+# bitbake-setup bootstrap clone (run ./bitbake/bin/bitbake-setup); not part of the layers
+/bitbake/
+
+# bitbake-setup build trees (scripts/bitbake-setup puts them here)
+/bitbake-builds/

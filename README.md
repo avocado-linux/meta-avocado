@@ -1,7 +1,14 @@
 # meta-avocado
 
+AvocadoOS can be configured and built two ways. Both produce the same build —
+they share the same pinned layer revisions, because the bitbake-setup configs
+are generated from the kas configs (see below):
 
-## Configuring a build
+- **[kas](kas/)** — the established workflow.
+- **[bitbake-setup](bitbake-setup/)** — the upstream Yocto tooling, for those
+  who prefer it.
+
+## Configuring a build (kas)
 
 Source the `init-build` script and pass the path to a kas configuration to build. This will create a `build-{config file name}` directory in your `cwd`.
 
@@ -11,11 +18,32 @@ Source the `init-build` script and pass the path to a kas configuration to build
 
 If you have direnv installed, there is a .envrc file added to the build dir to make it easier to reference the kas config. `$KAS_YML`
 
-## Building
+### Building
 
 ```bash
 kas build $KAS_YML
 ```
+
+## Configuring a build (bitbake-setup)
+
+`bitbake-setup` ships inside the bitbake repo, so clone bitbake once into the
+repo root to bootstrap it (gitignored; only used by this workflow — kas clones
+its own bitbake):
+
+```bash
+git clone --branch 2.18 https://github.com/avocado-linux/vendor-bitbake bitbake
+./scripts/bitbake-setup init ./bitbake-setup/avocado-qemux86-64.conf.json
+cd bitbake-builds/<setup-dir>/build && . ./init-build-env
+bitbake avocado-distro
+```
+
+`scripts/bitbake-setup` keeps build trees under `meta-avocado/bitbake-builds/`
+(gitignored), the same way kas keeps `build-*` dirs in the checkout.
+
+See [bitbake-setup/README.md](bitbake-setup/README.md) for the full guide,
+the kas↔bitbake-setup mapping, and how to regenerate the configs. kas remains
+the single source of truth; regenerate with `./scripts/kas2bitbake-setup.py`
+after any change under `kas/`.
 
 ## Running in Qemu
 

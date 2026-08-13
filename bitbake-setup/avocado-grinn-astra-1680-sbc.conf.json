@@ -1,0 +1,193 @@
+{
+  "version": "1.0",
+  "description": "AvocadoOS -- avocado-grinn-astra-1680-sbc (generated from kas/machine/grinn-astra-1680-sbc.yml)",
+  "sources": {
+    "bitbake": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-bitbake",
+        "branch": "2.18",
+        "rev": "22021758e66737bcf68dfd2b74adc6a0cb1d42d9"
+      },
+      "path": "bitbake"
+    },
+    "openembedded-core": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-openembedded-core",
+        "branch": "wrynose-avocado",
+        "rev": "709c4fd69a3476e79d3c37c2fe504ddc7a7cacbb"
+      },
+      "path": "openembedded-core"
+    },
+    "meta-openembedded": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-openembedded",
+        "branch": "wrynose",
+        "rev": "420222862f5a6d95023b8f5f3b7e1808b2264ef9"
+      },
+      "path": "meta-openembedded"
+    },
+    "meta-virtualization": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-virtualization",
+        "branch": "wrynose",
+        "rev": "8cfa4881864742296613f99abccc5daea054936c"
+      },
+      "path": "meta-virtualization"
+    },
+    "meta-synaptics": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-synaptics",
+        "branch": "scarthgap_6.12_v2.2.1",
+        "rev": "5e8a73f54b8a3dd0e5e9a8fd5b765178a22f0d4a"
+      },
+      "path": "meta-synaptics"
+    },
+    "meta-grinn-astra": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-grinn-astra",
+        "branch": "scarthgap_6.12_v2.2.0",
+        "rev": "c055fad1d8d3b992f4f774fecc7ffc391ec1ebd0"
+      },
+      "path": "meta-grinn-astra"
+    },
+    "meta-fwup": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-fwup.git",
+        "branch": "wrynose-avocado",
+        "rev": "0998acc313c44662410f397243eccec3936c8395"
+      },
+      "path": "meta-fwup"
+    },
+    "meta-qt5": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-qt5.git",
+        "branch": "master",
+        "rev": "06b898916ddfbf2e758450be737bf4b505eeeeff"
+      },
+      "path": "meta-qt5"
+    },
+    "meta-clang": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-clang.git",
+        "branch": "master",
+        "rev": "b044647662a6916299238e7f2d9476d54f528263"
+      },
+      "path": "meta-clang"
+    },
+    "meta-python-ai": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-python-ai.git",
+        "branch": "wrynose",
+        "rev": "596a00168046c5c8db4c240c1fee9e3f73fbc285"
+      },
+      "path": "meta-python-ai"
+    },
+    "meta-clang-revival": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-clang-revival.git",
+        "branch": "wrynose",
+        "rev": "d1777c50f959e4593dfcf2ca777c1835365acd45"
+      },
+      "path": "meta-clang-revival"
+    },
+    "meta-swupdate": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-swupdate.git",
+        "branch": "wrynose",
+        "rev": "6616d4ec7c5e4fb44ce44bc4a6499f3969c35833"
+      },
+      "path": "meta-swupdate"
+    },
+    "meta-openjdk-temurin": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-openjdk-temurin.git",
+        "branch": "main",
+        "rev": "01b411f4c1f45d9a18182f1ca3d6ce5db90f5f6a"
+      },
+      "path": "meta-openjdk-temurin"
+    },
+    "meta-browser": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-browser.git",
+        "branch": "master",
+        "rev": "c28c854532dcbdcde439bb2461fe5f325a6554ad"
+      },
+      "path": "meta-browser"
+    },
+    "meta-wayland": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-wayland.git",
+        "branch": "wrynose",
+        "rev": "059d0a3a31be857d1fbf464dd6ebf7b5f175a621"
+      },
+      "path": "meta-wayland"
+    },
+    "meta-deepx-m1": {
+      "git-remote": {
+        "uri": "https://github.com/avocado-linux/vendor-meta-deepx-m1",
+        "rev": "c061e8372bd7cdaf447aaf21808826e62ab7c658"
+      },
+      "path": "meta-deepx-m1"
+    }
+  },
+  "bitbake-setup": {
+    "configurations": [
+      {
+        "name": "avocado-grinn-astra-1680-sbc",
+        "description": "AvocadoOS avocado-grinn-astra-1680-sbc target. Build with: bitbake avocado-distro",
+        "setup-dir-name": "avocado-grinn-astra-1680-sbc",
+        "bb-layers": [
+          "openembedded-core/meta",
+          "meta-openembedded/meta-oe",
+          "meta-openembedded/meta-perl",
+          "meta-openembedded/meta-python",
+          "meta-openembedded/meta-networking",
+          "meta-openembedded/meta-filesystems",
+          "meta-openembedded/meta-webserver",
+          "meta-openembedded/meta-multimedia",
+          "meta-virtualization",
+          "meta-synaptics",
+          "meta-grinn-astra/meta-grinn-astra-bsp",
+          "meta-grinn-astra/meta-grinn-astra-fixes",
+          "meta-fwup",
+          "meta-qt5",
+          "meta-clang",
+          "meta-python-ai",
+          "meta-clang-revival",
+          "meta-swupdate",
+          "meta-openjdk-temurin",
+          "meta-browser/meta-chromium",
+          "meta-wayland",
+          "meta-deepx-m1"
+        ],
+        "bb-layers-file-relative": [
+          "../meta-avocado",
+          "../meta-avocado-shared",
+          "../meta-avocado-distro",
+          "../meta-avocado-sdk",
+          "../meta-avocado-deepx",
+          "../meta-avocado-synaptics"
+        ],
+        "oe-fragments": [
+          "meta-avocado/avocado-build/grinn-astra-1680-sbc"
+        ],
+        "bb-env-passthrough-additions": [
+          "BB_GIT_SHALLOW",
+          "BB_GENERATE_SHALLOW_TARBALLS",
+          "BB_GIT_SHALLOW_DEPTH",
+          "PRSERV_HOST",
+          "BB_SIGNATURE_HANDLER",
+          "BB_HASHSERVE",
+          "AVOCADO_REPO_BASE",
+          "DISTRO_CODENAME",
+          "DISTRO_VERSION",
+          "BUILD_ID",
+          "PARALLEL_MAKE_HIGHMEM",
+          "SDKMACHINE",
+          "AVOCADO_DEV_ROOT_LOGIN",
+          "AVOCADO_RM_WORK"
+        ]
+      }
+    ]
+  }
+}
