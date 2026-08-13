@@ -1,7 +1,7 @@
-SUMMARY = "AHAB-signed OS container (kernel + device tree) for i.MX9"
-DESCRIPTION = "Packs the kernel Image and its device tree into an AHAB container \
-and signs it with the OEM SRK, so U-Boot can extend the root of trust from the \
-bootloader to Linux."
+SUMMARY = "AHAB-signed OS container (kernel + initramfs + device tree) for i.MX9"
+DESCRIPTION = "Packs the initramfs-bundled kernel Image and its device tree into \
+an AHAB container and signs it with the OEM SRK, so U-Boot can extend the root of \
+trust from the bootloader through to the initrd that unlocks /var."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -27,6 +27,12 @@ python () {
                  "configuration to the device tree this machine boots; the "
                  "container records it by name and nothing downstream notices "
                  "a wrong one until the kernel has the wrong hardware.")
+    if not bb.utils.to_boolean(d.getVar('INITRAMFS_IMAGE_BUNDLE')):
+        bb.fatal("INITRAMFS_IMAGE_BUNDLE is not set, so no initramfs-bundled "
+                 "kernel is built and the container would carry a kernel with "
+                 "no initrd. The AHAB boot flow passes booti no ramdisk "
+                 "argument, so /var would never be unlocked. Set it in the "
+                 "machine configuration.")
 }
 
 do_configure[noexec] = "1"
@@ -49,12 +55,19 @@ AVOCADO_CNTR_CORE ?= "a55"
 # authenticates and then boots a kernel with the wrong hardware description.
 AVOCADO_KERNEL_DTB ?= ""
 
+# The initramfs-bundled kernel, not the bare Image beside it. Both are deployed
+# when INITRAMFS_IMAGE_BUNDLE is set, and the bare one is the wrong choice here:
+# it authenticates and boots, then finds no initrd to unlock /var from. The
+# name is kernel-artifact-names.bbclass's INITRAMFS_LINK_NAME symlink, so it
+# tracks the build without carrying a version or timestamp.
+AVOCADO_KERNEL_IMAGE ?= "Image-initramfs-${MACHINE}.bin"
+
 OS_CONTAINER = "os_cntr_signed.bin"
 
 do_compile() {
     cd ${B}
 
-    cp ${DEPLOY_DIR_IMAGE}/Image ${B}/Image
+    cp ${DEPLOY_DIR_IMAGE}/${AVOCADO_KERNEL_IMAGE} ${B}/Image
     cp ${DEPLOY_DIR_IMAGE}/${AVOCADO_KERNEL_DTB} ${B}/${AVOCADO_KERNEL_DTB}
 
     ${DEPLOY_DIR_IMAGE}/${BOOT_TOOLS}/mkimage_imx8 \

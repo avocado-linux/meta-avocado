@@ -107,10 +107,15 @@ do_configure:append:class-target () {
 # "Authenticate OS container is failed" and drops the board to a prompt.
 #
 # So the boot flow changes shape, not just its inputs: one signed container
-# replaces the separate Image and dtb loads, and the fdt argument goes away
-# because the container carries that address itself. The initramfs is still
-# passed as argv[1], which booti leaves alone - note it therefore stays
-# unauthenticated, same as the reference BSP does it.
+# replaces the separate Image, dtb and initramfs loads, and both trailing
+# arguments go away. The fdt address comes out of the container, and the
+# initramfs is bundled into the kernel Image (INITRAMFS_IMAGE_BUNDLE, set in
+# the machine configuration) so it rides inside the signed exec payload.
+#
+# booti never authenticates argv[1], so leaving the initramfs there would leave
+# the component that unlocks LUKS /var outside the chain. Passing "-" instead
+# is the documented no-ramdisk form - boot/image-board.c:474 compares the
+# selector against "-" before trying to locate one.
 #
 # Patched into the environment text rather than kept as a second env file so
 # the non-AHAB and AHAB environments cannot drift apart in every other line.
@@ -128,8 +133,8 @@ do_compile:prepend:bootvars-ubootenv() {
         # booti at image_addr does not.
         sed -i \
             -e 's|^load_image=.*|load_image=load ${devtype} ${devnum}:${bootpart} ${cntr_addr} os_cntr_signed.bin|' \
-            -e 's|^avocado_boot=.*|avocado_boot=booti ${cntr_addr} ${ramdisk_addr}:${filesize} -;|' \
-            -e 's|^bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot|bootcmd=run avocado_boot_init load_image load_initramfs avocado_boot|' \
+            -e 's|^avocado_boot=.*|avocado_boot=booti ${cntr_addr} - -;|' \
+            -e 's|^bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot|bootcmd=run avocado_boot_init load_image avocado_boot|' \
             ${ENV_FILEPATH}
 
         # cntr_addr has to exist and has to differ from image_addr, per the
@@ -147,6 +152,17 @@ do_compile:prepend:bootvars-ubootenv() {
         fi
         if grep '^bootcmd=' ${ENV_FILEPATH} | grep -q 'load_devicetree'; then
             bbfatal "AHAB bootcmd still loads a separate device tree; the container carries that address itself"
+        fi
+
+        # The whole point of ENG-2418. A separate initramfs load reintroduces an
+        # unauthenticated argv[1], and it fails open rather than loudly: the
+        # board boots, /var unlocks, and nothing reports that the initrd that
+        # derived the key was never checked.
+        if grep '^bootcmd=' ${ENV_FILEPATH} | grep -q 'load_initramfs'; then
+            bbfatal "AHAB bootcmd still loads a separate initramfs; booti never authenticates it, so it must be bundled into the kernel Image instead"
+        fi
+        if grep -q '^avocado_boot=.*ramdisk_addr' ${ENV_FILEPATH}; then
+            bbfatal "AHAB boot command still passes a ramdisk argument to booti; that argument is never authenticated"
         fi
     fi
 }
