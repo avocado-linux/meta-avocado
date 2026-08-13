@@ -10,16 +10,47 @@ mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
+# U-Boot refuses a load that leaves the bootm window: "Reading file would
+# overwrite reserved memory". NXP's board env caps the window at 256 MiB from
+# 0x80000000 (board/nxp/imx93_frdm/imx93_frdm.env:31), which was ample for a
+# ~33 MB kernel and cannot hold a ~200 MB bundled kernel plus the container
+# staging it. 1 GiB reaches cntr_addr with room and stays well inside the 2 GB
+# the board has.
+bootm_size=0x40000000
+
 image_addr=0x80200000
-fdt_addr=0x83000000
+
+# Near the top of the first DRAM bank, which ends at 0x95ffffff, rather than
+# 46 MB above the kernel. Bundling the initramfs took the kernel from ~33 MB to
+# ~200 MB, so it unpacks to roughly 0x80200000-0x8c78ea00 and every earlier
+# choice here landed inside that - U-Boot refused with "FDT image overlaps OS
+# image". Placed high on purpose: a kernel that grew past this would not fit in
+# the bank at all, so this address stops being the thing to adjust first.
+fdt_addr=0x94000000
+
+# Only used when AHAB is off. It sits inside the bundled kernel's range, which
+# is safe only because an unsigned build loads a ~33 MB kernel that ends well
+# below it; the AHAB boot passes booti no ramdisk at all.
 ramdisk_addr=0x84000000
-# Staging address for a signed AHAB OS container. Must not equal image_addr:
-# authenticating a container unpacks the kernel to image_addr, and booti then
-# re-reads the container to find out where that went, so the two collide. Sits
-# above the initramfs at ramdisk_addr rather than between the two loads, so
-# growth in either does not silently start overlapping it. Unused unless the
-# ahab DISTRO_FEATURE is on.
-cntr_addr=0x88000000
+# Staging address for the signed AHAB OS container, in the second DRAM bank.
+#
+# It cannot share the first bank with the kernel. `bdinfo` reports memory as
+# two regions with a 32 MiB hole between them - 0x80000000+0x16000000 and
+# 0x98000000+0x68000000 - so bank 0 holds 352 MiB, and the bundled kernel takes
+# about 200 MB of it. A load that spans the hole is refused with "Reading file
+# would overwrite reserved memory", which names neither the hole nor the size.
+# 0xa8000000 also clears the no-map carve-out at 0xa4000000-0xa411ffff, which
+# Linux later claims as ele-reserved.
+#
+# It must never overlap image_addr: authenticating a container memcpys the
+# kernel to image_addr, and booti then re-reads the container to learn where
+# that landed, so an overlap destroys the header between the write and the
+# read. avocado-os-container.bb asserts the measured kernel reaches neither
+# this address nor fdt_addr; keep AVOCADO_CNTR_LOAD_ADDR there in step with
+# this value, since nothing checks that the two agree.
+#
+# Unused unless the ahab DISTRO_FEATURE is on.
+cntr_addr=0xa8000000
 
 # Calculate partition based on avocado_boot_slot
 avocado_boot_init=\

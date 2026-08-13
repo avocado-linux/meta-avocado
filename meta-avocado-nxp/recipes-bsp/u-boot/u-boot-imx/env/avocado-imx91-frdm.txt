@@ -10,8 +10,14 @@ mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
+# The bundled kernel and its container staging need more than NXP's 256 MiB
+# bootm window - see the i.MX93 environment for the refusal this avoids.
+bootm_size=0x40000000
+
 image_addr=0x80200000
-fdt_addr=0x83000000
+# Above the kernel rather than inside it - see the i.MX93 environment for the
+# overlap this avoids once the initramfs is bundled into the Image.
+fdt_addr=0x94000000
 ramdisk_addr=0x84000000
 # Staging address for a signed AHAB OS container. Must not equal image_addr:
 # authenticating a container unpacks the kernel to image_addr, and booti then
@@ -19,7 +25,7 @@ ramdisk_addr=0x84000000
 # above the initramfs at ramdisk_addr rather than between the two loads, so
 # growth in either does not silently start overlapping it. Unused unless the
 # ahab DISTRO_FEATURE is on.
-cntr_addr=0x88000000
+cntr_addr=0xa8000000
 
 # Calculate partition based on avocado_boot_slot
 avocado_boot_init=\
