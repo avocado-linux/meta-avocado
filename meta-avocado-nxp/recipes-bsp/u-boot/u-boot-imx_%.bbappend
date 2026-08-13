@@ -23,6 +23,7 @@ SRC_URI:append:class-target = " \
 # so that cat has always written to a file named configs/[sd] that nothing
 # reads. Those two fragments reach the build through find_cfgs like this one.
 SRC_URI:append:imx93-frdm = " file://ahab.cfg"
+SRC_URI:append:imx91-frdm = " file://ahab.cfg"
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
 

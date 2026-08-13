@@ -25,7 +25,21 @@ AVOCADO_AHAB_SRK_ID ?= "0"
 AVOCADO_AHAB_SPSDK_BINDIR ?= ""
 
 AVOCADO_AHAB_KEY_TYPE ?= "secp384r1"
-AVOCADO_AHAB_FAMILY ?= "mimx9352"
+
+# The SPSDK family, set per machine rather than defaulted, because a wrong one
+# signs happily and produces an image the ELE rejects. There is no sane fallback
+# here: silently signing an i.MX91 image as an i.MX93 is worse than refusing.
+AVOCADO_AHAB_FAMILY ?= ""
+
+python () {
+    if not bb.utils.contains('DISTRO_FEATURES', 'ahab', True, False, d):
+        return
+    if not d.getVar('AVOCADO_AHAB_FAMILY'):
+        bb.fatal("AVOCADO_AHAB_FAMILY is unset. Set it in the machine "
+                 "configuration to the SPSDK family for this SoC - "
+                 "`nxpimage ahab get-families -c get-template` lists them "
+                 "(mimx9352 for i.MX93, mimx9131 for i.MX91).")
+}
 
 python () {
     if not bb.utils.contains('DISTRO_FEATURES', 'ahab', True, False, d):
