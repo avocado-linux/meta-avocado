@@ -1,0 +1,6 @@
+header:
+  version: 16
+
+local_conf_header:
+  feature/sbom: |
+    SPDX_INCLUDE_VEX ??= "current"

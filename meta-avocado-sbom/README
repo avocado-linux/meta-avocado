@@ -1,0 +1,172 @@
+meta-avocado-sbom
+=================
+
+Produces the package to CVE report that avocado-cli downloads to tell a user
+which CVEs affect the packages installed in their image.
+
+Sources
+-------
+
+Two artifacts a world build leaves in TMPDIR, both persistent across builds:
+
+  ${DEPLOY_DIR_IMAGE}/world-recipe-sbom.sbom-cve-check.yocto.json
+                                          CVE analysis of the world SBOM
+  ${TMPDIR}/pkgdata/*/runtime-reverse/*   runtime package name -> recipe
+
+The first is written by sbom-cve-check. wrynose OE-core has no cve-check class
+any more: the sbom-cve-check tool reads an SPDX 3.0 document, matches its
+purl/CPE identifiers against the cvelistV5 and NVD databases, applies the VEX
+statements in that same document, and exports the result as a manifest in the
+JSON shape the old class used to write per recipe. This layer appends
+sbom-cve-check-recipe to OE-core's meta-world-recipe-sbom, whose SBOM covers
+every world target, so one scan describes the whole build. DEPLOY_DIR_IMAGE is
+already ${DEPLOY_DIR}/images/${MACHINE}, so nothing has to be scoped by hand.
+
+The two are joined on the recipe name. CVEs are stored once per recipe and
+packages only reference it, so a recipe shipping many packages does not
+duplicate its CVE list.
+
+Requirements
+------------
+
+  kas build kas/machine/<machine>.yml:kas/feature/cve-check.yml
+
+That fragment carries this layer, raises SPDX_INCLUDE_VEX to "all" so the scan
+can see the Patched and Ignored statements, and points the CVE database recipes
+at AUTOREV. kas/feature/sbom.yml is the SPDX-only fragment: stacking it as well
+is harmless, but this report needs the cve-check one.
+
+Outside kas, with this layer in bblayers.conf, the equivalent in local.conf:
+
+  SPDX_INCLUDE_VEX = "all"
+  SRCREV:pn-sbom-cve-check-update-nvd-native = "${AUTOREV}"
+  SRCREV:pn-sbom-cve-check-update-cvelist-native = "${AUTOREV}"
+
+create-spdx does not have to be inherited by hand: OE-core does it through
+INHERIT_DISTRO, and there create-spdx is create-spdx-3.0.
+
+SPDX_INCLUDE_VEX has to be in place before the build that produces the SPDX
+documents, not just before this recipe runs.
+
+Usage
+-----
+
+  bitbake world
+  bitbake avocado-cve-report
+
+Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json.
+
+do_cve_report depends on meta-world-recipe-sbom:do_sbom_cve_check_recipe, so
+the second command runs the scan itself. The world build is still needed first,
+for pkgdata: the scan alone never writes it.
+
+The same code can run standalone against a build tree, if needed:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --tmpdir build/tmp --machine <machine> -o avocado-cve-report.json
+
+Variables
+---------
+
+  AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
+                               of them; defaults to the world SBOM's export in
+                               ${DEPLOY_DIR_IMAGE}
+  AVOCADO_CVE_REPORT_FILE      output path
+  AVOCADO_CVE_REPORT_STATUS    CVE status to report, default "Unpatched".
+                               Set to "Ignored" to audit what
+                               cve-extra-exclusions.inc and any local
+                               CVE_STATUS declaration suppress; each issue then
+                               carries "detail" (the CVE_STATUS keyword -
+                               cpe-incorrect is a false positive,
+                               upstream-wontfix is not) and "description" (the
+                               maintainer's rationale), which is the whole
+                               point of running that mode. Both reach the
+                               manifest as the VEX status notes and statement.
+                               "Patched" is the mode that needs
+                               SPDX_INCLUDE_VEX = "all": under "current" the
+                               fixed-version and cpe-stable-backport statements
+                               never reach the document to be reported on
+  AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
+
+Report format
+-------------
+
+  {
+    "version": "1",
+    "generated": "2026-07-31T12:00:00Z",
+    "machine": "avocado-qemux86-64",
+    "packages_digest": "sha256:0f3c...",
+    "status": "Unpatched",
+    "unscanned_recipes": [ "packagegroup-core-boot", "..." ],
+    "counts": { "recipes": 225, "cves": 2206,
+                "packaged_recipes": 177, "packaged_cves": 1927,
+                "packages": 30747, "cve_files": 1, "stale_dropped": 0,
+                "unscanned_recipes": 34, "cve_files_unreadable": 0,
+                "entries_unreadable": 0, "pkgdata_unreadable": 0,
+                "package_collisions": 0, "unpatched_cves": 0,
+                "patched_cves": 0, "ignored_cves": 0,
+                "unknown_status_cves": 0 },
+    "recipes": {
+      "openssl": {
+        "version": "3.5.7",
+        "packaged": true,
+        "cves": [ { "id": "CVE-...", "scorev3": "7.5", "vector": "NETWORK",
+                    "summary": "...", "link": "https://nvd.nist.gov/..." } ]
+      }
+    },
+    "packages": {
+      "libssl3": { "recipe": "openssl", "version": "3.5.7-r0.0",
+                   "origin": "avocado-qemux86-64" }
+    }
+  }
+
+"packaged": false marks a recipe absent from pkgdata, i.e. one that produced no
+runtime package. Two different things land there:
+
+  - -native and -cross recipes, which run on the build host and correlate to
+    nothing installed. They are kept because they still describe the build's
+    own exposure.
+  - deploy-only target recipes, which do ship on the device but outside any
+    package: imx-atf and imx-boot (do_install[noexec], inherit deploy),
+    u-boot variants with PACKAGES = "", optee-os, firmware-* recipes. Their
+    CVEs are real and on the device.
+  - recipes this build no longer produces at all. The manifest is rewritten
+    whole by each scan, so unlike scarthgap's per-recipe ${DEPLOY_DIR}/cve
+    files these cannot pile up across configuration changes - but the world
+    SBOM behind it is only as current as the last do_create_recipe_sbom, and
+    stale_dropped only fires when pkgdata knows the recipe at some other
+    version.
+
+  cve_files             manifests consumed; one, unless AVOCADO_CVE_MANIFEST
+                        points at a directory holding several
+  unscanned_recipes     recipes that shipped packages but are absent from the
+                        manifest - unscanned, not clean. Named individually in
+                        the top-level "unscanned_recipes" list, so a consumer
+                        can tell a recipe nothing examined from one that was
+                        examined and found clean; both are absent from
+                        "recipes". Normally non-zero: every recipe that
+                        inherits nospdx is absent from the world SBOM and so
+                        from the scan, which on wrynose is all 32 packagegroups
+                        plus the SDK metadata recipes. A recipe that was
+                        scanned and came back clean is not here - it has an
+                        entry in the manifest with an empty issue list. Watch
+                        for a sharp rise, which means the world SBOM covered
+                        less than the packages pkgdata knows about - typically
+                        a world build that stopped early
+  stale_dropped         manifest entries discarded because no recipe in
+                        pkgdata built that version. Their recipes still count
+                        as scanned, so they are not in "unscanned_recipes" as
+                        well - a version mismatch and a recipe nothing looked
+                        at stay distinguishable
+  cve_files_unreadable  manifests that would not parse, including files that
+                        are valid JSON of the wrong shape
+  entries_unreadable    single manifest entries of the wrong shape, skipped
+                        one by one; the rest of that manifest is still read
+  unknown_status_cves   CVEs filtered out on a status that is not one of
+                        Unpatched, Patched or Ignored - nothing sbom-cve-check
+                        is known to emit, so a non-zero value means the report
+                        is not describing everything the scan found. The
+                        bitbake task warns on it
+  pkgdata_unreadable    pkgdata entries that would not parse
+  package_collisions    package names claimed by more than one recipe or
+                        version; the first pkgdata directory won
