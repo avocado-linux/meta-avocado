@@ -13,6 +13,13 @@ rootdev=/dev/mmcblk${mmcblk}p5
 image_addr=0x80200000
 fdt_addr=0x83000000
 ramdisk_addr=0x84000000
+# Staging address for a signed AHAB OS container. Must not equal image_addr:
+# authenticating a container unpacks the kernel to image_addr, and booti then
+# re-reads the container to find out where that went, so the two collide. Sits
+# above the initramfs at ramdisk_addr rather than between the two loads, so
+# growth in either does not silently start overlapping it. Unused unless the
+# ahab DISTRO_FEATURE is on.
+cntr_addr=0x88000000
 
 # Slot A/B only: no recovery partition. An unset or invalid slot boots A.
 avocado_boot_init=\
