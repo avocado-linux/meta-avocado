@@ -441,8 +441,27 @@ def interrupt_to_uboot(ub: "UBoot", window: float = 45.0) -> None:
     if state == "login":
         info("board is at a login prompt; logging in to reboot it")
         ub.ser.write(b"root\r")
-        time.sleep(3)
-        ub._drain(quiet=0.5)
+        # Wait for the shell rather than sleeping a fixed interval. A getty that
+        # is slow to hand over swallows the reboot typed on top of it, and the
+        # board then boots the OS while this holds CR at nothing - which reads as
+        # "autoboot is disabled" and sends the next reader to bootdelay.
+        got_shell = False
+        seen = b""
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            seen += ub.ser.read(4096)
+            seen = seen[-2048:]
+            if SHELL_RE.search(seen.strip()[-200:]):
+                got_shell = True
+                break
+            time.sleep(0.2)
+        if not got_shell:
+            raise Fatal(
+                "logged in as root but no shell prompt appeared within 20s.\n"
+                "  The console may require a password, which this does not handle - "
+                "reboot the board yourself and re-run."
+            )
+        ub._drain(quiet=0.3)
         ub.ser.write(b"reboot\r")
     elif state == "shell":
         info("board is at a shell; rebooting it")
@@ -711,7 +730,24 @@ def compute_fuse_words(nxpcrypto: Path, certs: list[Path], workdir: Path) -> lis
             "  the wrong family was selected, and copying the i.MX8 srktool invocation\n"
             "  is exactly how that happens."
         )
-    return list(struct.unpack(">8I", raw))
+
+    # LITTLE-endian, and this is not a style choice. NXP's
+    # doc/imx/ahab/guides/mx8ulp_9x_secure_boot.txt section 1.6 dumps the fuse
+    # file with `od -t x4` - native byte order, no --endian=big - and programs
+    # those words verbatim:
+    #
+    #     $ od -t x4 SRK_1_2_3_4_fuse.bin
+    #     0000000 db2959f2 90dfc39c ...
+    #     => fuse prog 16 0 0xdb2959f2
+    #
+    # introduction_ahab.txt shows the same file under `od -t x4 --endian=big`,
+    # but only to demonstrate that its contents equal the SHA - and says outright
+    # "The commands above cannot be used as reference to program the SoC
+    # SRK_HASH fuses". Reading big-endian here burns the hash byte-swapped. That
+    # happened on 2026-08-13: every guard in this tool passed, because they all
+    # check what was intended rather than what NXP specifies, and the fuses are
+    # one-time programmable so the board can no longer validate AHAB at all.
+    return list(struct.unpack("<8I", raw))
 
 
 def read_fuse_words(ub: UBoot) -> list[int]:
@@ -844,10 +880,38 @@ def fuse_srk(args, deploy: Path, machine: str) -> None:
             )
         info("read-back matches")
 
-        print("\n" + ub.cmd("ahab_status", timeout=15))
+        # Read the ELE's verdict rather than stopping at "the words I meant are
+        # the words I wrote". Every check above compares the burn against this
+        # tool's own intent, so all of them pass on a hash that is correctly
+        # written and wrong - which is precisely what a byte-swapped hash is. The
+        # event log is per boot session and the entries still present now were
+        # produced before the fuses existed, so this has to reboot to mean
+        # anything.
+        print("\n== Confirming with the ELE")
+        info("rebooting to read a fresh event log")
+        interrupt_to_uboot(ub)
+        status = ub.cmd("ahab_status", timeout=25)
+        print(status)
+
+        if "FAILURE_IND" in status or "BAD_KEY_HASH" in status:
+            raise Fatal(
+                "the fuses were programmed and read back correctly, but the ELE still\n"
+                "  reports authentication events on a fresh boot. The value written does\n"
+                "  not match what the ELE computes for this image.\n"
+                "\n"
+                "  The board is NOT bricked: it is OEM Open, so it boots regardless. Do\n"
+                "  NOT close it - with a hash the ELE rejects, closing makes it refuse\n"
+                "  every image you can sign.\n"
+                "\n"
+                "  SRK_HASH is one-time programmable, so this board can no longer\n"
+                "  validate AHAB. Check byte order first: NXP programs the words as\n"
+                "  `od -t x4` prints them (native), not `od -t x4 --endian=big`."
+            )
+
+        info("no authentication events - the fused hash matches this image")
         print(
-            "\nThe part is still OEM Open. Reboot and re-read ahab_status: a correctly\n"
-            "fused board reports no authentication events."
+            "\nThe part is still OEM Open, so signature failures are logged rather than\n"
+            "fatal. Closing is a separate step and this tool does not implement it."
         )
     finally:
         ub.close()
