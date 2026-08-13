@@ -164,57 +164,6 @@ wait_for_rcm() {
     "$here/find-jetson-usb" --wait "$usb_instance"
 }
 
-# Helper function to find USB device instance (bus-devpath) from a block device
-# Returns the USB path like "3-1" or "4-2.1"
-find_usb_instance_from_device() {
-    local dev="$1"
-    local dev_name=$(basename "$dev")
-    local sysfs_path="/sys/block/$dev_name"
-    
-    if [ ! -L "$sysfs_path/device" ]; then
-        return 1
-    fi
-    
-    # Walk up the device hierarchy to find the USB device
-    local current_path=$(readlink -f "$sysfs_path/device" 2>/dev/null)
-    while [ -n "$current_path" ] && [ "$current_path" != "/" ] && [ "$current_path" != "/sys" ]; do
-        # Check if this is a USB device (has idVendor and idProduct)
-        if [ -f "$current_path/idVendor" ] && [ -f "$current_path/idProduct" ]; then
-            # Extract bus and device number from path (e.g., /sys/devices/pci0000:00/0000:00:14.0/usb2/2-10)
-            local usb_path_info=$(basename "$current_path")
-            if echo "$usb_path_info" | grep -q '^[0-9]\+-[0-9.]\+'; then
-                echo "$usb_path_info"
-                return 0
-            fi
-        fi
-        current_path=$(dirname "$current_path")
-    done
-    
-    return 1
-}
-
-# Helper function to find current device by session ID (derived from serial number)
-# This is needed because devices can change their device node (/dev/sdX) and USB path
-find_device_by_session() {
-    local sessid="$1"
-    
-    if [ -z "$sessid" ]; then
-        return 1
-    fi
-    
-    # Scan all /dev/sd[a-z] devices to find one matching the session ID
-    for candidate in /dev/sd[a-z]; do
-        [ -b "$candidate" ] || continue
-        local cand_model=$(get_device_property "$candidate" "ID_MODEL")
-        if [ "$cand_model" = "$sessid" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    
-    return 1
-}
-
 # Ask the avocado-vm-agent (running outside the SDK container, inside the
 # avocado-vm) to perform a real USB disconnect/reconnect cycle by
 # bouncing the device on the macOS host. Used when this script is running
@@ -348,40 +297,6 @@ disconnect_usb_device() {
     return 0
 }
 
-copy_signed_binaries() {
-    local signdir="${1:-signed}"
-    local xmlfile="${2:-flash.xml.tmp}"
-    local destdir="${3:-.}"
-    local blksize partnumber partname partsize partfile partguid parttype partfilltoend
-    local line
-
-    while read line; do
-	eval "$line"
-	[ -n "$partfile" ] || continue
-	if [ ! -e "$signdir/$partfile" ]; then
-	    if [ ! -e "$destdir/$partfile" ] && ! echo "$partfile" | grep -q "FILE"; then
-		echo "ERR: could not copy $partfile from $signdir" >&2
-		return 1
-	    fi
-	else
-	    cp "$signdir/$partfile" "$destdir"
-	fi
-    done < <("$here/nvflashxmlparse" -t boot "$signdir/$xmlfile"; "$here/nvflashxmlparse" -t rootfs "$signdir/$xmlfile")
-}
-
-create_rcm_boot_script() {
-    ln -sf "$here/tegrarcm_v2" rcmboot_blob/
-    cat > rcm-boot.sh <<EOF
-oldwd="\$PWD"
-cd rcmboot_blob
-EOF
-    cat rcmboot_blob/rcmbootcmd.txt >> rcm-boot.sh
-    cat >> rcm-boot.sh <<EOF
-cd "\$oldwd"
-EOF
-    chmod +x rcm-boot.sh
-}
-
 sign_binaries() {
     if [ -n "$PRESIGNED" ]; then
 	cp doflash.sh flash_signed.sh
@@ -451,65 +366,6 @@ run_rcm_boot() {
 	fi
     fi
     ./rcm-boot.sh || return 1
-}
-
-# Helper function to get current mounts for a device (container-friendly)
-get_device_mounts() {
-    local dev="$1"
-    # Use mount command output instead of /proc/mounts
-    # This works in containers and doesn't require /proc access
-    mount | grep "^$dev " | awk '{print $3}' 2>/dev/null || true
-}
-
-# Helper function to detect filesystem type
-detect_filesystem() {
-    local dev="$1"
-    local fstype=""
-    
-    # First check if device is currently mounted using mount command
-    fstype=$(mount | grep "^$dev " | awk '{print $5}' | head -1 2>/dev/null)
-    if [ -n "$fstype" ]; then
-        echo "$fstype"
-        return 0
-    fi
-    
-    # Try reading filesystem signature from the device
-    if [ -r "$dev" ]; then
-        # Check for FAT32 (most common for USB storage)
-        local magic=$(dd if="$dev" bs=1 skip=82 count=8 2>/dev/null | tr -d '\0' | tr -d ' ')
-        if [ "$magic" = "FAT32" ]; then
-            echo "vfat"
-            return 0
-        fi
-        
-        # Check for FAT16/FAT12
-        magic=$(dd if="$dev" bs=1 skip=54 count=8 2>/dev/null | tr -d '\0' | tr -d ' ')
-        if [ "$magic" = "FAT16" ] || [ "$magic" = "FAT12" ]; then
-            echo "vfat"
-            return 0
-        fi
-        
-        # Check for ext4 magic number
-        magic=$(dd if="$dev" bs=1 skip=1080 count=2 2>/dev/null | hexdump -v -e '/1 "%02x"')
-        if [ "$magic" = "53ef" ]; then
-            echo "ext4"
-            return 0
-        fi
-        
-        # Try using file command if available (fallback)
-        if command -v file >/dev/null 2>&1; then
-            local file_output=$(file -s "$dev" 2>/dev/null)
-            case "$file_output" in
-                *"FAT"*|*"DOS/MBR"*) echo "vfat"; return 0 ;;
-                *"ext4"*) echo "ext4"; return 0 ;;
-                *"ext3"*) echo "ext3"; return 0 ;;
-                *"ext2"*) echo "ext2"; return 0 ;;
-            esac
-        fi
-    fi
-    
-    # Default fallback - most USB storage devices use FAT32
-    echo "vfat"
 }
 
 # ===========================================================================
@@ -649,64 +505,6 @@ find_device_by_session() {
     done
 
     return 1
-}
-
-# Shared function to disconnect USB device by toggling authorized attribute
-# This is the reliable method for triggering Jetson devices to detect disconnect
-# Parameters:
-#   $1: usb_inst - The USB bus path (e.g., "3-1")
-#   $2: sessid (optional) - If provided, will rescan to find current USB instance
-disconnect_usb_device() {
-    local usb_inst="$1"
-    local sessid="$2"
-
-    # If session ID is provided, rescan to find current device and USB instance
-    # This handles the case where device reconnected with a different USB path
-    if [ -n "$sessid" ]; then
-        echo "Rescanning for device with session ID $sessid..." >&2
-        local current_dev=$(find_device_by_session "$sessid")
-        if [ -n "$current_dev" ]; then
-            local rescanned_instance=$(find_usb_instance_from_device "$current_dev")
-            if [ -n "$rescanned_instance" ]; then
-                echo "Device found at $current_dev with USB instance $rescanned_instance" >&2
-                usb_inst="$rescanned_instance"
-            else
-                echo "WARN: Could not find USB instance for rescanned device $current_dev" >&2
-            fi
-        else
-            echo "WARN: Could not find device with session ID $sessid for disconnect" >&2
-        fi
-    fi
-
-    if [ -z "$usb_inst" ]; then
-        echo "WARN: No USB instance available for disconnect" >&2
-        return 1
-    fi
-
-    local authorized_path="/sys/bus/usb/devices/$usb_inst/authorized"
-
-    if [ ! -w "$authorized_path" ]; then
-        echo "WARN: Cannot write to $authorized_path (device may not exist or path changed)" >&2
-        return 1
-    fi
-
-    echo "Disconnecting USB device $usb_inst by toggling authorized..." >&2
-    # Set authorized to 0 (disconnect)
-    echo 0 > "$authorized_path" 2>/dev/null || {
-        echo "ERR: Failed to deauthorize USB device $usb_inst" >&2
-        return 1
-    }
-
-    # Wait a moment for the disconnect to be processed
-    sleep 1
-
-    # Set authorized back to 1 (reconnect) - path may no longer exist after deauthorization
-    if [ -e "$authorized_path" ]; then
-        echo 1 > "$authorized_path" 2>/dev/null || true
-    fi
-
-    echo "USB device $usb_inst disconnected and reconnected" >&2
-    return 0
 }
 
 # Helper function to get current mounts for a device (container-friendly)
