@@ -121,7 +121,61 @@ open - see the signing-infrastructure question in the Secure Boot project. The
 UEFI keys with `BB_BASEHASH_IGNORE_VARS`, and the same pattern applies to
 whatever variable points at the SRK directory.
 
-## Why the signing step cannot be a static CSF
+## Prior art: meta-variscite-hab
+
+Variscite ships a working AHAB integration for this SoC family on the same
+Yocto release and the same NXP BSP tag we build (`wrynose`, i.MX
+6.18.20-2.0.0). It is worth reading before writing any of the below, because it
+answers the hard part differently than the NXP guide implies.
+
+`varigit/meta-variscite-hab` at `wrynose_var01`, ~24 files. What is directly
+reusable:
+
+- **`imx_signer` removes the offsets problem entirely.** It is
+  `varigit/nxp-cst-signer` at `v3.0_var01`, a fork of NXP's `cst_signer`, and
+  it parses the container to locate the header and signature block itself:
+  `imx_signer -d -i <imx-boot-...-sd.bin> -c <config>` emits
+  `signed-<image>`. No CSF generation from build logs, and no two-pass split of
+  `do_compile`.
+- **SPSDK rather than CST for the AHAB path.** The config is a YAML, not a CSF.
+  Their `mx93-generic-bsp/spsdk_ahab.yaml` is `family: mimx9352`,
+  `srk_set: oem`, `used_srk_id: 0`, `hash_algorithm: sha384`, `flag_ca: false`,
+  signing with `SRK1_sha384_secp384r1_v3_usr_key.pem` - which matches the P-384,
+  no-SGK tree recommended above. Note that SPSDK is expected on the host:
+  `spsdk.bbclass` fails the build when `${SIG_TOOL_PATH}/spsdk` is absent, it
+  does not build it. `imx-cst-native` is only used on their HABv4 path.
+- **Fuse commands are generated, not typed.** `mx8-fuse-commands-helper.bbclass`
+  reads the SRK fuse binary and emits a U-Boot script, deployed next to the
+  image. For i.MX93 (`create_fuse_cmds_mx9`) that is one
+  `fuse prog -y 16 <word> <value>` line per word for words 0-7 - eight 32-bit
+  words, confirming the 256-bit hash above - followed by `ahab_close`.
+  Generating these beats transcribing them by hand when each line is
+  irreversible.
+- **The kernel gets its own signed container.**
+  `linux-var-ahab-signature.inc` assembles one by calling `mkimage_imx8` with
+  `-soc IMX9 -c -ap Image a55 0x80400000 --data <dtb> a55 0x83000000`, signs it
+  to `os_cntr_signed.bin`, and ships it as `kernel-image-signed`, which
+  `layer.conf` makes essential under the `ahab` override. That is the
+  root-of-trust extension from SPL through to Linux.
+- **`ahab` as an override**, with bbappends gated on
+  `'ahab' in d.getVar('OVERRIDES')`, is how they scope all of it.
+
+They also confirm `CONFIG_AHAB_BOOT=y` is the required u-boot symbol, though
+they set it by appending to `${B}/${config}/.config` in `do_compile:prepend`
+rather than through a config fragment.
+
+**One thing not to copy.** `var-hab-certs.bb` fetches a *public* certificate
+repo and hardcodes `CST_KEYPASS ?= "Variscite_password"` and
+`CST_SERIAL ?= "1248163E"`. Those are demo keys, and they are `?=` so a product
+is expected to override them - but a device fused against that default SRK hash
+has secure boot that anyone can satisfy. Whatever we build must fail closed when
+no key is configured rather than fall back to a shipped default.
+
+Worth noting for scope: their manifest carries `meta-security`, but nothing in
+their layers consumes it - no IMA policy, no dm-verity. A vendor doing this work
+seriously on the same silicon chose signed containers over runtime appraisal.
+
+## Why the raw CST path needs generated offsets
 
 The AHAB signature lives inside the container, and `cst` is told which byte
 ranges to sign by explicit offsets in the CSF:
@@ -154,13 +208,17 @@ before the outer one is assembled:
 4. `make SOC=<soc> flash_<bootmode>` - note the **new** offsets
 5. `cst -i csf_boot_image.txt -o signed-flash.bin`
 
-`imx-boot_1.0.bb` runs steps 1 and 4 inside one `do_compile`, so the
-integration has to split them or drive mkimage twice. That is the real work in
-this task, and it is why none of the variables above is a shortcut.
+`imx-boot_1.0.bb` runs steps 1 and 4 inside one `do_compile`, so a raw-CST
+integration has to split them or drive mkimage twice.
 
-CSF templates to start from are in u-boot-imx under
+CSF templates for that path are in u-boot-imx under
 `doc/imx/ahab/csf_examples/` - `csf_uboot_atf.txt` for the inner container and
 `csf_boot_image.txt` for `flash.bin`.
+
+**Prefer `cst_signer` over doing this by hand.** It reads the offsets out of
+the container rather than out of a build log, which is what makes the whole
+step a single call on the finished `imx-boot` artifact. The section above
+describes the mechanism only so that a failure inside the tool is debuggable.
 
 ## Order of operations on hardware
 
