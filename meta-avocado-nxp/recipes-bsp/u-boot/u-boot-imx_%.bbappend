@@ -23,6 +23,11 @@ SRC_URI:append:class-target = " \
 # These fragments reach .config via cml1.bbclass's merge_config.sh over
 # SRC_URI's file://*.cfg entries instead.
 #
+# AHAB (i.MX9) signed-boot support in U-Boot. The EFI capsule options the
+# stock defconfig enables are already turned off for every board and version by
+# disable-unused-vendor-features.cfg above.
+SRC_URI:append:imx93-frdm = " file://ahab.cfg"
+
 # disable-unused-vendor-features.cfg turns off NXP stock defconfig defaults
 # (EFI capsule-on-disk, USB DFU) that Avocado never uses and that do not build
 # in this layer set - see the fragment's own header. Every u-boot-imx board:
