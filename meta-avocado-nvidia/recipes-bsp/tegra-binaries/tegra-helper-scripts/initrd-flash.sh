@@ -191,6 +191,11 @@ _twiddle_via_agent() {
     req=$(printf '{"loc_hint":"%s"}' "$usb_instance")
     local resp=""
 
+    # Terminal-visible prompt: CLI-driven provisions have no banner UI,
+    # so without this line the flash just stalls silently while the
+    # host waits for the user. Desktop flows show a banner as well.
+    echo "ACTION NEEDED: unplug and replug the device's USB cable to continue provisioning" >&2
+
     # Two transports — prefer nc -U for terseness, fall back to python3.
     # Either should be available in the SDK container. 130s overall
     # timeout: the host has a 120s waiter for user replug, +10s slack.
@@ -219,6 +224,7 @@ sys.stdout.write(data.decode(errors='replace'))
     case "$resp" in
         *'"status":"ok"'*|*'"status":"manual"'*)
             echo "Agent twiddle succeeded: $resp" >&2
+            agent_twiddle_done=1
             return 0
             ;;
         *)
@@ -237,9 +243,24 @@ sys.stdout.write(data.decode(errors='replace'))
 # Parameters:
 #   $1: usb_instance - The USB bus path (e.g., "3-1")
 #   $2: session_id (optional) - If provided, will rescan to find current USB instance
+#   $3: mode (optional) -
+#       "reuse-cycle": the caller only needs the device to have observed
+#           *a* disconnect edge since commands were staged. If an agent
+#           twiddle (manual cable cycle) already delivered one, don't
+#           prompt the user for another — the replug that satisfied the
+#           first request re-enumerates the device, so the presence
+#           rescan below can't tell this apart from "no disconnect yet".
+#       "no-prompt": teardown/cleanup release — never ask the user for a
+#           manual cable cycle; only the free sysfs toggle is attempted.
 disconnect_usb_device() {
     local usb_instance="$1"
     local sessid="$2"
+    local mode="$3"
+
+    if [ "$mode" = "reuse-cycle" ] && [ "$agent_twiddle_done" = "1" ]; then
+        echo "Manual disconnect cycle already delivered via agent; not requesting another" >&2
+        return 0
+    fi
 
     # If session ID is provided, rescan to find current device and USB instance.
     # This handles the case where the device reconnected with a different USB
@@ -273,7 +294,7 @@ disconnect_usb_device() {
     # Prefer the agent-driven path when available. Falls through to the
     # sysfs toggle on any failure so this remains a non-breaking change
     # for non-avocado-vm contexts (bare Linux flashing, CI, etc).
-    if _twiddle_via_agent "$usb_instance"; then
+    if [ "$mode" != "no-prompt" ] && _twiddle_via_agent "$usb_instance"; then
         echo "USB device $usb_instance twiddled via agent" >&2
         return 0
     fi
@@ -551,7 +572,8 @@ mount_partition() {
 unmount_and_release() {
     local mnt="$1"
     local dev="$2"
-    
+    local disconnect_mode="$3"
+
     # Unmount if mount point provided
     if [ -n "$mnt" ]; then
         if ! umount "$mnt" 2>/dev/null; then
@@ -577,7 +599,7 @@ unmount_and_release() {
         # Use the reliable USB disconnect method via authorized toggle
         # Pass session_id to allow rescanning if device path changed
         if [ -n "$usb_instance" ]; then
-            disconnect_usb_device "$usb_instance" "$session_id"
+            disconnect_usb_device "$usb_instance" "$session_id" "$disconnect_mode"
         fi
     fi
     
@@ -760,6 +782,9 @@ copy_bootloader_files() {
 }
 
 generate_flash_package() {
+    # Fresh stage: any manual cycle from before this function must not
+    # satisfy this stage's reuse-cycle disconnect below.
+    agent_twiddle_done=
     local dev=$(wait_for_usb_storage "$session_id" "flashpkg" "$usb_instance")
     local exports
 
@@ -824,11 +849,14 @@ generate_flash_package() {
         done
     fi
     
-    # Disconnect USB device to trigger Jetson to process commands
-    # Pass session_id to allow rescanning if device path changed
+    # Disconnect USB device to trigger Jetson to process commands.
+    # reuse-cycle: when unmount_and_release above already delivered a
+    # manual cable cycle via the agent, that cycle IS the trigger edge —
+    # the user's replug re-enumerates the device, so without this the
+    # presence rescan finds it and prompts for a redundant second cycle.
     if [ -n "$usb_instance" ]; then
         echo "Disconnecting USB device to trigger command processing..." >&2
-        disconnect_usb_device "$usb_instance" "$session_id"
+        disconnect_usb_device "$usb_instance" "$session_id" reuse-cycle
     fi
     
     # Wait for the command device to disconnect (indicates reboot started)
@@ -947,7 +975,9 @@ get_final_status() {
 	    cp "$logfile" "$logdir/"
 	done
     fi
-    unmount_and_release "$mnt" "$dev" || return 1
+    # Teardown release — flashing is complete once the status is read;
+    # never prompt the user for a manual cable cycle here.
+    unmount_and_release "$mnt" "$dev" no-prompt || return 1
     echo "Final status: $final_status"
     return 0
 }
@@ -1070,10 +1100,9 @@ if [ -n "$usb_instance" ] || [ -n "$session_id" ]; then
     fi
     
     if [ -n "$final_usb_instance" ]; then
-        # Route through the shared helper so the agent path applies here
-        # too when running inside the avocado-vm. The helper handles the
-        # AVOCADO_AGENT_SOCK / sysfs fallback dispatch.
-        disconnect_usb_device "$final_usb_instance" "$session_id" || true
+        # End-of-script teardown — the device owes us nothing further;
+        # never prompt the user for a manual cable cycle.
+        disconnect_usb_device "$final_usb_instance" "$session_id" no-prompt || true
     fi
 fi
 
