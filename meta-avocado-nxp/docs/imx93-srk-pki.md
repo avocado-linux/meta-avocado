@@ -55,18 +55,18 @@ validate a signed image with.
 
 ## Generating the PKI tree
 
-Run once, off the build machine, on a host that will hold the private keys. The
-CST tarball ships the generator under `keys/`.
+Run once, off the build machine, on a host that will hold the private keys.
+SPSDK replaces CST's interactive `ahab_pki_tree.sh` with one non-interactive
+command, which is what the rest of this document assumes:
 
 ```bash
-./ahab_pki_tree.sh
-  Do you want to use an existing CA key (y/n)?: n
-  Do you want to use Elliptic Curve Cryptography (y/n)?: y
-  Enter length for elliptic curve to be used for PKI tree: p384
-  Enter the digest algorithm to use: sha384
-  Enter PKI tree duration (years): 5
-  Do you want the SRK certificates to have the CA flag set? (y/n)?: n
+nxpcrypto pki-tree ahab -k secp384r1 -o <outdir> -n 4 -d 5
 ```
+
+Add `-ca` to make the SRKs certificate authorities and get an SGK tier under
+each; add `-p <password>` to encrypt the private keys at rest. The legacy CST
+script is equivalent - `-k secp384r1` is its p384/sha384 answer, `-n 4` its four
+SRKs, and omitting `-ca` its "no" to the CA-flag question.
 
 This yields one CA and four SRKs. Four is the hardware's count - the SRK table
 holds four keys and the fuses hold the hash of that table, so a compromised or
@@ -78,33 +78,69 @@ fuses.
 
 ## SRK table and fuse hash
 
-**This is the step that is easy to get wrong by copying an i.MX8 example.**
-i.MX 8/8x expect a 512-bit SRK hash; i.MX 8ULP and 9x expect **256-bit**. The
-i.MX93 command therefore needs `-d sha256` in addition to `-s sha384`:
+SPSDK derives the SRK table from the `srk_array` at signing time, so the only
+thing to produce separately is the value that goes into the fuses:
 
 ```bash
-cd ../crts/
-../linux64/bin/srktool -a -d sha256 -s sha384 \
-    -t SRK_1_2_3_4_table.bin \
-    -e SRK_1_2_3_4_fuse.bin -f 1 -c \
-    SRK1_sha384_secp384r1_v3_usr_crt.pem,\
-    SRK2_sha384_secp384r1_v3_usr_crt.pem,\
-    SRK3_sha384_secp384r1_v3_usr_crt.pem,\
-    SRK4_sha384_secp384r1_v3_usr_crt.pem
+nxpcrypto rot calculate-hash -f mimx9352 \
+    -k crts/SRK0_secp384r1_cert.pem -k crts/SRK1_secp384r1_cert.pem \
+    -k crts/SRK2_secp384r1_cert.pem -k crts/SRK3_secp384r1_cert.pem \
+    -o srk_fuse.bin
 ```
 
-Omitting `-d sha256` produces a table whose hash will never match what the
-i.MX93 ELE computes, and the failure only shows after the fuses are burned -
-which is irreversible. Regenerate and cross-check the fuse value before going
-anywhere near a fuse:
+That writes **32 bytes** - 256 bits, eight 32-bit words, which is what lands in
+i.MX93 fuse bank 16 words 0-7. Read it back big-endian before going anywhere
+near a fuse:
 
 ```bash
-openssl dgst -binary -sha256 SRK_1_2_3_4_table.bin | od -t x4 --endian=big
-od -t x4 --endian=big SRK_1_2_3_4_fuse.bin
+od -t x4 --endian=big srk_fuse.bin
 ```
 
-The two must match. `SRK_1_2_3_4_table.bin` ships inside the signed image;
-`SRK_1_2_3_4_fuse.bin` is what gets burned.
+**Using CST's `srktool` instead is where this gets silently wrong.** i.MX 8/8x
+expect a 512-bit SRK hash while 8ULP and 9x expect 256-bit, so the i.MX93
+invocation needs `-d sha256` on top of `-s sha384`:
+
+```bash
+srktool -a -d sha256 -s sha384 -t SRK_1_2_3_4_table.bin \
+    -e SRK_1_2_3_4_fuse.bin -f 1 -c SRK1...pem,SRK2...pem,SRK3...pem,SRK4...pem
+```
+
+Omitting `-d sha256` yields a table whose hash the ELE will never match, and
+the failure surfaces only after the burn. The `nxpcrypto` form above cannot make
+that mistake, because passing `-f mimx9352` is what selects the digest. That is
+the better reason to prefer it over the legacy tool.
+
+## Verified end to end on our own artifact
+
+Run against `imx-boot-avocado-imx93-frdm-sd.bin-flash_singleboot` as our build
+produces it, with SPSDK 3.10.0 and a throwaway P-384 tree. Everything below is
+observed output, not a plan:
+
+```bash
+nxpcrypto pki-tree ahab -k secp384r1 -o keys -n 4 -d 5
+nxpimage ahab sign --force -c spsdk_ahab.yaml -b flash.bin -o signed-flash.bin
+nxpimage ahab info -f mimx9352 -b signed-flash.bin
+```
+
+Container 1 moves from `none. Image is not signed` to
+`oem. Signed by OEM keys (SECP384R1)`. Container 0 stays
+`nxp. Signed by NXP keys (SECP256R1)` - it is the ELE firmware and NXP owns it.
+
+Three things this settles:
+
+- **`nxpimage ahab sign` takes the finished `flash.bin` directly.** It locates
+  the containers itself, so the `imx_signer` wrapper is not needed on the AHAB
+  path - reading its source confirms that for AHAB it only shells
+  `spsdk ahab sign`. One fewer recipe than the Variscite design.
+- **`target_memory` is not a key `ahab sign` accepts.** Setting it logs
+  `Unknown property found in configuration` and changes nothing. The
+  `Multiple possible memory types detected` warning on our image is noise.
+- **Signing is not reproducible.** Two runs over identical inputs differ at the
+  same byte, because ECDSA picks a fresh nonce each time. So a signed
+  `imx-boot` has a different checksum on every build even when nothing changed,
+  which matters for sstate reuse and for anything computing OTA deltas against
+  a previous artifact. Sign once and reuse the output rather than re-signing
+  per build.
 
 ## Key custody
 
