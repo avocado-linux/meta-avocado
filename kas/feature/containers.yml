@@ -1,0 +1,15 @@
+header:
+  version: 16
+  includes:
+  # Pull the layer through virtualization.yml rather than pinning
+  # meta-virtualization a second time here. Two fragments naming the same repo
+  # at different commits is a silent last-include-wins hazard, and ~24 machine,
+  # vendor and sdk configs already include virtualization.yml for the layer
+  # alone (they need the container runtime without wanting the podman package
+  # set). This fragment adds only the feature-group token on top.
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
+
+local_conf_header:
+  feature/containers: |
+    AVOCADO_FEATURE_GROUPS:append = " containers"

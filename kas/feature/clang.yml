@@ -9,7 +9,3 @@ repos:
     branch: master
     layers:
       .:
-
-local_conf_header:
-  extra-clang: |
-

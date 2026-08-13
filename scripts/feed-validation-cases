@@ -12,5 +12,22 @@
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
 #
-# name    | packages | expected-libs | boot
-zeromq    | zeromq   | libzmq.so.5   | yes
+# name              | packages               | expected-libs | boot
+zeromq              | zeromq                 | libzmq.so.5   | yes
+# One representative package per feature group, so a group that stops
+# producing anything fails here rather than silently shipping an empty feed.
+# The visual groups also run the boot e2e; the rest assert feed presence only.
+#
+# No cameras or cloud-aws case: meta-basler-tools, meta-intel-realsense and
+# meta-aws have no wrynose branch, so those groups cannot be selected here yet.
+# Add the case in the same commit that adds the layer back.
+system-base         | vim                    |               | no
+networking          | networkmanager         |               | no
+multimedia          | gstreamer1.0           |               | no
+python              | python3-pip            |               | no
+graphics            | weston                 |               | yes
+qt                  | qtbase                 |               | yes
+browsers            | chromium-ozone-wayland |               | yes
+ai                  | dx-driver              |               | no
+java                | openjdk-17-jre         |               | no
+containers          | podman                 |               | no

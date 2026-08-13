@@ -1,0 +1,63 @@
+name: PR-Parse-Container-SDK
+
+# Parse-only guard for the SDK container compositions.
+#
+# avocado-distro.bb lives in the always-enabled meta-avocado layer, so it is
+# parsed in every build. An unconditional `inherit` there (or any always-parsed
+# recipe) can break a composition that does not enable the inherited class's
+# layer -- e.g. the SDK container, which does not enable meta-avocado-distro --
+# while every device build keeps passing. That is what happened with 258fa675d:
+# the container target was unbuildable for months because nothing in CI parses
+# it. This job parses the container compositions on every PR so that class of
+# regression fails fast instead of silently.
+#
+# Forward-ported verbatim from scarthgap, which is the only branch that had it.
+# wrynose PRs previously ran no checks at all: the only other workflow here is
+# pr-build-labeled.yml, which fires on a `build` label and needs the self-hosted
+# runner. Keep the two copies in sync.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege: this job only checks out and parses.
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: parse-container-sdk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parse-container-sdk:
+    # `bitbake -p` executes recipe-embedded Python (__anonymous, inline ${@...})
+    # during parse, so this ran same-repo-only while it was on the persistent
+    # self-hosted runner. On an ephemeral GitHub-hosted runner that is the
+    # normal model for fork PRs -- the container is destroyed after the job and
+    # `permissions: contents: read` grants it nothing -- so the guard is gone
+    # and fork PRs are covered too.
+    runs-on: ubuntu-latest
+    container:
+      image: avocadolinux/ci-build:ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: parse avocado-image-container (${{ matrix.arch }})
+        shell: bash
+        env:
+          BB_GIT_SHALLOW: "1"
+          SDKMACHINE: "x86_64"
+          DISTRO_CODENAME: ""
+          CI: "true"
+        # No mirrors fragment: kas/ci/mirrors.yml is download/sstate/disk-monitor
+        # tuning pointed at http://molcajete:30082, none of which a parse reads
+        # and none of which resolves from a hosted runner. `bitbake -p` fetches
+        # no sources; kas still clones the layers it needs.
+        run: |
+          . scripts/init-build kas/sdk/container-${{ matrix.arch }}.yml
+          kas shell meta-avocado/kas/sdk/container-${{ matrix.arch }}.yml -c "bitbake -p"

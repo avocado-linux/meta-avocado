@@ -47,6 +47,43 @@ repos:
       meta-avocado:
       meta-avocado-shared:
 
+  # Base vendor layers: always provisioned because meta-avocado-distro carries
+  # unconditional bbappends/recipes that customize them (swupdate) or always-on
+  # packages depend on them (fwup).
+  #
+  # scarthgap also carries meta-atmel and meta-erlang here. Both are omitted on
+  # wrynose: meta-atmel declares LAYERSERIES_COMPAT=nanbield and meta-erlang
+  # declares whinlatter, so adding either fails the layer compatibility check
+  # outright rather than degrading. Their only consumers were cryptoauthlib and
+  # livebook in the system-base feature group, which this branch drops for the
+  # same reason. Restore all four together once the forks carry a wrynose branch.
+  meta-fwup:
+    url: https://github.com/avocado-linux/vendor-meta-fwup.git
+    path: meta-fwup
+    commit: 0998acc313c44662410f397243eccec3936c8395
+    branch: wrynose-avocado
+    layers:
+      .:
+
+  meta-swupdate:
+    url: https://github.com/avocado-linux/vendor-meta-swupdate.git
+    path: meta-swupdate
+    commit: 6616d4ec7c5e4fb44ce44bc4a6499f3969c35833
+    branch: wrynose
+    layers:
+      .:
+
+  # openjdk is base, not a feature: the always-on KOS tools kabtool and
+  # publishtool (in system-base) RDEPEND on openjdk-17-jre, so their nativesdk
+  # variants in the SDK pull nativesdk-openjdk-17-jre on every build.
+  meta-openjdk-temurin:
+    url: https://github.com/avocado-linux/vendor-meta-openjdk-temurin.git
+    path: meta-openjdk-temurin
+    branch: main
+    commit: 01b411f4c1f45d9a18182f1ca3d6ce5db90f5f6a
+    layers:
+      .:
+
 distro: avocado
 
 local_conf_header:
@@ -55,6 +92,15 @@ local_conf_header:
   # scarthgap's qemu. The backport has been deleted; OE-core wrynose
   # ships qemu 10.2.0 which we want unmodified.
   qemu: |
+
+  git-lfs: |
+    HOSTTOOLS += "git-lfs"
+    FETCHCMD_git = "git -c core.fsyncobjectfiles=0"
+
+  extra-openjdk: |
+    PREFERRED_VERSION_openjdk-17-jdk ?= "17.0.12+7"
+    PREFERRED_VERSION_openjdk-17-jre ?= "17.0.12+7"
+    PREFERRED_VERSION_openjdk-17-jdk-native ?= "17.0.12+7"
 
   meta-avocado: |
     # buildhistory's version-going-backwards QA check compares each package's

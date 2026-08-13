@@ -1,0 +1,6 @@
+header:
+  version: 16
+
+local_conf_header:
+  feature/system-base: |
+    AVOCADO_FEATURE_GROUPS:append = " system-base"

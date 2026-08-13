@@ -2,10 +2,14 @@ DESCRIPTION = "Packagegroup for Avocado extra"
 LICENSE = "Apache-2.0"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
+# Metadata-only packagegroup with no upstream source - wrynose's create-spdx
+# requires a static SPDX document for such recipes ("Could not find a static
+# SPDX document named static-..."). Nothing to SBOM here, so opt out and keep
+# the SBOM pipeline intact for real packages.
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-# SDK target sysroot — target-arch (MACHINE_ARCH) build deps for compiling extensions
+# SDK target sysroot - target-arch (MACHINE_ARCH) build deps for compiling extensions
 # against the target. Moved here from packagegroup-avocado-sdk-extra: the distro build
 # builds target-arch (-> target feed), the SDK build builds host/nativesdk (-> sdk feed).
 # avocado-sdk-target-sysroot lands in the target feed where the CLI's combined repo conf
@@ -20,8 +24,6 @@ SDK_SYSROOT_DEPENDS = " \
 
 RDEPENDS:${PN} = " \
   ${SDK_SYSROOT_DEPENDS} \
-  audit \
-  avahi-daemon \
   avocado-hitl \
   avocado-img-bootfiles \
   avocado-img-initramfs \
@@ -29,242 +31,11 @@ RDEPENDS:${PN} = " \
   avocado-img-var \
   avocado-pkg-rootfs \
   avocado-pkg-initramfs \
-  bind-utils \
-  bubblewrap \
-  ca-certificates \
-  can-utils \
-  chrony \
-  cifs-utils \
-  cockpit \
-  cockpit-networkmanager \
-  cronie \
-  coreutils \
-  curl \
-  devmem2 \
-  dnsmasq \
-  dtc \
-  ${@bb.utils.contains('MACHINE_FEATURES', 'deepx', "${DEEPX_PACKAGES}", '', d)} \
-  ethtool \
-  fwup \
-  git \
-  glibc-utils \
-  gnutls \
-  gptfdisk \
-  hostapd \
-  htop \
-  i2c-tools \
-  iperf3 \
-  iproute2 \
-  iptables \
-  jq \
-  kabtool \
-  keyutils \
-  less \
-  libgpiod \
-  libgpiod-tools \
-  libimobiledevice \
-  libnss-mdns \
-  ${@'librealsense2' if 'opengl' in (d.getVar('DISTRO_FEATURES') or '').split() and 'intel-realsense' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else ''} \
-  libqmi \
-  libv4l \
-  libwebsockets \
   linux-firmware \
-  logrotate \
-  lsof \
-  ltrace \
-  modemmanager \
-  mosquitto \
-  net-snmp \
-  net-tools \
-  networkmanager \
-  networkmanager-daemon \
-  networkmanager-nmcli \
-  networkmanager-wwan \
-  nodejs \
-  ntfs-3g-ntfsprogs \
-  opencv \
-  openssh \
-  openssh-sftp-server \
-  openssh-sshd \
-  ${@bb.utils.contains('MACHINE_FEATURES', 'optee', 'optee-client', '', d)} \
-  p11-kit \
-  parted \
   phytool \
-  picocom \
-  plymouth \
-  procps \
-  pstree \
-  qemu-guest-agent \
   qemu-user-static \
   qemu-user-static-binfmt \
-  redis \
-  rng-tools \
-  rtc-tools \
-  rsync \
-  screen \
-  sscg \
-  strace \
-  tcpdump \
-  tmux \
-  tio \
-  usbip-tools \
-  usbmuxd \
-  usbutils \
-  uv \
-  v4l-utils \
-  vim \
-  vnstat \
-  wireguard-tools \
-  wireless-regdb \
-  wireless-regdb-static \
-  wpa-supplicant \
-  zeromq \
-  iw \
-  bluez5 \
-  ${GSTREAMER_PACKAGES} \
-  ${PYTHON_PACKAGES} \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${QT5_PACKAGES}", '', d)} \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${BASLER_PACKAGES}", '', d)} \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'virtualization', "${CONATINER_PACKAGES}", '', d)} \
-  ${JAVA_PACKAGES} \
-  ${AWS_PACKAGES} \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl wayland', "${BROWSER_PACKAGES}", '', d)} \
+  qemu-guest-agent \
 "
 
-DEEPX_PACKAGES = " \
-  dx-driver \
-  dx-rt \
-  dx-stream \
-  dx-stream-sample \
-"
-
-# AWS Greengrass and openjdk-17 RDEPEND on a JRE/JDK; Amazon Corretto and
-# OpenJDK only build for aarch64 and x86_64. Skip on aarch32 (Cortex-A32 /
-# Cortex-A7 etc.) where TARGET_ARCH == "arm". Also empty when meta-aws is
-# disabled in kas (e.g. while waiting on upstream wrynose support); the
-# packages come from meta-aws and would otherwise be unbuildable.
-AWS_PACKAGES = "${@' \
-  greengrass-bin \
-  aws-iot-device-client \
-' if d.getVar('TARGET_ARCH') in ('aarch64', 'x86_64') and 'meta-aws' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else ''}"
-
-JAVA_PACKAGES = "${@' \
-  openjdk-17-jdk \
-  openjdk-17-jre \
-' if d.getVar('TARGET_ARCH') in ('aarch64', 'x86_64') else ''}"
-
-OPENGL_PACKAGES = " \
-  cage \
-  weston \
-  weston-init \
-  wayland \
-  wayland-utils \
-  libdrm-tests \
-  xkeyboard-config \
-"
-
-# TEMP (wrynose): chromium-ozone-wayland is disabled on aarch64 pending the
-# libclang_rt triple mismatch. Chromium's build/config/clang/BUILD.gn hardcodes
-# the aarch64-unknown-linux-gnu triple for libclang_rt.builtins.a, and
-# meta-chromium only bridges OE's default -oe- vendor to -unknown- via sed; our
-# TARGET_VENDOR=-avocado never matches, so the lib stays under
-# aarch64-avocado-linux-gnu/ and chromium's C++ link can't find it. Restore the
-# chromium entry once that's fixed upstream (teach meta-chromium's sed about
-# non--unknown- vendors) or via a working bbappend.
-BROWSER_PACKAGES = ""
-# BROWSER_PACKAGES = " \
-#   chromium-ozone-wayland \
-# "
-
-CONATINER_PACKAGES = " \
-  docker \
-  podman \
-  podman-compose \
-  k3s \
-"
-
-# Basler Pylon SDK is only available for aarch64. Also empty when
-# meta-basler-tools is disabled in kas (the layer's collection name is
-# "basler-common"); waiting on an upstream wrynose branch.
-BASLER_PACKAGES = "${@' \
-  pylon \
-  python3-pypylon \
-  gst-plugin-pylon \
-' if d.getVar('TARGET_ARCH') == 'aarch64' and 'basler-common' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else ''}"
-
-GSTREAMER_PACKAGES = " \
-  gstreamer1.0 \
-  gstreamer1.0-plugins-base \
-  gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad \
-  gstreamer1.0-plugins-ugly \
-  gstreamer1.0-libav \
-"
-
-PYTHON_PACKAGES = " \
-  python3-pyyaml \
-  python3-pip \
-  python3-flask \
-  python3-werkzeug \
-  python3-jinja2 \
-  python3-markupsafe \
-  python3-itsdangerous \
-  python3-click \
-  python3-opencv \
-  python3-spidev \
-  python3-smbus \
-  python3-cryptography \
-  python3-distro \
-  python3-paho-mqtt \
-  python3-periphery \
-  python3-posix-ipc \
-  python3-psutil \
-  python3-pycurl \
-  python3-pyserial \
-  python3-requests \
-  python3-smbus2 \
-  python3-tzdata \
-"
-
-QT5_PACKAGES = " \
-  qtbase \
-  qtbase-plugins \
-  qtbase-tools \
-  qtdeclarative \
-  qtdeclarative-plugins \
-  qtdeclarative-tools \
-  qtquickcontrols2 \
-  qtmultimedia \
-  qtmultimedia-plugins \
-  qtgraphicaleffects \
-  qtsvg \
-  qtimageformats \
-  qtserialport \
-  qtsensors \
-  qtconnectivity \
-  qtlocation \
-  qtnetworkauth \
-  qtwebsockets \
-  qtwebengine \
-  qtxmlpatterns \
-  qttools \
-  qttools-plugins \
-  qtcharts \
-  qtvirtualkeyboard \
-  qt3d \
-  qtgamepad \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'opengl wayland', 'qtwayland qtwayland-plugins', '', d)} \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'qtx11extras', '', d)} \
-  ${QT5_OPTIONAL_PACKAGES} \
-"
-
-# Optional packages that may require additional dependencies or features
-QT5_OPTIONAL_PACKAGES = " \
-  ${@bb.utils.contains('DISTRO_FEATURES', 'bluetooth', 'qtconnectivity', '', d)} \
-  qtscript \
-  qtremoteobjects \
-  qtscxml \
-  qtdatavis3d \
-  qttranslations \
-"
+RDEPENDS:${PN} += "${@' '.join('packagegroup-avocado-feature-' + g for g in (d.getVar('AVOCADO_FEATURE_GROUPS') or '').split())}"
