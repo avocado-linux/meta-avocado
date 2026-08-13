@@ -49,7 +49,13 @@ rootdev=/dev/mmcblk${mmcblk}p5
 # ~200 MB container spanning the hole; see KB imx93-initramfs-in-signed-container.
 image_addr=0x90000000
 
-# Slot A/B only: no recovery partition. An unset or invalid slot boots A.
+# Staging address for a signed AHAB OS container. Must not equal image_addr:
+# authenticating a container unpacks the kernel to image_addr, and booti then
+# re-reads the container to find out where that went, so the two collide.
+# Unused unless the ahab DISTRO_FEATURE is on.
+cntr_addr=0x88000000
+
+# Calculate partition based on avocado_boot_slot
 avocado_boot_init=\
   if test "${avocado_boot_slot}" = "b"; then\
     echo "Booting B";\
