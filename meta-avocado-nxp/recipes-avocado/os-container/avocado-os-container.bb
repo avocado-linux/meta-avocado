@@ -15,13 +15,18 @@ do_compile[depends] += " \
 "
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-COMPATIBLE_MACHINE = "avocado-imx93-frdm"
+COMPATIBLE_MACHINE = "(avocado-imx93-frdm|avocado-imx91-frdm)"
 
 # Only meaningful with AHAB on: without it U-Boot boots a raw Image and this
 # container has no consumer.
 python () {
     if not bb.utils.contains('DISTRO_FEATURES', 'ahab', True, False, d):
         raise bb.parse.SkipRecipe("requires the 'ahab' DISTRO_FEATURE")
+    if not d.getVar('AVOCADO_KERNEL_DTB'):
+        bb.fatal("AVOCADO_KERNEL_DTB is unset. Set it in the machine "
+                 "configuration to the device tree this machine boots; the "
+                 "container records it by name and nothing downstream notices "
+                 "a wrong one until the kernel has the wrong hardware.")
 }
 
 do_configure[noexec] = "1"
@@ -30,7 +35,7 @@ do_install[noexec] = "1"
 BOOT_TOOLS = "imx-boot-tools"
 
 # These MUST match image_addr and fdt_addr in the machine's U-Boot environment
-# (meta-avocado-nxp/recipes-bsp/u-boot/u-boot-imx/env/avocado-imx93-frdm.txt).
+# (meta-avocado-nxp/recipes-bsp/u-boot/u-boot-imx/env/avocado-<machine>.txt).
 # The container records where each payload is to be placed, and U-Boot reads
 # those destinations back out of it via container_get_image_dst() rather than
 # from the environment - so a mismatch here does not fail the build, it boots a
@@ -40,7 +45,9 @@ AVOCADO_DTB_LOAD_ADDR ?= "0x83000000"
 AVOCADO_CNTR_SOC ?= "IMX9"
 AVOCADO_CNTR_CORE ?= "a55"
 
-AVOCADO_KERNEL_DTB ?= "imx93-11x11-frdm.dtb"
+# Set per machine; no default, since the wrong dtb builds a container that
+# authenticates and then boots a kernel with the wrong hardware description.
+AVOCADO_KERNEL_DTB ?= ""
 
 OS_CONTAINER = "os_cntr_signed.bin"
 
