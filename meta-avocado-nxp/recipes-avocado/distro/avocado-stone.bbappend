@@ -43,3 +43,32 @@ do_deploy:append:stone-uuu-emmc() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${UNPACKDIR}/stone-provision-uuu-emmc.sh ${DEPLOYDIR}/stone-provision-uuu-emmc.sh
 }
+
+# With AHAB on, the boot partition carries a signed OS container instead of a
+# bare Image and dtb. U-Boot's booti takes the container address and reads the
+# kernel and fdt destinations back out of it (cmd/booti.c), so shipping the raw
+# pair alongside would only waste 35 MB of a 128 MB partition on files nothing
+# loads.
+#
+# Rewritten here rather than forked into a second machine JSON: the file list
+# is the only difference, and two near-identical manifests drift.
+DEPENDS:append = "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', ' avocado-os-container', '', d)}"
+do_compile[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', 'avocado-os-container:do_deploy', '', d)}"
+
+do_deploy:append() {
+    if ${@bb.utils.contains('DISTRO_FEATURES', 'ahab', 'true', 'false', d)}; then
+        _m="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
+        jq '(.storage_devices.rootdisk.images.boot.build_args.files) |=
+                (map(select(. != "Image" and (endswith(".dtb") | not)))
+                 + ["os_cntr_signed.bin"])' \
+            "$_m" > "$_m.ahab" || bbfatal "failed to rewrite the boot file list for AHAB"
+        mv "$_m.ahab" "$_m"
+
+        if ! grep -q 'os_cntr_signed.bin' "$_m"; then
+            bbfatal "AHAB is enabled but the boot partition still has no signed OS container"
+        fi
+        if grep -q '"Image"' "$_m"; then
+            bbfatal "AHAB is enabled but the boot partition still ships a bare Image"
+        fi
+    fi
+}
