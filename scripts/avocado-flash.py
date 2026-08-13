@@ -388,6 +388,101 @@ def flash_uuu(deploy: Path, machine: str, dry_run: bool, assume_yes: bool) -> No
     execute(["sudo", "uuu", "-m", usb_path, "-b", "emmc_all", str(boot), str(image)], dry_run)
 
 
+# ------------------------------------------------------- reaching U-Boot
+
+
+LOGIN_RE = re.compile(rb"login:\s*$")
+SHELL_RE = re.compile(rb"[#$]\s*$")
+
+
+def console_state(ub: "UBoot", settle: float = 3.0) -> str:
+    """What is on the other end right now: 'uboot', 'login', 'shell' or 'unknown'.
+
+    Nudges with a bare CR and classifies the reply. A CR is inert at all three -
+    U-Boot reprints its prompt, a getty reprints the banner, a shell gives an
+    empty line - so this cannot change the state it is measuring.
+    """
+    ub._drain(quiet=0.3)
+    ub.ser.write(b"\r")
+    out = b""
+    deadline = time.monotonic() + settle
+    while time.monotonic() < deadline:
+        chunk = ub.ser.read(4096)
+        if chunk:
+            out += chunk
+    tail = out.strip()[-200:]
+    if PROMPT.strip() in out:
+        return "uboot"
+    if LOGIN_RE.search(tail):
+        return "login"
+    if SHELL_RE.search(tail):
+        return "shell"
+    return "unknown"
+
+
+def interrupt_to_uboot(ub: "UBoot", window: float = 45.0) -> None:
+    """Get the board to a U-Boot prompt, rebooting it if that is what it takes.
+
+    The autoboot window is about three seconds and lands roughly ten seconds
+    into a boot, so waiting and then knocking races it. Holding CR from the
+    moment the reboot is issued does not: a CR at the U-Boot prompt only
+    reprints the prompt, so over-sending costs nothing and under-sending loses
+    the window and boots the OS instead.
+
+    Rebooting through the console rather than over the network keeps this working
+    on a board with no address yet, which is the state a freshly flashed card
+    leaves it in.
+    """
+    state = console_state(ub)
+    if state == "uboot":
+        info("already at a U-Boot prompt")
+        return
+
+    if state == "login":
+        info("board is at a login prompt; logging in to reboot it")
+        ub.ser.write(b"root\r")
+        time.sleep(3)
+        ub._drain(quiet=0.5)
+        ub.ser.write(b"reboot\r")
+    elif state == "shell":
+        info("board is at a shell; rebooting it")
+        ub.ser.write(b"reboot\r")
+    else:
+        # Nothing recognisable came back. It may be mid-boot, or wedged. A reset
+        # from an unknown state is not something to do silently.
+        raise Fatal(
+            "could not tell what the board is doing - no U-Boot prompt, login "
+            "prompt or shell responded.\n"
+            "  It may be mid-boot; try again in a few seconds. If the console is "
+            "silent, check that --port names the debug UART (P16 on the "
+            "FRDM-IMX93) and not the OTG port."
+        )
+
+    info("holding the console through the autoboot window")
+    seen = b""
+    deadline = time.monotonic() + window
+    while time.monotonic() < deadline:
+        ub.ser.write(b"\r")
+        time.sleep(0.1)
+        # Accumulate rather than testing each read: at 115200 the prompt arrives
+        # split across reads more often than not, and checking chunks in
+        # isolation misses it entirely.
+        seen += ub.ser.read(4096)
+        seen = seen[-4096:]
+        if PROMPT in seen:
+            # Drain the CRs still in flight so the caller starts on a clean prompt.
+            ub._drain(quiet=0.5)
+            ub.sync()
+            info("at a U-Boot prompt")
+            return
+
+    raise Fatal(
+        f"the board did not stop at a U-Boot prompt within {window:.0f}s.\n"
+        "  autoboot may be disabled, or bootdelay set to 0 - check `bootdelay` in "
+        "the environment."
+    )
+
+
 # --------------------------------------------------------------------- ums
 
 
@@ -682,8 +777,11 @@ def fuse_srk(args, deploy: Path, machine: str) -> None:
     print("\n== Board-side checks")
     ub = UBoot(args.port)
     try:
-        ub.sync()
-        info("at a U-Boot prompt")
+        if getattr(args, "interrupt", False):
+            interrupt_to_uboot(ub)
+        else:
+            ub.sync()
+            info("at a U-Boot prompt")
 
         lifecycle = read_lifecycle(ub)
         info(f"lifecycle: {lifecycle}")
@@ -806,6 +904,9 @@ examples:
     ap.add_argument("--spsdk-bin", type=Path, help="directory holding nxpimage/nxpcrypto")
     ap.add_argument("--commit", action="store_true",
                     help="fuse-srk: actually program the fuses (irreversible)")
+    ap.add_argument("--interrupt", action="store_true",
+                    help="get the board to a U-Boot prompt first, rebooting it "
+                         "through the console if it is running Linux")
     ap.add_argument("--ums-dev", default="mmc 1",
                     help="what U-Boot exports for 'ums' (default: %(default)s; "
                          "'mmc list' names which is the SD)")
@@ -869,8 +970,11 @@ def main() -> int:
         ub = UBoot(args.port)
         target = None
         try:
-            ub.sync()
-            info("at a U-Boot prompt")
+            if args.interrupt:
+                interrupt_to_uboot(ub)
+            else:
+                ub.sync()
+                info("at a U-Boot prompt")
             info(f"exporting {args.ums_dev} over USB controller {args.usb_controller}")
             target = ums_expose(ub, args.usb_controller, args.ums_dev)
             info(f"board appeared as {target}")
