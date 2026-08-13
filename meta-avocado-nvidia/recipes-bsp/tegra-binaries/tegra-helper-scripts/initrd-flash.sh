@@ -184,6 +184,11 @@ _twiddle_via_agent() {
     req=$(printf '{"loc_hint":"%s"}' "$usb_instance")
     local resp=""
 
+    # Terminal-visible prompt: CLI-driven provisions have no banner UI,
+    # so without this line the flash just stalls silently while the
+    # host waits for the user. Desktop flows show a banner as well.
+    echo "ACTION NEEDED: unplug and replug the device's USB cable to continue provisioning" >&2
+
     # Two transports — prefer nc -U for terseness, fall back to python3.
     # Either should be available in the SDK container. 130s overall
     # timeout: the host has a 120s waiter for user replug, +10s slack.
@@ -230,17 +235,18 @@ sys.stdout.write(data.decode(errors='replace'))
 # Parameters:
 #   $1: usb_instance - The USB bus path (e.g., "3-1")
 #   $2: session_id (optional) - If provided, will rescan to find current USB instance
+#   $3: mode (optional) - "no-prompt": teardown/cleanup release; never engage
+#       the agent (no user prompt), keep only the sysfs toggle
 disconnect_usb_device() {
     local usb_instance="$1"
     local sessid="$2"
+    local mode="$3"
 
     # If session ID is provided, rescan to find current device and USB instance.
     # This handles the case where the device reconnected with a different USB
     # path. When the device is *gone* entirely, the disconnect is already in
-    # effect — return success without re-issuing a twiddle. This is the
-    # idempotency contract that lets generate_flash_package call us a second
-    # time (after unmount_and_release already cycled the device) without
-    # accidentally blocking on a 120s replug-waiter for a phantom request.
+    # effect — return success without re-issuing a twiddle, so a repeat
+    # caller never blocks a 120s replug-waiter on a phantom request.
     if [ -n "$sessid" ]; then
         echo "Rescanning for device with session ID $sessid..." >&2
         local current_dev=$(find_device_by_session "$sessid")
@@ -266,7 +272,7 @@ disconnect_usb_device() {
     # Prefer the agent-driven path when available. Falls through to the
     # sysfs toggle on any failure so this remains a non-breaking change
     # for non-avocado-vm contexts (bare Linux flashing, CI, etc).
-    if _twiddle_via_agent "$usb_instance"; then
+    if [ "$mode" != "no-prompt" ] && _twiddle_via_agent "$usb_instance"; then
         echo "USB device $usb_instance twiddled via agent" >&2
         return 0
     fi
@@ -569,6 +575,7 @@ mount_partition() {
 unmount_and_release() {
     local mnt="$1"
     local dev="$2"
+    local disconnect_mode="$3"
 
     # Unmount if mount point provided
     if [ -n "$mnt" ]; then
@@ -594,7 +601,7 @@ unmount_and_release() {
         # Use the reliable USB disconnect method via authorized toggle
         # Pass session_id to allow rescanning if device path changed
         if [ -n "$usb_instance" ]; then
-            disconnect_usb_device "$usb_instance" "$session_id"
+            disconnect_usb_device "$usb_instance" "$session_id" "$disconnect_mode"
         fi
     fi
 
@@ -1011,7 +1018,7 @@ get_final_status_t234() {
             cp "$logfile" "$logdir/"
         done
     fi
-    unmount_and_release "$mnt" "$dev" || return 1
+    unmount_and_release "$mnt" "$dev" no-prompt || return 1
     echo "Final status: $final_status"
     return 0
 }
@@ -1380,11 +1387,10 @@ if [ -n "$usb_instance" ] || [ -n "$session_id" ]; then
     if [ -z "$final_usb_instance" ] || [ ! -e "$settle_path" ]; then
         echo "Device already detached — flash completed cleanly" | tee -a "$logfile"
     else
-        # Route through the shared helper so the agent path applies here
-        # too when running inside the avocado-vm. The helper handles the
-        # AVOCADO_AGENT_SOCK / sysfs fallback dispatch.
+        # Teardown release: flashing is already complete, so never ask the
+        # user for a cable cycle here — keep only the sysfs deauthorize.
         echo "Forcing deauthorize on lingering device $final_usb_instance" | tee -a "$logfile"
-        disconnect_usb_device "$final_usb_instance" "$session_id" || \
+        disconnect_usb_device "$final_usb_instance" "$session_id" no-prompt || \
             echo "WARN: failed to deauthorize $final_usb_instance" | tee -a "$logfile"
     fi
 fi
