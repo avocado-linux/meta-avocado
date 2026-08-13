@@ -137,11 +137,31 @@ do_configure:append:class-target () {
 # the non-AHAB and AHAB environments cannot drift apart in every other line.
 do_compile:prepend:bootvars-ubootenv() {
     if ${@bb.utils.contains('DISTRO_FEATURES', 'ahab', 'true', 'false', d)}; then
+        # The container is staged at cntr_addr, NOT at image_addr, and the two
+        # must not be the same address. authenticate_os_container() memcpys each
+        # image to the destination recorded inside the container - which for the
+        # kernel is image_addr - and booti then calls container_get_image_dst()
+        # on the container to learn where that landed. Load the container at
+        # image_addr and the first step overwrites what the second reads: the ELE
+        # authenticates fine, then the parse fails with "Parse kernel and fdt
+        # address failed -1", or the header check reports a bad container.
+        # Verified on an FRDM-IMX93 - booti at a staged address boots Linux,
+        # booti at image_addr does not.
         sed -i \
-            -e 's|^load_image=.*|load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} os_cntr_signed.bin|' \
-            -e 's|^avocado_boot=.*|avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} -;|' \
+            -e 's|^load_image=.*|load_image=load ${devtype} ${devnum}:${bootpart} ${cntr_addr} os_cntr_signed.bin|' \
+            -e 's|^avocado_boot=.*|avocado_boot=booti ${cntr_addr} ${ramdisk_addr}:${filesize} -;|' \
             -e 's|^bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot|bootcmd=run avocado_boot_init load_image load_initramfs avocado_boot|' \
             ${ENV_FILEPATH}
+
+        # cntr_addr has to exist and has to differ from image_addr, per the
+        # collision described above. Asserted rather than assumed because the
+        # failure is a board that authenticates and then refuses to boot.
+        if ! grep -q '^cntr_addr=' ${ENV_FILEPATH}; then
+            bbfatal "AHAB is enabled but the environment defines no cntr_addr to stage the container at"
+        fi
+        if [ "$(sed -n 's/^cntr_addr=//p' ${ENV_FILEPATH})" = "$(sed -n 's/^image_addr=//p' ${ENV_FILEPATH})" ]; then
+            bbfatal "cntr_addr equals image_addr; the container would be overwritten by its own payload during authentication"
+        fi
 
         if ! grep -q 'os_cntr_signed.bin' ${ENV_FILEPATH}; then
             bbfatal "AHAB is enabled but the U-Boot environment still loads a bare kernel"
