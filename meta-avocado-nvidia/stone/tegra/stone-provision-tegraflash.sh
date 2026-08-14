@@ -304,19 +304,31 @@ trap "rm -rf '$temp_bin_dir'" EXIT
 # The nativesdk cpp may not be installed, so fall back to the
 # cross-compiler cpp which works fine for preprocessing (target
 # architecture is irrelevant for text preprocessing).
+#
+# Every branch stores the ABSOLUTE path, never a bare name. The wrapper written
+# below is itself called `cpp` and its directory is prepended to PATH, so a body
+# of `exec cpp "$@"` re-resolves through PATH, finds the wrapper again, and
+# re-execs itself forever. The flash then sits in "Step 1: Signing binaries"
+# with no output and no error while one process spins at 100% CPU, which reads
+# as a dead board or a bad USB cable rather than a bug in this script. Only the
+# plain-cpp fallback could collide - the nativesdk and cross names differ from
+# the wrapper's own basename - and that is precisely the branch taken whenever
+# provisioning runs outside the SDK.
 SDK_HOST_CPP=""
 _nativesdk_cpp="${AVOCADO_SDK_ARCH:-$(uname -m)}-avocadosdk-linux-cpp"
-if command -v "$_nativesdk_cpp" >/dev/null 2>&1; then
-    SDK_HOST_CPP="$_nativesdk_cpp"
+if _resolved_cpp=$(command -v "$_nativesdk_cpp" 2>/dev/null); then
+    SDK_HOST_CPP="$_resolved_cpp"
 elif [ -n "${CC:-}" ]; then
     _cc_bin="${CC%% *}"
     _cross_cpp="${_cc_bin/gcc/cpp}"
-    if command -v "$_cross_cpp" >/dev/null 2>&1; then
-        SDK_HOST_CPP="$_cross_cpp"
+    if _resolved_cpp=$(command -v "$_cross_cpp" 2>/dev/null); then
+        SDK_HOST_CPP="$_resolved_cpp"
     fi
 fi
-if [ -z "$SDK_HOST_CPP" ] && command -v cpp >/dev/null 2>&1; then
-    SDK_HOST_CPP="cpp"
+if [ -z "$SDK_HOST_CPP" ]; then
+    if _resolved_cpp=$(command -v cpp 2>/dev/null); then
+        SDK_HOST_CPP="$_resolved_cpp"
+    fi
 fi
 if [ -z "$SDK_HOST_CPP" ]; then
     echo "ERROR: No C preprocessor (cpp) found in PATH"
@@ -324,6 +336,18 @@ if [ -z "$SDK_HOST_CPP" ]; then
     echo "Ensure the SDK toolchain is properly configured."
     exit 1
 fi
+# Refuse to write a wrapper that could exec itself. command -v returns a bare
+# word for a shell builtin or an alias, and the resulting wrapper would recurse
+# exactly as described above; failing here costs one clear message instead of an
+# unexplained hang partway through a flash.
+case "$SDK_HOST_CPP" in
+    /*) ;;
+    *)
+        echo "ERROR: resolved C preprocessor '$SDK_HOST_CPP' is not an absolute path."
+        echo "The generated cpp wrapper would re-exec itself and hang the flash."
+        exit 1
+        ;;
+esac
 
 cat > "$temp_bin_dir/cpp" << CPPWRAPPER
 #!/bin/bash
