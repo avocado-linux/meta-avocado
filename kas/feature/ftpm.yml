@@ -1,0 +1,68 @@
+# OP-TEE fTPM. Gives /var a key sealed to a TPM the SoC will not hand back,
+# replacing the phase-1 derivation from the SoC UID - which is readable rather
+# than secret, so it binds the key to the device without ever making it one.
+#
+#   bakar build meta-avocado/kas/machine/imx93-frdm.yml:meta-avocado/kas/feature/ftpm.yml
+#
+# Opt-in as a feature rather than set on the machine, because turning it on
+# pulls a layer into the build and that must not happen to a board that did
+# not ask for a TPM.
+#
+# Phase 1: the fTPM's NV storage is REE-FS on the recovery partition, the same
+# arrangement qemuarm64 uses. That proves the TA loads, /dev/tpm0 registers and
+# the PCR-7 seal takes, without touching any one-time hardware state. It does
+# NOT give hardware anti-rollback - that needs RPMB, which programs an eMMC key
+# exactly once and is therefore its own explicitly-confirmed step, never a side
+# effect of a build.
+header:
+  version: 16
+  includes:
+    # meta-arm carries both halves of the fTPM: optee-ftpm, which builds the
+    # Microsoft TA, and its optee-os_%.bbappend, which folds that TA into BL32
+    # via CFG_EARLY_TA. Neither is reachable otherwise - the i.MX93 machine
+    # config pulls base + nxp + freescale, and meta-arm arrives only here.
+    - repo: meta-avocado
+      file: kas/vendor/arm.yml
+
+    # An fTPM is still a TPM: the systemd PACKAGECONFIG below needs tpm2-tss,
+    # which only meta-security's meta-tpm provides. Without this the build gets
+    # all the way to dependency resolution and dies on "Nothing PROVIDES
+    # 'tpm2-tss'", which reads as a missing recipe rather than a missing layer.
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
+
+local_conf_header:
+  feature/ftpm: |
+    MACHINE_FEATURES:append = " optee-ftpm"
+
+    # Adding meta-arm makes meta-imx's dynamic-layers/meta-arm OP-TEE recipes
+    # parse for the first time, and imx-base-extend.inc already carries
+    # PREFERRED_VERSION_optee-os:imx-nxp-bsp ??= "4.10.0.imx". That preference
+    # resolves to nothing today because the recipe sits behind the dynamic
+    # layer; the moment meta-arm lands it resolves, and the board moves off the
+    # 4.8.0 OP-TEE silently - inside the signed boot chain, with no diff saying
+    # so.
+    #
+    # Pin it back. This is a hold, not a verdict: 4.10.0 is what the
+    # wrynose-6.18.20 meta-imx pin intends to pair with, and it gets its own
+    # change and its own hardware pass once 4.8.0 is validated. Delete this
+    # whole block then.
+    #
+    # All four, not just optee-os. imx-base-extend.inc:101-104 names optee-os,
+    # optee-client, optee-test and optee-os-tadevkit, and every one of those
+    # recipes lives under dynamic-layers/meta-arm - so every one resolves when
+    # the layer arrives. Pinning only optee-os would leave tee-supplicant
+    # (optee-client) a release ahead of the OP-TEE OS it talks to, and
+    # tee-supplicant is what backs the fTPM's REE-FS storage. That mismatch
+    # does not fail the build; it ships.
+    PREFERRED_VERSION_optee-os:imx-nxp-bsp = "4.8.0.imx"
+    PREFERRED_VERSION_optee-os-tadevkit:imx-nxp-bsp = "4.8.0.imx"
+    PREFERRED_VERSION_optee-client:imx-nxp-bsp = "4.8.0.imx"
+    PREFERRED_VERSION_optee-test:imx-nxp-bsp = "4.8.0.imx"
+
+    # Reopening the sealed /var goes through libcryptsetup-token-systemd-tpm2.so,
+    # which only cryptsetup-plugins builds. systemd-cryptenroll creates the
+    # token without it, so a build missing this enrolls cleanly and then falls
+    # back to the Argon2id recovery key on every later boot - encrypted, just
+    # never TPM-bound, and nothing reports the difference.
+    PACKAGECONFIG:append:pn-systemd = " tpm2 cryptsetup-plugins"
