@@ -157,8 +157,18 @@ do_compile:prepend:bootvars-ubootenv() {
             -e 's|^load_image=.*|load_image=load ${devtype} ${devnum}:${bootpart} ${cntr_addr} os_cntr_signed.bin|' \
             -e 's|^avocado_boot=.*|avocado_boot=booti ${cntr_addr} - -;|' \
             -e 's|^bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot|bootcmd=run avocado_boot_init load_image avocado_boot|' \
+            -e 's|^fdt_addr=.*|fdt_addr=0x94000000|' \
+            -e 's|^bootm_size=.*|bootm_size=0x40000000|' \
             ${ENV_FILEPATH}
 
+        # fdt_addr and bootm_size are rewritten here rather than carried in the
+        # environment, because only the signed path needs them. The bundled
+        # kernel is ~200 MB and unpacks over the stock fdt_addr, and reaching
+        # the new one needs a window wider than NXP's 256 MiB. An unsigned build
+        # loads a ~33 MB kernel and is fine with the stock values, so moving
+        # them unconditionally would change a boot path this feature does not
+        # own.
+        #
         # cntr_addr has to exist and has to differ from image_addr, per the
         # collision described above. Asserted rather than assumed because the
         # failure is a board that authenticates and then refuses to boot.
