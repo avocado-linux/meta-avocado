@@ -92,6 +92,11 @@ KERNEL_DEVICETREE:append:imx95-frdm = " \
   freescale/imx95-15x15-frdm-ap1302.dtbo \
 "
 
+# ftpm.cfg is unconditional rather than gated on the optee-ftpm feature: it only
+# builds a module, and without meta-arm there is no TA for OP-TEE to advertise,
+# so no microsoft,ftpm DT node exists and nothing loads it. Gating a kernel
+# fragment on a feature that lives in a kas layer set would mean two kernel
+# configurations for one board, which costs more than the module does.
 SRC_URI:append:avocado-imx93-frdm = " \
   file://imx93-frdm/dm-crypt.cfg \
   file://imx93-frdm/ftpm.cfg \
