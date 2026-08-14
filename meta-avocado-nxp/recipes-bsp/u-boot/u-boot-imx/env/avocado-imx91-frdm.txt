@@ -10,14 +10,14 @@ mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
-# The bundled kernel and its container staging need more than NXP's 256 MiB
-# bootm window - see the i.MX93 environment for the refusal this avoids.
-bootm_size=0x40000000
+# NXP's own value, stated so the AHAB rewrite has a line to replace. The
+# signed path raises it - see the i.MX93 environment for why.
+bootm_size=0x10000000
 
 image_addr=0x80200000
-# Above the kernel rather than inside it - see the i.MX93 environment for the
-# overlap this avoids once the initramfs is bundled into the Image.
-fdt_addr=0x94000000
+# Fine for the kernel an unsigned build loads. The signed path moves it - see
+# the i.MX93 environment for the overlap that forces it.
+fdt_addr=0x83000000
 ramdisk_addr=0x84000000
 # Staging address for a signed AHAB OS container. Must not equal image_addr:
 # authenticating a container unpacks the kernel to image_addr, and booti then

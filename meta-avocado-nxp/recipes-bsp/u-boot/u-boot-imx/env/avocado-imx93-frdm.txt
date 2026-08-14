@@ -10,23 +10,21 @@ mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
-# U-Boot refuses a load that leaves the bootm window: "Reading file would
-# overwrite reserved memory". NXP's board env caps the window at 256 MiB from
-# 0x80000000 (board/nxp/imx93_frdm/imx93_frdm.env:31), which was ample for a
-# ~33 MB kernel and cannot hold a ~200 MB bundled kernel plus the container
-# staging it. 1 GiB reaches cntr_addr with room and stays well inside the 2 GB
-# the board has.
-bootm_size=0x40000000
+# NXP's own value (board/nxp/imx93_frdm/imx93_frdm.env:31), stated here rather
+# than inherited so the AHAB rewrite has a line to replace. A load that leaves
+# this window is refused with "Reading file would overwrite reserved memory".
+# 256 MiB is ample for the ~33 MB kernel an unsigned build loads; the signed
+# path raises it, because a ~200 MB bundled kernel plus the container staging
+# it does not fit.
+bootm_size=0x10000000
 
 image_addr=0x80200000
 
-# Near the top of the first DRAM bank, which ends at 0x95ffffff, rather than
-# 46 MB above the kernel. Bundling the initramfs took the kernel from ~33 MB to
-# ~200 MB, so it unpacks to roughly 0x80200000-0x8c78ea00 and every earlier
-# choice here landed inside that - U-Boot refused with "FDT image overlaps OS
-# image". Placed high on purpose: a kernel that grew past this would not fit in
-# the bank at all, so this address stops being the thing to adjust first.
-fdt_addr=0x94000000
+# 46 MB above the kernel, which is fine for the ~33 MB kernel this path loads.
+# The signed path moves it near the top of the first DRAM bank: bundling the
+# initramfs takes the kernel to ~200 MB, so it unpacks across this address and
+# U-Boot refuses with "FDT image overlaps OS image".
+fdt_addr=0x83000000
 
 # Only used when AHAB is off. It sits inside the bundled kernel's range, which
 # is safe only because an unsigned build loads a ~33 MB kernel that ends well
