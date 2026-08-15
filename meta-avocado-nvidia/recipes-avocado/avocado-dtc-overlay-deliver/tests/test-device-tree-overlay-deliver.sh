@@ -213,7 +213,24 @@ else
     fi
 fi
 
-# --- 6. drift guard: hook target must match the consumer's read -------------
+# --- 6. a DTB shadowing the merged one is a hard error ----------------------
+# stone resolves images.dtb by name, first input dir wins. A same-named DTB
+# beside the manifest would be picked over the merged copy in staging, shipping
+# a tree with no overlays applied and reporting nothing.
+make_staging "$work/s6" alpha
+cp "$bsp/kernel_tegra234-test.dtb" "$work/kernel_tegra234-test.dtb"
+if run_hook "$work/s6" "$work/stone.json" "$work/f6.json" >/dev/null 2>"$work/e6"; then
+    bad "hook accepted a shadowing DTB beside the manifest"
+else
+    if grep -qi "shadow" "$work/e6"; then
+        ok "a DTB that would shadow the merged one is a hard error"
+    else
+        bad "shadowing case had no clear message: $(cat "$work/e6")"
+    fi
+fi
+rm -f "$work/kernel_tegra234-test.dtb"
+
+# --- 7. drift guard: hook target must match the consumer's read -------------
 consumer="$here/../../../stone/tegra/stone-provision-tegraflash.sh"
 if [[ -f "$consumer" ]]; then
     if grep -q '\.storage_devices\.rootdisk\.images\.dtb' "$consumer" \
