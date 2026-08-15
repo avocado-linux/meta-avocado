@@ -104,12 +104,19 @@ def find_base_dtb(stone, data_dir):
     if not os.path.isdir(bsp_dir):
         die(f"tegraflash_bsp directory not found: {bsp_dir}")
 
-    base_name = f"kernel_{read_dtbfile(bsp_dir)}"
+    # Un-prefixed, deliberately. The BSP ships both <name>.dtb and the
+    # kernel_<name>.dtb alias, but they are not interchangeable here:
+    # tegra-flash-helper.sh:567-572 does `rm -f kernel_<name>.dtb` and recreates
+    # it from the un-prefixed <name>.dtb (or its .signed form) at signing time.
+    # Publishing the merged tree as kernel_<name>.dtb therefore hands it to a
+    # file that is deleted before it is read, and the board boots the stock tree
+    # with no overlay applied and nothing reported. Merging into the un-prefixed
+    # base means the signer regenerates the alias FROM the merged tree.
+    base_name = read_dtbfile(bsp_dir)
     if not os.path.isfile(os.path.join(bsp_dir, base_name)):
         die(
             f"{base_name} not found in {bsp_dir}: DTBFILE names it as the tree "
-            "this machine boots, but the BSP does not ship it. tegraflash-bsp.bb "
-            "only creates the kernel_ alias for DTBs matching nv-super"
+            "this machine boots, but the BSP does not ship it"
         )
     return bsp_dir, base_name
 
