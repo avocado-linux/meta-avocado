@@ -129,6 +129,25 @@ def main():
     # derives kernel_<basename>.dtb from it, and the flash layout expects the
     # name the BSP shipped.
     merged = os.path.join(staging, base_name)
+
+    # images.dtb is resolved by name against stone's input dirs, first match
+    # wins, and the merged DTB has to keep the base name because the flash
+    # layout refers to the BSP's filename. Today the base DTB exists only
+    # nested inside tegraflash_bsp/, so the staged copy is the only top-level
+    # match and it wins. If anything ever deploys that name beside the manifest,
+    # stone resolves to the unmerged tree instead and the board boots cleanly
+    # with no overlay applied - the exact failure this hook exists to prevent,
+    # and one that reports nothing. The Raspberry Pi hook refuses by name for
+    # the same class of shadowing.
+    shadow = os.path.join(data_dir, base_name)
+    if os.path.exists(shadow):
+        die(
+            f"{shadow} would shadow the merged DTB: stone resolves images.dtb "
+            "by name against its input dirs and would pick that copy over the "
+            "merged one in staging, shipping a tree with no overlays applied. "
+            "Remove it or rename the deployed DTB"
+        )
+
     shutil.copy2(os.path.join(bsp_dir, base_name), merged)
 
     # fdtoverlay applies in argument order, and order is load-bearing: a later
