@@ -1,5 +1,14 @@
 header:
   version: 16
+  includes:
+  # Console login comes from dev-root-login.yml rather than being set again
+  # here. Both fragments need AVOCADO_DEV_ROOT_LOGIN, and two overlays
+  # independently setting the same variable drift - the second one to change is
+  # the one nobody notices. Including it also picks up the QA relaxation that
+  # flipping the toggle requires, which this fragment needs for exactly the same
+  # reason and did not previously carry.
+  - repo: meta-avocado
+    file: kas/feature/dev-root-login.yml
 
 # Bench/HITL SSH access, on any machine.
 #
@@ -15,10 +24,9 @@ header:
 # have a shell before any extension has been installed.
 local_conf_header:
   feature/ssh-dev: |
-    # Console. avocado-users_1.0.bb rewrites /etc/shadow's `root:*:` to
-    # `root::` only when this is 1; `*` means no password can ever match, so
-    # the stock 0 leaves no way in on console or over SSH.
-    AVOCADO_DEV_ROOT_LOGIN = "1"
+    # Console login (AVOCADO_DEV_ROOT_LOGIN) is inherited from
+    # kas/feature/dev-root-login.yml, included above. Without it `*` in
+    # /etc/shadow means no password can ever match, on console or over SSH.
 
     # SSH. oe-core owns these: allow-root-login and allow-empty-password wire
     # postprocesses that edit whatever sshd config actually ships, and
