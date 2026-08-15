@@ -7,6 +7,20 @@ set -u
 # Propagate errors in pipelines
 set -o pipefail
 
+# Provisioning needs CAP_SYS_ADMIN: initrd-flash mounts the board's exposed USB
+# storage to write the command package, and contains no sudo of its own. Without
+# privilege the run still signs binaries and boots the board over RCM, then dies
+# ~40s later at "could not mount USB storage for writing flashing commands",
+# which reads as a storage or cable fault. Check first, so the operator is told
+# the actual cause before anything is signed or the board is touched.
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: tegraflash provisioning must run as root." >&2
+    echo "       initrd-flash mounts the target's exported USB storage and does" >&2
+    echo "       not elevate on its own. Re-run under sudo, preserving the" >&2
+    echo "       environment: sudo -E <command>" >&2
+    exit 1
+fi
+
 # Environment variables provided by avocado:
 # AVOCADO_STONE_MANIFEST - path to manifest JSON file
 # AVOCADO_STONE_BUILD_DIR - build output directory
