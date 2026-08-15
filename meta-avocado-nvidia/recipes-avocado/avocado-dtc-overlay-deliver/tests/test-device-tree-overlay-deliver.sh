@@ -205,18 +205,24 @@ fi
 make_staging "$work/s4a" alpha
 if run_hook "$work/s4a" "$work/stone.json" "$work/f4a.json" >/dev/null 2>"$work/e4a"; then
     picked="$(jq -r '.storage_devices.rootdisk.images.dtb' "$work/f4a.json")"
-    if [[ "$picked" == "kernel_tegra234-test-0005.dtb" ]]; then
-        ok "the DTB named by DTBFILE is the one published"
+    # Deliberately WITHOUT the kernel_ prefix. tegra-flash-helper.sh:567-572 does
+    # `rm -f kernel_$base` then recreates it from the un-prefixed $base, so a
+    # merged DTB published as kernel_<name> is deleted before it is ever read,
+    # and the board boots the stock tree with no overlay and no error. Verified
+    # on hardware 2026-08-15: kernel-dtb partitions p4/p7 contained a valid DTB
+    # that did not carry the overlay marker.
+    if [[ "$picked" == "tegra234-test-0005.dtb" ]]; then
+        ok "images.dtb names the un-prefixed base DTB the signer reads"
     else
-        bad "wrong base DTB selected: $picked"
+        bad "wrong name published (a kernel_ prefix here is deleted by the signer): $picked"
     fi
-    if dtc -I dtb -O dts "$work/s4a/kernel_tegra234-test-0005.dtb" 2>/dev/null | grep -q 'alpha = "present"'; then
+    if dtc -I dtb -O dts "$work/s4a/tegra234-test-0005.dtb" 2>/dev/null | grep -q 'alpha = "present"'; then
         ok "the overlay was merged into that SKU's tree"
     else
         bad "the selected tree carries no overlay"
     fi
     # The other SKUs must be left alone.
-    if [[ ! -e "$work/s4a/kernel_tegra234-test-0000.dtb" ]]; then
+    if [[ ! -e "$work/s4a/tegra234-test-0000.dtb" ]]; then
         ok "unrelated SKU trees are not touched"
     else
         bad "hook staged a DTB for a SKU this machine does not boot"
@@ -273,7 +279,7 @@ fi
 # beside the manifest would be picked over the merged copy in staging, shipping
 # a tree with no overlays applied and reporting nothing.
 make_staging "$work/s6" alpha
-cp "$bsp/kernel_tegra234-test-0005.dtb" "$work/kernel_tegra234-test-0005.dtb"
+cp "$bsp/tegra234-test-0005.dtb" "$work/tegra234-test-0005.dtb"
 if run_hook "$work/s6" "$work/stone.json" "$work/f6.json" >/dev/null 2>"$work/e6"; then
     bad "hook accepted a shadowing DTB beside the manifest"
 else
@@ -283,7 +289,7 @@ else
         bad "shadowing case had no clear message: $(cat "$work/e6")"
     fi
 fi
-rm -f "$work/kernel_tegra234-test-0005.dtb"
+rm -f "$work/tegra234-test-0005.dtb"
 
 # --- 7. drift guard: hook target must match the consumer's read -------------
 consumer="$here/../../../stone/tegra/stone-provision-tegraflash.sh"
