@@ -54,8 +54,22 @@ cat > "$work/base.dts" <<'EOF'
     };
 };
 EOF
-dtc -@ -I dts -O dtb -o "$bsp/kernel_tegra234-test.dtb" "$work/base.dts" 2>/dev/null
-cp "$bsp/kernel_tegra234-test.dtb" "$bsp/tegra234-test.dtb"
+# A real BSP ships one base DTB per module SKU - five of them on the Orin Nano
+# devkit (p3767-0000/0001/0003/0004/0005). Picking by uniqueness is therefore
+# not an option; the flash picks by DTBFILE, and so must the hook.
+for sku in 0000 0003 0005; do
+    dtc -@ -I dts -O dtb -o "$bsp/kernel_tegra234-test-$sku.dtb" "$work/base.dts" 2>/dev/null
+    cp "$bsp/kernel_tegra234-test-$sku.dtb" "$bsp/tegra234-test-$sku.dtb"
+done
+
+# initrd-flash.sh:922 substitutes the flash XML's DTB_FILE with kernel_$DTBFILE,
+# sourcing DTBFILE from this file. It is the only thing in the BSP that names
+# which SKU's tree this machine actually boots.
+write_env() {
+    printf 'BOOTDEV="mmcblk0p1"\nDTBFILE="%s"\nROOTFS_DEVICE="mmcblk0"\n' "$1" \
+        > "$bsp/.env.initrd-flash"
+}
+write_env "tegra234-test-0005.dtb"
 
 # Overlay fixtures, each adding an identifiable property to the same target.
 make_dtbo() {
@@ -184,19 +198,60 @@ else
     fi
 fi
 
-# --- 4. a missing base DTB is a hard error ----------------------------------
-mv "$bsp/kernel_tegra234-test.dtb" "$work/stashed.dtb"
-make_staging "$work/s4" alpha
-if run_hook "$work/s4" "$work/stone.json" "$work/f4.json" >/dev/null 2>"$work/e4"; then
-    bad "hook accepted a BSP with no base DTB"
-else
-    if grep -qi "base dtb\|kernel_" "$work/e4"; then
-        ok "a missing base DTB is a hard error"
+# --- 4a. the SKU named by DTBFILE is the one merged -------------------------
+# The decisive case: several base DTBs are present and only one is the tree this
+# machine boots. Merging into the wrong one produces a board that boots the
+# untouched DTB with no overlay applied, reporting nothing.
+make_staging "$work/s4a" alpha
+if run_hook "$work/s4a" "$work/stone.json" "$work/f4a.json" >/dev/null 2>"$work/e4a"; then
+    picked="$(jq -r '.storage_devices.rootdisk.images.dtb' "$work/f4a.json")"
+    if [[ "$picked" == "kernel_tegra234-test-0005.dtb" ]]; then
+        ok "the DTB named by DTBFILE is the one published"
     else
-        bad "missing-base-DTB had no clear message: $(cat "$work/e4")"
+        bad "wrong base DTB selected: $picked"
+    fi
+    if dtc -I dtb -O dts "$work/s4a/kernel_tegra234-test-0005.dtb" 2>/dev/null | grep -q 'alpha = "present"'; then
+        ok "the overlay was merged into that SKU's tree"
+    else
+        bad "the selected tree carries no overlay"
+    fi
+    # The other SKUs must be left alone.
+    if [[ ! -e "$work/s4a/kernel_tegra234-test-0000.dtb" ]]; then
+        ok "unrelated SKU trees are not touched"
+    else
+        bad "hook staged a DTB for a SKU this machine does not boot"
+    fi
+else
+    bad "hook failed with several base DTBs present: $(cat "$work/e4a")"
+fi
+
+# --- 4b. no DTBFILE selector is a hard error --------------------------------
+mv "$bsp/.env.initrd-flash" "$work/stashed.env"
+make_staging "$work/s4b" alpha
+if run_hook "$work/s4b" "$work/stone.json" "$work/f4b.json" >/dev/null 2>"$work/e4b"; then
+    bad "hook guessed a base DTB with no DTBFILE to select one"
+else
+    if grep -qiE "dtbfile|env.initrd-flash" "$work/e4b"; then
+        ok "a missing DTBFILE selector is a hard error"
+    else
+        bad "missing-selector had no clear message: $(cat "$work/e4b")"
     fi
 fi
-mv "$work/stashed.dtb" "$bsp/kernel_tegra234-test.dtb"
+mv "$work/stashed.env" "$bsp/.env.initrd-flash"
+
+# --- 4c. a DTBFILE naming a file that is not there is a hard error ----------
+write_env "tegra234-test-9999.dtb"
+make_staging "$work/s4c" alpha
+if run_hook "$work/s4c" "$work/stone.json" "$work/f4c.json" >/dev/null 2>"$work/e4c"; then
+    bad "hook accepted a DTBFILE naming an absent DTB"
+else
+    if grep -qi "9999\|not found\|base dtb" "$work/e4c"; then
+        ok "a DTBFILE naming an absent DTB is a hard error"
+    else
+        bad "absent-DTB case had no clear message: $(cat "$work/e4c")"
+    fi
+fi
+write_env "tegra234-test-0005.dtb"
 
 # --- 5. a missing rootdisk is a hard error ----------------------------------
 cat > "$work/stone-nodisk.json" <<'EOF'
@@ -218,7 +273,7 @@ fi
 # beside the manifest would be picked over the merged copy in staging, shipping
 # a tree with no overlays applied and reporting nothing.
 make_staging "$work/s6" alpha
-cp "$bsp/kernel_tegra234-test.dtb" "$work/kernel_tegra234-test.dtb"
+cp "$bsp/kernel_tegra234-test-0005.dtb" "$work/kernel_tegra234-test-0005.dtb"
 if run_hook "$work/s6" "$work/stone.json" "$work/f6.json" >/dev/null 2>"$work/e6"; then
     bad "hook accepted a shadowing DTB beside the manifest"
 else
@@ -228,7 +283,7 @@ else
         bad "shadowing case had no clear message: $(cat "$work/e6")"
     fi
 fi
-rm -f "$work/kernel_tegra234-test.dtb"
+rm -f "$work/kernel_tegra234-test-0005.dtb"
 
 # --- 7. drift guard: hook target must match the consumer's read -------------
 consumer="$here/../../../stone/tegra/stone-provision-tegraflash.sh"
