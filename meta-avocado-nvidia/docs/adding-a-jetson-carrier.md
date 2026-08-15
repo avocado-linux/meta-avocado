@@ -315,6 +315,29 @@ cause).
 
 ## Caveats
 
+- **Provisioning must run as root.** `initrd-flash` mounts the board's
+  exported USB storage to write the command package and never elevates
+  on its own, so the flash needs `CAP_SYS_ADMIN`. Run it under
+  `sudo -E` so the SDK environment survives. Unprivileged runs used to
+  sign the binaries and RCM-boot the board before dying at
+  `could not mount USB storage for writing flashing commands`, which
+  reads as a storage or cable fault; the provisioning script now
+  refuses up front instead.
+- **A Jetson in Force Recovery needs a udev rule to be reachable.** The
+  board enumerates as vendor `0955`, which the stock
+  `51-android.rules` hands to `GROUP="adbusers" MODE="0660"`. A user
+  outside that group cannot open the device, and tegraflash blocks on
+  the USB read with no message at all - the run simply sits there.
+  Either join `adbusers`, or drop in a rule granting the logged-in
+  user access directly:
+
+  ```udev
+  # /etc/udev/rules.d/60-jetson-recovery.rules
+  SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TAG+="uaccess"
+  ```
+
+  `uaccess` is preferable: it grants access via ACL on device add, so
+  it needs no group membership and no re-login.
 - **EEPROM SKU mismatch aborts signing.** If the actual SOM SKU
   doesn't match `CHECK_BOARDSKU` in flashvars, tegraflash refuses to
   sign with `actual board SKU X does not match expected board SKU Y`.
