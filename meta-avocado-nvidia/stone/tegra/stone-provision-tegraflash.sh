@@ -487,9 +487,15 @@ case "$boot_media" in
         fi
         ;;
     sd)
+        # An eMMC-less module instantiates only the SD controller, so the card
+        # is the first MMC device: 3400000.mmc -> mmc0 -> mmcblk0. A module that
+        # carries eMMC puts eMMC on mmc0 and the card on mmc1, which is what the
+        # BSP's generic/cfg/flash_t234_qspi_sd*.xml assume; set
+        # AVOCADO_PROVISION_SD_DEVICE=mmcblk1 for those.
+        sd_device="${AVOCADO_PROVISION_SD_DEVICE:-mmcblk0}"
         sed -i \
-            -e 's/^BOOTDEV=.*/BOOTDEV="mmcblk1p1"/' \
-            -e 's/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE="mmcblk1"/' \
+            -e "s/^BOOTDEV=.*/BOOTDEV=\"${sd_device}p1\"/" \
+            -e "s/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE=\"${sd_device}\"/" \
             -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
             "$build_dir/.env.initrd-flash"
         ;;
