@@ -627,7 +627,15 @@ wait_for_exported_storage() {
         if [ $elapsed -ge $timeout ]; then
             echo "" >&2
             echo "ERR: Timeout waiting for exported storage device $name after ${timeout}s" >&2
-            echo "Available devices:" >&2
+            echo "The target was asked to export '$name' and never did. This is a" >&2
+            echo "target-side failure, not a host storage or cable fault: the target" >&2
+            echo "prints its own reason (e.g. \"Export of $name failed\") to its debug" >&2
+            echo "UART, and does not re-export the flashpkg device the host reads logs" >&2
+            echo "from, so the reason exists only on the serial console. Attach it and" >&2
+            echo "re-run. A wrong device name is the usual cause - confirm what the" >&2
+            echo "target actually enumerated." >&2
+            echo "Host block devices below are listed for reference only; none of them" >&2
+            echo "is the target:" >&2
             for candidate in /dev/sd[a-z]; do
                 [ -b "$candidate" ] || continue
                 local size_blocks=$(cat /sys/block/$(basename "$candidate")/size 2>/dev/null || echo "0")
