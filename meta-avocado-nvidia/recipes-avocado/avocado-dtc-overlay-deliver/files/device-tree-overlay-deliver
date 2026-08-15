@@ -57,6 +57,31 @@ def env(name):
     return value
 
 
+def read_dtbfile(bsp_dir):
+    """Return the DTB basename this machine actually boots.
+
+    A BSP ships one base DTB per module SKU - five on the Orin Nano developer
+    kit (p3767-0000/0001/0003/0004/0005) - so the tree cannot be identified by
+    being the only one present. initrd-flash.sh:922 resolves the flash XML's
+    DTB_FILE to kernel_$DTBFILE, sourcing DTBFILE from .env.initrd-flash, which
+    is the only thing in the BSP that names the SKU this machine boots. Use the
+    same selector, so the merged tree is by construction the tree that gets
+    flashed."""
+    env_path = os.path.join(bsp_dir, ".env.initrd-flash")
+    if not os.path.isfile(env_path):
+        die(
+            f"{env_path} not found: it names the DTB this machine boots "
+            "(DTBFILE), and a BSP ships one base DTB per module SKU, so there "
+            "is no safe way to pick one without it"
+        )
+    with open(env_path) as f:
+        for line in f:
+            key, sep, value = line.partition("=")
+            if sep and key.strip() == "DTBFILE":
+                return value.strip().strip('"').strip("'")
+    die(f"no DTBFILE entry in {env_path}; cannot tell which base DTB to merge into")
+
+
 def find_base_dtb(stone, data_dir):
     """Locate the BSP's base kernel DTB.
 
@@ -79,20 +104,14 @@ def find_base_dtb(stone, data_dir):
     if not os.path.isdir(bsp_dir):
         die(f"tegraflash_bsp directory not found: {bsp_dir}")
 
-    candidates = sorted(
-        name
-        for name in os.listdir(bsp_dir)
-        if name.startswith("kernel_") and name.endswith(".dtb")
-    )
-    if not candidates:
-        die(f"no base DTB (kernel_*.dtb) in {bsp_dir}")
-    if len(candidates) > 1:
+    base_name = f"kernel_{read_dtbfile(bsp_dir)}"
+    if not os.path.isfile(os.path.join(bsp_dir, base_name)):
         die(
-            "more than one base DTB in "
-            f"{bsp_dir}: {', '.join(candidates)}. Refusing to guess which tree "
-            "the overlays belong to"
+            f"{base_name} not found in {bsp_dir}: DTBFILE names it as the tree "
+            "this machine boots, but the BSP does not ship it. tegraflash-bsp.bb "
+            "only creates the kernel_ alias for DTBs matching nv-super"
         )
-    return bsp_dir, candidates[0]
+    return bsp_dir, base_name
 
 
 def main():
