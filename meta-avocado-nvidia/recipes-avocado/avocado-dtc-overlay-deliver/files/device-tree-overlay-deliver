@@ -76,9 +76,38 @@ def read_dtbfile(bsp_dir):
         )
     with open(env_path) as f:
         for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
             key, sep, value = line.partition("=")
-            if sep and key.strip() == "DTBFILE":
-                return value.strip().strip('"').strip("'")
+            if not sep:
+                continue
+            # `export DTBFILE=...` and a trailing `# comment` are both valid
+            # shell and both appear in hand-edited env files. Neither is in the
+            # BSP's current output, but this is the single selector the whole
+            # merge hinges on: an unrecognised form matches nothing and falls
+            # through to the die() below, which reports a MISSING selector when
+            # the truth is an unparsed one - and sends the reader looking for a
+            # BSP that failed to write the value rather than a format change.
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export ") :].strip()
+            if key != "DTBFILE":
+                continue
+            value = value.strip()
+            if value[:1] in ("'", '"'):
+                quote = value[0]
+                end = value.find(quote, 1)
+                if end != -1:
+                    return value[1:end]
+                # Unterminated quote - fall through to the bare-word path
+                # rather than silently returning the rest of the line.
+                value = value[1:]
+            else:
+                value = value.split("#", 1)[0].strip()
+            if value:
+                return value
+            die(f"DTBFILE in {env_path} is set but empty; cannot pick a base DTB")
     die(f"no DTBFILE entry in {env_path}; cannot tell which base DTB to merge into")
 
 
@@ -145,6 +174,22 @@ def main():
     if not overlays:
         die("hook invoked with no overlays to deliver")
 
+    # Validate up front rather than at each use. Every other failure in this
+    # hook exits through die() with a "[ERROR] device-tree-overlay-deliver"
+    # prefix; indexing ov["file"] and ov["name"] later would raise a bare
+    # KeyError traceback instead - the one class of bad input that escapes the
+    # otherwise-uniform fail-clean handling, and the least readable place to
+    # land given the hook runs inside a build container.
+    for index, ov in enumerate(overlays):
+        if not isinstance(ov, dict):
+            die(f"overlays[{index}] is not an object: {ov!r}")
+        for key in ("name", "file"):
+            if not ov.get(key):
+                die(
+                    f"overlays[{index}] has no '{key}': the CLI writes both for "
+                    f"every declared overlay, so this manifest is malformed. Entry: {ov!r}"
+                )
+
     with open(stone_path) as f:
         stone = json.load(f)
     bsp_dir, base_name = find_base_dtb(stone, data_dir)
@@ -158,13 +203,21 @@ def main():
 
     # images.dtb is resolved by name against stone's input dirs, first match
     # wins, and the merged DTB has to keep the base name because the flash
-    # layout refers to the BSP's filename. Today the base DTB exists only
-    # nested inside tegraflash_bsp/, so the staged copy is the only top-level
-    # match and it wins. If anything ever deploys that name beside the manifest,
-    # stone resolves to the unmerged tree instead and the board boots cleanly
-    # with no overlay applied - the exact failure this hook exists to prevent,
-    # and one that reports nothing. The Raspberry Pi hook refuses by name for
-    # the same class of shadowing.
+    # layout refers to the BSP's filename.
+    #
+    # Precedence is owned by the CLI, not by this check: it prepends the
+    # staging dir to the -i list, so the merged tree wins over every other
+    # input dir by construction. That ordering is the actual guarantee, and it
+    # is asserted in the CLI's own tests. This hook cannot enforce it - the -i
+    # list is assembled after the hook returns, and the hook is never told what
+    # is on it.
+    #
+    # The check below is therefore a second line covering the one directory the
+    # hook can see, not the whole input set. It is kept because it costs
+    # nothing and the failure it catches is invisible: a shadowed lookup ships
+    # an unmerged tree, and the board boots cleanly with no overlay applied and
+    # nothing reported. The Raspberry Pi hook refuses by name for the same
+    # class of shadowing.
     shadow = os.path.join(data_dir, base_name)
     if os.path.exists(shadow):
         die(

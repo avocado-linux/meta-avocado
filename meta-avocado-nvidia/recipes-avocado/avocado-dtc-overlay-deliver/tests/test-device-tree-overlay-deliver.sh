@@ -304,6 +304,45 @@ else
     bad "consumer script not found at $consumer; drift guard cannot run"
 fi
 
+# --- 8. a malformed manifest entry fails clean, not with a traceback --------
+# Every other bad input exits through die(); indexing a missing key would
+# raise a bare KeyError instead. The distinction matters because the hook runs
+# inside a build container, where a traceback is the least readable thing to
+# land in the log.
+make_staging "$work/s8" alpha
+jq '.overlays[0] |= del(.file)' "$work/s8/overlays.manifest.json" > "$work/s8/m.json"
+mv "$work/s8/m.json" "$work/s8/overlays.manifest.json"
+if run_hook "$work/s8" "$work/stone.json" "$work/f8.json" >/dev/null 2>"$work/e8"; then
+    bad "hook accepted an overlay entry with no 'file'"
+elif grep -q "Traceback" "$work/e8"; then
+    bad "malformed entry raised a traceback instead of a clean error: $(cat "$work/e8")"
+elif grep -qi "file" "$work/e8"; then
+    ok "a manifest entry missing 'file' fails clean"
+else
+    bad "malformed-entry case had no clear message: $(cat "$work/e8")"
+fi
+
+# --- 9. DTBFILE parsing tolerates ordinary shell forms ----------------------
+# An unrecognised form matches nothing and falls through to the "no DTBFILE
+# entry" die, which reports a MISSING selector when the truth is an unparsed
+# one - pointing the reader at the wrong half of the system.
+for form in 'export DTBFILE="tegra234-test-0005.dtb"' \
+    'DTBFILE=tegra234-test-0005.dtb  # the SKU this board boots' \
+    "DTBFILE='tegra234-test-0005.dtb'"; do
+    printf 'BOOTDEV="mmcblk0p1"\n%s\nROOTFS_DEVICE="mmcblk0"\n' "$form" \
+        > "$bsp/.env.initrd-flash"
+    make_staging "$work/s9" alpha
+    rm -f "$work/f9.json"
+    if run_hook "$work/s9" "$work/stone.json" "$work/f9.json" >/dev/null 2>"$work/e9" \
+        && [[ "$(jq -r '.storage_devices.rootdisk.images.dtb' "$work/f9.json")" \
+            == "tegra234-test-0005.dtb" ]]; then
+        ok "DTBFILE parsed from: $form"
+    else
+        bad "DTBFILE form not handled: $form :: $(cat "$work/e9")"
+    fi
+done
+write_env "tegra234-test-0005.dtb"
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]
