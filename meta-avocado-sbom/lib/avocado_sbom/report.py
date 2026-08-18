@@ -220,6 +220,18 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
     stats.recipes = len(recipes)
     return recipes, scanned
 
+def packages_digest(packages):
+    """Fingerprint of the package set. Consumers re-derive it, so the input
+    format is part of the frozen contract.
+    """
+    digest = hashlib.sha256()
+    for name in sorted(packages):
+        pkg = packages[name]
+        digest.update(
+            ("%s\t%s\t%s\n" % (name, pkg["recipe"], pkg["version"])).encode()
+        )
+    return "sha256:" + digest.hexdigest()
+
 REPORT_VERSION = "1"
 
 def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summary=True):
@@ -238,20 +250,13 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
     unscanned = sorted({p["recipe"] for p in packages.values()} - scanned)
     stats.unscanned_recipes = len(unscanned)
 
-    digest = hashlib.sha256()
-    for name in sorted(packages):
-        pkg = packages[name]
-        digest.update(
-            ("%s\t%s\t%s\n" % (name, pkg["recipe"], pkg["version"])).encode()
-        )
-
     report = {
         "version": REPORT_VERSION,
         "generated": datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z"),
-        "packages_digest": "sha256:" + digest.hexdigest(),
+        "packages_digest": packages_digest(packages),
         "status": status,
         "counts": {
             "recipes": len(recipes),
