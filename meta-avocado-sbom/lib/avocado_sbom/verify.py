@@ -36,11 +36,14 @@ REPORT_COUNTERS = (
 
 # Non-zero means the report is missing data. Silent otherwise: the document
 # stays schema-valid and the loss is just a number nobody reads.
+#
+# package_collisions is not one: the winner is the first pkgdata directory, so
+# the report is complete and deterministic, just ambiguous about one name. The
+# recipe notes it and the count stays in the document.
 HEALTH_COUNTERS = (
     "stale_dropped",
     "cve_files_unreadable",
     "pkgdata_unreadable",
-    "package_collisions",
 )
 
 TOP_LEVEL_TYPES = {

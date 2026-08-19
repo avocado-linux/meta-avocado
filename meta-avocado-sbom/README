@@ -327,4 +327,6 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         that are valid JSON of the wrong shape
   pkgdata_unreadable    pkgdata entries that would not parse
   package_collisions    package names claimed by more than one recipe or
-                        version; the first pkgdata directory won
+                        version; the first pkgdata directory won. Not a health
+                        counter: the winner is deterministic and the report is
+                        complete, so it is noted rather than failed on

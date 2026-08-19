@@ -104,9 +104,11 @@ class FixtureTests(unittest.TestCase):
 
     # Health counters.
 
-    def test_package_collisions(self):
+    def test_package_collisions_is_not_a_failure(self):
+        # The first pkgdata directory wins, so the report is complete. The
+        # recipe notes it; nothing here fails on it.
         self.report["counts"]["package_collisions"] = 3
-        self.assertCaught("counts.package_collisions")
+        self.assertClean()
 
     def test_stale_dropped(self):
         self.report["counts"]["stale_dropped"] = 1
@@ -316,6 +318,18 @@ class SchemaTests(unittest.TestCase):
                 "counts.%s is a health counter but the schema does not say so"
                 % name,
             )
+
+    def test_only_health_counters_are_documented_as_such(self):
+        # The other direction, or a counter dropped from HEALTH_COUNTERS keeps
+        # describing itself as one and the two disagree silently.
+        properties = self.schema["properties"]["counts"]["properties"]
+        for name, spec in properties.items():
+            if spec["description"].startswith("Health."):
+                self.assertIn(
+                    name, verify.HEALTH_COUNTERS,
+                    "the schema calls counts.%s a health counter but the "
+                    "checker does not fail on it" % name,
+                )
 
     def test_fixture_validates(self):
         try:
