@@ -42,8 +42,16 @@ SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
 # UBOOT_DEFCONFIG expands to the string "['sd']" rather than a defconfig name,
 # so that cat has always written to a file named configs/[sd] that nothing
 # reads. Those two fragments reach the build through find_cfgs like this one.
-SRC_URI:append:imx93-frdm = " file://ahab.cfg"
-SRC_URI:append:imx91-frdm = " file://ahab.cfg"
+#
+# Gated on the 'ahab' DISTRO_FEATURE, matching the machine override to
+# meta-avocado/recipes-kernel/linux/linux-yocto_%.bbappend's secureboot/
+# encrypted-var pattern. Machine-only gating compiled CONFIG_AHAB_BOOT=y into
+# every imx93-frdm/imx91-frdm u-boot regardless of the feature, so booti
+# unconditionally demanded a signed container even on builds that never
+# constructed one - confirmed on hardware as "Authenticate OS container is
+# failed" / "Error: Wrong container header" on a plain fTPM build.
+SRC_URI:append:imx93-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', ' file://ahab.cfg', '', d)}"
+SRC_URI:append:imx91-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', ' file://ahab.cfg', '', d)}"
 
 # disable-unused-vendor-features.cfg turns off NXP stock defconfig defaults
 # Avocado never uses and this board's tree cannot actually build - see the
