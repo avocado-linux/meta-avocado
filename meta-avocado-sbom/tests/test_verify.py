@@ -378,6 +378,75 @@ class SeverityTests(unittest.TestCase):
     def test_health_of_a_non_report(self):
         self.assertEqual(verify.check_health("not a report"), [])
 
+class ExpectedUnscannedTests(unittest.TestCase):
+    """The declared band from ENG-2364. Opt-in on purpose: the fixture is a
+    trimmed report and carries its own count, so a band asserted against the
+    format rather than the configuration would fail a correct fixture.
+    """
+
+    def setUp(self):
+        self.report = load()
+        self.actual = self.report["counts"]["unscanned_recipes"]
+
+    def test_no_declared_value_means_no_check(self):
+        self.assertEqual(verify.check_expected_unscanned(self.report, None), [])
+
+    def test_the_fixture_is_not_held_to_a_build_figure(self):
+        # The whole reason the check is opt-in: 11 is avocado-qemuarm64's
+        # number, the fixture legitimately carries a smaller one.
+        self.assertEqual(verify.check_report(self.report), [])
+        self.assertTrue(verify.check_expected_unscanned(self.report, 11))
+
+    def test_the_declared_value_passes(self):
+        self.assertEqual(
+            verify.check_expected_unscanned(self.report, self.actual), []
+        )
+
+    def test_a_rise_is_caught(self):
+        self.report["counts"]["unscanned_recipes"] = self.actual + 1
+        failures = verify.check_expected_unscanned(self.report, self.actual)
+        self.assertTrue(failures)
+        self.assertIn("stopped being scanned", failures[0])
+
+    def test_a_fall_is_caught_too(self):
+        # A drop is not good news: an opt-out that became a scan, or a
+        # declared value nobody has revisited.
+        self.report["counts"]["unscanned_recipes"] = self.actual + 1
+        failures = verify.check_expected_unscanned(self.report, self.actual + 2)
+        self.assertTrue(failures)
+        self.assertIn("stale", failures[0])
+
+    def test_the_failure_names_the_recipes(self):
+        self.report["counts"]["unscanned_recipes"] = self.actual + 1
+        failures = verify.check_expected_unscanned(self.report, self.actual)
+        for name in self.report["unscanned_recipes"]:
+            self.assertIn(name, failures[0])
+
+    def test_a_missing_counter_is_left_to_the_envelope_check(self):
+        # Absence is malformed, and check_report already fails on it. Two
+        # failures for one defect reads as two defects.
+        del self.report["counts"]["unscanned_recipes"]
+        self.assertEqual(verify.check_expected_unscanned(self.report, 11), [])
+        self.assertTrue(verify.check_report(self.report, health=False))
+
+    def test_a_non_report_does_not_raise(self):
+        self.assertEqual(verify.check_expected_unscanned("not a report", 11), [])
+        self.assertEqual(verify.check_expected_unscanned({}, 11), [])
+
+    def test_it_stays_out_of_check_report_and_check_health(self):
+        # The recipe calls it separately so it can carry its own message. The
+        # count and its list move together, so this is a report that is valid
+        # in every way except the value this configuration declared.
+        self.report["unscanned_recipes"].pop()
+        self.report["counts"]["unscanned_recipes"] = len(
+            self.report["unscanned_recipes"]
+        )
+        self.assertEqual(verify.check_report(self.report), [])
+        self.assertEqual(verify.check_health(self.report), [])
+        self.assertTrue(
+            verify.check_expected_unscanned(self.report, self.actual)
+        )
+
 class VersionTests(unittest.TestCase):
     def test_the_generator_major_is_supported(self):
         # Or the day REPORT_VERSION is bumped, every fresh report fails its

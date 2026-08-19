@@ -282,6 +282,43 @@ def check_health(report):
     _check_health(report, failures.append)
     return failures
 
+def check_expected_unscanned(report, expected):
+    """Return the ways counts.unscanned_recipes departs from the value declared
+    for this build configuration, or [] when nothing was declared.
+
+    Out of check_report and check_health because the expected value belongs to
+    one MACHINE and one image scope, not to the report format: the fixture is a
+    trimmed report and carries a smaller count than any real build. Set by
+    AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED.
+    """
+    if expected is None or not isinstance(report, dict):
+        return []
+
+    counts = report.get("counts")
+    if not isinstance(counts, dict):
+        return []
+
+    value = counts.get("unscanned_recipes")
+    if not _is_int(value) or value == expected:
+        return []
+
+    # A fall matters as much as a rise: an opt-out that became a scan, or a
+    # declared value nobody has revisited.
+    return [
+        "counts.unscanned_recipes is %d, declared %d for this configuration; "
+        "%s. Recipes with no cve-check entry at all: %s"
+        % (
+            value,
+            expected,
+            "a recipe stopped being scanned"
+            if value > expected
+            else "a recipe that opted out no longer does, or the declared "
+                 "value is stale",
+            ", ".join(sorted(n for n in report.get("unscanned_recipes", [])
+                             if isinstance(n, str))) or "none listed",
+        )
+    ]
+
 def check_report(report, health=True):
     """Return the contract violations in a parsed report. health=False leaves
     out the data-loss checks.
@@ -330,6 +367,12 @@ def main():
         action="store_true",
         help="fail on unknown keys instead of reporting them",
     )
+    parser.add_argument(
+        "--expect-unscanned",
+        type=int,
+        metavar="N",
+        help="fail unless counts.unscanned_recipes is exactly N",
+    )
     args = parser.parse_args()
 
     rc = 0
@@ -343,6 +386,7 @@ def main():
             continue
 
         failures = check_report(report)
+        failures.extend(check_expected_unscanned(report, args.expect_unscanned))
         extra = additions(report)
 
         for message in failures:
@@ -358,7 +402,7 @@ def main():
         counts = report.get("counts", {})
         print(
             "%s: ok, version %s, %d packages, %d recipes, %d CVEs "
-            "(%d recipes, %d CVEs packaged), health counters zero"
+            "(%d recipes, %d CVEs packaged), health counters zero%s"
             % (
                 path,
                 report.get("version"),
@@ -367,6 +411,9 @@ def main():
                 counts.get("cves", 0),
                 counts.get("packaged_recipes", 0),
                 counts.get("packaged_cves", 0),
+                # Silence would not distinguish a match from no declaration.
+                "" if args.expect_unscanned is None
+                else ", unscanned_recipes %d as declared" % args.expect_unscanned,
             )
         )
 

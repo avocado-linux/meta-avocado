@@ -69,6 +69,14 @@ Variables
                                for a build knowingly sharing a CVE_CHECK_DIR
                                or knowingly interrupted. Default "1". A
                                malformed report fails the build either way
+  AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED
+                               expected counts.unscanned_recipes. Empty by
+                               default, meaning no check; set it and a drift in
+                               either direction fails the build, governed by
+                               AVOCADO_CVE_REPORT_STRICT. No usable default -
+                               the count is opt-outs only, so it belongs to one
+                               MACHINE and image scope. Measured for
+                               avocado-qemuarm64, feed-scoped: 11
 
 The frozen contract
 -------------------
@@ -107,7 +115,7 @@ Exits non-zero and prints every violation. --strict also fails on keys the
 checker does not know about, which is what CI uses against the fixture.
 
 The same check runs inside do_cve_report against every report the build
-produces, after the existing counter diagnostics, in two severities:
+produces, after the existing counter diagnostics, in three severities:
 
   malformed    the shape is wrong - a missing counter, a count that disagrees
                with what the document holds, a digest that no longer matches
@@ -117,15 +125,22 @@ produces, after the existing counter diagnostics, in two severities:
                counter, or recipes carrying CVEs with none of them correlated
                to an installed package. Fails the build by default;
                AVOCADO_CVE_REPORT_STRICT = "0" downgrades it to a warning
+  undeclared   the report is complete and unscanned_recipes is not the value
+               AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED declares - the build
+               changed shape, not the data. Same severity as incomplete, and
+               silent unless the variable is set
 
 check_report(report, health=False) and check_health(report) are the two halves,
-if you need them separately.
+if you need them separately. check_expected_unscanned(report, expected) is the
+third and stays out of both: its value belongs to a build configuration, not to
+the format, and the committed fixture carries a smaller count than any real
+build. The CLI takes it as --expect-unscanned N.
 
 A build with no unpatched CVEs at all is not a failure of either kind. Zero
 recipes, zero CVEs and zero packaged recipes is what a fully patched build
 correctly reports, and it passes.
 
-What it checks beyond the schema: six counters are re-derived from the document
+What it checks beyond the schema: seven counters are re-derived from the document
 that reported them, and packages_digest is recomputed from the package set.
 counts.packages and len(packages) come out of the same code path in the
 generator, so they can only disagree if something dropped packages after the
@@ -182,10 +197,13 @@ Requires a new major:
   - changing what a counter counts, including how packages_digest is computed
   - making an optional key required, or dropping "machine"/"distro_version"
 
-Adding a counter means updating three files in one change: the Stats namespace
-and the counts block in report.py, the schema, and REPORT_COUNTERS in
-verify.py. A test asserts the schema and the checker agree, so a change that
-touches only one of them fails before it reaches a consumer.
+Adding a counter means updating four files in one change: the Stats namespace
+and the counts block in report.py, the schema, REPORT_COUNTERS in verify.py,
+and the counts block in tests/fixtures/make-fixture.py. A test asserts the
+schema and the checker agree, so a change that touches only one of the first
+three fails before it reaches a consumer. make-fixture.py has no such test: it
+builds counts from its own key list, so a counter missing there is only found
+when someone regenerates the fixture and CI reports it missing.
 
 One change was made under these rules that they would otherwise forbid.
 unscanned_recipes originally counted recipes with no cve-check result *and*
@@ -282,7 +300,14 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         CVE_PRODUCT = "", which packagegroup.bbclass sets for
                         every packagegroup. Watch for a sharp rise, which means
                         a world build that stopped early, or
-                        CVE_CHECK_LAYER_EXCLUDELIST / CVE_CHECK_SKIP_RECIPE
+                        CVE_CHECK_LAYER_EXCLUDELIST / CVE_CHECK_SKIP_RECIPE.
+                        Gate on it rather than trend it: it moves when our own
+                        configuration changes, and
+                        AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED turns that into a
+                        build failure. Any declared value assumes a clean
+                        ${DEPLOY_DIR}/cve and pkgdata - both accumulate across
+                        builds, nothing prunes either, and they move this
+                        counter in opposite directions
   no_cve_record_recipes recipes that shipped packages and were scanned, but
                         whose products came back cvesInRecord "No" - the NVD
                         holds no record under that product name. Named in the
@@ -291,7 +316,11 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         larger of the two: most of a rootfs is software the NVD
                         has never had an advisory for. A CVE_PRODUCT that names
                         no real product looks identical from here, so check
-                        this list when a recipe you expect CVEs for is quiet
+                        this list when a recipe you expect CVEs for is quiet.
+                        Trend it, do not gate on it: it moves when the NVD
+                        grows an advisory for something already shipped, which
+                        is not this build breaking. A sharp rise still deserves
+                        a look, for the CVE_PRODUCT reason above
   stale_dropped         cve-check entries discarded because no recipe in
                         pkgdata built that version
   cve_files_unreadable  cve-check files that would not parse, including files
