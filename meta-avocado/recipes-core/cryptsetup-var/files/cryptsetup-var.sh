@@ -129,6 +129,14 @@ ensure_tpm2_enroll() {
 maybe_resize() {
     PARTITION_SECTORS=$(blockdev --getsz "$VAR_DEV")
     DATA_OFFSET=$(dmsetup table "$MAP_NAME" 2>/dev/null | awk '{print $8}')
+    if [ -z "$DATA_OFFSET" ]; then
+        # dmsetup missing, or the table query failed/returned nothing. /var is
+        # already open and formatted at this point - skip the resize rather
+        # than let a malformed arithmetic expression fail the unit on the
+        # last step of an otherwise-successful unlock.
+        echo "cryptsetup-var: could not read dm-crypt data offset - skipping resize check" >&2
+        return 0
+    fi
     DM_SECTORS=$(blockdev --getsz "$MAPPER")
     EXPECTED_DM=$(( PARTITION_SECTORS - DATA_OFFSET ))
     if [ "$DM_SECTORS" -lt "$EXPECTED_DM" ]; then
