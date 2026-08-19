@@ -29,11 +29,20 @@ TEE_DEV=/dev/disk/by-partlabel/recovery
 TEE_STORE=/var/lib/tee
 mkdir -p "$TEE_STORE"
 if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
+    # Probe before formatting, same convention as cryptsetup-var.sh's
+    # ensure_fs: mount can fail for reasons other than "no filesystem yet"
+    # (a dirty btrfs needing recovery, a foreign signature), and -f would
+    # clobber the recovery partition's real contents in exactly that case.
+    if blkid -p "$TEE_DEV" >/dev/null 2>&1; then
+        echo "optee-ftpm: $TEE_DEV has a filesystem but would not mount;" \
+             "skipping fTPM bring-up (/var will fall back to Argon2id)" >&2
+        exit 0
+    fi
     echo "optee-ftpm: first boot - formatting TEE store on $TEE_DEV"
     # If we cannot format and mount the persistent store, do not fall through:
     # tee-supplicant would keep the fTPM NV on the initramfs tmpfs, silently
     # non-persistent. Skip fTPM bring-up instead so /var takes its Argon2id path.
-    if ! mkfs.btrfs -M -f -L teestore "$TEE_DEV" || ! mount "$TEE_DEV" "$TEE_STORE"; then
+    if ! mkfs.btrfs -M -L teestore "$TEE_DEV" || ! mount "$TEE_DEV" "$TEE_STORE"; then
         echo "optee-ftpm: could not prepare persistent TEE store on $TEE_DEV;" \
              "skipping fTPM bring-up (/var will fall back to Argon2id)" >&2
         exit 0
@@ -47,9 +56,15 @@ tee-supplicant -d
 # embedded early TA and registers /dev/tpm0.
 modprobe tpm_ftpm_tee || true
 
-# Give the chip time to appear so the enroll finds it.
+# Give the chip time to appear so the enroll finds it. Whole-second sleep,
+# not fractional: busybox's sleep applet needs FEATURE_FANCY_SLEEP to accept
+# a fractional argument, and this minimal initramfs's busybox is not
+# guaranteed to have it - an unsupported "0.1" errors out instantly, the
+# loop spins its iterations with no real wait, and the chip is reported
+# missing on a board where it would have appeared. cryptsetup-var.sh's own
+# TPM wait uses whole seconds for the same reason.
 i=0
-while [ ! -e /dev/tpm0 ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.1; done
+while [ ! -e /dev/tpm0 ] && [ "$i" -lt 10 ]; do i=$((i + 1)); sleep 1; done
 if [ -e /dev/tpm0 ]; then
     echo "optee-ftpm: /dev/tpm0 ready"
 else
