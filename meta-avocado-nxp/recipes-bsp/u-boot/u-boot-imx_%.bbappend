@@ -23,11 +23,14 @@ SRC_URI:append:class-target = " \
 # These fragments reach .config via cml1.bbclass's merge_config.sh over
 # SRC_URI's file://*.cfg entries instead.
 #
-# AHAB (i.MX9) signed-boot support in U-Boot. The EFI capsule options the
-# stock defconfig enables are already turned off for every board and version by
-# disable-unused-vendor-features.cfg above.
-SRC_URI:append:imx93-frdm = " file://ahab.cfg"
-SRC_URI:append:imx91-frdm = " file://ahab.cfg"
+# AHAB (i.MX9) signed-boot support in U-Boot, gated on the 'ahab'
+# DISTRO_FEATURE: machine-only gating compiled CONFIG_AHAB_BOOT=y into every
+# imx93-frdm/imx91-frdm u-boot, so booti demanded a signed container even on
+# builds that never constructed one ("Authenticate OS container is failed" on a
+# plain build). The EFI capsule options the stock defconfig enables are already
+# turned off for every board and version by disable-unused-vendor-features.cfg.
+SRC_URI:append:imx93-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', ' file://ahab.cfg', '', d)}"
+SRC_URI:append:imx91-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', ' file://ahab.cfg', '', d)}"
 
 # disable-unused-vendor-features.cfg turns off NXP stock defconfig defaults
 # (EFI capsule-on-disk, USB DFU) that Avocado never uses and that do not build
