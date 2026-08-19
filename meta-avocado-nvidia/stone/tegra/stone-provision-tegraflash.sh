@@ -369,9 +369,13 @@ case "$SDK_HOST_CPP" in
         ;;
 esac
 
+# The path is quoted: every branch above now stores an absolute path, and an
+# SDK unpacked below a directory with a space in it would otherwise make the
+# wrapper exec its first word - a failure that surfaces inside tegraflash's DTS
+# preprocessing rather than here.
 cat > "$temp_bin_dir/cpp" << CPPWRAPPER
 #!/bin/bash
-exec ${SDK_HOST_CPP} "\$@"
+exec "${SDK_HOST_CPP}" "\$@"
 CPPWRAPPER
 chmod +x "$temp_bin_dir/cpp"
 
