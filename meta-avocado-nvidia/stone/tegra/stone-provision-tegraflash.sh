@@ -13,11 +13,18 @@ set -o pipefail
 # ~40s later at "could not mount USB storage for writing flashing commands",
 # which reads as a storage or cable fault. Check first, so the operator is told
 # the actual cause before anything is signed or the board is touched.
+#
+# `sudo -E` alone is not enough on a distro that ships `Defaults secure_path`
+# in sudoers (Debian, Ubuntu and Fedora all do): sudo replaces PATH regardless
+# of -E, so the nativesdk / cross cpp lookup below stops matching and the run
+# falls back to plain cpp, or exits at "No C preprocessor (cpp) found in PATH".
+# `env "PATH=$PATH"` restores the caller's PATH inside the elevated shell.
 if [ "$(id -u)" -ne 0 ]; then
     echo "ERROR: tegraflash provisioning must run as root." >&2
     echo "       initrd-flash mounts the target's exported USB storage and does" >&2
     echo "       not elevate on its own. Re-run under sudo, preserving the" >&2
-    echo "       environment: sudo -E <command>" >&2
+    echo "       environment and PATH:" >&2
+    echo "         sudo -E env \"PATH=\$PATH\" <command>" >&2
     exit 1
 fi
 

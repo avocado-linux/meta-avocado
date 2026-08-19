@@ -317,12 +317,24 @@ cause).
 
 - **Provisioning must run as root.** `initrd-flash` mounts the board's
   exported USB storage to write the command package and never elevates
-  on its own, so the flash needs `CAP_SYS_ADMIN`. Run it under
-  `sudo -E` so the SDK environment survives. Unprivileged runs used to
-  sign the binaries and RCM-boot the board before dying at
+  on its own, so the flash needs `CAP_SYS_ADMIN`. Unprivileged runs
+  used to sign the binaries and RCM-boot the board before dying at
   `could not mount USB storage for writing flashing commands`, which
   reads as a storage or cable fault; the provisioning script now
-  refuses up front instead.
+  refuses up front instead. Elevate with:
+
+  ```sh
+  sudo -E env "PATH=$PATH" <command>
+  ```
+
+  `sudo -E` on its own preserves the SDK environment but not `PATH`:
+  Debian, Ubuntu and Fedora all ship `Defaults secure_path` in
+  sudoers, which replaces `PATH` whatever `-E` says. The provisioning
+  script looks up its C preprocessor with `command -v` against `PATH`,
+  so under a replaced `PATH` the nativesdk and cross branches stop
+  matching - the run silently falls back to the host `cpp`, or exits
+  at `No C preprocessor (cpp) found in PATH` on a host without one.
+  The explicit `env "PATH=$PATH"` puts the caller's `PATH` back.
 - **A Jetson in Force Recovery needs a udev rule to be reachable.** The
   board enumerates as vendor `0955`, which the stock
   `51-android.rules` hands to `GROUP="adbusers" MODE="0660"`. A user
