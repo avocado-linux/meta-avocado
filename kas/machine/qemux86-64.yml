@@ -25,5 +25,12 @@ local_conf_header:
     # so chromium, qt5, weston, mesa, vulkan, etc. don't get pulled into
     # the image via packagegroup-avocado-extra's opengl/wayland gates.
     DISTRO_FEATURES:remove = "opengl wayland vulkan"
+    # barebox's build emits barebox.efi under this machine's MACHINE_FEATURES
+    # 'efi' (avocado-qemux86-64.conf), which fails objcopy in this toolchain.
+    # qemux86-64 boots via systemd-boot + OVMF and never uses barebox. Masked
+    # here rather than in the machine .conf so the exclusion is scoped to this
+    # build invocation, not to every consumer of that .conf (e.g. a
+    # multiconfig build also targeting a barebox machine).
+    BBMASK += "recipes-bsp/barebox/"
 
 machine: avocado-qemux86-64
