@@ -32,10 +32,14 @@ fail() {
 
 echo "test-preflight-checks: $TARGET"
 
+# Exit 77 (the automake convention) rather than 0: a root CI container and
+# anyone running the suite under the sudo this script now requires both land
+# here, and reporting PASS for a suite that asserted nothing turns the one
+# guard on the privilege check into a green tick that means nothing.
 if [ "$(id -u)" -eq 0 ]; then
   echo "  skip  running as root; cannot exercise the non-root path" >&2
-  echo "test-preflight-checks: PASS"
-  exit 0
+  echo "test-preflight-checks: SKIP"
+  exit 77
 fi
 
 # Deliberately no environment. A check that fires only after the manifest

@@ -1,0 +1,35 @@
+name: PR-Tegra-Tests
+
+# Regression suites for the Jetson provisioning scripts.
+#
+# meta-avocado-nvidia/stone/tegra/tests/ covers failure modes that are silent
+# on the host: a cpp wrapper that execs itself and hangs the flash with no
+# output, an SD device name that makes the target refuse the export, a
+# privilege check that has to fire before anything is signed. Each one cost a
+# serial-console or process-tree debugging session to find, and none of them
+# is visible in a build. The suites lift the code under test out of the
+# scripts and run it, so they need no board, no BSP and no SDK - which is what
+# makes running them on every PR worth the seconds it takes.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege: this job only checks out and runs shell tests.
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: tegra-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tegra-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: run tegra provisioning tests
+        shell: bash
+        run: meta-avocado-nvidia/stone/tegra/tests/run-tegra-tests.sh
