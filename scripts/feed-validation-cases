@@ -18,10 +18,13 @@
 #
 # name              | packages               | expected-libs | boot | assertions
 zeromq              | zeromq                 | libzmq.so.5   | yes  |
-# Boot-only cases: no feed package to install, the assertion set is the test.
-luks-var            |                        |               | yes  | luks-var
-luks-var-tpm        |                        |               | yes  | luks-var-tpm
-dm-verity           |                        |               | yes  | dm-verity
+# luks-var, luks-var-tpm and dm-verity boot-only cases are not added yet:
+# encrypted-var is not enabled by MACHINE=qemuarm64 (this script's target) in
+# any kas config, and dm-verity has no implementation in the tree at all
+# (no vroot device, no veritysetup invocation, no root-hash generation) -
+# both would be guaranteed red on every run, at a full image cycle each.
+# Add them in the same commit that wires the feature into this script's
+# target machine, matching the rule below for cameras/cloud-aws.
 # One representative package per feature group, so a group that stops
 # producing anything fails here rather than silently shipping an empty feed.
 # The visual groups also run the boot e2e; the rest assert feed presence only.
