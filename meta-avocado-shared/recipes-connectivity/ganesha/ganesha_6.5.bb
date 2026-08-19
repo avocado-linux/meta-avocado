@@ -32,6 +32,17 @@ PACKAGECONFIG[acl]      = "-DUSE_ACL_MAPPING=ON,-DUSE_ACL_MAPPING=OFF,acl"
 PACKAGECONFIG[gss]     = "-DUSE_GSS=ON,-DUSE_GSS=OFF,gss-ntlmssp"
 PACKAGECONFIG[rdma]    = "-DUSE_RPC_RDMA=ON,-DUSE_RPC_RDMA=OFF,rdma-core"
 
+# Avocado carries no glusterfs-api recipe in any layer, so USE_FSAL_GLUSTER's
+# own default-ON probe (src/CMakeLists.txt's pkg_check_modules(GFAPI
+# glusterfs-api>=7.6.6)) can never succeed here - every configure pays for a
+# doomed pkg-config call and prints "Cannot find GLUSTER GFAPI runtime". The
+# recipe's gopt_test() macro skips that probe entirely when the option is
+# forced rather than left at its default, so expressing this as a
+# PACKAGECONFIG - off by default, like the FSAL/backend toggles above - both
+# documents the reason and gives a path to opt in if Avocado ever adds a
+# glusterfs-api provider.
+PACKAGECONFIG[gluster] = "-DUSE_FSAL_GLUSTER=ON,-DUSE_FSAL_GLUSTER=OFF,glusterfs-api"
+
 PACKAGECONFIG ?= "acl dbus"
 
 # The nativesdk build is a host NFS tool for dev-VM provisioning and does not need
@@ -47,7 +58,6 @@ EXTRA_OECMAKE = "\
     -DUSE_SYSTEM_NTIRPC=ON \
     -DUSE_GSS=OFF \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DUSE_FSAL_GLUSTER=OFF \
 "
 
 # install the systemd unit
