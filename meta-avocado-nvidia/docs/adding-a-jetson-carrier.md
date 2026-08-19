@@ -338,6 +338,41 @@ cause).
 
   `uaccess` is preferable: it grants access via ACL on device add, so
   it needs no group membership and no re-login.
+- **SD boot needs the card's device name declared per board.** The
+  `tegraflash-sd` profile has to tell the target which block device to
+  export, and that name depends on the module, not on the carrier: a
+  module without eMMC instantiates only the SD controller, so the card
+  is `mmcblk0`; a module carrying eMMC puts eMMC on `mmc0` and the
+  card on `mmc1`. The BSP's `generic/cfg/flash_t234_qspi_sd*.xml` say
+  `mmcblk1p1` because they are written for the latter. Declare it in
+  the board's stone manifest:
+
+  ```json
+  "storage_devices": {
+    "rootdisk": {
+      "tegraflash": { "sd_device": "mmcblk0" }
+    }
+  }
+  ```
+
+  `AVOCADO_PROVISION_SD_DEVICE` overrides the manifest for a one-off
+  run (a board revision that enumerates differently). Both accept a
+  bare `mmcblkN` name - a `/dev/...` path is rejected. Provisioning
+  with the SD profile and neither set is an error rather than a guess,
+  since guessing wrong writes at the module's internal storage. In
+  tree today, and how far each value is trusted:
+
+  | Board | `sd_device` | Basis |
+  |---|---|---|
+  | `jetson-orin-nano-devkit` | `mmcblk0` | Confirmed on a P3767-0005 |
+  | `recomputer-j301x` | `mmcblk0` | Same Orin Nano module (its machine conf requires `orin-nano.inc`, whose upstream `TNSPEC_BOOTDEV_DEFAULT` is `mmcblk0p1`); not yet flashed |
+  | `jetson-agx-orin-devkit` | `mmcblk1` | The value the tree used before this was declarable; not yet flashed |
+  | `jetson-orin-nx` | `mmcblk1` | Same |
+  | `recomputer-j401x` | `mmcblk1` | Same |
+
+  Check yours against the target's own console
+  (`mmcblkN: mmcN:0001 USD 29.8 GiB`) the first time you flash it, and
+  correct the manifest if it disagrees.
 - **EEPROM SKU mismatch aborts signing.** If the actual SOM SKU
   doesn't match `CHECK_BOARDSKU` in flashvars, tegraflash refuses to
   sign with `actual board SKU X does not match expected board SKU Y`.

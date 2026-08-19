@@ -113,6 +113,9 @@
         "tegraflash_bsp": "tegraflash-bsp",
         "tegraflash_tools": "tegraflash-tools",
         "tegraflash_carrier_bsp": "carrier-bsp"
+      },
+      "tegraflash": {
+        "sd_device": "mmcblk1"
       }
     }
   }
