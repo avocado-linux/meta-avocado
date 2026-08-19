@@ -86,6 +86,47 @@ class ReadCveDataTests(unittest.TestCase):
         _, scanned, _ = self.read({"openssl": {"1.0"}, "packagegroup-base": {"1.0"}})
         self.assertNotIn("packagegroup-base", scanned)
 
+    def test_two_entries_for_one_recipe_keep_the_counters_honest(self):
+        # Overwriting left stats holding the replaced entry's CVEs, and counts
+        # that exceed the document fail the contract check as malformed - the
+        # one verdict no setting overrides.
+        self.write(
+            "openssl",
+            entry("openssl", issues=[{"id": "CVE-2026-0001",
+                                      "status": "Unpatched"}]),
+            entry("openssl", issues=[{"id": "CVE-2026-0002",
+                                      "status": "Unpatched"}]),
+        )
+        recipes, _, _ = self.read({"openssl": {"1.0"}})
+        self.assertEqual(len(recipes), 1)
+        self.assertEqual(
+            self.stats.cves, sum(len(e["cves"]) for e in recipes.values())
+        )
+        self.assertEqual(self.stats.packaged_recipes, 1)
+        self.assertEqual(self.stats.packaged_cves, self.stats.cves)
+
+    def test_the_same_cve_twice_is_one_cve(self):
+        issue = {"id": "CVE-2026-0001", "status": "Unpatched"}
+        self.write("openssl", entry("openssl", issues=[issue]),
+                   entry("openssl", issues=[issue]))
+        recipes, _, _ = self.read({"openssl": {"1.0"}})
+        self.assertEqual(len(recipes["openssl"]["cves"]), 1)
+        self.assertEqual(self.stats.cves, 1)
+
+    def test_a_merged_entry_keeps_both_recipes_cves(self):
+        self.write(
+            "openssl",
+            entry("openssl", issues=[{"id": "CVE-2026-0001",
+                                      "status": "Unpatched"}]),
+            entry("openssl", issues=[{"id": "CVE-2026-0002",
+                                      "status": "Unpatched"}]),
+        )
+        recipes, _, _ = self.read({"openssl": {"1.0"}})
+        self.assertEqual(
+            sorted(c["id"] for c in recipes["openssl"]["cves"]),
+            ["CVE-2026-0001", "CVE-2026-0002"],
+        )
+
 class BuildReportTests(unittest.TestCase):
     """The two lists partition the shipped recipes with the clean ones."""
 

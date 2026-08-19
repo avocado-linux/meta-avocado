@@ -221,6 +221,22 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 continue
 
             packaged = name in recipe_versions
+            existing = recipes.get(name)
+            if existing is not None:
+                # Two entries for one recipe - two files naming it, or two
+                # entries in one file. Overwriting would leave the counters
+                # holding the replaced entry's CVEs, and a report whose counts
+                # exceed what it carries fails its own check as malformed,
+                # which no setting overrides. Merge instead, by id: the same
+                # CVE reported twice is one CVE.
+                seen_ids = {c.get("id") for c in existing["cves"]}
+                added = [c for c in issues if c.get("id") not in seen_ids]
+                existing["cves"].extend(added)
+                stats.cves += len(added)
+                if packaged:
+                    stats.packaged_cves += len(added)
+                continue
+
             recipes[name] = {
                 "version": version,
                 "packaged": packaged,
