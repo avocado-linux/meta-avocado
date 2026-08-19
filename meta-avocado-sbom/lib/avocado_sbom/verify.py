@@ -24,6 +24,7 @@ REPORT_COUNTERS = (
     "cve_files",
     "stale_dropped",
     "unscanned_recipes",
+    "no_cve_record_recipes",
     "cve_files_unreadable",
     "pkgdata_unreadable",
     "package_collisions",
@@ -51,6 +52,7 @@ TOP_LEVEL_TYPES = {
     "recipes": dict,
     "packages": dict,
     "unscanned_recipes": list,
+    "no_cve_record_recipes": list,
 }
 
 # Written by the recipe, not by build_report: a standalone run lacks both.
@@ -160,20 +162,24 @@ def _check_entries(report, fail):
             if isinstance(entry.get("recipe"), str) and not entry["recipe"]:
                 fail("packages[%r] has an empty recipe" % name)
 
-    unscanned = report.get("unscanned_recipes")
-    if isinstance(unscanned, list):
-        for name in unscanned:
-            if not isinstance(name, str) or not name:
-                fail("unscanned_recipes holds %r, expected a recipe name" % name)
+    for key in ("unscanned_recipes", "no_cve_record_recipes"):
+        names = report.get(key)
+        if isinstance(names, list):
+            for name in names:
+                if not isinstance(name, str) or not name:
+                    fail("%s holds %r, expected a recipe name" % (key, name))
 
 def _check_derived(report, fail):
     counts = report.get("counts")
     recipes = report.get("recipes")
     packages = report.get("packages")
     unscanned = report.get("unscanned_recipes")
+    no_record = report.get("no_cve_record_recipes")
     if not isinstance(counts, dict) or not isinstance(recipes, dict):
         return
     if not isinstance(packages, dict) or not isinstance(unscanned, list):
+        return
+    if not isinstance(no_record, list):
         return
 
     entries = [e for e in recipes.values() if isinstance(e, dict)]
@@ -193,12 +199,34 @@ def _check_derived(report, fail):
         "cves": cve_count(entries),
         "packaged_cves": cve_count(packaged),
         "unscanned_recipes": len(unscanned),
+        "no_cve_record_recipes": len(no_record),
     }
 
     for name, want in derived.items():
         got = counts.get(name)
         if _is_int(got) and got != want:
             fail("counts.%s is %d, but the report holds %d" % (name, got, want))
+
+    # Both lists partition the shipped recipes with the ones scanned and found
+    # in the NVD, so a consumer can account for every shipped recipe exactly
+    # once. Overlap would mean a recipe reported as both examined and not.
+    shipped = {
+        p["recipe"] for p in packages.values()
+        if isinstance(p, dict) and isinstance(p.get("recipe"), str)
+    }
+    unscanned_names = {n for n in unscanned if isinstance(n, str)}
+    no_record_names = {n for n in no_record if isinstance(n, str)}
+    both = sorted(unscanned_names & no_record_names)
+    if both:
+        fail("%s in both unscanned_recipes and no_cve_record_recipes; a recipe "
+             "nothing looked at cannot also have been looked up"
+             % ", ".join(both[:5]))
+    for key, names in (("unscanned_recipes", unscanned),
+                       ("no_cve_record_recipes", no_record)):
+        stray = sorted(n for n in names if isinstance(n, str) and n not in shipped)
+        if stray:
+            fail("%s holds %s, which shipped no package; both lists are scoped "
+                 "to recipes in packages" % (key, ", ".join(stray[:5])))
 
     digest = report.get("packages_digest")
     if isinstance(digest, str) and all(

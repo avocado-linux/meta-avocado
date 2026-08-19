@@ -187,6 +187,16 @@ and the counts block in report.py, the schema, and REPORT_COUNTERS in
 verify.py. A test asserts the schema and the checker agree, so a change that
 touches only one of them fails before it reaches a consumer.
 
+One change was made under these rules that they would otherwise forbid.
+unscanned_recipes originally counted recipes with no cve-check result *and*
+recipes cve-check looked up and found no NVD record for, which made it read as
+a coverage gap when most of it was a scan result; the second group moved to
+no_cve_record_recipes, and both new keys are required rather than optional.
+That is "changing what a counter counts" and it would need a major. It was made
+at version 1 because version 1 had no consumer at the time - the report was
+produced by this layer and read by nothing outside it. The rules above apply
+from here without that exemption.
+
 "machine" and "distro_version" are optional by construction rather than by
 policy: build_report never writes them, the recipe does, so a standalone run
 legitimately lacks both.
@@ -201,10 +211,12 @@ Report format
     "packages_digest": "sha256:0f3c...",
     "status": "Unpatched",
     "unscanned_recipes": [ "packagegroup-core-boot", "..." ],
+    "no_cve_record_recipes": [ "attr", "..." ],
     "counts": { "recipes": 225, "cves": 2206,
                 "packaged_recipes": 177, "packaged_cves": 1927,
                 "packages": 30747, "cve_files": 3571, "stale_dropped": 0,
-                "unscanned_recipes": 0, "cve_files_unreadable": 0,
+                "unscanned_recipes": 71, "no_cve_record_recipes": 402,
+                "cve_files_unreadable": 0,
                 "pkgdata_unreadable": 0, "package_collisions": 0,
                 "unpatched_cves": 0, "patched_cves": 0, "ignored_cves": 0,
                 "unknown_status_cves": 0 },
@@ -241,19 +253,45 @@ runtime package. Two different things land there:
     only fires when pkgdata knows the recipe at some other version. Delete
     ${DEPLOY_DIR}/cve when you change what a machine builds.
 
+A recipe that shipped a package and is absent from "recipes" is in exactly one
+of three states, and the report says which:
+
+  - scanned, the NVD has records for its product, none matched at the reported
+    status. Clean, and in neither list.
+  - scanned, the NVD holds no record for its product at all. In
+    "no_cve_record_recipes".
+  - not scanned. In "unscanned_recipes".
+
+The two lists are disjoint and both are scoped to recipes in "packages", so
+together with the clean ones they account for every shipped recipe exactly
+once. Do not add them together and call the result a coverage gap: only the
+third state is one.
+
+The partition assumes stale_dropped is zero, which is the condition for
+publishing at all. A recipe whose only cve-check entry was dropped as stale was
+scanned, so it is in neither list - but its CVEs were discarded, so it is not
+clean either, and it reads as the first state. That is why stale_dropped is a
+health counter: a report carrying one is not fit to publish, and
+AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
+
   cve_files             cve-check files consumed
-  unscanned_recipes     recipes that shipped packages but have no cve-check
-                        result - unscanned, not clean. Named individually in
-                        the top-level "unscanned_recipes" list, so a consumer
-                        can tell a recipe nothing examined from one that was
-                        examined and found clean; both are absent from
-                        "recipes". Normally non-zero: a
-                        recipe opts out with CVE_PRODUCT = "", which
-                        packagegroup.bbclass sets for every packagegroup. A
-                        complete avocado-qemuarm64 world build sits at 68, all
-                        of them opt-outs. Watch for a sharp rise, which means a
-                        world build that stopped early, or
+  unscanned_recipes     recipes that shipped packages and have no cve-check
+                        entry at all - nothing looked at them. Named
+                        individually in the top-level "unscanned_recipes" list.
+                        Normally non-zero: a recipe opts out with
+                        CVE_PRODUCT = "", which packagegroup.bbclass sets for
+                        every packagegroup. Watch for a sharp rise, which means
+                        a world build that stopped early, or
                         CVE_CHECK_LAYER_EXCLUDELIST / CVE_CHECK_SKIP_RECIPE
+  no_cve_record_recipes recipes that shipped packages and were scanned, but
+                        whose products came back cvesInRecord "No" - the NVD
+                        holds no record under that product name. Named in the
+                        top-level "no_cve_record_recipes" list. This is a scan
+                        result, not a coverage gap, and it is normally the
+                        larger of the two: most of a rootfs is software the NVD
+                        has never had an advisory for. A CVE_PRODUCT that names
+                        no real product looks identical from here, so check
+                        this list when a recipe you expect CVEs for is quiet
   stale_dropped         cve-check entries discarded because no recipe in
                         pkgdata built that version
   cve_files_unreadable  cve-check files that would not parse, including files

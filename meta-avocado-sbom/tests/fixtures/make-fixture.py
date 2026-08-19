@@ -71,7 +71,13 @@ def trim(full):
         packages[name] = full["packages"][name]
 
     kept_recipes = {pkg["recipe"] for pkg in packages.values()}
+    if "no_cve_record_recipes" not in full:
+        raise SystemExit(
+            "source report has no no_cve_record_recipes; it predates the split "
+            "of unscanned_recipes and cannot be cut into a current fixture"
+        )
     unscanned = [r for r in full["unscanned_recipes"] if r in kept_recipes]
+    no_record = [r for r in full["no_cve_record_recipes"] if r in kept_recipes]
 
     packaged = [e for e in recipes.values() if e["packaged"]]
     counts = {
@@ -81,6 +87,7 @@ def trim(full):
         "cves": sum(len(e["cves"]) for e in recipes.values()),
         "packaged_cves": sum(len(e["cves"]) for e in packaged),
         "unscanned_recipes": len(unscanned),
+        "no_cve_record_recipes": len(no_record),
     }
     for name in CARRIED:
         counts[name] = full["counts"][name]
@@ -100,6 +107,7 @@ def trim(full):
     fixture["recipes"] = dict(sorted(recipes.items()))
     fixture["packages"] = dict(sorted(packages.items()))
     fixture["unscanned_recipes"] = unscanned
+    fixture["no_cve_record_recipes"] = no_record
     fixture["packages_digest"] = packages_digest(packages)
     return fixture
 

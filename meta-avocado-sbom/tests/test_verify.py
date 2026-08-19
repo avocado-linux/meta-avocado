@@ -159,6 +159,44 @@ class FixtureTests(unittest.TestCase):
         self.report["unscanned_recipes"] = []
         self.assertCaught("counts.unscanned_recipes")
 
+    def test_no_cve_record_list_and_counter_disagree(self):
+        self.report["no_cve_record_recipes"] = []
+        self.assertCaught("counts.no_cve_record_recipes")
+
+    def test_no_cve_record_list_removed(self):
+        del self.report["no_cve_record_recipes"]
+        self.assertCaught("missing top-level key 'no_cve_record_recipes'")
+
+    def test_a_list_entry_that_is_not_a_string_is_reported_not_raised(self):
+        # The checker's whole job is to report violations; a traceback out of
+        # main() is a violation it failed to report.
+        self.report["unscanned_recipes"] = [["glibc-locale"]]
+        self.assertCaught("unscanned_recipes holds")
+
+    def test_no_cve_record_list_holds_a_non_name(self):
+        self.report["no_cve_record_recipes"].append("")
+        self.assertCaught("no_cve_record_recipes holds")
+
+    def test_a_recipe_in_both_lists(self):
+        # The regression this counter exists to prevent: a recipe reported as
+        # both examined and not examined.
+        name = next(iter(self.report["packages"].values()))["recipe"]
+        for key in ("unscanned_recipes", "no_cve_record_recipes"):
+            if name not in self.report[key]:
+                self.report[key].append(name)
+                self.report["counts"][key] += 1
+        self.assertCaught("both unscanned_recipes and no_cve_record_recipes")
+
+    def test_no_cve_record_recipe_that_shipped_nothing(self):
+        self.report["no_cve_record_recipes"].append("never-built")
+        self.report["counts"]["no_cve_record_recipes"] += 1
+        self.assertCaught("which shipped no package")
+
+    def test_unscanned_recipe_that_shipped_nothing(self):
+        self.report["unscanned_recipes"].append("never-built")
+        self.report["counts"]["unscanned_recipes"] += 1
+        self.assertCaught("which shipped no package")
+
     def test_optional_keys_may_be_absent(self):
         # A standalone run has neither.
         del self.report["machine"]
@@ -207,6 +245,8 @@ class FixtureTests(unittest.TestCase):
         # Nothing may depend on which packages or CVEs exist.
         packages = {
             "libfoo1": {"recipe": "foo", "version": "1.0-r0", "origin": "m"},
+            "libbar1": {"recipe": "bar", "version": "2.0-r0", "origin": "m"},
+            "libbaz1": {"recipe": "baz", "version": "3.0-r0", "origin": "m"},
         }
         report = {
             "version": "1",
@@ -223,10 +263,11 @@ class FixtureTests(unittest.TestCase):
             },
             "packages": packages,
             "unscanned_recipes": ["bar"],
+            "no_cve_record_recipes": ["baz"],
         }
         report["counts"].update(
-            recipes=1, packages=1, packaged_recipes=1, cves=1, packaged_cves=1,
-            unscanned_recipes=1, cve_files=1,
+            recipes=1, packages=3, packaged_recipes=1, cves=1, packaged_cves=1,
+            unscanned_recipes=1, no_cve_record_recipes=1, cve_files=1,
         )
         self.assertEqual(verify.check_report(report), [])
 
