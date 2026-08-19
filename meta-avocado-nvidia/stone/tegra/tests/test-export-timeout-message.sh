@@ -70,10 +70,13 @@ EOF
 out="$(bash "$work/harness.sh" 2>&1)"
 rc=$?
 
-if [ "$rc" -ne 0 ]; then
-  pass "the handler still fails on timeout"
+# Non-zero alone would also be satisfied by a failed function extraction or an
+# unbound variable in the harness, so the timeout line itself has to be there:
+# the handler must have reached its own timeout path, not merely died.
+if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -q "Timeout waiting for exported storage device mmcblk0"; then
+  pass "the handler reaches its timeout path and fails"
 else
-  fail "handler returned success on timeout"
+  fail "handler did not report a timeout for mmcblk0 (rc=$rc): $(printf '%s' "$out" | head -4)"
 fi
 
 # The requested device must appear as something the TARGET was asked for.
