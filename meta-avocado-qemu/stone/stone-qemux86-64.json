@@ -95,6 +95,7 @@
           }
         },
         "rootfs": "avocado-image-rootfs-qemux86-64.erofs-lz4",
+        "var": "avocado-image-var-qemux86-64.btrfs",
         "initramfs": "avocado-image-initramfs-qemux86-64.cpio.zst",
         "kernel": "bzImage",
         "bootloader": "systemd-bootx64.efi"
@@ -105,7 +106,7 @@
         { "name": "recovery", "partition_type": "EF00", "size": 256, "size_unit": "mebibytes" },
         { "name": "rootfs-a", "image": "rootfs", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
         { "name": "rootfs-b", "partition_type": "8304", "size": 512, "size_unit": "mebibytes" },
-        { "name": "var", "image": "", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 512, "size_unit": "mebibytes", "expand": "true" }
+        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 512, "size_unit": "mebibytes", "expand": "true" }
       ]
     }
   }
