@@ -40,6 +40,8 @@ do_install() {
     done
 }
 
+inherit deploy
+
 do_deploy() {
     install -d "${DEPLOYDIR}/sb-keys"
 
