@@ -5,7 +5,14 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-# NXP 88W8997 WiFi driver (out-of-tree mwifiex fork)
+# NXP WiFi driver: kernel-module-nxp-wlan is the same out-of-tree module for
+# every NXP WiFi chip meta-imx-bsp knows about, 88W8997 included. Kept as a
+# firm RDEPENDS rather than left to meta-imx-bsp/conf/layer.conf:110's own
+# MACHINE_EXTRA_RRECOMMENDS (which already adds it for mx93-nxp-bsp once
+# nxpaw693-sdio lands in MACHINE_FEATURES, layer.conf:277) so the module is
+# guaranteed present - not merely recommended - the day a WiFi module is
+# fitted to this unit's empty M.2 slot, independent of NO_RECOMMENDATIONS
+# policy on any given image.
 NXP_WIFI_DRIVER = " \
   kernel-module-nxp-wlan \
 "
