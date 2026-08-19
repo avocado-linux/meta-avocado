@@ -21,3 +21,10 @@ RDEPENDS:${PN} = "\
 "
 
 RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"
+
+# A UEFI target boots systemd-boot out of a per-slot ESP, and stone hands both
+# ESPs the same boot image, so the loader entry's root= cannot name the slot -
+# only the LoaderDevicePartUUID the firmware set can. Gated on the boot method
+# rather than on the machine because that is the property the generator needs:
+# a U-Boot target reads its slot from a U-Boot variable and has no ESP to ask.
+RDEPENDS:${PN} += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uefi', 'avocado-slot-root-generator', '', d)}"
