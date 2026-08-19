@@ -19,10 +19,18 @@
 # while the host only ever reported a 120s timeout with no cause, so the real
 # error reached the serial console and nowhere else.
 #
-# Note for a future reader tempted to "correct" this back: the BSP's own
-# generic/cfg/flash_t234_qspi_sd*.xml files do say mmcblk1p1. Those are written
-# for eMMC-bearing modules. A config file cannot settle what a given board
-# enumerates; only the board can.
+# Neither name is a safe default - mmcblk1 misses the card on an eMMC-less
+# module, mmcblk0 IS the eMMC on a module that has one - so the board declares
+# it (manifest `storage_devices.rootdisk.tegraflash.sd_device`), an operator can
+# override it for one run (AVOCADO_PROVISION_SD_DEVICE), and providing neither
+# is an error. That is what the cases below assert: no re-hardcode can pass the
+# "nothing declared" case, since it would write a device name instead of
+# failing.
+#
+# Note for a future reader tempted to "correct" the Orin Nano value back: the
+# BSP's own generic/cfg/flash_t234_qspi_sd*.xml files do say mmcblk1p1. Those
+# are written for eMMC-bearing modules. A config file cannot settle what a
+# given board enumerates; only the board can.
 
 set -uo pipefail
 
@@ -54,66 +62,101 @@ if [ -z "$sd_branch" ]; then
   exit 1
 fi
 
-# --- 1. the sd branch must not assume eMMC occupies mmcblk0 ------------------
-# Comments are stripped first: the branch documents mmcblk1 as the override
-# value for eMMC-bearing modules, and saying so must not trip the check.
-sd_code=$(printf '%s\n' "$sd_branch" | grep -v '^[[:space:]]*#')
-if printf '%s\n' "$sd_code" | grep -q 'mmcblk1'; then
-  fail "sd branch names mmcblk1; an eMMC-less module enumerates the card as mmcblk0"
-  printf '%s\n' "$sd_code" | grep -n 'mmcblk1' | sed 's/^/       /'
-else
-  pass "sd branch does not hardcode mmcblk1"
-fi
-
-# --- 2. run the branch's own sed and check what it writes -------------------
-# Executing the text lifted out of the script proves the substitution lands,
-# rather than only proving the source reads correctly. Each case sets the
-# override differently, so the fixture is rebuilt per case.
+# Run the branch's own code against a throwaway .env.initrd-flash, rather than
+# asserting on source text: this proves the substitution lands, and proves the
+# rejected inputs leave the file alone. Each case gets a fresh fixture.
+# Results come back in branch_rc / branch_out / branch_env.
 run_branch() {
-  local dev_override="$1" tmp
+  local manifest_dev="$1" env_dev="$2" tmp
   tmp=$(mktemp -d)
   printf 'BOOTDEV="placeholder"\nROOTFS_DEVICE="placeholder"\nEXTERNAL_ROOTFS_DRIVE=0\n' \
     >"$tmp/.env.initrd-flash"
   (
-    # shellcheck disable=SC2034  # read by the sed lines lifted from the script
+    # shellcheck disable=SC2034  # all read by the branch lifted from the script
     build_dir="$tmp"
-    if [ -n "$dev_override" ]; then
-      AVOCADO_PROVISION_SD_DEVICE="$dev_override"
-      export AVOCADO_PROVISION_SD_DEVICE
+    # shellcheck disable=SC2034
+    AVOCADO_STONE_MANIFEST="$tmp/stone-manifest.json"
+    # shellcheck disable=SC2034
+    tegraflash_sd_device="$manifest_dev"
+    if [ -n "$env_dev" ]; then
+      # shellcheck disable=SC2034
+      AVOCADO_PROVISION_SD_DEVICE="$env_dev"
     else
       unset AVOCADO_PROVISION_SD_DEVICE
     fi
     eval "$sd_branch"
-  )
-  cat "$tmp/.env.initrd-flash"
+  ) >"$tmp/out" 2>&1
+  branch_rc=$?
+  branch_out=$(cat "$tmp/out")
+  branch_env=$(cat "$tmp/.env.initrd-flash")
   rm -rf "$tmp"
 }
 
-default_out=$(run_branch "")
-if grep -q 'ROOTFS_DEVICE="mmcblk0"' <<<"$default_out" &&
-  grep -q 'BOOTDEV="mmcblk0p1"' <<<"$default_out"; then
-  pass "with no override the branch writes mmcblk0 / mmcblk0p1"
+# --- 1. the board's declared device is what gets written ---------------------
+# Both values are exercised: an eMMC-less module (mmcblk0, the case observed on
+# hardware) and an eMMC-bearing one (mmcblk1, what the BSP xml assumes). A
+# branch that hardcoded either would fail one of them.
+run_branch "mmcblk0" ""
+if grep -q 'ROOTFS_DEVICE="mmcblk0"' <<<"$branch_env" &&
+  grep -q 'BOOTDEV="mmcblk0p1"' <<<"$branch_env"; then
+  pass "a declared mmcblk0 reaches BOOTDEV and ROOTFS_DEVICE"
 else
-  fail "default is not mmcblk0; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$default_out" | tr '\n' ' ')"
+  fail "mmcblk0 not written; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$branch_env" | tr '\n' ' ')"
 fi
 
-# An eMMC-bearing module still needs mmcblk1, so the name must stay reachable
-# without editing the script. The probe value is deliberately one no branch
-# would ever hardcode, so this cannot pass by coincidence the way mmcblk1 would.
-override_out=$(run_branch "mmcblk3")
-if grep -q 'ROOTFS_DEVICE="mmcblk3"' <<<"$override_out" &&
-  grep -q 'BOOTDEV="mmcblk3p1"' <<<"$override_out"; then
-  pass "AVOCADO_PROVISION_SD_DEVICE overrides both BOOTDEV and ROOTFS_DEVICE"
-else
-  fail "override ignored; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$override_out" | tr '\n' ' ')"
-fi
-
-# --- 3. the external-rootfs flag must survive either path -------------------
-if grep -q 'EXTERNAL_ROOTFS_DRIVE=1' <<<"$default_out"; then
+if grep -q 'EXTERNAL_ROOTFS_DRIVE=1' <<<"$branch_env"; then
   pass "EXTERNAL_ROOTFS_DRIVE is set for SD boot"
 else
   fail "EXTERNAL_ROOTFS_DRIVE was not set; the target would look for an internal rootfs"
 fi
+
+run_branch "mmcblk1" ""
+if grep -q 'ROOTFS_DEVICE="mmcblk1"' <<<"$branch_env" &&
+  grep -q 'BOOTDEV="mmcblk1p1"' <<<"$branch_env"; then
+  pass "a declared mmcblk1 reaches BOOTDEV and ROOTFS_DEVICE"
+else
+  fail "mmcblk1 not written; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$branch_env" | tr '\n' ' ')"
+fi
+
+# --- 2. the environment override wins over the manifest ----------------------
+# The probe value is deliberately one no board would declare, so this cannot
+# pass by coincidence the way mmcblk0 or mmcblk1 could.
+run_branch "mmcblk0" "mmcblk3"
+if grep -q 'ROOTFS_DEVICE="mmcblk3"' <<<"$branch_env" &&
+  grep -q 'BOOTDEV="mmcblk3p1"' <<<"$branch_env"; then
+  pass "AVOCADO_PROVISION_SD_DEVICE overrides the manifest value"
+else
+  fail "override ignored; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$branch_env" | tr '\n' ' ')"
+fi
+
+# --- 3. with nothing declared the branch must refuse, not guess --------------
+# This is also the guard against a reintroduced hardcode: any default would
+# write a device name here instead of failing.
+run_branch "" ""
+if [ "$branch_rc" -ne 0 ] && grep -q 'placeholder' <<<"$branch_env"; then
+  pass "no declared device: the branch fails and writes nothing"
+else
+  fail "no declared device: rc=$branch_rc, env=$(tr '\n' ' ' <<<"$branch_env")"
+fi
+
+if grep -q 'sd_device' <<<"$branch_out" && grep -q 'AVOCADO_PROVISION_SD_DEVICE' <<<"$branch_out"; then
+  pass "the refusal names both places the device can be declared"
+else
+  fail "refusal does not name the manifest key and the env var: $(head -3 <<<"$branch_out")"
+fi
+
+# --- 4. a malformed override is rejected before it reaches sed ---------------
+# /dev/mmcblk1 is the natural mistake - every other device reference an
+# operator sees is a /dev path - and unvalidated it makes sed die with "unknown
+# option to `s'". A value containing & would substitute the matched text.
+for bad in "/dev/mmcblk1" "mmcblk0p1" "mmcblk0&"; do
+  run_branch "mmcblk0" "$bad"
+  if [ "$branch_rc" -ne 0 ] && grep -q 'placeholder' <<<"$branch_env"; then
+    pass "override '$bad' is rejected and .env.initrd-flash is left alone"
+  else
+    fail "override '$bad' was not rejected: rc=$branch_rc, env=$(tr '\n' ' ' <<<"$branch_env")"
+  fi
+done
 
 echo
 if [ "$failures" -eq 0 ]; then
