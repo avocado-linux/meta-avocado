@@ -72,12 +72,6 @@ repos:
 
 local_conf_header:
   imx93-dangling-appends: |
-    # Three bbappends in the layer set have no recipe left to append to at the
-    # wrynose meta-freescale / 6.18 meta-imx pairing. bitbake treats an append
-    # with no target as a hard error, so each is masked with its own reason.
-    # None is caused by excluding meta-imx-ml above - all three are already in
-    # the orphan list with that layer present.
-    #
     # meta-freescale renamed udev-rules-imx.bb to udev-rules-imx_1.0.bb for
     # wrynose. meta-imx's append is unversioned, so it no longer matches, and
     # the branch tip still ships it that way. Masking falls back to
@@ -86,22 +80,11 @@ local_conf_header:
     # 0660 rather than 0666. Neither has a consumer on this board - i.MX93 has
     # no Vivante GPU, so no galcore node exists, and the image ships no NPU
     # software to open a neutron node as a non-root user.
+    #
+    # Scoped to this machine because the rename is specific to the wrynose
+    # meta-freescale branch this board's meta-imx pairing pulls in; the
+    # gstreamer1.0-plugins-imx and nnstreamer masks that used to sit alongside
+    # this one are machine-agnostic and now live in
+    # fsl-imx-preferred-env.inc, where every fsl-imx-preferred-env.inc machine
+    # sees them.
     BBMASK += "meta-imx/meta-imx-bsp/recipes-core/udev/udev-rules-imx.bbappend"
-
-    # The only provider of gstreamer1.0-plugins-imx is meta-freescale's
-    # gstreamer1.0-plugins-imx_2.2.0.bb, which fsl-imx-preferred-env.inc masks
-    # wholesale via BBMASK on meta-freescale/recipes-multimedia/gstreamer. That
-    # pairing is not new - the mask and the append have coexisted since the FRDM
-    # boards were added - so this append has been dangling for any machine
-    # requiring that include, and surfaces here only because the imx93 build now
-    # gets far enough to report it.
-    BBMASK += "meta-avocado/meta-avocado-nxp/recipes-multimedia/gstreamer/gstreamer1.0-plugins-imx_%.bbappend"
-
-    # nnstreamer has no provider at all in this layer set. meta-imx-ml shipped
-    # nnstreamer_2.2.0.bb on 6.6.36 but is append-only at 6.18
-    # (nnstreamer_2.4.2.bbappend), expecting a recipe from a layer Avocado does
-    # not carry; meta-openembedded has never provided one on either series. The
-    # append's purpose was to drop the tvm PACKAGECONFIG to dodge a conflict
-    # between meta-imx-ml's and meta-ros's tvm_0.7.0, and neither layer is in
-    # this build.
-    BBMASK += "meta-avocado/meta-avocado-nxp/recipes-nnstreamer/nnstreamer/nnstreamer_%.bbappend"
