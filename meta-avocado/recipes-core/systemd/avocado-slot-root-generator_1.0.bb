@@ -14,6 +14,32 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # second home for those UUIDs and a silent way for the two to drift apart.
 inherit stone
 
+# Skip the recipe outright on machines that do not boot UEFI, mirroring the
+# condition packagegroup-avocado-initramfs.bb uses to pull it in - so recipe
+# availability and recipe consumption cannot drift apart.
+#
+# This has to be a parse-time skip, not a task-time check. The SRC_URI below
+# names the machine's stone manifest, and base.bbclass wires
+# do_fetch[file-checksums] to bb.fetch.get_checksum_file_list(d), which fatals
+# on a file:// entry it cannot resolve. That varflag expands during taskhash
+# computation, after parsing - so `bitbake -p` fails for any machine with no
+# stone manifest at all, which is every container-SDK build. do_write_slot_map's
+# own guards below cannot help: a task never runs on a recipe whose parse
+# already died.
+#
+# Gating on AVOCADO_BOOTLOADER rather than on whether the manifest happens to
+# exist is deliberate. A UEFI machine that is genuinely missing its manifest
+# should still hit the checksum error, which names every path it searched and so
+# says exactly which file to add; silently skipping the recipe there would
+# instead surface as an unrelated "nothing RPROVIDES" failure from the
+# packagegroup.
+python __anonymous() {
+    if not bb.utils.contains("AVOCADO_BOOTLOADER", "uefi", True, False, d):
+        raise bb.parse.SkipRecipe(
+            "AVOCADO_BOOTLOADER does not contain 'uefi'; the rootfs slot is "
+            "resolved from the booted ESP and only applies to UEFI machines")
+}
+
 SRC_URI = "file://avocado-slot-root-generator \
            file://stone-${MACHINE_SHORT_NAME}.json"
 
