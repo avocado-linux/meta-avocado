@@ -104,3 +104,12 @@ avocado_security_capabilities_eventhandler[eventmask] = "bb.event.ConfigParsed"
 python avocado_security_capabilities_eventhandler() {
     avocado_security_capabilities_check(e.data)
 }
+
+# devtool-debt: kas/feature/ftpm.yml (imx93-ahab-secure-boot branch only, not
+# present on this branch) still does MACHINE_FEATURES:append = " optee-ftpm"
+# directly, a second place avocado-imx93-frdm's fTPM support gets asserted
+# outside AVOCADO_SECURITY_CAPABILITIES. Not fixable from here: the file does
+# not exist on this branch to edit. Ceiling: the duplication stands for as
+# long as the two branches remain separate. Upgrade trigger: the branches
+# merge, or ftpm.yml's own MACHINE_FEATURES:append is replaced with a read of
+# this machine's AVOCADO_SECURITY_CAPABILITIES declaration.
