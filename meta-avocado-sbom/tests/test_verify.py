@@ -392,74 +392,160 @@ class SeverityTests(unittest.TestCase):
     def test_health_of_a_non_report(self):
         self.assertEqual(verify.check_health("not a report"), [])
 
-class ExpectedUnscannedTests(unittest.TestCase):
-    """The declared band from ENG-2364. Opt-in on purpose: the fixture is a
-    trimmed report and carries its own count, so a band asserted against the
-    format rather than the configuration would fail a correct fixture.
+class UnscannedDeclaredTests(unittest.TestCase):
+    """ENG-2364's gate, after the declared count was replaced by declared
+    reasons. The count could only say that the number moved, so the only way to
+    answer it was to copy the new number back in; and one opt-out gained while
+    one scan was lost left it silent. These assert the set instead.
     """
 
     def setUp(self):
         self.report = load()
-        self.actual = self.report["counts"]["unscanned_recipes"]
+        self.unscanned = list(self.report["unscanned_recipes"])
+        # What the markers avocado-cve-optout writes would say for this build.
+        self.declared = {n: "CVE_PRODUCT is empty" for n in self.unscanned}
+        # Real recipes from the fixture's package set. Both lists are scoped to
+        # recipes that shipped a package, and check_report enforces that, so a
+        # made-up name would fail the envelope rather than this check.
+        self.scanned = [
+            r
+            for r in sorted({p["recipe"] for p in self.report["packages"].values()})
+            if r not in self.unscanned
+        ]
 
-    def test_no_declared_value_means_no_check(self):
-        self.assertEqual(verify.check_expected_unscanned(self.report, None), [])
+    def _stops_being_scanned(self, name):
+        self.report["unscanned_recipes"].append(name)
+        self.report["counts"]["unscanned_recipes"] += 1
 
-    def test_the_fixture_is_not_held_to_a_build_figure(self):
-        # The whole reason the check is opt-in: 11 is avocado-qemuarm64's
-        # number, the fixture legitimately carries a smaller one.
-        self.assertEqual(verify.check_report(self.report), [])
-        self.assertTrue(verify.check_expected_unscanned(self.report, 11))
+    def test_no_markers_means_no_check(self):
+        # An older build tree has none; asserting against an empty map would
+        # fail every unscanned recipe at once.
+        self.assertEqual(verify.check_unscanned_declared(self.report, None), [])
 
-    def test_the_declared_value_passes(self):
+    def test_every_unscanned_recipe_declared_passes(self):
         self.assertEqual(
-            verify.check_expected_unscanned(self.report, self.actual), []
+            verify.check_unscanned_declared(self.report, self.declared), []
         )
 
-    def test_a_rise_is_caught(self):
-        self.report["counts"]["unscanned_recipes"] = self.actual + 1
-        failures = verify.check_expected_unscanned(self.report, self.actual)
-        self.assertTrue(failures)
-        self.assertIn("stopped being scanned", failures[0])
+    def test_the_fixture_is_not_held_to_a_build_figure(self):
+        # The count check could never run against the fixture: 11 was
+        # avocado-qemuarm64's number and the fixture carries its own. A set of
+        # reasons is true on every machine, so the fixture can assert it.
+        self.assertEqual(verify.check_report(self.report), [])
+        self.assertEqual(
+            verify.check_unscanned_declared(self.report, self.declared), []
+        )
 
-    def test_a_fall_is_caught_too(self):
-        # A drop is not good news: an opt-out that became a scan, or a
-        # declared value nobody has revisited.
-        self.report["counts"]["unscanned_recipes"] = self.actual + 1
-        failures = verify.check_expected_unscanned(self.report, self.actual + 2)
+    def test_a_recipe_that_stopped_being_scanned_is_caught(self):
+        victim = self.scanned[0]
+        self._stops_being_scanned(victim)
+        failures = verify.check_unscanned_declared(self.report, self.declared)
         self.assertTrue(failures)
-        self.assertIn("stale", failures[0])
+        self.assertIn(victim, failures[0])
 
-    def test_the_failure_names_the_recipes(self):
-        self.report["counts"]["unscanned_recipes"] = self.actual + 1
-        failures = verify.check_expected_unscanned(self.report, self.actual)
-        for name in self.report["unscanned_recipes"]:
+    def test_a_new_opt_out_does_not_fail_the_build(self):
+        # The whole point. A packagegroup added today declares itself, and
+        # nobody edits a number in a conf file to let the build through.
+        newcomer = self.scanned[0]
+        self._stops_being_scanned(newcomer)
+        self.declared[newcomer] = "CVE_PRODUCT is empty"
+        self.assertEqual(
+            verify.check_unscanned_declared(self.report, self.declared), []
+        )
+
+    def test_one_gained_and_one_lost_is_caught(self):
+        # The failure a count structurally cannot see: the total does not move.
+        newcomer, victim = self.scanned[0], self.scanned[1]
+        self._stops_being_scanned(newcomer)
+        self.declared[newcomer] = "CVE_PRODUCT is empty"
+        self._stops_being_scanned(victim)
+        failures = verify.check_unscanned_declared(self.report, self.declared)
+        self.assertTrue(failures)
+        self.assertIn(victim, failures[0])
+        self.assertNotIn(newcomer, failures[0])
+
+    def test_the_failure_names_every_undeclared_recipe(self):
+        victims = self.scanned[:2]
+        for name in victims:
+            self._stops_being_scanned(name)
+        failures = verify.check_unscanned_declared(self.report, self.declared)
+        for name in victims:
             self.assertIn(name, failures[0])
+        self.assertIn("2 recipe(s)", failures[0])
 
-    def test_a_missing_counter_is_left_to_the_envelope_check(self):
+    def test_a_missing_list_is_left_to_the_envelope_check(self):
         # Absence is malformed, and check_report already fails on it. Two
         # failures for one defect reads as two defects.
-        del self.report["counts"]["unscanned_recipes"]
-        self.assertEqual(verify.check_expected_unscanned(self.report, 11), [])
+        del self.report["unscanned_recipes"]
+        self.assertEqual(
+            verify.check_unscanned_declared(self.report, self.declared), []
+        )
         self.assertTrue(verify.check_report(self.report, health=False))
 
     def test_a_non_report_does_not_raise(self):
-        self.assertEqual(verify.check_expected_unscanned("not a report", 11), [])
-        self.assertEqual(verify.check_expected_unscanned({}, 11), [])
+        self.assertEqual(
+            verify.check_unscanned_declared("not a report", {}), []
+        )
+        self.assertEqual(verify.check_unscanned_declared({}, {}), [])
 
     def test_it_stays_out_of_check_report_and_check_health(self):
-        # The recipe calls it separately so it can carry its own message. The
-        # count and its list move together, so this is a report that is valid
-        # in every way except the value this configuration declared.
-        self.report["unscanned_recipes"].pop()
-        self.report["counts"]["unscanned_recipes"] = len(
-            self.report["unscanned_recipes"]
-        )
+        # The recipe calls it separately so it can carry its own message, and
+        # because the markers are not in the report: a consumer holding only
+        # the JSON cannot run this check at all.
+        self._stops_being_scanned(self.scanned[0])
         self.assertEqual(verify.check_report(self.report), [])
         self.assertEqual(verify.check_health(self.report), [])
         self.assertTrue(
-            verify.check_expected_unscanned(self.report, self.actual)
+            verify.check_unscanned_declared(self.report, self.declared)
         )
+
+class StaleOptoutTests(unittest.TestCase):
+    """A marker that outlived its declaration silently widens what the check
+    above lets through, so it is reported - but the recipe was scanned, so the
+    report is complete and this does not fail a build.
+    """
+
+    def setUp(self):
+        self.report = load()
+        self.declared = {
+            n: "CVE_PRODUCT is empty" for n in self.report["unscanned_recipes"]
+        }
+        self.shipped = sorted(
+            {p["recipe"] for p in self.report["packages"].values()}
+        )
+
+    def test_markers_matching_the_build_are_quiet(self):
+        self.assertEqual(
+            verify.stale_optout_declarations(self.report, self.declared), []
+        )
+
+    def test_a_declared_recipe_that_was_scanned_is_reported(self):
+        scanned = next(
+            r for r in self.shipped if r not in self.report["unscanned_recipes"]
+        )
+        self.declared[scanned] = "CVE_PRODUCT is empty"
+        failures = verify.stale_optout_declarations(self.report, self.declared)
+        self.assertTrue(failures)
+        self.assertIn(scanned, failures[0])
+
+    def test_opt_outs_that_ship_nothing_are_not_stale(self):
+        # A marker is written for every opt-out in the build - image recipes,
+        # anything native - and almost none of them ship a package. Reporting
+        # those would bury the one case that matters.
+        self.declared["core-image-minimal"] = "CVE_PRODUCT is empty"
+        self.declared["quilt-native"] = "CVE_PRODUCT is empty"
+        self.assertEqual(
+            verify.stale_optout_declarations(self.report, self.declared), []
+        )
+
+    def test_no_markers_means_no_check(self):
+        self.assertEqual(
+            verify.stale_optout_declarations(self.report, None), []
+        )
+
+    def test_a_non_report_does_not_raise(self):
+        self.assertEqual(verify.stale_optout_declarations("not a report", {}), [])
+        self.assertEqual(verify.stale_optout_declarations({}, {}), [])
 
 class VersionTests(unittest.TestCase):
     def test_the_generator_major_is_supported(self):

@@ -285,41 +285,94 @@ def check_health(report):
     _check_health(report, failures.append)
     return failures
 
-def check_expected_unscanned(report, expected):
-    """Return the ways counts.unscanned_recipes departs from the value declared
-    for this build configuration, or [] when nothing was declared.
-
-    Out of check_report and check_health because the expected value belongs to
-    one MACHINE and one image scope, not to the report format: the fixture is a
-    trimmed report and carries a smaller count than any real build. Set by
-    AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED.
+def _shipped_recipes(report):
+    """The recipes that put at least one package in the image, from the report
+    itself. build_report derives unscanned_recipes from this same set.
     """
-    if expected is None or not isinstance(report, dict):
+    packages = report.get("packages")
+    if not isinstance(packages, dict):
+        return set()
+    return {
+        p["recipe"]
+        for p in packages.values()
+        if isinstance(p, dict) and isinstance(p.get("recipe"), str)
+    }
+
+def check_unscanned_declared(report, declared):
+    """Return the recipes that shipped a package, have no cve-check result, and
+    declare no reason for it.
+
+    declared is the name -> reason map from report.read_optouts(), or None to
+    skip the check - a tree built before avocado-cve-optout was inherited has
+    no markers, and asserting against an empty map would fail every recipe.
+
+    This is the check that replaced a declared count. A count could only ever
+    say that the number moved, so the only way to answer it was to copy the
+    new number back into the configuration; and a build that gained one opt-out
+    while losing one scan left it silent. Naming the recipes makes both cases
+    visible and neither of them a number anybody maintains.
+
+    Out of check_report and check_health for the same reason the count was: the
+    markers live beside the build's cve-check results, so a report checked on
+    its own - the committed fixture, or one handed to a consumer - cannot
+    produce them.
+    """
+    if declared is None or not isinstance(report, dict):
         return []
 
-    counts = report.get("counts")
-    if not isinstance(counts, dict):
+    unscanned = report.get("unscanned_recipes")
+    if not isinstance(unscanned, list):
         return []
 
-    value = counts.get("unscanned_recipes")
-    if not _is_int(value) or value == expected:
+    undeclared = sorted(
+        n for n in unscanned if isinstance(n, str) and n not in declared
+    )
+    if not undeclared:
         return []
 
-    # A fall matters as much as a rise: an opt-out that became a scan, or a
-    # declared value nobody has revisited.
     return [
-        "counts.unscanned_recipes is %d, declared %d for this configuration; "
-        "%s. Recipes with no cve-check entry at all: %s"
-        % (
-            value,
-            expected,
-            "a recipe stopped being scanned"
-            if value > expected
-            else "a recipe that opted out no longer does, or the declared "
-                 "value is stale",
-            ", ".join(sorted(n for n in report.get("unscanned_recipes", [])
-                             if isinstance(n, str))) or "none listed",
-        )
+        "%d recipe(s) shipped a package, have no cve-check result and declare "
+        "no reason for it: %s. Either something stopped scanning them - a "
+        "cleared CVE_PRODUCT, an interrupted build, a layer that fell out of "
+        "CVE_CHECK_LAYER_INCLUDELIST - or they opted out somewhere "
+        "avocado-cve-optout does not look, in which case teach it that "
+        "mechanism rather than widening what this accepts."
+        % (len(undeclared), ", ".join(undeclared))
+    ]
+
+def stale_optout_declarations(report, declared):
+    """Return the opt-outs that no longer describe the build: a recipe that
+    declared one, shipped a package, and was scanned anyway.
+
+    Not data loss - the recipe was scanned and its CVEs are in the report - so
+    this is reported separately from check_unscanned_declared and does not fail
+    a build. It means a marker outlived the declaration that produced it, which
+    matters because a stale marker silently widens what the check above lets
+    through.
+
+    Restricted to recipes that shipped a package: a marker is written for every
+    opt-out in the build, and most of them - image recipes, anything native -
+    ship nothing and were never candidates for unscanned_recipes.
+    """
+    if declared is None or not isinstance(report, dict):
+        return []
+
+    unscanned = report.get("unscanned_recipes")
+    if not isinstance(unscanned, list):
+        return []
+
+    scanned_anyway = sorted(
+        (_shipped_recipes(report) & set(declared))
+        - {n for n in unscanned if isinstance(n, str)}
+    )
+    if not scanned_anyway:
+        return []
+
+    return [
+        "%d recipe(s) declare a cve-check opt-out but were scanned anyway: %s. "
+        "The declaration is stale, or CVE_CHECK_DIR is carrying markers from a "
+        "configuration this build no longer has."
+        % (len(scanned_anyway), ", ".join(scanned_anyway))
     ]
 
 def check_report(report, health=True):
@@ -371,12 +424,28 @@ def main():
         help="fail on unknown keys instead of reporting them",
     )
     parser.add_argument(
-        "--expect-unscanned",
-        type=int,
-        metavar="N",
-        help="fail unless counts.unscanned_recipes is exactly N",
+        "--optout-dir",
+        metavar="DIR",
+        help="CVE_CHECK_DIR holding *_optout.json markers; fail on any "
+             "unscanned recipe that declares no reason for it",
     )
     args = parser.parse_args()
+
+    declared = None
+    if args.optout_dir is not None:
+        from . import report as report_module
+
+        declared, unreadable = report_module.read_optouts(args.optout_dir)
+        if unreadable:
+            print("%s: %d opt-out marker(s) could not be read"
+                  % (args.optout_dir, unreadable), file=sys.stderr)
+        if not declared:
+            # Otherwise every unscanned recipe below is reported as undeclared,
+            # which names the recipes but not the reason they all failed at
+            # once. do_cve_report says this before it fails; so does this.
+            print("%s: no *_optout.json markers here. Point --optout-dir at a "
+                  "CVE_CHECK_DIR from a build that inherited "
+                  "avocado-cve-optout." % args.optout_dir, file=sys.stderr)
 
     rc = 0
     for path in args.report:
@@ -389,11 +458,13 @@ def main():
             continue
 
         failures = check_report(report)
-        failures.extend(check_expected_unscanned(report, args.expect_unscanned))
+        failures.extend(check_unscanned_declared(report, declared))
         extra = additions(report)
 
         for message in failures:
             print("%s: %s" % (path, message), file=sys.stderr)
+        for message in stale_optout_declarations(report, declared):
+            print("%s: warning: %s" % (path, message), file=sys.stderr)
         for message in extra:
             print("%s: unknown key, not in version %s: %s"
                   % (path, REPORT_VERSION, message), file=sys.stderr)
@@ -415,8 +486,8 @@ def main():
                 counts.get("packaged_recipes", 0),
                 counts.get("packaged_cves", 0),
                 # Silence would not distinguish a match from no declaration.
-                "" if args.expect_unscanned is None
-                else ", unscanned_recipes %d as declared" % args.expect_unscanned,
+                "" if declared is None
+                else ", every unscanned recipe declared",
             )
         )
 

@@ -69,14 +69,10 @@ Variables
                                for a build knowingly sharing a CVE_CHECK_DIR
                                or knowingly interrupted. Default "1". A
                                malformed report fails the build either way
-  AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED
-                               expected counts.unscanned_recipes. Empty by
-                               default, meaning no check; set it and a drift in
-                               either direction fails the build, governed by
-                               AVOCADO_CVE_REPORT_STRICT. No usable default -
-                               the count is opt-outs only, so it belongs to one
-                               MACHINE and image scope. Measured for
-                               avocado-qemuarm64, feed-scoped: 11
+  AVOCADO_CVE_REPORT_OPTOUT_DIR
+                               where avocado-cve-optout.bbclass leaves its
+                               markers. Defaults to CVE_CHECK_DIR, beside the
+                               cve-check results they explain
 
 The frozen contract
 -------------------
@@ -125,16 +121,59 @@ produces, after the existing counter diagnostics, in three severities:
                counter, or recipes carrying CVEs with none of them correlated
                to an installed package. Fails the build by default;
                AVOCADO_CVE_REPORT_STRICT = "0" downgrades it to a warning
-  undeclared   the report is complete and unscanned_recipes is not the value
-               AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED declares - the build
-               changed shape, not the data. Same severity as incomplete, and
-               silent unless the variable is set
+  undeclared   the report is complete and a recipe in unscanned_recipes
+               declares no reason for being there - the scan changed shape, not
+               the data. Same severity as incomplete
 
 check_report(report, health=False) and check_health(report) are the two halves,
-if you need them separately. check_expected_unscanned(report, expected) is the
-third and stays out of both: its value belongs to a build configuration, not to
-the format, and the committed fixture carries a smaller count than any real
-build. The CLI takes it as --expect-unscanned N.
+if you need them separately. check_unscanned_declared(report, declared) is the
+third and stays out of both: it needs the opt-out markers, which live beside
+the build's cve-check results rather than in the report, so a consumer holding
+only the JSON cannot run it. The CLI takes the directory as --optout-dir DIR.
+
+Why reasons and not a count
+---------------------------
+
+The first version of this check declared the number of unscanned recipes and
+failed when the build disagreed. It was replaced because a count cannot answer
+the question it raises. When it fires, the only information it carries is that
+the number moved - so the only available fix is to copy the new number back
+into the configuration, which is a check nobody can fail. Worse, one opt-out
+gained while one scan was silently lost leaves the total unchanged and the
+check quiet, which is exactly the event it existed to catch.
+
+The recipes in that list are not an arbitrary set that happens to have a size.
+Every one of them declared, in its own metadata, that it has no CVE surface:
+
+  CVE_PRODUCT = ""              set by packagegroup.bbclass for every
+                                packagegroup, and by recipes whose CVEs belong
+                                to another recipe - glibc-locale defers to
+                                glibc
+  CVE_CHECK_SKIP_RECIPE         PN listed explicitly
+  CVE_CHECK_LAYER_EXCLUDELIST   the layer opted out
+  CVE_CHECK_LAYER_INCLUDELIST   the layer was never opted in
+
+avocado-cve-optout.bbclass records which of these fired, per recipe, as
+${CVE_CHECK_DIR}/${PN}_optout.json, at the moment cve-check decides to write
+nothing. do_cve_report then asserts that every unscanned recipe has a marker.
+
+So a packagegroup added today declares itself and no one edits anything, while
+a recipe whose CVE_PRODUCT got cleared fails the build naming itself. The check
+also stops being machine-specific: it asserts that each recipe said why, never
+how many did, so it holds on every MACHINE and image scope - which the count
+never could, and which is why the count had nowhere to live.
+
+The reverse case is a warning, not a failure: a recipe that declared an opt-out
+and was scanned anyway means a marker outlived its declaration. The report is
+complete, so the build passes, but the stale marker is widening what the check
+accepts and is worth clearing. CVE_CHECK_DIR is never pruned, so the class
+removes a marker whenever a recipe stops opting out.
+
+A build with no markers at all fails as incomplete rather than skipping the
+check: nothing distinguishes "no recipe opts out" - which no real build has
+been - from avocado-cve-optout not being inherited, and silently skipping is
+the failure mode the whole check exists to prevent. Add
+INHERIT += "avocado-cve-optout", or stack kas/feature/cve-check.yml.
 
 A build with no unpatched CVEs at all is not a failure of either kind. Zero
 recipes, zero CVEs and zero packaged recipes is what a fully patched build
@@ -298,16 +337,15 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         individually in the top-level "unscanned_recipes" list.
                         Normally non-zero: a recipe opts out with
                         CVE_PRODUCT = "", which packagegroup.bbclass sets for
-                        every packagegroup. Watch for a sharp rise, which means
-                        a world build that stopped early, or
-                        CVE_CHECK_LAYER_EXCLUDELIST / CVE_CHECK_SKIP_RECIPE.
-                        Gate on it rather than trend it: it moves when our own
-                        configuration changes, and
-                        AVOCADO_CVE_REPORT_UNSCANNED_EXPECTED turns that into a
-                        build failure. Any declared value assumes a clean
-                        ${DEPLOY_DIR}/cve and pkgdata - both accumulate across
-                        builds, nothing prunes either, and they move this
-                        counter in opposite directions
+                        every packagegroup. Do not gate on the number and do
+                        not trend it: it moves whenever our own configuration
+                        changes, in both directions, and a stale
+                        ${DEPLOY_DIR}/cve or pkgdata moves it too - both
+                        accumulate across builds and nothing prunes either.
+                        What is checked is the membership, not the size:
+                        avocado-cve-optout records why each of these recipes
+                        was skipped and do_cve_report fails on any that gives
+                        no reason. See "Why reasons and not a count"
   no_cve_record_recipes recipes that shipped packages and were scanned, but
                         whose products came back cvesInRecord "No" - the NVD
                         holds no record under that product name. Named in the

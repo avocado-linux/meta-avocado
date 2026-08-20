@@ -21,7 +21,12 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
-from avocado_sbom.report import Stats, build_report, read_cve_data  # noqa: E402
+from avocado_sbom.report import (  # noqa: E402
+    Stats,
+    build_report,
+    read_cve_data,
+    read_optouts,
+)
 
 def entry(name, version="1.0", in_record="Yes", issues=(), products=None):
     if products is None:
@@ -190,6 +195,79 @@ class BuildReportTests(unittest.TestCase):
         self.assertEqual(doc["counts"]["no_cve_record_recipes"], 1)
         self.assertEqual(stats.unscanned_recipes, 1)
         self.assertEqual(stats.no_cve_record_recipes, 1)
+
+class ReadOptoutsTests(unittest.TestCase):
+    """The markers avocado-cve-optout.bbclass leaves beside the cve-check
+    results. They are what replaced a declared count, so a marker that reads
+    wrong has to be counted, never silently dropped: an unreadable one makes
+    the recipe it speaks for look like a scan that disappeared.
+    """
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+
+    def write(self, name, data, suffix="_optout.json"):
+        path = os.path.join(self.cve_dir, name + suffix)
+        with open(path, "w") as f:
+            if isinstance(data, str):
+                f.write(data)
+            else:
+                json.dump(data, f)
+        return path
+
+    def marker(self, name, reason="CVE_PRODUCT is empty"):
+        return {"version": "1", "name": name, "reason": reason}
+
+    def test_a_marker_is_read(self):
+        self.write("glibc-locale", self.marker("glibc-locale"))
+        declared, unreadable = read_optouts(self.cve_dir)
+        self.assertEqual(declared, {"glibc-locale": "CVE_PRODUCT is empty"})
+        self.assertEqual(unreadable, 0)
+
+    def test_the_reason_is_carried(self):
+        self.write("foo", self.marker("foo", "PN is in CVE_CHECK_SKIP_RECIPE"))
+        declared, _ = read_optouts(self.cve_dir)
+        self.assertEqual(declared["foo"], "PN is in CVE_CHECK_SKIP_RECIPE")
+
+    def test_the_name_inside_wins_over_the_filename(self):
+        # The filename is ${PN}_optout.json, but PN is what the check joins on.
+        self.write("whatever", self.marker("real-recipe-name"))
+        declared, _ = read_optouts(self.cve_dir)
+        self.assertEqual(list(declared), ["real-recipe-name"])
+
+    def test_cve_results_are_not_mistaken_for_markers(self):
+        self.write("acl", {"version": "1", "package": []}, suffix="_cve.json")
+        self.assertEqual(read_optouts(self.cve_dir), ({}, 0))
+
+    def test_an_empty_directory_declares_nothing(self):
+        self.assertEqual(read_optouts(self.cve_dir), ({}, 0))
+
+    def test_a_missing_directory_does_not_raise(self):
+        self.assertEqual(
+            read_optouts(os.path.join(self.cve_dir, "nope")), ({}, 0)
+        )
+
+    def test_truncated_json_is_counted_not_dropped(self):
+        self.write("half", '{"version": "1", "name": "ha')
+        declared, unreadable = read_optouts(self.cve_dir)
+        self.assertEqual(declared, {})
+        self.assertEqual(unreadable, 1)
+
+    def test_a_marker_missing_its_fields_is_counted(self):
+        self.write("noname", {"version": "1", "reason": "CVE_PRODUCT is empty"})
+        self.write("noreason", {"version": "1", "name": "noreason"})
+        self.write("notadict", [1, 2, 3])
+        declared, unreadable = read_optouts(self.cve_dir)
+        self.assertEqual(declared, {})
+        self.assertEqual(unreadable, 3)
+
+    def test_a_bad_marker_does_not_hide_a_good_one(self):
+        self.write("good", self.marker("good"))
+        self.write("bad", "not json at all")
+        declared, unreadable = read_optouts(self.cve_dir)
+        self.assertEqual(list(declared), ["good"])
+        self.assertEqual(unreadable, 1)
 
 if __name__ == "__main__":
     unittest.main()

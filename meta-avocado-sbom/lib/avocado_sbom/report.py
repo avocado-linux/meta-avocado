@@ -251,6 +251,46 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
     stats.recipes = len(recipes)
     return recipes, scanned, scanned - with_record
 
+OPTOUT_VERSION = "1"
+
+def read_optouts(cve_dir):
+    """Read the opt-out markers avocado-cve-optout.bbclass writes beside the
+    cve-check results.
+
+    Returns (declared, unreadable): a recipe name -> reason map, and the number
+    of markers that could not be read. A recipe with no cve-check result and no
+    marker was not scanned and nothing says why, which is the case worth
+    failing a build over; the reason string is carried so the failure can say
+    which mechanism a declared opt-out used.
+
+    Deliberately not part of build_report: the markers explain the report
+    rather than belonging to it, and the version 1 envelope is frozen.
+    """
+    declared = {}
+    unreadable = 0
+
+    for path in sorted(glob.glob(os.path.join(cve_dir, "*_optout.json"))):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            unreadable += 1
+            continue
+
+        if not isinstance(data, dict):
+            unreadable += 1
+            continue
+
+        name = data.get("name")
+        reason = data.get("reason")
+        if not isinstance(name, str) or not name or not isinstance(reason, str):
+            unreadable += 1
+            continue
+
+        declared[name] = reason
+
+    return declared, unreadable
+
 def packages_digest(packages):
     """Fingerprint of the package set. Consumers re-derive it, so the input
     format is part of the frozen contract.
