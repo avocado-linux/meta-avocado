@@ -19,6 +19,38 @@ set -u
 # Surface progress on the console (the initrd journal is not forwarded here).
 exec >/dev/console 2>&1
 
+# Fail-closed pre-flight: refuse before any privileged action (mount, mkfs,
+# tee-supplicant, modprobe) if either (a) this device's base image never
+# declared ftpm, or (b) the kernel cannot actually deliver OP-TEE. These two
+# refusal paths must stay distinguishable per design.md A6 - a declaration
+# problem and a kernel problem need different fixes, so collapsing them into
+# one message would hide which side to fix. Mirrors cryptsetup-var.sh's
+# check_capability_declared/check_dmcrypt_available shape.
+CAPABILITIES_FILE="/etc/avocado-security-capabilities"
+REQUIRED_CAPABILITY="ftpm"
+
+check_capability_declared() {
+    if [ ! -f "$CAPABILITIES_FILE" ]; then
+        echo "optee-ftpm: $CAPABILITIES_FILE is absent - this device's base image never declared $REQUIRED_CAPABILITY" >&2
+        exit 1
+    fi
+    declared="$(cat "$CAPABILITIES_FILE")"
+    for token in $declared; do
+        [ "$token" = "$REQUIRED_CAPABILITY" ] && return 0
+    done
+    echo "optee-ftpm: $REQUIRED_CAPABILITY is missing from this device's AVOCADO_SECURITY_CAPABILITIES declaration (declares: ${declared:-<empty>})" >&2
+    exit 1
+}
+
+check_optee_available() {
+    [ -e /sys/bus/tee ] && return 0
+    echo "optee-ftpm: this device's kernel cannot deliver OP-TEE - fTPM is unavailable" >&2
+    exit 1
+}
+
+check_capability_declared
+check_optee_available
+
 TEE_DEV=/dev/disk/by-partlabel/recovery
 [ -b "$TEE_DEV" ] || { echo "optee-ftpm: no recovery partition, skipping fTPM bring-up"; exit 0; }
 
