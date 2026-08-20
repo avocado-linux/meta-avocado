@@ -100,6 +100,40 @@ ensure_tpm2_unlocked() {
     fi
 }
 
+# Which keyslot actually opened /var this boot. Recorded because it is the one
+# posture fact that cannot be recovered afterwards: a luksDump later shows that
+# a TPM2 token EXISTS, not that it was the thing that worked. ensure_tpm2_enroll
+# below deliberately fails open, so a device whose PCR 7 moved keeps booting on
+# the Argon2id recovery slot indefinitely and nothing upstream notices.
+VAR_UNLOCK_METHOD="unknown"
+
+# Published to /run, not to the U-Boot KV store, because neither fw_setenv nor
+# its fw_env.config exists in this initramfs (see the recipe's RDEPENDS note,
+# and the fw_env.config generator that runs in the real root). /run is the same
+# early tmpfs the key file above already depends on, and systemd carries it
+# across the switch-root, so a userspace unit can publish it from there.
+POSTURE_FILE="/run/avocado-var-posture"
+
+# Best-effort by construction: posture reporting must never be the reason /var
+# fails to open, so every write is guarded and the function always succeeds.
+write_posture() {
+    _tpm2_token=no
+    if has_tpm2_token; then
+        _tpm2_token=yes
+    fi
+
+    _tpm_dev=no
+    if [ -e /dev/tpm0 ]; then
+        _tpm_dev=yes
+    fi
+
+    {
+        echo "VAR_UNLOCK_METHOD=${VAR_UNLOCK_METHOD}"
+        echo "VAR_TPM2_TOKEN=${_tpm2_token}"
+        echo "VAR_TPM_DEVICE=${_tpm_dev}"
+    } > "$POSTURE_FILE" 2>/dev/null || true
+}
+
 # Open the container as /dev/mapper/var: the TPM2-sealed keyslot first (PCR 7),
 # the Argon2id key file as fallback. The Argon2id keyslot (slot 0) is ALWAYS
 # retained as the recovery path - it is never retired. A legitimate PCR 7 change
@@ -120,6 +154,7 @@ open_var() {
         # and letting it fall through to the Argon2id recovery key on failure.
         if [ -e /dev/tpm0 ] && cryptsetup open --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
             echo "cryptsetup-var: opened via TPM2 token"
+            VAR_UNLOCK_METHOD="tpm2"
             return 0
         fi
         echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
@@ -129,6 +164,7 @@ open_var() {
         echo "cryptsetup-var: Argon2id open failed on $VAR_DEV" >&2
         exit 1
     fi
+    VAR_UNLOCK_METHOD="argon2id"
 }
 
 # Ensure a filesystem exists inside the opened container (the in-place path
@@ -292,5 +328,10 @@ ensure_tpm2_enroll
 
 # 5. Grow the container to fill the partition if it was expanded.
 maybe_resize
+
+# 6. Publish posture for userspace to pick up. Runs after ensure_tpm2_enroll so a
+# first boot reports the token it just enrolled rather than the absence it saw
+# on open.
+write_posture
 
 echo "cryptsetup-var: $MAPPER ready"
