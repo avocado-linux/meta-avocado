@@ -8,3 +8,10 @@
 # miss for every developer with a different AVOCADO_SB_KEYS_DIR; that is the
 # safe failure mode for key material, not the collision.
 AVOCADO_SB_KEYS_DIR ?= "${TOPDIR}/avocado-sb-keys"
+
+# Global fail-loud check for security features requested via DISTRO_FEATURES
+# against what the selected machine declares it can deliver. Same INHERIT +=
+# shape as INHERIT += "avocado-sysusers" in conf/distro/avocado.conf:15;
+# lives here rather than there because this file is the security-scoped
+# include, already require'd from conf/distro/avocado.inc:56.
+INHERIT += "avocado-security-capabilities"
