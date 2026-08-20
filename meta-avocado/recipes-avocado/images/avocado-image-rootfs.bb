@@ -69,3 +69,11 @@ persist_ssh_host_keys () {
 IMAGE_PREPROCESS_COMMAND += "create_dirs;"
 IMAGE_PREPROCESS_COMMAND += "persist_ssh_host_keys;"
 ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"
+
+# avocado_security_capabilities_write_artifact is provided by
+# avocado-security-capabilities.bbclass (globally inherited via
+# conf/distro/include/avocado-security.inc); it writes
+# /etc/avocado-security-capabilities from this machine's
+# AVOCADO_SECURITY_CAPABILITIES so an on-device extension can check
+# eligibility without a build-time BitBake channel.
+ROOTFS_POSTPROCESS_COMMAND += "avocado_security_capabilities_write_artifact;"
