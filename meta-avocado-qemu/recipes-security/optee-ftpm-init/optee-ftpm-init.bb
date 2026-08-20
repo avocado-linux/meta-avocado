@@ -61,3 +61,37 @@ FILES:${PN} += "${systemd_system_unitdir}/initrd-root-fs.target.wants/optee-ftpm
 
 # Only the OP-TEE fTPM machines need this.
 COMPATIBLE_MACHINE = "avocado-qemuarm64"
+
+# Assert this recipe's COMPATIBLE_MACHINE agrees with the machine's own
+# AVOCADO_SECURITY_CAPABILITIES declaration, rather than letting the two drift
+# apart silently - the class of defect avocado-security-capabilities.bbclass
+# exists to close.
+#
+# devtool-debt: this catches only ONE of the two directions a disagreement can
+# take. It runs in an anonymous python function, which BitBake only executes
+# for a MACHINE this recipe's own COMPATIBLE_MACHINE already matches - a
+# machine COMPATIBLE_MACHINE excludes never reaches this code at all, so
+# "declaration claims ftpm, but this recipe excludes the machine" cannot be
+# caught here; nothing from an excluded recipe ever runs to report it. Only
+# "this recipe would build ftpm, but the declaration forgot to say so" is
+# checked. Closing the other direction needs either this recipe's
+# COMPATIBLE_MACHINE value duplicated into a machine-wide config-level check
+# (defeating the "declared in exactly one place" premise this whole change
+# exists for) or COMPATIBLE_MACHINE generated FROM the declaration (design.md's
+# deferred, unverified idea). Ceiling: the declaration-excludes-but-recipe-
+# includes direction stays uncaught. Upgrade trigger: COMPATIBLE_MACHINE
+# becomes derivable from AVOCADO_SECURITY_CAPABILITIES, or a second check is
+# added elsewhere for that direction specifically.
+python () {
+    machine = d.getVar("MACHINE") or "<unknown>"
+    capabilities = (d.getVar("AVOCADO_SECURITY_CAPABILITIES") or "").split()
+    if "ftpm" not in capabilities:
+        bb.fatal(
+            "machine %s can build optee-ftpm-init (COMPATIBLE_MACHINE "
+            "matches) but its AVOCADO_SECURITY_CAPABILITIES declaration does "
+            "not include ftpm. Unmet prerequisite: add ftpm to "
+            "AVOCADO_SECURITY_CAPABILITIES in this machine's conf, or this "
+            "recipe's COMPATIBLE_MACHINE no longer applies to it."
+            % machine
+        )
+}
