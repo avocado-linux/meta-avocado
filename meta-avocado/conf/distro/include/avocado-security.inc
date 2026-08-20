@@ -23,3 +23,10 @@ AVOCADO_SB_KEYS_DIR ?= "${TOPDIR}/avocado-sb-keys"
 # sign.bbclass) - AHAB keys are the root of trust burned into a fuse and
 # cannot be conjured by the build, so a default that worked would be a
 # default anyone could sign against.
+
+# Global fail-loud check for security features requested via DISTRO_FEATURES
+# against what the selected machine declares it can deliver. Same INHERIT +=
+# shape as INHERIT += "avocado-sysusers" in conf/distro/avocado.conf:15;
+# lives here rather than there because this file is the security-scoped
+# include, already require'd from conf/distro/avocado.inc:56.
+INHERIT += "avocado-security-capabilities"
