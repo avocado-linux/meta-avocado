@@ -18,6 +18,7 @@ do_create_image_spdx[noexec] = "1"
 do_create_image_spdx_setscene[noexec] = "1"
 do_create_rootfs_spdx_setscene[noexec] = "1"
 do_create_image_sbom_spdx[noexec] = "1"
+do_create_image_sbom_spdx_setscene[noexec] = "1"
 
 # Disable image-specific settings
 IMAGE_FSTYPES = ""
