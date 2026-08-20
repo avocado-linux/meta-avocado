@@ -7,6 +7,8 @@ SRC_URI = " \
     file://var-key.sh \
     file://cryptsetup-var.service \
     file://99-zz-cryptsetup-var.rules \
+    file://avocado-posture-publish.sh \
+    file://avocado-posture-publish.service \
 "
 
 # Tools cryptsetup-var.sh + var-key.sh invoke in the (minimal) initramfs:
@@ -64,10 +66,41 @@ do_install() {
     install -d ${D}${nonarch_base_libdir}/udev/rules.d
     install -m 0644 ${UNPACKDIR}/99-zz-cryptsetup-var.rules \
         ${D}${nonarch_base_libdir}/udev/rules.d/99-zz-cryptsetup-var.rules
+
+    # Posture publisher: reads what cryptsetup-var.sh left in /run and puts it in
+    # the U-Boot KV store, which is what peridiod already reads.
+    install -m 0750 ${UNPACKDIR}/avocado-posture-publish.sh \
+        ${D}${libexecdir}/cryptsetup-var/
+    install -m 0644 ${UNPACKDIR}/avocado-posture-publish.service \
+        ${D}${systemd_system_unitdir}/
 }
 
-PACKAGES =+ "${PN}-udev"
+PACKAGES =+ "${PN}-udev ${PN}-posture"
 FILES:${PN}-udev = "${nonarch_base_libdir}/udev/rules.d/99-zz-cryptsetup-var.rules"
+
+# Posture publishing is rootfs-only, so it gets its own package rather than
+# riding along in ${PN} and being pulled into the initrd - it reads what the
+# initramfs recorded, it does not run there.
+#
+# The split relies on PACKAGES order, which is load-bearing here: FILES:${PN}
+# below globs the whole ${libexecdir}/cryptsetup-var/ directory and so also
+# matches this script, and the first package in PACKAGES to match a file claims
+# it. `PACKAGES =+` prepends, putting ${PN}-posture ahead of ${PN}, so the script
+# lands here rather than in the initramfs package. Switching that to `=.` or
+# appending instead would silently pull the publisher into the initrd.
+#
+# libubootenv supplies fw_printenv/fw_setenv and util-linux-findmnt supplies
+# findmnt. Both are RDEPENDS rather than optional probes because a posture
+# reporter that silently cannot read posture is worse than one that fails to
+# install; the script still degrades cleanly if the fw_env.config a given
+# machine needs was never generated.
+FILES:${PN}-posture = " \
+    ${libexecdir}/cryptsetup-var/avocado-posture-publish.sh \
+    ${systemd_system_unitdir}/avocado-posture-publish.service \
+"
+RDEPENDS:${PN}-posture = "libubootenv util-linux-findmnt"
+SYSTEMD_SERVICE:${PN}-posture = "avocado-posture-publish.service"
+SYSTEMD_AUTO_ENABLE:${PN}-posture = "enable"
 
 FILES:${PN} += "${libexecdir}/cryptsetup-var/"
 FILES:${PN} += "${systemd_system_unitdir}/cryptsetup-var.service"

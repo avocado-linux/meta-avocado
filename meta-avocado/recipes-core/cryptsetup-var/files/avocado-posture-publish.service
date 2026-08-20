@@ -1,0 +1,20 @@
+[Unit]
+Description=Publish /var storage-security posture to the U-Boot environment
+# Ordering, never a requirement. avocado-uboot-env.service generates the
+# fw_env.config this needs, but it lives in meta-avocado-nxp while this unit
+# ships in the shared layer, so it must stay valid on a machine that has no such
+# generator - systemd ignores After= on a unit that does not exist, and the
+# script exits 0 when the libubootenv tools are absent.
+#
+# local-fs.target rather than var.mount: the script reports whether /var came up
+# through the dm-crypt mapper, which needs the mount settled but must still run
+# (and report the negative) on a target where it did not.
+After=local-fs.target avocado-uboot-env.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/cryptsetup-var/avocado-posture-publish.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
