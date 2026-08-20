@@ -54,11 +54,20 @@ def avocado_security_capabilities_check(d):
     capabilities = d.getVar("AVOCADO_SECURITY_CAPABILITIES")
 
     # Absent declaration: this machine has not been migrated onto
-    # AVOCADO_SECURITY_CAPABILITIES at all. Landed permissive - warn and let
-    # the build proceed - so migrating machines one at a time (this change's
-    # groups 2-3) does not break every other machine's build in the
-    # meantime. This is the one branch task 4.1 flips, once every in-scope
-    # machine has a real declaration.
+    # AVOCADO_SECURITY_CAPABILITIES at all. Refused, distinctly from the
+    # explicitly-empty case below (that one names the features missing from a
+    # real, non-empty-or-empty declaration; this one names the declaration
+    # itself as absent) - migrating a board is "add the line", not "guess
+    # which features it happens to support by trying a build".
+    #
+    # This was landed permissive through groups 1-3 while avocado-qemuarm64,
+    # avocado-qemux86-64, avocado-imx93-frdm and avocado-raspberrypi migrated
+    # (raspberrypi's migration was in fact stopped mid-way on an unrelated,
+    # pre-existing partition-numbering defect - see task 2.4's notes - so it
+    # remains unmigrated and is refused here along with
+    # avocado-grinn-astra-1680-sbc, avocado-rubikpi3 and the Jetson family).
+    # A machine with no declaration and no security feature requested is
+    # unaffected either way - see the empty-`requested`-list return above.
     #
     # No square brackets in these messages: bakar streams bitbake's log
     # through a RichHandler with markup=True (observability.py:132), and Rich
@@ -70,12 +79,15 @@ def avocado_security_capabilities_check(d):
     # machine, the feature and the prerequisite so an operator does not have
     # to read the check to interpret the failure.
     if capabilities is None:
-        bb.warn(
-            "%s: requested security feature(s) %s but declares no "
-            "AVOCADO_SECURITY_CAPABILITIES (unmigrated machine) - permitting "
-            "for now" % (machine, ", ".join(requested))
+        bb.fatal(
+            "machine %s requested security feature(s) %s but declares no "
+            "AVOCADO_SECURITY_CAPABILITIES at all. Unmet prerequisite: add "
+            "AVOCADO_SECURITY_CAPABILITIES to this machine's conf naming "
+            "every security feature it can actually deliver, or drop the "
+            "feature request if this machine has not been migrated onto the "
+            "declaration yet."
+            % (machine, ", ".join(requested))
         )
-        return
 
     declared = capabilities.split()
     missing = [feature for feature in requested if feature not in declared]
