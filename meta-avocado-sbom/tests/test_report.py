@@ -49,8 +49,10 @@ class ReadCveDataTests(unittest.TestCase):
         with open(path, "w") as f:
             json.dump({"package": list(entries)}, f)
 
-    def read(self, recipe_versions):
-        return read_cve_data(self.cve_dir, recipe_versions, self.stats)
+    def read(self, recipe_versions, status="Unpatched"):
+        return read_cve_data(
+            self.cve_dir, recipe_versions, self.stats, status=status
+        )
 
     def test_no_nvd_record_is_scanned_not_unscanned(self):
         # The defect: cvesInRecord "No" means cve-check looked the product up
@@ -132,6 +134,57 @@ class ReadCveDataTests(unittest.TestCase):
             ["CVE-2026-0001", "CVE-2026-0002"],
         )
 
+    def test_a_recipe_carrying_cves_is_not_a_no_record_recipe(self):
+        # cve-check.bbclass skips the products of a CVE it ignored or found
+        # already patched, so a recipe whose every record was patched is
+        # written cvesInRecord "No" while its issues survive. At "Patched" that
+        # recipe reports CVEs, and a recipe in "recipes" is in no other leg of
+        # the partition.
+        self.write("openssl", entry(
+            "openssl", in_record="No",
+            issues=[{"id": "CVE-2026-0001", "status": "Patched"}]))
+        recipes, scanned, no_record = self.read(
+            {"openssl": {"1.0"}}, status="Patched")
+        self.assertIn("openssl", recipes)
+        self.assertIn("openssl", scanned)
+        self.assertNotIn("openssl", no_record)
+
+    def test_no_record_survives_when_the_recipe_reports_nothing(self):
+        # The same entry read at the default status carries no issue, so
+        # nothing displaces it: the subtraction must not swallow the whole list.
+        self.write("openssl", entry(
+            "openssl", in_record="No",
+            issues=[{"id": "CVE-2026-0001", "status": "Patched"}]))
+        recipes, _, no_record = self.read({"openssl": {"1.0"}})
+        self.assertNotIn("openssl", recipes)
+        self.assertIn("openssl", no_record)
+
+    def test_an_id_repeated_inside_one_entry_is_one_cve(self):
+        issue = {"id": "CVE-2026-0001", "status": "Unpatched"}
+        self.write("openssl", entry("openssl", issues=[issue, dict(issue)]))
+        recipes, _, _ = self.read({"openssl": {"1.0"}})
+        self.assertEqual(len(recipes["openssl"]["cves"]), 1)
+        self.assertEqual(self.stats.cves, 1)
+
+    def test_two_versions_merge_under_the_first_and_keep_both_cves(self):
+        # Only reachable unpackaged: a packaged recipe has a known version and
+        # anything else was dropped as stale. The first entry's version stands,
+        # first meaning sorted filename then file order.
+        self.write(
+            "openssl",
+            entry("openssl", version="1.0",
+                  issues=[{"id": "CVE-2026-0001", "status": "Unpatched"}]),
+            entry("openssl", version="2.0",
+                  issues=[{"id": "CVE-2026-0002", "status": "Unpatched"}]),
+        )
+        recipes, _, _ = self.read({})
+        self.assertEqual(recipes["openssl"]["version"], "1.0")
+        self.assertEqual(
+            sorted(c["id"] for c in recipes["openssl"]["cves"]),
+            ["CVE-2026-0001", "CVE-2026-0002"],
+        )
+        self.assertEqual(self.stats.cves, 2)
+
 class BuildReportTests(unittest.TestCase):
     """The two lists partition the shipped recipes with the clean ones."""
 
@@ -184,6 +237,31 @@ class BuildReportTests(unittest.TestCase):
             len(unscanned) + len(no_record) + len(clean) + len(doc["recipes"]),
             len(shipped),
         )
+
+    def test_the_partition_holds_at_a_patched_status(self):
+        # The shape a "Patched" build hits: every record for the product was
+        # already patched, so cve-check writes cvesInRecord "No" and the recipe
+        # still reports a CVE. It belongs to "recipes" and to nothing else.
+        self.package("libssl3", "openssl")
+        self.package("pg-base", "packagegroup-base")
+        self.write("openssl", entry(
+            "openssl", in_record="No",
+            issues=[{"id": "CVE-2026-1", "status": "Patched"}]))
+
+        doc, _ = build_report(self.cve_dir, [self.pkgdata], status="Patched")
+        unscanned = set(doc["unscanned_recipes"])
+        no_record = set(doc["no_cve_record_recipes"])
+        shipped = {p["recipe"] for p in doc["packages"].values()}
+
+        self.assertIn("openssl", doc["recipes"])
+        self.assertEqual(no_record, set())
+        self.assertEqual(unscanned, {"packagegroup-base"})
+        clean = shipped - unscanned - no_record - set(doc["recipes"])
+        self.assertEqual(
+            len(unscanned) + len(no_record) + len(clean) + len(doc["recipes"]),
+            len(shipped),
+        )
+        self.assertEqual(doc["counts"]["no_cve_record_recipes"], 0)
 
     def test_counters_match_the_lists(self):
         self.package("libattr1", "attr")

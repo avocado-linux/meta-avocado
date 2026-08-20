@@ -205,9 +205,17 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 break
 
             issues = []
+            seen_here = set()
             for issue in raw_issues:
                 issue_status = issue.get("status")
                 if issue_status == status:
+                    # An id repeated inside one entry is one CVE, the same as
+                    # one repeated across two entries - see the merge below.
+                    # Dropping it here covers both, and covers the first entry
+                    # for a recipe, which the merge never sees.
+                    if issue.get("id") in seen_here:
+                        continue
+                    seen_here.add(issue.get("id"))
                     issues.append({k: issue[k] for k in fields if k in issue})
                     continue
 
@@ -229,6 +237,15 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 # exceed what it carries fails its own check as malformed,
                 # which no setting overrides. Merge instead, by id: the same
                 # CVE reported twice is one CVE.
+                #
+                # The version already recorded stands, and the merged CVEs are
+                # carried under it. Entries at two versions only reach here
+                # unpackaged: a packaged recipe has a known version, and an
+                # entry at any other one was dropped as stale above. Nothing
+                # this build ships is described by that version, so the first
+                # is as good as the second - first meaning first in sorted
+                # filename order, then file order, which makes it stable
+                # across runs rather than correct.
                 seen_ids = {c.get("id") for c in existing["cves"]}
                 added = [c for c in issues if c.get("id") not in seen_ids]
                 existing["cves"].extend(added)
@@ -249,7 +266,14 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 stats.packaged_cves += len(issues)
 
     stats.recipes = len(recipes)
-    return recipes, scanned, scanned - with_record
+    # cvesInRecord "No" means no record matched, not that none exists:
+    # cve-check.bbclass skips the products of a CVE it ignored or found
+    # already patched, so at AVOCADO_CVE_REPORT_STATUS "Patched" or "Ignored" a
+    # recipe can carry issues and still be written with no record on every
+    # product. Reporting it as having none while its CVEs sit in "recipes"
+    # would put it in two legs of the partition at once, so what the report
+    # carries decides.
+    return recipes, scanned, scanned - with_record - set(recipes)
 
 def read_optouts(optout_dir):
     """Read the opt-out markers avocado-cve-optout.bbclass writes beside the

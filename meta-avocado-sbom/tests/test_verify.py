@@ -46,7 +46,7 @@ class FixtureTests(unittest.TestCase):
         self.assertClean()
         self.assertEqual(verify.additions(self.report), [])
 
-    # ENG-2317: packages disappear, the counter does not notice.
+    # Packages disappear, the counter does not notice.
 
     def test_packages_dropped_silently(self):
         for name in list(self.report["packages"])[:40]:
@@ -199,6 +199,21 @@ class FixtureTests(unittest.TestCase):
         self.report["counts"]["unscanned_recipes"] += 1
         self.assertCaught("which shipped no package")
 
+    def test_recipe_in_both_recipes_and_no_cve_record(self):
+        # At a status other than "Unpatched" the generator once put a recipe
+        # in both: cve-check writes cvesInRecord "No" for a product whose every
+        # record it ignored or found patched, while the issues survive.
+        name = next(iter(self.report["recipes"]))
+        self.report["no_cve_record_recipes"].append(name)
+        self.report["counts"]["no_cve_record_recipes"] += 1
+        self.assertCaught("which recipes reports CVEs for")
+
+    def test_recipe_in_both_recipes_and_unscanned(self):
+        name = next(iter(self.report["recipes"]))
+        self.report["unscanned_recipes"].append(name)
+        self.report["counts"]["unscanned_recipes"] += 1
+        self.assertCaught("which recipes reports CVEs for")
+
     def test_optional_keys_may_be_absent(self):
         # A standalone run has neither.
         del self.report["machine"]
@@ -236,7 +251,7 @@ class FixtureTests(unittest.TestCase):
         self.assertClean()
 
     def test_a_mapping_correction_still_passes(self):
-        # ENG-2196 shape: contents change, envelope does not.
+        # Contents change, envelope does not.
         packages = self.report["packages"]
         name = next(iter(packages))
         packages[name] = dict(packages[name], recipe="libxml2", version="2.12.10-r0")
@@ -403,7 +418,7 @@ class SeverityTests(unittest.TestCase):
         self.assertEqual(verify.check_health("not a report"), [])
 
 class UnscannedDeclaredTests(unittest.TestCase):
-    """ENG-2364's gate, after the declared count was replaced by declared
+    """The unscanned gate, after the declared count was replaced by declared
     reasons. The count could only say that the number moved, so the only way to
     answer it was to copy the new number back in; and one opt-out gained while
     one scan was lost left it silent. These assert the set instead.

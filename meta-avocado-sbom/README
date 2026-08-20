@@ -362,8 +362,14 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         image scope reads a different one and is not wrong
   no_cve_record_recipes recipes that shipped packages and were scanned, but
                         whose products came back cvesInRecord "No" - the NVD
-                        holds no record under that product name. Named in the
-                        top-level "no_cve_record_recipes" list. This is a scan
+                        holds no record under that product name - and that
+                        carry no CVE at the reported status. Both conditions
+                        matter: cve-check writes "No" for a product whose every
+                        record it ignored or found patched, so at a status
+                        other than "Unpatched" a recipe can be marked with no
+                        record and still report CVEs. Those are in "recipes",
+                        which is the leg of the partition that wins. Named in
+                        the top-level "no_cve_record_recipes" list. This is a scan
                         result, not a coverage gap, and it is normally the
                         larger of the two: most of a rootfs is software the NVD
                         has never had an advisory for. A CVE_PRODUCT that names

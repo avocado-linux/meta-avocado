@@ -213,9 +213,11 @@ def _check_derived(report, fail):
         if _is_int(got) and got != want:
             fail("counts.%s is %d, but the report holds %d" % (name, got, want))
 
-    # Both lists partition the shipped recipes with the ones scanned and found
-    # in the NVD, so a consumer can account for every shipped recipe exactly
-    # once. Overlap would mean a recipe reported as both examined and not.
+    # The two lists partition the shipped recipes with the ones scanned and
+    # found in the NVD, so a consumer can account for every shipped recipe
+    # exactly once. That needs all three legs to be disjoint: overlap between
+    # the lists would mean a recipe reported as both examined and not, and a
+    # recipe in "recipes" is by definition not in either.
     shipped = {
         p["recipe"] for p in packages.values()
         if isinstance(p, dict) and isinstance(p.get("recipe"), str)
@@ -227,6 +229,13 @@ def _check_derived(report, fail):
         fail("%s in both unscanned_recipes and no_cve_record_recipes; a recipe "
              "nothing looked at cannot also have been looked up"
              % ", ".join(both[:5]))
+    for key, names in (("unscanned_recipes", unscanned_names),
+                       ("no_cve_record_recipes", no_record_names)):
+        carried = sorted(names & set(recipes))
+        if carried:
+            fail("%s holds %s, which recipes reports CVEs for; the three are "
+                 "one partition and a recipe is in exactly one"
+                 % (key, ", ".join(carried[:5])))
     for key, names in (("unscanned_recipes", unscanned),
                        ("no_cve_record_recipes", no_record)):
         stray = sorted(n for n in names if isinstance(n, str) and n not in shipped)
