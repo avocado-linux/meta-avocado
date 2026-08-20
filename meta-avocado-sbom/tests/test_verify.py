@@ -289,6 +289,16 @@ class SchemaTests(unittest.TestCase):
             self.schema["properties"]["version"]["const"], verify.REPORT_VERSION
         )
 
+    def test_schema_statuses_match_the_generator(self):
+        # The pair the unknown-status warning depends on: do_cve_report warns
+        # when cve-check grows a status beyond CVE_STATUSES, but nothing tied
+        # that list to the schema's enum, so the two could drift apart in
+        # exactly the release the warning exists to survive.
+        self.assertEqual(
+            sorted(self.schema["properties"]["status"]["enum"]),
+            sorted(verify.CVE_STATUSES),
+        )
+
     def test_required_top_level_keys_match_the_checker(self):
         self.assertEqual(
             sorted(self.schema["required"]), sorted(verify.TOP_LEVEL_TYPES)
@@ -551,9 +561,15 @@ class VersionTests(unittest.TestCase):
     def test_the_generator_major_is_supported(self):
         # Or the day REPORT_VERSION is bumped, every fresh report fails its
         # own check and takes the build with it.
-        self.assertIn(
-            verify.REPORT_VERSION.partition(".")[0], verify.SUPPORTED_MAJORS
-        )
+        self.assertIn(verify.REPORT_VERSION, verify.SUPPORTED_MAJORS)
+
+    def test_a_dotted_version_is_not_a_point_release(self):
+        # "version" is the major, so "1.2" is not version 1 with something
+        # added - it is a version the schema's const "1" rejects outright, and
+        # reading it as "1" would accept a document no consumer agreed to.
+        report = load()
+        report["version"] = "1.2"
+        self.assertTrue(verify.check_report(report, health=False))
 
 class CopyGuardTest(unittest.TestCase):
     """The tests mutate; make sure they mutate a copy, not the file."""

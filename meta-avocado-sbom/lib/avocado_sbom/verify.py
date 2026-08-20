@@ -2,8 +2,10 @@
 
 """Check a CVE report against the frozen envelope.
 
-Shape and derived counters only. Nothing here asserts on which packages,
-recipes or CVEs a report carries, so a mapping correction never turns CI red.
+Shape and derived counters only. Nothing here asserts on an expected set of
+packages, recipes or CVEs: every check is the document against itself, or
+against markers the same build produced. So a mapping correction never turns
+CI red, even though a failure may name the recipes it found.
 Run by CI against the fixture and by do_cve_report against every fresh report.
 """
 
@@ -85,14 +87,15 @@ def _check_envelope(report, fail):
                 % (key, type(report[key]).__name__, want.__name__)
             )
 
+    # Exact, not a major prefix: "version" *is* the major, so "1.2" is not a
+    # point release this checker can read - it is a version the schema's
+    # const "1" rejects outright.
     version = report.get("version")
-    if isinstance(version, str):
-        major = version.partition(".")[0]
-        if major not in SUPPORTED_MAJORS:
-            fail(
-                "report version %r has major %r; this checker understands %s"
-                % (version, major, ", ".join(SUPPORTED_MAJORS))
-            )
+    if isinstance(version, str) and version not in SUPPORTED_MAJORS:
+        fail(
+            "report version %r; this checker understands %s"
+            % (version, ", ".join(SUPPORTED_MAJORS))
+        )
 
     status = report.get("status")
     if isinstance(status, str) and status not in CVE_STATUSES:

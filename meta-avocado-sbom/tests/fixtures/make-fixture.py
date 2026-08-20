@@ -24,6 +24,7 @@ sys.path.insert(
 )
 
 from avocado_sbom.report import packages_digest  # noqa: E402
+from avocado_sbom.verify import HEALTH_COUNTERS  # noqa: E402
 
 # Kept for the shapes they cover: packaged and unpackaged, one CVE and several.
 KEEP_RECIPES = (
@@ -39,13 +40,17 @@ KEEP_RECIPES = (
 # Packages from recipes with no CVEs: most of a real package set is unreferenced.
 EXTRA_PACKAGE_SAMPLE = 25
 
-# Not re-derivable from a trimmed report. Carried unchanged, never asserted on.
+# Not re-derivable from a trimmed report, so carried unchanged. No check reads
+# their value; package_collisions is here rather than below because it is not a
+# health counter - the first pkgdata directory wins and the report is complete
+# either way - so a source report carrying one still cuts a valid fixture.
 CARRIED = (
     "cve_files",
     "unpatched_cves",
     "ignored_cves",
     "patched_cves",
     "unknown_status_cves",
+    "package_collisions",
 )
 
 def trim(full):
@@ -92,8 +97,8 @@ def trim(full):
     for name in CARRIED:
         counts[name] = full["counts"][name]
     # A fixture with a non-zero health counter would pin the failure as normal.
-    for name in ("stale_dropped", "cve_files_unreadable", "pkgdata_unreadable",
-                 "package_collisions"):
+    # Read from verify so the two cannot disagree about what a health counter is.
+    for name in HEALTH_COUNTERS:
         if full["counts"][name]:
             raise SystemExit(
                 "source report has counts.%s = %d; fix the build that produced "

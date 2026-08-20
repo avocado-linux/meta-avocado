@@ -169,11 +169,14 @@ complete, so the build passes, but the stale marker is widening what the check
 accepts and is worth clearing. CVE_CHECK_DIR is never pruned, so the class
 removes a marker whenever a recipe stops opting out.
 
-A build with no markers at all fails as incomplete rather than skipping the
-check: nothing distinguishes "no recipe opts out" - which no real build has
-been - from avocado-cve-optout not being inherited, and silently skipping is
-the failure mode the whole check exists to prevent. Add
+A build with something unscanned and no markers at all fails as incomplete
+rather than skipping the check: nothing distinguishes "no recipe opts out" -
+which no real build has been - from avocado-cve-optout not being inherited, and
+silently skipping is the failure mode the whole check exists to prevent. Add
 INHERIT += "avocado-cve-optout", or stack kas/feature/cve-check.yml.
+
+A build with nothing unscanned needs no markers and is not held to this: there
+is no recipe to excuse, so a missing marker cannot be hiding one.
 
 A build with no unpatched CVEs at all is not a failure of either kind. Zero
 recipes, zero CVEs and zero packaged recipes is what a fully patched build
@@ -188,7 +191,10 @@ and went unnoticed for weeks.
 
 Five counters (cve_files, unpatched_cves, ignored_cves, patched_cves,
 unknown_status_cves) count inputs that are not in the report and cannot be
-re-derived from it. They are carried for fidelity and never asserted on.
+re-derived from it. They are carried for fidelity and their values are never
+asserted on. One exception, and only at zero: cve_files = 0 fails, because no
+cve-check file was consumed at all and every other counter is describing a scan
+that never happened.
 
 The fixture
 -----------
@@ -242,7 +248,9 @@ and the counts block in tests/fixtures/make-fixture.py. A test asserts the
 schema and the checker agree, so a change that touches only one of the first
 three fails before it reaches a consumer. make-fixture.py has no such test: it
 builds counts from its own key list, so a counter missing there is only found
-when someone regenerates the fixture and CI reports it missing.
+when someone regenerates the fixture and CI reports it missing. It does import
+HEALTH_COUNTERS from verify rather than restating it, so at least the question
+of which counters must be zero has one answer and not two.
 
 One change was made under these rules that they would otherwise forbid.
 unscanned_recipes originally counted recipes with no cve-check result *and*
@@ -345,7 +353,13 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         What is checked is the membership, not the size:
                         avocado-cve-optout records why each of these recipes
                         was skipped and do_cve_report fails on any that gives
-                        no reason. See "Why reasons and not a count"
+                        no reason. See "Why reasons and not a count".
+                        Measured once for orientation, not as a threshold:
+                        avocado-qemuarm64 feed-scoped read 11 on 2026-08-20 -
+                        6 packagegroups, 4 avocado meta-recipes and
+                        glibc-locale. Nothing gates on that number and it is
+                        deliberately in no conf file; a different MACHINE or
+                        image scope reads a different one and is not wrong
   no_cve_record_recipes recipes that shipped packages and were scanned, but
                         whose products came back cvesInRecord "No" - the NVD
                         holds no record under that product name. Named in the

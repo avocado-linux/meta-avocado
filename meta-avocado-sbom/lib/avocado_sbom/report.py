@@ -251,9 +251,7 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
     stats.recipes = len(recipes)
     return recipes, scanned, scanned - with_record
 
-OPTOUT_VERSION = "1"
-
-def read_optouts(cve_dir):
+def read_optouts(optout_dir):
     """Read the opt-out markers avocado-cve-optout.bbclass writes beside the
     cve-check results.
 
@@ -269,7 +267,7 @@ def read_optouts(cve_dir):
     declared = {}
     unreadable = 0
 
-    for path in sorted(glob.glob(os.path.join(cve_dir, "*_optout.json"))):
+    for path in sorted(glob.glob(os.path.join(optout_dir, "*_optout.json"))):
         try:
             with open(path) as f:
                 data = json.load(f)
