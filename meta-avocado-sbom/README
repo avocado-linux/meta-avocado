@@ -20,6 +20,26 @@ They are joined on the recipe name. CVEs are stored once per recipe and
 packages only reference it, so a recipe shipping many packages does not
 duplicate its CVE list.
 
+A format, not a tool
+--------------------
+
+The Patched and Ignored subtraction in read_cve_data reads the cve-check JSON
+shape - package[].issue[].status - and nothing else. It does not import, link
+against or extend whatever wrote those files. Keep it that way.
+
+The correlation engine selected to replace in-build cve-check, sbom-cve-check,
+is GPL-2.0 and exports yocto-cve-check-manifest. Pointing --cve-dir at that
+export is a path change, so the engine ships unmodified and the only obligation
+that ever attaches is conveying its public source. Implementing this same
+subtraction as a plugin inside that engine would make it a derivative work
+instead, and shipping it into a customer's on-prem install is a distribution -
+which would put our subtraction under GPL-2.0 too. This layer is Apache-2.0 and
+remains so exactly as long as the boundary holds.
+
+So extend the reader here, never the engine there. If the export turns out to
+be one merged document rather than <PN>_cve.json per recipe, widen the glob in
+read_cve_data; that is still the right side of the line.
+
 Requirements
 ------------
 
@@ -411,3 +431,123 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         version; the first pkgdata directory won. Not a health
                         counter: the winner is deterministic and the report is
                         complete, so it is noted rather than failed on
+
+Publishing SPDX
+---------------
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.publish \
+      --in build/tmp/deploy/spdx/3.0.1 -o publish/spdx
+
+Filters a build's SPDX tree down to an inventory - packages, files, licences -
+and drops the CVE assessment. --check runs the gate against a tree as it stands
+and writes nothing, which is the same assertion a consumer makes at ingest.
+
+The gate is on CVE identifiers appearing anywhere in the emitted document, not
+on the field that carried them. That is the whole design and it is not the
+obvious one:
+
+  Build    Where the assessment lives     A security_Vex* gate  This gate
+  -------  -----------------------------  --------------------  ---------
+  2.2      sourceInfo free text           passes, leaks         catches it
+  3.0.1    security_Vex* objects          catches it            catches it
+
+create-spdx-2.2.bbclass writes recipe.sourceInfo = "CVEs fixed: " + patched_cves
+and never consults SPDX_INCLUDE_VEX, so on 2.2 the field cannot be turned off at
+build time. A gate keyed on either field name goes quiet at exactly the moment
+the other starts working.
+
+What the filter removes:
+
+  3.0.1  every security_* node; every hasAssociatedVulnerability relationship;
+         any relationship whose from or to names a CVE
+  2.2    sourceInfo, and externalRefs in the SECURITY category
+
+Then the gate runs. A document that still carries an identifier is not written
+and the run exits non-zero naming the field - teach the filter that shape rather
+than widening the gate.
+
+One exception, and it is why the gate is not vacuous: a patch is named for the
+CVE it fixes, so the source file list carries the assessment too. Those names
+are redacted to CVE-REDACTED rather than dropped, keeping the file and its
+checksum in the inventory, and the count is reported. The match is
+case-insensitive: upstream ships lowercase patch names too, and a
+case-sensitive gate passes them clean rather than failing. It is the only scrub -
+everything else is structural, so anything the gate catches is a shape nobody
+has handled yet.
+
+Symlinks are skipped, never followed. by-hash/ and by-namespace/ (2.2) and
+by-spdxid-hash/ (3.0.1) are symlink trees mirroring the arch directories: on a
+qemuarm64 world build, 12,446 links over 6,223 real documents. A walker that
+follows them filters every document three times and publishes navigation
+indexes as if they were content. They are regenerable, so they stay out.
+
+Measured on that build, 3.0.1 with SPDX_INCLUDE_VEX = "current": 13,091
+documents, 4,762 of them carrying a CVE identifier, 31,221 security nodes and
+4,652 relationships dropped, 860 name fields redacted over 470 distinct patch
+filenames, 6,867 symlinks skipped. Eight seconds for the tree.
+
+Two of those 4,762 carry an identifier and no security_* node at all - both
+copies of package-openssl-ptest, six patch filenames between them and nothing
+else. That gap is worth stating because it is the whole reason the redaction
+step exists: an identifier gate over a purely structural filter fails on
+inventory that merely names a CVE, and no amount of node-dropping reaches it.
+The same gap showed up on 2.2 as 94 documents carrying an identifier against 93
+carrying "CVEs fixed:" - one document, same cause. Anyone tempted to write an
+allowlist should start here: the residue is filenames, not assessment.
+
+The two per-image documents on the same build: 2,001 nodes and 235 relationships
+dropped, 921 patch names redacted. The rootfs document goes from 9,543 nodes to
+8,614 and from 7.4 MB to 5.9 MB, losing all 862 security_* nodes and keeping all
+659 packages, all 4,203 files and its Sbom root. Filtering both trees and then
+re-running --check over the output passes, so the gate holds on what it emits.
+
+SPDX_INCLUDE_VEX = "none" is not a substitute. It is build-wide, so it cannot
+serve two audiences from one build; it leaves the patch filenames alone; and a
+configuration that silently reverts leaves the feed with no check at all, which
+is the failure this exists to prevent.
+
+What --in should point at, and what it does not look at
+-------------------------------------------------------
+
+There are two inputs, and the second is not under deploy/spdx/ at all:
+
+  deploy/spdx/<version>/            the per-recipe and per-package documents
+  deploy/images/<machine>/avocado-image-rootfs-<machine>.spdx.json
+                                   the flattened per-image inventory, written
+                                   by do_create_image_sbom_spdx
+
+The second is the one a consumer wants - a single document with an Sbom root
+listing what shipped, rather than a tree to reassemble - and it is only produced
+when the image recipe is built. avocado-distro does not request it.
+
+It also has a shape the tree does not: a software_Sbom root, whose rootElement
+names the image package and the image artifact. That matters because a 3.0.1
+spdxId embeds the CVE it names (.../vulnerability/CVE-2021-42380), so any field
+holding a raw id is a place a dropped vulnerability can leave its identifier
+behind, and rootElement is not a relationship - the reference pruning here works
+on "from" and "to".
+
+Measured across the 13,091-document tree and both per-image documents: 12,857
+nodes carry rootElement, no node carries element or import at all, and no
+rootElement entry has ever named a vulnerability - the roots point at packages
+and files. So no pruning is needed there today, and none is done. If that ever
+changes the gate catches it: an id naming a CVE is exactly what it looks for, so
+the run fails and the document is not written. Fail closed, rather than a pruner
+maintained against a shape nothing emits.
+
+Three things sit beside that document and are NOT filtered, because they are not
+SPDX and the filter only reads *.spdx.json:
+
+  avocado-image-rootfs-<machine>.cve            cve-check text
+  avocado-image-rootfs-<machine>.json           the same assessment, JSON
+  avocado-image-rootfs-<machine>.spdx.tar.zst   packed per-image documents
+
+All three are assessment, none is publishable, and keeping them off the feed is
+the publish step's job rather than this filter's. Note *.json cannot be globbed
+blind - *.testdata.json, stone-<machine>.json and the image manifests share the
+extension and are not paid surface.
+
+Each arch also carries packages/ and packages-staging/, roughly 6,442 documents
+each and not the same bytes. Both are filtered and both are written: which copy
+is the finalised one is a publish-step decision, and dropping one here would
+hide the duplication rather than settle it.

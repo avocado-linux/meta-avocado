@@ -1,0 +1,35 @@
+{
+  "spdxVersion": "SPDX-2.2",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "recipe-example",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-example",
+      "name": "example",
+      "versionInfo": "1.0",
+      "sourceInfo": "CVEs fixed: CVE-2021-42380 CVE-2019-1010022",
+      "externalRefs": [
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:example:example:1.0:*:*:*:*:*:*:*"
+        },
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:generic/example@1.0"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "SPDXID": "SPDXRef-File-1",
+      "fileName": "example-1.0.tar.gz"
+    },
+    {
+      "SPDXID": "SPDXRef-File-2",
+      "fileName": "CVE-2024-28085-0001.patch"
+    }
+  ]
+}

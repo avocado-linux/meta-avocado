@@ -385,7 +385,8 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
 
     return report, stats
 
-def write_report(report, out_path):
+def write_report(report, out_path, indent=2):
+    """Write one JSON document atomically. indent=None emits it compact."""
     out_dir = os.path.dirname(out_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
@@ -393,7 +394,7 @@ def write_report(report, out_path):
     tmp_path = out_path + ".tmp"
     try:
         with open(tmp_path, "w") as f:
-            json.dump(report, f, indent=2, sort_keys=True)
+            json.dump(report, f, indent=indent, sort_keys=True)
             f.write("\n")
         os.replace(tmp_path, out_path)
     except BaseException:

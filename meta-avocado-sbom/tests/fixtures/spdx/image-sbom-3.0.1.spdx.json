@@ -1,0 +1,85 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/document",
+      "name": "avocado-image-rootfs-example",
+      "profileConformance": ["core", "software", "security"],
+      "rootElement": ["http://spdx.org/spdxdocs/example/image/sbom"]
+    },
+    {
+      "type": "software_Sbom",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/sbom",
+      "name": "avocado-image-rootfs-example",
+      "software_sbomType": ["build"],
+      "rootElement": [
+        "http://spdx.org/spdxdocs/example/image/package/image",
+        "http://spdx.org/spdxdocs/example/image/artifact/erofs"
+      ]
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/package/image",
+      "name": "avocado-image-rootfs"
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/artifact/erofs",
+      "name": "avocado-image-rootfs-example.erofs-lz4",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "ee"}]
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/package/example",
+      "name": "example",
+      "software_packageVersion": "1.0"
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/source/1",
+      "name": "CVE-2024-28085-0001.patch",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "bb"}]
+    },
+    {
+      "type": "security_Vulnerability",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/vulnerability/CVE-2021-42380",
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2021-42380"
+        }
+      ]
+    },
+    {
+      "type": "security_VexFixedVulnAssessmentRelationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/vex/1",
+      "from": "http://spdx.org/spdxdocs/example/image/vulnerability/CVE-2021-42380",
+      "relationshipType": "fixedIn",
+      "to": ["http://spdx.org/spdxdocs/example/image/package/example"]
+    },
+    {
+      "type": "security_VexNotAffectedVulnAssessmentRelationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/vex/2",
+      "from": "http://spdx.org/spdxdocs/example/image/vulnerability/CVE-2021-42380",
+      "relationshipType": "doesNotAffect",
+      "to": ["http://spdx.org/spdxdocs/example/image/package/image"]
+    },
+    {
+      "type": "LifecycleScopedRelationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/relationship/1",
+      "from": "http://spdx.org/spdxdocs/example/image/package/image",
+      "relationshipType": "contains",
+      "completeness": "complete",
+      "to": ["http://spdx.org/spdxdocs/example/image/package/example"]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/image/relationship/2",
+      "from": "http://spdx.org/spdxdocs/example/image/package/example",
+      "relationshipType": "hasInputs",
+      "to": ["http://spdx.org/spdxdocs/example/image/source/1"]
+    }
+  ]
+}
