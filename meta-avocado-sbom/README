@@ -169,6 +169,12 @@ complete, so the build passes, but the stale marker is widening what the check
 accepts and is worth clearing. CVE_CHECK_DIR is never pruned, so the class
 removes a marker whenever a recipe stops opting out.
 
+Markers outnumber unscanned_recipes, and that is not the reverse case: a recipe
+that opts out and ships no runtime package writes one too, and was never a
+candidate for the list - a feed-scoped qemux86-64 build wrote 15 markers for 11
+unscanned recipes. Only declarations by recipes that shipped a package are held
+against the report.
+
 A build with something unscanned and no markers at all fails as incomplete
 rather than skipping the check: nothing distinguishes "no recipe opts out" -
 which no real build has been - from avocado-cve-optout not being inherited, and
@@ -354,12 +360,16 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         avocado-cve-optout records why each of these recipes
                         was skipped and do_cve_report fails on any that gives
                         no reason. See "Why reasons and not a count".
-                        Measured once for orientation, not as a threshold:
-                        avocado-qemuarm64 feed-scoped read 11 on 2026-08-20 -
-                        6 packagegroups, 4 avocado meta-recipes and
-                        glibc-locale. Nothing gates on that number and it is
-                        deliberately in no conf file; a different MACHINE or
-                        image scope reads a different one and is not wrong
+                        Measured for orientation, not as a threshold: both
+                        avocado-qemuarm64 and avocado-qemux86-64 feed-scoped
+                        read 11 on 2026-08-20 - the same 6 packagegroups, 4
+                        avocado meta-recipes and glibc-locale, over 222 and 218
+                        shipped recipes respectively. The set is structural
+                        rather than per-MACHINE, which is more than the check
+                        needs and less than a threshold: nothing gates on that
+                        number, it is deliberately in no conf file, and another
+                        MACHINE or image scope may read a different one and not
+                        be wrong
   no_cve_record_recipes recipes that shipped packages and were scanned, but
                         whose products came back cvesInRecord "No" - the NVD
                         holds no record under that product name - and that
