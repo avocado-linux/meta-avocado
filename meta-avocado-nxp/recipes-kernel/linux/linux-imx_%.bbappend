@@ -94,6 +94,7 @@ KERNEL_DEVICETREE:append:imx95-frdm = " \
 
 SRC_URI:append:avocado-imx93-frdm = " \
   file://imx93-frdm/dm-crypt.cfg \
+  file://imx93-frdm/ftpm.cfg \
 "
 
 do_configure:append() {
