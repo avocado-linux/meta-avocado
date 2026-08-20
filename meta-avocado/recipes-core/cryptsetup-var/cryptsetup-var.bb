@@ -17,14 +17,20 @@ SRC_URI = " \
 #                   time via x-systemd.growfs, not here)
 #   gawk          - awk in the cpuinfo-serial lookup and the dm resize check
 #   sed           - strips the `openssl dgst` prefix when deriving the salt
-#   device-mapper - provides dmsetup, used by maybe_resize's data-offset
+#   libdevmapper  - provides dmsetup, used by maybe_resize's data-offset
 #                   query. Not actually in the initramfs otherwise: nothing
 #                   else RDEPENDS on it, unlike blockdev/blkid (util-linux)
 #                   and systemd-cryptenroll (systemd), which genuinely are
 #                   already there via packagegroup-avocado-initramfs.
+#                   The package is libdevmapper, NOT device-mapper: dmsetup
+#                   ships in meta-oe lvm2's own `PACKAGES =+ "libdevmapper"`
+#                   split (FILES:libdevmapper carries ${sbindir}/dmsetup).
+#                   `device-mapper` is what other distros call it and nothing
+#                   in this layer set RPROVIDES that name, so asking for it
+#                   fails dependency resolution rather than pulling in dmsetup.
 # (blockdev, blkid, systemd-cryptenroll, mktemp, dirname, tr, cut are already
 #  in the avocado initramfs.)
-RDEPENDS:${PN} = "cryptsetup openssl-bin btrfs-tools gawk sed device-mapper"
+RDEPENDS:${PN} = "cryptsetup openssl-bin btrfs-tools gawk sed libdevmapper"
 
 inherit systemd
 
