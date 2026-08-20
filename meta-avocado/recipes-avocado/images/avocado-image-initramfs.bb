@@ -53,3 +53,12 @@ create_dirs() {
 
 IMAGE_PREPROCESS_COMMAND += "create_dirs;"
 ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"
+
+# The initramfs needs the same /etc/avocado-security-capabilities the rootfs
+# gets, because it is where the artifact is actually CONSUMED first:
+# cryptsetup-var.sh runs from cryptsetup-var.service in the initramfs
+# (WantedBy=initrd-root-fs.target) and reads this file to decide whether
+# encrypted-var was declared. Writing it only into the rootfs leaves the file
+# absent exactly where the check runs, so the check fails closed on every boot
+# and /var never unlocks - var.mount then times out into the emergency shell.
+ROOTFS_POSTPROCESS_COMMAND += "avocado_security_capabilities_write_artifact;"
