@@ -87,9 +87,7 @@
             "type": "fat",
             "variant": "FAT32",
             "files": [
-              "avocado-image-initramfs-imx93-frdm.cpio.zst",
-              "Image",
-              "imx93-11x11-frdm.dtb"
+              "fitImage"
             ]
           }
         },

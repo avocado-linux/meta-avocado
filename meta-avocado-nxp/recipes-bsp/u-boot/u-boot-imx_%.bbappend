@@ -39,6 +39,17 @@ SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
 # is sufficient.
 SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
 
+# fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
+# unconditional like avocado.cfg/env-mmc.cfg above: it is only meaningful on
+# avocado-imx93-frdm (the only machine this change wires a FIT signing key
+# for) and only when the customer has opted in via the 'verified-boot'
+# DISTRO_FEATURES token, so every other NXP board and every frdm build
+# without the feature build exactly as before.
+python () {
+    if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
+        d.appendVar('SRC_URI', ' file://fit-verify.cfg')
+}
+
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
 UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
@@ -46,6 +57,7 @@ UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
 do_configure:append:class-target () {
   cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
   cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
+  ${@'cat ${UNPACKDIR}/fit-verify.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}' if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d) else ''}
 }
 
 require recipes-bsp/u-boot/u-boot-env.inc

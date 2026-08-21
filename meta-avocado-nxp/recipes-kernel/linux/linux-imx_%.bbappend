@@ -131,3 +131,25 @@ do_configure:prepend:imx95-frdm() {
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
+
+# Enable FIT-based verified boot on avocado-imx93-frdm only, and only when the
+# opt-in 'verified-boot' DISTRO_FEATURES token is set - never on the distro
+# default 'secureboot' feature (that would silently change every one of the
+# ~32 machines that request it) and never unconditionally on this machine
+# (that would remove the ability to build it the old way). FIT_SIGN_INDIVIDUAL
+# is deliberately left unset so kernel-fitimage.bbclass signs once at the
+# 'configurations' node - one signature over kernel+fdt+initramfs together,
+# not a separate signature per file.
+python () {
+    if d.getVar('MACHINE') != 'avocado-imx93-frdm':
+        return
+    if not bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
+        return
+    d.appendVar('KERNEL_CLASSES', ' kernel-fitimage')
+    d.setVar('KERNEL_IMAGETYPE', 'fitImage')
+    d.setVar('INITRAMFS_IMAGE', 'avocado-image-initramfs')
+    d.setVar('INITRAMFS_IMAGE_BUNDLE', '1')
+    d.setVar('UBOOT_SIGN_ENABLE', '1')
+    d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
+    d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
+}
