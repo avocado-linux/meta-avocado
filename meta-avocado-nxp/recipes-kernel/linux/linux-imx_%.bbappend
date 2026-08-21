@@ -152,4 +152,5 @@ python () {
     d.setVar('UBOOT_SIGN_ENABLE', '1')
     d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
     d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
+    d.appendVar('DEPENDS', ' sb-keys')
 }
