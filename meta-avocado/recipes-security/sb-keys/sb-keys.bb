@@ -1,5 +1,6 @@
-SUMMARY = "UEFI Secure Boot key generation recipe"
-DESCRIPTION = "Generates PK/KEK/db/dbx key chain for UEFI Secure Boot. \
+SUMMARY = "UEFI Secure Boot and FIT image signing key generation recipe"
+DESCRIPTION = "Generates the PK/KEK/db/dbx key chain for UEFI Secure Boot, plus \
+a separate FIT key used to sign FIT images for verified boot. \
 Self-signed RSA 2048 / SHA256 certificates produced at build time. \
 Private keys are never installed to the target."
 LICENSE = "MIT"
@@ -32,7 +33,7 @@ do_compile() {
 do_install() {
     install -d "${D}${datadir}/avocado/sb-keys"
 
-    for cert in PK KEK db dbx; do
+    for cert in PK KEK db dbx FIT; do
         if [ -f "${AVOCADO_SB_KEYS_DIR}/${cert}.crt" ]; then
             install -m 0644 "${AVOCADO_SB_KEYS_DIR}/${cert}.crt" \
                 "${D}${datadir}/avocado/sb-keys/${cert}.crt"
@@ -50,7 +51,7 @@ inherit deploy
 do_deploy() {
     install -d "${DEPLOYDIR}/sb-keys"
 
-    for cert in PK KEK db dbx; do
+    for cert in PK KEK db dbx FIT; do
         if [ -f "${AVOCADO_SB_KEYS_DIR}/${cert}.crt" ]; then
             install -m 0644 "${AVOCADO_SB_KEYS_DIR}/${cert}.crt" \
                 "${DEPLOYDIR}/sb-keys/${cert}.crt"
@@ -75,4 +76,6 @@ FILES:${PN} = " \
     ${datadir}/avocado/sb-keys/db.der \
     ${datadir}/avocado/sb-keys/dbx.crt \
     ${datadir}/avocado/sb-keys/dbx.der \
+    ${datadir}/avocado/sb-keys/FIT.crt \
+    ${datadir}/avocado/sb-keys/FIT.der \
 "
