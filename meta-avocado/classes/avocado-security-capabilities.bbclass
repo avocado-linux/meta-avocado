@@ -117,6 +117,44 @@ python avocado_security_capabilities_eventhandler() {
     avocado_security_capabilities_check(e.data)
 }
 
+# Runtime-readable artifact exposing this machine's declared
+# AVOCADO_SECURITY_CAPABILITIES to a booted device. Generated FROM the
+# BitBake variable at image-build time - never a second, hand-maintained
+# copy of the declaration - so an extension's on-device activation check
+# can tell "this device's base image claims capability X" without any
+# channel back to build-time BitBake state.
+#
+# None (unset) vs "" (explicitly empty) matters here exactly as it does in
+# the ConfigParsed check above: an unmigrated machine gets no artifact at
+# all (nothing to read is the correct answer, not a fabricated empty file),
+# while a migrated machine that declares no capabilities gets an empty
+# file - a real, distinguishable answer from a real declaration.
+#
+# Hooked from ROOTFS_POSTPROCESS_COMMAND by avocado-image-rootfs.bb AND
+# avocado-image-initramfs.bb rather than added here, so this class stays
+# enforcement-only for recipes that merely inherit it globally
+# (conf/distro/include/avocado-security.inc) without becoming an image
+# rootfs itself. Both images need it: the rootfs is where an on-device
+# extension reads the declaration, and the initramfs is where
+# cryptsetup-var.sh and optee-ftpm-setup.sh read it - both are initrd
+# units, so the initramfs is actually the FIRST consumer, and wiring only
+# the rootfs leaves the file absent exactly where those checks run.
+python avocado_security_capabilities_write_artifact() {
+    import os
+
+    capabilities = d.getVar("AVOCADO_SECURITY_CAPABILITIES")
+    if capabilities is None:
+        return
+
+    rootfs = d.getVar("IMAGE_ROOTFS")
+    sysconfdir = d.getVar("sysconfdir")
+    destdir = rootfs + sysconfdir
+    bb.utils.mkdirhier(destdir)
+    path = os.path.join(destdir, "avocado-security-capabilities")
+    with open(path, "w") as f:
+        f.write(capabilities + "\n")
+}
+
 # devtool-debt: kas/feature/ftpm.yml still does MACHINE_FEATURES:append =
 # " optee-ftpm" directly, a second place avocado-imx93-frdm's fTPM support gets
 # asserted outside AVOCADO_SECURITY_CAPABILITIES. Ceiling: the two statements

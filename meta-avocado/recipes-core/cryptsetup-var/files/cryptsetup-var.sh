@@ -24,6 +24,40 @@ MAPPER="/dev/mapper/${MAP_NAME}"
 [ -z "$VAR_DEV" ] && { echo "Usage: $0 <block-device>" >&2; exit 1; }
 [ -b "$VAR_DEV" ] || { echo "Not a block device: $VAR_DEV" >&2; exit 1; }
 
+# Fail-closed pre-flight: refuse before any luksFormat/luksOpen attempt if
+# either (a) this device's base image never declared encrypted-var, or (b)
+# the kernel cannot actually deliver dm-crypt. These two refusal paths must
+# stay distinguishable per design.md A6 - a declaration problem and a kernel
+# problem need different fixes, so collapsing them into one message would
+# hide which side to fix.
+CAPABILITIES_FILE="/etc/avocado-security-capabilities"
+REQUIRED_CAPABILITY="encrypted-var"
+
+check_capability_declared() {
+    if [ ! -f "$CAPABILITIES_FILE" ]; then
+        echo "cryptsetup-var: $CAPABILITIES_FILE is absent - this device's base image never declared $REQUIRED_CAPABILITY" >&2
+        exit 1
+    fi
+    declared="$(cat "$CAPABILITIES_FILE")"
+    for token in $declared; do
+        [ "$token" = "$REQUIRED_CAPABILITY" ] && return 0
+    done
+    echo "cryptsetup-var: $REQUIRED_CAPABILITY is missing from this device's AVOCADO_SECURITY_CAPABILITIES declaration (declares: ${declared:-<empty>})" >&2
+    exit 1
+}
+
+check_dmcrypt_available() {
+    [ -e /sys/module/dm_crypt ] && return 0
+    if command -v modprobe >/dev/null 2>&1 && modprobe dm-crypt 2>/dev/null; then
+        return 0
+    fi
+    echo "cryptsetup-var: this device's kernel cannot deliver dm-crypt - /var encryption is unavailable" >&2
+    exit 1
+}
+
+check_capability_declared
+check_dmcrypt_available
+
 SCRIPT_DIR="$(dirname "$0")"
 KEY_SCRIPT="${SCRIPT_DIR}/var-key.sh"
 
