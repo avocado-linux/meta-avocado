@@ -1,7 +1,5 @@
 machine=imx93-frdm
-initramfs_file=avocado-image-initramfs-imx93-frdm.cpio.zst
-devicetree_file=imx93-11x11-frdm.dtb
-kernel_file=Image
+image_file=fitImage
 
 console=ttyLP0,115200
 devtype=mmc
@@ -11,8 +9,6 @@ bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
 image_addr=0x80200000
-fdt_addr=0x83000000
-ramdisk_addr=0x84000000
 
 # Calculate partition based on avocado_boot_slot
 avocado_boot_init=\
@@ -51,10 +47,8 @@ avocado_boot_init=\
     setenv bootargs audit=0 console=${console} rootwait;\
   fi;
 
-load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
-load_devicetree=load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file}
-load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}
+load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${image_file}
 
-avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
+avocado_boot=bootm ${image_addr};
 
-bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot
+bootcmd=run avocado_boot_init load_image avocado_boot
