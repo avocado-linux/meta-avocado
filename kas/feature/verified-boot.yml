@@ -1,0 +1,6 @@
+header:
+  version: 16
+
+local_conf_header:
+  feature/verified-boot: |
+    DISTRO_FEATURES:append = " verified-boot"
