@@ -342,13 +342,18 @@ def check_unscanned_declared(report, declared):
     if not undeclared:
         return []
 
+    # Deliberately names no opt-out mechanism. Every predicate
+    # avocado_cve_optout_reason() reports also writes a marker, so a recipe
+    # that hit one is declared and never reaches this line; naming it would
+    # send the reader after a cause that cannot have produced what they are
+    # looking at. What is left is the scan not having run.
     return [
         "%d recipe(s) shipped a package, have no cve-check result and declare "
-        "no reason for it: %s. Either something stopped scanning them - a "
-        "cleared CVE_PRODUCT, an interrupted build, a layer that fell out of "
-        "CVE_CHECK_LAYER_INCLUDELIST - or they opted out somewhere "
-        "avocado-cve-optout does not look, in which case teach it that "
-        "mechanism rather than widening what this accepts."
+        "no reason for it: %s. Either the scan never ran for them - an "
+        "interrupted build, avocado-cve-optout not inherited, a recipe still "
+        "in pkgdata that this build's graph no longer reaches - or they opted "
+        "out somewhere avocado-cve-optout does not look, in which case teach "
+        "it that mechanism rather than widening what this accepts."
         % (len(undeclared), ", ".join(undeclared))
     ]
 

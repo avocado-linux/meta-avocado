@@ -478,6 +478,43 @@ class UnscannedDeclaredTests(unittest.TestCase):
             verify.check_unscanned_declared(self.report, self.declared), []
         )
 
+    # Every mechanism avocado_cve_optout_reason() can report writes a marker,
+    # so a recipe that hit one is declared and cannot reach this failure. The
+    # reason strings are that function's, kept here as the tokens a reader
+    # would be sent chasing.
+    OPTOUT_MECHANISMS = (
+        "CVE_PRODUCT",
+        "CVE_CHECK_SKIP_RECIPE",
+        "CVE_CHECK_LAYER_EXCLUDELIST",
+        "CVE_CHECK_LAYER_INCLUDELIST",
+    )
+
+    def test_the_failure_names_no_cause_that_writes_a_marker(self):
+        # A diagnostic that names one sends the reader after a cause that
+        # cannot have produced what they are looking at: the same predicate
+        # that would have caused it also declares the recipe, which is the one
+        # thing that makes this check pass.
+        self._stops_being_scanned(self.scanned[0])
+        failures = verify.check_unscanned_declared(self.report, self.declared)
+        self.assertTrue(failures)
+        named = [m for m in self.OPTOUT_MECHANISMS if m in failures[0]]
+        self.assertEqual(named, [])
+
+    def test_an_accidental_opt_out_is_declared_like_a_deliberate_one(self):
+        # The limit this check has, asserted so the docs cannot drift back to
+        # claiming otherwise. A CVE_PRODUCT cleared by a bad rebase produces
+        # the same marker as glibc-locale's deliberate deferral, so it is
+        # declared and passes. Only a recipe with no marker at all fails.
+        victim = self.scanned[0]
+        self._stops_being_scanned(victim)
+        accidental = {**self.declared, victim: "CVE_PRODUCT is empty"}
+        self.assertEqual(
+            verify.check_unscanned_declared(self.report, accidental), []
+        )
+        self.assertTrue(
+            verify.check_unscanned_declared(self.report, self.declared)
+        )
+
     def test_one_gained_and_one_lost_is_caught(self):
         # The failure a count structurally cannot see: the total does not move.
         newcomer, victim = self.scanned[0], self.scanned[1]

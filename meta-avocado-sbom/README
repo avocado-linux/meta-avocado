@@ -158,10 +158,23 @@ ${CVE_CHECK_DIR}/${PN}_optout.json, at the moment cve-check decides to write
 nothing. do_cve_report then asserts that every unscanned recipe has a marker.
 
 So a packagegroup added today declares itself and no one edits anything, while
-a recipe whose CVE_PRODUCT got cleared fails the build naming itself. The check
-also stops being machine-specific: it asserts that each recipe said why, never
-how many did, so it holds on every MACHINE and image scope - which the count
-never could, and which is why the count had nowhere to live.
+a recipe that stops being scanned and declares nothing fails the build naming
+itself. The check also stops being machine-specific: it asserts that each
+recipe said why, never how many did, so it holds on every MACHINE and image
+scope - which the count never could, and which is why the count had nowhere to
+live.
+
+What it does not separate is intent, and the four mechanisms above are why. The
+reason is derived from the same predicates cve-check bails on, so a CVE_PRODUCT
+cleared by a bad rebase writes the same "CVE_PRODUCT is empty" marker that
+glibc-locale's deliberate deferral does - on a feed-scoped qemux86-64 build all
+15 markers carry exactly that reason. An accidental opt-out through any of the
+four is therefore declared, and passes. What fails is a recipe with no result
+and no marker at all, which is the scan not having run: an interrupted build,
+this class not inherited, or a recipe still in pkgdata that the build's graph no
+longer reaches. Separating accident from intent would need the marker to record
+what was intended rather than which predicate fired, which is a different
+mechanism from this one.
 
 The reverse case is a warning, not a failure: a recipe that declared an opt-out
 and was scanned anyway means a marker outlived its declaration. The report is
