@@ -61,7 +61,7 @@ RDEPENDS:${PN} = " \
   avocadoctl \
   avocado-users \
   btrfs-tools \
-  ${@bb.utils.contains('AVOCADO_VAR_PART_DEV','/dev/mapper/var','cryptsetup-var-udev cryptsetup','',d)} \
+  ${@bb.utils.contains('AVOCADO_VAR_PART_DEV','/dev/mapper/var','cryptsetup-var-udev cryptsetup cryptsetup-var-posture','',d)} \
   ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
   ${VIRTUAL-RUNTIME_base-utils} \
   ${VIRTUAL-RUNTIME_init_manager} \
