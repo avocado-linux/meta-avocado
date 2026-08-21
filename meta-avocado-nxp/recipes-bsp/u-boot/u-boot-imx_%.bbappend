@@ -39,12 +39,24 @@ SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
 # is sufficient.
 SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
 
+# fit.cfg enables base FIT container support (CONFIG_FIT) unconditionally on
+# avocado-imx93-frdm. The boot partition manifest (stone-imx93-frdm.json) and
+# the U-Boot env boot command (env/avocado-imx93-frdm.txt) are both static
+# per-machine files with no bitbake conditional mechanism, and both already
+# bootm a single FIT unconditionally - so U-Boot on this machine must always
+# be able to parse a FIT, signed or not. Every other NXP board is unaffected.
+python () {
+    if d.getVar('MACHINE') == 'avocado-imx93-frdm':
+        d.appendVar('SRC_URI', ' file://fit.cfg')
+}
+
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
-# unconditional like avocado.cfg/env-mmc.cfg above: it is only meaningful on
+# unconditional like fit.cfg above: it is only meaningful on
 # avocado-imx93-frdm (the only machine this change wires a FIT signing key
 # for) and only when the customer has opted in via the 'verified-boot'
 # DISTRO_FEATURES token, so every other NXP board and every frdm build
-# without the feature build exactly as before.
+# without the feature build exactly as before (still gets an unsigned FIT
+# via fit.cfg above, but no signature enforcement).
 #
 # The same gate also embeds the FIT public key into U-Boot's own control DTB,
 # so the running bootloader carries its own trust anchor rather than reading
@@ -78,6 +90,7 @@ UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
 do_configure:append:class-target () {
   cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
   cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
+  ${@'cat ${UNPACKDIR}/fit.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}' if d.getVar('MACHINE') == 'avocado-imx93-frdm' else ''}
   ${@'cat ${UNPACKDIR}/fit-verify.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}' if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d) else ''}
 }
 
