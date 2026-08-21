@@ -1,0 +1,53 @@
+name: PR-SBOM-Report-Contract
+
+# Checks the report contract against the committed fixture, so no build and no
+# Yocto. do_cve_report runs the same check against every generated report.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'meta-avocado-sbom/**'
+      - '.github/workflows/pr-sbom-report-contract.yml'
+  push:
+    branches: [scarthgap]
+    paths:
+      - 'meta-avocado-sbom/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: sbom-report-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner's system Python is PEP 668-marked; pip refuses to install
+      # into it.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install jsonschema
+        # The schema tests skip without it, so a failed install would shrink
+        # the suite rather than fail it. Own step keeps that visible.
+        run: python -m pip install --quiet jsonschema
+
+      - name: Check the fixture against the frozen envelope
+        run: |
+          PYTHONPATH=meta-avocado-sbom/lib python -m avocado_sbom.verify \
+            --strict meta-avocado-sbom/tests/fixtures/avocado-cve-report.json
+
+      - name: Prove the check by mutation
+        # Without this the step above is indistinguishable from one that
+        # always passes.
+        run: |
+          python -m unittest discover -v \
+            -s meta-avocado-sbom/tests -p 'test_*.py'

@@ -19,6 +19,7 @@ class Stats(dict):
         "package_collisions",
         "stale_dropped",
         "unscanned_recipes",
+        "no_cve_record_recipes",
         "unpatched_cves",
         "ignored_cves",
         "patched_cves",
@@ -130,6 +131,12 @@ def _strip_pe(version):
     return version
 
 def _has_cve_record(entry):
+    """Whether the NVD holds any CVE record for this entry's products.
+
+    False is a scan result, not the absence of one: cve-check looked the
+    product up and the database had nothing under that name. Do not use it to
+    decide whether a recipe was scanned - presence of the entry decides that.
+    """
     products = entry.get("products")
     if not isinstance(products, list) or not products:
         return True
@@ -145,6 +152,7 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
     )
     recipes = {}
     scanned = set()
+    with_record = set()
 
     paths = sorted(glob.glob(os.path.join(cve_dir, "*_cve.json")))
     stats.cve_files = len(paths)
@@ -170,6 +178,16 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 stats.cve_files_unreadable += 1
                 break
 
+            # Presence of an entry is what separates a recipe something
+            # examined from one nothing looked at, so this is recorded before
+            # the stale-version drop below: those recipes were scanned, just at
+            # a version this build does not have. cvesInRecord says something
+            # narrower - the NVD holds no record for the product - which is
+            # tracked separately and must not be read as unscanned.
+            scanned.add(name)
+            if _has_cve_record(entry):
+                with_record.add(name)
+
             known = recipe_versions.get(name)
             stripped = _strip_pe(version)
             if not known:
@@ -180,9 +198,6 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                     continue
                 version = stripped
 
-            if _has_cve_record(entry):
-                scanned.add(name)
-
             raw_issues = entry.get("issue", [])
             if not isinstance(raw_issues, list) or not all(
                 isinstance(i, dict) for i in raw_issues):
@@ -190,9 +205,17 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 break
 
             issues = []
+            seen_here = set()
             for issue in raw_issues:
                 issue_status = issue.get("status")
                 if issue_status == status:
+                    # An id repeated inside one entry is one CVE, the same as
+                    # one repeated across two entries - see the merge below.
+                    # Dropping it here covers both, and covers the first entry
+                    # for a recipe, which the merge never sees.
+                    if issue.get("id") in seen_here:
+                        continue
+                    seen_here.add(issue.get("id"))
                     issues.append({k: issue[k] for k in fields if k in issue})
                     continue
 
@@ -206,6 +229,31 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 continue
 
             packaged = name in recipe_versions
+            existing = recipes.get(name)
+            if existing is not None:
+                # Two entries for one recipe - two files naming it, or two
+                # entries in one file. Overwriting would leave the counters
+                # holding the replaced entry's CVEs, and a report whose counts
+                # exceed what it carries fails its own check as malformed,
+                # which no setting overrides. Merge instead, by id: the same
+                # CVE reported twice is one CVE.
+                #
+                # The version already recorded stands, and the merged CVEs are
+                # carried under it. Entries at two versions only reach here
+                # unpackaged: a packaged recipe has a known version, and an
+                # entry at any other one was dropped as stale above. Nothing
+                # this build ships is described by that version, so the first
+                # is as good as the second - first meaning first in sorted
+                # filename order, then file order, which makes it stable
+                # across runs rather than correct.
+                seen_ids = {c.get("id") for c in existing["cves"]}
+                added = [c for c in issues if c.get("id") not in seen_ids]
+                existing["cves"].extend(added)
+                stats.cves += len(added)
+                if packaged:
+                    stats.packaged_cves += len(added)
+                continue
+
             recipes[name] = {
                 "version": version,
                 "packaged": packaged,
@@ -218,7 +266,64 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                 stats.packaged_cves += len(issues)
 
     stats.recipes = len(recipes)
-    return recipes, scanned
+    # cvesInRecord "No" means no record matched, not that none exists:
+    # cve-check.bbclass skips the products of a CVE it ignored or found
+    # already patched, so at AVOCADO_CVE_REPORT_STATUS "Patched" or "Ignored" a
+    # recipe can carry issues and still be written with no record on every
+    # product. Reporting it as having none while its CVEs sit in "recipes"
+    # would put it in two legs of the partition at once, so what the report
+    # carries decides.
+    return recipes, scanned, scanned - with_record - set(recipes)
+
+def read_optouts(optout_dir):
+    """Read the opt-out markers avocado-cve-optout.bbclass writes beside the
+    cve-check results.
+
+    Returns (declared, unreadable): a recipe name -> reason map, and the number
+    of markers that could not be read. A recipe with no cve-check result and no
+    marker was not scanned and nothing says why, which is the case worth
+    failing a build over; the reason string is carried so the failure can say
+    which mechanism a declared opt-out used.
+
+    Deliberately not part of build_report: the markers explain the report
+    rather than belonging to it, and the version 1 envelope is frozen.
+    """
+    declared = {}
+    unreadable = 0
+
+    for path in sorted(glob.glob(os.path.join(optout_dir, "*_optout.json"))):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            unreadable += 1
+            continue
+
+        if not isinstance(data, dict):
+            unreadable += 1
+            continue
+
+        name = data.get("name")
+        reason = data.get("reason")
+        if not isinstance(name, str) or not name or not isinstance(reason, str):
+            unreadable += 1
+            continue
+
+        declared[name] = reason
+
+    return declared, unreadable
+
+def packages_digest(packages):
+    """Fingerprint of the package set. Consumers re-derive it, so the input
+    format is part of the frozen contract.
+    """
+    digest = hashlib.sha256()
+    for name in sorted(packages):
+        pkg = packages[name]
+        digest.update(
+            ("%s\t%s\t%s\n" % (name, pkg["recipe"], pkg["version"])).encode()
+        )
+    return "sha256:" + digest.hexdigest()
 
 REPORT_VERSION = "1"
 
@@ -231,19 +336,18 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
 
     stats = Stats()
     packages, recipe_versions = read_pkgdata(pkgdata_dirs, stats)
-    recipes, scanned = read_cve_data(
+    recipes, scanned, no_record = read_cve_data(
         cve_dir, recipe_versions, stats, status=status, summary=summary
     )
 
-    unscanned = sorted({p["recipe"] for p in packages.values()} - scanned)
+    # Both lists are scoped to recipes that shipped a package, so together with
+    # the recipes scanned and found in the NVD they partition that set: a
+    # consumer can account for every shipped recipe exactly once.
+    shipped = {p["recipe"] for p in packages.values()}
+    unscanned = sorted(shipped - scanned)
     stats.unscanned_recipes = len(unscanned)
-
-    digest = hashlib.sha256()
-    for name in sorted(packages):
-        pkg = packages[name]
-        digest.update(
-            ("%s\t%s\t%s\n" % (name, pkg["recipe"], pkg["version"])).encode()
-        )
+    no_cve_record = sorted(no_record & shipped)
+    stats.no_cve_record_recipes = len(no_cve_record)
 
     report = {
         "version": REPORT_VERSION,
@@ -251,7 +355,7 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z"),
-        "packages_digest": "sha256:" + digest.hexdigest(),
+        "packages_digest": packages_digest(packages),
         "status": status,
         "counts": {
             "recipes": len(recipes),
@@ -262,6 +366,7 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
             "cve_files": stats.cve_files,
             "stale_dropped": stats.stale_dropped,
             "unscanned_recipes": stats.unscanned_recipes,
+            "no_cve_record_recipes": stats.no_cve_record_recipes,
             "cve_files_unreadable": stats.cve_files_unreadable,
             "pkgdata_unreadable": stats.pkgdata_unreadable,
             "package_collisions": stats.package_collisions,
@@ -273,6 +378,7 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
         "recipes": recipes,
         "packages": packages,
         "unscanned_recipes": unscanned,
+        "no_cve_record_recipes": no_cve_record,
     }
     if machine:
         report["machine"] = machine
@@ -501,6 +607,7 @@ def main():
     )
     for key in (
         "unscanned_recipes",
+        "no_cve_record_recipes",
         "stale_dropped",
         "package_collisions",
         "cve_files_unreadable",

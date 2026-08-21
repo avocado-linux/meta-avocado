@@ -64,6 +64,226 @@ Variables
                                maintainer's rationale), which is the whole
                                point of running that mode
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
+  AVOCADO_CVE_REPORT_STRICT    "0" turns a well-formed report that lost data
+                               into a warning instead of a build failure -
+                               for a build knowingly sharing a CVE_CHECK_DIR
+                               or knowingly interrupted. Default "1". A
+                               malformed report fails the build either way
+  AVOCADO_CVE_REPORT_OPTOUT_DIR
+                               where avocado-cve-optout.bbclass leaves its
+                               markers. Defaults to CVE_CHECK_DIR, beside the
+                               cve-check results they explain
+
+The frozen contract
+-------------------
+
+The report shape is frozen; its contents are not. Two independent codebases
+build against it - the producer here, and the consumers in avocado-cli and at
+Peridio - and neither can wait on the other to ship.
+
+Three artifacts hold the line:
+
+  schema/avocado-cve-report-v1.schema.json  the envelope, as JSON Schema
+  tests/fixtures/avocado-cve-report.json    a real report, cut down small
+  lib/avocado_sbom/verify.py                the check both CI and the build run
+
+  Frozen                             Not frozen
+  ---------------------------------  -------------------------------------
+  Top-level keys and their types     Which packages, recipes or CVEs appear
+  The counter namespace              Any package identifier or CVE id
+  Every counter present and numeric  The value of any count
+  Health counters zero               Version strings, scores, links
+  Entry shape - every recipe alike   How many of anything there are
+
+The distinction is load-bearing. A fixture pinned to package versions or CVE
+counts turns every mapping correction into a red build, and the natural fix -
+regenerating the fixture - destroys the regression test in the process. So the
+assertion is "every health counter is present and equals zero", never "the
+report contains exactly these 6,224 packages". The first catches the failure
+this exists for; the second breaks whenever anyone does real work.
+
+Checking a report
+-----------------
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.verify REPORT.json
+
+Exits non-zero and prints every violation. --strict also fails on keys the
+checker does not know about, which is what CI uses against the fixture.
+
+The same check runs inside do_cve_report against every report the build
+produces, after the existing counter diagnostics, in three severities:
+
+  malformed    the shape is wrong - a missing counter, a count that disagrees
+               with what the document holds, a digest that no longer matches
+               the package set. Never publishable, so it fails the build
+               whatever AVOCADO_CVE_REPORT_STRICT says
+  incomplete   the shape is right and data is missing - a non-zero health
+               counter, or recipes carrying CVEs with none of them correlated
+               to an installed package. Fails the build by default;
+               AVOCADO_CVE_REPORT_STRICT = "0" downgrades it to a warning
+  undeclared   the report is complete and a recipe in unscanned_recipes
+               declares no reason for being there - the scan changed shape, not
+               the data. Same severity as incomplete
+
+check_report(report, health=False) and check_health(report) are the two halves,
+if you need them separately. check_unscanned_declared(report, declared) is the
+third and stays out of both: it needs the opt-out markers, which live beside
+the build's cve-check results rather than in the report, so a consumer holding
+only the JSON cannot run it. The CLI takes the directory as --optout-dir DIR.
+
+Why reasons and not a count
+---------------------------
+
+The first version of this check declared the number of unscanned recipes and
+failed when the build disagreed. It was replaced because a count cannot answer
+the question it raises. When it fires, the only information it carries is that
+the number moved - so the only available fix is to copy the new number back
+into the configuration, which is a check nobody can fail. Worse, one opt-out
+gained while one scan was silently lost leaves the total unchanged and the
+check quiet, which is exactly the event it existed to catch.
+
+The recipes in that list are not an arbitrary set that happens to have a size.
+Every one of them declared, in its own metadata, that it has no CVE surface:
+
+  CVE_PRODUCT = ""              set by packagegroup.bbclass for every
+                                packagegroup, and by recipes whose CVEs belong
+                                to another recipe - glibc-locale defers to
+                                glibc
+  CVE_CHECK_SKIP_RECIPE         PN listed explicitly
+  CVE_CHECK_LAYER_EXCLUDELIST   the layer opted out
+  CVE_CHECK_LAYER_INCLUDELIST   the layer was never opted in
+
+avocado-cve-optout.bbclass records which of these fired, per recipe, as
+${CVE_CHECK_DIR}/${PN}_optout.json, at the moment cve-check decides to write
+nothing. do_cve_report then asserts that every unscanned recipe has a marker.
+
+So a packagegroup added today declares itself and no one edits anything, while
+a recipe that stops being scanned and declares nothing fails the build naming
+itself. The check also stops being machine-specific: it asserts that each
+recipe said why, never how many did, so it holds on every MACHINE and image
+scope - which the count never could, and which is why the count had nowhere to
+live.
+
+What it does not separate is intent, and the four mechanisms above are why. The
+reason is derived from the same predicates cve-check bails on, so a CVE_PRODUCT
+cleared by a bad rebase writes the same "CVE_PRODUCT is empty" marker that
+glibc-locale's deliberate deferral does - on a feed-scoped qemux86-64 build all
+15 markers carry exactly that reason. An accidental opt-out through any of the
+four is therefore declared, and passes. What fails is a recipe with no result
+and no marker at all, which is the scan not having run: an interrupted build,
+this class not inherited, or a recipe still in pkgdata that the build's graph no
+longer reaches. Separating accident from intent would need the marker to record
+what was intended rather than which predicate fired, which is a different
+mechanism from this one.
+
+The reverse case is a warning, not a failure: a recipe that declared an opt-out
+and was scanned anyway means a marker outlived its declaration. The report is
+complete, so the build passes, but the stale marker is widening what the check
+accepts and is worth clearing. CVE_CHECK_DIR is never pruned, so the class
+removes a marker whenever a recipe stops opting out.
+
+Markers outnumber unscanned_recipes, and that is not the reverse case: a recipe
+that opts out and ships no runtime package writes one too, and was never a
+candidate for the list - a feed-scoped qemux86-64 build wrote 15 markers for 11
+unscanned recipes. Only declarations by recipes that shipped a package are held
+against the report.
+
+A build with something unscanned and no markers at all fails as incomplete
+rather than skipping the check: nothing distinguishes "no recipe opts out" -
+which no real build has been - from avocado-cve-optout not being inherited, and
+silently skipping is the failure mode the whole check exists to prevent. Add
+INHERIT += "avocado-cve-optout", or stack kas/feature/cve-check.yml.
+
+A build with nothing unscanned needs no markers and is not held to this: there
+is no recipe to excuse, so a missing marker cannot be hiding one.
+
+A build with no unpatched CVEs at all is not a failure of either kind. Zero
+recipes, zero CVEs and zero packaged recipes is what a fully patched build
+correctly reports, and it passes.
+
+What it checks beyond the schema: seven counters are re-derived from the document
+that reported them, and packages_digest is recomputed from the package set.
+counts.packages and len(packages) come out of the same code path in the
+generator, so they can only disagree if something dropped packages after the
+fact - which is the failure that shipped a report missing 61 of 139 packages
+and went unnoticed for weeks.
+
+Five counters (cve_files, unpatched_cves, ignored_cves, patched_cves,
+unknown_status_cves) count inputs that are not in the report and cannot be
+re-derived from it. They are carried for fidelity and their values are never
+asserted on. One exception, and only at zero: cve_files = 0 fails, because no
+cve-check file was consumed at all and every other counter is describing a scan
+that never happened.
+
+The fixture
+-----------
+
+tests/fixtures/avocado-cve-report.json is a real report with whole recipes and
+whole packages removed, small enough to read in a diff. No record in it was
+edited by hand; only the counters describing the trimmed set were rewritten,
+and the five underivable counters above are carried from the source report
+unchanged - which is why cve_files and patched_cves are far larger than seven
+recipes would produce. Regenerate rather than hand-edit:
+
+  python3 tests/fixtures/make-fixture.py FULL-REPORT.json \
+      -o tests/fixtures/avocado-cve-report.json
+
+It carries no customer-specific data. The package set is ours, the CVE matches
+come from public advisories, the counters are our own computation; which
+organisation runs which image is not in the report at all.
+
+tests/test_verify.py proves the check by mutation - it breaks the fixture the
+way a real regression would, thirty-odd ways, and asserts each break is caught.
+The controls at the end of that file matter as much as the mutations: a new
+advisory with the counters updated, and a package remapped onto another recipe,
+both have to pass. A check that fires on ordinary CVE churn gets switched off
+within a week.
+
+  python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'
+
+Compatibility policy
+--------------------
+
+"version" is the major, and it is currently "1". A consumer must reject a major
+it does not implement rather than reading the parts it recognises.
+
+Allowed without a bump, so consumers must ignore what they do not know:
+
+  - a new top-level key
+  - a new counter in "counts"
+  - a new field inside a CVE record
+  - any change in values, counts, or which entries appear
+
+Requires a new major:
+
+  - removing or renaming a top-level key or a counter
+  - changing the type of an existing key, or the meaning of one
+  - changing what a counter counts, including how packages_digest is computed
+  - making an optional key required, or dropping "machine"/"distro_version"
+
+Adding a counter means updating four files in one change: the Stats namespace
+and the counts block in report.py, the schema, REPORT_COUNTERS in verify.py,
+and the counts block in tests/fixtures/make-fixture.py. A test asserts the
+schema and the checker agree, so a change that touches only one of the first
+three fails before it reaches a consumer. make-fixture.py has no such test: it
+builds counts from its own key list, so a counter missing there is only found
+when someone regenerates the fixture and CI reports it missing. It does import
+HEALTH_COUNTERS from verify rather than restating it, so at least the question
+of which counters must be zero has one answer and not two.
+
+One change was made under these rules that they would otherwise forbid.
+unscanned_recipes originally counted recipes with no cve-check result *and*
+recipes cve-check looked up and found no NVD record for, which made it read as
+a coverage gap when most of it was a scan result; the second group moved to
+no_cve_record_recipes, and both new keys are required rather than optional.
+That is "changing what a counter counts" and it would need a major. It was made
+at version 1 because version 1 had no consumer at the time - the report was
+produced by this layer and read by nothing outside it. The rules above apply
+from here without that exemption.
+
+"machine" and "distro_version" are optional by construction rather than by
+policy: build_report never writes them, the recipe does, so a standalone run
+legitimately lacks both.
 
 Report format
 -------------
@@ -75,10 +295,12 @@ Report format
     "packages_digest": "sha256:0f3c...",
     "status": "Unpatched",
     "unscanned_recipes": [ "packagegroup-core-boot", "..." ],
+    "no_cve_record_recipes": [ "attr", "..." ],
     "counts": { "recipes": 225, "cves": 2206,
                 "packaged_recipes": 177, "packaged_cves": 1927,
                 "packages": 30747, "cve_files": 3571, "stale_dropped": 0,
-                "unscanned_recipes": 0, "cve_files_unreadable": 0,
+                "unscanned_recipes": 71, "no_cve_record_recipes": 402,
+                "cve_files_unreadable": 0,
                 "pkgdata_unreadable": 0, "package_collisions": 0,
                 "unpatched_cves": 0, "patched_cves": 0, "ignored_cves": 0,
                 "unknown_status_cves": 0 },
@@ -115,23 +337,77 @@ runtime package. Two different things land there:
     only fires when pkgdata knows the recipe at some other version. Delete
     ${DEPLOY_DIR}/cve when you change what a machine builds.
 
+A recipe that shipped a package and is absent from "recipes" is in exactly one
+of three states, and the report says which:
+
+  - scanned, the NVD has records for its product, none matched at the reported
+    status. Clean, and in neither list.
+  - scanned, the NVD holds no record for its product at all. In
+    "no_cve_record_recipes".
+  - not scanned. In "unscanned_recipes".
+
+The two lists are disjoint and both are scoped to recipes in "packages", so
+together with the clean ones they account for every shipped recipe exactly
+once. Do not add them together and call the result a coverage gap: only the
+third state is one.
+
+The partition assumes stale_dropped is zero, which is the condition for
+publishing at all. A recipe whose only cve-check entry was dropped as stale was
+scanned, so it is in neither list - but its CVEs were discarded, so it is not
+clean either, and it reads as the first state. That is why stale_dropped is a
+health counter: a report carrying one is not fit to publish, and
+AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
+
   cve_files             cve-check files consumed
-  unscanned_recipes     recipes that shipped packages but have no cve-check
-                        result - unscanned, not clean. Named individually in
-                        the top-level "unscanned_recipes" list, so a consumer
-                        can tell a recipe nothing examined from one that was
-                        examined and found clean; both are absent from
-                        "recipes". Normally non-zero: a
-                        recipe opts out with CVE_PRODUCT = "", which
-                        packagegroup.bbclass sets for every packagegroup. A
-                        complete avocado-qemuarm64 world build sits at 68, all
-                        of them opt-outs. Watch for a sharp rise, which means a
-                        world build that stopped early, or
-                        CVE_CHECK_LAYER_EXCLUDELIST / CVE_CHECK_SKIP_RECIPE
+  unscanned_recipes     recipes that shipped packages and have no cve-check
+                        entry at all - nothing looked at them. Named
+                        individually in the top-level "unscanned_recipes" list.
+                        Normally non-zero: a recipe opts out with
+                        CVE_PRODUCT = "", which packagegroup.bbclass sets for
+                        every packagegroup. Do not gate on the number and do
+                        not trend it: it moves whenever our own configuration
+                        changes, in both directions, and a stale
+                        ${DEPLOY_DIR}/cve or pkgdata moves it too - both
+                        accumulate across builds and nothing prunes either.
+                        What is checked is the membership, not the size:
+                        avocado-cve-optout records why each of these recipes
+                        was skipped and do_cve_report fails on any that gives
+                        no reason. See "Why reasons and not a count".
+                        Measured for orientation, not as a threshold: both
+                        avocado-qemuarm64 and avocado-qemux86-64 feed-scoped
+                        read 11 on 2026-08-20 - the same 6 packagegroups, 4
+                        avocado meta-recipes and glibc-locale, over 222 and 218
+                        shipped recipes respectively. The set is structural
+                        rather than per-MACHINE, which is more than the check
+                        needs and less than a threshold: nothing gates on that
+                        number, it is deliberately in no conf file, and another
+                        MACHINE or image scope may read a different one and not
+                        be wrong
+  no_cve_record_recipes recipes that shipped packages and were scanned, but
+                        whose products came back cvesInRecord "No" - the NVD
+                        holds no record under that product name - and that
+                        carry no CVE at the reported status. Both conditions
+                        matter: cve-check writes "No" for a product whose every
+                        record it ignored or found patched, so at a status
+                        other than "Unpatched" a recipe can be marked with no
+                        record and still report CVEs. Those are in "recipes",
+                        which is the leg of the partition that wins. Named in
+                        the top-level "no_cve_record_recipes" list. This is a scan
+                        result, not a coverage gap, and it is normally the
+                        larger of the two: most of a rootfs is software the NVD
+                        has never had an advisory for. A CVE_PRODUCT that names
+                        no real product looks identical from here, so check
+                        this list when a recipe you expect CVEs for is quiet.
+                        Trend it, do not gate on it: it moves when the NVD
+                        grows an advisory for something already shipped, which
+                        is not this build breaking. A sharp rise still deserves
+                        a look, for the CVE_PRODUCT reason above
   stale_dropped         cve-check entries discarded because no recipe in
                         pkgdata built that version
   cve_files_unreadable  cve-check files that would not parse, including files
                         that are valid JSON of the wrong shape
   pkgdata_unreadable    pkgdata entries that would not parse
   package_collisions    package names claimed by more than one recipe or
-                        version; the first pkgdata directory won
+                        version; the first pkgdata directory won. Not a health
+                        counter: the winner is deterministic and the report is
+                        complete, so it is noted rather than failed on
