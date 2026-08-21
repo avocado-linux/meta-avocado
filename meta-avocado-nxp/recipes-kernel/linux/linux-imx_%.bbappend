@@ -132,25 +132,34 @@ inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 
-# Enable FIT-based verified boot on avocado-imx93-frdm only, and only when the
-# opt-in 'verified-boot' DISTRO_FEATURES token is set - never on the distro
-# default 'secureboot' feature (that would silently change every one of the
-# ~32 machines that request it) and never unconditionally on this machine
-# (that would remove the ability to build it the old way). FIT_SIGN_INDIVIDUAL
-# is deliberately left unset so kernel-fitimage.bbclass signs once at the
-# 'configurations' node - one signature over kernel+fdt+initramfs together,
-# not a separate signature per file.
+# Package the boot payload as a FIT container on avocado-imx93-frdm
+# unconditionally - the boot partition manifest (stone-imx93-frdm.json) and
+# the U-Boot env boot command (env/avocado-imx93-frdm.txt) are both static
+# per-machine files with no bitbake conditional mechanism, and both were
+# already changed to always bootm a single "fitImage" instead of three
+# discrete boot files. The FIT container shape is therefore this machine's
+# permanent default, regardless of DISTRO_FEATURES.
+#
+# Cryptographic signing of that FIT stays opt-in behind the 'verified-boot'
+# token - never on the distro default 'secureboot' feature (that would
+# silently change every one of the ~32 machines that request it). An
+# unsigned build still produces a valid FIT that U-Boot's plain bootm boots
+# the same way it always booted the discrete images; only a build with
+# 'verified-boot' set gets UBOOT_SIGN_ENABLE and the signature U-Boot then
+# enforces. FIT_SIGN_INDIVIDUAL is deliberately left unset so
+# kernel-fitimage.bbclass signs once at the 'configurations' node - one
+# signature over kernel+fdt+initramfs together, not a separate signature per
+# file.
 python () {
     if d.getVar('MACHINE') != 'avocado-imx93-frdm':
-        return
-    if not bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
         return
     d.appendVar('KERNEL_CLASSES', ' kernel-fitimage')
     d.setVar('KERNEL_IMAGETYPE', 'fitImage')
     d.setVar('INITRAMFS_IMAGE', 'avocado-image-initramfs')
     d.setVar('INITRAMFS_IMAGE_BUNDLE', '1')
-    d.setVar('UBOOT_SIGN_ENABLE', '1')
-    d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
-    d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
-    d.appendVar('DEPENDS', ' sb-keys')
+    if bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
+        d.setVar('UBOOT_SIGN_ENABLE', '1')
+        d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
+        d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
+        d.appendVar('DEPENDS', ' sb-keys')
 }
