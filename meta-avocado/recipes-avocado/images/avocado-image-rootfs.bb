@@ -40,3 +40,13 @@ ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"
 # AVOCADO_SECURITY_CAPABILITIES so an on-device extension can check
 # eligibility without a build-time BitBake channel.
 ROOTFS_POSTPROCESS_COMMAND += "avocado_security_capabilities_write_artifact;"
+
+# The artifact's CONTENT comes from AVOCADO_SECURITY_CAPABILITIES, so the task
+# that writes it has to depend on that variable or editing a machine's
+# declaration leaves do_rootfs looking unchanged: it is not rerun, do_image
+# packages the cached rootfs, and the image ships the previous declaration with
+# nothing reporting it. A vardeps flag on the function itself does NOT achieve
+# this - measured, not assumed - because the function is only ever named from
+# ROOTFS_POSTPROCESS_COMMAND rather than called by the task, so its flags never
+# reach do_rootfs's signature. The dependency has to sit on the task.
+do_rootfs[vardeps] += "AVOCADO_SECURITY_CAPABILITIES"
