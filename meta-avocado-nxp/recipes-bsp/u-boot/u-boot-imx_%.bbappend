@@ -45,9 +45,30 @@ SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
 # for) and only when the customer has opted in via the 'verified-boot'
 # DISTRO_FEATURES token, so every other NXP board and every frdm build
 # without the feature build exactly as before.
+#
+# The same gate also embeds the FIT public key into U-Boot's own control DTB,
+# so the running bootloader carries its own trust anchor rather than reading
+# the key from writable storage at runtime (spec: "the verification key is
+# not modifiable from the running system"). u-boot.inc already unconditionally
+# inherits OE-core's uboot-sign.bbclass, so setting UBOOT_SIGN_ENABLE plus the
+# same UBOOT_SIGN_KEYDIR/UBOOT_SIGN_KEYNAME="FIT" pair task 3.1 wires for the
+# kernel-fitimage side is enough: uboot-sign's do_uboot_assemble_fitimage task
+# (added unconditionally by u-boot.inc, gated internally on UBOOT_SIGN_ENABLE)
+# runs mkimage -f auto-conf against AVOCADO_SB_KEYS_DIR/FIT.crt and embeds the
+# PUBLIC half only into u-boot.dtb before it is concatenated into the final
+# u-boot binary - the private FIT.key never leaves the build host. This board
+# already builds with CONFIG_OF_SEPARATE=y, the precondition uboot-sign.bbclass
+# documents for this embedding step, so no CONFIG_DEFAULT_DEVICE_TREE/binman
+# fallback is needed here. DEPENDS on sb-keys is added under the same gate so
+# FIT.crt exists in AVOCADO_SB_KEYS_DIR before this recipe's fitimage-assemble
+# task runs.
 python () {
     if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
         d.appendVar('SRC_URI', ' file://fit-verify.cfg')
+        d.appendVar('DEPENDS', ' sb-keys')
+        d.setVar('UBOOT_SIGN_ENABLE', '1')
+        d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
+        d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
 }
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
