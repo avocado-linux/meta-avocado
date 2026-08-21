@@ -48,6 +48,9 @@ SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
 python () {
     if d.getVar('MACHINE') == 'avocado-imx93-frdm':
         d.appendVar('SRC_URI', ' file://fit.cfg')
+        d.setVar('FIT_CFG_CAT_LINE', 'cat ${UNPACKDIR}/fit.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}')
+    else:
+        d.setVar('FIT_CFG_CAT_LINE', '')
 }
 
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
@@ -81,6 +84,9 @@ python () {
         d.setVar('UBOOT_SIGN_ENABLE', '1')
         d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
         d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
+        d.setVar('FIT_VERIFY_CFG_CAT_LINE', 'cat ${UNPACKDIR}/fit-verify.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}')
+    else:
+        d.setVar('FIT_VERIFY_CFG_CAT_LINE', '')
 }
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
@@ -90,8 +96,8 @@ UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
 do_configure:append:class-target () {
   cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
   cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
-  ${@'cat ${UNPACKDIR}/fit.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}' if d.getVar('MACHINE') == 'avocado-imx93-frdm' else ''}
-  ${@'cat ${UNPACKDIR}/fit-verify.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}' if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d) else ''}
+  ${FIT_CFG_CAT_LINE}
+  ${FIT_VERIFY_CFG_CAT_LINE}
 }
 
 require recipes-bsp/u-boot/u-boot-env.inc
