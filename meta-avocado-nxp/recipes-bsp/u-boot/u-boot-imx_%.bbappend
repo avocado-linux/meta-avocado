@@ -31,6 +31,14 @@ SRC_URI:append:class-target = " \
 SRC_URI:append:imx93-frdm = " file://no-efi-capsule-auth.cfg"
 SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
 
+# disable-unused-vendor-features.cfg turns off NXP stock defconfig defaults
+# Avocado never uses and this board's tree cannot actually build - see the
+# fragment's own header comment. Machine override, not python: this is a
+# single unconditional per-machine fragment, not a two-axis machine+feature
+# gate, so bitbake's native override stacking (:avocado-imx93-frdm:class-target)
+# is sufficient.
+SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
+
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
 UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
@@ -38,6 +46,10 @@ UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
 do_configure:append:class-target () {
   cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
   cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
+}
+
+do_configure:append:avocado-imx93-frdm:class-target () {
+  cat ${UNPACKDIR}/disable-unused-vendor-features.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
 }
 
 require recipes-bsp/u-boot/u-boot-env.inc
