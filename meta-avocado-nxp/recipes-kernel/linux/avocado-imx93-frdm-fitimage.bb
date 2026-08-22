@@ -1,5 +1,5 @@
-SUMMARY = "avocado-imx93-frdm kernel as a FIT image bundling the initramfs"
-DESCRIPTION = "Bundles this machine's kernel, device tree and initramfs into \
+SUMMARY = "avocado-imx93-frdm kernel, device tree and initramfs as one FIT image"
+DESCRIPTION = "Carries this machine's kernel, device tree and initramfs in \
 a single FIT image via OE-core's kernel-fit-image mechanism, so U-Boot boots \
 one container instead of three discrete files - signed when the verified-boot \
 feature is selected, unsigned otherwise (see avocado-imx93-frdm.conf for the \
@@ -22,13 +22,14 @@ inherit linux-kernel-base kernel-fit-image
 # (without taking the long way around via PV), matching linux-yocto-fitimage.bb.
 PKGV = "${@get_kernelversion_file("${STAGING_KERNEL_BUILDDIR}")}"
 
-# INITRAMFS_IMAGE/INITRAMFS_IMAGE_BUNDLE are set in avocado-imx93-frdm.conf,
-# not here: kernel.bbclass's early anonymous python (which decides whether to
-# addtask do_bundle_initramfs on linux-imx at all) needs to see them before
-# ANY recipe parses, and linux-imx and this recipe are two different
-# datastores either way. The initramfs ends up folded into vmlinux.initramfs
-# by linux-imx's own do_bundle_initramfs, not as a separate FIT ramdisk node -
-# it's what unlocks /var and brings up the fTPM, so its integrity matters
-# most here (design decision: one signature over kernel+dtb+initramfs
-# together, not per-file), and this way it's covered by the same
-# kernel-1 image hash/signature rather than a second, independent one.
+# INITRAMFS_IMAGE comes from conf/distro/avocado.conf and the bundling
+# decision is left at that file's default of "0" - see the comment in
+# avocado-imx93-frdm.conf for why this machine does not override it.
+#
+# So the initramfs arrives as its own ramdisk-1 node emitted by
+# kernel-fit-image.bbclass, carrying its own hash, and oe/fitimage.py adds
+# "ramdisk" to the configuration node's signed entries next to "kernel" and
+# "fdt". One signature over the whole configuration still covers kernel, dtb
+# and initramfs together, which is the design property that matters: the
+# initramfs unlocks /var and brings up the fTPM, so it must not be
+# substitutable independently of the kernel it boots with.
