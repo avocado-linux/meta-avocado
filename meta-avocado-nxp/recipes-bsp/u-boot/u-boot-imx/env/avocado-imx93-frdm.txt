@@ -8,7 +8,25 @@ mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
-image_addr=0x80200000
+# Load the FIT well clear of where its own kernel decompresses to.
+#
+# The kernel subimage carries Load Address 0x80400000 (CONFIG_SYS_LOAD_ADDR),
+# and bootm inflates the gzipped payload from inside the FIT straight to that
+# address. At the previous image_addr of 0x80200000 the destination landed only
+# 2 MiB into the compressed source, so decompression overwrote its own input
+# and inflate() aborted with -3 (Z_DATA_ERROR) on hardware - after the FIT
+# hashes had already verified OK, which is what makes the failure look like
+# payload corruption when it is purely an address collision.
+#
+# This bites regardless of whether the initramfs is bundled into the kernel:
+# even a bare 33.8 MiB kernel decompresses past a FIT loaded at 0x80200000.
+# The old booti path never hit it because an uncompressed Image is copied, not
+# inflated, so source and destination could overlap harmlessly.
+#
+# 0x90000000 is 256 MiB into DRAM (2 GiB at 0x80000000), clearing the largest
+# decompressed payload measured so far (167.9 MiB, ending 0x8abdea00) with room
+# to spare. Verified on hardware: the -3 overlap error stops at this address.
+image_addr=0x90000000
 
 # Calculate partition based on avocado_boot_slot
 avocado_boot_init=\
