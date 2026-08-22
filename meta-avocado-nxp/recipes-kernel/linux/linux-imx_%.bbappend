@@ -132,34 +132,24 @@ inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 
-# Package the boot payload as a FIT container on avocado-imx93-frdm
-# unconditionally - the boot partition manifest (stone-imx93-frdm.json) and
-# the U-Boot env boot command (env/avocado-imx93-frdm.txt) are both static
-# per-machine files with no bitbake conditional mechanism, and both were
-# already changed to always bootm a single "fitImage" instead of three
-# discrete boot files. The FIT container shape is therefore this machine's
-# permanent default, regardless of DISTRO_FEATURES.
+# FIT image assembly for avocado-imx93-frdm is NOT wired here. This oe-core
+# release's kernel.bbclass explicitly rejects KERNEL_IMAGETYPE=fitImage
+# ("fitImage is no longer supported as a KERNEL_IMAGETYPE(S). FIT images are
+# built by the linux-yocto-fitimage recipe") - kernel-fitimage.bbclass was
+# replaced by kernel-fit-image.bbclass, used as its OWN dedicated recipe that
+# depends on virtual/kernel:do_deploy rather than something inherited into
+# the kernel recipe itself. See avocado-imx93-frdm-fitimage.bb.
 #
-# Cryptographic signing of that FIT stays opt-in behind the 'verified-boot'
-# token - never on the distro default 'secureboot' feature (that would
-# silently change every one of the ~32 machines that request it). An
-# unsigned build still produces a valid FIT that U-Boot's plain bootm boots
-# the same way it always booted the discrete images; only a build with
-# 'verified-boot' set gets UBOOT_SIGN_ENABLE and the signature U-Boot then
-# enforces. FIT_SIGN_INDIVIDUAL is deliberately left unset so
-# kernel-fitimage.bbclass signs once at the 'configurations' node - one
-# signature over kernel+fdt+initramfs together, not a separate signature per
-# file.
-python () {
-    if d.getVar('MACHINE') != 'avocado-imx93-frdm':
-        return
-    d.appendVar('KERNEL_CLASSES', ' kernel-fitimage')
-    d.setVar('KERNEL_IMAGETYPE', 'fitImage')
-    d.setVar('INITRAMFS_IMAGE', 'avocado-image-initramfs')
-    d.setVar('INITRAMFS_IMAGE_BUNDLE', '1')
-    if bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
-        d.setVar('UBOOT_SIGN_ENABLE', '1')
-        d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
-        d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
-        d.appendVar('DEPENDS', ' sb-keys')
+# kernel-fit-image.bbclass's do_compile reads linux.bin/linux_comp from
+# DEPLOY_DIR_IMAGE, but nothing in this oe-core release actually produces
+# them: kernel-uboot.bbclass defines the uboot_prep_kimage() helper that
+# generates both, but the helper is not called from anywhere in
+# kernel.bbclass's own kernel_do_deploy - confirmed by a real build (FileNotFoundError
+# on linux.bin). Inherit kernel-uboot directly (not via KERNEL_CLASSES, which
+# has the same inherit_defer timing problem as kernel-fitimage did) and call
+# the helper explicitly from this machine's own do_deploy append.
+inherit kernel-uboot
+
+do_deploy:append:avocado-imx93-frdm() {
+    uboot_prep_kimage "${DEPLOYDIR}"
 }

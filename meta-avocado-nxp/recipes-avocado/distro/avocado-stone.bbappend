@@ -4,6 +4,14 @@
 do_compile[depends] += "${IMX_DEFAULT_BOOTLOADER}:do_deploy"
 do_compile[depends] += "imx-boot:do_deploy"
 
+# avocado-imx93-frdm-fitimage assembles the FIT this machine's boot partition
+# manifest expects; virtual/kernel's own do_deploy (implied above via
+# IMX_DEFAULT_BOOTLOADER/imx-boot) only deploys the discrete Image/dtb files
+# linux-imx itself produces, not the FIT bundling them - that is a separate
+# recipe now (kernel.bbclass rejects KERNEL_IMAGETYPE=fitImage in this oe-core
+# release; see avocado-imx93-frdm-fitimage.bb's own header).
+do_compile[depends] += "${@' avocado-imx93-frdm-fitimage:do_deploy' if d.getVar('MACHINE') == 'avocado-imx93-frdm' else ''}"
+
 DEPENDS += " jq-native mkfat-native fwup-native"
 
 # fw_setenv, for stone-provision-uuu-emmc.sh, which patches devnum and mmcblk
