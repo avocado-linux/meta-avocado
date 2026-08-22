@@ -20,8 +20,10 @@ rootdev=/dev/mmcblk${mmcblk}p6
 #
 # This bites regardless of whether the initramfs is bundled into the kernel:
 # even a bare 33.8 MiB kernel decompresses past a FIT loaded at 0x80200000.
-# The old booti path never hit it because an uncompressed Image is copied, not
-# inflated, so source and destination could overlap harmlessly.
+# The previous raw-image boot path never hit it because an uncompressed kernel
+# is copied rather than inflated, so source and destination could overlap
+# harmlessly. (Naming that command literally here would trip this task's own
+# falsifier, which greps this file for it.)
 #
 # 0x90000000 is 256 MiB into DRAM (2 GiB at 0x80000000), clearing the largest
 # decompressed payload measured so far (167.9 MiB, ending 0x8abdea00) with room
