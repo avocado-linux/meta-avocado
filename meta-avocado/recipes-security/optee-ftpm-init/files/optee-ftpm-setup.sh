@@ -3,8 +3,9 @@
 # cryptsetup-var's TPM2 PCR-7 enroll.
 #
 # The fTPM TA is embedded as an OP-TEE early TA (built into BL32 by meta-arm's
-# optee-ftpm/optee-os wiring), but its NV secure storage is REE-FS - qemu has no
-# RPMB - and REE-FS is serviced by tee-supplicant in userspace. So:
+# optee-ftpm/optee-os wiring), but its NV secure storage is REE-FS on every
+# machine that runs this today (see optee-ftpm-init.bb for why, per machine),
+# and REE-FS is serviced by tee-supplicant in userspace. So:
 #   * tpm_ftpm_tee is a module (not built-in): loaded here, after tee-supplicant,
 #     rather than probing at kernel init when the supplicant isn't running yet.
 #   * the fTPM NV (the seed the SRK derives from) is kept on the recovery
@@ -12,14 +13,15 @@
 #     path /var/lib/tee.
 #
 # Reboot-survival caveat: OP-TEE's secure storage anti-rollback needs an RPMB
-# hardware counter. Real ARM eMMC has it and the seal reopens every boot; the
-# QEMU 'virt' machine has no RPMB, so on qemuarm64 the seal is created on first
-# boot but /var falls back to Argon2id on reboot. See optee-ftpm-init.bb.
+# counter, and no machine running this uses one yet - qemuarm64 has no RPMB at
+# all, and the i.MX93 OP-TEE has the hardware but is not built with
+# CFG_RPMB_FS=y. So the seal is created on first boot and /var falls back to
+# Argon2id on reboot. See optee-ftpm-init.bb.
 set -u
 # Surface progress on the console (the initrd journal is not forwarded here).
 exec >/dev/console 2>&1
 
-# Fail-closed pre-flight: refuse before any privileged action (mount, mkfs,
+# Fail-closed pre-flight: refuse before any privileged action (mount, format,
 # tee-supplicant, modprobe) if either (a) this device's base image never
 # declared ftpm, or (b) the kernel cannot actually deliver OP-TEE. These two
 # refusal paths must stay distinguishable per design.md A6 - a declaration

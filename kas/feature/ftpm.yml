@@ -1,0 +1,76 @@
+# OP-TEE fTPM. Gives /var a key sealed to a TPM the SoC will not hand back,
+# replacing the phase-1 derivation from the SoC UID - which is readable rather
+# than secret, so it binds the key to the device without ever making it one.
+#
+#   bakar build meta-avocado/kas/machine/imx93-frdm.yml:meta-avocado/kas/feature/ftpm.yml
+#
+# Opt-in as a feature rather than set on the machine, because turning it on
+# pulls a layer into the build and that must not happen to a board that did
+# not ask for a TPM.
+#
+# Phase 1: the fTPM's NV storage is REE-FS on the recovery partition, the same
+# arrangement qemuarm64 uses. That proves the TA loads, /dev/tpm0 registers and
+# the PCR-7 seal takes, without touching any one-time hardware state. It does
+# NOT give hardware anti-rollback - that needs RPMB, which programs an eMMC key
+# exactly once and is therefore its own explicitly-confirmed step, never a side
+# effect of a build.
+header:
+  version: 16
+  includes:
+    # meta-arm carries both halves of the fTPM: optee-ftpm, which builds the
+    # Microsoft TA, and its optee-os_%.bbappend, which folds that TA into BL32
+    # via CFG_EARLY_TA.
+    #
+    # Kept as an explicit include even though it is REDUNDANT on this board:
+    # kas/vendor/nxp.yml:5 already includes this same file, so every i.MX
+    # machine has meta-arm in BBLAYERS with or without this feature (verified:
+    # BBLAYERS on the bare machine config lists meta-arm and
+    # meta-arm-toolchain). It stays so the fragment is self-contained for a
+    # machine whose vendor file does not pull arm.yml, and kas dedupes the
+    # include. Do NOT infer from its presence that meta-arm arrives here.
+    - repo: meta-avocado
+      file: kas/vendor/arm.yml
+
+    # An fTPM is still a TPM: the systemd PACKAGECONFIG below needs tpm2-tss,
+    # which only meta-security's meta-tpm provides. Without this the build gets
+    # all the way to dependency resolution and dies on "Nothing PROVIDES
+    # 'tpm2-tss'", which reads as a missing recipe rather than a missing layer.
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
+
+local_conf_header:
+  feature/ftpm: |
+    MACHINE_FEATURES:append = " optee-ftpm"
+
+    # NO OP-TEE VERSION PIN HERE, deliberately. The ported version of this
+    # fragment pinned all four OP-TEE components to 4.8.0.imx, on the reasoning
+    # that meta-imx's PREFERRED_VERSION_optee-os:imx-nxp-bsp ??= "4.10.0.imx"
+    # (imx-base-extend.inc:101) "resolves to nothing" until meta-arm arrives
+    # with this feature, so enabling the feature would silently move OP-TEE
+    # inside the boot chain.
+    #
+    # That premise does not hold in this tree, and the pin inverted its own
+    # purpose. kas/vendor/nxp.yml:5 already includes kas/vendor/arm.yml, so
+    # meta-arm is in BBLAYERS on every i.MX build; the 4.10.0 recipe under
+    # meta-imx/dynamic-layers/meta-arm parses by default, and a bare
+    # imx93-frdm config already resolves optee-os to 4.10.0.imx. The FRDM on
+    # the bench confirms it from the other side - it was flashed from a build
+    # with no fTPM feature and reports "optee: revision 4.10" at boot.
+    #
+    # So 4.10.0 is the status quo, not the deviation. Pinning 4.8.0 would have
+    # DOWNGRADED OP-TEE by two releases for anyone enabling the fTPM, inside
+    # the signed boot chain, which is precisely the silent version move the pin
+    # was written to prevent - just in the other direction. Enabling the fTPM
+    # now changes no OP-TEE version at all, which is the property worth having.
+    #
+    # If a future tree does gate the 4.10.0 recipes behind a layer this feature
+    # is alone in supplying, the pin becomes meaningful again. Verify it against
+    # a resolved PREFERRED_VERSION on a bare machine config before re-adding
+    # one, never against the comment above it.
+
+    # Reopening the sealed /var goes through libcryptsetup-token-systemd-tpm2.so,
+    # which only cryptsetup-plugins builds. systemd-cryptenroll creates the
+    # token without it, so a build missing this enrolls cleanly and then falls
+    # back to the Argon2id recovery key on every later boot - encrypted, just
+    # never TPM-bound, and nothing reports the difference.
+    PACKAGECONFIG:append:pn-systemd = " tpm2 cryptsetup-plugins"
