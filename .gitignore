@@ -1,4 +1,10 @@
+# Both spellings. `build-*/` alone left a bare `build/` untracked-but-not-ignored,
+# and that is where sb-keys generates its private keys - AVOCADO_SB_KEYS_DIR
+# defaults to ${TOPDIR}/avocado-sb-keys. Since FIT verified boot made FIT.key
+# load-bearing, one `git add -A` in a clone using a bare build dir would commit
+# the key that signs every bootable payload for those devices into a public repo.
 build-*/
+build/
 _repo
 # Python bytecode from helper scripts
 __pycache__/

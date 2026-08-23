@@ -18,6 +18,17 @@ COMPATIBLE_MACHINE = "avocado-imx93-frdm"
 
 inherit linux-kernel-base kernel-fit-image
 
+# kernel-fit-image.bbclass contributes only u-boot-tools-native, dtc-native and
+# (when FIT_GENERATE_KEYS is "1", which it is not here) kernel-signing-keys-native,
+# so nothing otherwise orders sb-keys' key generation before this recipe's signing
+# step. The u-boot bbappend takes its own sb-keys dependency, but that edge is on
+# u-boot's graph, not this one: `bitbake avocado-imx93-frdm-fitimage` on a tree
+# with no keys yet has no path to generating them and dies in oe/fitimage.py's
+# run_mkimage_sign. A build tree that already holds FIT.crt from an earlier run
+# hides this completely, which is why it survived two full builds and a hardware
+# pass. Gated on the feature because an unsigned FIT needs no key at all.
+DEPENDS += "${@bb.utils.contains('DISTRO_FEATURES', 'verified-boot', 'sb-keys', '', d)}"
+
 # Set the version of this recipe to the version of the included kernel
 # (without taking the long way around via PV), matching linux-yocto-fitimage.bb.
 PKGV = "${@get_kernelversion_file("${STAGING_KERNEL_BUILDDIR}")}"

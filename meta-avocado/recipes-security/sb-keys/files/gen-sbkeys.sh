@@ -2,7 +2,27 @@
 # gen-sbkeys.sh - Generate UEFI Secure Boot PK/KEK/db/dbx key chain, plus a
 # separate FIT image signing key used by mkimage -k for verified boot.
 #
-# Idempotent: exits 0 without regenerating if PK.crt already exists in SBKEYS_DIR.
+# Idempotent PER KEY: each role is generated only if its .crt is missing, so an
+# existing key is never regenerated and adding a new role to this script does
+# reach a directory that already holds the older ones.
+#
+# It used to short-circuit on PK.crt alone, on the reasoning that PK is written
+# first so its presence means the chain is complete. Two ways that was wrong.
+# Adding the FIT role made every pre-existing AVOCADO_SB_KEYS_DIR permanently
+# miss it - the guard saw PK.crt and exited 0 - and that directory defaults to
+# ${TOPDIR}/avocado-sb-keys, which survives cleanall, TMPDIR wipes and sstate
+# purges, so there was no ordinary way to notice. It also latched a partial
+# keyset: `set -eu` aborts mid-script on an openssl failure or ENOSPC, but PK.crt
+# is already on disk by then, so every later run reported the chain complete.
+#
+# The failure was silent and security-relevant rather than loud. The kernel FIT
+# side does check (oe/fitimage.py, "mkimage exits with 0 also without needed
+# keys"), but uboot-sign.bbclass's concat_dtb has no equivalent check: mkimage -k
+# against an absent key succeeds having embedded nothing, UBOOT_FIT_CHECK_SIGN
+# then passes vacuously against a blob with no /signature node, and the result is
+# a bootloader built with CONFIG_FIT_SIGNATURE=y and no trust anchor - which
+# accepts any FIT.
+#
 # Private key files (.key) are produced locally but must never be installed to
 # the target (the calling recipe enforces this via FILES).
 #
@@ -18,14 +38,6 @@ SBKEYS_DIR="${SBKEYS_DIR:-./sb-keys}"
 
 mkdir -p "${SBKEYS_DIR}"
 
-# Idempotency check: if PK.crt already exists, the chain is complete.
-if [ -f "${SBKEYS_DIR}/PK.crt" ]; then
-	echo "gen-sbkeys: PK.crt already exists in ${SBKEYS_DIR}, skipping regeneration."
-	exit 0
-fi
-
-echo "gen-sbkeys: generating UEFI Secure Boot key chain in ${SBKEYS_DIR}"
-
 SUBJECT_BASE="/O=Avocado OS/CN"
 
 # Common openssl arguments for all self-signed certs.
@@ -33,44 +45,42 @@ SUBJECT_BASE="/O=Avocado OS/CN"
 DAYS=3650
 BITS=2048
 
-# Platform Key (PK) - top of the UEFI SB chain.
-openssl req -newkey "rsa:${BITS}" -nodes -keyout "${SBKEYS_DIR}/PK.key" \
-	-new -x509 -sha256 -days "${DAYS}" \
-	-subj "${SUBJECT_BASE}=Platform Key" \
-	-out "${SBKEYS_DIR}/PK.crt"
-openssl x509 -in "${SBKEYS_DIR}/PK.crt" -out "${SBKEYS_DIR}/PK.der" -outform DER
+# gen_key <role> <subject-cn>
+#
+# Generates one self-signed RSA key pair plus its DER form, and does nothing at
+# all when that role's .crt is already present. Never regenerate an existing
+# role: a fresh PK would orphan anything already signed with the old one, and a
+# fresh FIT key would make every already-flashed device reject its next kernel.
+gen_key() {
+  role="$1"
+  cn="$2"
 
-# Key Exchange Key (KEK) - signed with the PK private key.
-openssl req -newkey "rsa:${BITS}" -nodes -keyout "${SBKEYS_DIR}/KEK.key" \
-	-new -x509 -sha256 -days "${DAYS}" \
-	-subj "${SUBJECT_BASE}=Key Exchange Key" \
-	-out "${SBKEYS_DIR}/KEK.crt"
-openssl x509 -in "${SBKEYS_DIR}/KEK.crt" -out "${SBKEYS_DIR}/KEK.der" -outform DER
+  if [ -f "${SBKEYS_DIR}/${role}.crt" ]; then
+    echo "gen-sbkeys: ${role}.crt present, keeping it."
+    return 0
+  fi
 
-# Signature Database (db) - authorised signing certificates.
-openssl req -newkey "rsa:${BITS}" -nodes -keyout "${SBKEYS_DIR}/db.key" \
-	-new -x509 -sha256 -days "${DAYS}" \
-	-subj "${SUBJECT_BASE}=Signature Database" \
-	-out "${SBKEYS_DIR}/db.crt"
-openssl x509 -in "${SBKEYS_DIR}/db.crt" -out "${SBKEYS_DIR}/db.der" -outform DER
+  echo "gen-sbkeys: generating ${role} (${cn})"
+  openssl req -newkey "rsa:${BITS}" -nodes -keyout "${SBKEYS_DIR}/${role}.key" \
+    -new -x509 -sha256 -days "${DAYS}" \
+    -subj "${SUBJECT_BASE}=${cn}" \
+    -out "${SBKEYS_DIR}/${role}.crt"
+  openssl x509 -in "${SBKEYS_DIR}/${role}.crt" \
+    -out "${SBKEYS_DIR}/${role}.der" -outform DER
+}
 
-# Signature Database Exclude (dbx) - revocation list, intentionally empty.
-openssl req -newkey "rsa:${BITS}" -nodes -keyout "${SBKEYS_DIR}/dbx.key" \
-	-new -x509 -sha256 -days "${DAYS}" \
-	-subj "${SUBJECT_BASE}=Signature Database Exclude" \
-	-out "${SBKEYS_DIR}/dbx.crt"
-openssl x509 -in "${SBKEYS_DIR}/dbx.crt" -out "${SBKEYS_DIR}/dbx.der" -outform DER
+# UEFI Secure Boot chain.
+gen_key PK "Platform Key"
+gen_key KEK "Key Exchange Key"
+gen_key db "Signature Database"
+gen_key dbx "Signature Database Exclude"
 
-# FIT Image Signing Key (FIT) - separate PKI chain used by mkimage -k to sign
-# FIT images for verified boot. NOT part of the UEFI SB PK/KEK/db/dbx chain:
-# this SoC does not do UEFI Secure Boot, so reusing one of those roles would
+# FIT Image Signing Key - separate PKI chain used by mkimage -k to sign FIT
+# images for verified boot. NOT part of the UEFI SB PK/KEK/db/dbx chain: this
+# SoC does not do UEFI Secure Boot, so reusing one of those roles would
 # conflate two unrelated PKI chains under one name.
-openssl req -newkey "rsa:${BITS}" -nodes -keyout "${SBKEYS_DIR}/FIT.key" \
-	-new -x509 -sha256 -days "${DAYS}" \
-	-subj "${SUBJECT_BASE}=FIT Image Signing Key" \
-	-out "${SBKEYS_DIR}/FIT.crt"
-openssl x509 -in "${SBKEYS_DIR}/FIT.crt" -out "${SBKEYS_DIR}/FIT.der" -outform DER
+gen_key FIT "FIT Image Signing Key"
 
-echo "gen-sbkeys: key chain generated."
+echo "gen-sbkeys: key chain complete."
 echo "  Public certs (.crt/.der): safe to ship to target."
 echo "  Private keys (.key):      must NOT be installed to the target."

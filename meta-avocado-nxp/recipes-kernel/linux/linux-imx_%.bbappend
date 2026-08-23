@@ -140,16 +140,19 @@ require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 # depends on virtual/kernel:do_deploy rather than something inherited into
 # the kernel recipe itself. See avocado-imx93-frdm-fitimage.bb.
 #
-# kernel-fit-image.bbclass's do_compile reads linux.bin/linux_comp from
-# DEPLOY_DIR_IMAGE, but nothing in this oe-core release actually produces
-# them: kernel-uboot.bbclass defines the uboot_prep_kimage() helper that
-# generates both, but the helper is not called from anywhere in
-# kernel.bbclass's own kernel_do_deploy - confirmed by a real build (FileNotFoundError
-# on linux.bin). Inherit kernel-uboot directly (not via KERNEL_CLASSES, which
-# has the same inherit_defer timing problem as kernel-fitimage did) and call
-# the helper explicitly from this machine's own do_deploy append.
-inherit kernel-uboot
-
-do_deploy:append:avocado-imx93-frdm() {
-    uboot_prep_kimage "${DEPLOYDIR}"
-}
+# linux.bin/linux_comp, which kernel-fit-image.bbclass reads, are produced by
+# oe-core's kernel-fit-extra-artifacts.bbclass. It is selected via
+# KERNEL_CLASSES in avocado-imx93-frdm.conf, not from here - see that file.
+#
+# An earlier revision of this bbappend hand-wrote that class's body here
+# (`inherit kernel-uboot` plus a do_deploy:append calling uboot_prep_kimage),
+# under a comment claiming no upstream mechanism existed. Three things were
+# wrong with it. The class does exist and is named as the requirement in
+# kernel-fit-image.bbclass itself. The `inherit kernel-uboot` was a no-op
+# anyway, since kernel.bbclass defaults KERNEL_CLASSES to kernel-uimage, which
+# already inherits it. And passing "${DEPLOYDIR}" rather than the class's
+# "$deployDir" drops KERNEL_DEPLOYSUBDIR, so any machine built with
+# KERNEL_PACKAGE_NAME != "kernel" - this repo ships multi-kernel-jetson.yml and
+# multi-kernel-raspberrypi.yml, so the pattern is live - would put linux.bin one
+# directory above where the FIT recipe looks, reproducing the exact
+# FileNotFoundError the hand-rolled version was written to fix.
