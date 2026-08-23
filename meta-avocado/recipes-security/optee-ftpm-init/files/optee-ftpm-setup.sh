@@ -63,11 +63,23 @@ TEE_DEV=/dev/disk/by-partlabel/recovery
 TEE_STORE=/var/lib/tee
 mkdir -p "$TEE_STORE"
 if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
-    # Probe before formatting, same convention as cryptsetup-var.sh's
-    # ensure_fs: mount can fail for reasons other than "no filesystem yet"
-    # (a dirty btrfs needing recovery, a foreign signature), and -f would
-    # clobber the recovery partition's real contents in exactly that case.
-    if blkid -p "$TEE_DEV" >/dev/null 2>&1; then
+    # Probe before formatting, same intent as cryptsetup-var.sh's ensure_fs:
+    # mount can fail for reasons other than "no filesystem yet" (a dirty btrfs
+    # needing recovery, a foreign signature), and -f would clobber the recovery
+    # partition's real contents in exactly that case.
+    #
+    # Test the TYPE value, NOT blkid's exit status. cryptsetup-var.sh can key on
+    # the status because it probes /dev/mapper/var, a dm device that carries no
+    # partition-table metadata - with no filesystem there, blkid finds nothing
+    # at all. This probes a GPT PARTITION, where blkid -p still reports
+    # PART_ENTRY_* and exits 0 on a completely blank partition. Keying on the
+    # status therefore reported "has a filesystem" unconditionally, the format
+    # path below was unreachable on every board, and the fTPM could never come
+    # up on a first boot. Verified against a blank GPT partition on a loop
+    # device: `blkid -p` and `blkid -p -u filesystem` both exit 0, while
+    # `blkid -p -s TYPE -o value` prints nothing - so emptiness of the value is
+    # the only reliable discriminator here.
+    if [ -n "$(blkid -p -s TYPE -o value "$TEE_DEV" 2>/dev/null)" ]; then
         echo "optee-ftpm: $TEE_DEV has a filesystem but would not mount;" \
              "skipping fTPM bring-up (/var will fall back to Argon2id)" >&2
         exit 0
