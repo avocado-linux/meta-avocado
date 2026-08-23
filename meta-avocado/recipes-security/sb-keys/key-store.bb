@@ -11,7 +11,11 @@ AVOCADO_SB_KEYS_DIR ?= "${TOPDIR}/avocado-sb-keys"
 do_install() {
     install -d "${D}${datadir}/avocado/sb-keys"
 
-    for cert in PK KEK db dbx; do
+    # FIT included: this recipe and sb-keys.bb both package
+    # ${datadir}/avocado/sb-keys, so a role added to one and not the other makes
+    # the two disagree on that directory's contents depending on which recipe an
+    # image pulls in.
+    for cert in PK KEK db dbx FIT; do
         if [ -f "${AVOCADO_SB_KEYS_DIR}/${cert}.crt" ]; then
             install -m 0644 "${AVOCADO_SB_KEYS_DIR}/${cert}.crt" \
                 "${D}${datadir}/avocado/sb-keys/${cert}.crt"
@@ -34,4 +38,6 @@ FILES:${PN} = " \
     ${datadir}/avocado/sb-keys/db.der \
     ${datadir}/avocado/sb-keys/dbx.crt \
     ${datadir}/avocado/sb-keys/dbx.der \
+    ${datadir}/avocado/sb-keys/FIT.crt \
+    ${datadir}/avocado/sb-keys/FIT.der \
 "

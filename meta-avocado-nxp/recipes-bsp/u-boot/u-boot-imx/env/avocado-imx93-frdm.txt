@@ -25,9 +25,28 @@ rootdev=/dev/mmcblk${mmcblk}p6
 # harmlessly. (Naming that command literally here would trip this task's own
 # falsifier, which greps this file for it.)
 #
-# 0x90000000 is 256 MiB into DRAM (2 GiB at 0x80000000), clearing the largest
-# decompressed payload measured so far (167.9 MiB, ending 0x8abdea00) with room
-# to spare. Verified on hardware: the -3 overlap error stops at this address.
+# 0x90000000 is 256 MiB into DRAM and clears the decompressed kernel, which is
+# the lower bound. Verified on hardware: the -3 overlap error stops here.
+#
+# The UPPER bound is tighter than it looks and is the real constraint. DRAM on
+# this board is not contiguous: bdinfo reports bank0 0x80000000+0x16000000 and
+# bank1 0x98000000+0x68000000, with a 32 MiB hole between them, and bank0's edge
+# at 0x96000000 is also OP-TEE's CFG_TZDRAM_START (DRAM_BASE + 0x16000000; this
+# machine sets MACHINE_FEATURES += optee). So the FIT has 96 MiB here, of which
+# it currently uses 57.6 - about 60%.
+#
+# `load` does not bounds-check against the bank edge. Once the FIT outgrows
+# 96 MiB the tail lands in TrustZone-protected DRAM, the write is dropped, and
+# the subsequent hash check fails - presenting as payload corruption, which is
+# the same misdiagnosis the 0x80200000 overlap caused. The initramfs is the
+# component that grows (cryptsetup, fTPM, dm-verity tooling), so treat 96 MiB as
+# a budget rather than headroom.
+#
+# If it needs more: 0x84000000 still clears the decompressed kernel (which ends
+# 0x8258a000) and yields 288 MiB. That address has NOT been booted on hardware -
+# moving there needs its own board pass, which is why this stays at the verified
+# value. The AHAB work hit a related problem at this same 0x90000000 with a
+# ~200 MB container spanning the hole; see KB imx93-initramfs-in-signed-container.
 image_addr=0x90000000
 
 # Calculate partition based on avocado_boot_slot

@@ -45,13 +45,18 @@ SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
 # per-machine files with no bitbake conditional mechanism, and both already
 # bootm a single FIT unconditionally - so U-Boot on this machine must always
 # be able to parse a FIT, signed or not. Every other NXP board is unaffected.
-python () {
-    if d.getVar('MACHINE') == 'avocado-imx93-frdm':
-        d.appendVar('SRC_URI', ' file://fit.cfg')
-        d.setVar('FIT_CFG_CAT_LINE', 'cat ${UNPACKDIR}/fit.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}')
-    else:
-        d.setVar('FIT_CFG_CAT_LINE', '')
-}
+#
+# SRC_URI is the whole mechanism. cml1.bbclass's do_configure runs
+# merge_config.sh over every file://*.cfg in SRC_URI, straight from the layer
+# path - that is what puts these symbols in .config. Do NOT add a `cat` line
+# into do_configure:append for a new fragment: UBOOT_DEFCONFIG below expands to
+# the literal ['sd'] (its `.split((',', 1)[0])` is `.split(',')`, which returns
+# a list), so every cat line in this file appends to a path named `['sd']` and
+# the real imx93_11x11_frdm_defconfig is never touched. Confirmed from
+# temp/run.do_configure and log.do_configure on a real build. A fragment added
+# only via a cat line therefore reaches nothing, silently - which for a
+# verification Kconfig means shipping a bootloader that enforces nothing.
+SRC_URI:append:avocado-imx93-frdm = " file://fit.cfg"
 
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
 # unconditional like fit.cfg above: it is only meaningful on
@@ -84,20 +89,23 @@ python () {
         d.setVar('UBOOT_SIGN_ENABLE', '1')
         d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
         d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
-        d.setVar('FIT_VERIFY_CFG_CAT_LINE', 'cat ${UNPACKDIR}/fit-verify.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}')
-    else:
-        d.setVar('FIT_VERIFY_CFG_CAT_LINE', '')
 }
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
+# Broken, and load-bearing for nothing - kept only because the two cat lines
+# below have depended on it since before this change and fixing it would move
+# where avocado.cfg/env-mmc.cfg land, which is a separate change with its own
+# verification. `(',', 1)[0]` is the string ',', so this is UBOOT_CONFIG.split(',')
+# - a LIST, which bitbake stringifies to ['sd']. Every cat line below therefore
+# writes to ${S}/configs/['sd'] and the real defconfig is never touched. Those
+# fragments still reach .config, via cml1.bbclass's merge_config.sh over SRC_URI;
+# the cat lines are dead. Do not add a third.
 UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
 
 do_configure:append:class-target () {
   cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
   cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
-  ${FIT_CFG_CAT_LINE}
-  ${FIT_VERIFY_CFG_CAT_LINE}
 }
 
 require recipes-bsp/u-boot/u-boot-env.inc
