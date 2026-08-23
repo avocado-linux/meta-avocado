@@ -11,6 +11,26 @@ SRC_URI:append:class-target = " \
   file://env-mmc.cfg \
 "
 
+# The FRDM defconfigs enable EFI capsule authentication, whose ESL step shells
+# out to a host tool no recipe here provides, so do_compile fails on a clean
+# workspace whether or not signing is on. Not gated on any feature for that
+# reason. See the fragment for the full account.
+#
+# SRC_URI is the whole mechanism - do NOT add a cat line to do_configure:append
+# below for this fragment. UBOOT_DEFCONFIG expands to the literal ['sd'] (its
+# `.split((',', 1)[0])` is `.split(',')`, which returns a list), so every cat
+# line writes to a path named ['sd'] and the real defconfig is never touched.
+# These fragments reach .config via cml1.bbclass's merge_config.sh over
+# SRC_URI's file://*.cfg entries instead.
+#
+# imx93-frdm and imx91-frdm only, matching the equivalent already carried on
+# imx93-ahab-secure-boot so the two branches converge rather than diverge on a
+# file in the boot path. avocado-imx95-frdm's defconfig carries the same symbol
+# and is likely broken identically, but it is not built or booted here and is
+# left alone rather than changed unverified.
+SRC_URI:append:imx93-frdm = " file://no-efi-capsule-auth.cfg"
+SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
+
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
 UBOOT_DEFCONFIG = "${@'${UBOOT_CONFIG}'.split((',', 1)[0])}"
