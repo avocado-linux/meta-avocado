@@ -9,6 +9,11 @@ DEPENDS = "openssl-native"
 
 SRC_URI = "file://gen-sbkeys.sh"
 
+# file://-only recipe: sources land in UNPACKDIR on wrynose, and the default
+# S (${UNPACKDIR}/${BP}) never exists, which do_unpack warns about on every
+# build. Point S at where the files actually are, as avocado-users does.
+S = "${UNPACKDIR}"
+
 # Output directory for generated keys (override per-developer to a stable path
 # outside the build tree; excluded from sstate hashing via BB_BASEHASH_IGNORE_VARS
 # in avocado-security.inc).

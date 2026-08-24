@@ -5,6 +5,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = "file://avocado-uboot-env \
            file://avocado-uboot-env.service"
 
+# file://-only recipe: sources land in UNPACKDIR on wrynose, and the default
+# S (${UNPACKDIR}/${BP}) never exists, which do_unpack warns about on every
+# build. Point S at where the files actually are, as avocado-users does.
+S = "${UNPACKDIR}"
+
 inherit systemd
 
 do_install() {
