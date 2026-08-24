@@ -76,19 +76,75 @@ GN_ARGS += "v8_enable_webassembly=false"
 GN_ARGS += " "
 
 # ninja's Rust allocator-error-handler link step (obj/build/rust/allocator/
-# liballoc_error_handler_impl.a) invokes the plain clang-native binary
-# directly as a universal cross-compiler (--target=aarch64-unknown-linux-gnu,
-# LLVM's canonical triple), which looks for compiler-rt's builtins under its
-# OWN resource directory in recipe-sysroot-native. oe-core's compiler-rt
-# recipe already builds and stages this exact per-target-triple layout - but
-# only into the dedicated cross-compiler's sysroot (recipe-sysroot), for use
-# by aarch64-avocado-linux-clang. Mirror the already-built archive into
-# recipe-sysroot-native so the plain clang-native binary finds it too.
-do_compile:prepend () {
-	src="${RECIPE_SYSROOT}/usr/lib/clang/latest/lib/aarch64-unknown-linux-gnu/libclang_rt.builtins.a"
-	dest_dir="${RECIPE_SYSROOT_NATIVE}/usr/lib/clang/latest/lib/aarch64-unknown-linux-gnu"
-	if [ -f "$src" ] && [ ! -f "$dest_dir/libclang_rt.builtins.a" ]; then
-		mkdir -p "$dest_dir"
-		cp "$src" "$dest_dir/libclang_rt.builtins.a"
-	fi
+# liballoc_error_handler_impl.a) invokes the plain clang-native binary directly
+# as a universal cross-compiler (--target=aarch64-unknown-linux-gnu, LLVM's
+# canonical triple), so compiler-rt's builtins have to exist under THAT triple
+# in recipe-sysroot-native. Staging them there is upstream's own
+# do_copy_clang_library -- but it derives the canonical triple with
+#
+#     sed 's:-oe-:-unknown-:'
+#
+# which hardcodes OE-core's default TARGET_VENDOR. avocado.inc sets
+# TARGET_VENDOR = "-avocado", so RUST_TARGET_SYS is aarch64-avocado-linux-gnu,
+# the substitution is a no-op, and the archive lands in
+# latest/lib/aarch64-avocado-linux-gnu/ while ninja looks in
+# latest/lib/aarch64-unknown-linux-gnu/ -- "missing and no known rule to make
+# it". Upstream meta-browser 7172778 fixes this with 's:${TARGET_VENDOR}-:',
+# and scarthgap carried the same fix in a full chromium-gn.inc override that
+# the wrynose port dropped; this is that fix, re-applied as a function
+# override so no whole .inc has to be forked.
+#
+# Redefining the function here rather than patching it: a bbappend is parsed
+# after the base recipe and all its requires, so the last definition wins --
+# the same mechanism the gn-utils.inc require above relies on.
+#
+# Deltas from upstream's body, both carried over from the scarthgap version:
+#   - the vendor is matched as -[^-]*- so this holds for any TARGET_VENDOR
+#     (-oe, -avocado, -poky) instead of trading one hardcoded vendor for
+#     another
+#   - versioned clang dirs are searched newest-first (sort -rV) and copied
+#     with cp -n, so a stale lower-version compiler-rt tree left in the
+#     sysroot cannot shadow the current one
+do_copy_clang_library () {
+    cp -r "${STAGING_LIBDIR_NATIVE}/clang/latest" "${STAGING_DIR_HOST}${nonarch_libdir}/clang/"
+    cd "${STAGING_DIR_HOST}${nonarch_libdir}/clang" || return
+
+    versioned_dirs=$(find . -maxdepth 1 -mindepth 1 \! -name latest -type d | sort -rV)
+    lib_file=$(find $versioned_dirs \( -name "libclang_rt.builtins-*" -o -name "liborc_rt-*" \) | sort -u)
+    echo "lib_file = $lib_file"
+    export CHROMIUM_TARGET_TRIPLET="$(echo ${RUST_TARGET_SYS} | sed 's:-[^-]*-:-unknown-:')"
+
+    mkdir -p "latest/lib/${CHROMIUM_TARGET_TRIPLET}"
+    echo "Executing cp $lib_file latest/lib/${CHROMIUM_TARGET_TRIPLET}/"
+    for f in $lib_file; do
+        cp -n "$f" "latest/lib/${CHROMIUM_TARGET_TRIPLET}/"
+    done
+    cd "latest/lib/${CHROMIUM_TARGET_TRIPLET}/" || return
+
+    for file in *-"${TARGET_ARCH}".a *-"${TARGET_ARCH}hf".a; do
+        if [ -f "$file" ]; then
+            new_name=$(echo "$file" | sed -e "s/-${TARGET_ARCH}hf//" -e "s/-${TARGET_ARCH}//")
+            mv "$file" "$new_name"
+        fi
+    done
+
+    native_arch_path="${STAGING_LIBDIR_NATIVE}/clang/latest/lib/${CHROMIUM_TARGET_TRIPLET}/"
+    mkdir -p "$native_arch_path"
+    echo "Executing cp -r $(ls -d *) $native_arch_path"
+    cp -r * "$native_arch_path"
+
+    if [ "${TARGET_ARCH}" != "${BUILD_ARCH}" ]; then
+        export CHROMIUM_BUILD_TRIPLET="$(echo ${RUST_BUILD_SYS} | sed 's:-[^-]*-:-unknown-:')"
+        cd "${STAGING_LIBDIR_NATIVE}/clang"
+        rm -rf "latest/lib/${CHROMIUM_BUILD_TRIPLET}"
+        cp -ar latest/lib/linux "latest/lib/${CHROMIUM_BUILD_TRIPLET}"
+        cd "latest/lib/${CHROMIUM_BUILD_TRIPLET}"
+
+        for file in *-"${BUILD_ARCH}".a *-"${BUILD_ARCH}hf".a; do
+            if [ -f "$file" ]; then
+                new_name=$(echo "$file" | sed -e "s/-${BUILD_ARCH}hf//" -e "s/-${BUILD_ARCH}//")
+                mv "$file" "$new_name"
+            fi
+        done
+    fi
 }
