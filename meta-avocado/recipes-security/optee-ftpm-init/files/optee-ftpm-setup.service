@@ -9,6 +9,26 @@ After=dev-disk-by\x2dpartlabel-recovery.device systemd-udevd.service
 Wants=systemd-udevd.service
 # /dev/tpm0 must exist before cryptsetup-var runs its enroll.
 Before=cryptsetup-var.service initrd-root-fs.target
+# The initramfs carries its own /etc/fstab, whose /var line is substituted at
+# build time from AVOCADO_VAR_PART_DEV, so systemd-fstab-generator produces a
+# var.mount INSIDE the initrd - not only in the real root. Without this ordering
+# that mount races the setup script and lands on /var between the script's
+# `mkdir -p /var/lib/tee` and its `mount`: the freshly created mount point is
+# shadowed, mount fails with "mount point does not exist", and the script takes
+# its skip path so no /dev/tpm0 ever appears. Observed on avocado-imx93-frdm.
+#
+# Only an encrypted-var=0 build was ever bitten. With the feature on,
+# AVOCADO_VAR_PART_DEV is /dev/mapper/var, so var.mount cannot start until
+# cryptsetup-var.service has created the mapping - and the Before= above already
+# puts this service ahead of that, supplying the ordering by accident. Declaring
+# it makes both configurations behave the same way instead of one working by
+# luck.
+#
+# Before=, not After=: After=var.mount deadlocks the encrypted-var case
+# (optee-ftpm-setup -> cryptsetup-var -> dev-mapper-var.device -> var.mount ->
+# optee-ftpm-setup). Moving the store out from under /var is not an option
+# either - tee-supplicant is compiled with TEE_FS_PARENT_PATH=/var/lib/tee.
+Before=var.mount
 
 [Service]
 Type=oneshot
