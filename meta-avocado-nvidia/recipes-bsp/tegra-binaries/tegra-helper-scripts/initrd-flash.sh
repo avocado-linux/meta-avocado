@@ -805,7 +805,7 @@ sign_binaries_t234() {
         wait_for_rcm
     fi
     rm -rf rcmboot_blob
-    if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU serial_number=$serial_number \
+    if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" serial_number=$serial_number \
               "$here/$FLASH_HELPER" --no-flash --sign -u "$keyfile" -v "$sbk_keyfile" $instance_args \
               flash.xml.in $DTBFILE $EMC_BCT $ODMDATA $LNXFILE $ROOTFS_IMAGE; then
         cp flashcmd.txt flash_signed.sh
@@ -824,7 +824,7 @@ sign_binaries_t234() {
     if [ -e external-flash.xml.in ]; then
         if grep -q 'oem_sign="true"' external-flash.xml.in 2>/dev/null; then
             . ./boardvars.sh
-            if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU \
+            if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" \
                             "$here/$FLASH_HELPER" --no-flash --sign --external-device -u "$keyfile" -v "$sbk_keyfile" $instance_args \
                             external-flash.xml.in $DTBFILE $EMC_BCT $ODMDATA $LNXFILE $ROOTFS_IMAGE; then
                 mv secureflash.xml external-secureflash.xml

@@ -180,7 +180,35 @@ if [ ! -e ./flashvars ]; then
     exit 1
 fi
 
+# ODMDATA has two possible sources and the carrier one must win. Capture the
+# environment value BEFORE sourcing flashvars, because sourcing assigns
+# unconditionally and would clobber it.
+#
+#   1. .env.initrd-flash, which carrier-bsp/carrier.env rewrites via
+#      CARRIER_ENV_ODMDATA (bsp-mic-712-ox-16gb, bsp-mic-733-ao5a1/ao6a1 all
+#      rely on this to set their own UPHY lane mapping). initrd-flash forwards
+#      it in the environment.
+#   2. flashvars, i.e. the MACHINE-baked TEGRA_FLASHVAR_ODMDATA default.
+#
+# It used to arrive as positional $4 instead, but .env.initrd-flash sets
+# ODMDATA="" on machines with no carrier override and the argument was
+# unquoted -- so it collapsed, $4 landed on the following parameter, and
+# tegraflash was handed "--odmdata boot.img". MB1 then logged
+# "W> Skipping GBE UPHY config", the MGBE UPHY lanes (gbe-uphy-config-22,
+# nvhs-uphy-config-0, gbe0-enable-10g on p3737) were never applied, and the
+# AQR113C was unreachable (phy_id read 0x00000000) -- no ethernet.
+# Guarding also removes a latent hazard: "--odmdata $odmdata" with an empty
+# value ate the following argument rather than being omitted.
+odmdata_env="${ODMDATA-}"
+
 . ./flashvars
+
+odmdata_arg=
+if [ -n "${odmdata_env}" ]; then
+    odmdata_arg="--odmdata ${odmdata_env}"
+elif [ -n "$ODMDATA" ]; then
+    odmdata_arg="--odmdata $ODMDATA"
+fi
 
 if [ -z "$CHIPID" ]; then
     echo "ERR: CHIPID variable not set" >&2
@@ -468,6 +496,19 @@ if [ "$CHIPID" = "0x23" ]; then
         if ! [ "$BOARDSKU" = "0000" -o "$BOARDSKU" = "0001" -o "$BOARDSKU" = "0002" ]; then
             BPFDTB_FILE=$(echo "$BPFDTB_FILE" | sed -e"s,3701-0000,3701-$BOARDSKU,")
             if [ "$BOARDSKU" = "0005" -o "$BOARDSKU" = "0008" ]; then
+                # EMC_BCT is NOT in scope here: this script sources only
+                # ./flashvars (which defines BCTFILE/WB0SDRAM_BCT), while
+                # EMC_BCT lives in .env.initrd-flash, which initrd-flash
+                # sources without exporting. So the line below has always
+                # been a no-op on an empty string. The real SDRAM config is
+                # $sdramcfg_files ($3), which is what --sdram_config is given,
+                # so rewrite that too or a -0005/-0008 module gets flashed
+                # with the -0000 SDRAM config -- MB1 then halts in
+                # MB1_MSS_CHECKER at "Task: Check MSS settings" after
+                # declining to program PLLM/PLLHUB for the resulting mem BCT.
+                # Only the first comma-field: callers may pass a list (see the
+                # cut -d, -f1/-f2 uses below).
+                sdramcfg_files=$(echo "$sdramcfg_files" | sed -e"s,3701-0000,3701-$BOARDSKU,")
                 EMC_BCT=$(echo "$EMC_BCT" | sed -e"s,3701-0000,3701-$BOARDSKU,")
                 WB0SDRAM_BCT=$(echo "$WB0SDRAM_BCT" | sed -e"s,3701-0000,3701-$BOARDSKU,")
             else
@@ -712,7 +753,7 @@ if [ $want_signing -eq 1 ]; then
     debug_mode=0
     FLASHARGS="--chip 0x23 $hsm_arg --bl ${RCM_UEFI_IMAGE}_with_dtb.bin \
           --sdram_config $sdramcfg_files \
-          --odmdata $odmdata \
+          $odmdata_arg \
           --applet mb1_t234_prod.bin \
           --cmd \"$tfcmd\" $skipuid \
           --cfg flash.xml \
@@ -738,7 +779,7 @@ if [ $want_signing -eq 1 ]; then
 	BINSARGS="--bins \"$binsargs_params; kernel $RCMBOOT_KERNEL; kernel_dtb $kernel_dtbfile\""
 	FLASHARGS="--chip 0x23 $hsm_arg --bl ${RCM_UEFI_IMAGE}_with_dtb.bin \
           --sdram_config $sdramcfg_files \
-          --odmdata $odmdata \
+          $odmdata_arg \
           --applet mb1_t234_prod.bin \
           --cmd \"$tfcmd\" $skipuid \
           --cfg flash.xml \
@@ -764,7 +805,7 @@ if [ $want_signing -eq 1 ]; then
 else
     flashcmd="python3 $flashappname ${inst_args} --chip 0x23 $hsm_arg --bl ${RCM_UEFI_IMAGE}_with_dtb.bin \
           --sdram_config $sdramcfg_files \
-          --odmdata $odmdata \
+          $odmdata_arg \
           --applet mb1_t234_prod.bin \
           --cmd \"$tfcmd\" $skipuid \
           --cfg flash.xml \
