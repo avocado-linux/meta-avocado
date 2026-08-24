@@ -1,5 +1,11 @@
 MACHINE_FEATURES:append = " optee"
 
+# Jetson consoles are on the Tegra Combined UART with no virtual console, so
+# OE-core's `enable getty@.service` preset can only ever fail. Shipped from the
+# shared include rather than per-machine: it applies to every Jetson, devkit or
+# carrier. See recipes-core/systemd/systemd-jetson-masks_1.0.bb.
+MACHINE_ESSENTIAL_EXTRA_RDEPENDS += "systemd-jetson-masks"
+
 STONE_PROVISIONING ?= "tegraflash"
 USE_REDUNDANT_FLASH_LAYOUT_DEFAULT = "1"
 PREFERRED_PROVIDER_virtual/kernel = "linux-yocto"
