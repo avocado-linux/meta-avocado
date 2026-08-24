@@ -56,10 +56,20 @@ check_optee_available
 TEE_DEV=/dev/disk/by-partlabel/recovery
 [ -b "$TEE_DEV" ] || { echo "optee-ftpm: no recovery partition, skipping fTPM bring-up"; exit 0; }
 
-# Mount the persistent TEE store, formatting it (btrfs, already in the initramfs
-# for /var) on first boot. tee-supplicant was built with
-# TEE_FS_PARENT_PATH=/var/lib/tee, so that exact path must be the persistent
-# mount or the fTPM's NV lands on the initramfs tmpfs and is lost on reboot.
+# Mount the persistent TEE store, formatting it (btrfs) on first boot.
+#
+# btrfs-tools is an explicit RDEPENDS of this recipe, NOT something inherited
+# from /var's own tooling - an earlier revision of this comment claimed the
+# latter, and it only holds when the encrypted-var DISTRO_FEATURE pulls
+# cryptsetup-var in. Built without it, mkfs.btrfs was simply absent and the
+# format below failed. See optee-ftpm-init.bb.
+#
+# tee-supplicant was built with TEE_FS_PARENT_PATH=/var/lib/tee, so that exact
+# path must be the persistent mount or the fTPM's NV lands on the initramfs
+# tmpfs and is lost on reboot. The mount is made on the initramfs /var and is
+# covered by the real /var moments later, which is why /var/lib/tee does not
+# exist on a running system - see optee-ftpm-setup.service for the ordering
+# that makes that sequence deterministic instead of a race.
 TEE_STORE=/var/lib/tee
 mkdir -p "$TEE_STORE"
 if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
