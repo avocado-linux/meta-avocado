@@ -12,6 +12,11 @@ SRC_URI = " \
     file://avocado-devicetree.service \
 "
 
+# file://-only recipe: sources land in UNPACKDIR on wrynose, and the default
+# S (${UNPACKDIR}/${BP}) never exists, which do_unpack warns about on every
+# build. Point S at where the files actually are, as avocado-users does.
+S = "${UNPACKDIR}"
+
 # fw_setenv/fw_printenv at runtime; the env partition wiring is per-machine
 # (avocado-uboot-env generates /etc/fw_env.config).
 RDEPENDS:${PN} = "libubootenv-bin"
@@ -22,10 +27,10 @@ SYSTEMD_SERVICE:${PN} = "avocado-devicetree.service"
 
 do_install() {
     install -d ${D}${libexecdir}
-    install -m 0755 ${WORKDIR}/avocado-devicetree-apply ${D}${libexecdir}/avocado-devicetree-apply
+    install -m 0755 ${UNPACKDIR}/avocado-devicetree-apply ${D}${libexecdir}/avocado-devicetree-apply
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/avocado-devicetree.service ${D}${systemd_system_unitdir}/avocado-devicetree.service
+    install -m 0644 ${UNPACKDIR}/avocado-devicetree.service ${D}${systemd_system_unitdir}/avocado-devicetree.service
 
     # Drop-in dir extensions/configs write *.conf fragments into.
     install -d ${D}${sysconfdir}/avocado/devicetree.d
