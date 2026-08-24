@@ -432,3 +432,32 @@ commit subject (`scarthgap` vs the forward-port history).
 - `f347c52`, `3fb9561` — vendor-fork re-pins; see the two concrete
   fork-port items under Open Questions above (oe-core symlink patch,
   bitbake LFS subdir fix). Not distro cherry-picks.
+
+## Forward-Port Round — 2026-08-13
+
+### `meta-avocado: add meta-avocado-sbom` (scarthgap `62fc186`, PR #252)
+
+Not a cherry-pick: wrynose OE-core deleted `cve-check.bbclass`. CVE
+analysis is now `sbom-cve-check` — the external
+[sbom-cve-check](https://github.com/bootlin/sbom-cve-check) tool
+(`python3-sbom-cve-check-native`) reads an SPDX 3.0 document, matches its
+purl/CPE identifiers against the cvelistV5 and NVD databases fetched by
+`sbom-cve-check-update-{cvelist,nvd}-native`, applies the VEX statements
+in that same document, and exports the result. Three classes wrap it:
+`sbom-cve-check` (per image, via `IMAGE_CLASSES`),
+`sbom-cve-check-recipe` (per recipe, whole dependency closure), and
+`sbom-cve-check-common` (shared).
+
+What the port changed against scarthgap's commit:
+
+| Scarthgap | Wrynose | Why |
+|---|---|---|
+| `INHERIT += "cve-check"`, `CVE_CHECK_DIR = "${DEPLOY_DIR}/cve/${MACHINE}"`, `CVE_CHECK_COPY_FILES`, `CVE_CHECK_FORMAT_JSON`, `CVE_CHECK_SHOW_WARNINGS` | `sbom-cve-check-recipe` appended to `meta-world-recipe-sbom`; `SBOM_CVE_CHECK_SHOW_WARNINGS = "0"`; `SRCREV:pn-sbom-cve-check-update-*-native = "${AUTOREV}"` | the class and every one of those variables are gone. Exports land in `${DEPLOY_DIR_IMAGE}`, which is already per MACHINE, so nothing needs scoping by hand |
+| `INHERIT:remove = "create-spdx"` + `INHERIT += "create-spdx-3.0"` in `kas/feature/sbom.yml` | dropped | on wrynose `create-spdx` *is* `create-spdx-3.0` (SPDX 3.0.1), inherited through `INHERIT_DISTRO` |
+| `SPDX_INCLUDE_VEX = "current"` | `??= "current"` in `sbom.yml`, hard `= "all"` in `cve-check.yml` | the scan reads VEX out of the SBOM to decide Patched/Ignored. Under `"current"` the `fixed-version` and `cpe-stable-backport` statements never reach the document, and what the kernel's `cve-exclusion_6.18.inc` asserts would come back as Unpatched. OE-core's own `conf/fragments/yocto/sbom-cve-check.conf` sets `"all"` for the same reason. Weak assignment in `sbom.yml` so fragment include order cannot decide the value |
+| `report.py` globs `${CVE_CHECK_DIR}/*_cve.json`, one file per recipe | reads `${DEPLOY_DIR_IMAGE}/world-recipe-sbom.sbom-cve-check.yocto.json`, one file for the build | `sbom-cve-check`'s `yocto-cve-check-manifest` export is the same JSON shape the old class wrote (`name`/`version`/`products`/`issue`, statuses Unpatched/Patched/Ignored), so only discovery changed, not parsing. CLI `--cve-dir` became `--manifest` |
+| `cvesInRecord` distinguishes scanned-clean from unexamined | presence of a manifest entry does | `export_yocto.py` sets `cvesInRecord = "Yes" if issues else "No"`, so a scanned-clean recipe now carries `"No"` too. Without this change every clean recipe would have been counted `unscanned_recipes` |
+| A malformed record fails its whole file (`break` + `cve_files_unreadable`) | it fails only that entry (`continue` + new `counts.entries_unreadable`) | with one manifest for the build, `cve_files_unreadable >= cve_files` is the "nothing was scanned" condition — so a single bad record used to `bb.fatal` the build with the wrong diagnosis. Per-recipe files made that harmless on scarthgap |
+| One recipe name seen twice overwrites in `recipes` while the counters add up both | merged by CVE id, counted once | reachable now that `AVOCADO_CVE_MANIFEST` may be a directory (a per-image export beside the world one), where it would have made `counts` disagree with the report body |
+| `deltask do_cve_check` in `avocado-cve-report.bb` | dropped; `do_cve_report[depends] += "meta-world-recipe-sbom:do_sbom_cve_check_recipe"` | no such task any more. `meta-world-recipe-sbom` pins its own `do_build` deps to `do_create_recipe_sbom`, so the report task is what pulls the scan |
+| `inherit packagegroup nospdx` on `packagegroup-avocado-sdk-all.bb` | already on wrynose (items 30/31 above) | conflict resolved to the wrynose side, no delta |
