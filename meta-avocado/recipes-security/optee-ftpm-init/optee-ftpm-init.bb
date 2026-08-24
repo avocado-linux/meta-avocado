@@ -32,9 +32,20 @@ SRC_URI = " \
 "
 
 # tee-supplicant (optee-client) services the fTPM REE-FS; the fTPM driver is a
-# module (see ftpm.cfg); mkfs.btrfs/mount for the persistent TEE store are
-# already in the initramfs via cryptsetup-var.
-RDEPENDS:${PN} = "optee-client kernel-module-tpm-ftpm-tee"
+# module (see ftpm.cfg).
+#
+# btrfs-tools is named here rather than assumed. optee-ftpm-setup formats its
+# persistent TEE store with mkfs.btrfs, and an earlier revision of this line
+# left it out on the grounds that the tool "is already in the initramfs via
+# cryptsetup-var" - true only when the encrypted-var DISTRO_FEATURE is on,
+# since that is what pulls cryptsetup-var in. Build the fTPM without it, which
+# kas/feature/ftpm.yml invites by being independently selectable, and the tool
+# is absent: the format fails, the script takes its skip path, and no TPM
+# appears. Confirmed on avocado-imx93-frdm with an ftpm-but-not-encrypted-var
+# image, where the console read "could not prepare persistent TEE store" while
+# systemd reported the unit Finished - so journalctl showed a healthy service
+# and /dev/tpm0 was simply never there.
+RDEPENDS:${PN} = "optee-client kernel-module-tpm-ftpm-tee btrfs-tools"
 
 inherit systemd
 
