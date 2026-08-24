@@ -34,6 +34,7 @@ RDEPENDS:${PN} = " \
   ${CUDA_MATH_PACKAGES} \
   ${PYTHON_AI_PACKAGES} \
   ${FRAMEWORK_PACKAGES} \
+  ${DEEPSTREAM_PACKAGES} \
   ${VPI_HPC_PACKAGES} \
   ${DIAGNOSTIC_PACKAGES} \
   ${TEGRA_TEST_PACKAGES} \
@@ -66,11 +67,25 @@ GSTREAMER_PACKAGES = " \
 # PACKAGE_ARCH = ${MACHINE_ARCH}, so it is rebuilt per machine).
 #
 # DELIBERATELY EXCLUDED:
-#   * deepstream-7.1 / deepstream-7.1-pyds -- DEPENDS on libnvvpi3, which does
-#     not exist in the wrynose fork (only libnvvpi4). Adding it makes EVERY
-#     tegra rootfs unbuildable. Re-enable only after the recipe is ported to
-#     libnvvpi4 (see docs/migrations/scarthgap-to-wrynose.md).
 #   * libcudla -- no recipe present in the wrynose fork.
+#   * vkcube -- REQUIRED_DISTRO_FEATURES = "vulkan", which the nvidia vendor
+#     config does not set (kas/vendor/nvidia.yml sets only opengl wayland
+#     seccomp virtualization efi; synaptics/rubikpi/renesas are the vendors
+#     that add vulkan). features_check would SKIP the recipe, and a skipped
+#     recipe named here is a hard "Nothing RPROVIDES" failure, not a silent
+#     omission. Add ` vulkan` to DISTRO_FEATURES_EXTRA first if wanted.
+#   * rendercheck -- DEPENDS on virtual/libx11 libxrender libxext. This is a
+#     Wayland image with no x11 DISTRO_FEATURE; it would drag X11 in.
+#   * tegra-libraries-vulkan-sc{,-core} / tegra-vulkan-sc-samples -- Vulkan
+#     SAFETY CRITICAL, a separate certified driver stack from regular Vulkan.
+#     Only relevant to a safety-certified target, and -core is
+#     (tegra234|tegra264)-only so it would need the SoC scoping described above.
+#   * holoscan-sensor-bridge -- BYOS-over-Ethernet sensor ingest. Plausible
+#     (COMPATIBLE_MACHINE "(tegra)", and we already ship holoscan-sdk +
+#     gxf-core) but a heavy, narrow dependency set for a use case nobody has
+#     asked for yet.
+#   * opentelemetry-cpp-1230, yaml-cpp-080-static -- pulled in automatically as
+#     RDEPENDS of deepstream-9.1 / holoscan-sdk. Not direct adds.
 #   * holohub-apps -- Holoscan SAMPLE apps (demo medical-imaging clips), not the
 #     framework. Its claraviz volume_renderer links libnvjpeg_static.a, which
 #     isn't staged into the sysroot (CUDA static lib in a non-standard
@@ -146,7 +161,24 @@ FRAMEWORK_PACKAGES = " \
   gxf-core \
 "
 
+# DeepStream 9.1 (L4T R39.2) inference pipeline + its Python bindings.
+#
+# Unblocked by the meta-tegra-community f9600de4 update: the 7.1 recipe this
+# group used to exclude DEPENDed on libnvvpi3, which the wrynose fork does not
+# carry. 9.1 DEPENDS on libnvvpi4 (shipped below in VPI_HPC_PACKAGES), and the
+# 7.1 recipe is gone from the layer entirely. Everything else it needs --
+# tensorrt-core, tensorrt-plugins, libcufft, libcublas, libnpp -- is already
+# here. yaml-cpp-080 and opentelemetry-cpp-1230 arrive as its RDEPENDS.
+#
+# This is a large source build. It lands in PKG_EXTRA_INSTALL, so it enters the
+# feed for every Jetson machine, not just the one being built.
+DEEPSTREAM_PACKAGES = " \
+  deepstream-9.1 \
+  deepstream-9.1-pyds \
+"
+
 # VPI (Vision Programming Interface) + multi-GPU/HPC building blocks.
+# nvcomp: GPU lossless compression/decompression, COMPATIBLE_MACHINE "(cuda)".
 VPI_HPC_PACKAGES = " \
   libnvvpi4 \
   vpi4-samples \
@@ -156,21 +188,27 @@ VPI_HPC_PACKAGES = " \
   rmm \
   ucx \
   ucxx \
+  nvcomp \
 "
 
 # On-device diagnostics / profiling / debug tooling.
+# stream (memory bandwidth) and schbench (scheduler latency) are new upstream
+# benchmarks -- tiny, no dependencies, no COMPATIBLE_MACHINE restriction.
 DIAGNOSTIC_PACKAGES = " \
   python3-jetson-stats \
   nsight-systems \
   cuda-samples \
   cuda-gdb \
+  stream \
+  schbench \
 "
 
-# Tegra self-tests (deepstream-tests omitted -- it pulls the excluded
-# deepstream-7.1 stack above).
+# Tegra self-tests. deepstream-tests was migrated to DeepStream 9.1 upstream,
+# so the 7.1 dependency that kept it out of this list no longer exists.
 TEGRA_TEST_PACKAGES = " \
   tensorrt-tests \
   vpi-tests \
   tegra-mmapi-tests \
   gstreamer-tests \
+  deepstream-tests \
 "

@@ -5,7 +5,7 @@ repos:
   meta-python-ai:
     url: https://github.com/avocado-linux/vendor-meta-python-ai.git
     path: meta-python-ai
-    commit: 596a00168046c5c8db4c240c1fee9e3f73fbc285
+    commit: 91cc20407148acbbe1ec2dbb295c240ec5c2cbeb
     branch: wrynose
     layers:
       .:
