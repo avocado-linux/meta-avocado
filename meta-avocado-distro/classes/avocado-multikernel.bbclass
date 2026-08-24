@@ -65,11 +65,22 @@ do_multikernel_merge() {
         # So filter rpm/ to ONLY the alt kernel's version-tagged RPMs. This
         # depends solely on the alt mc's own output — never on the prunable
         # default deploy state — so it is immune to prune/ordering races. The
-        # version is derived from the alt mc's abiversioned kernel package
+        # version is derived from the alt mc's kernel package
         # (e.g. kernel-6.6.63-v8-... -> 6.6.63); it tags every kernel RPM (PV
         # 6.6.63+git..., KERNEL_VERSION 6.6.63-v8) and none of the common NEVRAs
         # (base-files 3.0.14, packagegroup 1.0, shadow-securetty 4.6, ...).
-        altkver="$(ls "${base}/rpm/"*/kernel-[0-9]*-v[0-9]*.rpm 2>/dev/null \
+        #
+        # Match kernel-<N.N.N> without requiring an ABI suffix. The glob used to
+        # be kernel-[0-9]*-v[0-9]*.rpm, which only matched the Raspberry Pi
+        # shape (kernel-6.6.63-v8-...). Jetson's L4T kernel is
+        # kernel-6.8.12-l4t-r39.2.0-1021.21-... with no -v<digit>, so the glob
+        # matched nothing, altkver came back empty, and EVERY Jetson build
+        # skipped the alt-mc merge with only a bbwarn -- leaving the L4T
+        # kernel's RPMs out of the unified feed entirely. kernel-[0-9]* still
+        # excludes kernel-module-*/kernel-image-*/kernel-devsrc-* (no digit
+        # directly after "kernel-"), and the sed below takes only N.N.N, so
+        # both naming shapes reduce to the same version key.
+        altkver="$(ls "${base}/rpm/"*/kernel-[0-9]*.rpm 2>/dev/null \
                    | sed -nE 's#.*/kernel-([0-9]+\.[0-9]+\.[0-9]+)[-+].*#\1#p' \
                    | sort -u | head -1)"
         if [ -z "${altkver}" ]; then
