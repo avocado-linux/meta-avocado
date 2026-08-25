@@ -48,8 +48,4 @@ do_configure:append:class-target () {
   cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
 }
 
-do_configure:append:avocado-imx93-frdm:class-target () {
-  cat ${UNPACKDIR}/disable-unused-vendor-features.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
-}
-
 require recipes-bsp/u-boot/u-boot-env.inc
