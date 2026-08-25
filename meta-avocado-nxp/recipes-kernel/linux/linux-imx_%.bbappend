@@ -17,7 +17,7 @@ SRC_URI:append:avocado-imx93-frdm = " \
   file://imx93-frdm/ftpm.cfg \
 "
 
-SRC_URI:append:avocado-imx8mp-evk = " file://imx8mp-evk/mwifiex.cfg"
+SRC_URI:append:avocado-imx8mp-evk = " file://imx8mp-evk/mwifiex.cfg file://imx8mp-evk/fw-loader.cfg"
 
 do_configure:append() {
   cat ${UNPACKDIR}/*.cfg >> ${B}/.config
