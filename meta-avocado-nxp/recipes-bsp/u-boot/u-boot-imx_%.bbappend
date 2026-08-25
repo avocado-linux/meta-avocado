@@ -23,21 +23,11 @@ SRC_URI:append:class-target = " \
 # These fragments reach .config via cml1.bbclass's merge_config.sh over
 # SRC_URI's file://*.cfg entries instead.
 #
-# imx93-frdm and imx91-frdm only, matching the equivalent already carried on
-# imx93-ahab-secure-boot so the two branches converge rather than diverge on a
-# file in the boot path. avocado-imx95-frdm's defconfig carries the same symbol
-# and is likely broken identically, but it is not built or booted here and is
-# left alone rather than changed unverified.
-SRC_URI:append:imx93-frdm = " file://no-efi-capsule-auth.cfg"
-SRC_URI:append:imx91-frdm = " file://no-efi-capsule-auth.cfg"
-
 # disable-unused-vendor-features.cfg turns off NXP stock defconfig defaults
-# Avocado never uses and this board's tree cannot actually build - see the
-# fragment's own header comment. Machine override, not python: this is a
-# single unconditional per-machine fragment, not a two-axis machine+feature
-# gate, so bitbake's native override stacking (:avocado-imx93-frdm:class-target)
-# is sufficient.
-SRC_URI:append:avocado-imx93-frdm = " file://disable-unused-vendor-features.cfg"
+# (EFI capsule-on-disk, USB DFU) that Avocado never uses and that do not build
+# in this layer set - see the fragment's own header. Every u-boot-imx board:
+# the same symbols are on in the imx8mp-evk, imx91/93/95-frdm defconfigs alike.
+SRC_URI:append:class-target = " file://disable-unused-vendor-features.cfg"
 
 # fit.cfg enables base FIT container support (CONFIG_FIT) unconditionally on
 # avocado-imx93-frdm. The boot partition manifest (stone-imx93-frdm.json) and
