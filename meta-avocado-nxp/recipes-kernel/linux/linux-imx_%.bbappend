@@ -17,7 +17,27 @@ SRC_URI:append:avocado-imx93-frdm = " \
   file://imx93-frdm/ftpm.cfg \
 "
 
-SRC_URI:append:avocado-imx8mp-evk = " file://imx8mp-evk/mwifiex.cfg file://imx8mp-evk/fw-loader.cfg"
+SRC_URI:append:avocado-imx8mp-evk = " \
+  file://imx8mp-evk/mwifiex.cfg \
+  file://imx8mp-evk/fw-loader.cfg \
+  file://imx8mp-evk/imx8mp-evk-8997-bt.dtso \
+"
+
+# imx8mp-evk-pcie-8997.dtb = NXP's imx8mp-evk-pcie.dtb + the 8997-bt overlay
+# above, composed by the kernel build the same way NXP composes
+# imx8mp-evk-pcie.dtb itself (freescale/Makefile "-dtbs :=" rule). Listed in
+# KERNEL_DEVICETREE by avocado-imx8mp-evk.conf and booted by its u-boot env.
+do_configure:prepend:avocado-imx8mp-evk() {
+  dts="${S}/arch/arm64/boot/dts/freescale"
+  cp "${UNPACKDIR}/imx8mp-evk/imx8mp-evk-8997-bt.dtso" "${dts}/"
+  if ! grep -q 'imx8mp-evk-pcie-8997-dtbs' "${dts}/Makefile"; then
+    cat >> "${dts}/Makefile" <<'EOM'
+
+imx8mp-evk-pcie-8997-dtbs := imx8mp-evk-pcie.dtb imx8mp-evk-8997-bt.dtbo
+dtb-$(CONFIG_ARCH_MXC) += imx8mp-evk-pcie-8997.dtb
+EOM
+  fi
+}
 
 do_configure:append() {
   cat ${UNPACKDIR}/*.cfg >> ${B}/.config
