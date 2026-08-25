@@ -1,0 +1,81 @@
+From: Avocado Linux <dev@avocadolinux.org>
+Subject: [PATCH] imx93_frdm: restrict which saved env variables U-Boot honours
+
+Without CFG_ENV_FLAGS_LIST_STATIC, enabling CONFIG_ENV_WRITEABLE_LIST leaves
+the list at its "" default (include/env_flags.h), so no variable carries the
+'w' access flag and env_flags_validate rejects EVERY variable arriving from
+the saved environment - including avocado_boot_slot, which would silently
+break A/B updates. The two have to land together.
+
+The environment lives in the unsigned, writable uboot-env partition
+(CONFIG_ENV_IS_IN_MMC=y), so anyone with offline write access to the card can
+rewrite bootcmd to boot an unsigned kernel and bypass FIT signature
+verification entirely. Listing only the variables that legitimately have to
+survive from storage means every boot-path variable comes from the compiled-in
+default instead, which ships inside the signed bootloader.
+
+The permitted set is derived from what actually writes this board's
+environment, not from what looks plausible:
+
+  - fwup, via meta-avocado-nxp/stone/avocado-imx/rootdisk.conf: tasks
+    'complete', 'upgrade.a' and 'upgrade.b' between them uboot_setenv
+    avocado_boot_slot, avocado_device_id, avocado_device_cert,
+    avocado_device_key, peridio_vsn_current, and the per-slot
+    a./b. avocado_platform and avocado_architecture stamps.
+
+  - the on-device update agent, via avocadoctl's SlotAction::UbootEnv, which
+    iterates an arbitrary key/value map supplied by the stone manifest rather
+    than hardcoding names; stone-imx93-frdm.json's update.activate sets only
+    avocado_boot_slot.
+
+a.avocado_version, a.avocado_uuid and their b. counterparts are deliberately
+absent: nothing sets them (upgrade.a/upgrade.b only uboot_unsetenv them) and
+the boot script never reads them.
+
+Everything omitted - bootcmd, avocado_boot, avocado_boot_init, load_image,
+image_addr, image_file, bootpart, rootdev, bootargs, console, devtype, devnum,
+mmcblk, machine - now comes from the compiled-in default when it arrives from
+storage. Note this does NOT prevent a runtime `setenv`: env_flags_validate
+gates on H_EXTERNAL, so the boot script's own `setenv bootpart`/`rootdev`/
+`bootargs` inside avocado_boot_init still work, and the board boots normally.
+
+Upstream-Status: Inappropriate [Avocado-specific board policy]
+
+---
+diff --git a/include/configs/imx93_frdm.h b/include/configs/imx93_frdm.h
+index 635025d..0c56723 100644
+--- a/include/configs/imx93_frdm.h
++++ b/include/configs/imx93_frdm.h
+@@ -18,6 +18,32 @@
+ #else
+ #define IMX93_EVK_MMC_ENV_DEV 0
+ #endif
++
++/*
++ * Variables U-Boot will honour when they arrive from the SAVED environment.
++ * Anything not listed here is ignored on import and the compiled-in default
++ * applies instead, which is what keeps the boot path under the control of the
++ * signed bootloader rather than the writable uboot-env partition.
++ *
++ * 's' is the string vartype; 'w' is the writeable access flag that
++ * CONFIG_ENV_WRITEABLE_LIST tests. Both characters are required - the access
++ * flag is read from position 1 of the attribute string.
++ *
++ * Keep this in sync with rootdisk.conf's uboot_setenv calls and with the
++ * stone manifest's update.activate map. Adding a boot-path variable here
++ * reopens the bypass this list exists to close.
++ */
++#define CFG_ENV_FLAGS_LIST_STATIC \
++	"avocado_boot_slot:sw," \
++	"avocado_device_id:sw," \
++	"avocado_device_cert:sw," \
++	"avocado_device_key:sw," \
++	"peridio_vsn_current:sw," \
++	"a.avocado_platform:sw," \
++	"a.avocado_architecture:sw," \
++	"b.avocado_platform:sw," \
++	"b.avocado_architecture:sw"
++
+ /* Link Definitions */
+ 
+ #define CFG_SYS_INIT_RAM_ADDR        0x80000000
