@@ -31,7 +31,7 @@ SRC_URI:append:class-target = " file://disable-unused-vendor-features.cfg"
 
 # fit.cfg enables base FIT container support (CONFIG_FIT) unconditionally on
 # avocado-imx93-frdm. The boot partition manifest (stone-imx93-frdm.json) and
-# the U-Boot env boot command (env/avocado-imx93-frdm.txt) are both static
+# the U-Boot env boot command (avocado-imx93-frdm.env) are both static
 # per-machine files with no bitbake conditional mechanism, and both already
 # bootm a single FIT unconditionally - so U-Boot on this machine must always
 # be able to parse a FIT, signed or not. Every other NXP board is unaffected.
@@ -47,6 +47,53 @@ SRC_URI:append:class-target = " file://disable-unused-vendor-features.cfg"
 # only via a cat line therefore reaches nothing, silently - which for a
 # verification Kconfig means shipping a bootloader that enforces nothing.
 SRC_URI:append:avocado-imx93-frdm = " file://fit.cfg"
+
+# Compile the Avocado boot flow into U-Boot's default environment.
+#
+# Until this landed, the flow (bootcmd, avocado_boot_init, load_image,
+# avocado_boot and the variables they read) reached U-Boot ONLY as the saved
+# environment: u-boot-env.inc runs mkenvimage over env/${MACHINE}.txt and fwup
+# writes the result to the uboot-env partition. That is exactly what
+# CONFIG_ENV_WRITEABLE_LIST rejects - env/mmc.c imports the saved copy with
+# H_EXTERNAL and env/flags.c drops every H_EXTERNAL variable missing the 'w'
+# access flag - so the permit list alone would leave the board running U-Boot's
+# stock bootcmd with no Avocado boot path at all.
+#
+# Unconditional for this machine rather than gated on verified-boot, for the
+# same reason fit.cfg is unconditional: a build without the feature has to boot
+# the same way as one with it. Without the feature the saved environment is
+# still imported and still wins, so nothing changes for those builds.
+#
+# env/${MACHINE}.txt deliberately keeps its own full copy of the flow, and must.
+# env/env.c's env_load() seeds the built-in default before the storage driver
+# only under CONFIG_ENV_WRITEABLE_LIST; with the feature off the hash table is
+# built from the saved environment alone, so a reduced .txt would leave those
+# builds with no bootcmd. See the debt marker there.
+#
+# avocado-imx93-frdm.env includes the vendor's own board .env, which is what
+# the build picked up before this and which supplies values the flow relies on
+# without setting them - initrd_high, and the fastboot/manufacturing helpers
+# that uuu recovery uses.
+SRC_URI:append:avocado-imx93-frdm = " file://env-compiled-in.cfg file://avocado-imx93-frdm.env"
+
+# CONFIG_ENV_SOURCE_FILE resolves against board/$(SYS_VENDOR)/$(SYS_BOARD),
+# which board/nxp/imx93_frdm/Kconfig fixes at nxp/imx93_frdm for this target.
+# No bitbake variable carries it, so the path is spelled out.
+#
+# It is spelled out TWICE - here, and in the fragment's own #include - and both
+# assume the 2026.04 layout. This is a `%` bbappend and the machine no longer
+# pins a version, so u-boot-imx 2025.04 is still reachable, and 2025.04 keeps
+# this board at board/freescale/imx93_frdm instead. Guard rather than let
+# `install` fail: its "cannot create regular file" names a path that appears in
+# no recipe, and CONFIG_ENV_SOURCE_FILE exists in 2025.04 too, so merge_config
+# accepts the fragment silently and offers no second chance to notice.
+do_configure:prepend:avocado-imx93-frdm () {
+    if [ ! -d ${S}/board/nxp/imx93_frdm ]; then
+        bbfatal "board/nxp/imx93_frdm is absent from ${S}. u-boot-imx 2025.04 keeps this board at board/freescale/imx93_frdm; the compiled-in environment (CONFIG_ENV_SOURCE_FILE, and the #include inside avocado-imx93-frdm.env) assumes the 2026.04 layout. Build this machine against 2026.04, or teach both paths about the older layout."
+    fi
+    install -m 0644 ${UNPACKDIR}/avocado-imx93-frdm.env \
+        ${S}/board/nxp/imx93_frdm/avocado.env
+}
 
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
 # unconditional like fit.cfg above: it is only meaningful on
