@@ -1,0 +1,46 @@
+#!/bin/sh
+# /var LUKS key provider for NVIDIA Jetson -- phase-1: SoC-serial derived, no
+# provisioned secret. Same shape as the i.MX9 and x86 providers: this is the
+# Argon2id RECOVERY keyslot (slot 0); the fTPM-sealed keyslot cryptsetup-var.sh
+# enrolls on top of it is what actually binds /var to this device. A readable
+# serial gives device *binding*, not secrecy - see cryptsetup-var.sh.
+#
+# Identity source: the /serial-number DT property, which the Jetson UEFI
+# bootloader populates from the SoC's unique chip id before handing off the
+# device tree, so it exists on every Orin/Thor regardless of which of the two
+# feed kernels (linux-yocto or L4T linux-noble) is booted. Secondary source is
+# soc0's serial_number (drivers/soc/tegra/fuse), for a boot path that does not
+# populate the DT property. No identity is a refusal, never a constant: a
+# constant would give every board in the fleet the same recovery key with no
+# visible symptom.
+set -eu
+
+DT_SERIAL_FILE="/sys/firmware/devicetree/base/serial-number"
+SOC_UID_FILE="/sys/devices/soc0/serial_number"
+
+HW_ID=""
+if [ -r "$DT_SERIAL_FILE" ]; then
+    HW_ID=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+fi
+if [ -z "$HW_ID" ] && [ -r "$SOC_UID_FILE" ]; then
+    HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
+fi
+if [ -z "$HW_ID" ]; then
+    echo "var-key: no SoC serial at $DT_SERIAL_FILE or $SOC_UID_FILE" >&2
+    echo "var-key: refusing to derive a key that would not be device-unique" >&2
+    exit 1
+fi
+
+# Salt is SHA-256(hw_id) truncated to 16 bytes - public, per-device, non-secret.
+SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-32)
+
+# 64 raw key bytes on stdout; stderr stays attached so a KDF failure trips
+# set -e in the caller instead of yielding a silent empty key.
+openssl kdf -binary \
+    -keylen 64 \
+    -kdfopt pass:"$HW_ID" \
+    -kdfopt salt:"$SALT" \
+    -kdfopt iter:3 \
+    -kdfopt memcost:65536 \
+    -kdfopt lanes:1 \
+    ARGON2ID

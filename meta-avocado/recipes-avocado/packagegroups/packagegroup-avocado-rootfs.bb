@@ -54,6 +54,7 @@ VIRTUAL-RUNTIME_dev_manager ?= "udev"
 
 RDEPENDS:${PN} = " \
   os-release \
+  avocado-security-capabilities \
   base-files \
   base-passwd \
   netbase \

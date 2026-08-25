@@ -78,6 +78,28 @@ has_tpm2_token() {
     cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/systemd-tpm2/{f=1} END{exit !f}'
 }
 
+# Some firmware TPMs keep no NV state across boots. Measured on Jetson Orin
+# (NVIDIA OP-TEE fTPM, ms-tpm-20-ref): the seeds are stable - a credential
+# sealed on one boot unseals on the next, so a TPM2 keyslot is sound - but the
+# dictionary-attack state resets every boot to inLockout=1 with maxTries=0,
+# and every object load then fails with TPM_RC_LOCKOUT (0x921) until a
+# DictionaryAttackLockReset. lockoutAuth cannot be persisted either, so the
+# reset is free; DA protection is therefore nil on such parts, which is
+# acceptable here because the sealed keyslot carries a PCR policy and no auth
+# value. Best-effort and silent where tpm2-tools are absent or the TPM is not
+# in lockout.
+ensure_tpm2_unlocked() {
+    [ -e /dev/tpm0 ] || return 0
+    command -v tpm2_getcap >/dev/null 2>&1 || return 0
+    if tpm2_getcap properties-variable 2>/dev/null | awk '/inLockout:/{f=($2==1)} END{exit !f}'; then
+        echo "cryptsetup-var: TPM is in dictionary-attack lockout at boot - resetting"
+        tpm2_dictionarylockout --clear-lockout 2>/dev/null \
+            && tpm2_dictionarylockout --setup-parameters --max-tries=32 \
+                   --recovery-time=600 --lockout-recovery-time=86400 2>/dev/null \
+            || echo "cryptsetup-var: TPM lockout reset failed - TPM2 unlock will fall back to the recovery key" >&2
+    fi
+}
+
 # Open the container as /dev/mapper/var: the TPM2-sealed keyslot first (PCR 7),
 # the Argon2id key file as fallback. The Argon2id keyslot (slot 0) is ALWAYS
 # retained as the recovery path - it is never retired. A legitimate PCR 7 change
@@ -109,7 +131,8 @@ open_var() {
     fi
 }
 
-# Ensure a filesystem exists inside the opened container. This is the resume
+# Ensure a filesystem exists inside the opened container (the in-place path
+# keeps the flashed one; this covers the blank-partition path). This is the resume
 # point for a first boot interrupted after luksFormat but before mkfs: the open
 # path would otherwise leave /dev/mapper/var filesystem-less, which udev flags
 # SYSTEMD_READY=0 (an empty CRYPT-* device), so dev-mapper-var.device never
@@ -179,21 +202,87 @@ maybe_resize() {
     fi
 }
 
-# 1. Ensure the LUKS2 container exists (format on first boot).
-cryptsetup isLuks "$VAR_DEV" 2>/dev/null || {
-    echo "cryptsetup-var: first boot - formatting $VAR_DEV as LUKS2"
-    cryptsetup luksFormat \
+# Encrypt a pre-seeded plaintext filesystem in place instead of formatting over
+# it. Provisioning flashes the var btrfs `avocado build` produced (subvolumes,
+# var_files, primed container images); with a device-generated key that image
+# cannot be encrypted on the host, so first boot converts it here.
+#
+# LUKS2 needs a header in front of the data, so `--reduce-device-size 32M`
+# shifts the data forward by 32 MiB. Nothing needs shrinking: the partition is
+# an expand-to-fill one far larger than the flashed image, and `--device-size`
+# (fs size + 32 MiB) confines the work to the seeded bytes - the shift lands
+# in the partition's free tail and only the data that exists gets encrypted.
+# maybe_resize then grows the mapping to the partition on the following boots.
+#
+# Interrupted mid-way (power cut), LUKS2 records the reencryption in its
+# metadata; open_var resumes it before opening. A filesystem whose size cannot
+# be read gets the whole-partition reencryption instead - slower, still correct.
+encrypt_in_place() {
+    fstype="$1"
+    part_bytes=$(blockdev --getsize64 "$VAR_DEV")
+    fs_bytes=""
+    if [ "$fstype" = "btrfs" ] && command -v btrfs >/dev/null 2>&1; then
+        fs_bytes=$(btrfs inspect-internal dump-super "$VAR_DEV" 2>/dev/null \
+                    | awk '/^total_bytes/{print $2}')
+    fi
+    size_opt=""
+    if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null; then
+        # fs + 32 MiB shift, rounded up to whole MiB; must still fit the partition.
+        want_mib=$(( (fs_bytes + 33554432 + 1048575) / 1048576 ))
+        if [ $(( want_mib * 1048576 )) -le "$part_bytes" ]; then
+            size_opt="--device-size ${want_mib}M"
+        fi
+    fi
+    if [ -z "$size_opt" ] && [ $(( part_bytes - 33554432 )) -lt "${fs_bytes:-0}" ]; then
+        echo "cryptsetup-var: $fstype on $VAR_DEV leaves no 32 MiB for a LUKS header - cannot encrypt in place" >&2
+        exit 1
+    fi
+    echo "cryptsetup-var: first boot - encrypting existing $fstype on $VAR_DEV in place${size_opt:+ ($size_opt)}"
+    # shellcheck disable=SC2086 # size_opt is two words on purpose
+    cryptsetup reencrypt --encrypt \
         --type luks2 \
         --cipher aes-xts-plain64 \
         --key-size 512 \
         --hash sha256 \
+        --reduce-device-size 32M \
+        $size_opt \
         --key-file "$KEY_FILE" \
         --batch-mode \
         "$VAR_DEV"
 }
 
-# 2. Ensure it is open as /dev/mapper/var.
-[ -b "$MAPPER" ] || open_var
+# Resume a reencryption a previous boot did not finish. Idempotent: fails fast
+# when no reencryption is recorded, which is the normal case.
+resume_reencrypt() {
+    if cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/online-reencrypt/{f=1} END{exit !f}'; then
+        echo "cryptsetup-var: resuming interrupted reencryption on $VAR_DEV"
+        cryptsetup reencrypt --resume-only --key-file "$KEY_FILE" --batch-mode "$VAR_DEV"
+    fi
+}
+
+# 1. Ensure the LUKS2 container exists: encrypt a flashed filesystem in place,
+#    or format a blank partition on first boot.
+cryptsetup isLuks "$VAR_DEV" 2>/dev/null || {
+    existing_fs=$(blkid -p -s TYPE -o value "$VAR_DEV" 2>/dev/null || true)
+    if [ -n "$existing_fs" ]; then
+        encrypt_in_place "$existing_fs"
+    else
+        echo "cryptsetup-var: first boot - formatting $VAR_DEV as LUKS2"
+        cryptsetup luksFormat \
+            --type luks2 \
+            --cipher aes-xts-plain64 \
+            --key-size 512 \
+            --hash sha256 \
+            --key-file "$KEY_FILE" \
+            --batch-mode \
+            "$VAR_DEV"
+    fi
+}
+
+# 2. Ensure it is open as /dev/mapper/var (finishing any interrupted
+#    reencryption first - the Argon2id key is the only one it can have then).
+ensure_tpm2_unlocked
+[ -b "$MAPPER" ] || { resume_reencrypt; open_var; }
 
 # 3. Ensure a filesystem exists (self-heal a first boot interrupted before mkfs).
 ensure_fs

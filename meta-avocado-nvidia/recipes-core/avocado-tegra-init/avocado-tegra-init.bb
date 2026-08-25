@@ -23,6 +23,17 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/avocado-tegra-init.service \
         ${D}${systemd_system_unitdir}/avocado-tegra-init.service
 
+    # Mask the shared cryptsetup-var.service on Jetson: avocado-tegra-init
+    # runs the script itself (the var partition is found by PARTNAME, not by
+    # the `var` partlabel the unit Requires=). A drop-in with empty
+    # Requires=/After= does NOT reset those dependencies (observed on an Orin
+    # Nano: the initrd sat 90 s in "A start job is running for
+    # /dev/disk/by-partlabel/var"), so mask it outright. /etc is free here -
+    # cryptsetup-var installs its unit under /usr/lib - and the mask is inert
+    # when cryptsetup-var is not in the image at all.
+    install -d ${D}${sysconfdir}/systemd/system
+    ln -sf /dev/null ${D}${sysconfdir}/systemd/system/cryptsetup-var.service
+
     # systemd 258+ uses initrd-preset/ instead of system-preset/ when
     # /etc/initrd-release exists (i.e. in initramfs images).  The bbclass
     # only generates system-preset/98-*.preset, so we must provide an
@@ -37,4 +48,5 @@ SYSTEMD_AUTO_ENABLE = "enable"
 
 FILES:${PN} += "${sbindir}/avocado-tegra-init \
                 ${systemd_system_unitdir}/avocado-tegra-init.service \
+                ${sysconfdir}/systemd/system/cryptsetup-var.service \
                 ${systemd_unitdir}/initrd-preset/98-avocado-tegra-init.preset"
