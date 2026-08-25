@@ -57,12 +57,17 @@ S = "${UNPACKDIR}"
 do_install() {
     install -d ${D}${libexecdir}/optee-ftpm
     install -m 0750 ${UNPACKDIR}/optee-ftpm-setup.sh ${D}${libexecdir}/optee-ftpm/
+    sed -i -e 's|@TEE_STORE_DEV@|${OPTEE_FTPM_TEE_STORE_DEV}|g' \
+        ${D}${libexecdir}/optee-ftpm/optee-ftpm-setup.sh
 
     install -d ${D}${nonarch_base_libdir}/modprobe.d
     install -m 0644 ${UNPACKDIR}/optee-ftpm.conf ${D}${nonarch_base_libdir}/modprobe.d/
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/optee-ftpm-setup.service ${D}${systemd_system_unitdir}/
+    sed -i -e 's|@TEE_STORE_DEV@|${OPTEE_FTPM_TEE_STORE_DEV}|g' \
+           -e 's|@TEE_STORE_UNIT@|${OPTEE_FTPM_TEE_STORE_UNIT}|g' \
+        ${D}${systemd_system_unitdir}/optee-ftpm-setup.service
 
     # Statically enable for the initrd (the initramfs build does not apply the
     # preset for a WantedBy=initrd-root-fs.target unit - same as cryptsetup-var).
@@ -81,7 +86,21 @@ FILES:${PN} += "${systemd_system_unitdir}/initrd-root-fs.target.wants/optee-ftpm
 # kas machine config pulls base + nxp + freescale only - while the initramfs
 # packagegroup that pulls this recipe in (on MACHINE_FEATURES optee-ftpm) is
 # shared and would otherwise RDEPEND on a recipe with no provider.
-COMPATIBLE_MACHINE = "avocado-qemuarm64|avocado-imx93-frdm"
+# `tegra` is the MACHINEOVERRIDE every meta-tegra machine carries, so this
+# matches all Avocado Jetson machines at once (they set OPTEE_ENABLE_FTPM).
+COMPATIBLE_MACHINE = "avocado-qemuarm64|avocado-imx93-frdm|tegra"
+
+# Block device holding the persistent REE-FS TEE store (/var/lib/tee). A
+# machine fact: a small, otherwise-unused GPT partition outside the encrypted
+# /var. The generic default is the recovery partition (qemuarm64, imx93-frdm);
+# Jetson overrides it in avocado-jetson.inc because its `recovery` partition
+# holds a kernel image. Substituted into the script and unit at install time.
+OPTEE_FTPM_TEE_STORE_DEV ?= "/dev/disk/by-partlabel/recovery"
+# systemd unit name for that path (e.g. dev-disk-by\x2dpartlabel-recovery.device).
+# The dash escape is doubled ('\\x2d' -> two backslashes) because the value
+# is fed to a GNU sed replacement in do_install, which would otherwise read
+# \x2d as a hex escape and emit a plain '-', silently un-escaping the unit.
+OPTEE_FTPM_TEE_STORE_UNIT = "${@d.getVar('OPTEE_FTPM_TEE_STORE_DEV').lstrip('/').replace('-', '\\\\x2d').replace('/', '-')}.device"
 
 # Assert the machine's AVOCADO_SECURITY_CAPABILITIES declaration agrees with
 # whether the fTPM is actually being built in, rather than letting the two drift

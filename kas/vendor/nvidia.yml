@@ -1,5 +1,10 @@
 header:
   version: 16
+  includes:
+    # meta-tpm (tpm2-tss) for systemd's tpm2 PACKAGECONFIG - every Jetson
+    # ships an OP-TEE fTPM (OPTEE_ENABLE_FTPM in avocado-jetson.inc).
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
 
 repos:
   meta-tegra:

@@ -1,11 +1,12 @@
 [Unit]
 Description=Bring up the OP-TEE fTPM for the initrd TPM2 enroll
 DefaultDependencies=no
-# Only meaningful where the fTPM's persistent TEE store (recovery partition)
-# exists; on machines without it the service is skipped.
-ConditionPathExists=/dev/disk/by-partlabel/recovery
-Requires=dev-disk-by\x2dpartlabel-recovery.device
-After=dev-disk-by\x2dpartlabel-recovery.device systemd-udevd.service
+# Only meaningful where the fTPM's persistent TEE store partition exists
+# (OPTEE_FTPM_TEE_STORE_DEV, substituted by optee-ftpm-init.bb); on machines
+# without it the service is skipped.
+ConditionPathExists=@TEE_STORE_DEV@
+Requires=@TEE_STORE_UNIT@
+After=@TEE_STORE_UNIT@ systemd-udevd.service
 Wants=systemd-udevd.service
 # /dev/tpm0 must exist before cryptsetup-var runs its enroll.
 Before=cryptsetup-var.service initrd-root-fs.target

@@ -53,8 +53,9 @@ check_optee_available() {
 check_capability_declared
 check_optee_available
 
-TEE_DEV=/dev/disk/by-partlabel/recovery
-[ -b "$TEE_DEV" ] || { echo "optee-ftpm: no recovery partition, skipping fTPM bring-up"; exit 0; }
+# Substituted from OPTEE_FTPM_TEE_STORE_DEV by optee-ftpm-init.bb.
+TEE_DEV=@TEE_STORE_DEV@
+[ -b "$TEE_DEV" ] || { echo "optee-ftpm: no TEE store partition at $TEE_DEV, skipping fTPM bring-up"; exit 0; }
 
 # Mount the persistent TEE store, formatting it (btrfs) on first boot.
 #

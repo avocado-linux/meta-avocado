@@ -1,5 +1,34 @@
 MACHINE_FEATURES:append = " optee"
 
+# Build NVIDIA's OP-TEE fTPM TA + ftpm-helper PTA into BL32 (meta-tegra's
+# optee-l4t.inc defaults this to 1 on tegra264/Thor and 0 on tegra234/Orin;
+# every Avocado Jetson gets it). optee-client then ships
+# tee-ftpm-modprobe.service, so /dev/tpm0 exists on the running system.
+OPTEE_ENABLE_FTPM = "1"
+
+# What this machine can deliver (avocado-security-capabilities.bbclass).
+# encrypted-var: cryptsetup-var + the dm-crypt fragments both Jetson kernels
+# carry (recipes-kernel/linux/files/ftpm.cfg + avocado-security-kernel.inc).
+# ftpm/tpm2: the OP-TEE fTPM above. Declaring is not enabling - /var
+# encryption is a per-runtime opt-in (avocado.yaml var.encrypt); the plaintext
+# default is unchanged. MACHINE_FEATURES optee-ftpm is deliberately NOT set:
+# that token pulls optee-ftpm-init into the Yocto initramfs image for every
+# runtime, and the opt-in path installs it from the feed instead.
+AVOCADO_SECURITY_CAPABILITIES = "encrypted-var ftpm tpm2"
+
+# libcryptsetup-token-systemd-tpm2.so (cryptsetup-plugins) is what re-opens
+# the sealed /var on later boots; without it every boot silently falls back to
+# the Argon2id recovery keyslot. tpm2-tss comes from meta-tpm via
+# kas/feature/tpm.yml, included from kas/vendor/nvidia.yml.
+PACKAGECONFIG:append:pn-systemd = " tpm2 cryptsetup-plugins"
+
+# Persistent REE-FS store for the fTPM's NV state (optee-ftpm-init). Must live
+# outside the encrypted /var it unlocks, and Orin NX/Nano have no RPMB. Both
+# Avocado flash layouts carry an unused 480 MiB `reserved` partition; use it.
+# Jetson's `recovery` partition (the generic default) holds a kernel image and
+# must never be formatted.
+OPTEE_FTPM_TEE_STORE_DEV = "/dev/disk/by-partlabel/reserved"
+
 # Jetson consoles are on the Tegra Combined UART with no virtual console, so
 # OE-core's `enable getty@.service` preset can only ever fail. Shipped from the
 # shared include rather than per-machine: it applies to every Jetson, devkit or
