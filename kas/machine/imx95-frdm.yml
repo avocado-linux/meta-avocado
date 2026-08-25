@@ -10,7 +10,7 @@ header:
     - repo: meta-avocado
       file: kas/target/distro.yml
     - repo: meta-avocado
-      file: kas/extra/deepx.yml
+      file: kas/feature/ai.yml
 
 repos:
   meta-avocado:
