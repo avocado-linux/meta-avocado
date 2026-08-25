@@ -14,6 +14,12 @@ verification entirely. Listing only the variables that legitimately have to
 survive from storage means every boot-path variable comes from the compiled-in
 default instead, which ships inside the signed bootloader.
 
+That compiled-in default is a precondition rather than an assumption. This
+board's boot flow reached U-Boot ONLY through the saved environment until
+board/nxp/imx93_frdm/avocado.env was added, so this list without that file
+rejects the entire flow on import and leaves the stock bootcmd running - the
+board comes up, and does not boot Avocado. Neither piece works alone.
+
 The permitted set is derived from what actually writes this board's
 environment, not from what looks plausible:
 
@@ -28,13 +34,29 @@ environment, not from what looks plausible:
     than hardcoding names; stone-imx93-frdm.json's update.activate sets only
     avocado_boot_slot.
 
+  - stone-provision-uuu-emmc.sh, which fw_setenv's devnum and mmcblk directly
+    into the env image when provisioning eMMC instead of SD. This one writes
+    after mkenvimage has run, so the values cannot come from the compiled-in
+    default - without them on the list an eMMC device would silently look for
+    its boot partition on the SD defaults.
+
+Being on the list is not the whole decision; the vartype matters as much as
+the access flag. devnum and mmcblk are 'd' rather than 's' because both are
+substituted into commands, and _env_flags_validate_type does nothing at all
+for a string. mmcblk reaches rootdev and from there bootargs, which the FIT
+signature does not cover, so as a string "1p6 init=/bin/sh x" boots a fully
+verified kernel straight into a root shell. devnum reaches the load command,
+where the extra words become extra arguments and place a chosen file at a
+chosen DRAM address before bootm ever runs. Decimal rejects both, admits 0
+and 1, and so costs provisioning nothing.
+
 a.avocado_version, a.avocado_uuid and their b. counterparts are deliberately
 absent: nothing sets them (upgrade.a/upgrade.b only uboot_unsetenv them) and
 the boot script never reads them.
 
 Everything omitted - bootcmd, avocado_boot, avocado_boot_init, load_image,
-image_addr, image_file, bootpart, rootdev, bootargs, console, devtype, devnum,
-mmcblk, machine - now comes from the compiled-in default when it arrives from
+image_addr, image_file, bootpart, rootdev, bootargs, console, devtype,
+machine - now comes from the compiled-in default when it arrives from
 storage. Note this does NOT prevent a runtime `setenv`: env_flags_validate
 gates on H_EXTERNAL, so the boot script's own `setenv bootpart`/`rootdev`/
 `bootargs` inside avocado_boot_init still work, and the board boots normally.
@@ -43,10 +65,10 @@ Upstream-Status: Inappropriate [Avocado-specific board policy]
 
 ---
 diff --git a/include/configs/imx93_frdm.h b/include/configs/imx93_frdm.h
-index 5a77d63e43e..be33cc6a0a6 100644
+index 5a77d63e43e..3ae83421f0c 100644
 --- a/include/configs/imx93_frdm.h
 +++ b/include/configs/imx93_frdm.h
-@@ -29,6 +29,32 @@
+@@ -29,6 +29,53 @@
  #else
  #define IMX93_EVK_MMC_ENV_DEV 0
  #endif
@@ -57,13 +79,32 @@ index 5a77d63e43e..be33cc6a0a6 100644
 + * applies instead, which is what keeps the boot path under the control of the
 + * signed bootloader rather than the writable uboot-env partition.
 + *
-+ * 's' is the string vartype; 'w' is the writeable access flag that
-+ * CONFIG_ENV_WRITEABLE_LIST tests. Both characters are required - the access
-+ * flag is read from position 1 of the attribute string.
++ * Each entry is "name:<vartype><varaccess>". 's' is string and 'd' is decimal;
++ * 'w' is the writeable access flag that CONFIG_ENV_WRITEABLE_LIST tests. Both
++ * characters are required - the access flag is read from position 1 of the
++ * attribute string.
 + *
-+ * Keep this in sync with rootdisk.conf's uboot_setenv calls and with the
-+ * stone manifest's update.activate map. Adding a boot-path variable here
-+ * reopens the bypass this list exists to close.
++ * devnum and mmcblk are listed because eMMC provisioning rewrites them in the
++ * env image with fw_setenv after mkenvimage has already run
++ * (stone-provision-uuu-emmc.sh), so an eMMC-provisioned device would otherwise
++ * fall back to the compiled-in SD defaults and hunt for its boot partition on
++ * the wrong medium.
++ *
++ * They are 'd' (decimal) and not 's' (string), and that is load-bearing, not
++ * tidiness. _env_flags_validate_type runs before the access check and on the
++ * H_EXTERNAL path, and its string case is a bare break - no validation at all -
++ * while its decimal case rejects any value with a trailing non-digit. Both of
++ * these are substituted into commands, so as strings they are injection points:
++ * mmcblk lands in rootdev and from there in bootargs, which the FIT signature
++ * does not cover, so "1p6 init=/bin/sh x" would hand a root shell to anyone who
++ * can write the card; devnum lands in the load command, where extra words
++ * become extra arguments and put a chosen file at a chosen DRAM address before
++ * bootm runs. Decimal admits 0 and 1, which is all SD and eMMC need.
++ *
++ * Keep this in sync with rootdisk.conf's uboot_setenv calls, with the stone
++ * manifest's update.activate map, and with those fw_setenv calls. Adding a
++ * boot-path variable here reopens the bypass this list exists to close - and
++ * "it only selects a device" is not a safe reading, as the two above show.
 + */
 +#define CFG_ENV_FLAGS_LIST_STATIC \
 +	"avocado_boot_slot:sw," \
@@ -74,7 +115,9 @@ index 5a77d63e43e..be33cc6a0a6 100644
 +	"a.avocado_platform:sw," \
 +	"a.avocado_architecture:sw," \
 +	"b.avocado_platform:sw," \
-+	"b.avocado_architecture:sw"
++	"b.avocado_architecture:sw," \
++	"devnum:dw," \
++	"mmcblk:dw"
 +
  /* Link Definitions */
  
