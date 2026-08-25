@@ -11,7 +11,10 @@ SRC_URI = "gitsm://github.com/raspberrypi/usbboot.git;branch=master;protocol=htt
 SRCREV = "36baa69fc2783d9df2ff5d28e2fb4bc179bd1d1b"
 
 
-inherit nativesdk
+# pkgconfig: wrynose oe-core exports PKG_CONFIG_{LIBDIR,SYSROOT_DIR,...} from
+# pkgconfig.bbclass, no longer from bitbake.conf; the Makefile shells out to
+# pkg-config for libusb-1.0 and found nothing without it.
+inherit nativesdk pkgconfig
 
 # Pass native build variables into the make environment
 # EXTRA_OEMAKE += "'BUILD_CC=${BUILD_CC}' 'BUILD_CFLAGS=${BUILD_CFLAGS}' 'BUILD_LDFLAGS=${BUILD_LDFLAGS}'"
