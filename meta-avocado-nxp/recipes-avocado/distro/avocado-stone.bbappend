@@ -1,7 +1,10 @@
 # Depend on whichever bootloader the machine selects (u-boot-imx for the NXP
-# EVK/FRDM, u-boot-compulab for CompuLab boards), not a hardcoded recipe -
-# forcing u-boot-imx on a CompuLab machine fails (no defconfig for it).
-do_compile[depends] += "${IMX_DEFAULT_BOOTLOADER}:do_deploy"
+# EVK/FRDM, u-boot-compulab for CompuLab, u-boot-variscite for Variscite), not
+# a hardcoded recipe. virtual/bootloader rather than ${IMX_DEFAULT_BOOTLOADER}:
+# Variscite selects its bootloader through PREFERRED_PROVIDER_virtual/bootloader
+# alone and leaves IMX_DEFAULT_BOOTLOADER at imx-base.inc's u-boot-imx, which is
+# not COMPATIBLE_MACHINE for its boards, so the old form had no provider there.
+do_compile[depends] += "virtual/bootloader:do_deploy"
 do_compile[depends] += "imx-boot:do_deploy"
 
 # avocado-imx93-frdm-fitimage assembles the FIT this machine's boot partition
