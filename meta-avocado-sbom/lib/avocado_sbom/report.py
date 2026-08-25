@@ -24,6 +24,7 @@ class Stats(dict):
         "ignored_cves",
         "patched_cves",
         "unknown_status_cves",
+        "manifests_read",
     )
 
     def __init__(self):
@@ -94,6 +95,73 @@ def read_pkgdata(pkgdata_dirs, stats):
 
     stats.packages = len(packages)
     return packages, recipe_versions
+
+def read_manifests(manifest_paths, stats):
+    """Package names installed by the given image manifests.
+
+    A manifest line is "PKG ARCH VERSION". An absent one is not an error - see
+    _scope for why the report degrades rather than fails.
+    """
+    installed = set()
+
+    for path in sorted(manifest_paths):
+        try:
+            with open(path, errors="ignore") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+
+        names = {fields[0] for fields in (line.split() for line in lines) if fields}
+        if not names:
+            # Truncated: counting it would report the image as scoped by it.
+            continue
+        installed.update(names)
+        stats.manifests_read += 1
+
+    return installed
+
+# Most privileged first. A label on every finding, never a filter on the
+# report - the README's "Scope" section has why.
+SCOPES = ("boot-chain", "base-runtime", "feed", "build-only")
+
+# Naming is the only signal the report's inputs carry; the real one is whether
+# the recipe inherits deploy, which needs a per-recipe datastore the standalone
+# path lacks. Checked against all 94 package-less recipes on a qemuarm64 world
+# build - the -source and -initial families are there because gcc-source-<PV>
+# and libgcc-initial matched none of the obvious suffixes.
+def _is_host_tooling(recipe):
+    return (
+        recipe.startswith("nativesdk-")
+        or recipe.endswith(("-native", "-cross", "-crosssdk", "-initial"))
+        or "-cross-" in recipe
+        or "-source-" in recipe
+        or recipe.endswith("-source")
+    )
+
+def _scope(recipe, package_names, installed, boot_chain):
+    """Which surface a recipe occupies.
+
+    Boot chain is checked first and by name, not package membership: u-boot and
+    trusted-firmware-a reach the device through avocado-img-bootfiles, which
+    scrapes DEPLOY_DIR_IMAGE, so no manifest names them.
+
+    "build-only" is the only value asserting a recipe is NOT on the device, so
+    it is earned rather than defaulted to. Read no manifest and everything
+    packaged reads "feed" - over-reporting the device, which is the safe way to
+    be wrong.
+    """
+    if recipe in boot_chain:
+        return "boot-chain"
+    if any(name in installed for name in package_names):
+        return "base-runtime"
+    if package_names:
+        return "feed"
+    if _is_host_tooling(recipe):
+        return "build-only"
+    # Deploy-only target recipe - imx-atf, imx-boot, firmware-*, a u-boot with
+    # PACKAGES = "". The README's "packaged" section says their CVEs are real
+    # and on the device, so build-only would hide them.
+    return "boot-chain"
 
 CVE_FIELDS = (
     "id",
@@ -327,7 +395,15 @@ def packages_digest(packages):
 
 REPORT_VERSION = "1"
 
-def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summary=True):
+def build_report(
+    cve_dir,
+    pkgdata_dirs,
+    machine=None,
+    status="Unpatched",
+    summary=True,
+    manifest_paths=(),
+    boot_chain=(),
+):
     if status not in CVE_STATUSES:
         raise ValueError(
             "unknown cve-check status %r; expected one of %s"
@@ -340,6 +416,23 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
         cve_dir, recipe_versions, stats, status=status, summary=summary
     )
 
+    installed = read_manifests(manifest_paths, stats)
+    declared_boot_chain = set(boot_chain)
+    recipe_packages = {}
+    for name, pkg in packages.items():
+        recipe_packages.setdefault(pkg["recipe"], []).append(name)
+
+    # Scope totals are deliberately not counters: every entry carries its own,
+    # so an aggregate cannot drift from what the entries say.
+    for name, entry in recipes.items():
+        entry["scope"] = _scope(
+            name, recipe_packages.get(name, ()), installed, declared_boot_chain
+        )
+
+    # Scope is a field, not a filter, so this denominator does not move: both
+    # lists stay derived from pkgdata, and reading a manifest leaves them
+    # identical.
+    #
     # Both lists are scoped to recipes that shipped a package, so together with
     # the recipes scanned and found in the NVD they partition that set: a
     # consumer can account for every shipped recipe exactly once.
@@ -374,6 +467,7 @@ def build_report(cve_dir, pkgdata_dirs, machine=None, status="Unpatched", summar
             "ignored_cves": stats.ignored_cves,
             "patched_cves": stats.patched_cves,
             "unknown_status_cves": stats.unknown_status_cves,
+            "manifests_read": stats.manifests_read,
         },
         "recipes": recipes,
         "packages": packages,
@@ -500,6 +594,16 @@ def default_paths(tmpdir, machine=None):
     pkgdata_dirs.sort(key=lambda d: "-linux" in os.path.basename(d))
     return cve_dir, pkgdata_dirs
 
+def default_manifests(tmpdir, machine=None):
+    """Image manifests under a build's TMPDIR.
+
+    Kept out of default_paths so its return shape stays frozen: an empty result
+    is a normal outcome here, not the failure every branch of default_paths
+    raises for.
+    """
+    images = os.path.join(tmpdir, "deploy", "images", machine or "*")
+    return sorted(glob.glob(os.path.join(images, "*.manifest")))
+
 def main():
     import argparse
     import sys
@@ -528,6 +632,19 @@ def main():
     parser.add_argument(
         "--no-summary", action="store_true", help="drop CVE description text"
     )
+    parser.add_argument(
+        "--manifest",
+        action="append",
+        default=[],
+        help="image manifest naming the base runtime, repeatable; overrides "
+        "the ${DEPLOY_DIR}/images/${MACHINE}/*.manifest default",
+    )
+    parser.add_argument(
+        "--boot-chain",
+        default="",
+        help="space-separated recipes that run on the device but are "
+        "installed by no package manager, e.g. 'u-boot trusted-firmware-a'",
+    )
     parser.add_argument("-o", "--output", required=True)
     args = parser.parse_args()
 
@@ -539,6 +656,9 @@ def main():
             parser.error(str(e))
     cve_dir = args.cve_dir or cve_dir
     pkgdata_dirs = args.pkgdata_dir or pkgdata_dirs
+    manifests = args.manifest or (
+        default_manifests(args.tmpdir, args.machine) if args.tmpdir else []
+    )
 
     if not cve_dir or not pkgdata_dirs:
         parser.error("need --tmpdir, or both --cve-dir and --pkgdata-dir")
@@ -555,6 +675,8 @@ def main():
         machine=args.machine,
         status=args.status,
         summary=not args.no_summary,
+        manifest_paths=manifests,
+        boot_chain=args.boot_chain.split(),
     )
 
     if not stats.cve_files:
@@ -605,7 +727,16 @@ def main():
         ),
         file=sys.stderr,
     )
+    if not stats.manifests_read:
+        print(
+            "  no image manifest read: every packaged recipe scopes 'feed'. "
+            "Pass --manifest, or run after the image tasks have written "
+            "${DEPLOY_DIR}/images/%s/*.manifest." % (args.machine or "<machine>"),
+            file=sys.stderr,
+        )
+
     for key in (
+        "manifests_read",
         "unscanned_recipes",
         "no_cve_record_recipes",
         "stale_dropped",

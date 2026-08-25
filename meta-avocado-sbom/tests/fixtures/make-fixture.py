@@ -46,6 +46,7 @@ EXTRA_PACKAGE_SAMPLE = 25
 # either way - so a source report carrying one still cuts a valid fixture.
 CARRIED = (
     "cve_files",
+    "manifests_read",
     "unpatched_cves",
     "ignored_cves",
     "patched_cves",
@@ -59,6 +60,11 @@ def trim(full):
         if name not in full["recipes"]:
             raise SystemExit("source report has no recipe %r" % name)
         recipes[name] = full["recipes"][name]
+        if "scope" not in full["recipes"][name]:
+            raise SystemExit(
+                "source report's %r has no scope; it predates the scope field "
+                "and cannot be cut into a current fixture" % name
+            )
 
     packages = {
         name: pkg

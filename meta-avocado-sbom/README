@@ -73,6 +73,85 @@ Variables
                                where avocado-cve-optout.bbclass leaves its
                                markers. Defaults to CVE_CHECK_DIR, beside the
                                cve-check results they explain
+  AVOCADO_CVE_REPORT_MANIFESTS glob of image manifests naming the base
+                               runtime. Defaults to
+                               ${DEPLOY_DIR_IMAGE}/*.manifest. Matching
+                               nothing is not an error - see "Scope" below
+  AVOCADO_CVE_BOOT_CHAIN       recipes that run on the device but are
+                               installed by no package manager, so no manifest
+                               names them. Defaults to "u-boot
+                               trusted-firmware-a optee-os". Override per
+                               machine: a board with a different
+                               secure-firmware stack has a different list
+
+Scope
+-----
+
+Every recipe entry carries a "scope": which surface of the device it occupies.
+
+  boot-chain    runs on the device, installed by no package manager
+  base-runtime  ships in the image as an installed package
+  feed          built and installable, not in this image
+  build-only    never reaches the device as itself (-native, -cross, nativesdk)
+
+"build-only" is the only value that asserts a recipe is absent from the device,
+so it has to be earned rather than defaulted to. A recipe that produced no
+package is host tooling only if it is named like host tooling - -native,
+nativesdk-, -cross, -crosssdk, -initial, and gcc-source-<PV>, checked against
+all 94 package-less recipes on a qemuarm64 world build; otherwise it is a
+deploy-only target recipe that ships outside any package manager - imx-atf,
+imx-boot, firmware-*, a u-boot with PACKAGES = "" - and it scopes boot-chain.
+See the "packaged" section below, which lists those recipes and says their CVEs
+are real and on the device. Naming each one in AVOCADO_CVE_BOOT_CHAIN would not
+be a fix: a vendor layer adds recipes the default list has never heard of, and
+the mislabel would be silent. A host-side deploy recipe caught by that fallback
+is over-reported, which is the safe direction to be wrong in.
+
+It is a label on the finding, never a filter on the report. That distinction is
+the decision itself, so it is worth stating why the obvious alternative -
+generating the report against the image manifest instead of pkgdata - is wrong
+in three separate directions:
+
+  - A feed package is installable, so "not in the image" is not "not shipped".
+    An image-scoped report says the base runtime is clean while saying nothing
+    about what the customer is about to install.
+  - Static linking breaks package presence. A Go or Rust binary carries its
+    dependencies inside it; the toolchain recipe that built it need not be
+    installed anywhere. A rule keyed on package presence clears findings that
+    are genuinely reachable, so a statically-linked language runtime must be
+    attributed to the dependent package rather than to the toolchain. Stated
+    on principle: no configuration this layer builds today ships one, and the
+    carve-out is not written into the scope function until one does.
+  - The boot chain is in no manifest at all. u-boot and trusted-firmware-a
+    reach the device through avocado-img-bootfiles, which copies out of
+    DEPLOY_DIR_IMAGE wholesale; IMAGE_BOOT_FILES on qemuarm64 is just the
+    kernel. Image-manifest scope silently drops the most privileged code on
+    the device.
+
+That last point is why boot-chain is decided by recipe name, from
+AVOCADO_CVE_BOOT_CHAIN, and checked before package membership. It also makes
+the label independent of whether a given machine's u-boot sets PACKAGES = ""
+(see "packaged" below): the bootloader scopes boot-chain either way.
+
+The coverage denominator does not move. unscanned_recipes and
+no_cve_record_recipes are derived from pkgdata - everything this build produced
+- and reading an image manifest leaves both untouched, which tests/test_report.py
+asserts directly by building the same tree twice. Scoping the findings to an
+image without also scoping that denominator would leave a coverage counter
+measuring a different population than the findings beside it; scope being a
+field and not a filter is what avoids the question.
+
+Per-scope totals are deliberately not counters. Every recipe entry carries its
+own scope, so any aggregate a consumer wants is one pass over "recipes" and
+cannot drift from the entries it summarises - which is the failure the derived
+-count checks in verify.py exist to catch for the counters that do exist.
+
+When no manifest is read, manifests_read is 0 and every packaged recipe scopes
+"feed". do_cve_report is ordered before do_build only, so it can legitimately
+run before the image tasks have written anything - the recipe warns, and the
+degradation is deliberately toward the wider claim. Feed scope over-reports
+what a device carries; base-runtime scope would under-report it, and for a CVE
+report only one of those is safe to get wrong.
 
 The frozen contract
 -------------------
@@ -281,6 +360,23 @@ at version 1 because version 1 had no consumer at the time - the report was
 produced by this layer and read by nothing outside it. The rules above apply
 from here without that exemption.
 
+A second change was made under these rules that they would otherwise forbid.
+"scope" was added to every recipe entry as a required field, so a report
+generated before it fails the current checker. The rules do not actually name
+this case - "making an optional key required" is a different thing, since scope
+was never optional, and the allowed list covers a new field inside a CVE record
+rather than inside a recipe entry. Read against their intent it is a new major. It was made at version 1 deliberately: an
+optional scope is worse than none, because a consumer would have to guess what
+an absent scope meant, and the only safe guess - "feed" - is exactly the value
+a producer that had read no manifest would have written anyway. The two cases
+are indistinguishable and one of them is wrong. Requiring it makes a producer
+that cannot label a finding say so through manifests_read instead. The cost is
+bounded: do_cve_report is nostamp, so every build regenerates the report, and
+ENG-2363 rejects stale documents at the Connect boundary regardless.
+
+Consumers reading version 1 are unaffected either way - this tightens what a
+producer must emit, never what a reader must understand.
+
 "machine" and "distro_version" are optional by construction rather than by
 policy: build_report never writes them, the recipe does, so a standalone run
 legitimately lacks both.
@@ -303,11 +399,12 @@ Report format
                 "cve_files_unreadable": 0,
                 "pkgdata_unreadable": 0, "package_collisions": 0,
                 "unpatched_cves": 0, "patched_cves": 0, "ignored_cves": 0,
-                "unknown_status_cves": 0 },
+                "unknown_status_cves": 0, "manifests_read": 2 },
     "recipes": {
       "openssl": {
         "version": "3.5.7",
         "packaged": true,
+        "scope": "base-runtime",
         "cves": [ { "id": "CVE-...", "scorev3": "7.5", "vector": "NETWORK",
                     "summary": "...", "link": "https://nvd.nist.gov/..." } ]
       }

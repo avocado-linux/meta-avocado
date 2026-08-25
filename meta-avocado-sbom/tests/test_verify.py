@@ -71,6 +71,19 @@ class FixtureTests(unittest.TestCase):
                 entry["cves"] = entry["cves"][:1]
         self.assertCaught("counts.packaged_cves")
 
+    def test_scope_removed(self):
+        # A producer that predates the scope field, or one that dropped it:
+        # every finding then claims a surface it has not declared.
+        for entry in self.report["recipes"].values():
+            del entry["scope"]
+        self.assertCaught(".scope")
+
+    def test_scope_misspelled(self):
+        # "runtime" reads plausible and means nothing. A free-string scope
+        # would let a producer invent a fourth surface no consumer maps.
+        next(iter(self.report["recipes"].values()))["scope"] = "runtime"
+        self.assertCaught(".scope")
+
     def test_whole_recipe_dropped(self):
         name = next(iter(self.report["recipes"]))
         del self.report["recipes"][name]
@@ -275,6 +288,7 @@ class FixtureTests(unittest.TestCase):
                 "foo": {
                     "version": "1.0",
                     "packaged": True,
+                    "scope": "feed",
                     "cves": [{"id": "CVE-2026-1"}],
                 },
             },
