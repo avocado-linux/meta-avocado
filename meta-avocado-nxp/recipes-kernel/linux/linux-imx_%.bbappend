@@ -23,8 +23,11 @@ do_configure:append() {
   # unpacked sources still landed in WORKDIR. Globbed there this matches nothing
   # and the fragments are dropped silently, leaving a kernel with no
   # CONFIG_DM_CRYPT and a /var that cannot be unlocked.
+  # `if`, not `[ -e ] &&`: on boards without this directory the glob stays
+  # literal, the test is false, and that 1 would be the function's exit
+  # status - do_configure failed on every non-imx93 machine that way.
   for f in ${UNPACKDIR}/imx93-frdm/*.cfg; do
-    [ -e "$f" ] && cat "$f" >> ${B}/.config
+    if [ -e "$f" ]; then cat "$f" >> ${B}/.config; fi
   done
 }
 
