@@ -26,6 +26,11 @@ NXP_WIFI_DRIVER = " \
 # 6.18 on). Same firm-RDEPENDS reasoning as the driver above: MACHINE_FIRMWARE
 # only reaches the image as a recommendation otherwise.
 NXP_WIFI_FIRMWARE = "${MACHINE_FIRMWARE}"
+# The 8M Plus EVK's stock M.2 module is an 88W8997, which NXP's 6.18 firmware
+# and moal driver no longer cover; firmware-nxp-wifi-8997 carries the blobs for
+# the mainline mwifiex/btnxpuart path (see that recipe and the EVK's
+# mwifiex.cfg kernel fragment). Feed-only here; the BSP extension installs it.
+NXP_WIFI_FIRMWARE:append:avocado-imx8mp-evk = " firmware-nxp-wifi-8997"
 
 RDEPENDS:${PN} = " \
   ${NXP_WIFI_DRIVER} \

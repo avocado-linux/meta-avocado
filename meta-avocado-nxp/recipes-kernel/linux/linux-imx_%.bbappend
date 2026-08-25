@@ -17,6 +17,8 @@ SRC_URI:append:avocado-imx93-frdm = " \
   file://imx93-frdm/ftpm.cfg \
 "
 
+SRC_URI:append:avocado-imx8mp-evk = " file://imx8mp-evk/mwifiex.cfg"
+
 do_configure:append() {
   cat ${UNPACKDIR}/*.cfg >> ${B}/.config
   # UNPACKDIR, not WORKDIR: the stack was written against scarthgap, where
@@ -26,7 +28,7 @@ do_configure:append() {
   # `if`, not `[ -e ] &&`: on boards without this directory the glob stays
   # literal, the test is false, and that 1 would be the function's exit
   # status - do_configure failed on every non-imx93 machine that way.
-  for f in ${UNPACKDIR}/imx93-frdm/*.cfg; do
+  for f in ${UNPACKDIR}/*/*.cfg; do
     if [ -e "$f" ]; then cat "$f" >> ${B}/.config; fi
   done
 }
