@@ -7,7 +7,7 @@ header:
     # imx-mkimage / imx-boot. CompuLab's BSP layers meta-imx on top of this.
     - repo: meta-avocado
       file: kas/vendor/freescale.yml
-    # NXP proprietary meta-imx (pinned to 6.6.52-2.2.0 here) + CompuLab
+    # NXP proprietary meta-imx (pinned to wrynose-6.18.20-2.0.0 here) + CompuLab
     # meta-bsp-imx8mp. Also pulls kas/vendor/nxp.yml (arm.yml for the Cortex-M7
     # bare-metal toolchain + virtualization.yml).
     - repo: meta-avocado

@@ -48,15 +48,30 @@ repos:
       meta-avocado-shared:
 
   # Base vendor layers: always provisioned because meta-avocado-distro carries
-  # unconditional bbappends/recipes that customize them (swupdate) or always-on
-  # packages depend on them (fwup).
+  # unconditional bbappends/recipes that customize them (erlang, swupdate) or
+  # always-on packages depend on them (fwup, cryptoauthlib in system-base).
   #
-  # scarthgap also carries meta-atmel and meta-erlang here. Both are omitted on
-  # wrynose: meta-atmel declares LAYERSERIES_COMPAT=nanbield and meta-erlang
-  # declares whinlatter, so adding either fails the layer compatibility check
-  # outright rather than degrading. Their only consumers were cryptoauthlib and
-  # livebook in the system-base feature group, which this branch drops for the
-  # same reason. Restore all four together once the forks carry a wrynose branch.
+  # meta-atmel's wrynose branch is Avocado-authored (upstream stops at nanbield)
+  # and only its layer.conf was ported: several of its recipes still fail to
+  # parse on wrynose (S = ${WORKDIR}, missing swig.inc). cryptoauthlib is the
+  # only thing consumed, so every other recipe directory is masked below.
+  # meta-erlang's branch mirrors upstream.
+  meta-atmel:
+    url: https://github.com/avocado-linux/vendor-meta-atmel
+    path: meta-atmel
+    branch: wrynose
+    commit: c556d36f808f75ac147c033f82f5ade24d87a1c1
+    layers:
+      .:
+
+  meta-erlang:
+    url: https://github.com/avocado-linux/vendor-meta-erlang
+    path: meta-erlang
+    branch: wrynose
+    commit: e731185522a2da73e40929761e323ff2f8c20abc
+    layers:
+      .:
+
   meta-fwup:
     url: https://github.com/avocado-linux/vendor-meta-fwup.git
     path: meta-fwup
@@ -92,6 +107,9 @@ local_conf_header:
   # scarthgap's qemu. The backport has been deleted; OE-core wrynose
   # ships qemu 10.2.0 which we want unmodified.
   qemu: |
+
+  meta-atmel: |
+    BBMASK += "meta-atmel/recipes-(?!security/cryptoauthlib/)"
 
   git-lfs: |
     HOSTTOOLS += "git-lfs"

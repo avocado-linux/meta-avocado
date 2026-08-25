@@ -14,14 +14,11 @@ PACKAGES = "${PN}"
 # different delegates and would get their own packagegroup. The NN/OpenVX
 # userspace itself arrives with imx-gpu-viv (already built for the GPU).
 NPU_ML_PKGS = ""
-NPU_ML_PKGS:mx8mp-nxp-bsp = " \
-    tensorflow-lite \
-    tensorflow-lite-vx-delegate \
-    tim-vx \
-    nnstreamer \
-    nnstreamer-tensorflow-lite \
-    nnstreamer-python3 \
-"
+# wrynose: meta-imx-ml is disabled in kas/vendor/nxp.yml (it does not parse at
+# 6.18.20-2.0.0), so the mx8mp list below is empty until that layer comes back.
+# scarthgap shipped: tensorflow-lite tensorflow-lite-vx-delegate tim-vx
+# nnstreamer nnstreamer-tensorflow-lite nnstreamer-python3
+NPU_ML_PKGS:mx8mp-nxp-bsp = ""
 
 # nnshark (GStreamer NN profiler) is intentionally omitted: it DEPENDS on
 # libgpuperfcnt, which lives in meta-imx-sdk -- a meta-imx sublayer Avocado does

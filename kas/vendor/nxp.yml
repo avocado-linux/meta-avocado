@@ -22,8 +22,14 @@ repos:
     path: meta-imx
     layers:
       meta-imx-bsp:
-      meta-imx-ml:
       meta-imx-v2x:
+      # meta-imx-ml does not parse at wrynose-6.18.20-2.0.0: neutron_3.1.1.bb
+      # requires a neutron_1.0.0.bb the release no longer ships, and its
+      # tim-vx/tvm/nnshark/nnstreamer appends have no base recipe in this layer
+      # set. Its only consumer was the mx8mp NPU stack in
+      # packagegroup-avocado-imx-ml, which is emptied alongside. Re-enable both
+      # when NXP ships a self-contained meta-imx-ml.
+      meta-imx-ml: disabled
 
 local_conf_header:
   vendor-nxp: |
@@ -31,8 +37,14 @@ local_conf_header:
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx-rootfs"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-extra"
-    # NPU/eIQ ML stack -> feed. Machine-gated: only populated on mx8mp-nxp-bsp
-    # (i.MX8MP VIP9000); empty on the FRDM / non-8MP boards, so harmless here.
+    # NPU/eIQ ML stack -> feed. Currently empty on every machine (meta-imx-ml is
+    # disabled above); kept wired so re-enabling the layer is a one-file change.
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-ml"
     BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
     BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"
+    # meta-freescale renamed udev-rules-imx.bb to udev-rules-imx_1.0.bb for
+    # wrynose; meta-imx's append is unversioned so it no longer matches and
+    # dangles on every machine that pulls this layer. Masking falls back to
+    # meta-freescale's own 10-imx.rules, which differs only in a
+    # SUBSYSTEM=="neutron" line and galcore 0660-vs-0666.
+    BBMASK += "meta-imx/meta-imx-bsp/recipes-core/udev/udev-rules-imx.bbappend"

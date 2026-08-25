@@ -132,7 +132,7 @@ before we can re-pin.
 | meta-alif | `scarthgap` | |
 | meta-alif-ensemble | `scarthgap` | |
 | meta-imx | `walnascar-6.12.20-2.0.0` | NXP release-aligned; latest line is walnascar |
-| meta-imx-frdm | `lf-6.6.36-2.1.0` | Single branch |
+| meta-imx-frdm | `lf-6.6.36-2.1.0` | Single branch; dropped on wrynose — FRDM machines live in meta-imx-bsp from whinlatter on |
 | meta-synaptics | (none) | `main` is README-only |
 | meta-st-stm32mp | (none) | `master` is README-only |
 | meta-qcom-hwe | (none) | `main` is README-only |

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+set -e
+
+hook="avocado-provision"
+target="imx8mp-var-dart"
+
+RUNTIME_NAME="$1"
+
+input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
+
+# Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
+build_include_flags() {
+    local main_input_dir="$1"
+    local include_flags=""
+    
+    if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                include_flags="$include_flags -i \"$path\""
+            fi
+        done
+    fi
+    
+    include_flags="$include_flags -i \"$main_input_dir\""
+    echo "$include_flags"
+}
+
+# Build display string of all include paths
+build_include_display() {
+    local main_input_dir="$1"
+    local display=""
+    
+    if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                display="${display}\n    - ${path}"
+            fi
+        done
+    fi
+    
+    display="${display}\n    - ${main_input_dir}"
+    echo -e "$display"
+}
+
+echo -e "\033[94m[INFO]\033[0m Running stone provision.
+  Input directories:$(build_include_display "$input_dir")"
+
+include_flags=$(build_include_flags "$input_dir")
+
+# stone manifests omit the `size` field on the last `expand: "true"` partition
+# (var). avocado-cli builds the btrfs into $AVOCADO_PREFIX/runtimes/<runtime>/
+# during `avocado build`, so stat it here and forward the bytes to stone via
+# --partition-size. Stone rounds up to size_alignment (default 4 MiB).
+var_image="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/avocado-image-var-${target}.btrfs"
+var_image_bytes=$(stat -c%s "$var_image")
+
+eval stone provision $include_flags --partition-size \"var=$var_image_bytes\"
+
+echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+exit 0

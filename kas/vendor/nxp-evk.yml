@@ -6,11 +6,8 @@ header:
 
 repos:
   # The i.MX8MP EVK is a board provided directly by meta-imx (no extra vendored
-  # BSP layer, unlike the CompuLab family's meta-bsp-imx8mp), so this file only
-  # pins the NXP release. Tracks 6.6.52-2.2.0 to share a single meta-imx pin with
-  # the CompuLab i.MX8MP family (kas/vendor/compulab.yml) -- same silicon, one
-  # release to revalidate across both i.MX8MP boards. url/path/layers come from
-  # kas/vendor/nxp.yml.
+  # BSP layer). Tracks wrynose-6.18.20-2.0.0, the same meta-imx pin as every
+  # other NXP-BSP board on this branch. url/path/layers come from kas/vendor/nxp.yml.
   meta-imx:
-    branch: scarthgap-6.6.52-2.2.0
-    commit: a0cf309d2e2d544111e520f572db8dff335eca01
+    branch: wrynose-6.18.20-2.0.0
+    commit: 52516b92a70669eb58b805810f2a27a07c874771

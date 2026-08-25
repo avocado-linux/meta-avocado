@@ -7,7 +7,7 @@ header:
     # imx-mkimage / imx-boot, and the shared SDK extras. meta-imx layers on top.
     - repo: meta-avocado
       file: kas/vendor/freescale.yml
-    # NXP proprietary meta-imx (pinned 6.6.52-2.2.0) -> Vivante GPU + VIP9000 NPU
+    # NXP proprietary meta-imx (pinned wrynose-6.18.20-2.0.0) -> Vivante GPU + VIP9000 NPU
     # eIQ ML stack (packagegroup-avocado-imx-ml, machine-gated to mx8mp-nxp-bsp).
     # Transitively pulls kas/vendor/nxp.yml, which sets IMX_DEFAULT_BSP=nxp and
     # includes arm.yml (nativesdk-gcc-arm-none-eabi for the Cortex-M7 bare-metal

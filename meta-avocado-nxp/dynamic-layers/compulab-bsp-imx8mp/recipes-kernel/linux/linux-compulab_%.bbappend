@@ -19,12 +19,12 @@ SRC_URI += " \
 # Avoids editing the vendor base dts (which enables unwired MIPI+LVDS and blocks
 # the imx-drm KMS aggregate -- see the .dts header).
 do_configure:prepend() {
-  install -m 0644 ${WORKDIR}/ucm-imx8m-plus-hdmi.dts \
+  install -m 0644 ${UNPACKDIR}/ucm-imx8m-plus-hdmi.dts \
     ${S}/arch/arm64/boot/dts/compulab/ucm-imx8m-plus-hdmi.dts
 }
 
 do_configure:append() {
-  cat ${WORKDIR}/*.cfg >> ${B}/.config
+  cat ${UNPACKDIR}/*.cfg >> ${B}/.config
 }
 
 # CompuLab's recipe sets KERNEL_SPLIT_MODULES = "0", lumping every module into

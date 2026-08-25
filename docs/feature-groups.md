@@ -51,7 +51,6 @@ set (see §3).
 | cloud-aws    | `cloud-aws`   | greengrass-bin, aws-iot-device-client           | meta-aws                | **unavailable on wrynose** |
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
-| ai           | `ai`          | DeepX NPU runtime (dx-driver, dx-rt, dx-stream) | meta-deepx-m1           | MACHINE_FEATURES deepx |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
@@ -135,33 +134,14 @@ The same append works on any machine:
 kas build kas/machine/qemuarm64.yml:kas/feature/complete.yml
 ```
 
-### DeepX (NPU) boards
-
-`ai` is excluded from `complete.yml` because it is `MACHINE_FEATURES`-gated.
-Deepx machine files keep their own `ai.yml` include (deepx is machine-specific),
-but no board includes the umbrella. grinn-astra defaults to base + ai; append
-the umbrella for the full set:
-
-```bash
-kas build kas/machine/grinn-astra-1680-sbc.yml:kas/feature/complete.yml
-```
-
-On a deepx machine whose file does not already include `ai.yml`, append both:
-
-```bash
-kas build kas/machine/<deepx-machine>.yml:kas/feature/complete.yml:kas/feature/ai.yml
-```
-
 ## 4. Notes for maintainers
 
 - Adding a fragment a machine cannot satisfy is harmless: the group's
   packagegroup resolves to an empty set (the guards are preserved from the
   original monolith), though the vendor layer is still fetched and parsed.
-- `complete.yml` deliberately omits `ai`; including it on non-deepx hardware
-  would pull an unbuildable `dx-*` recipe. Add `ai.yml` only on deepx boards.
 - The SDK mirrors the target: `avocado-pkg-sdk-extra` pulls the Qt5 nativesdk
   toolchain only when the `qt` token is present, so an SDK build that opts out
   of `qt` does not require meta-qt5.
 - Board files do not include the umbrella; a board is minimal by default. To
-  ship the full set, append `:kas/feature/complete.yml` at build time (and
-  `:kas/feature/ai.yml` on a deepx board) rather than adding an include.
+  ship the full set, append `:kas/feature/complete.yml` at build time rather
+  than adding an include.
