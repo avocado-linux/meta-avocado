@@ -1,7 +1,9 @@
 machine=imx8mp-evk
 kernel_file=Image
 initramfs_file=avocado-image-initramfs-imx8mp-evk.cpio.zst
-devicetree_file=imx8mp-evk.dtb
+# imx8mp-evk-pcie.dtb: PCIe M.2 slot (stock 88W8997 module); imx8mp-evk.dtb is
+# the SDIO M.2 variant. See avocado-imx8mp-evk.conf.
+devicetree_file=imx8mp-evk-pcie.dtb
 
 console=ttymxc1,115200
 devtype=mmc
