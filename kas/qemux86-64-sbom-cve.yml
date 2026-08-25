@@ -1,0 +1,25 @@
+# qemux86-64 with SPDX 3.0 SBOM and cve-check both inherited from the start.
+#
+# The repo convention is colon composition (kas build machine.yml:ci/mirrors.yml),
+# but bakar derives its build directory from the first YAML's stem, so composing
+# on the command line would land in build-qemux86-64 alongside unrelated runs.
+# This wrapper exists to give the SBOM/CVE end-to-end its own build directory.
+#
+# cve-check must be inherited while the packages build - added to an existing
+# build afterwards, avocado-cve-report has no *_cve.json to read and produces an
+# empty report rather than failing.
+
+header:
+  version: 16
+  includes:
+    - machine/qemux86-64.yml
+    - feature/sbom.yml
+    - feature/cve-check.yml
+
+# SPDX_INCLUDE_SOURCES is deliberately NOT set here. Measured 2026-08-20: it does
+# make sbom-cve-check's compiled-source kernel filter fire, but the filter removed
+# only 76 of 2,094 kernel findings (3.6%) while costing 19x SPDX storage
+# (0.276 -> 5.36 GB), 333x on the per-image document (7.5 MB -> 2.50 GB), 3.5x
+# build time, and ~50 GB of RAM to parse that document. The 485-finding reduction
+# in the design doc is a different mechanism - kernel-CNA metadata via
+# improve_kernel_cve_report.py - not this one.
