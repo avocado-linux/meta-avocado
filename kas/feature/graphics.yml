@@ -10,13 +10,17 @@ repos:
     layers:
       .:
 
-  # scarthgap also pulls meta-webkit here and sets
-  # PREFERRED_PROVIDER_virtual/wpebackend = "wpebackend-fdo". The fork has no
-  # wrynose branch (upstream declares LAYERSERIES_COMPAT=whinlatter), so the
-  # group ships weston/wayland only and wpewebkit is unavailable. The
-  # corresponding wpewebkit bbappend is absent from dynamic-layers for the same
-  # reason - restore both together with the layer.
+  meta-webkit:
+    url: https://github.com/avocado-linux/vendor-meta-webkit
+    path: meta-webkit
+    branch: wrynose
+    commit: 13a0e5a5cc49516e3e3c91fdc5e7033e3c3dfb73
+    layers:
+      .:
 
 local_conf_header:
   feature/graphics: |
     AVOCADO_FEATURE_GROUPS:append = " graphics"
+
+  extra-webkit: |
+    PREFERRED_PROVIDER_virtual/wpebackend = "wpebackend-fdo"

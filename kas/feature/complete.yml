@@ -14,10 +14,6 @@ header:
 # would fail the layer compatibility check and take the whole build down
 # rather than just skipping a group. The fragment files are still in tree with
 # their scarthgap pins; add the line back here when the fork gains a branch.
-#
-# ai is absent for a different reason: scarthgap does not list it either, even
-# though kas/feature/ai.yml and its packagegroup both exist. Left as-is rather
-# than fixed here so this branch stays a port and not a redesign.
   includes:
   - repo: meta-avocado
     file: kas/feature/system-base.yml

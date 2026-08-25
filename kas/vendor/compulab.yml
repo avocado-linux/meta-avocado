@@ -5,11 +5,12 @@ header:
     file: kas/vendor/nxp.yml
 
 repos:
-  # CompuLab family pins meta-imx to the NXP 6.6.52-2.2.0 release (matches
-  # linux-compulab 6.6.52). url/path/layers come from kas/vendor/nxp.yml.
+  # CompuLab family pins meta-imx to the NXP wrynose-6.18.20-2.0.0 release,
+  # matching meta-bsp-imx8mp's wrynose-6.18.20-2.0.0 branch below.
+  # url/path/layers come from kas/vendor/nxp.yml.
   meta-imx:
-    branch: scarthgap-6.6.52-2.2.0
-    commit: a0cf309d2e2d544111e520f572db8dff335eca01
+    branch: wrynose-6.18.20-2.0.0
+    commit: 52516b92a70669eb58b805810f2a27a07c874771
 
   # CompuLab i.MX8M Plus BSP: machine defs (ucm-imx8m-plus, iot-gate-imx8plus,
   # ...), u-boot-compulab, linux-compulab. Self-contained for boot+kernel; the
@@ -19,8 +20,8 @@ repos:
   meta-bsp-imx8mp:
     url: https://github.com/avocado-linux/vendor-meta-bsp-imx8mp.git
     path: meta-bsp-imx8mp
-    branch: scarthgap
-    commit: 784b21b888fb0d3bc75d5e5937b94a622cee9786
+    branch: wrynose-6.18.20-2.0.0
+    commit: 7baa292db55edae827d4ee25f9de5123f238dbb1
     layers:
       .:
 
@@ -30,3 +31,6 @@ local_conf_header:
     LICENSE_FLAGS_ACCEPTED:append = " commercial"
     # CompuLab DDR variant: d1d8 / d2 / d4 (see meta-bsp-imx8mp README).
     DRAM_CONF ?= "d4"
+    # nxp-demo-experience comes from meta-imx-demo, which Avocado does not
+    # vendor, so the CompuLab append has nothing to attach to.
+    BBMASK += "meta-bsp-imx8mp/recipes-nxp-demo-experience/"

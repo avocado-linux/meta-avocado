@@ -5,16 +5,15 @@ header:
     file: kas/vendor/nxp.yml
 
 repos:
-  # FRDM family pins meta-imx to the NXP 6.6.36-2.1.0 release. The url/path/
-  # layers come from kas/vendor/nxp.yml; only the refspec is set here.
+  # FRDM family (imx91, imx93, imx95) pins meta-imx to the NXP
+  # wrynose-6.18.20-2.0.0 release. url/path/layers come from kas/vendor/nxp.yml.
+  #
+  # The FRDM machine configurations live in meta-imx-bsp itself from whinlatter
+  # onward, and the FRDM device trees are native to the 6.18 kernel, so the
+  # separate meta-imx-frdm layer (6.6-only, lf-6.6.36-2.1.0) is no longer needed.
+  #
+  # wrynose-6.18.20-2.0.0 rather than whinlatter-6.18.2-1.0.0 because only the
+  # former lists wrynose in LAYERSERIES_COMPAT_fsl-bsp-release.
   meta-imx:
-    branch: scarthgap-6.6.36-2.1.0
-    commit: 92ad51ef3cc7f132238f1ae6c8e81432f2a69cc7
-
-  meta-imx-frdm:
-    url: https://github.com/avocado-linux/vendor-meta-imx-frdm.git
-    path: meta-imx-frdm
-    branch: lf-6.6.36-2.1.0
-    commit: 0391d7457a9f044f2b38ed3f91570926a669261b
-    layers:
-      meta-imx-bsp:
+    branch: wrynose-6.18.20-2.0.0
+    commit: 52516b92a70669eb58b805810f2a27a07c874771

@@ -1,0 +1,101 @@
+# Bringup target overlay - minimal, fast, bootable image for new-HW bringup.
+#
+# Layer on top of any kas/machine/<board>.yml to build the base Avocado rootfs
+# (avocado-image-rootfs) instead of the full avocado-distro meta-target. That
+# skips the shared extras packagegroup (Qt5, chromium, gstreamer, opencv,
+# nodejs, docker/k3s, openjdk, ...) and the cross SDK, so a fresh board boots
+# and is debuggable without paying for any of it. Touches no packagegroups -
+# everything here is image-scoped.
+#
+# Usage (board-agnostic) - the overlay carries its own target, so no image
+# argument is needed; both commands build avocado-image-rootfs:
+#   bakar build \
+#     meta-avocado/kas/machine/<board>.yml:meta-avocado/kas/target/bringup.yml
+#   kas-container build \
+#     meta-avocado/kas/machine/<board>.yml:meta-avocado/kas/target/bringup.yml
+#
+# Passing an explicit target (bakar build --target X, or bakar bitbake X)
+# overrides the `target:` below.
+
+header:
+  version: 16
+
+# Replace avocado-distro (extras + SDK) with the minimal bootable rootfs.
+target:
+  - avocado-image-rootfs
+
+local_conf_header:
+  bringup: |
+    # The avocado distro already sets INIT_MANAGER = "systemd"; assert it here
+    # so a bringup image is correct even on a board that overrides it.
+    INIT_MANAGER = "systemd"
+
+    # Passwordless serial/root login for a fresh board with no provisioned
+    # credentials. Bringup convenience - drop before ship. No ssh-server-*
+    # feature here: avocado-image-rootfs uses image.bbclass, not
+    # core-image.bbclass, so those features are undefined; the sshd ships via
+    # the openssh package in the install list below instead.
+    #
+    # The four features debug-tweaks expands to, spelled out, for the same
+    # reason ssh-server-* is absent above: debug-tweaks itself is defined in
+    # core-image.bbclass, so naming it makes bitbake skip avocado-image-rootfs
+    # entirely. That surfaces as "Nothing PROVIDES 'avocado-image-rootfs'",
+    # which points at a missing recipe rather than at this line.
+    EXTRA_IMAGE_FEATURES:append = " allow-empty-password allow-root-login empty-root-password post-install-logging"
+
+    # Not implied by the features above. avocado-users ships /etc/shadow with a
+    # locked root (root:*:), and empty-root-password only preserves an
+    # already-empty password - it never creates one from *. Without this the
+    # image has no console or ssh login at all.
+    AVOCADO_DEV_ROOT_LOGIN = "1"
+
+    # Declare the read-only rootfs the image already has. avocado-image-rootfs
+    # produces erofs, and without this nothing downstream knows, so packages
+    # take their writable-rootfs paths and fail at runtime. openssh is the one
+    # that matters for a bringup image: sshd_check_keys tries to write host keys
+    # into /etc/ssh, fails with "sync: error syncing '/etc/ssh': Invalid
+    # argument", and sshdgenkeys.service dies - leaving sshd listening with no
+    # host key, so every connection is dropped at kex_exchange_identification.
+    # With this set, oe-core points sshd at sshd_config_readonly and keeps the
+    # keys on tmpfs.
+    EXTRA_IMAGE_FEATURES:append = " read-only-rootfs"
+
+    # All built kernel modules, so every on-board peripheral has its driver
+    # available during bringup. kernel-modules is the same meta-package the
+    # machine extras already use (e.g. packagegroup-avocado-alif-extra).
+    #
+    # Two cases want something narrower than the whole set. On a multi-kernel
+    # board (jetson, raspberrypi) prefer the version-qualified
+    # packagegroup-avocado-rootfs-modules-${KERNEL_VERSION} so an off-kernel
+    # module is not pulled in. And on a board where a module can claim the
+    # console UART this is actively harmful: on avocado-imx93-frdm,
+    # kernel-module-hci-uart takes the console about 84 seconds into boot,
+    # right after "Bluetooth: hci0: Opcode 0x0c03 failed: -110" - the board
+    # keeps running, but the console is gone until a power cycle, which reads
+    # as a hang and is not one. A bringup image exists to be debuggable, so
+    # name the modules a board actually needs when that applies.
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " kernel-modules"
+
+    # Minimal HW-bringup toolset: network, bus/peripheral probing, storage,
+    # device-tree, and tracing. All small, fast-building, board-agnostic.
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " \
+        openssh \
+        ethtool \
+        iproute2 \
+        iputils \
+        i2c-tools \
+        libgpiod \
+        libgpiod-tools \
+        usbutils \
+        pciutils \
+        devmem2 \
+        util-linux \
+        e2fsprogs \
+        dosfstools \
+        parted \
+        dtc \
+        strace \
+        procps \
+        htop \
+        curl \
+    "

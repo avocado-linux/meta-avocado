@@ -9,11 +9,10 @@ RDEPENDS:${PN} = " \
   ${@bb.utils.contains('DISTRO_FEATURES', 'opengl', "${OPENGL_PACKAGES}", '', d)} \
 "
 
-# scarthgap also lists wpewebkit, wpebackend-fdo and cog here. All three come
-# from meta-webkit, which has no wrynose branch, so kas/feature/graphics.yml
-# does not provision that layer and naming them here would make the group
-# unbuildable rather than merely smaller. Restore with the layer.
 OPENGL_PACKAGES = " \
+  wpewebkit \
+  wpebackend-fdo \
+  cog \
   cage \
   weston \
   weston-init \

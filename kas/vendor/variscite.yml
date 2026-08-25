@@ -1,0 +1,34 @@
+header:
+  version: 16
+  includes:
+  - repo: meta-avocado
+    file: kas/vendor/nxp.yml
+
+repos:
+  # Variscite family pins meta-imx to wrynose-6.18.20-2.0.0, the release the
+  # wrynose_6.18.20_2.0.0_var01 Variscite BSP builds against. url/path/layers
+  # come from kas/vendor/nxp.yml.
+  meta-imx:
+    branch: wrynose-6.18.20-2.0.0
+    commit: 52516b92a70669eb58b805810f2a27a07c874771
+
+  # Variscite i.MX BSP: machines (imx8mp-var-dart, ...), u-boot-variscite,
+  # linux-variscite-fslc-imx. Its hard LAYERDEPENDS are variscite-bsp-common
+  # (below) + fsl-bsp-release (meta-imx). The sdk/hab/demo layers from
+  # Variscite's repo manifest are omitted for the headless Avocado base.
+  meta-variscite-bsp-imx:
+    url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-imx.git
+    path: meta-variscite-bsp-imx
+    branch: wrynose_6.18.20_2.0.0_var01
+    commit: f70a345bd4920e7bf82a03fc06c6c4541ae91d0a
+    layers:
+      .:
+
+  # Shared machine-agnostic Variscite BSP bits (LAYERDEPENDS of bsp-imx).
+  meta-variscite-bsp-common:
+    url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-common.git
+    path: meta-variscite-bsp-common
+    branch: wrynose_var01
+    commit: 6a069e128a201de16bc629332708d1678f428946
+    layers:
+      .:

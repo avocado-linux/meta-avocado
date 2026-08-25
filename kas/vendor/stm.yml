@@ -3,16 +3,21 @@ header:
   includes:
   - repo: meta-avocado
     file: kas/vendor/arm.yml
+  # meta-virtualization provides the docker/containerd/runc recipes that
+  # meta-avocado-sdk's always-on bbappends extend; without it they dangle.
+  - repo: meta-avocado
+    file: kas/feature/virtualization.yml
 
 repos:
   meta-stm:
     url: https://github.com/avocado-linux/vendor-meta-st-stm32mp
     path: meta-st-stm32mp
-    branch: scarthgap
-    commit: bcadba4d92cbfeba7b7a876c2e828f37a70d0d0a
+    branch: wrynose_v26.02.18
+    commit: a5e5cef8442de4eb3afca97e4c4dddb0f25e4ae1
     layers:
       .:
 
 local_conf_header:
   vendor-stm: |
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-stm-extra"
+    DISTRO_FEATURES_EXTRA:append = " virtualization"

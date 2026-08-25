@@ -5,10 +5,6 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
-# scarthgap also lists cryptoauthlib (meta-atmel) and livebook (meta-erlang).
-# Neither layer is provisioned on wrynose - both declare a LAYERSERIES_COMPAT
-# that predates it - so naming them here would make the group unbuildable.
-# kas/base.yml carries the matching note; restore all of it together.
 RDEPENDS:${PN} = " \
   audit \
   bubblewrap \
@@ -17,6 +13,7 @@ RDEPENDS:${PN} = " \
   cockpit-networkmanager \
   cronie \
   coreutils \
+  cryptoauthlib \
   curl \
   devmem2 \
   dtc \
@@ -33,6 +30,7 @@ RDEPENDS:${PN} = " \
   less \
   libgpiod \
   libgpiod-tools \
+  livebook \
   logrotate \
   lsof \
   ltrace \
