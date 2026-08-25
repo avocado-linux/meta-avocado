@@ -75,6 +75,18 @@ SRC_URI:append:avocado-imx93-frdm = " file://fit.cfg"
 python () {
     if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
         d.appendVar('SRC_URI', ' file://fit-verify.cfg')
+        # env-writeable-list.patch adds CFG_ENV_FLAGS_LIST_STATIC to
+        # include/configs/imx93_frdm.h. It rides the SAME gate as
+        # fit-verify.cfg deliberately: that fragment sets
+        # CONFIG_ENV_WRITEABLE_LIST, and that symbol without this patch leaves
+        # the permit list at its "" default, which rejects every variable
+        # arriving from the saved environment - avocado_boot_slot included -
+        # and silently breaks A/B updates. Neither is safe to ship alone.
+        #
+        # A patch rather than a .cfg entry because the permit list is a C
+        # #define in a board config header, not a Kconfig symbol, so no
+        # fragment can express it.
+        d.appendVar('SRC_URI', ' file://env-writeable-list.patch')
         d.appendVar('DEPENDS', ' sb-keys')
         d.setVar('UBOOT_SIGN_ENABLE', '1')
         d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
