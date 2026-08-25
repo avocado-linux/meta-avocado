@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
+// i.MX 8M Plus EVK with the stock AW-CM276MA M.2 module: its Bluetooth is an
+// 88W8997 on uart1. NXP's 6.18 imx8mp-evk.dts declares nxp,88w8987-bt there
+// (their newer module), so btnxpuart pushes uart8987_bt.bin into an 8997 and
+// times out ("FW Download Timeout. offset: 0"). Applied on top of
+// imx8mp-evk-pcie.dtb by the kernel build (see linux-imx_%.bbappend).
+/dts-v1/;
+/plugin/;
+
+&uart1 {
+	bluetooth {
+		compatible = "nxp,88w8997-bt";
+	};
+};
