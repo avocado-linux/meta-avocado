@@ -90,7 +90,8 @@
             "files": [
               "avocado-image-initramfs-imx8mp-evk.cpio.zst",
               "Image",
-              "imx8mp-evk.dtb"
+              "imx8mp-evk.dtb",
+              "imx8mp-evk-pcie.dtb"
             ]
           }
         },
