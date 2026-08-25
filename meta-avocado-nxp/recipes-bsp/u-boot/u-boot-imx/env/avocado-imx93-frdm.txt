@@ -1,3 +1,28 @@
+# Saved environment for the uboot-env partition, via mkenvimage.
+#
+# This duplicates ../avocado-imx93-frdm.env, which compiles the same flow into
+# U-Boot, and the duplication is REQUIRED rather than sloppy. env/env.c's
+# env_load() imports the built-in default before the storage driver ONLY under
+# CONFIG_ENV_WRITEABLE_LIST:
+#
+#     if (CONFIG_IS_ENABLED(ENV_WRITEABLE_LIST))
+#             env_set_default(NULL, 0);
+#
+# Without the 'verified-boot' feature that symbol is off, env_relocate() still
+# takes the env_load() branch (env_init() ends with env_valid = ENV_VALID), and
+# the hash table is then built from the saved environment ALONE. Strip the flow
+# from here and a build without the feature comes up with no bootcmd at all.
+# With the feature, everything below except devnum and mmcblk is rejected on
+# import and the compiled-in copy applies - which is the point of the exercise.
+#
+# devtool-debt: two authored copies of one boot flow, in two syntaxes (trailing
+# backslash here, leading-whitespace continuation there). Nothing in the build
+# compares them, so an edit to one silently applies to only one build mode.
+# Ceiling: correct exactly while both files agree; a divergence shows up only as
+# a board that boots differently with and without verified-boot.
+# Upgrade trigger: the permit list stops being gated on 'verified-boot' - at
+# which point env_load() always seeds the default, this file drops to devnum and
+# mmcblk, and the .env becomes the single source.
 machine=imx93-frdm
 image_file=fitImage
 
