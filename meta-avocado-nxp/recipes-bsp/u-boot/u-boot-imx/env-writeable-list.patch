@@ -43,10 +43,10 @@ Upstream-Status: Inappropriate [Avocado-specific board policy]
 
 ---
 diff --git a/include/configs/imx93_frdm.h b/include/configs/imx93_frdm.h
-index 635025d..0c56723 100644
+index 5a77d63e43e..be33cc6a0a6 100644
 --- a/include/configs/imx93_frdm.h
 +++ b/include/configs/imx93_frdm.h
-@@ -18,6 +18,32 @@
+@@ -29,6 +29,32 @@
  #else
  #define IMX93_EVK_MMC_ENV_DEV 0
  #endif
@@ -78,4 +78,4 @@ index 635025d..0c56723 100644
 +
  /* Link Definitions */
  
- #define CFG_SYS_INIT_RAM_ADDR        0x80000000
+ #ifdef CONFIG_IMX_MATTER_TRUSTY
