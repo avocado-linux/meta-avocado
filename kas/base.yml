@@ -60,7 +60,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-atmel
     path: meta-atmel
     branch: wrynose
-    commit: c556d36f808f75ac147c033f82f5ade24d87a1c1
+    commit: 96d8723f2c0b858e1796c95653f7615d52db981e
     layers:
       .:
 
