@@ -35,7 +35,13 @@
 # skipped, but for a SECURITY feature means the feature silently does not
 # ship. A silent skip is the exact failure mode this class exists to remove.
 
-AVOCADO_SECURITY_FEATURES ?= "encrypted-var ahab ftpm tpm2"
+# verified-boot joins the list so that requesting it on a machine that has not
+# declared it is REFUSED rather than silently ignored. Until now
+# kas/feature/verified-boot.yml appended the token to DISTRO_FEATURES and every
+# consumer gated on it independently, so asking for it on a machine with no FIT
+# signing key wired produced an ordinary unsigned build and no diagnostic - the
+# failure mode this class exists to remove.
+AVOCADO_SECURITY_FEATURES ?= "encrypted-var ahab ftpm tpm2 verified-boot"
 
 def avocado_security_capabilities_check(d):
     requested = [
