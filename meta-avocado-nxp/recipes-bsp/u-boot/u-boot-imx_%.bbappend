@@ -177,6 +177,25 @@ python () {
     if not bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-demo', True, False, d):
         return
 
+    # Refuse the demo and the real capability together. They are not additive:
+    # EFI_VARIABLE_FILE_STORE and EFI_MM_COMM_TEE are alternatives in one
+    # Kconfig `choice`, so two fragments setting different members do not
+    # produce two stores - merge_config.sh applies them in order and the LAST
+    # one wins, with nothing printed. When that is the demo fragment the image
+    # gets an UNAUTHENTICATED store while its own feature tokens claim an
+    # authenticated one, which is the worst available outcome and is invisible
+    # in a build log.
+    #
+    # Fatal rather than a warning, and rather than picking a winner here. A
+    # build asking for both has an incoherent intent, and guessing which one
+    # was meant is how the unauthenticated store ends up shipping under the
+    # authenticated name.
+    if bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-reporting', True, False, d):
+        bb.fatal("boot-integrity-demo and boot-integrity-reporting are mutually "
+                 "exclusive: they select different members of U-Boot's UEFI "
+                 "variable-store Kconfig choice, so enabling both lets fragment "
+                 "order decide silently which store the image gets. Pick one.")
+
     d.appendVar('SRC_URI', ' file://efi-vars-demo.cfg')
 
     # The spec permits an unauthenticated store ONLY when the build announces
