@@ -8,48 +8,27 @@ devtype=mmc
 devnum=1
 mmcblk=1
 bootpart=3
-rootdev=/dev/mmcblk${mmcblk}p6
+rootdev=/dev/mmcblk${mmcblk}p5
 
 image_addr=0x80200000
 fdt_addr=0x83000000
 ramdisk_addr=0x84000000
 
-# Calculate partition based on avocado_boot_slot
+# Slot A/B only: no recovery partition. An unset or invalid slot boots A.
 avocado_boot_init=\
-  if test -n "${avocado_boot_slot}"; then\
-    if test "${avocado_boot_slot}" = "a"; then\
-      echo "Booting A";\
-      setenv bootpart 3;\
-      setenv rootdev /dev/mmcblk${mmcblk}p6;\
-    else\
-      if test "${avocado_boot_slot}" = "b"; then\
-        echo "Booting B";\
-        setenv bootpart 4;\
-        setenv rootdev /dev/mmcblk${mmcblk}p7;\
-      else\
-        if test "${avocado_boot_slot}" = "r"; then\
-          echo "Booting Recovery";\
-          setenv bootpart 5;\
-          setenv rootdev;\
-        else\
-          echo "avocado_boot_slot=${avocado_boot_slot} invalid";\
-          echo "Booting Recovery";\
-          setenv bootpart 5;\
-          setenv rootdev;\
-        fi;\
-      fi;\
-    fi;\
+  if test "${avocado_boot_slot}" = "b"; then\
+    echo "Booting B";\
+    setenv bootpart 4;\
+    setenv rootdev /dev/mmcblk${mmcblk}p6;\
   else\
-    echo "avocado_boot_slot undefined";\
+    if test "${avocado_boot_slot}" != "a"; then\
+      echo "avocado_boot_slot=${avocado_boot_slot} unset or invalid";\
+    fi;\
     echo "Booting A";\
     setenv bootpart 3;\
-    setenv rootdev /dev/mmcblk${mmcblk}p6;\
+    setenv rootdev /dev/mmcblk${mmcblk}p5;\
   fi;\
-  if test -n "${rootdev}"; then\
-    setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;\
-  else\
-    setenv bootargs audit=0 console=${console} rootwait;\
-  fi;
+  setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
 load_devicetree=load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file}

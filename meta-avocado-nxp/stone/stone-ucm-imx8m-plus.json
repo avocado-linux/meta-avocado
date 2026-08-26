@@ -147,12 +147,6 @@
           "size_unit": "mebibytes"
         },
         {
-          "name": "recovery",
-          "image": "",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
           "name": "rootfs-a",
           "image": "rootfs",
           "size": 160,

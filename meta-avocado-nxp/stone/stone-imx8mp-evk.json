@@ -12,7 +12,8 @@
     },
     "os_artifacts": {
       "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
-      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] },
+      "rootfs_hash": { "image_key": "rootfs_hash", "slot_partitions": ["rootfs-a-hash", "rootfs-b-hash"] }
     },
     "activate": {
       "type": "uboot-env",
@@ -93,6 +94,7 @@
           }
         },
         "rootfs": "avocado-image-rootfs-imx8mp-evk.erofs-lz4",
+        "rootfs_hash": "avocado-image-rootfs-imx8mp-evk.verity",
         "var": "avocado-image-var-imx8mp-evk.btrfs"
       },
       "partitions": [
@@ -129,12 +131,6 @@
           "size_unit": "mebibytes"
         },
         {
-          "name": "recovery",
-          "image": "",
-          "size": 128,
-          "size_unit": "mebibytes"
-        },
-        {
           "name": "rootfs-a",
           "image": "rootfs",
           "size": 160,
@@ -144,6 +140,18 @@
           "name": "rootfs-b",
           "image": "",
           "size": 160,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a-hash",
+          "image": "rootfs_hash",
+          "size": 8,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b-hash",
+          "image": "",
+          "size": 8,
           "size_unit": "mebibytes"
         },
         {
