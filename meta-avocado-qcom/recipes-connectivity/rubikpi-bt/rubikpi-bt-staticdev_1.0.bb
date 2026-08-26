@@ -7,10 +7,9 @@ LICENSE = "CLOSED"
 LIC_FILES_CHKSUM = ""
 
 # Source: https://github.com/rubikpi-ai/meta-rubikpi-bsp @ 227631ce94bb
-SRC_URI = "git://github.com/rubikpi-ai/rubikpi_bt_bsa_demo.git;branch=main;protocol=https;destsuffix=git"
+SRC_URI = "git://github.com/rubikpi-ai/rubikpi_bt_bsa_demo.git;branch=main;protocol=https"
 SRCREV = "c83d8155df3a9bf381b44552a3a2500eb0c001ab"
 
-S = "${UNPACKDIR}/git"
 
 TARGET_CXX_ARCH += "${LDFLAGS}"
 
