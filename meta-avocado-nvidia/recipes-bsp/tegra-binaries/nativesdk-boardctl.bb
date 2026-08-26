@@ -26,13 +26,26 @@ do_install() {
     install -m 0755 ${L4T_BSP_TOOLS}/nvtopo.py ${D}${BOARDCTL_BINDIR}/
     install -m 0644 ${L4T_BSP_TOOLS}/libnvtopo_wrapper.py ${D}${BOARDCTL_BINDIR}/
     install -m 0644 ${L4T_BSP_TOOLS}/supported_targets.py ${D}${BOARDCTL_BINDIR}/
+    install -m 0644 ${L4T_BSP_TOOLS}/__init__.py ${D}${BOARDCTL_BINDIR}/
+
+    # Target definitions (topo, thor-jetson-devkit, orin-jetson, ...). boardctl
+    # scans _targets/ next to itself at startup and dies with FileNotFoundError
+    # without them.
+    install -d ${D}${BOARDCTL_BINDIR}/_targets
+    install -m 0644 ${L4T_BSP_TOOLS}/_targets/*.py ${D}${BOARDCTL_BINDIR}/_targets/
 
     # Native shared library (x86_64)
     install -m 0755 ${L4T_BSP_TOOLS}/libnvtopo.so ${D}${BOARDCTL_BINDIR}/
 
-    # Symlink boardctl into PATH
+    # Wrapper, not a symlink: boardctl locates _targets via
+    # os.path.dirname(os.path.abspath(__file__)), which for a symlink resolves
+    # to ${bindir}/_targets rather than board_automation/_targets.
     install -d ${D}${SDKPATHNATIVE}${bindir_nativesdk}
-    ln -sf board_automation/boardctl ${D}${SDKPATHNATIVE}${bindir_nativesdk}/boardctl
+    cat > ${D}${SDKPATHNATIVE}${bindir_nativesdk}/boardctl <<EOF
+#!/bin/sh
+exec python3 ${BOARDCTL_BINDIR}/boardctl "\$@"
+EOF
+    chmod 0755 ${D}${SDKPATHNATIVE}${bindir_nativesdk}/boardctl
 }
 
 FILES:${PN} = "${BOARDCTL_BINDIR} ${SDKPATHNATIVE}${bindir_nativesdk}/boardctl"

@@ -1341,25 +1341,26 @@ EOF
 
             # T264 keeps the RCM boot mode across the warm reset the initramfs
             # just performed, so instead of cold-booting the flashed system the
-            # SoC comes back as the boot-ROM APX device (0955:7026). NVIDIA's
-            # own bootburn has Mb2AppletReset() for this but never calls it.
-            # Wait briefly for the device to re-enter RCM and ask the boot ROM
-            # for a cold boot; if it never reappears it booted on its own.
+            # SoC comes back as the boot-ROM APX device (0955:7026). Nothing on
+            # the RCM side gets it out: 'tegrarcm_v2 --new_session ... --reboot
+            # coldboot' is accepted but leaves the device in RCM (tested), and
+            # NVIDIA's own bootburn never issues a reset either. What works is
+            # the reset button -- so press it through the devkit's TOPO debug
+            # MCU (boardctl) when one is attached, else ask the user.
             echo "Waiting for the device to re-enter RCM after reboot..." | tee -a "$logfile"
             if timeout 60 "$here/find-jetson-usb" --wait $usb_instance >>"$logfile" 2>&1; then
-                rcm_inst=""
-                [ -n "$usb_instance" ] && rcm_inst="--instance $usb_instance"
-                # --reboot only works inside an RCM session: tegrarcm keeps the
-                # session in an rcm_state file in its cwd, written by
-                # --new_session (this is how NVIDIA's rcmbootcmd.txt sequences
-                # its own '--reboot recovery'). Without it: "File rcm_state
-                # open failed / ERROR: failed to read rcm_state".
-                echo "Issuing 'tegrarcm --new_session; --reboot coldboot' to leave RCM..." | tee -a "$logfile"
-                rcm_exit_dir=$(mktemp -d "$PWD/rcm-exit.XXXXXX")
-                ( cd "$rcm_exit_dir" && \
-                  "$here/tegrarcm_v2" $rcm_inst --new_session --chip 0x26 0 --uid && \
-                  "$here/tegrarcm_v2" $rcm_inst --chip 0x26 0 --reboot coldboot ) 2>&1 | tee -a "$logfile" || true
-                rm -rf "$rcm_exit_dir"
+                boardctl_target="${BOARDCTL_TARGET:-}"
+                if [ -z "$boardctl_target" ] && [ "$CHIPID" = "0x26" ] && \
+                   grep -qs "^7045$" /sys/bus/usb/devices/*/idProduct 2>/dev/null; then
+                    boardctl_target="thor-jetson-devkit"
+                fi
+                if [ -n "$boardctl_target" ] && command -v boardctl >/dev/null 2>&1; then
+                    echo "Device is back in RCM; pressing SYS_RESET via boardctl (target=$boardctl_target)..." | tee -a "$logfile"
+                    boardctl -t "$boardctl_target" ${BOARDCTL_SERIAL:+-s "$BOARDCTL_SERIAL"} reset 2>&1 | tee -a "$logfile" || \
+                        echo "WARN: boardctl reset failed; press the RESET button to boot the flashed system" | tee -a "$logfile"
+                else
+                    echo "ACTION NEEDED: device is back in recovery mode; press the RESET button to boot the flashed system" | tee -a "$logfile"
+                fi
             else
                 echo "Device did not return to RCM; assuming it cold-booted" | tee -a "$logfile"
             fi
