@@ -25,3 +25,11 @@ MACHINEOVERRIDES =. "avocado-imx:"
 #     about 60% of its address window.
 #
 # Both values read from real built .config files, not from the defconfigs.
+
+# meta-imx-bsp's imx-base-extend.inc prefers libcamera 0.7.1.imx on mx95 /
+# mx8mm / mx8ulp, but that recipe lives in meta-imx-sdk (needs the
+# freescale-distro layer set), which we do not include -- so every parse warns
+# "preferred version 0.7.1.imx of libcamera not available". Nothing in our
+# images pulls libcamera; drop the preference (`=` beats the inc's `??=`) and
+# let the meta-openembedded / meta-freescale 0.6.0 recipes resolve normally.
+PREFERRED_VERSION_libcamera = ""
