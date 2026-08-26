@@ -6,6 +6,7 @@ SRC_URI += " \
   file://avocado-wireless.cfg \
   file://avocado-netfilter.cfg \
   file://avocado-usb-serial.cfg \
+  file://caam.cfg \
 "
 
 do_configure:append() {

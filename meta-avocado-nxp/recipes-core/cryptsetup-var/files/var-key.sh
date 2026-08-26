@@ -1,5 +1,5 @@
 #!/bin/sh
-# /var LUKS key provider for the NXP i.MX9 FRDM boards -- phase-1: SoC-UID
+# /var LUKS key provider for NXP i.MX8M / i.MX9 boards -- phase-1: SoC-UID
 # derived, no provisioned secret.
 #
 # The shared provider reads a secret from /var/private/var-key-secret, which
@@ -8,11 +8,11 @@
 # that file. Both qemu and avocado-x86-64 already override with a hardware-id
 # provider for the same reason; this is the i.MX equivalent.
 #
-# Identity source: /sys/devices/soc0/serial_number, which drivers/soc/imx/
-# soc-imx9.c publishes as the 128-bit OCOTP UID (uid127_64 << 64 | uid63_0,
-# fetched via SMC) for fsl,imx93 and its siblings. Confirmed built in on the
-# wrynose BSP: CONFIG_SOC_IMX9=y in the produced 6.18.20 .config, so soc0 is
-# registered well before the initramfs reaches the unlock.
+# Identity source: /sys/devices/soc0/serial_number - the OCOTP UID, published
+# by drivers/soc/imx/soc-imx9.c (128-bit, fetched via SMC) on i.MX9 and by
+# soc-imx8m.c on i.MX8M. Confirmed built in on the wrynose BSP for both
+# (CONFIG_SOC_IMX9=y / CONFIG_SOC_IMX8M=y in the produced 6.18.20 .configs), so
+# soc0 is registered well before the initramfs reaches the unlock.
 #
 # That driver is newer than some vendor kernels - it does not exist upstream in
 # v6.6 at all - which is what the DT fallback below is for, and why a missing
@@ -51,7 +51,7 @@ fi
 # one device's disk opening on another. A missing UID means this machine cannot
 # derive a device-bound key, and refusing is the only safe answer.
 if [ -z "$HW_ID" ]; then
-    echo "var-key: no SoC UID at $SOC_UID_FILE (is CONFIG_SOC_IMX9 enabled?)" >&2
+    echo "var-key: no SoC UID at $SOC_UID_FILE (is CONFIG_SOC_IMX8M / CONFIG_SOC_IMX9 enabled?)" >&2
     echo "var-key: refusing to derive a key that would not be device-unique" >&2
     exit 1
 fi

@@ -5,6 +5,7 @@ SRC_URI += " \
   file://avocado-wireless.cfg \
   file://avocado-netfilter.cfg \
   file://avocado-usb-serial.cfg \
+  file://caam.cfg \
 "
 
 # ftpm.cfg is unconditional rather than gated on the optee-ftpm feature: it only
@@ -13,7 +14,6 @@ SRC_URI += " \
 # fragment on a feature that lives in a kas layer set would mean two kernel
 # configurations for one board, which costs more than the module does.
 SRC_URI:append:avocado-imx93-frdm = " \
-  file://imx93-frdm/caam.cfg \
   file://imx93-frdm/ftpm.cfg \
 "
 
