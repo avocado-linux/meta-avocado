@@ -1,6 +1,12 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}/env:"
 
+# Set by the boot-integrity-demo block below when this machine gets the EFI boot
+# path. Defaulted here so do_configure's test reads a defined value on every
+# other build rather than depending on how bitbake expands an unset variable
+# inside a shell function.
+AVOCADO_EFI_BOOT_ENV ?= "0"
+
 # The UUU tag goes on the boot partition. For 8+, the boot partition image
 # is imx-boot, so disable UUU-tagging here
 UUU_BOOTLOADER:mx8-generic-bsp = ""
@@ -115,6 +121,33 @@ do_configure:prepend:avocado-imx93-frdm () {
     fi
     install -m 0644 ${UNPACKDIR}/avocado-imx93-frdm.env \
         ${S}/board/nxp/imx93_frdm/avocado.env
+
+    # boot-integrity-demo: append the EFI boot path so its redefinitions of
+    # image_file, avocado_boot and bootcmd win over the base environment's.
+    # env2string.awk keys an awk array by variable name and emits each key once,
+    # so last definition wins and no duplicate reaches U-Boot - but only if this
+    # lands after the base file, which is why it is a concatenation and not a
+    # second install.
+    #
+    # sed rather than a literal DTB name in the .env: FIT_CONF_DEFAULT_DTB is
+    # what the FIT path already pins, and spelling the name twice is how the two
+    # boot paths would come to disagree about which device tree is the default.
+    # The U-Boot ${...} references in that file are invisible to bitbake because
+    # they live in a file rather than in this recipe body - inlining the block
+    # here would let bitbake expand ${bootpart} and friends to nothing.
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        # An empty FIT_CONF_DEFAULT_DTB would substitute to `fdt_file=`, and the
+        # board would then fail to load a device tree at boot with nothing in the
+        # build log pointing back here. Fail the build instead.
+        if [ -z "${FIT_CONF_DEFAULT_DTB}" ]; then
+            bbfatal "boot-integrity-demo: FIT_CONF_DEFAULT_DTB is empty, so the EFI boot path has no device tree to load. It is set in the machine conf; this build has lost it."
+        fi
+        bbwarn "boot-integrity-demo: replacing this board's FIT boot path with an EFI hand-off (bootefi on an EFI-stub kernel staged in the ESP). Slot selection is unchanged. The staged kernel is unauthenticated."
+        printf '\n' >> ${S}/board/nxp/imx93_frdm/avocado.env
+        sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
+            ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
+            >> ${S}/board/nxp/imx93_frdm/avocado.env
+    fi
 }
 
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
@@ -217,6 +250,67 @@ python () {
                 "avocado-imx93-frdm only, so on %s this sets up a variable "
                 "store that nothing will reach. efivarfs will be absent."
                 % d.getVar('MACHINE'))
+        return
+
+    # The EFI boot path itself. Machine-gated where the store above is not:
+    # the store is board-independent, but this block hardcodes this board's
+    # boot flow, so shipping it anywhere else would break booting rather than
+    # be a no-op. do_configure:prepend concatenates it onto the compiled-in
+    # environment; see that function and the .env file's own header for why
+    # appending (rather than replacing) is what makes the override take.
+    d.appendVar('SRC_URI', ' file://avocado-imx93-frdm-efi-boot.env')
+    d.setVar('AVOCADO_EFI_BOOT_ENV', '1')
+}
+
+# The demo has to reach the SAVED environment as well as the compiled-in one,
+# and this is not belt-and-braces. CONFIG_ENV_WRITEABLE_LIST rides the
+# 'verified-boot' gate, and its permit list (env-writeable-list.patch) admits
+# only avocado_boot_slot, the device identity vars, devnum and mmcblk - no
+# boot-path variable - so with that feature ON the saved copies of bootcmd and
+# image_file are rejected on import and the compiled-in EFI override above wins
+# unopposed. With it OFF nothing rejects them: the saved environment is imported
+# whole and wins, so the board would boot the FIT path while the build log
+# claimed the demo was enabled. That is the silent-substitution failure this
+# change exists to avoid, arrived at from the opposite direction.
+#
+# The override text comes from the same .env file rather than a second copy in
+# mkenvimage's flat format. grep pulls out its bare assignments; the C comment
+# block does not survive, which is required, since mkenvimage has no notion of
+# one. Two spellings of one boot path is how they come to disagree.
+#
+# Superseded keys are FILTERED OUT rather than shadowed by a later duplicate.
+# The compiled-in path could rely on last-definition-wins because env2string.awk
+# keys an awk array and emits each name once; mkenvimage has no such step - it
+# rewrites line separators and checksums the result - so an appended duplicate
+# would put two image_file entries into one environment blob and leave which one
+# survives to U-Boot's import order. Filtering keeps the blob single-valued.
+#
+# The filter list is derived from the override file itself, so a variable added
+# there is superseded automatically. Hardcoding the three names that collide
+# today would leave the next addition shadowed-but-duplicated. It also makes the
+# step idempotent across a do_compile rerun on a UNPACKDIR that was not
+# re-unpacked, since a previous run's lines are filtered before the re-append.
+do_compile:prepend:avocado-imx93-frdm() {
+    if [ "${AVOCADO_EFI_BOOT_ENV}" != "1" ]; then
+        return
+    fi
+
+    override="${WORKDIR}/avocado-efi-boot-flat.txt"
+    # `|| true` so an empty extraction reaches the bbfatal below. bitbake runs
+    # shell tasks under `set -e`, and without it a grep that matches nothing
+    # aborts the task with grep's bare exit 1 - naming no file and no cause.
+    sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
+        ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
+        | grep -E '^[a-z_]+=' > "$override" || true
+
+    keys=$(cut -d= -f1 < "$override" | paste -sd'|')
+    if [ -z "$keys" ]; then
+        bbfatal "boot-integrity-demo: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the demo enabled."
+    fi
+
+    grep -vE "^($keys)=" ${UNPACKDIR}/${MACHINE}.txt > "$override.merged"
+    cat "$override" >> "$override.merged"
+    mv "$override.merged" ${UNPACKDIR}/${MACHINE}.txt
 }
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
