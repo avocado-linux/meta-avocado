@@ -49,6 +49,10 @@ Options:
     -y, --assume-yes    Skip the interactive confirmation. Intended for a
                         board farm where the device comes from an exporter,
                         not for interactive use.
+        --stale-ok      Write even when the payload is older than the build
+                        output under images/<machine>. Refused by default,
+                        because the stone archive is not rebuilt by an
+                        ordinary build and silently lags a fresh one.
     -h, --help          This text
 
 Backends:
@@ -343,6 +347,57 @@ resolve_raw_image() {
          -d $DEPLOY_DIR/stone/_build/$MACHINE_NAME-rootdisk.img -t complete"
 }
 
+# Refuse a payload older than the build output it is supposed to carry.
+#
+# The stone archive is NOT produced by an ordinary build. avocado-stone.bb wires
+# do_build[depends] += "${PN}:do_stone_bundle", and the archive comes out of
+# do_stone_provision, which sits one task LATER in that chain and no default
+# target reaches. So a rebuild refreshes deploy/images/<machine>/ and leaves the
+# flashable archive at the previous build, and this script then writes that
+# previous build and reports "Success!" - correctly, because the write did
+# succeed. Observed: a u-boot change built at 08:29 was flashed twice from a
+# 17:00 archive made the day before, and the board kept booting the old
+# bootloader through both.
+#
+# Fatal rather than a warning, and deliberately NOT gated on -y. The archive's
+# date is already printed on every run; the failure mode being closed here is
+# precisely that nobody reads it, so a second line in the same scrollback would
+# change nothing. -y exists to skip an interactive prompt, not to opt out of
+# correctness checks, which is why --stale-ok is separate.
+#
+# Comparing against images/<machine> rather than a hardcoded artifact list keeps
+# this honest as the image set changes: anything the build wrote after the
+# payload was assembled counts, whatever it is called.
+assert_payload_fresh() {
+  local payload="$1" images="$DEPLOY_DIR/images/$MACHINE_NAME"
+  local count newest
+
+  [ "$ALLOW_STALE" = "1" ] && return 0
+  [ -d "$images" ] || return 0
+  [ -f "$payload" ] || return 0
+
+  # -L on both walks: imx-boot and the fitImage are symlinks in this tree, so
+  # without it the link's own mtime answers instead of the artifact's, and a
+  # freshly rebuilt image hides behind a link that never changed.
+  count=$(find -L "$images" -type f -newer "$payload" 2>/dev/null | wc -l)
+  [ "$count" -gt 0 ] || return 0
+  newest=$(find -L "$images" -type f -newer "$payload" -printf '%T@\t%p\n' 2>/dev/null \
+    | sort -rn | head -1 | cut -f2)
+
+  die "payload is older than the build output it should carry
+  payload: $payload
+           $(date -r "$payload" '+%Y-%m-%d %H:%M')
+  newest:  $newest
+           $(date -r "$newest" '+%Y-%m-%d %H:%M')
+  $count file(s) under $images are newer than the payload.
+
+  The stone archive is not rebuilt by an ordinary build - do_build stops at
+  do_stone_bundle, and the archive comes from do_stone_provision one task later.
+  Refresh it with:
+    bakar bitbake avocado-stone <machine.yml>[:<feature.yml>] -c stone_provision
+  then flash again. To write this payload anyway, pass --stale-ok."
+}
+
 flash_fwup() {
   # The archive is resolved by the caller, before the confirmation, so the prompt
   # can name what is about to be written. Resolved here if absent so the function
@@ -407,6 +462,10 @@ flash_uuu() {
   # lays the OS down.
   local image
   image=$(resolve_raw_image)
+  # Same staleness gate as the sd path. This one writes over serial download
+  # rather than to a card, but it is assembled from the same deploy tree and so
+  # lags a rebuild in exactly the same way.
+  assert_payload_fresh "$image"
 
   # Pin the target instead of matching a vendor ID and hoping. `lsusb -d 1fc9:`
   # answers "is any NXP device in SDP mode", and uuu without -m then takes
@@ -475,6 +534,7 @@ DEPLOY_DIR=""
 BACKEND=""
 DRY_RUN=0
 ASSUME_YES=0
+ALLOW_STALE=0
 # fwup's task, passed through as -t. `complete` writes the whole medium
 # including var; `upgrade` writes only the inactive A/B boot+rootfs slots and
 # leaves var alone, which is the difference between provisioning a blank card
@@ -505,6 +565,10 @@ while [ $# -gt 0 ]; do
       ;;
     -y | --assume-yes)
       ASSUME_YES=1
+      shift
+      ;;
+    --stale-ok)
+      ALLOW_STALE=1
       shift
       ;;
     -h | --help)
@@ -565,6 +629,11 @@ case "$MEDIUM" in
       bmaptool) PAYLOAD=$(resolve_raw_image) ;;
       *) die "backend ${BACKEND} cannot write a block device" ;;
     esac
+
+    # Before the confirmation, for the same reason the resolution moved ahead of
+    # it: a gate cleared before the script knows it has the right thing to write
+    # trains people to clear it by reflex.
+    assert_payload_fresh "$PAYLOAD"
 
     confirm_destructive "$DEVICE" "$PAYLOAD"
 
