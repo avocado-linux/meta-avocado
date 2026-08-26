@@ -209,8 +209,10 @@ in the `CHIPID = 0x26` branch:
   issued. T264 then keeps the RCM boot mode across that warm reset and
   re-enumerates as the boot-ROM APX device (`0955:7026`) instead of
   cold-booting, so the script waits up to 60 s for it with
-  `find-jetson-usb --wait` and sends `tegrarcm_v2 --chip 0x26 0 --reboot
-  coldboot`. If the device never reappears it booted on its own.
+  `find-jetson-usb --wait`, opens an RCM session (`tegrarcm_v2 --new_session
+  --chip 0x26 0 --uid`, which writes the `rcm_state` file `--reboot` needs in
+  its cwd) and sends `tegrarcm_v2 --chip 0x26 0 --reboot coldboot`. If the
+  device never reappears it booted on its own.
 - **Device-side `reboot` restored.** meta-tegra's `tegra-target-flash-scripts`
   sed drops NVIDIA's `/sbin/reboot` wrapper (`busybox reboot -f`) along with
   the mount block; with bash as PID 1, bare busybox `reboot` is a no-op.

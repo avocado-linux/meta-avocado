@@ -1349,8 +1349,17 @@ EOF
             if timeout 60 "$here/find-jetson-usb" --wait $usb_instance >>"$logfile" 2>&1; then
                 rcm_inst=""
                 [ -n "$usb_instance" ] && rcm_inst="--instance $usb_instance"
-                echo "Issuing 'tegrarcm --reboot coldboot' to leave RCM..." | tee -a "$logfile"
-                "$here/tegrarcm_v2" $rcm_inst --chip 0x26 0 --reboot coldboot 2>&1 | tee -a "$logfile" || true
+                # --reboot only works inside an RCM session: tegrarcm keeps the
+                # session in an rcm_state file in its cwd, written by
+                # --new_session (this is how NVIDIA's rcmbootcmd.txt sequences
+                # its own '--reboot recovery'). Without it: "File rcm_state
+                # open failed / ERROR: failed to read rcm_state".
+                echo "Issuing 'tegrarcm --new_session; --reboot coldboot' to leave RCM..." | tee -a "$logfile"
+                rcm_exit_dir=$(mktemp -d "$PWD/rcm-exit.XXXXXX")
+                ( cd "$rcm_exit_dir" && \
+                  "$here/tegrarcm_v2" $rcm_inst --new_session --chip 0x26 0 --uid && \
+                  "$here/tegrarcm_v2" $rcm_inst --chip 0x26 0 --reboot coldboot ) 2>&1 | tee -a "$logfile" || true
+                rm -rf "$rcm_exit_dir"
             else
                 echo "Device did not return to RCM; assuming it cold-booted" | tee -a "$logfile"
             fi
