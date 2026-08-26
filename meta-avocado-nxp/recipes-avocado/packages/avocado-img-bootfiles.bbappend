@@ -21,3 +21,19 @@ do_install:append() {
 # reason: virtual/bootloader, not a hardcoded u-boot-imx, so CompuLab and
 # Variscite boards are covered too.
 do_collect_artifacts[depends] += "virtual/bootloader:do_deploy imx-boot:do_deploy"
+
+# Every i.MX stone manifest names a rootfs dm-verity hash image (rootfs_hash ->
+# avocado-image-rootfs-<machine>.verity) for the per-slot hash partitions, and
+# avocado-stone.bbappend deploys a 4096-byte zero placeholder for it. The
+# collector above never ships it: the default skip list ("rootfs initramfs
+# var. -var-") matches the "rootfs" in its name, so a project whose CLI does
+# not yet write the placeholder itself (rootfs.image.verity landed in
+# avocado-cli after 1.0.0-rc.2) fails `stone bundle` with "Image file
+# 'avocado-image-rootfs-imx95-frdm.verity' for artifact 'rootfs_hash' not
+# found in any input directory". Install it explicitly; a CLI that does emit
+# the real hash tree writes it to the same path and simply replaces this.
+do_install:append() {
+    if [ -f ${DEPLOY_DIR_IMAGE}/avocado-image-rootfs-${MACHINE_SHORT_NAME}.verity ]; then
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/avocado-image-rootfs-${MACHINE_SHORT_NAME}.verity ${D}/
+    fi
+}
