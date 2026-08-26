@@ -128,6 +128,17 @@ uuu_version 1.2.39
 # Boot U-Boot via SDPS
 SDPS: boot -f imx-boot
 
+# SPL hand-off. An SPL built to boot from USB SDP (U-Boot 2026.04 on i.MX 95:
+# "Trying to boot from USB SDP ... SDP: handle requests") re-enumerates as the
+# SDPV device (1fc9:0151) and waits for the host to push U-Boot proper; without
+# this block both sides wait forever. uuu runs a protocol block only when a
+# matching device appears, so on an SPL that streams the second stage through
+# the ROM API instead (i.MX 93) these lines are skipped -- same shape as uuu's
+# built-in emmc_all script.
+SDPV: delay 1000
+SDPV: write -f imx-boot -skipspl
+SDPV: jump
+
 # U-Boot enters fastboot mode (iMX8M: -dev emmc_fastboot container;
 # iMX9: CONFIG_FASTBOOT_UUU_SUPPORT in U-Boot). Select eMMC as the target.
 FB: ucmd setenv fastboot_dev mmc
