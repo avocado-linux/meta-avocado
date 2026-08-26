@@ -15,3 +15,10 @@
 # selected. Pinning a kernel without OOT (linux-yocto 6.18) skips the
 # OOT packagegroup entirely — no leakage.
 RDEPENDS:${PN}:remove = "nvidia-kernel-oot-base"
+
+# systemd-jetson-masks (disable the bare `getty@.service` preset that leaves
+# every Jetson `degraded` with getty@getty.service) is wired into
+# MACHINE_ESSENTIAL_EXTRA_RDEPENDS by avocado-jetson.inc, but
+# packagegroup-avocado-rootfs.bb deliberately does not expand that variable
+# (see above), so it never reached an avocado-built rootfs. Pull it in here.
+RDEPENDS:${PN}:append:tegra = " systemd-jetson-masks"
