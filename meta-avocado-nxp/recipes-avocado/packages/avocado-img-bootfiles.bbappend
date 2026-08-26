@@ -1,8 +1,14 @@
-# imx-boot deploys its build inputs and the host-side mkimage_imx8 binary into
-# DEPLOY_DIR_IMAGE/imx-boot-tools/. Provisioning consumes the assembled imx-boot
-# image named in the stone manifest, never that directory, and packaging a
-# native binary fails do_package_qa with a bad-RPATH error into the build tree.
-AVOCADO_IMG_BOOTFILES_SKIP_EXTRA += " imx-boot-tools"
+# imx-boot deploys its build inputs (DDR firmware, SPL, u-boot-nodtb, the
+# U-Boot control DTB, bl31/tee, mkimage_fit_atf.sh) plus the host-side
+# mkimage_imx8 binary into DEPLOY_DIR_IMAGE/imx-boot-tools/. The inputs are
+# exactly what a project needs to re-assemble imx-boot after injecting its own
+# FIT public key into that DTB (fdt_add_pubkey + nativesdk-imx-mkimage-tools),
+# so ship the directory - but not the binary: it is a build-host executable
+# with an RPATH into the build tree, which fails do_package_qa, and the SDK
+# gets a proper one from nativesdk-imx-mkimage-tools instead.
+do_install:append() {
+    rm -f ${D}/imx-boot-tools/mkimage_imx8
+}
 
 # The collect task scrapes DEPLOY_DIR_IMAGE, so its signature must carry the
 # recipes that put the bootloader there or a U-Boot change never invalidates
