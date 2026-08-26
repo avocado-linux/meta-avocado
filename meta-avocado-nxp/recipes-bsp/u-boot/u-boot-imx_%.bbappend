@@ -303,7 +303,10 @@ do_compile:prepend:avocado-imx93-frdm() {
         ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
         | grep -E '^[a-z_]+=' > "$override" || true
 
-    keys=$(cut -d= -f1 < "$override" | paste -sd'|')
+    # awk, not `cut | paste`: bitbake runs tasks under a restricted HOSTTOOLS
+    # PATH that carries awk and sed but NOT paste, so the pipeline died with
+    # `paste: command not found` (exit 127) at do_compile rather than at parse.
+    keys=$(awk -F= '{printf "%s%s", sep, $1; sep="|"} END {print ""}' "$override")
     if [ -z "$keys" ]; then
         bbfatal "boot-integrity-poc: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the PoC enabled."
     fi
