@@ -189,7 +189,7 @@ is the per-board provisioning script invoked by `avocado provision`.
 is the NVIDIA-derived host-side flash driver. Two Thor-specific changes
 in the `CHIPID = 0x26` branch:
 
-- **`adb reboot` after successful flash.** NVIDIA's
+- **`adb shell reboot -f` after successful flash.** NVIDIA's
   `bootburn_t264_py/bootburn_lib.py:FlashImages` ends with
   `# self.AdbCleanup` (commented out) and `os.chdir(cwd)` — no reboot.
   The legacy T23x flow rebooted implicitly via the USB `authorized`
@@ -198,14 +198,17 @@ in the `CHIPID = 0x26` branch:
   device sits forever in the flashing initramfs running adbd. We
   capture `PIPESTATUS[0]` from `doflash.sh` and, if zero, locate the
   bundled `unified_flash/tools/flashtools/flash/adb` (or fall back to
-  PATH) and call `adb reboot`. The call returns non-zero because the
+  PATH) and call `adb shell reboot -f`. Plain `adb reboot` does not work:
+  the device-side `adbd64` implements it via the Android `sys.powerctl`
+  property, which nothing serves in the flashing initramfs (adbd logs
+  `reboot (reboot,adb) failed`). The call returns non-zero because the
   device disconnects mid-call — that's expected, the reboot has been
   issued.
 - **End-of-script disconnect verification.** The chip-independent
   final-disconnect block previously logged
   `WARN: Cannot write to /sys/bus/usb/devices/<inst>/authorized` even
   on the success path, because by the time we reach it the device is
-  already gone (post `adb reboot` — exactly what we want). Updated to
+  already gone (post `adb shell reboot -f` — exactly what we want). Updated to
   poll up to 5s for the device to disappear, and to log
   `Device already detached — flash completed cleanly` instead of WARN
   when the path doesn't exist. WARN now fires only when a *known-

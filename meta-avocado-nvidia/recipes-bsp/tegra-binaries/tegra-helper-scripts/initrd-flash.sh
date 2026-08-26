@@ -1321,8 +1321,11 @@ EOF
     # deauthorizes the USB endpoint. NVIDIA's T264 unified-flash flow
     # (flash_bsp_images.py -> FlashImages) does not include any reboot step
     # at the end — the device is left running adbd in the flashing initramfs
-    # until something tells it to reboot. Send `adb reboot` so the freshly
-    # flashed system boots without requiring a manual reset.
+    # until something tells it to reboot. `adb reboot` cannot work here: the
+    # device-side adbd64 implements it by setting the Android sys.powerctl
+    # property, which nothing serves in this initramfs ("reboot (reboot,adb)
+    # failed"). Run `reboot -f` over adb shell instead so the freshly flashed
+    # system boots without requiring a manual reset.
     if [ "${uniflash_rc:-0}" -eq 0 ]; then
         adb_bin=""
         if [ -x "./unified_flash/tools/flashtools/flash/adb" ]; then
@@ -1331,10 +1334,10 @@ EOF
             adb_bin="$(command -v adb)"
         fi
         if [ -n "$adb_bin" ]; then
-            echo "Issuing 'adb reboot' to leave flashing initramfs..." | tee -a "$logfile"
-            # adb reboot returns non-zero because the device disconnects
-            # mid-call; the reboot has already been initiated by then.
-            "$adb_bin" reboot 2>&1 | tee -a "$logfile" || true
+            echo "Issuing 'adb shell reboot -f' to leave flashing initramfs..." | tee -a "$logfile"
+            # Returns non-zero because the device disconnects mid-call; the
+            # reboot has already been initiated by then.
+            "$adb_bin" shell reboot -f 2>&1 | tee -a "$logfile" || true
         else
             echo "WARN: adb binary not found; device may need manual reset" | tee -a "$logfile"
         fi
