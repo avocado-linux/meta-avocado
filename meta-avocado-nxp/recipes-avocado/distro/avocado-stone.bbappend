@@ -144,19 +144,27 @@ do_deploy:append() {
 # otherwise boot a wrong-pinmux DTB with no build error; hardcoding here would
 # reintroduce that silent failure on the second boot path.
 #
-# Written into build_args.files_append rather than build_args.files: stone runs
-# merge_fat_files() over the pair (manifest.rs:718, called from bundle.rs:395),
-# which dedups by output path and hard-errors when two entries claim one output
-# with different inputs. Appending to `files` would instead produce a FAT with
-# two entries for EFI/BOOT/BOOTAA64.EFI and no complaint. It also matches the
-# field stone's own --overlay mechanism populates, so when overlay plumbing
-# reaches avocado-stone.bb this block becomes an overlay file carrying the same
-# object rather than a rewrite.
+# devtool-debt: appends to build_args.files, so nothing detects two entries
+# claiming one output path.
+# Ceiling: this block is the only writer of the boot partition's file list.
+# Upgrade trigger: stone gains build_args.files_append on a revision this layer
+# pins - then move these two entries there and drop this marker.
 #
-# Caveat: `stone validate` reads only `files` (validate.rs:181), so a missing
-# files_append input is not caught there and surfaces at bundle time instead.
-# Both inputs here are deployed unconditionally by linux-imx, so neither depends
-# on the PoC feature being on.
+# files_append is the better field and is deliberately NOT used yet. stone runs
+# merge_fat_files() over (files, files_append), which dedups by output path and
+# hard-errors when two entries claim one output with different inputs
+# (manifest.rs:718, called from bundle.rs:395), and it is the field stone's own
+# --overlay mechanism populates. But stone_2.2.0.bb pins SRCREV b58a6411, which
+# predates that support, and the commit adding it is not on stone's origin/main
+# either. An older stone does not reject the unknown key - it ignores it, builds
+# a FAT with only the base `files`, and exits 0. Verified the hard way: a green
+# build produced a boot.img containing fitImage and neither EFI payload, because
+# the stone binary in the build carried no `files_append` string at all. Writing
+# to a field the pinned tool has never heard of fails silently and green, which
+# is worse than having no conflict detection.
+#
+# Both inputs are deployed unconditionally by linux-imx, so neither depends on
+# the PoC feature being on.
 AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}"
 
 do_deploy:append:avocado-imx93-frdm() {
@@ -168,7 +176,7 @@ do_deploy:append:avocado-imx93-frdm() {
 
   manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
   jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
-    '.storage_devices.rootdisk.images.boot.build_args.files_append += [
+    '.storage_devices.rootdisk.images.boot.build_args.files += [
        {"in": "Image", "out": "EFI/BOOT/BOOTAA64.EFI"},
        {"in": $dtb, "out": $dtb}
      ]' \
