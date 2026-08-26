@@ -29,12 +29,11 @@ SRC_URI:append:class-target = " \
 # the same symbols are on in the imx8mp-evk, imx91/93/95-frdm defconfigs alike.
 SRC_URI:append:class-target = " file://disable-unused-vendor-features.cfg"
 
-# fit.cfg enables base FIT container support (CONFIG_FIT) unconditionally on
-# avocado-imx93-frdm. The boot partition manifest (stone-imx93-frdm.json) and
-# the U-Boot env boot command (env/avocado-imx93-frdm.txt) are both static
-# per-machine files with no bitbake conditional mechanism, and both already
-# bootm a single FIT unconditionally - so U-Boot on this machine must always
-# be able to parse a FIT, signed or not. Every other NXP board is unaffected.
+# fit.cfg enables base FIT container support (CONFIG_FIT) on every u-boot-imx
+# board. Capability, not policy: it is already =y in the stock imx8m/imx9
+# defconfigs and costs nothing where the env still boots loose files, and a
+# machine that flips to `bootm fitImage` (avocado-imx-fit.inc) must be able to
+# parse a FIT whether or not signing is on.
 #
 # SRC_URI is the whole mechanism. cml1.bbclass's do_configure runs
 # merge_config.sh over every file://*.cfg in SRC_URI, straight from the layer
@@ -42,38 +41,35 @@ SRC_URI:append:class-target = " file://disable-unused-vendor-features.cfg"
 # into do_configure:append for a new fragment: UBOOT_DEFCONFIG below expands to
 # the literal ['sd'] (its `.split((',', 1)[0])` is `.split(',')`, which returns
 # a list), so every cat line in this file appends to a path named `['sd']` and
-# the real imx93_11x11_frdm_defconfig is never touched. Confirmed from
-# temp/run.do_configure and log.do_configure on a real build. A fragment added
-# only via a cat line therefore reaches nothing, silently - which for a
-# verification Kconfig means shipping a bootloader that enforces nothing.
-SRC_URI:append:avocado-imx93-frdm = " file://fit.cfg"
+# the real defconfig is never touched. Confirmed from temp/run.do_configure and
+# log.do_configure on a real build. A fragment added only via a cat line
+# therefore reaches nothing, silently - which for a verification Kconfig means
+# shipping a bootloader that enforces nothing.
+SRC_URI:append:class-target = " file://fit.cfg"
 
-# fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
-# unconditional like fit.cfg above: it is only meaningful on
-# avocado-imx93-frdm (the only machine this change wires a FIT signing key
-# for) and only when the customer has opted in via the 'verified-boot'
-# DISTRO_FEATURES token, so every other NXP board and every frdm build
-# without the feature build exactly as before (still gets an unsigned FIT
-# via fit.cfg above, but no signature enforcement).
+# fit-verify.cfg enables U-Boot FIT signature verification, and the same gate
+# embeds the FIT public key into U-Boot's own control DTB so the running
+# bootloader carries its own trust anchor rather than reading the key from
+# writable storage (spec: "the verification key is not modifiable from the
+# running system"). Gated on the 'verified-boot' DISTRO_FEATURES token alone -
+# no machine check - so every u-boot-imx board that opts in gets the same
+# treatment; a board whose env still boots loose files with booti is unaffected
+# by CONFIG_FIT_SIGNATURE (it only ever acts inside bootm).
 #
-# The same gate also embeds the FIT public key into U-Boot's own control DTB,
-# so the running bootloader carries its own trust anchor rather than reading
-# the key from writable storage at runtime (spec: "the verification key is
-# not modifiable from the running system"). u-boot.inc already unconditionally
-# inherits OE-core's uboot-sign.bbclass, so setting UBOOT_SIGN_ENABLE plus the
-# same UBOOT_SIGN_KEYDIR/UBOOT_SIGN_KEYNAME="FIT" pair task 3.1 wires for the
-# kernel-fitimage side is enough: uboot-sign's do_uboot_assemble_fitimage task
-# (added unconditionally by u-boot.inc, gated internally on UBOOT_SIGN_ENABLE)
-# runs mkimage -f auto-conf against AVOCADO_SB_KEYS_DIR/FIT.crt and embeds the
-# PUBLIC half only into u-boot.dtb before it is concatenated into the final
-# u-boot binary - the private FIT.key never leaves the build host. This board
-# already builds with CONFIG_OF_SEPARATE=y, the precondition uboot-sign.bbclass
-# documents for this embedding step, so no CONFIG_DEFAULT_DEVICE_TREE/binman
-# fallback is needed here. DEPENDS on sb-keys is added under the same gate so
-# FIT.crt exists in AVOCADO_SB_KEYS_DIR before this recipe's fitimage-assemble
-# task runs.
+# u-boot.inc already unconditionally inherits OE-core's uboot-sign.bbclass, so
+# setting UBOOT_SIGN_ENABLE plus the same UBOOT_SIGN_KEYDIR/UBOOT_SIGN_KEYNAME
+# ="FIT" pair avocado-imx-fit.inc sets for the kernel-fit-image side is enough:
+# uboot-sign's do_uboot_assemble_fitimage task (added unconditionally by
+# u-boot.inc, gated internally on UBOOT_SIGN_ENABLE) runs mkimage -f auto-conf
+# against AVOCADO_SB_KEYS_DIR/FIT.crt and embeds the PUBLIC half only into
+# u-boot.dtb before it is concatenated into the final u-boot binary - the
+# private FIT.key never leaves the build host. The imx8m/imx9 defconfigs build
+# with CONFIG_OF_SEPARATE=y, the precondition uboot-sign.bbclass documents for
+# this embedding step, so no CONFIG_DEFAULT_DEVICE_TREE/binman fallback is
+# needed. DEPENDS on sb-keys is added under the same gate so FIT.crt exists in
+# AVOCADO_SB_KEYS_DIR before this recipe's fitimage-assemble task runs.
 python () {
-    if d.getVar('MACHINE') == 'avocado-imx93-frdm' and bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
+    if bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
         d.appendVar('SRC_URI', ' file://fit-verify.cfg')
         d.appendVar('DEPENDS', ' sb-keys')
         d.setVar('UBOOT_SIGN_ENABLE', '1')

@@ -10,8 +10,13 @@ REQUIRED_DISTRO_FEATURES = ""
 
 inherit packagegroup nospdx
 
+# mmc-utils: `mmc extcsd read` / `mmc bootpart enable` are how a bootloader
+# update targets the inactive eMMC boot0/boot1 hardware partition and flips
+# PARTITION_CONFIG only after read-back verifies. Useful for field eMMC
+# diagnostics regardless.
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
+  mmc-utils \
 "
 
 # SDMA RAM firmware (sdma-imx7d.bin) for the i.MX SDMAv3 controller (audio/SAI,

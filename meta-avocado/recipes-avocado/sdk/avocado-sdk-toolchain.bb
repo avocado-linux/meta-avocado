@@ -18,6 +18,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-bison \
     nativesdk-btrfs-tools \
     nativesdk-cmake \
+    nativesdk-cryptsetup \
     nativesdk-curl \
     nativesdk-dnf \
     nativesdk-dosfstools \
@@ -39,6 +40,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-erofs-utils \
     nativesdk-squashfs-tools \
     nativesdk-systemd-systemctl \
+    nativesdk-u-boot-tools \
     nativesdk-unfs3 \
     nativesdk-util-linux-losetup \
     nativesdk-util-linux-umount \
