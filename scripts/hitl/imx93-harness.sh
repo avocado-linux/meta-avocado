@@ -71,7 +71,10 @@ usage: imx93-harness.sh <mode>
   --assert-env-lockdown        saved bootcmd is rejected, saved avocado_boot_slot
                                is honoured, and the board still boots
   --assert-slot-boots <a|b>    board boots the named slot to a login prompt
-  --assert-uefi-var-persists   a UEFI variable survives a reset  [NOT IMPLEMENTED]
+  --assert-uefi-var-persists   a UEFI variable is written, survives a reset, and
+                               reads back. Requires firmware with a UEFI variable
+                               store; fails with a clear message on firmware that
+                               has none. Proves PERSISTENCE, not tamper-resistance.
   --assert-boot-integrity-report
                                on-device reporter emits enforcement + root-of-trust
                                                                  [NOT IMPLEMENTED]
@@ -85,11 +88,12 @@ case "${1:-}" in
         [ "${2:-}" = a ] || [ "${2:-}" = b ] || die "--assert-slot-boots needs a or b"
         run_mode slot_boots "$2"
         ;;
+    --assert-uefi-var-persists) run_mode uefi_var_persists ;;
     # Deliberately non-zero rather than a no-op that exits 0. A stub that
     # succeeds is worse than a missing one: it turns an unimplemented check into
     # a passing verify: line, and the task it gates reads as verified.
-    --assert-uefi-var-persists|--assert-boot-integrity-report)
-        die "${1} is not implemented yet - it lands with the StMM/EFI work"
+    --assert-boot-integrity-report)
+        die "${1} is not implemented yet - it lands with the reporter in group 4"
         ;;
     *) usage ;;
 esac
