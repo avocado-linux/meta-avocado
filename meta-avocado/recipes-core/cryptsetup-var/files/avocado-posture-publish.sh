@@ -16,6 +16,38 @@ POSTURE_FILE="/run/avocado-var-posture"
 
 # Every key this script owns, so a stale value from a previous boot is never
 # left behind when the corresponding fact stops being reportable.
+#
+# ADDING A KEY HERE IS NOT ENOUGH ON A MACHINE THAT CARRIES THE U-BOOT ENV
+# PERMIT LIST. On avocado-imx93-frdm built with 'verified-boot', U-Boot is
+# compiled with CONFIG_ENV_WRITEABLE_LIST and a CFG_ENV_FLAGS_LIST_STATIC
+# permit list (meta-avocado-nxp/recipes-bsp/u-boot/u-boot-imx/
+# env-writeable-list.patch). Any key absent from that list is silently
+# DESTROYED rather than merely ignored:
+#
+#   env_flags_validate (env/flags.c:554-563) rejects an H_EXTERNAL variable
+#   that lacks the 'w' flag, so it never enters env_htab; env_export
+#   (env/common.c:553) exports the HASHTABLE via hexport_r; and env/mmc.c:344
+#   calls that on saveenv. The A/B update flow saveenv's on every slot switch.
+#   So a key written here by fw_setenv survives until the next OTA and is then
+#   gone, with nothing logged.
+#
+# The 'w' flag is needed to stop U-Boot ERASING these, not because U-Boot reads
+# them - only this script and peridiod do, through fw_printenv.
+#
+# Consequence that must travel with any consumer: a 'w' key is by construction
+# writable from the saved environment, so an attacker with boot-medium write
+# access can forge these values. That is accepted here because posture is an
+# observation and not a control, and such an attacker can rewrite the whole
+# medium anyway - but POSTURE IS NOT TAMPER-EVIDENT and must never be presented
+# as such in a fleet view.
+#
+# devtool-debt: these three keys are not yet in that permit list, because the
+# change that introduces the list has not merged. Ceiling: correct on every
+# machine without the permit list, and on imx93-frdm builds without
+# 'verified-boot'. Upgrade trigger: the env permit list lands on wrynose - at
+# which point add avocado_var_unlock, avocado_var_tpm2_token and
+# avocado_var_encrypted to CFG_ENV_FLAGS_LIST_STATIC as ':sw' entries, before
+# taking this PR out of draft.
 KEY_UNLOCK="avocado_var_unlock"
 KEY_TOKEN="avocado_var_tpm2_token"
 KEY_ENCRYPTED="avocado_var_encrypted"
