@@ -13,7 +13,7 @@ SRC_URI += " \
 # fragment on a feature that lives in a kas layer set would mean two kernel
 # configurations for one board, which costs more than the module does.
 SRC_URI:append:avocado-imx93-frdm = " \
-  file://imx93-frdm/dm-crypt.cfg \
+  file://imx93-frdm/caam.cfg \
   file://imx93-frdm/ftpm.cfg \
 "
 
@@ -53,6 +53,12 @@ do_configure:append() {
   done
 }
 
+# dm-crypt/dm-verity capability, unconditional - see avocado-security-kernel.inc
+# for why capability is never gated on a DISTRO_FEATURE. The fragments land in
+# UNPACKDIR and are merged by the `cat ${UNPACKDIR}/*.cfg` in do_configure:append
+# below, same as every other fragment this bbappend carries.
+require recipes-kernel/linux/avocado-security-kernel.inc
+
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
 require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
@@ -63,7 +69,7 @@ require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 # built by the linux-yocto-fitimage recipe") - kernel-fitimage.bbclass was
 # replaced by kernel-fit-image.bbclass, used as its OWN dedicated recipe that
 # depends on virtual/kernel:do_deploy rather than something inherited into
-# the kernel recipe itself. See avocado-imx93-frdm-fitimage.bb.
+# the kernel recipe itself. See avocado-imx-fitimage.bb.
 #
 # linux.bin/linux_comp, which kernel-fit-image.bbclass reads, are produced by
 # oe-core's kernel-fit-extra-artifacts.bbclass. It is selected via

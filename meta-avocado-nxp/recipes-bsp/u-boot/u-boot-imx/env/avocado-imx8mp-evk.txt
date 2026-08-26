@@ -1,9 +1,10 @@
 machine=imx8mp-evk
-kernel_file=Image
-initramfs_file=avocado-image-initramfs-imx8mp-evk.cpio.zst
-# imx8mp-evk-pcie-8997.dtb: PCIe M.2 slot + 88W8997 Bluetooth (stock module);
-# imx8mp-evk.dtb is NXP's SDIO/8987 default. See avocado-imx8mp-evk.conf.
-devicetree_file=imx8mp-evk-pcie-8997.dtb
+# Kernel, dtb and initramfs travel as one FIT (avocado-imx-fitimage.bb) so a
+# single signature covers all three under verified-boot. The default
+# configuration boots imx8mp-evk-pcie-8997.dtb (FIT_CONF_DEFAULT_DTB in
+# avocado-imx8mp-evk.conf); a board with an SDIO M.2 module selects NXP's
+# default dtb with `setenv avocado_boot 'bootm ${image_addr}#conf-imx8mp-evk.dtb'`.
+image_file=fitImage
 
 console=ttymxc1,115200
 devtype=mmc
@@ -12,9 +13,13 @@ mmcblk=1
 bootpart=3
 rootdev=/dev/mmcblk${mmcblk}p6
 
+# Load the FIT well clear of where its own kernel decompresses to. The kernel
+# subimage carries Load Address 0x40480000 (UBOOT_ENTRYPOINT:mx8m-generic-bsp)
+# and bootm inflates the gzipped payload straight there; 0x80200000 is 1 GiB
+# above that in a contiguous bank, so source and destination cannot overlap
+# (the failure mode imx93-frdm hit at its old address). The initramfs stays
+# inside the FIT - bootm reads ramdisk-1 in place - so no separate load address.
 image_addr=0x80200000
-fdt_addr=0x83000000
-ramdisk_addr=0x84000000
 
 # Calculate partition based on avocado_boot_slot
 avocado_boot_init=\
@@ -53,10 +58,8 @@ avocado_boot_init=\
     setenv bootargs audit=0 console=${console} rootwait;\
   fi;
 
-load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
-load_devicetree=load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file}
-load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}
+load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${image_file}
 
-avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
+avocado_boot=bootm ${image_addr};
 
-bootcmd=run avocado_boot_init load_image load_devicetree load_initramfs avocado_boot
+bootcmd=run avocado_boot_init load_image avocado_boot
