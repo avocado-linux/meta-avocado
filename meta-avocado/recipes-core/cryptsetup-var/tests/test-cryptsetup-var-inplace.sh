@@ -27,6 +27,7 @@ cat > "$work/bin/cryptsetup" <<'S'
 #!/bin/sh
 echo "cryptsetup $*" >> "$LOG"
 case "$1" in
+  --help)     echo "  --progress-frequency=secs" ;;
   isLuks)     [ -e "$STATE/luks" ] ;;
   luksDump)   cat "$STATE/dump" 2>/dev/null; exit 0 ;;
   luksFormat) touch "$STATE/luks" ;;
@@ -46,8 +47,13 @@ S
 cat > "$work/bin/btrfs" <<'S'
 #!/bin/sh
 echo "btrfs $*" >> "$LOG"
-case "$1" in inspect-internal) printf 'total_bytes\t\t%s\n' "$(cat "$STATE/fsbytes")" ;; esac
+case "$1" in
+  inspect-internal) printf 'total_bytes\t\t%s\n' "$(cat "$STATE/fsbytes")" ;;
+  filesystem) [ "$2" = resize ] && { n="${3#-}"; n="${n%M}"; echo $(( $(cat "$STATE/fsbytes") - n * 1048576 )) > "$STATE/fsbytes"; } ;;
+esac
 S
+printf '#!/bin/sh\necho "mount $*" >> "$LOG"\n' > "$work/bin/mount"
+printf '#!/bin/sh\necho "umount $*" >> "$LOG"\n' > "$work/bin/umount"
 printf '#!/bin/sh\necho "0 4194304 crypt aes-xts-plain64 :64:logon:x 0 %s 32768 1 allow_discards"\n' "8:0" > "$work/bin/dmsetup"
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/modprobe"
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/systemd-cryptenroll"
@@ -66,8 +72,8 @@ run() { # run <state-dir>
 # --- Case 1: flashed 128 MiB btrfs -> in-place reencrypt confined to fs+32M ---
 s="$work/c1"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 134217728 > "$s/fsbytes"
 run "$s" || bad "case 1 script exit"
-if grep -q "^cryptsetup reencrypt --encrypt --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --reduce-device-size 32M --device-size 160M --key-file .* --batch-mode $blk\$" "$s/log"; then
-  ok "plaintext btrfs is re-encrypted in place, confined to fs + 32 MiB (160M)"
+if grep -q "^cryptsetup reencrypt --encrypt --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --reduce-device-size 32M --device-size 160M --progress-frequency 30 --key-file .* --batch-mode $blk\$" "$s/log"; then
+  ok "plaintext btrfs is re-encrypted in place, confined to fs + 32 MiB (160M), with progress"
 else bad "unexpected reencrypt command: $(grep reencrypt "$s/log" || echo none)"; fi
 grep -q "^cryptsetup luksFormat" "$s/log" && bad "luksFormat ran over a flashed filesystem" || ok "luksFormat never touches a flashed filesystem"
 grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "container opened with the recovery key afterwards" || bad "container not opened"
@@ -84,5 +90,23 @@ run "$s" || bad "case 3 script exit"
 if grep -q "^cryptsetup reencrypt --resume-only" "$s/log" && [ "$(grep -n 'reencrypt --resume-only\|luksOpen' "$s/log" | head -1)" = "$(grep -n 'reencrypt --resume-only' "$s/log" | head -1)" ]; then
   ok "interrupted reencryption is resumed before the container is opened"
 else bad "resume not attempted first: $(grep -n 'reencrypt\|luksOpen' "$s/log")"; fi
+
+# --- Case 4: btrfs grown to fill the 2 GiB partition (deployed device, OTA turns
+# encryption on) -> shrink it by the 32 MiB header deficit first, then reencrypt ---
+s="$work/c4"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 2147483648 > "$s/fsbytes"
+run "$s" || bad "case 4 script exit"
+if grep -q "^btrfs filesystem resize -32M /run/cryptsetup-var-shrink$" "$s/log"; then
+  ok "grown btrfs is shrunk by exactly the 32 MiB header deficit"
+else bad "no/unexpected shrink: $(grep 'btrfs filesystem' "$s/log" || echo none)"; fi
+seq_ok=1
+m=$(grep -n '^mount -t btrfs' "$s/log" | head -1 | cut -d: -f1); r=$(grep -n '^btrfs filesystem resize' "$s/log" | head -1 | cut -d: -f1)
+u=$(grep -n '^umount' "$s/log" | head -1 | cut -d: -f1); e=$(grep -n '^cryptsetup reencrypt --encrypt' "$s/log" | head -1 | cut -d: -f1)
+{ [ -n "$m" ] && [ -n "$r" ] && [ -n "$u" ] && [ -n "$e" ] && [ "$m" -lt "$r" ] && [ "$r" -lt "$u" ] && [ "$u" -lt "$e" ]; } || seq_ok=0
+[ "$seq_ok" = 1 ] && ok "shrink is mount -> resize -> umount, all before the reencrypt" || bad "wrong shrink ordering: $(grep -n 'mount\|resize\|reencrypt --encrypt' "$s/log")"
+grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2048M " "$s/log" && ok "reencrypt then covers the shrunk fs + header (2048M = whole partition)" || bad "unexpected device-size after shrink: $(grep 'reencrypt --encrypt' "$s/log")"
+grep -q "MiB to convert" "$s/out" && ok "operator is told how much is being converted" || bad "no size/progress line on the console"
+
+# --- Case 5: flashed small btrfs (case 1 shape) must NOT be shrunk ---
+grep -q "^btrfs filesystem resize" "$work/c1/log" && bad "small flashed btrfs was shrunk needlessly" || ok "a filesystem with free tail is left alone"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]
