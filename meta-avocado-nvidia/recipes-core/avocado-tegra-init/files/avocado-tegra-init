@@ -143,6 +143,31 @@ if [ -z "$vardev" ]; then
     done
 fi
 
+# Encrypted /var: a per-runtime opt-in. avocado-cli drops the marker into the
+# initramfs when avocado.yaml sets `var.encrypt`; the plaintext default has no
+# marker and takes the unchanged path below. cryptsetup-var.sh (from the feed's
+# cryptsetup-var package) encrypts the flashed btrfs in place on first boot and
+# opens it as /dev/mapper/var afterwards. /dev/tpm0 needs no helper here:
+# tpm_ftpm_tee (in the initramfs modules) binds to the firmware:ftpm device
+# at coldplug. Fail closed: a marker
+# without the tooling, or without a var partition, must not fall through to a
+# plaintext mount.
+ENC_MARKER=/etc/avocado/var-encrypt
+CRYPT_SH=/usr/libexec/cryptsetup-var/cryptsetup-var.sh
+if [ -e "$ENC_MARKER" ]; then
+    if [ -z "$vardev" ]; then
+        echo "ERROR: $ENC_MARKER set but DATAPART_EXPAND not found on any disk"
+        exit 1
+    fi
+    if [ ! -x "$CRYPT_SH" ]; then
+        echo "ERROR: $ENC_MARKER set but $CRYPT_SH is not in this initramfs"
+        exit 1
+    fi
+    echo "Encrypted var requested: unlocking $vardev"
+    "$CRYPT_SH" "$vardev"
+    vardev=/dev/mapper/var
+fi
+
 if [ -n "$vardev" ]; then
     echo "Mounting var partition: $vardev"
     mount "$vardev" /sysroot/var

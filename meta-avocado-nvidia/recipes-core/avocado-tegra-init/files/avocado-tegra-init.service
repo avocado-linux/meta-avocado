@@ -8,7 +8,11 @@ Before=initrd-root-fs.target
 Type=oneshot
 ExecStart=/usr/sbin/avocado-tegra-init
 RemainAfterExit=yes
-CapabilityBoundingSet=CAP_SYS_ADMIN
+# CAP_SYS_MODULE: cryptsetup-var.sh modprobes dm-crypt (a module on the
+# linux-yocto kernel) before touching the partition; without it the fail-closed
+# guard reports "kernel cannot deliver dm-crypt" and /var never mounts
+# (observed on an Orin Nano). CAP_IPC_LOCK: cryptsetup mlocks its key buffers.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE CAP_IPC_LOCK
 MountFlags=shared
 PrivateDevices=no
 ProtectSystem=no

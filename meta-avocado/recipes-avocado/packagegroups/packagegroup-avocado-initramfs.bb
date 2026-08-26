@@ -10,6 +10,7 @@ RDEPENDS:${PN} = "\
   systemd \
   systemd-extra-utils \
   os-release-initrd \
+  avocado-security-capabilities \
   util-linux \
   util-linux-blkid \
   util-linux-lsblk \
