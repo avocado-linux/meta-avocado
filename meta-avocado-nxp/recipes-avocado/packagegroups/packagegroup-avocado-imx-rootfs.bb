@@ -14,9 +14,14 @@ inherit packagegroup nospdx
 # update targets the inactive eMMC boot0/boot1 hardware partition and flips
 # PARTITION_CONFIG only after read-back verifies. Useful for field eMMC
 # diagnostics regardless.
+# systemd-serial-console-preset: every i.MX board here has a serial console
+# only, so OE-core's `enable getty@.service` preset can only ever produce a
+# failed getty@getty.service and a `degraded` system (seen on imx95-frdm and
+# imx8mp-evk). Same fix nvidia/qcom carry per-vendor; this is the shared one.
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
   mmc-utils \
+  systemd-serial-console-preset \
 "
 
 # SDMA RAM firmware (sdma-imx7d.bin) for the i.MX SDMAv3 controller (audio/SAI,
