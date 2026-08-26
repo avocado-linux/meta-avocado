@@ -128,3 +128,50 @@ do_deploy:append() {
         fi
     fi
 }
+
+# Stage an EFI System Partition layout in the boot slot so the kernel can be
+# entered through its EFI stub, which is what populates efivarfs for the
+# userspace boot-integrity reporter. Injected into the deployed manifest rather
+# than written into stone-imx93-frdm.json because it is demo-only: the payload
+# is an EFI-stub kernel that the default boot path never executes, and staging a
+# second bootable kernel in the ESP of a board whose AHAB lifecycle is open
+# hands anyone who can write the boot medium a differently-configured kernel for
+# free. A default build's manifest stays byte-identical.
+#
+# The DTB comes from FIT_CONF_DEFAULT_DTB rather than a literal name so the EFI
+# path and the FIT path cannot drift onto different device trees. The machine
+# conf pins that variable precisely because a KERNEL_DEVICETREE reorder would
+# otherwise boot a wrong-pinmux DTB with no build error; hardcoding here would
+# reintroduce that silent failure on the second boot path.
+#
+# Written into build_args.files_append rather than build_args.files: stone runs
+# merge_fat_files() over the pair (manifest.rs:718, called from bundle.rs:395),
+# which dedups by output path and hard-errors when two entries claim one output
+# with different inputs. Appending to `files` would instead produce a FAT with
+# two entries for EFI/BOOT/BOOTAA64.EFI and no complaint. It also matches the
+# field stone's own --overlay mechanism populates, so when overlay plumbing
+# reaches avocado-stone.bb this block becomes an overlay file carrying the same
+# object rather than a rewrite.
+#
+# Caveat: `stone validate` reads only `files` (validate.rs:181), so a missing
+# files_append input is not caught there and surfaces at bundle time instead.
+# Both inputs here are deployed unconditionally by linux-imx, so neither depends
+# on the demo feature being on.
+AVOCADO_BOOT_INTEGRITY_DEMO = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-demo', '1', '0', d)}"
+
+do_deploy:append:avocado-imx93-frdm() {
+  if [ "${AVOCADO_BOOT_INTEGRITY_DEMO}" != "1" ]; then
+    return
+  fi
+
+  bbwarn "boot-integrity-demo: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is demo scaffolding: the staged kernel is unauthenticated and writable by anyone with access to the boot medium."
+
+  manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
+  jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
+    '.storage_devices.rootdisk.images.boot.build_args.files_append += [
+       {"in": "Image", "out": "EFI/BOOT/BOOTAA64.EFI"},
+       {"in": $dtb, "out": $dtb}
+     ]' \
+    "$manifest" > "$manifest.efi-demo"
+  mv "$manifest.efi-demo" "$manifest"
+}
