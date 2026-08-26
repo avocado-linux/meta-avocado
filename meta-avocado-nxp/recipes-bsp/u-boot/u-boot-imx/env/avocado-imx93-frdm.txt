@@ -55,6 +55,7 @@ avocado_boot_init=\
     echo "Booting B";\
     setenv bootpart 4;\
     setenv rootdev /dev/mmcblk${mmcblk}p6;\
+    setenv roothashdev /dev/mmcblk${mmcblk}p8;\
   else\
     if test "${avocado_boot_slot}" != "a"; then\
       echo "avocado_boot_slot=${avocado_boot_slot} unset or invalid";\
@@ -62,11 +63,25 @@ avocado_boot_init=\
     echo "Booting A";\
     setenv bootpart 3;\
     setenv rootdev /dev/mmcblk${mmcblk}p5;\
+    setenv roothashdev /dev/mmcblk${mmcblk}p7;\
   fi;\
   setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${image_file}
 
+# rootfs dm-verity: root hash read back out of the (verified) FIT and handed to
+# systemd-veritysetup-generator; a FIT without the property boots as before.
+# Same block as avocado-imx8mp-evk.txt.
+avocado_verity_init=\
+  if fdt addr ${image_addr}; then\
+    if fdt get value fitconf /configurations default; then\
+      if fdt get value roothash /configurations/${fitconf} avocado,roothash; then\
+        echo "rootfs dm-verity root hash ${roothash}";\
+        setenv bootargs audit=0 console=${console} root=/dev/mapper/root roothash=${roothash} systemd.verity_root_data=${rootdev} systemd.verity_root_hash=${roothashdev} rootwait;\
+      fi;\
+    fi;\
+  fi;
+
 avocado_boot=bootm ${image_addr};
 
-bootcmd=run avocado_boot_init load_image avocado_boot
+bootcmd=run avocado_boot_init load_image avocado_verity_init avocado_boot

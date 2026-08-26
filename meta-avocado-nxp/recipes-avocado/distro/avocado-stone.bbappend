@@ -40,6 +40,13 @@ SRC_URI:append:stone-uuu-emmc = " \
 do_deploy:append() {
   install -d ${DEPLOYDIR}
   install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
+  # The manifests name a rootfs dm-verity hash image (rootfs_hash) for the
+  # per-slot hash partitions. A project build produces the real tree when
+  # rootfs.image.verity is on; the distro's own bundle never does - its FIT
+  # carries no root hash, so the partition content is never read - but stone
+  # validate/bundle still require the file. Same zero-filled placeholder the
+  # runtime build writes when verity is off.
+  truncate -s 4096 ${DEPLOYDIR}/avocado-image-rootfs-${MACHINE_SHORT_NAME}.verity
 }
 
 do_deploy:append:stone-uuu-emmc() {
