@@ -1,0 +1,36 @@
+header:
+  version: 16
+
+# Boot-integrity DEMO. Not the capability.
+#
+#   bakar build meta-avocado/kas/machine/imx93-frdm.yml:meta-avocado/kas/feature/boot-integrity-demo.yml
+#
+# What it shows: the device boots through the EFI stub, efivarfs appears, and
+# userspace can read a SecureBoot value. On the bootm/FIT path a device can
+# report nothing at all about how it booted, so this is the first configuration
+# where anything is readable.
+#
+# What it does NOT show, and the distinction is the entire point:
+#
+#   - The variable store is UNAUTHENTICATED. Variables live in /ubootefi.var on
+#     the EFI system partition, a FAT filesystem, so anyone who can write the
+#     boot medium can change them. The authenticated route stores through
+#     StandAloneMM in the secure world, which needs RPMB; RPMB is an eMMC
+#     feature and this board boots from SD.
+#   - The firmware asserting the value is itself UNAUTHENTICATED. AHAB is open
+#     on this part and cannot be closed - its SRK_HASH fuse is burned in the
+#     wrong byte order - so a substituted bootloader would be believed.
+#
+# Those two are independent and both have to be fixed before any value read
+# here means what it appears to mean. Neither is fixable in software.
+#
+# The one misreading to guard against: variables here DO survive a reboot,
+# because a file on the ESP persists. Surviving a power cycle looks like having
+# been protected and is not. The missing property is tamper-resistance.
+#
+# Deliberately does NOT set boot-integrity-reporting. That token names the real
+# capability and is registered nowhere yet, on purpose - declaring it is what
+# would make this scaffolding read as a delivered capability.
+local_conf_header:
+  feature/boot-integrity-demo: |
+    DISTRO_FEATURES:append = " boot-integrity-demo"

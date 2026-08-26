@@ -157,6 +157,49 @@ python () {
         d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
 }
 
+# efi-vars-demo.cfg gives this board a UEFI variable store so that efivarfs
+# exists and userspace can read a SecureBoot value. It is DEMO scaffolding with
+# a known replacement, not a step toward the real capability, and the two
+# differ in the one property that matters: the demo store is a file on the ESP
+# that anyone who can write the boot medium can edit.
+#
+# Gated on 'boot-integrity-demo' and deliberately NOT on
+# 'boot-integrity-reporting'. That second name belongs to the authenticated
+# capability, and letting scaffolding answer to it is exactly what would make a
+# demo read as delivered to anything inspecting the tree.
+#
+# Gated on the token ALONE rather than on token-and-machine, unlike fit-verify
+# above. The variable store is not machine-specific, so restricting it to one
+# machine would leave any other board that opted in with the token set and no
+# store - a silent no-op. The warning below covers the converse case: a board
+# that gets the store but has no EFI boot path to reach it.
+python () {
+    if not bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-demo', True, False, d):
+        return
+
+    d.appendVar('SRC_URI', ' file://efi-vars-demo.cfg')
+
+    # The spec permits an unauthenticated store ONLY when the build announces
+    # the substitution; a silent one is the failure it forbids. So this warning
+    # is a required output of the build, not commentary on it - if it ever
+    # becomes conditional or gets downgraded, the build stops satisfying the
+    # requirement that licensed the demo in the first place.
+    bb.warn("boot-integrity-demo: UEFI variables will be stored UNAUTHENTICATED "
+            "in /ubootefi.var on the EFI system partition. They persist across "
+            "reboot, which is NOT the same as being protected - anyone who can "
+            "write the boot medium can change them. Do not read a value from "
+            "this store as evidence about how the device booted.")
+
+    # A store with no EFI boot path to consume it produces no efivarfs, so the
+    # demo would look enabled and show nothing. Name that rather than letting
+    # someone debug it.
+    if d.getVar('MACHINE') != 'avocado-imx93-frdm':
+        bb.warn("boot-integrity-demo: the EFI boot path is wired for "
+                "avocado-imx93-frdm only, so on %s this sets up a variable "
+                "store that nothing will reach. efivarfs will be absent."
+                % d.getVar('MACHINE'))
+}
+
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
 # Broken, and load-bearing for nothing - kept only because the two cat lines
