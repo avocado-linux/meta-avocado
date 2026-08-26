@@ -217,13 +217,45 @@ maybe_resize() {
 # Interrupted mid-way (power cut), LUKS2 records the reencryption in its
 # metadata; open_var resumes it before opening. A filesystem whose size cannot
 # be read gets the whole-partition reencryption instead - slower, still correct.
+#
+# A /var that has already been GROWN to fill the partition (a deployed device
+# whose OTA turns encryption on) has no free tail for the header. btrfs can
+# shrink online, so give the header its 32 MiB back first: mount, resize by
+# the deficit, unmount, then reencrypt as usual. Anything else about the
+# migration is the same; it just starts from a filesystem that no longer ends
+# at the partition's last sector.
+btrfs_total_bytes() {
+    btrfs inspect-internal dump-super "$VAR_DEV" 2>/dev/null | awk '/^total_bytes/{print $2}'
+}
+
+shrink_btrfs_for_header() {
+    shrink_mib="$1"
+    mnt=/run/cryptsetup-var-shrink
+    echo "cryptsetup-var: btrfs on $VAR_DEV fills the partition - shrinking it by ${shrink_mib} MiB to make room for the LUKS2 header"
+    mkdir -p "$mnt"
+    if ! mount -t btrfs "$VAR_DEV" "$mnt"; then
+        echo "cryptsetup-var: cannot mount $VAR_DEV to shrink it - cannot encrypt in place" >&2
+        exit 1
+    fi
+    if ! btrfs filesystem resize "-${shrink_mib}M" "$mnt"; then
+        umount "$mnt"
+        echo "cryptsetup-var: btrfs refused to shrink by ${shrink_mib} MiB (tail in use or too full) - cannot encrypt in place" >&2
+        exit 1
+    fi
+    umount "$mnt"
+}
+
 encrypt_in_place() {
     fstype="$1"
     part_bytes=$(blockdev --getsize64 "$VAR_DEV")
     fs_bytes=""
     if [ "$fstype" = "btrfs" ] && command -v btrfs >/dev/null 2>&1; then
-        fs_bytes=$(btrfs inspect-internal dump-super "$VAR_DEV" 2>/dev/null \
-                    | awk '/^total_bytes/{print $2}')
+        fs_bytes=$(btrfs_total_bytes)
+        if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null \
+           && [ $(( part_bytes - fs_bytes )) -lt 33554432 ]; then
+            shrink_btrfs_for_header $(( (33554432 - (part_bytes - fs_bytes) + 1048575) / 1048576 ))
+            fs_bytes=$(btrfs_total_bytes)
+        fi
     fi
     size_opt=""
     if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null; then
@@ -237,8 +269,18 @@ encrypt_in_place() {
         echo "cryptsetup-var: $fstype on $VAR_DEV leaves no 32 MiB for a LUKS header - cannot encrypt in place" >&2
         exit 1
     fi
+    # Tell whoever is watching the console what is about to happen: a seeded
+    # /var can be tens of GiB, so this step can run for many minutes with
+    # nothing else on screen. It is a one-time migration and resumable after a
+    # power cut (resume_reencrypt). Periodic progress needs cryptsetup >= 2.4.
+    if [ -n "$size_opt" ]; then work_mib=$want_mib; else work_mib=$(( part_bytes / 1048576 )); fi
+    progress_opt=""
+    if cryptsetup --help 2>&1 | grep -q -- --progress-frequency; then
+        progress_opt="--progress-frequency 30"
+    fi
     echo "cryptsetup-var: first boot - encrypting existing $fstype on $VAR_DEV in place${size_opt:+ ($size_opt)}"
-    # shellcheck disable=SC2086 # size_opt is two words on purpose
+    echo "cryptsetup-var: ${work_mib} MiB to convert - one-time migration, resumes after a power cut${progress_opt:+, progress every 30 s}"
+    # shellcheck disable=SC2086 # size_opt / progress_opt are two words on purpose
     cryptsetup reencrypt --encrypt \
         --type luks2 \
         --cipher aes-xts-plain64 \
@@ -246,6 +288,7 @@ encrypt_in_place() {
         --hash sha256 \
         --reduce-device-size 32M \
         $size_opt \
+        $progress_opt \
         --key-file "$KEY_FILE" \
         --batch-mode \
         "$VAR_DEV"
