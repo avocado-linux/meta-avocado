@@ -1,9 +1,9 @@
 header:
   version: 16
 
-# Boot-integrity DEMO. Not the capability.
+# Boot-integrity PoC. Not the capability.
 #
-#   bakar build meta-avocado/kas/machine/imx93-frdm.yml:meta-avocado/kas/feature/boot-integrity-demo.yml
+#   bakar build meta-avocado/kas/machine/imx93-frdm.yml:meta-avocado/kas/feature/boot-integrity-poc.yml
 #
 # What it shows: the device boots through the EFI stub, efivarfs appears, and
 # userspace can read a SecureBoot value. On the bootm/FIT path a device can
@@ -32,5 +32,5 @@ header:
 # capability and is registered nowhere yet, on purpose - declaring it is what
 # would make this scaffolding read as a delivered capability.
 local_conf_header:
-  feature/boot-integrity-demo: |
-    DISTRO_FEATURES:append = " boot-integrity-demo"
+  feature/boot-integrity-poc: |
+    DISTRO_FEATURES:append = " boot-integrity-poc"

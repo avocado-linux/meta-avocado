@@ -1,7 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}/env:"
 
-# Set by the boot-integrity-demo block below when this machine gets the EFI boot
+# Set by the boot-integrity-poc block below when this machine gets the EFI boot
 # path. Defaulted here so do_configure's test reads a defined value on every
 # other build rather than depending on how bitbake expands an unset variable
 # inside a shell function.
@@ -122,7 +122,7 @@ do_configure:prepend:avocado-imx93-frdm () {
     install -m 0644 ${UNPACKDIR}/avocado-imx93-frdm.env \
         ${S}/board/nxp/imx93_frdm/avocado.env
 
-    # boot-integrity-demo: append the EFI boot path so its redefinitions of
+    # boot-integrity-poc: append the EFI boot path so its redefinitions of
     # image_file, avocado_boot and bootcmd win over the base environment's.
     # env2string.awk keys an awk array by variable name and emits each key once,
     # so last definition wins and no duplicate reaches U-Boot - but only if this
@@ -140,9 +140,9 @@ do_configure:prepend:avocado-imx93-frdm () {
         # board would then fail to load a device tree at boot with nothing in the
         # build log pointing back here. Fail the build instead.
         if [ -z "${FIT_CONF_DEFAULT_DTB}" ]; then
-            bbfatal "boot-integrity-demo: FIT_CONF_DEFAULT_DTB is empty, so the EFI boot path has no device tree to load. It is set in the machine conf; this build has lost it."
+            bbfatal "boot-integrity-poc: FIT_CONF_DEFAULT_DTB is empty, so the EFI boot path has no device tree to load. It is set in the machine conf; this build has lost it."
         fi
-        bbwarn "boot-integrity-demo: replacing this board's FIT boot path with an EFI hand-off (bootefi on an EFI-stub kernel staged in the ESP). Slot selection is unchanged. The staged kernel is unauthenticated."
+        bbwarn "boot-integrity-poc: replacing this board's FIT boot path with an EFI hand-off (bootefi on an EFI-stub kernel staged in the ESP). Slot selection is unchanged. The staged kernel is unauthenticated."
         printf '\n' >> ${S}/board/nxp/imx93_frdm/avocado.env
         sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
             ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
@@ -190,16 +190,16 @@ python () {
         d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
 }
 
-# efi-vars-demo.cfg gives this board a UEFI variable store so that efivarfs
-# exists and userspace can read a SecureBoot value. It is DEMO scaffolding with
+# efi-vars-poc.cfg gives this board a UEFI variable store so that efivarfs
+# exists and userspace can read a SecureBoot value. It is PoC scaffolding with
 # a known replacement, not a step toward the real capability, and the two
-# differ in the one property that matters: the demo store is a file on the ESP
+# differ in the one property that matters: the PoC store is a file on the ESP
 # that anyone who can write the boot medium can edit.
 #
-# Gated on 'boot-integrity-demo' and deliberately NOT on
+# Gated on 'boot-integrity-poc' and deliberately NOT on
 # 'boot-integrity-reporting'. That second name belongs to the authenticated
 # capability, and letting scaffolding answer to it is exactly what would make a
-# demo read as delivered to anything inspecting the tree.
+# PoC read as delivered to anything inspecting the tree.
 #
 # Gated on the token ALONE rather than on token-and-machine, unlike fit-verify
 # above. The variable store is not machine-specific, so restricting it to one
@@ -207,14 +207,14 @@ python () {
 # store - a silent no-op. The warning below covers the converse case: a board
 # that gets the store but has no EFI boot path to reach it.
 python () {
-    if not bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-demo', True, False, d):
+    if not bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', True, False, d):
         return
 
-    # Refuse the demo and the real capability together. They are not additive:
+    # Refuse the PoC and the real capability together. They are not additive:
     # EFI_VARIABLE_FILE_STORE and EFI_MM_COMM_TEE are alternatives in one
     # Kconfig `choice`, so two fragments setting different members do not
     # produce two stores - merge_config.sh applies them in order and the LAST
-    # one wins, with nothing printed. When that is the demo fragment the image
+    # one wins, with nothing printed. When that is the PoC fragment the image
     # gets an UNAUTHENTICATED store while its own feature tokens claim an
     # authenticated one, which is the worst available outcome and is invisible
     # in a build log.
@@ -224,29 +224,29 @@ python () {
     # was meant is how the unauthenticated store ends up shipping under the
     # authenticated name.
     if bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-reporting', True, False, d):
-        bb.fatal("boot-integrity-demo and boot-integrity-reporting are mutually "
+        bb.fatal("boot-integrity-poc and boot-integrity-reporting are mutually "
                  "exclusive: they select different members of U-Boot's UEFI "
                  "variable-store Kconfig choice, so enabling both lets fragment "
                  "order decide silently which store the image gets. Pick one.")
 
-    d.appendVar('SRC_URI', ' file://efi-vars-demo.cfg')
+    d.appendVar('SRC_URI', ' file://efi-vars-poc.cfg')
 
     # The spec permits an unauthenticated store ONLY when the build announces
     # the substitution; a silent one is the failure it forbids. So this warning
     # is a required output of the build, not commentary on it - if it ever
     # becomes conditional or gets downgraded, the build stops satisfying the
-    # requirement that licensed the demo in the first place.
-    bb.warn("boot-integrity-demo: UEFI variables will be stored UNAUTHENTICATED "
+    # requirement that licensed the PoC in the first place.
+    bb.warn("boot-integrity-poc: UEFI variables will be stored UNAUTHENTICATED "
             "in /ubootefi.var on the EFI system partition. They persist across "
             "reboot, which is NOT the same as being protected - anyone who can "
             "write the boot medium can change them. Do not read a value from "
             "this store as evidence about how the device booted.")
 
     # A store with no EFI boot path to consume it produces no efivarfs, so the
-    # demo would look enabled and show nothing. Name that rather than letting
+    # PoC would look enabled and show nothing. Name that rather than letting
     # someone debug it.
     if d.getVar('MACHINE') != 'avocado-imx93-frdm':
-        bb.warn("boot-integrity-demo: the EFI boot path is wired for "
+        bb.warn("boot-integrity-poc: the EFI boot path is wired for "
                 "avocado-imx93-frdm only, so on %s this sets up a variable "
                 "store that nothing will reach. efivarfs will be absent."
                 % d.getVar('MACHINE'))
@@ -262,7 +262,7 @@ python () {
     d.setVar('AVOCADO_EFI_BOOT_ENV', '1')
 }
 
-# The demo has to reach the SAVED environment as well as the compiled-in one,
+# The PoC has to reach the SAVED environment as well as the compiled-in one,
 # and this is not belt-and-braces. CONFIG_ENV_WRITEABLE_LIST rides the
 # 'verified-boot' gate, and its permit list (env-writeable-list.patch) admits
 # only avocado_boot_slot, the device identity vars, devnum and mmcblk - no
@@ -270,7 +270,7 @@ python () {
 # image_file are rejected on import and the compiled-in EFI override above wins
 # unopposed. With it OFF nothing rejects them: the saved environment is imported
 # whole and wins, so the board would boot the FIT path while the build log
-# claimed the demo was enabled. That is the silent-substitution failure this
+# claimed the PoC was enabled. That is the silent-substitution failure this
 # change exists to avoid, arrived at from the opposite direction.
 #
 # The override text comes from the same .env file rather than a second copy in
@@ -305,7 +305,7 @@ do_compile:prepend:avocado-imx93-frdm() {
 
     keys=$(cut -d= -f1 < "$override" | paste -sd'|')
     if [ -z "$keys" ]; then
-        bbfatal "boot-integrity-demo: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the demo enabled."
+        bbfatal "boot-integrity-poc: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the PoC enabled."
     fi
 
     grep -vE "^($keys)=" ${UNPACKDIR}/${MACHINE}.txt > "$override.merged"

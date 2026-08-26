@@ -177,7 +177,7 @@ if MODE == "uefi_var_persists" then
   -- `setenv -e` needs a variable store to write to. On firmware built with
   -- CONFIG_EFI_MM_COMM_TEE and no StandAloneMM behind it there is none, so this
   -- fails - which is the correct outcome on a board that has not been flashed
-  -- with the demo bootloader, and is why the failure message says so rather
+  -- with the PoC bootloader, and is why the failure message says so rather
   -- than reporting a generic write error.
   --
   -- -nv is what makes the variable non-volatile and therefore a persistence
@@ -186,7 +186,7 @@ if MODE == "uefi_var_persists" then
   cmd("setenv -e -nv -bs AvocadoHitlProbe HITLPROBEVALUE", 2000)
   if saw("Cannot set") or saw("Failed") or saw("not supported") then
     fail("setenv -e was refused - no UEFI variable store on this firmware. " ..
-         "Expected until the demo bootloader (CONFIG_EFI_VARIABLE_FILE_STORE) is flashed.")
+         "Expected until the PoC bootloader (CONFIG_EFI_VARIABLE_FILE_STORE) is flashed.")
   end
 
   cmd("printenv -e AvocadoHitlProbe", 2000)
@@ -200,7 +200,7 @@ if MODE == "uefi_var_persists" then
   -- buffer, so a value matched only afterwards would already have been evicted.
   watch("HITLPROBEVALUE")
 
-  -- A warm reset rather than a power cycle, deliberately. The demo store is a
+  -- A warm reset rather than a power cycle, deliberately. The PoC store is a
   -- file on the EFI system partition, so it is on the medium either way and the
   -- two are equivalent for this property. The .sh already power-cycles once at
   -- the start, so the board has been cold-started within this run.
@@ -210,11 +210,11 @@ if MODE == "uefi_var_persists" then
   tail = ""
   cmd("printenv -e AvocadoHitlProbe", 2500)
   if not saw("HITLPROBEVALUE") then
-    fail("the variable did not survive the reset - even the demo store is not persisting")
+    fail("the variable did not survive the reset - even the PoC store is not persisting")
   end
 
   pass("UEFI variable written, survived a reset, and read back. " ..
-       "NOTE: this proves PERSISTENCE only. The demo store is a file on a FAT " ..
+       "NOTE: this proves PERSISTENCE only. The PoC store is a file on a FAT " ..
        "partition and is not tamper-resistant.")
 end
 

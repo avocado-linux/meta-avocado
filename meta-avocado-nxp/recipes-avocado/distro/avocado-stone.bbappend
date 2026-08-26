@@ -132,7 +132,7 @@ do_deploy:append() {
 # Stage an EFI System Partition layout in the boot slot so the kernel can be
 # entered through its EFI stub, which is what populates efivarfs for the
 # userspace boot-integrity reporter. Injected into the deployed manifest rather
-# than written into stone-imx93-frdm.json because it is demo-only: the payload
+# than written into stone-imx93-frdm.json because it is PoC-only: the payload
 # is an EFI-stub kernel that the default boot path never executes, and staging a
 # second bootable kernel in the ESP of a board whose AHAB lifecycle is open
 # hands anyone who can write the boot medium a differently-configured kernel for
@@ -156,15 +156,15 @@ do_deploy:append() {
 # Caveat: `stone validate` reads only `files` (validate.rs:181), so a missing
 # files_append input is not caught there and surfaces at bundle time instead.
 # Both inputs here are deployed unconditionally by linux-imx, so neither depends
-# on the demo feature being on.
-AVOCADO_BOOT_INTEGRITY_DEMO = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-demo', '1', '0', d)}"
+# on the PoC feature being on.
+AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}"
 
 do_deploy:append:avocado-imx93-frdm() {
-  if [ "${AVOCADO_BOOT_INTEGRITY_DEMO}" != "1" ]; then
+  if [ "${AVOCADO_BOOT_INTEGRITY_POC}" != "1" ]; then
     return
   fi
 
-  bbwarn "boot-integrity-demo: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is demo scaffolding: the staged kernel is unauthenticated and writable by anyone with access to the boot medium."
+  bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is PoC scaffolding: the staged kernel is unauthenticated and writable by anyone with access to the boot medium."
 
   manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
   jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
@@ -172,6 +172,6 @@ do_deploy:append:avocado-imx93-frdm() {
        {"in": "Image", "out": "EFI/BOOT/BOOTAA64.EFI"},
        {"in": $dtb, "out": $dtb}
      ]' \
-    "$manifest" > "$manifest.efi-demo"
-  mv "$manifest.efi-demo" "$manifest"
+    "$manifest" > "$manifest.efi-poc"
+  mv "$manifest.efi-poc" "$manifest"
 }
