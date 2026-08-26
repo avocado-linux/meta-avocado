@@ -1321,8 +1321,11 @@ EOF
     # deauthorizes the USB endpoint. NVIDIA's T264 unified-flash flow
     # (flash_bsp_images.py -> FlashImages) does not include any reboot step
     # at the end — the device is left running adbd in the flashing initramfs
-    # until something tells it to reboot. Send `adb reboot` so the freshly
-    # flashed system boots without requiring a manual reset.
+    # until something tells it to reboot. `adb reboot` cannot work here: the
+    # device-side adbd64 implements it by setting the Android sys.powerctl
+    # property, which nothing serves in this initramfs ("reboot (reboot,adb)
+    # failed"). Run `reboot -f` over adb shell instead so the freshly flashed
+    # system boots without requiring a manual reset.
     if [ "${uniflash_rc:-0}" -eq 0 ]; then
         adb_bin=""
         if [ -x "./unified_flash/tools/flashtools/flash/adb" ]; then
@@ -1331,10 +1334,36 @@ EOF
             adb_bin="$(command -v adb)"
         fi
         if [ -n "$adb_bin" ]; then
-            echo "Issuing 'adb reboot' to leave flashing initramfs..." | tee -a "$logfile"
-            # adb reboot returns non-zero because the device disconnects
-            # mid-call; the reboot has already been initiated by then.
-            "$adb_bin" reboot 2>&1 | tee -a "$logfile" || true
+            echo "Issuing 'adb shell reboot -f' to leave flashing initramfs..." | tee -a "$logfile"
+            # Returns non-zero because the device disconnects mid-call; the
+            # reboot has already been initiated by then.
+            "$adb_bin" shell reboot -f 2>&1 | tee -a "$logfile" || true
+
+            # T264 keeps the RCM boot mode across the warm reset the initramfs
+            # just performed, so instead of cold-booting the flashed system the
+            # SoC comes back as the boot-ROM APX device (0955:7026). Nothing on
+            # the RCM side gets it out: 'tegrarcm_v2 --new_session ... --reboot
+            # coldboot' is accepted but leaves the device in RCM (tested), and
+            # NVIDIA's own bootburn never issues a reset either. What works is
+            # the reset button -- so press it through the devkit's TOPO debug
+            # MCU (boardctl) when one is attached, else ask the user.
+            echo "Waiting for the device to re-enter RCM after reboot..." | tee -a "$logfile"
+            if timeout 60 "$here/find-jetson-usb" --wait $usb_instance >>"$logfile" 2>&1; then
+                boardctl_target="${BOARDCTL_TARGET:-}"
+                if [ -z "$boardctl_target" ] && [ "$CHIPID" = "0x26" ] && \
+                   grep -qs "^7045$" /sys/bus/usb/devices/*/idProduct 2>/dev/null; then
+                    boardctl_target="thor-jetson-devkit"
+                fi
+                if [ -n "$boardctl_target" ] && command -v boardctl >/dev/null 2>&1; then
+                    echo "Device is back in RCM; pressing SYS_RESET via boardctl (target=$boardctl_target)..." | tee -a "$logfile"
+                    boardctl -t "$boardctl_target" ${BOARDCTL_SERIAL:+-s "$BOARDCTL_SERIAL"} reset 2>&1 | tee -a "$logfile" || \
+                        echo "WARN: boardctl reset failed; press the RESET button to boot the flashed system" | tee -a "$logfile"
+                else
+                    echo "ACTION NEEDED: device is back in recovery mode; press the RESET button to boot the flashed system" | tee -a "$logfile"
+                fi
+            else
+                echo "Device did not return to RCM; assuming it cold-booted" | tee -a "$logfile"
+            fi
         else
             echo "WARN: adb binary not found; device may need manual reset" | tee -a "$logfile"
         fi

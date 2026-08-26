@@ -54,8 +54,11 @@ required these adjustments:
   (`sources/` is now an explicit subdirectory) — the recipe's `cp -a`
   steps were silently no-oping for `.bin` / `.img` / `.fw` / `eks` /
   generic copies. Fixed the path.
-- **`FLASH_HELPER_SCRIPT:tegra264 = "tegra264-flash-helper.sh"`.** The
-  per-SoC override picks the right helper. Before: hardcoded to t234.
+- **`FLASH_HELPER_SCRIPT:tegra264 = "tegra-flash-helper.sh"`.** Thor uses
+  meta-tegra's unified helper unmodified (our former `tegra264-flash-helper.sh`
+  was a stale upstream snapshot with no avocado logic and was dropped). Only
+  tegra234 keeps a local `tegra234-flash-helper.sh`, for the ODMDATA
+  env-precedence fix upstream lacks. Before: hardcoded to t234.
 - **`TOSIMGFILENAME:tegra234 / :tegra264`.** Per-SoC TOS filename — the
   unified-flash Python expects `tos-optee_t264.img` for Thor and breaks
   out `unsigned customer data` if it can't find it.
@@ -189,7 +192,7 @@ is the per-board provisioning script invoked by `avocado provision`.
 is the NVIDIA-derived host-side flash driver. Two Thor-specific changes
 in the `CHIPID = 0x26` branch:
 
-- **`adb reboot` after successful flash.** NVIDIA's
+- **`adb shell reboot -f` after successful flash.** NVIDIA's
   `bootburn_t264_py/bootburn_lib.py:FlashImages` ends with
   `# self.AdbCleanup` (commented out) and `os.chdir(cwd)` — no reboot.
   The legacy T23x flow rebooted implicitly via the USB `authorized`
@@ -198,14 +201,29 @@ in the `CHIPID = 0x26` branch:
   device sits forever in the flashing initramfs running adbd. We
   capture `PIPESTATUS[0]` from `doflash.sh` and, if zero, locate the
   bundled `unified_flash/tools/flashtools/flash/adb` (or fall back to
-  PATH) and call `adb reboot`. The call returns non-zero because the
+  PATH) and call `adb shell reboot -f`. Plain `adb reboot` does not work:
+  the device-side `adbd64` implements it via the Android `sys.powerctl`
+  property, which nothing serves in the flashing initramfs (adbd logs
+  `reboot (reboot,adb) failed`). The call returns non-zero because the
   device disconnects mid-call — that's expected, the reboot has been
-  issued.
+  issued. T264 then keeps the RCM boot mode across that warm reset and
+  re-enumerates as the boot-ROM APX device (`0955:7026`) instead of
+  cold-booting. `tegrarcm_v2 --new_session … --reboot coldboot` is accepted
+  but does nothing (tested), so the script waits up to 60 s for the APX
+  device with `find-jetson-usb --wait` and then presses SYS_RESET through the
+  devkit's TOPO debug MCU: `boardctl -t $BOARDCTL_TARGET reset`, defaulting
+  to `thor-jetson-devkit` when a `0955:7045` Operator is on the bus. Without
+  a TOPO it prints `ACTION NEEDED … press the RESET button`.
+- **Device-side `reboot` restored.** meta-tegra's `tegra-target-flash-scripts`
+  sed drops NVIDIA's `/sbin/reboot` wrapper (`busybox reboot -f`) along with
+  the mount block; with bash as PID 1, bare busybox `reboot` is a no-op.
+  `recipes-bsp/tegra-binaries/tegra-target-flash-scripts_%.bbappend`
+  reinstates it as an update-alternative (priority 100 > busybox 50).
 - **End-of-script disconnect verification.** The chip-independent
   final-disconnect block previously logged
   `WARN: Cannot write to /sys/bus/usb/devices/<inst>/authorized` even
   on the success path, because by the time we reach it the device is
-  already gone (post `adb reboot` — exactly what we want). Updated to
+  already gone (post `adb shell reboot -f` — exactly what we want). Updated to
   poll up to 5s for the device to disappear, and to log
   `Device already detached — flash completed cleanly` instead of WARN
   when the path doesn't exist. WARN now fires only when a *known-
