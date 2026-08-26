@@ -70,6 +70,11 @@ avocado_boot_init=\
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${image_file}
 
 # rootfs dm-verity: root hash read back out of the (verified) FIT and handed to
+# systemd-veritysetup-generator. Ends in `true` on purpose: hush returns the
+# status of a failed `if` condition when there is no else branch, so a FIT
+# without avocado,roothash made this variable fail, `run` stopped before
+# avocado_boot and the board sat at the prompt after
+# "libfdt fdt_getprop(): FDT_ERR_NOTFOUND" (seen on imx93-frdm).
 # systemd-veritysetup-generator; a FIT without the property boots as before.
 # Same block as avocado-imx8mp-evk.txt.
 avocado_verity_init=\
@@ -80,7 +85,8 @@ avocado_verity_init=\
         setenv bootargs audit=0 console=${console} root=/dev/mapper/root roothash=${roothash} systemd.verity_root_data=${rootdev} systemd.verity_root_hash=${roothashdev} rootwait;\
       fi;\
     fi;\
-  fi;
+  fi;\
+  true;
 
 avocado_boot=bootm ${image_addr};
 
