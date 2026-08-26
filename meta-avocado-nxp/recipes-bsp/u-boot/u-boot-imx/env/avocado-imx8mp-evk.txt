@@ -56,7 +56,8 @@ avocado_verity_init=\
         setenv bootargs audit=0 console=${console} root=/dev/mapper/root roothash=${roothash} systemd.verity_root_data=${rootdev} systemd.verity_root_hash=${roothashdev} rootwait;\
       fi;\
     fi;\
-  fi;
+  fi;\
+  true;
 
 avocado_boot=bootm ${image_addr};
 
