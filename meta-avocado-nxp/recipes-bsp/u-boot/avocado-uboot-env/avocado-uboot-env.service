@@ -9,6 +9,12 @@ Type=oneshot
 ExecStart=/usr/sbin/avocado-uboot-env
 RemainAfterExit=yes
 RuntimeDirectory=avocado
+# /run/avocado is shared with avocadoctl.socket (avocadoctl.sock lives there).
+# Without this, a failure of this one-shot makes systemd remove the directory
+# and the daemon's socket with it, and every later avocadoctl call fails with
+# "Daemon Not Running" - which is how a cmdline-parsing error here turned into
+# no extensions merged at boot.
+RuntimeDirectoryPreserve=yes
 
 [Install]
 WantedBy=sysinit.target

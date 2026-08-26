@@ -31,12 +31,17 @@ if [ -f "$USER_OVERRIDE" ]; then
     exit 0
 fi
 
-# Auto-detect boot device from kernel cmdline
+# Auto-detect boot device from kernel cmdline. With rootfs dm-verity the root
+# is /dev/mapper/root and the partition it is built on arrives as
+# systemd.verity_root_data=; that is the same device the env lives on.
 root_dev=""
 for arg in $(cat /proc/cmdline); do
     case "$arg" in
         root=/dev/mmcblk*)
             root_dev="${arg#root=}"
+            ;;
+        systemd.verity_root_data=/dev/mmcblk*)
+            root_dev="${arg#systemd.verity_root_data=}"
             ;;
     esac
 done
