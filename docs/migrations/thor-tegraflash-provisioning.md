@@ -54,8 +54,11 @@ required these adjustments:
   (`sources/` is now an explicit subdirectory) — the recipe's `cp -a`
   steps were silently no-oping for `.bin` / `.img` / `.fw` / `eks` /
   generic copies. Fixed the path.
-- **`FLASH_HELPER_SCRIPT:tegra264 = "tegra264-flash-helper.sh"`.** The
-  per-SoC override picks the right helper. Before: hardcoded to t234.
+- **`FLASH_HELPER_SCRIPT:tegra264 = "tegra-flash-helper.sh"`.** Thor uses
+  meta-tegra's unified helper unmodified (our former `tegra264-flash-helper.sh`
+  was a stale upstream snapshot with no avocado logic and was dropped). Only
+  tegra234 keeps a local `tegra234-flash-helper.sh`, for the ODMDATA
+  env-precedence fix upstream lacks. Before: hardcoded to t234.
 - **`TOSIMGFILENAME:tegra234 / :tegra264`.** Per-SoC TOS filename — the
   unified-flash Python expects `tos-optee_t264.img` for Thor and breaks
   out `unsigned customer data` if it can't find it.

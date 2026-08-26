@@ -13,7 +13,6 @@ SRC_URI = "\
     file://initrd-flash.sh \
     file://make-sdcard.sh \
     file://tegra234-flash-helper.sh \
-    file://tegra264-flash-helper.sh \
 "
 
 S = "${UNPACKDIR}"
@@ -44,7 +43,6 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/initrd-flash.sh ${D}${TEGRAFLASH_BINDIR}/initrd-flash
     install -m 0755 ${UNPACKDIR}/make-sdcard.sh ${D}${TEGRAFLASH_BINDIR}/make-sdcard
     install -m 0755 ${UNPACKDIR}/tegra234-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra234-flash-helper.sh
-    install -m 0755 ${UNPACKDIR}/tegra264-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra264-flash-helper.sh
     
     # Determine flash tools source directory from native staging
     # Use STAGING_DIR_NATIVE since nativesdk can't access native tools via STAGING_BINDIR_NATIVE
@@ -83,8 +81,9 @@ do_install() {
             fi
         done
         
-        # Copy flash helper scripts from native sysroot (upstream versions)
-        for helper in tegra234-flash-helper.sh tegra264-flash-helper.sh flash-helper.sh; do
+        # Copy upstream's unified flash helper from the native sysroot; it is the
+        # FLASH_HELPER on tegra264/Thor (tegra234 uses our copy installed above).
+        for helper in tegra-flash-helper.sh; do
             if [ -f "$FLASH_SRC/$helper" ]; then
                 install -m 0755 "$FLASH_SRC/$helper" ${D}${TEGRAFLASH_BINDIR}/
             fi

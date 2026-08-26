@@ -6,11 +6,13 @@ COMPATIBLE_MACHINE = "(tegra)"
 
 inherit deploy l4t_bsp
 
-# Per-SoC flash helper script name. tegra-flashtools-native deploys both
-# tegra234-flash-helper.sh and tegra264-flash-helper.sh; the .env.initrd-flash
-# file picks the right one for this machine via SOC_FAMILY.
+# Flash helper script name written into .env.initrd-flash as FLASH_HELPER.
+# tegra234 uses our tegra234-flash-helper.sh (carries the ODMDATA env-precedence
+# fix upstream lacks); tegra264/Thor uses meta-tegra's unified
+# tegra-flash-helper.sh unmodified -- our former tegra264 copy was a stale
+# upstream snapshot with no avocado logic.
 FLASH_HELPER_SCRIPT = "tegra234-flash-helper.sh"
-FLASH_HELPER_SCRIPT:tegra264 = "tegra264-flash-helper.sh"
+FLASH_HELPER_SCRIPT:tegra264 = "tegra-flash-helper.sh"
 
 # SoC-specific file names - these mirror image_types_tegra.bbclass definitions
 TOSIMGFILENAME = "tos-optee.img"
