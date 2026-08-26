@@ -1,9 +1,15 @@
-FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.18:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.18:${THISDIR}/files:"
 
 SRC_URI += " \
   file://avocado-core.cfg \
   file://avocado-extra.cfg \
 "
+
+# dm-crypt/dm-verity capability (shared fragments) + the OP-TEE fTPM driver.
+# Unconditional: see avocado-security-kernel.inc for why capability is not
+# gated on a DISTRO_FEATURE. files/ftpm.cfg is shared by both Jetson kernels.
+require recipes-kernel/linux/avocado-security-kernel.inc
+SRC_URI += " file://ftpm.cfg"
 
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
@@ -21,6 +27,9 @@ RDEPENDS:packagegroup-avocado-initramfs-modules:append = " \
     kernel-module-pcie-tegra194-${KERNEL_VERSION} \
     kernel-module-phy-tegra194-p2u-${KERNEL_VERSION} \
     kernel-module-tegra-xudc-${KERNEL_VERSION} \
+    kernel-module-tpm-ftpm-tee-${KERNEL_VERSION} \
+    kernel-module-dm-mod-${KERNEL_VERSION} \
+    kernel-module-dm-crypt-${KERNEL_VERSION} \
 "
 
 # Tegra hardware modules previously contributed via meta-tegra's unversioned

@@ -38,7 +38,21 @@ RDEPENDS:${PN} = " \
   ${VPI_HPC_PACKAGES} \
   ${DIAGNOSTIC_PACKAGES} \
   ${TEGRA_TEST_PACKAGES} \
+  ${SECURITY_PACKAGES} \
   swupdate \
+"
+
+# Encrypted-/var + fTPM userspace, published so avocado-cli can install it from
+# the single Jetson feed when a runtime opts in (avocado.yaml var.encrypt).
+# None of it is in the Yocto rootfs/initramfs images by default.
+SECURITY_PACKAGES = " \
+  cryptsetup \
+  cryptsetup-var \
+  cryptsetup-var-udev \
+  libdevmapper \
+  optee-ftpm-init \
+  optee-client \
+  tpm2-tools \
 "
 
 GSTREAMER_PACKAGES = " \
