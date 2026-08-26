@@ -1338,6 +1338,22 @@ EOF
             # Returns non-zero because the device disconnects mid-call; the
             # reboot has already been initiated by then.
             "$adb_bin" shell reboot -f 2>&1 | tee -a "$logfile" || true
+
+            # T264 keeps the RCM boot mode across the warm reset the initramfs
+            # just performed, so instead of cold-booting the flashed system the
+            # SoC comes back as the boot-ROM APX device (0955:7026). NVIDIA's
+            # own bootburn has Mb2AppletReset() for this but never calls it.
+            # Wait briefly for the device to re-enter RCM and ask the boot ROM
+            # for a cold boot; if it never reappears it booted on its own.
+            echo "Waiting for the device to re-enter RCM after reboot..." | tee -a "$logfile"
+            if timeout 60 "$here/find-jetson-usb" --wait $usb_instance >>"$logfile" 2>&1; then
+                rcm_inst=""
+                [ -n "$usb_instance" ] && rcm_inst="--instance $usb_instance"
+                echo "Issuing 'tegrarcm --reboot coldboot' to leave RCM..." | tee -a "$logfile"
+                "$here/tegrarcm_v2" $rcm_inst --chip 0x26 0 --reboot coldboot 2>&1 | tee -a "$logfile" || true
+            else
+                echo "Device did not return to RCM; assuming it cold-booted" | tee -a "$logfile"
+            fi
         else
             echo "WARN: adb binary not found; device may need manual reset" | tee -a "$logfile"
         fi

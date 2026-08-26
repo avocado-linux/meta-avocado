@@ -206,7 +206,16 @@ in the `CHIPID = 0x26` branch:
   property, which nothing serves in the flashing initramfs (adbd logs
   `reboot (reboot,adb) failed`). The call returns non-zero because the
   device disconnects mid-call — that's expected, the reboot has been
-  issued.
+  issued. T264 then keeps the RCM boot mode across that warm reset and
+  re-enumerates as the boot-ROM APX device (`0955:7026`) instead of
+  cold-booting, so the script waits up to 60 s for it with
+  `find-jetson-usb --wait` and sends `tegrarcm_v2 --chip 0x26 0 --reboot
+  coldboot`. If the device never reappears it booted on its own.
+- **Device-side `reboot` restored.** meta-tegra's `tegra-target-flash-scripts`
+  sed drops NVIDIA's `/sbin/reboot` wrapper (`busybox reboot -f`) along with
+  the mount block; with bash as PID 1, bare busybox `reboot` is a no-op.
+  `recipes-bsp/tegra-binaries/tegra-target-flash-scripts_%.bbappend`
+  reinstates it as an update-alternative (priority 100 > busybox 50).
 - **End-of-script disconnect verification.** The chip-independent
   final-disconnect block previously logged
   `WARN: Cannot write to /sys/bus/usb/devices/<inst>/authorized` even
