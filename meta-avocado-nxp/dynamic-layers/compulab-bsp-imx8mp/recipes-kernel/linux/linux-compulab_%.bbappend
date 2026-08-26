@@ -9,6 +9,7 @@ SRC_URI += " \
   file://avocado-wireless.cfg \
   file://avocado-netfilter.cfg \
   file://avocado-usb-serial.cfg \
+  file://caam.cfg \
   file://avocado-compulab.cfg \
   file://ucm-imx8m-plus-hdmi.dts \
 "
