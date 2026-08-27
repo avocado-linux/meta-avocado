@@ -17,6 +17,7 @@ SRC_URI = " \
     git://github.com/rubikpi-ai/WiringRP-Python.git;protocol=https;branch=main;name=python;destsuffix=git/python \
     git://github.com/rubikpi-ai/WiringRP.git;protocol=https;branch=main;name=c;destsuffix=git/python/WiringPi \
     file://0001-wiringPi-call-GetRP1Memory-with-no-arguments.patch;patchdir=${UNPACKDIR}/git/python/WiringPi \
+    file://0002-wiringpi.i-use-SWIG_AppendOutput-in-the-argout-typemap.patch \
 "
 
 SRCREV_python = "8b797fdde07d564f648bddba900507ac241eba6e"
