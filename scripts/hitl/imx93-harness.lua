@@ -312,6 +312,12 @@ if MODE == "boot_integrity_report" then
   if not saw("rot_state=") then
     fail("record carries enforcement with no root-of-trust indicator")
   end
+  -- Same echo rule as above, and it is the test to apply to any field added
+  -- here later: `keydb_origin=` occurs in the record but nowhere in the text of
+  -- the command sent, so matching it cannot be satisfied by the getty's echo.
+  if not saw("keydb_origin=") then
+    fail("record carries no keydb_origin field - the reporter predates the key-database contract")
+  end
 
   -- efivarfs never appeared, so the kernel was not entered through the EFI stub
   -- and the boot path change did not take.
@@ -327,7 +333,7 @@ if MODE == "boot_integrity_report" then
     fail("root of trust reads authenticated on a board whose AHAB lifecycle is open")
   end
 
-  pass("record carries enforcement and a root-of-trust indicator; root of trust is not authenticated")
+  pass("record carries enforcement, a root-of-trust indicator and a keydb_origin; root of trust is not authenticated")
 end
 
 fail("unknown HARNESS_MODE '" .. MODE .. "'")
