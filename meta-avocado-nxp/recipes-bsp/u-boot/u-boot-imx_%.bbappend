@@ -164,7 +164,30 @@ do_configure:prepend:avocado-imx93-frdm () {
         if [ ! -f ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ]; then
             bbfatal "boot-integrity-poc: ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var is absent, so U-Boot would compile with an empty preseed and the board would come up in setup mode while this build reported enrolment. sb-keys' do_deploy produces it; this recipe DEPENDS on sb-keys under the same gate."
         fi
+        # TWO copies, deliberately, because two different consumers resolve the
+        # seed two different ways and satisfying one does not satisfy the other:
+        #
+        #   ${S}/ubootefi.var
+        #     The MAKE PREREQUISITE. lib/efi_loader/Makefile declares
+        #     $(obj)/efi_var_seed.o: $(srctree)/$(EFI_VAR_SEED_FILE), so make
+        #     refuses to build the object unless the file exists at exactly this
+        #     path. It is also what the do_deploy:append below tests before it
+        #     will write db.fingerprint - removing this copy silently disables
+        #     that integrity check as well as breaking the build.
+        #
+        #   ${S}/lib/efi_loader/ubootefi.var
+        #     The ASSEMBLER INCLUDE PATH. efi_var_seed.S carries a bare
+        #     .incbin "ubootefi.var", which gas resolves against its own -I list.
+        #     That list does NOT contain the srctree root, so the prerequisite
+        #     above being satisfied is not enough: on an out-of-tree build
+        #     (O=${B}, which is how this recipe builds) the assembler fails with
+        #     "Error: file not found: ubootefi.var". The -I list DOES already
+        #     contain $(srctree)/lib/efi_loader, so a copy here makes the bare
+        #     filename resolve with no U-Boot patch and no absolute path in
+        #     CONFIG_EFI_VAR_SEED_FILE (which would break the prerequisite, since
+        #     make would expand it to $(srctree)//abs/path).
         install -m 0644 ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ${S}/ubootefi.var
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ${S}/lib/efi_loader/ubootefi.var
     fi
 }
 
