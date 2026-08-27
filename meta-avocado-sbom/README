@@ -73,11 +73,13 @@ Variables
                                where avocado-cve-optout.bbclass leaves its
                                markers. Defaults to CVE_CHECK_DIR, beside the
                                cve-check results they explain
-  AVOCADO_CVE_REPORT_MANIFESTS globs of image manifests naming the base
-                               runtime. Defaults to ${DEPLOY_DIR_IMAGE}/
-                               avocado-image-{rootfs,initramfs}-*.manifest -
-                               the two images that ship. Matching nothing is
-                               not an error - see "Scope" below
+  AVOCADO_CVE_REPORT_MANIFESTS space-separated globs of image manifests
+                               naming the base runtime. Defaults to the two
+                               images that ship, as two patterns under
+                               ${DEPLOY_DIR_IMAGE}: avocado-image-rootfs-*
+                               .manifest and avocado-image-initramfs-*
+                               .manifest. Matching nothing is not an error -
+                               see "Scope" below
   AVOCADO_CVE_BOOT_CHAIN       recipes that run on the device but are
                                installed by no package manager, so no manifest
                                names them. Defaults to "u-boot
@@ -97,10 +99,11 @@ Every recipe entry carries a "scope": which surface of the device it occupies.
 
 "build-only" is the only value that asserts a recipe is absent from the device,
 so it has to be earned rather than defaulted to. A recipe that produced no
-package is host tooling only if it is named like host tooling - -native,
-nativesdk-, -cross, -crosssdk, -initial, and gcc-source-<PV>, checked against
-all 94 package-less recipes on a qemuarm64 world build; otherwise it is a
-deploy-only target recipe that ships outside any package manager - imx-atf,
+package is host tooling only if it is named like host tooling - a -native,
+-cross, -crosssdk, -initial or -source suffix, or -cross- or -source- inside
+the name, checked against all 94 package-less recipes on a qemuarm64 world
+build; otherwise it is a deploy-only target recipe that ships outside any
+package manager - imx-atf,
 imx-boot, firmware-*, a u-boot with PACKAGES = "" - and it scopes boot-chain.
 See the "packaged" section below, which lists those recipes and says their CVEs
 are real and on the device. Naming each one in AVOCADO_CVE_BOOT_CHAIN would not
@@ -136,7 +139,8 @@ the label independent of whether a given machine's u-boot sets PACKAGES = ""
 
 The coverage denominator does not move. unscanned_recipes and
 no_cve_record_recipes are derived from pkgdata - everything this build produced
-- and reading an image manifest leaves both untouched, which tests/test_report.py
+- and reading an image manifest leaves both untouched, which
+tests/test_report.py
 asserts directly by building the same tree twice. Scoping the findings to an
 image without also scoping that denominator would leave a coverage counter
 measuring a different population than the findings beside it; scope being a
@@ -303,12 +307,12 @@ generator, so they can only disagree if something dropped packages after the
 fact - which is the failure that shipped a report missing 61 of 139 packages
 and went unnoticed for weeks.
 
-Five counters (cve_files, unpatched_cves, ignored_cves, patched_cves,
-unknown_status_cves) count inputs that are not in the report and cannot be
-re-derived from it. They are carried for fidelity and their values are never
-asserted on. One exception, and only at zero: cve_files = 0 fails, because no
-cve-check file was consumed at all and every other counter is describing a scan
-that never happened.
+Six counters (cve_files, manifests_read, unpatched_cves, ignored_cves,
+patched_cves, unknown_status_cves) count inputs that are not in the report and
+cannot be re-derived from it. They are carried for fidelity and their values
+are never asserted on. One exception, and only at zero: cve_files = 0 fails,
+because no cve-check file was consumed at all and every other counter is
+describing a scan that never happened.
 
 The fixture
 -----------
@@ -316,7 +320,7 @@ The fixture
 tests/fixtures/avocado-cve-report.json is a real report with whole recipes and
 whole packages removed, small enough to read in a diff. No record in it was
 edited by hand; only the counters describing the trimmed set were rewritten,
-and the five underivable counters above are carried from the source report
+and the six underivable counters above are carried from the source report
 unchanged - which is why cve_files and patched_cves are far larger than seven
 recipes would produce. Regenerate rather than hand-edit:
 
@@ -381,8 +385,9 @@ A second change was made under these rules that they would otherwise forbid.
 generated before it fails the current checker. The rules do not actually name
 this case - "making an optional key required" is a different thing, since scope
 was never optional, and the allowed list covers a new field inside a CVE record
-rather than inside a recipe entry. Read against their intent it is a new major. It was made at version 1 deliberately: an
-optional scope is worse than none, because a consumer would have to guess what
+rather than inside a recipe entry. Read against their intent it is a new major.
+It was made at version 1 deliberately: an optional scope is worse than none,
+because a consumer would have to guess what
 an absent scope meant, and the only safe guess - "feed" - is exactly the value
 a producer that had read no manifest would have written anyway. The two cases
 are indistinguishable and one of them is wrong. Requiring it makes a producer

@@ -104,7 +104,7 @@ def read_manifests(manifest_paths, stats):
     """
     installed = set()
 
-    for path in sorted(manifest_paths):
+    for path in manifest_paths:
         try:
             with open(path, errors="ignore") as f:
                 lines = f.read().splitlines()
@@ -131,11 +131,9 @@ SCOPES = ("boot-chain", "base-runtime", "feed", "build-only")
 # and libgcc-initial matched none of the obvious suffixes.
 def _is_host_tooling(recipe):
     return (
-        recipe.startswith("nativesdk-")
-        or recipe.endswith(("-native", "-cross", "-crosssdk", "-initial"))
+        recipe.endswith(("-native", "-cross", "-crosssdk", "-initial", "-source"))
         or "-cross-" in recipe
         or "-source-" in recipe
-        or recipe.endswith("-source")
     )
 
 def _scope(recipe, package_names, installed, boot_chain):
@@ -152,6 +150,11 @@ def _scope(recipe, package_names, installed, boot_chain):
     """
     if recipe in boot_chain:
         return "boot-chain"
+    # Before package membership, unlike the rest of host tooling: PKGDATA_DIR_SDK
+    # packages nativesdk recipes, so they are packaged and would read "feed" -
+    # installable on a device, which is what the prefix rules out.
+    if recipe.startswith("nativesdk-"):
+        return "build-only"
     if any(name in installed for name in package_names):
         return "base-runtime"
     if package_names:
@@ -647,8 +650,8 @@ def main():
         action="append",
         default=[],
         help="image manifest naming the base runtime, repeatable; overrides "
-        "the ${DEPLOY_DIR}/images/${MACHINE}/avocado-image-{rootfs,initramfs}-"
-        "*.manifest default",
+        "the avocado-image-rootfs-*.manifest and avocado-image-initramfs-*"
+        ".manifest defaults under ${DEPLOY_DIR}/images/${MACHINE}",
     )
     parser.add_argument(
         "--boot-chain",

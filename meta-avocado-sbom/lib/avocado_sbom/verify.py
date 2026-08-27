@@ -40,7 +40,8 @@ REPORT_COUNTERS = (
 # The surfaces a finding can occupy. Kept in step with report.SCOPES, but
 # spelled out rather than imported: the checker is what a consumer runs against
 # a document the producer wrote, so it must not take the producer's word for
-# the vocabulary.
+# the vocabulary. test_verify.py binds this, report.SCOPES and the schema enum,
+# so spelling it out cannot become drifting from it.
 SCOPES = ("boot-chain", "base-runtime", "feed", "build-only")
 
 # Non-zero means the report is missing data. Silent otherwise: the document
