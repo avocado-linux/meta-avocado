@@ -462,4 +462,204 @@ if MODE == "signed_payload_refused" then
        "merely reported")
 end
 
+-- Assert the enrolled key database cannot be replaced, covering BOTH halves of
+-- the spec requirement in one run:
+--
+--   part one, RUNTIME  - a write to PK from a booted root shell is refused and
+--                        leaves PK byte-identical;
+--   part two, OFFLINE  - deleting the variable store from the boot medium and
+--                        resetting leaves the SAME PK in place, because the
+--                        seed compiled into the bootloader is authoritative and
+--                        the file store cannot override it.
+--
+-- The hash is read ONCE, before any tamper, and compared twice. Re-reading it
+-- after a tamper and comparing that against itself would pass on a PK that had
+-- been substituted wholesale, since a substituted variable hashes consistently
+-- with itself.
+--
+-- Neither half may be skipped. A half that cannot run fails the mode; recording
+-- a PASS for a check that was never exercised is the outcome this mode exists
+-- to prevent.
+if MODE == "keydb_immutable" then
+  local PK = "/sys/firmware/efi/efivars/PK-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+
+  -- Every marker below is built by concatenating two adjacent shell string
+  -- literals, so the bytes SENT carry `PKPROBE''-` while the bytes the board
+  -- PRINTS carry `PKPROBE-`. The getty echoes its own input, and this is what
+  -- keeps that echo from satisfying the pattern. `cmd` clears the tail before
+  -- writing, so nothing matched here can be text left over from earlier.
+  local function probe_pk()
+    cmd("s=$(wc -c < " .. PK .. "); h=$(sha256sum < " .. PK ..
+        " | cut -c1-64); printf 'PKPROBE''-%s-%s\\n' \"$s\" \"$h\"", 4000)
+    -- The optional whitespace is not cosmetic: some `wc` implementations pad the
+    -- count into a fixed-width field, and command substitution keeps the leading
+    -- spaces. Without it the probe would read as "PK absent" on such an image.
+    return string.match(tail, "PKPROBE%-%s*(%d+)%-(%x+)")
+  end
+
+  local function login_root()
+    cmd("root", 4000)
+    if not saw("avocado%-imx93%-frdm:~#") then
+      fail("did not reach a root shell - neither half of this mode can run")
+    end
+  end
+
+  if not reach_prompt(180) then fail("never reached the U-Boot prompt") end
+  cmd("reset", 500)
+  if not await_login(240) then fail("board did not reach a login prompt") end
+  login_root()
+
+  ---------------------------------------------------------------- part one ---
+
+  -- A read-only efivarfs would refuse the write for a reason that has nothing
+  -- to do with the key database, and that refusal would read exactly like the
+  -- one being tested for. Establish the mount is writable before drawing any
+  -- conclusion from a failed write. awk concatenates the two literals, so the
+  -- printed key differs from the sent one.
+  cmd("awk '$3==\"efivarfs\"{print \"EFIVARFSOPTS\" \"=\" $4}' /proc/mounts", 3000)
+  local opts = string.match(tail, "EFIVARFSOPTS=(%S+)")
+  if not opts then
+    fail("efivarfs is not mounted - there is no runtime variable interface to " ..
+         "write to, so part one cannot run")
+  end
+  if not string.match(opts, "^rw") then
+    fail("efivarfs is mounted read-only (" .. opts .. ") - a refused write " ..
+         "proves nothing about the key database")
+  end
+
+  local size0, hash0 = probe_pk()
+  if not size0 then
+    fail("PK did not read back from efivarfs - either the key database is not " ..
+         "enrolled, or the image carries no wc/sha256sum for the probe to use. " ..
+         "Either way there is nothing whose immutability could be tested")
+  end
+  if size0 == "0" then fail("PK is present but empty - nothing to protect") end
+  tio.echo("\r\n>>> PK recorded before any tamper: " .. size0 .. " bytes, " ..
+           hash0 .. " <<<\r\n")
+
+  -- efivarfs sets the immutable attribute on the authentication variables, and
+  -- that attribute alone would refuse the write at the filesystem layer without
+  -- the firmware ever being asked. Try to clear it first so the refusal comes
+  -- from the variable store rather than from a file flag.
+  cmd("chattr -i " .. PK .. " > /tmp/hitl.ci 2>&1; echo 'CHATTRRC''='$?; " ..
+      "cat /tmp/hitl.ci", 3000)
+  local chattr_rc = string.match(tail, "CHATTRRC=(%d+)")
+  if not chattr_rc then
+    fail("the chattr step produced no return code - the shell is not running " ..
+         "what it is sent, and no later result here can be trusted")
+  end
+
+  -- The payload carries the 4-byte little-endian attribute prefix efivarfs
+  -- requires (0x27 = NV|BS|RT|AT), so a rejection is not a rejection of a
+  -- malformed write.
+  --
+  -- WHAT THIS SEPARATES AND WHAT IT DOES NOT. A missing prefix and a short
+  -- write are excluded: the prefix is present and the payload is written in one
+  -- call. When chattr reported 0 the immutable attribute was cleared, so the
+  -- refusal came from the variable store. When chattr reported non-zero - no
+  -- chattr on the image, or the kernel refusing to clear the flag - this check
+  -- does NOT distinguish "efivarfs held the immutable attribute" from "the
+  -- firmware refused the SetVariable"; it establishes only that the write did
+  -- not land. The hash comparison below is what carries the verdict in that
+  -- case, and it is the same comparison either way.
+  --
+  -- The shell's own error goes to the console rather than to a file: when the
+  -- `>` redirection is what fails, the command never runs and a `2>` on it is
+  -- never applied, so capturing it would capture nothing.
+  cmd("printf '\\047\\000\\000\\000AVOCADOHITLTAMPER' > " .. PK ..
+      "; echo 'WRITERC''='$?", 4000)
+  local write_rc = string.match(tail, "WRITERC=(%d+)")
+  if not write_rc then
+    fail("the write attempt produced no return code - the command did not run, " ..
+         "so nothing was offered to the variable store and nothing was refused")
+  end
+  if write_rc == "0" then
+    fail("the runtime write to PK SUCCEEDED (chattr rc " .. chattr_rc .. ") - " ..
+         "the key database is editable from userspace and the enrolment is worthless")
+  end
+  tio.echo("\r\n>>> runtime write refused (rc " .. write_rc .. ", chattr rc " ..
+           chattr_rc .. ") <<<\r\n")
+
+  -- A refused write is not enough on its own: a partial write that failed late
+  -- could still have truncated or altered the variable.
+  local size1, hash1 = probe_pk()
+  if not size1 then
+    fail("PK no longer reads back after the refused write - it was damaged, " ..
+         "which is a failure of the same requirement")
+  end
+  if size1 ~= size0 or hash1 ~= hash0 then
+    fail("PK CHANGED across the refused write: was " .. size0 .. "/" .. hash0 ..
+         ", now " .. size1 .. "/" .. hash1)
+  end
+  tio.echo("\r\n>>> part one: write refused, PK unchanged <<<\r\n")
+
+  ---------------------------------------------------------------- part two ---
+
+  cmd("reboot", 3000)
+  if not reach_prompt(240) then
+    fail("board did not return to the U-Boot prompt after the reboot - part " ..
+         "two did not run")
+  end
+
+  -- Liveness off output the BOARD produces, never off a string this script sent.
+  cmd("version", 1500)
+  if not saw("U%-Boot") then fail("no version banner - console not actually live") end
+
+  -- The device and partition come from the board's own environment, the same
+  -- way every other U-Boot step in this file resolves them.
+  cmd("fatls ${devtype} ${devnum}:${bootpart}", 4000)
+  if not saw("file%(s%)") then
+    fail("could not list the boot partition - part two cannot run")
+  end
+  if not saw("ubootefi%.var") then
+    fail("no ubootefi.var on the boot partition, so there is no store to " ..
+         "delete and part two cannot run. It must be the ESP the firmware " ..
+         "reads its variable file from")
+  end
+
+  cmd("fatrm ${devtype} ${devnum}:${bootpart} ubootefi.var", 4000)
+  if saw("Unknown command") then
+    fail("fatrm is unavailable on this firmware - the offline half cannot run")
+  end
+
+  -- Confirm the delete off a tail that no longer holds the fatrm command line.
+  -- That line contains the filename, so a presence match against it would be
+  -- satisfied by the console's echo rather than by the directory. `cmd` clears
+  -- the tail before writing, and the fatls it sends does not name the file.
+  cmd("fatls ${devtype} ${devnum}:${bootpart}", 4000)
+  if not saw("file%(s%)") then
+    fail("could not re-list the boot partition, so the delete is unconfirmed - " ..
+         "part two did not run")
+  end
+  if saw("ubootefi%.var") then
+    fail("ubootefi.var is still on the boot partition after fatrm - the delete " ..
+         "did not happen, so the offline half was never exercised")
+  end
+  tio.echo("\r\n>>> variable store deleted from the boot medium <<<\r\n")
+
+  cmd("reset", 500)
+  if not await_login(240) then
+    fail("board did not reach a login prompt with the variable store deleted")
+  end
+  login_root()
+
+  local size2, hash2 = probe_pk()
+  if not size2 then
+    fail("PK is GONE after deleting the variable store - the key database came " ..
+         "from the editable file store, not from the seed compiled into the " ..
+         "bootloader, and deleting a file on a FAT partition disarms Secure Boot")
+  end
+  -- Presence alone would pass on a substituted PK, so the comparison is against
+  -- the hash recorded before the FIRST tamper.
+  if size2 ~= size0 or hash2 ~= hash0 then
+    fail("PK is present but DIFFERENT after deleting the variable store: was " ..
+         size0 .. "/" .. hash0 .. ", now " .. size2 .. "/" .. hash2 ..
+         " - the file store can override the compiled-in seed")
+  end
+
+  pass("runtime write to PK refused with PK unchanged, and the same PK " ..
+       "survived deletion of the variable store on the boot medium - the " ..
+       "compiled-in seed is authoritative")
+end
+
 fail("unknown HARNESS_MODE '" .. MODE .. "'")
