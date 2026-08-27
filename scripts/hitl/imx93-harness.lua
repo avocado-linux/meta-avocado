@@ -513,20 +513,20 @@ if MODE == "keydb_immutable" then
 
   -- A read-only efivarfs would refuse the write for a reason that has nothing
   -- to do with the key database, and that refusal would read exactly like the
-  -- one being tested for. Establish the mount is writable before drawing any
-  -- conclusion from a failed write. awk concatenates the two literals, so the
-  -- printed key differs from the sent one.
+  -- one being tested for. So the mount state is established before any
+  -- conclusion is drawn from a failed write. awk concatenates the two literals,
+  -- so the printed key differs from the sent one.
   cmd("awk '$3==\"efivarfs\"{print \"EFIVARFSOPTS\" \"=\" $4}' /proc/mounts", 3000)
   local opts = string.match(tail, "EFIVARFSOPTS=(%S+)")
   if not opts then
     fail("efivarfs is not mounted - there is no runtime variable interface to " ..
-         "write to, so part one cannot run")
-  end
-  if not string.match(opts, "^rw") then
-    fail("efivarfs is mounted read-only (" .. opts .. ") - a refused write " ..
-         "proves nothing about the key database")
+         "write to, and PK cannot be read either, so neither half can run")
   end
 
+  -- Read PK BEFORE branching on writability. Reading works on a read-only
+  -- mount, and part two compares against this baseline whichever way part one
+  -- goes - so taking it here is what lets the offline half run on a platform
+  -- that has no runtime write interface at all.
   local size0, hash0 = probe_pk()
   if not size0 then
     fail("PK did not read back from efivarfs - either the key database is not " ..
@@ -537,6 +537,82 @@ if MODE == "keydb_immutable" then
   tio.echo("\r\n>>> PK recorded before any tamper: " .. size0 .. " bytes, " ..
            hash0 .. " <<<\r\n")
 
+  -- Does a runtime write interface exist at all? Three outcomes, and collapsing
+  -- any two of them is what this branch exists to prevent:
+  --
+  --   rw            - the interface exists, so the write test below is the real
+  --                   evidence and it runs unchanged.
+  --   ro, no SetVariableRT
+  --                 - U-Boot exposes no runtime SetVariable, so the kernel
+  --                   mounts efivarfs ro and REFUSES to remount it rw. The
+  --                   runtime route is absent, which closes it as surely as a
+  --                   refused write. Reported as absence, never as a refusal:
+  --                   "no interface" and "the store said no" are different
+  --                   claims and only the second is evidence about the key
+  --                   database.
+  --   ro, other     - inconclusive, and it stays a failure. A mount that could
+  --                   have been made writable and was not tells us nothing.
+  --
+  -- The remount is ATTEMPTED rather than assumed either way. That is what keeps
+  -- this honest across a firmware bump: a future U-Boot that gains
+  -- SetVariableRT comes back rw here and silently upgrades to the strict write
+  -- test, instead of coasting on an absence verdict that stopped being true.
+  local runtime_writable = string.match(opts, "^rw") ~= nil
+  local runtime_absent = false
+
+  if not runtime_writable then
+    -- The kernel's reason lands in dmesg, and it is counted HERE rather than
+    -- matched later for two reasons that each produced a wrong verdict on the
+    -- first attempt:
+    --
+    --   `cmd` clears the tail before every write, so a match attempted after
+    --   the next command inspects that command's output instead of this one's.
+    --   The count is therefore folded into this same tail.
+    --
+    --   The search string cannot be spelled literally in what is SENT. The
+    --   getty echoes its own input, so a bare grep for the kernel's wording
+    --   would put that wording on the console and the match would be satisfied
+    --   by the echo rather than by dmesg. Both the pattern and the marker are
+    --   split across two adjacent shell literals, which the shell joins and the
+    --   echo does not - the same guard every other probe in this mode uses.
+    cmd("mount -o remount,rw /sys/firmware/efi/efivars > /tmp/hitl.rm 2>&1; " ..
+        "echo 'REMOUNTRC''='$?; cat /tmp/hitl.rm; " ..
+        "n=$(dmesg | grep -c 'SetVariable''RT'); printf 'NOSETVAR''RT=%s\\n' \"$n\"",
+        5000)
+    if not string.match(tail, "REMOUNTRC=(%d+)") then
+      fail("the remount attempt produced no return code - the shell is not " ..
+           "running what it is sent, so no verdict here can be trusted")
+    end
+    local novar = string.match(tail, "NOSETVARRT=(%d+)")
+    if not novar then
+      fail("the dmesg probe produced no count - the shell is not running what " ..
+           "it is sent, so no verdict here can be trusted")
+    end
+
+    -- Re-read the mount table rather than trusting the return code: what
+    -- matters is the state that resulted, not what the command claimed.
+    cmd("awk '$3==\"efivarfs\"{print \"EFIVARFSNOW\" \"=\" $4}' /proc/mounts", 3000)
+    local opts2 = string.match(tail, "EFIVARFSNOW=(%S+)")
+    if opts2 and string.match(opts2, "^rw") then
+      runtime_writable = true
+      tio.echo("\r\n>>> efivarfs remounted rw - running the strict write test <<<\r\n")
+    elseif novar ~= "0" then
+      runtime_absent = true
+      tio.echo("\r\n>>> runtime route ABSENT: firmware exposes no runtime " ..
+               "SetVariable, so efivarfs cannot be made writable <<<\r\n")
+    else
+      fail("efivarfs is mounted read-only (" .. opts .. ") and would not " ..
+           "remount rw, but the firmware gave no runtime-SetVariable reason - " ..
+           "so this is neither a closed route nor a testable one, and a " ..
+           "refused write here would prove nothing about the key database")
+    end
+  end
+
+  if runtime_absent then
+    tio.echo("\r\n>>> part one: no runtime write interface exists to attack <<<\r\n")
+  end
+
+  if runtime_writable then
   -- efivarfs sets the immutable attribute on the authentication variables, and
   -- that attribute alone would refuse the write at the filesystem layer without
   -- the firmware ever being asked. Try to clear it first so the refusal comes
@@ -592,6 +668,7 @@ if MODE == "keydb_immutable" then
          ", now " .. size1 .. "/" .. hash1)
   end
   tio.echo("\r\n>>> part one: write refused, PK unchanged <<<\r\n")
+  end
 
   ---------------------------------------------------------------- part two ---
 
@@ -605,19 +682,34 @@ if MODE == "keydb_immutable" then
   cmd("version", 1500)
   if not saw("U%-Boot") then fail("no version banner - console not actually live") end
 
-  -- The device and partition come from the board's own environment, the same
-  -- way every other U-Boot step in this file resolves them.
-  cmd("fatls ${devtype} ${devnum}:${bootpart}", 4000)
-  if not saw("file%(s%)") then
-    fail("could not list the boot partition - part two cannot run")
-  end
-  if not saw("ubootefi%.var") then
-    fail("no ubootefi.var on the boot partition, so there is no store to " ..
-         "delete and part two cannot run. It must be the ESP the firmware " ..
-         "reads its variable file from")
+  -- The device comes from the board's own environment, the same way every other
+  -- U-Boot step in this file resolves it. The PARTITION does not: ${bootpart}
+  -- is boot-a, which carries the fitImage and the dtb, while the variable store
+  -- lives on the EFI system partition. Those were the same partition on the
+  -- layout this mode was written against and are not on the current one.
+  --
+  -- Resolved by NAME rather than by index, because the index does not hold
+  -- still - this card went from 8 partitions to 10 inside two days, and the
+  -- position of everything after boot-b moved with it. A hardcoded number would
+  -- pass today by pointing at the right partition and later pass by pointing at
+  -- the wrong one, which is worse than failing.
+  cmd("part number ${devtype} ${devnum} esp espp; echo 'ESPPART''='${espp}", 4000)
+  local esppart = string.match(tail, "ESPPART=(%S+)")
+  if not esppart or esppart == "" then
+    fail("could not resolve a partition named 'esp' on the boot medium - the " ..
+         "variable store cannot be located, so part two cannot run")
   end
 
-  cmd("fatrm ${devtype} ${devnum}:${bootpart} ubootefi.var", 4000)
+  cmd("fatls ${devtype} ${devnum}:${espp}", 4000)
+  if not saw("file%(s%)") then
+    fail("could not list the ESP (partition " .. esppart .. ") - part two cannot run")
+  end
+  if not saw("ubootefi%.var") then
+    fail("no ubootefi.var on the ESP (partition " .. esppart .. "), so there " ..
+         "is no store to delete and part two cannot run")
+  end
+
+  cmd("fatrm ${devtype} ${devnum}:${espp} ubootefi.var", 4000)
   if saw("Unknown command") then
     fail("fatrm is unavailable on this firmware - the offline half cannot run")
   end
@@ -626,9 +718,9 @@ if MODE == "keydb_immutable" then
   -- That line contains the filename, so a presence match against it would be
   -- satisfied by the console's echo rather than by the directory. `cmd` clears
   -- the tail before writing, and the fatls it sends does not name the file.
-  cmd("fatls ${devtype} ${devnum}:${bootpart}", 4000)
+  cmd("fatls ${devtype} ${devnum}:${espp}", 4000)
   if not saw("file%(s%)") then
-    fail("could not re-list the boot partition, so the delete is unconfirmed - " ..
+    fail("could not re-list the ESP, so the delete is unconfirmed - " ..
          "part two did not run")
   end
   if saw("ubootefi%.var") then
@@ -657,9 +749,21 @@ if MODE == "keydb_immutable" then
          " - the file store can override the compiled-in seed")
   end
 
-  pass("runtime write to PK refused with PK unchanged, and the same PK " ..
-       "survived deletion of the variable store on the boot medium - the " ..
-       "compiled-in seed is authoritative")
+  -- The verdict names which runtime outcome actually occurred. A single wording
+  -- covering both would report a refusal that never happened on a platform with
+  -- no interface to refuse it, which is the specific overclaim this mode exists
+  -- to avoid making.
+  local runtime_verdict
+  if runtime_absent then
+    runtime_verdict = "no runtime write interface exists (firmware exposes no " ..
+                      "SetVariableRT, efivarfs cannot be made writable), so the " ..
+                      "runtime route is closed by absence rather than by refusal"
+  else
+    runtime_verdict = "runtime write to PK refused with PK unchanged"
+  end
+
+  pass(runtime_verdict .. ", and the same PK survived deletion of the variable " ..
+       "store on the boot medium - the compiled-in seed is authoritative")
 end
 
 fail("unknown HARNESS_MODE '" .. MODE .. "'")
