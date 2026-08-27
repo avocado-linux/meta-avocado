@@ -114,6 +114,43 @@ def resolve_machine(deploy: Path, explicit: str | None) -> str:
     raise Fatal(f"several machines built ({' '.join(dirs)}); pass --machine")
 
 
+def assert_payload_fresh(payload: Path, deploy: Path, machine: str, stale_ok: bool) -> None:
+    """Refuse a payload older than the build output it should carry.
+
+    An ordinary build stops at do_stone_bundle; the fwup archive and raw image
+    come from do_stone_provision one task later, so after a rebuild they sit
+    there looking complete while carrying yesterday's bootloader and kernel.
+    Symlinks are followed on both sides: imx-boot and the fitImage are links in
+    the deploy tree, and a link's own mtime never changes when its target does.
+    """
+    images = deploy / "images" / machine
+    if stale_ok or not images.is_dir() or not payload.is_file():
+        return
+    since = payload.resolve().stat().st_mtime
+    newer = []
+    for root, _dirs, files in os.walk(images, followlinks=True):
+        for name in files:
+            f = Path(root) / name
+            try:
+                mtime = f.resolve().stat().st_mtime
+            except OSError:
+                continue
+            if mtime > since:
+                newer.append((mtime, f))
+    if not newer:
+        return
+    newest_mtime, newest = max(newer)
+    stamp = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
+    raise Fatal(
+        "payload is older than the build output it should carry\n"
+        f"  payload: {payload}\n           {stamp(since)}\n"
+        f"  newest:  {newest}\n           {stamp(newest_mtime)}\n"
+        f"  {len(newer)} file(s) under {images} are newer than the payload.\n"
+        "  Refresh it with the provisioning step (bitbake avocado-stone -c stone_provision)\n"
+        "  and flash again. To write this payload anyway, pass --stale-ok."
+    )
+
+
 def resolve_fwup_archive(deploy: Path, machine: str) -> Path:
     """The fwup archive is produced by stone provision, not by stone bundle.
 
@@ -959,6 +996,8 @@ examples:
                     help="fwup task: complete (whole medium, including var) or "
                          "upgrade (inactive A/B slots only, var untouched)")
     ap.add_argument("-n", "--dry-run", action="store_true", help="print what would run; touch nothing")
+    ap.add_argument("--stale-ok", action="store_true",
+                    help="write even when the payload is older than the build output")
     ap.add_argument("-y", "--assume-yes", action="store_true",
                     help="skip the confirmation. For a board farm, not interactive use")
     # fuse-srk only
@@ -1013,6 +1052,7 @@ def main() -> int:
             payload = resolve_raw_image(deploy, machine)
         else:
             raise Fatal(f"backend {backend} cannot write a block device")
+        assert_payload_fresh(payload, deploy, machine, args.stale_ok)
 
         confirm_destructive(args.device, str(payload), args.dry_run, args.assume_yes)
 
@@ -1030,6 +1070,7 @@ def main() -> int:
                 "point of the verb that the card does not move"
             )
         payload = resolve_fwup_archive(deploy, machine)
+        assert_payload_fresh(payload, deploy, machine, args.stale_ok)
 
         ub = UBoot(args.port)
         target = None
