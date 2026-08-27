@@ -6,9 +6,11 @@ Private keys are never installed to the target."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-DEPENDS = "openssl-native"
+# sbsiglist builds the EFI signature lists the seed carries; python3-native packs
+# them into U-Boot's variable-store container.
+DEPENDS = "openssl-native sbsigntool-native python3-native"
 
-SRC_URI = "file://gen-sbkeys.sh"
+SRC_URI = "file://gen-sbkeys.sh file://gen-efi-seed.sh"
 
 # file://-only recipe: sources land in UNPACKDIR on wrynose, and the default
 # S (${UNPACKDIR}/${BP}) never exists, which do_unpack warns about on every
@@ -28,6 +30,14 @@ do_compile() {
     install -d "${AVOCADO_SB_KEYS_DIR}"
     chmod +x "${UNPACKDIR}/gen-sbkeys.sh"
     SBKEYS_DIR="${AVOCADO_SB_KEYS_DIR}" "${UNPACKDIR}/gen-sbkeys.sh"
+}
+
+# Runs after gen-sbkeys.sh so PK/KEK/db certificates already exist. Produces the
+# UEFI variable seed that CONFIG_EFI_VARIABLES_PRESEED compiles into U-Boot, so
+# the board leaves setup mode with no first-boot enrolment window.
+do_compile:append() {
+    chmod +x "${UNPACKDIR}/gen-efi-seed.sh"
+    SBKEYS_DIR="${AVOCADO_SB_KEYS_DIR}" "${UNPACKDIR}/gen-efi-seed.sh"
 }
 
 do_install() {
@@ -61,6 +71,11 @@ do_deploy() {
                 "${DEPLOYDIR}/sb-keys/${cert}.der"
         fi
     done
+
+    # The UEFI variable seed. Deployed, never installed: it is consumed by the
+    # U-Boot build, not shipped to the rootfs.
+    install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var" \
+        "${DEPLOYDIR}/sb-keys/ubootefi.var"
 }
 
 addtask deploy after do_install before do_build
