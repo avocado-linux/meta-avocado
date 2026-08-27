@@ -63,6 +63,7 @@ RDEPENDS:${PN} = " \
   btrfs-tools \
   ${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'encrypted-var', 'cryptsetup-var-udev cryptsetup cryptsetup-var-posture', '', d)} \
   ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
+  ${@bb.utils.contains('DISTRO_FEATURES','boot-integrity-poc','boot-integrity','',d)} \
   ${VIRTUAL-RUNTIME_base-utils} \
   ${VIRTUAL-RUNTIME_init_manager} \
   ${VIRTUAL-RUNTIME_dev_manager} \

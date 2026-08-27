@@ -1,10 +1,15 @@
 [Unit]
 Description=Publish boot-integrity state (enforcement and root of trust)
-# efivarfs is mounted by systemd's own generator when the kernel booted through
-# the EFI stub. Ordering only, never a requirement: on a target that did not,
-# the mount unit does not exist and the report must still run - "no efivarfs" is
-# the fact this record exists to carry, so a unit that refused to start there
-# would suppress exactly the case worth reporting.
+# Wants, not Requires, and both are needed. After= alone orders against a unit
+# nothing pulls in, so on this image - whose systemd is built without EFI
+# support and so mounts efivarfs itself - the report ran before anything had
+# mounted it and read an empty directory.
+#
+# Requires= would be wrong in the other direction: on a target with no efivarfs
+# the mount cannot start, and this service must still run and report that. "No
+# efivarfs" is a fact the record exists to carry, so a dependency that suppressed
+# the run would hide exactly the case worth reporting.
+Wants=sys-firmware-efi-efivars.mount
 After=sys-firmware-efi-efivars.mount local-fs.target
 
 [Service]
