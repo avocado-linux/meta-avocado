@@ -76,6 +76,28 @@ local_conf_header:
     # name the modules a board actually needs when that applies.
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " kernel-modules"
 
+    # Acting on that last sentence for the one board where the conflict is not
+    # hypothetical. Dropping the whole set is the blunt half of "name the
+    # modules a board actually needs", and it is the right trade here: an image
+    # whose console dies 84s in is not debuggable at all, which is the property
+    # the modules were for. Measured: 721 modules before, 7 after.
+    #
+    # Safe for the boot-integrity path specifically - CONFIG_EFIVAR_FS=y and
+    # CONFIG_EFI_STUB=y on this kernel, so nothing that path reads is modular.
+    #
+    # Do NOT reach for BAD_RECOMMENDATIONS to drop hci-uart alone. The obvious
+    # spelling fails silently:
+    #
+    #     BAD_RECOMMENDATIONS:append:avocado-imx93-frdm = " kernel-module-hci-uart"
+    #
+    # builds clean and changes nothing, because the package is really
+    # kernel-module-hci-uart-${KERNEL_VERSION} (observed:
+    # kernel-module-hci-uart-6.18.20-2.0.0-gb096ce610e95) and the bare name is
+    # only an RPROVIDES, which BAD_RECOMMENDATIONS does not match. Whatever you
+    # try, verify it by looking for the .ko in the built rootfs rather than by
+    # reading the config back.
+    ROOTFS_IMAGE_EXTRA_INSTALL:remove:avocado-imx93-frdm = "kernel-modules"
+
     # Minimal HW-bringup toolset: network, bus/peripheral probing, storage,
     # device-tree, and tracing. All small, fast-building, board-agnostic.
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " \
