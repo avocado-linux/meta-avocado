@@ -6,7 +6,7 @@ inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = "\
-  ${@bb.utils.contains('DISTRO_FEATURES', 'encrypted-var', 'cryptsetup cryptsetup-var', '', d)} \
+  ${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'encrypted-var', 'cryptsetup cryptsetup-var', '', d)} \
   systemd \
   systemd-extra-utils \
   os-release-initrd \

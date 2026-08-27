@@ -1,13 +1,17 @@
 # Fails a build, loudly, when it requests a security feature the selected
 # machine cannot deliver.
 #
-# The request side (DISTRO_FEATURES: encrypted-var, ahab, ftpm, tpm2) has no
-# machine restriction today - kas/feature/encrypted-var.yml composes with any
-# machine.yml. The delivery side is a set of per-machine facts (a raw
-# AVOCADO_VAR_PART_DEV path, a MACHINE_FEATURES entry, a kernel config
-# fragment, a COMPATIBLE_MACHINE opt-in list) that must happen to agree with
-# what was requested, and nothing checked that they did. This class is that
-# check.
+# The request side (DISTRO_FEATURES: ahab, ftpm, tpm2, verified-boot) has no
+# machine restriction - a kas feature overlay composes with any machine.yml.
+# The delivery side is a set of per-machine facts (a MACHINE_FEATURES entry, a
+# kernel config fragment, a COMPATIBLE_MACHINE opt-in list) that must happen to
+# agree with what was requested, and nothing checked that they did. This class
+# is that check.
+#
+# AVOCADO_SECURITY_CAPABILITIES is also what recipes gate on to BUILD a
+# capability's tooling - `bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES',
+# 'encrypted-var', ...)` - so declaring is what puts it in the feed, and the
+# user's avocado.yaml decides whether a runtime uses it.
 #
 # AVOCADO_SECURITY_CAPABILITIES is the one place a machine states which of
 # these features it can deliver. It is deliberately its own variable rather
@@ -41,9 +45,24 @@
 # consumer gated on it independently, so asking for it on a machine with no FIT
 # signing key wired produced an ordinary unsigned build and no diagnostic - the
 # failure mode this class exists to remove.
-AVOCADO_SECURITY_FEATURES ?= "encrypted-var ahab ftpm tpm2 verified-boot"
+#
+# encrypted-var is deliberately NOT in this list any more. It is no longer a
+# build-time request: a machine that declares the capability gets the tooling
+# built (dm-crypt in the kernel, cryptsetup-var in the initramfs, the udev and
+# posture pieces in the rootfs), and whether a device encrypts is decided per
+# runtime by avocado.yaml (var.encrypt). A leftover DISTRO_FEATURES token from an
+# old kas overlay is harmless and warned about below. docs/security-capabilities.md
+# has the model.
+AVOCADO_SECURITY_FEATURES ?= "ahab ftpm tpm2 verified-boot"
 
 def avocado_security_capabilities_check(d):
+    if "encrypted-var" in (d.getVar("DISTRO_FEATURES") or "").split():
+        bb.warn(
+            "DISTRO_FEATURES contains encrypted-var, which no longer selects "
+            "anything: the tooling ships wherever AVOCADO_SECURITY_CAPABILITIES "
+            "declares encrypted-var, and a runtime turns it on with avocado.yaml "
+            "var.encrypt. Drop the token (kas/feature/encrypted-var.yml is gone)."
+        )
     requested = [
         feature
         for feature in (d.getVar("AVOCADO_SECURITY_FEATURES") or "").split()

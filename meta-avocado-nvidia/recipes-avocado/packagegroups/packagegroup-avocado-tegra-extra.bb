@@ -42,17 +42,14 @@ RDEPENDS:${PN} = " \
   swupdate \
 "
 
-# Encrypted-/var + fTPM userspace, published so avocado-cli can install it from
-# the single Jetson feed when a runtime opts in (avocado.yaml var.encrypt).
-# None of it is in the Yocto rootfs/initramfs images by default.
+# Encrypted-/var + fTPM userspace, published to the feed for the machines that
+# declare the capability (avocado-jetson.inc), so a runtime can opt in with
+# avocado.yaml var.encrypt. Same gate as the shared packagegroups: what
+# AVOCADO_SECURITY_CAPABILITIES declares is built, and nothing here turns it on
+# (docs/security-capabilities.md).
 SECURITY_PACKAGES = " \
-  cryptsetup \
-  cryptsetup-var \
-  cryptsetup-var-udev \
-  libdevmapper \
-  optee-ftpm-init \
-  optee-client \
-  tpm2-tools \
+  ${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'encrypted-var', 'cryptsetup cryptsetup-var cryptsetup-var-udev libdevmapper', '', d)} \
+  ${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'ftpm', 'optee-ftpm-init optee-client tpm2-tools', '', d)} \
 "
 
 GSTREAMER_PACKAGES = " \

@@ -99,6 +99,10 @@ FILES:${PN}-posture = " \
     ${systemd_system_unitdir}/avocado-posture-publish.service \
 "
 RDEPENDS:${PN}-posture = "libubootenv util-linux-findmnt"
+# SYSTEMD_PACKAGES defaults to ${PN} alone; without listing the subpackage the
+# SYSTEMD_SERVICE/AUTO_ENABLE lines below are ignored and no preset is generated,
+# so the unit shipped "disabled; preset: disabled" and never published.
+SYSTEMD_PACKAGES += "${PN}-posture"
 SYSTEMD_SERVICE:${PN}-posture = "avocado-posture-publish.service"
 SYSTEMD_AUTO_ENABLE:${PN}-posture = "enable"
 

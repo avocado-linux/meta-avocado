@@ -264,19 +264,50 @@ btrfs_total_bytes() {
     btrfs inspect-internal dump-super "$VAR_DEV" 2>/dev/null | awk '/^total_bytes/{print $2}'
 }
 
+# Shrink to what is actually allocated (plus room to relocate), not just by the
+# 32 MiB the header needs: reencrypt converts the filesystem's full extent, and a
+# /var that x-systemd.growfs has grown to fill a 30 GB partition would otherwise
+# take many minutes to convert 200 MB of data. growfs grows it back at the first
+# mount of the mapping.
+#
+# The yardstick is "Device allocated" (chunk space), not "Used": a shrink must
+# relocate every chunk that lies past the new end into space inside it, and a
+# filesystem this size allocates 1 GiB data chunks and 2 x 256 MiB DUP metadata
+# chunks - asking for used+slack got "No space left on device" on the board.
+# Allocated + 1.5 GiB leaves one full chunk set to relocate into. If btrfs still
+# refuses, fall back to the minimal 32 MiB shrink rather than fail the unlock.
 shrink_btrfs_for_header() {
     shrink_mib="$1"
     mnt=/run/cryptsetup-var-shrink
-    echo "cryptsetup-var: btrfs on $VAR_DEV fills the partition - shrinking it by ${shrink_mib} MiB to make room for the LUKS2 header"
     mkdir -p "$mnt"
     if ! mount -t btrfs "$VAR_DEV" "$mnt"; then
         echo "cryptsetup-var: cannot mount $VAR_DEV to shrink it - cannot encrypt in place" >&2
         exit 1
     fi
-    if ! btrfs filesystem resize "-${shrink_mib}M" "$mnt"; then
-        umount "$mnt"
-        echo "cryptsetup-var: btrfs refused to shrink by ${shrink_mib} MiB (tail in use or too full) - cannot encrypt in place" >&2
-        exit 1
+    alloc_bytes=$(btrfs filesystem usage -b "$mnt" 2>/dev/null | awk '/^ *Device allocated:/{print $3; exit}')
+    total_bytes=$(btrfs_total_bytes)
+    minimal="-${shrink_mib}M"
+    resize_arg="$minimal"
+    if [ -n "$alloc_bytes" ] && [ "$alloc_bytes" -gt 0 ] 2>/dev/null; then
+        target_mib=$(( (alloc_bytes + 1610612736 + 1048575) / 1048576 ))
+        minimal_mib=$(( total_bytes / 1048576 - shrink_mib ))
+        if [ "$target_mib" -lt "$minimal_mib" ]; then
+            resize_arg="${target_mib}M"
+        fi
+    fi
+    echo "cryptsetup-var: btrfs on $VAR_DEV fills the partition - resizing it (${resize_arg}) to make room for the LUKS2 header and keep the conversion to the data in use"
+    if ! btrfs filesystem resize "$resize_arg" "$mnt"; then
+        if [ "$resize_arg" = "$minimal" ]; then
+            umount "$mnt"
+            echo "cryptsetup-var: btrfs refused to resize to ${resize_arg} (tail in use or too full) - cannot encrypt in place" >&2
+            exit 1
+        fi
+        echo "cryptsetup-var: btrfs refused ${resize_arg}; shrinking by the 32 MiB header only (the whole filesystem will be converted)" >&2
+        if ! btrfs filesystem resize "$minimal" "$mnt"; then
+            umount "$mnt"
+            echo "cryptsetup-var: btrfs refused to shrink by ${shrink_mib} MiB (tail in use or too full) - cannot encrypt in place" >&2
+            exit 1
+        fi
     fi
     umount "$mnt"
 }

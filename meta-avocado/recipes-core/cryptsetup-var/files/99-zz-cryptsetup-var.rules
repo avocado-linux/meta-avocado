@@ -12,4 +12,10 @@
 # This file sorts after 99-systemd.rules so our decision is final: match the var
 # dm device by its kernel dm name, run blkid so it no longer looks empty,
 # (re)create the node symlink, and force the device ready so the mount proceeds.
-SUBSYSTEM=="block", ACTION=="add|change", KERNEL=="dm-[0-9]*", ATTR{dm/name}=="var", IMPORT{builtin}="blkid", SYMLINK+="mapper/var", ENV{SYSTEMD_READY}="1"
+#
+# It also claims /dev/disk/by-avocado/var, the name fstab mounts /var from. The
+# plaintext partition claims the same link (61-avocado-var.rules, from
+# base-files) at default priority; link_priority=100 makes this mapping win
+# whenever the initrd opened one, so the same fstab mounts encrypted or plain
+# without the build deciding which.
+SUBSYSTEM=="block", ACTION=="add|change", KERNEL=="dm-[0-9]*", ATTR{dm/name}=="var", IMPORT{builtin}="blkid", SYMLINK+="mapper/var disk/by-avocado/var", OPTIONS+="link_priority=100", ENV{SYSTEMD_READY}="1"

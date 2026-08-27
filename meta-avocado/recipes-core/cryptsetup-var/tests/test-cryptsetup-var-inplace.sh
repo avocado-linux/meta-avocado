@@ -49,7 +49,15 @@ cat > "$work/bin/btrfs" <<'S'
 echo "btrfs $*" >> "$LOG"
 case "$1" in
   inspect-internal) printf 'total_bytes\t\t%s\n' "$(cat "$STATE/fsbytes")" ;;
-  filesystem) [ "$2" = resize ] && { n="${3#-}"; n="${n%M}"; echo $(( $(cat "$STATE/fsbytes") - n * 1048576 )) > "$STATE/fsbytes"; } ;;
+  filesystem)
+    case "$2" in
+      usage) [ -f "$STATE/alloc" ] && printf '    Device size:\t\t%s\n    Device allocated:\t\t%s\n    Used:\t\t\t%s\n' "$(cat "$STATE/fsbytes")" "$(cat "$STATE/alloc")" "$(cat "$STATE/alloc")" ;;
+      resize) n="${3%M}"; case "$3" in
+                -*) echo $(( $(cat "$STATE/fsbytes") - ${n#-} * 1048576 )) > "$STATE/fsbytes" ;;
+                *)  if [ -f "$STATE/refuse_shrink" ]; then echo "ERROR: unable to resize: No space left on device" >&2; exit 1; fi
+                    echo $(( n * 1048576 )) > "$STATE/fsbytes" ;;
+              esac ;;
+    esac ;;
 esac
 S
 printf '#!/bin/sh\necho "mount $*" >> "$LOG"\n' > "$work/bin/mount"
@@ -108,5 +116,18 @@ grep -q "MiB to convert" "$s/out" && ok "operator is told how much is being conv
 
 # --- Case 5: flashed small btrfs (case 1 shape) must NOT be shrunk ---
 grep -q "^btrfs filesystem resize" "$work/c1/log" && bad "small flashed btrfs was shrunk needlessly" || ok "a filesystem with free tail is left alone"
+
+# --- Case 6: grown 2 GiB btrfs with 300 MiB allocated -> shrink to allocated +
+# 1.5 GiB of relocation room (1836M), so the reencrypt converts that, not the
+# whole partition ---
+s="$work/c6"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 2147483648 > "$s/fsbytes"; echo 314572800 > "$s/alloc"
+run "$s" || bad "case 6 script exit"
+grep -q "^btrfs filesystem resize 1836M /run/cryptsetup-var-shrink$" "$s/log" && ok "grown btrfs with little data is shrunk to allocated + relocation room (1836M)" || bad "unexpected resize: $(grep 'btrfs filesystem resize' "$s/log" || echo none)"
+grep -q "^cryptsetup reencrypt --encrypt .*--device-size 1868M " "$s/log" && ok "reencrypt is confined to the shrunk fs + header (1868M), not the partition" || bad "unexpected device-size: $(grep 'reencrypt --encrypt' "$s/log")"
+
+# --- Case 7: btrfs refuses the aggressive shrink -> fall back to the 32 MiB one ---
+s="$work/c7"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 2147483648 > "$s/fsbytes"; echo 314572800 > "$s/alloc"; touch "$s/refuse_shrink"
+run "$s" || bad "case 7 script exit"
+{ grep -q "^btrfs filesystem resize 1836M " "$s/log" && grep -q "^btrfs filesystem resize -32M " "$s/log" && grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2048M " "$s/log"; } && ok "a refused aggressive shrink falls back to the 32 MiB shrink and converts the whole fs" || bad "fallback not taken: $(grep -n 'resize\|reencrypt --encrypt' "$s/log")"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]
