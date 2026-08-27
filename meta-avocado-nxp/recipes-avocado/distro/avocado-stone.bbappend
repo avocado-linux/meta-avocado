@@ -167,19 +167,24 @@ do_deploy:append() {
 # the PoC feature being on.
 AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}"
 
+# Wrapped in an `if` rather than guarded by an early `return`, for the reason
+# spelled out in u-boot-imx_%.bbappend's do_compile:prepend: bitbake concatenates
+# every :append into ONE shell function with the recipe's own task body, so a
+# `return` here ends do_deploy rather than this block, silently skipping whatever
+# append was concatenated after it. Less damaging in an :append than in a
+# :prepend, which is why this one never surfaced - but it is the same defect and
+# it depends on parse order to stay harmless.
 do_deploy:append:avocado-imx93-frdm() {
-  if [ "${AVOCADO_BOOT_INTEGRITY_POC}" != "1" ]; then
-    return
+  if [ "${AVOCADO_BOOT_INTEGRITY_POC}" = "1" ]; then
+    bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is PoC scaffolding: the staged kernel is unauthenticated and writable by anyone with access to the boot medium."
+
+    manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
+    jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
+      '.storage_devices.rootdisk.images.boot.build_args.files += [
+         {"in": "Image", "out": "EFI/BOOT/BOOTAA64.EFI"},
+         {"in": $dtb, "out": $dtb}
+       ]' \
+      "$manifest" > "$manifest.efi-poc"
+    mv "$manifest.efi-poc" "$manifest"
   fi
-
-  bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is PoC scaffolding: the staged kernel is unauthenticated and writable by anyone with access to the boot medium."
-
-  manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
-  jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
-    '.storage_devices.rootdisk.images.boot.build_args.files += [
-       {"in": "Image", "out": "EFI/BOOT/BOOTAA64.EFI"},
-       {"in": $dtb, "out": $dtb}
-     ]' \
-    "$manifest" > "$manifest.efi-poc"
-  mv "$manifest.efi-poc" "$manifest"
 }

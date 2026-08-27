@@ -290,30 +290,40 @@ python () {
 # today would leave the next addition shadowed-but-duplicated. It also makes the
 # step idempotent across a do_compile rerun on a UNPACKDIR that was not
 # re-unpacked, since a previous run's lines are filtered before the re-append.
+#
+# The body is wrapped in an `if` rather than guarded by an early `return`.
+# bitbake concatenates a :prepend and the recipe's own do_compile into ONE
+# shell function, so a `return` here does not end the prepend - it ends
+# do_compile, before u-boot.inc's uboot_compile/uboot_compile_config ever run.
+# That shipped: every avocado-imx93-frdm build WITHOUT boot-integrity-poc
+# compiled no u-boot at all, and it stayed invisible because those builds always
+# restored u-boot-imx from sstate. It surfaced only on a forced rebuild, as
+# do_install failing on a missing u-boot-sd.bin - a message that points at
+# u-boot.inc and names nothing here.
 do_compile:prepend:avocado-imx93-frdm() {
-    if [ "${AVOCADO_EFI_BOOT_ENV}" != "1" ]; then
-        return
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        override="${WORKDIR}/avocado-efi-boot-flat.txt"
+        # `|| true` so an empty extraction reaches the bbfatal below. bitbake
+        # runs shell tasks under `set -e`, and without it a grep that matches
+        # nothing aborts the task with grep's bare exit 1 - naming no file and
+        # no cause.
+        sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
+            ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
+            | grep -E '^[a-z_]+=' > "$override" || true
+
+        # awk, not `cut | paste`: bitbake runs tasks under a restricted
+        # HOSTTOOLS PATH that carries awk and sed but NOT paste, so the pipeline
+        # died with `paste: command not found` (exit 127) at do_compile rather
+        # than at parse.
+        keys=$(awk -F= '{printf "%s%s", sep, $1; sep="|"} END {print ""}' "$override")
+        if [ -z "$keys" ]; then
+            bbfatal "boot-integrity-poc: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the PoC enabled."
+        fi
+
+        grep -vE "^($keys)=" ${UNPACKDIR}/${MACHINE}.txt > "$override.merged"
+        cat "$override" >> "$override.merged"
+        mv "$override.merged" ${UNPACKDIR}/${MACHINE}.txt
     fi
-
-    override="${WORKDIR}/avocado-efi-boot-flat.txt"
-    # `|| true` so an empty extraction reaches the bbfatal below. bitbake runs
-    # shell tasks under `set -e`, and without it a grep that matches nothing
-    # aborts the task with grep's bare exit 1 - naming no file and no cause.
-    sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
-        ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
-        | grep -E '^[a-z_]+=' > "$override" || true
-
-    # awk, not `cut | paste`: bitbake runs tasks under a restricted HOSTTOOLS
-    # PATH that carries awk and sed but NOT paste, so the pipeline died with
-    # `paste: command not found` (exit 127) at do_compile rather than at parse.
-    keys=$(awk -F= '{printf "%s%s", sep, $1; sep="|"} END {print ""}' "$override")
-    if [ -z "$keys" ]; then
-        bbfatal "boot-integrity-poc: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the PoC enabled."
-    fi
-
-    grep -vE "^($keys)=" ${UNPACKDIR}/${MACHINE}.txt > "$override.merged"
-    cat "$override" >> "$override.merged"
-    mv "$override.merged" ${UNPACKDIR}/${MACHINE}.txt
 }
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
