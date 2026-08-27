@@ -1,0 +1,19 @@
+# qemuarm64 with SPDX 3.0 SBOM and cve-check both inherited from the start.
+#
+# The arm64 counterpart of qemux86-64-sbom-cve.yml, and it exists for the same
+# reason: bakar derives its build directory from the first YAML's stem, so
+# composing machine/qemuarm64.yml:feature/sbom.yml on the command line would
+# land in build-qemuarm64 alongside unrelated runs.
+#
+# cve-check must be inherited while the packages build - added to an existing
+# build afterwards, avocado-cve-report has no *_cve.json to read and produces an
+# empty report rather than failing.
+#
+# See qemux86-64-sbom-cve.yml for why SPDX_INCLUDE_SOURCES is deliberately unset.
+
+header:
+  version: 16
+  includes:
+    - machine/qemuarm64.yml
+    - feature/sbom.yml
+    - feature/cve-check.yml
