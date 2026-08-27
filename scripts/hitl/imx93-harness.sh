@@ -30,13 +30,22 @@ die() {
 command -v tio >/dev/null 2>&1 || die "tio not on PATH"
 command -v kasa >/dev/null 2>&1 || die "kasa not on PATH"
 
+# Seconds to hold the outlet OFF. Four is enough to reboot the board and is the
+# default because every assertion mode pays it on every run.
+#
+# It is NOT enough to clear a USB controller that came up refusing to
+# initialise ("Failed to initialize board for USB", "Port not available"). That
+# state survives a short cycle and needs the board unpowered for a MINUTE or
+# more; export POWER_OFF_S=90 for a run that has to recover from it.
+POWER_OFF_S="${POWER_OFF_S:-4}"
+
 # Power-cycle in the background so tio is ALREADY attached when the autoboot
 # window opens. Attaching after the cycle races a 2-second window and loses.
 schedule_power_cycle() {
   (
     sleep 2
     kasa --host "$KASA_HOST" --type strip off --child-index "$KASA_INDEX" >/dev/null 2>&1 || true
-    sleep 4
+    sleep "$POWER_OFF_S"
     kasa --host "$KASA_HOST" --type strip on --child-index "$KASA_INDEX" >/dev/null 2>&1 || true
   ) &
 }
@@ -97,8 +106,12 @@ run_mode() {
 # Stop an export on the BOARD. Dropping the host end does not: U-Boot keeps
 # exporting, and a power cycle taken with the gadget still live is what leaves
 # the USB controller unable to initialise on the next run ("Failed to initialize
-# board for USB"). Recovering from that has needed physical cable intervention,
-# so the cheap Ctrl-C is worth taking on every exit path.
+# board for USB"). So the cheap Ctrl-C is worth taking on every exit path.
+#
+# Recovery, when it does happen, is a LONG power-off - a minute or more with the
+# outlet off, which POWER_OFF_S above exists to give it. It is not a cable
+# fault: this comment used to claim it needed physical cable intervention, and
+# that was wrong. The wedge cleared with the cable untouched.
 #
 # Note the limit honestly: this is a trap, so it runs on a normal exit, on
 # Ctrl-C and on SIGTERM - but NOT on SIGKILL. `pkill -9` on this harness still
