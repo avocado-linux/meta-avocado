@@ -14,7 +14,8 @@ SRC_URI += "${@bb.utils.contains('DISTRO_FEATURES', 'secureboot', ' file://dm-ve
 # regenerated per build. Gated on the opt-in 'module-signing' feature rather
 # than on 'security', which is on by default for every machine.
 SRC_URI += "${@bb.utils.contains('DISTRO_FEATURES', 'module-signing', ' file://modsign.cfg', '', d)}"
-# dm-crypt + LUKS ciphers for the encrypted /var (cryptsetup-var). Gated on the
-# opt-in 'encrypted-var' feature; the shared dm-crypt.cfg is arch-agnostic so
-# x86, arm and the NXP boards all pick it up when encryption is enabled.
-SRC_URI += "${@bb.utils.contains('DISTRO_FEATURES', 'encrypted-var', ' file://dm-crypt.cfg', '', d)}"
+# dm-crypt + LUKS ciphers for the encrypted /var (cryptsetup-var). Built
+# whenever the machine declares the encrypted-var capability: whether a device
+# actually encrypts is decided per runtime by avocado.yaml (var.encrypt), so the
+# kernel has to be able to either way. See docs/security-capabilities.md.
+SRC_URI += "${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'encrypted-var', ' file://dm-crypt.cfg', '', d)}"

@@ -70,6 +70,7 @@ kas/machine/<machine>.yml          KAS build entry point
 | 11 | Kernel config fragments | `meta-avocado-<target>/recipes-kernel/linux/files/*.cfg` | If custom kernel |
 | 12 | Kernel bbappend with avocado boilerplate | `meta-avocado-<target>/recipes-kernel/linux/<kernel>_%.bbappend` | Yes — see [Section 10](#10-kernel-configuration) |
 | 13 | BSP extension | `bsp/<machine-short-name>/avocado.yaml` | Recommended |
+| 14 | Security capability declaration | `AVOCADO_SECURITY_CAPABILITIES` in the machine conf | Yes — `""` if the machine delivers none; see [Security capabilities](#security-capabilities) |
 
 ---
 
@@ -134,6 +135,40 @@ MACHINE_FEATURES += "<features>"
 | `EFI_PROVIDER` | Set to `"systemd-boot"` for UEFI targets, `""` for U-Boot targets |
 | `AVOCADO_BOOTLOADER` | Boot method: `"uboot"` (U-Boot + TF-A, fwup disk assembly) or `"uefi"` (systemd-boot + GPT). Defaults to `uboot` in `conf/machine/include/avocado.inc`; x86 targets set `uefi`. Boot-artifact deps in the stone / img-bootfiles / SDK bbappends gate on it with `bb.utils.contains('AVOCADO_BOOTLOADER', ...)` rather than the machine name. |
 | `KERNEL_IMAGETYPE` | `"bzImage"` for x86, `"Image"` for ARM64 |
+| `AVOCADO_SECURITY_CAPABILITIES` | What this machine can deliver on the security side (`encrypted-var`, `verified-boot`, `ahab`, `ftpm`, `tpm2`). Declaring builds the tooling into the feed; the user's `avocado.yaml` decides per runtime whether to use it. Set it to `""` rather than leaving it unset once the machine has been assessed. See [Security capabilities](#security-capabilities). |
+| `AVOCADO_VAR_PART_DEV` | The **plaintext** var partition — `/dev/disk/by-partlabel/var` (GPT layouts), `/dev/disk/by-partuuid/<uuid>` or `PARTUUID=<uuid>`, or a bare `/dev/<node>`; any other `/dev/disk/by-*` form fails the build. `/var` is mounted through `/dev/disk/by-avocado/var`, which follows an opened LUKS mapping automatically, so this never changes with encryption. `"none"` only when init mounts `/var` itself (Jetson). |
+
+### Security capabilities
+
+Every security feature is split in two: the machine **declares** what it can
+deliver, and the user's `avocado.yaml` **chooses** whether a runtime uses it.
+Yocto builds the declared capabilities into the feed unconditionally — kernel
+options, initramfs tooling, rootfs helpers — and never turns them on by itself.
+`docs/security-capabilities.md` is the full model; what a new machine needs:
+
+1. **Declare.** `AVOCADO_SECURITY_CAPABILITIES = "encrypted-var"` (or `""`).
+   `avocado-security-capabilities.bbclass` refuses a build that requests a
+   build-time mode (`verified-boot`, `ahab`, `ftpm`, `tpm2`) the machine has not
+   declared, and ships the declaration to the device as
+   `/etc/avocado-security-capabilities`.
+2. **Gate delivery on the declaration**, not on `DISTRO_FEATURES`:
+   ```bitbake
+   SRC_URI += "${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'encrypted-var', ' file://dm-crypt.cfg', '', d)}"
+   ```
+   The shared packagegroups already pull `cryptsetup-var` (initramfs) and
+   `cryptsetup-var-udev` / `-posture` (rootfs) this way; a vendor layer adds its
+   kernel fragment and a `cryptsetup-var.bbappend` with the machine's
+   `var-key.sh` backend (see `meta-avocado-nxp/recipes-core/cryptsetup-var/`).
+3. **Label the var partition `var`** in the stone manifest (GPT). Both
+   `cryptsetup-var.service` and the `by-avocado/var` rule key on it; an MBR
+   layout builds the tooling but cannot yet encrypt.
+4. **Set `AVOCADO_VAR_PART_DEV`** to the plaintext partition (above).
+5. **Prove both halves on hardware**: a runtime without `var.encrypt` boots a
+   plaintext `/var`; one with it encrypts in place on first boot and reopens on
+   the next.
+
+`kas/feature/complete.yml` adds no security tokens — a declared capability is
+built with or without it.
 
 ---
 
@@ -659,7 +694,7 @@ sdk:
 To add a new machine called `acme-widget`:
 
 1. **Create the meta-layer**: `meta-avocado-acme/conf/layer.conf`
-2. **Create the machine config**: `meta-avocado-acme/conf/machine/avocado-acme-widget.conf` (set `STONE_PROVISIONING ?= "..."`, `MACHINEOVERRIDES`, then `require conf/machine/include/avocado.inc`)
+2. **Create the machine config**: `meta-avocado-acme/conf/machine/avocado-acme-widget.conf` (set `STONE_PROVISIONING ?= "..."`, `MACHINEOVERRIDES`, then `require conf/machine/include/avocado.inc`; declare `AVOCADO_SECURITY_CAPABILITIES` and set `AVOCADO_VAR_PART_DEV` to the plaintext var partition — see [Security capabilities](#security-capabilities))
 3. **Create the KAS config**: `kas/machine/acme-widget.yml`
 4. **Create the stone manifest**: `meta-avocado-acme/stone/stone-acme-widget.json`
 5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-*.sh` and (if shared) `build-disk-image.sh`
@@ -672,6 +707,7 @@ To add a new machine called `acme-widget`:
 12. **Create BSP extension**: `bsp/acme-widget/avocado.yaml`
 13. **Build**: `kas build distro/kas/machine/acme-widget.yml`
 14. **Test**: Provision a device and verify boot, then test BSP extension installation with `avocado ext install bsp-acme-widget`.
+15. **Test the security opt-in** (if `encrypted-var` is declared): build one runtime with `var.encrypt: true` and one without; the first must encrypt `/var` on first boot, the second must stay plaintext.
 
 ---
 

@@ -2,6 +2,15 @@
 Description=LUKS2 /var unlock and first-boot format
 DefaultDependencies=no
 Before=initrd-root-fs.target
+# fstab mounts /var from /dev/disk/by-avocado/var, which resolves to the
+# plaintext partition until the mapping exists - so without this ordering the
+# initrd's var.mount grabs the partition first and the in-place reencrypt fails
+# with "already mapped or mounted". (The old /dev/mapper/var fstab entry got this
+# ordering for free: the device did not exist until this unit created it.)
+Before=var.mount
+# The marker asked for encryption. A failure here must not fall through to the
+# plaintext mount that fstab would otherwise happily perform.
+OnFailure=emergency.target
 # Wait for the var partition's by-partlabel symlink to actually exist before
 # running. A bare ConditionPathExists is evaluated once, the instant the service
 # is activated - if udev has not yet created /dev/disk/by-partlabel/var the
@@ -13,6 +22,13 @@ After=dev-disk-by\x2dpartlabel-var.device
 After=systemd-udevd.service
 Wants=systemd-udevd.service
 ConditionPathExists=/dev/disk/by-partlabel/var
+# The per-runtime opt-in. avocado-cli writes this marker into a runtime's
+# initramfs when avocado.yaml sets var.encrypt; the feed's own initramfs and a
+# runtime that did not opt in have no marker and mount the plaintext /var.
+# The tooling is in every declaring machine's feed regardless, so the switch
+# is the user's, not the build's. (avocado-tegra-init masks this unit and
+# checks the same marker itself.)
+ConditionPathExists=/etc/avocado/var-encrypt
 
 [Service]
 Type=oneshot

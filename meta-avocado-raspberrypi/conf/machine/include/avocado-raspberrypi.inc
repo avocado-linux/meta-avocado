@@ -11,20 +11,18 @@ CMDLINE_ROOT_PARTITION = "/dev/mmcblk0p2"
 CMDLINE_ROOT_FSTYPE = "rootfstype=erofs"
 CMDLINE:append = " audit=0"
 
-# One declaration of what this machine can deliver on the security side, read
-# by avocado-security-capabilities.bbclass before any DISTRO_FEATURES request
-# is honoured.
-AVOCADO_SECURITY_CAPABILITIES = "encrypted-var"
+# What this machine can deliver on the security side. Explicitly nothing, not
+# unset: the declaration is what pulls a capability's tooling into the feed
+# (docs/security-capabilities.md), and encrypted-var is not deliverable here
+# yet - linux-raspberrypi carries no dm-crypt fragment, and the MBR layout
+# (stone/rpi/rootdisk.conf) has no `var` PARTLABEL for cryptsetup-var.service
+# to key on. Declaring it anyway would ship a unit that waits on a device this
+# machine never produces. Declare it once both are wired.
+AVOCADO_SECURITY_CAPABILITIES = ""
 
-# /var is a LUKS2 container that cryptsetup-var.service formats (first boot) and
-# opens in the initramfs. Mount /var from the dm-crypt mapper rather than the raw
-# partition: var.mount then implicitly orders after dev-mapper-var.device, which
-# only appears once cryptsetup-var has opened the container - so the mount waits
-# for the unlock instead of racing it and dropping to emergency mode. Unlike
-# avocado-qemuarm64/qemux86-64/imx93-frdm, the non-encrypted-var branch stays the
-# raw /dev/mmcblk0p3 rather than /dev/disk/by-partlabel/var: this machine is
-# MBR-partitioned (stone/rpi/rootdisk.conf), which carries no GPT PARTLABEL, so a
-# by-partlabel path would not resolve here.
-AVOCADO_VAR_PART_DEV = "${@bb.utils.contains('DISTRO_FEATURES', 'encrypted-var', '/dev/mapper/var', '/dev/mmcblk0p3', d)}"
+# The plaintext var partition; /var mounts /dev/disk/by-avocado/var, which
+# resolves here. A raw node rather than /dev/disk/by-partlabel/var: MBR carries
+# no GPT PARTLABEL.
+AVOCADO_VAR_PART_DEV = "/dev/mmcblk0p3"
 
 DEPENDS:append:pn-mesa = " libxshmfence"
