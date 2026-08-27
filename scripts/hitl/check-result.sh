@@ -13,28 +13,39 @@
 set -euo pipefail
 
 MODE="${1:-}"
-[ -n "$MODE" ] || { printf 'usage: check-result.sh <mode>\n' >&2; exit 2; }
+# Modes that take an argument record one result PER argument, because they run a
+# different check per value. Pass the same argument here or the reader is asking
+# about a check nobody ran: `check-result.sh slot_boots` names no slot, and
+# answering it from either slot's record would vouch for the wrong one.
+ARG="${2:-}"
+[ -n "$MODE" ] || { printf 'usage: check-result.sh <mode> [arg]\n' >&2; exit 2; }
 
 RESULT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/avocado-hitl"
-FILE="${RESULT_DIR}/${MODE}.result"
+if [ -n "$ARG" ]; then
+    FILE="${RESULT_DIR}/${MODE}_${ARG}.result"
+    LABEL="$MODE $ARG"
+else
+    FILE="${RESULT_DIR}/${MODE}.result"
+    LABEL="$MODE"
+fi
 
 if [ ! -r "$FILE" ]; then
-    printf 'hitl: no recorded result for %s - run imx93-harness.sh --assert-%s\n' \
-        "$MODE" "${MODE//_/-}" >&2
+    printf 'hitl: no recorded result for %s - run imx93-harness.sh --assert-%s %s\n' \
+        "$LABEL" "${MODE//_/-}" "$ARG" >&2
     exit 1
 fi
 
 read -r verdict commit stamp < "$FILE"
 
 if [ "$verdict" != PASS ]; then
-    printf 'hitl: %s recorded %s at %s (commit %s)\n' "$MODE" "$verdict" "$stamp" "$commit" >&2
+    printf 'hitl: %s recorded %s at %s (commit %s)\n' "$LABEL" "$verdict" "$stamp" "$commit" >&2
     exit 1
 fi
 
 if ! git merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
     printf 'hitl: %s passed at commit %s, which is not an ancestor of HEAD - re-run on this tree\n' \
-        "$MODE" "$commit" >&2
+        "$LABEL" "$commit" >&2
     exit 1
 fi
 
-printf 'hitl: %s PASS at %s (commit %s)\n' "$MODE" "$stamp" "$commit"
+printf 'hitl: %s PASS at %s (commit %s)\n' "$LABEL" "$stamp" "$commit"

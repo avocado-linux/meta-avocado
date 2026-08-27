@@ -50,12 +50,29 @@ schedule_power_cycle() {
 # silently vouching for code that never ran.
 RESULT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/avocado-hitl"
 
+# The record is keyed on mode AND argument, not mode alone. A mode that takes an
+# argument runs a DIFFERENT check per value, and keying on the mode made the two
+# share one file: --assert-slot-boots a followed by --assert-slot-boots b left a
+# single slot_boots.result holding only the second verdict. A verify: line
+# reading it could not tell which slot it described, and a passing slot A would
+# be overwritten by - or would mask, depending on order - a failing slot B. That
+# is a check reporting a result for work it never did, which is the failure this
+# whole record mechanism exists to prevent.
+result_file() {
+    local mode="$1" arg="${2:-}"
+    if [ -n "$arg" ]; then
+        printf '%s/%s_%s.result' "$RESULT_DIR" "$mode" "$arg"
+    else
+        printf '%s/%s.result' "$RESULT_DIR" "$mode"
+    fi
+}
+
 record_result() {
-  local mode="$1" verdict="$2" commit
+    local mode="$1" verdict="$2" arg="${3:-}" commit
   commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
   mkdir -p "$RESULT_DIR"
   printf '%s %s %s\n' "$verdict" "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    >"${RESULT_DIR}/${mode}.result"
+        > "$(result_file "$mode" "$arg")"
 }
 
 run_mode() {
@@ -63,7 +80,11 @@ run_mode() {
   schedule_power_cycle
   HARNESS_MODE="$mode" HARNESS_ARG="$arg" \
     timeout 300 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" || rc=$?
-  if [ "$rc" -eq 0 ]; then record_result "$mode" PASS; else record_result "$mode" FAIL; fi
+    if [ "$rc" -eq 0 ]; then
+        record_result "$mode" PASS "$arg"
+    else
+        record_result "$mode" FAIL "$arg"
+    fi
   return "$rc"
 }
 
