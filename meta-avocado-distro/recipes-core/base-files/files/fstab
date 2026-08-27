@@ -1,6 +1,10 @@
 # stock fstab - you probably want to override this with a machine specific one
 
-/dev/root            /                    auto       defaults              1  1
+# The rootfs image is read-only (erofs/squashfs) and, under rootfs dm-verity,
+# /dev/root is a verity mapping that refuses a read-write remount outright -
+# "defaults" here made systemd-remount-fs try exactly that and fail every boot.
+# No fsck either: there is nothing to check and no writable superblock.
+/dev/root            /                    auto       ro                    0  0
 proc                 /proc                proc       defaults              0  0
 devpts               /dev/pts             devpts     mode=0620,ptmxmode=0666,gid=5      0  0
 tmpfs                /run                 tmpfs      mode=0755,nodev,nosuid,strictatime 0  0
