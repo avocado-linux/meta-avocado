@@ -48,6 +48,45 @@ DEPLOYDEPENDS = " \
 do_deploy_fixup[depends] += "${DEPLOYDEPENDS}"
 
 do_deploy_fixup[nostamp] = "1"
+
+# Cross-check the staged tree against what rawprogram*.xml will flash.
+#
+# Every copy in do_deploy_fixup is guarded by `if [ -f ... ]`, so a deploy name
+# that stops matching is skipped in silence. rawprogram*.xml still flashes the
+# file, and the miss only surfaces on hardware, tens of partitions into a QDL
+# run, as `unable to open <name>...failing` -- with the device half written.
+#
+# Call this LAST, from the machine bbappend that finishes staging, immediately
+# before the bootfiles tarball is rolled: do_deploy_fixup:append() bodies run
+# after the class body, so a check placed at the end of the class would fire on
+# files those appends have not copied yet.
+#
+# system.img and the /var image are absent by design: avocado-cli builds the
+# runtime pair (extensions applied, users configured) and
+# stone-provision-ufs.sh injects them at provision time.
+qcom_check_rawprogram_payloads() {
+    missing=""
+    for rawpg in rawprogram[0-9].xml; do
+        [ -f "$rawpg" ] || continue
+        for required in $(sed -n 's/.*filename="\([^"]*\)".*/\1/p' "$rawpg" | sort -u); do
+            case "$required" in
+                ""|system.img|avocado-image-var-*) continue ;;
+            esac
+            if [ ! -f "$required" ]; then
+                case " $missing " in
+                    *" $required "*) ;;
+                    *) missing="$missing $required" ;;
+                esac
+            fi
+        done
+    done
+    if [ -n "$missing" ]; then
+        bbfatal "rawprogram*.xml flashes files this image does not stage:${missing}." \
+                "Provisioning would fail mid-flash. Check the matching deploy-name" \
+                "test in image-avocado-qcom-deploy.bbclass or the machine bbappend."
+    fi
+}
+
 do_deploy_fixup () {
     # copy vmlinux, Image.gz/Image/zImage
     if [ -f ${DEPLOY_DIR_IMAGE}/vmlinux ]; then
@@ -79,9 +118,19 @@ do_deploy_fixup () {
         install -m 0644 ${DEPLOY_DIR_IMAGE}/esp-avocado-qcom-image-${MACHINE}.rootfs.vfat efi.bin
     fi
 
-    # copy dtb.bin
+    # copy dtb.bin -- the payload rawprogram*.xml flashes to dtb_a.
+    #
+    # Two producers, two names. meta-qcom's multi-dtb `dtb-qcom-image` recipe
+    # deploys dtb-qcom-image-${MACHINE}.rootfs.vfat, but a machine that pins a
+    # single dtb through QCOM_DTB_DEFAULT (avocado-rubikpi3 does: one board,
+    # one dtb, no qcom-dtb-metadata) never builds that recipe. It gets
+    # linux-qcom-dtbbin's dtb-${QCOM_DTB_DEFAULT}-image.vfat instead -- the
+    # same name meta-qcom's own qcom-capsule.bbclass stages as dtb.bin.
     if [ -f ${DEPLOY_DIR_IMAGE}/dtb-qcom-image-${MACHINE}.rootfs.vfat ]; then
         install -m 0644 ${DEPLOY_DIR_IMAGE}/dtb-qcom-image-${MACHINE}.rootfs.vfat dtb.bin
+    elif [ -n "${QCOM_DTB_DEFAULT}" ] && \
+         [ -f ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat ]; then
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat dtb.bin
     fi
 
     # copy el2-dtb.bin
@@ -196,5 +245,6 @@ do_deploy_fixup () {
             install -m 0644 $f ./partition_emmc/
         done
     fi
+
 }
 addtask do_deploy_fixup after do_image_complete before do_build

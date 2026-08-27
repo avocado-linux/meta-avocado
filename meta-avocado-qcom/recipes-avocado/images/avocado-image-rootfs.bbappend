@@ -44,5 +44,10 @@ do_deploy_fixup:append() {
     # firmware blobs, GPT, partition_ufs/, programmers, dtb/efi/etc partitions,
     # initramfs, and Thundercomm board-specific blobs.
 
+    # Everything the tarball will carry is staged by this point, so this is
+    # where a missing rawprogram payload can be caught (see the function's
+    # comment for why it cannot live at the end of the class body).
+    qcom_check_rawprogram_payloads
+
     tar -caf ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.bootfiles.tar.gz -C ${DEPLOY_DIR_IMAGE} ${IMAGE_BASENAME}
 }
