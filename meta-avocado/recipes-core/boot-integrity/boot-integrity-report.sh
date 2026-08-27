@@ -36,6 +36,14 @@ EFI_GLOBAL_GUID="8be4df61-93ca-11d2-aa0d-00e098032b8c"
 # is NOT the same as trustworthy and is never reported as such.
 STORE_DESC="/etc/avocado/boot-integrity-store"
 
+# Mount table, so "the directory is there" and "something is mounted on it" stay
+# separable. /sys/firmware/efi/efivars exists as a bare mount POINT on a machine
+# that booted through EFI but never mounted efivarfs, and an empty directory
+# then reads exactly like a firmware with no SecureBoot variable. Observed on
+# avocado-imx93-frdm: the kernel logged "efivars: Registered efivars operations"
+# and the directory was still empty, because nothing had mounted it.
+MOUNTS="/proc/mounts"
+
 # Defaults are the safe reading, not the optimistic one. Every one of these is
 # overwritten only by positive evidence, so a probe that fails, a file that is
 # missing, or a path nobody anticipated all leave the record saying "we do not
@@ -50,6 +58,12 @@ if [ ! -d "$EFIVARS" ]; then
     # No efivarfs at all. Either the kernel was not entered through the EFI
     # stub, or this is a boot path with no UEFI variable store behind it.
     detail="efivarfs absent - kernel was not entered through the EFI stub"
+elif [ -r "$MOUNTS" ] && ! awk -v p="$EFIVARS" '$2 == p { found = 1 } END { exit !found }' "$MOUNTS"; then
+    # The mount point is there and nothing is on it. Distinguished from the
+    # branch below because the causes are opposite: this is a userspace mount
+    # that did not happen, not firmware that reported nothing, and a consumer
+    # chasing the wrong one wastes the whole investigation.
+    detail="efivarfs directory present but not mounted - no variables are readable"
 elif ! _sb=$(od -An -N5 -tu1 "${EFIVARS}/SecureBoot-${EFI_GLOBAL_GUID}" 2>/dev/null); then
     # efivarfs is mounted but the variable is not there. Reported distinctly
     # from an absent efivarfs because the causes and the fixes differ.
