@@ -69,16 +69,20 @@ gen_key() {
     -out "${SBKEYS_DIR}/${role}.der" -outform DER
 }
 
-# UEFI Secure Boot chain.
+# UEFI Secure Boot chain. The db cert generated here is the one the UEFI
+# variable seed is built from, so its .crt is consumed downstream rather than
+# only being an artifact of this script.
 gen_key PK "Platform Key"
 gen_key KEK "Key Exchange Key"
 gen_key db "Signature Database"
 gen_key dbx "Signature Database Exclude"
 
 # FIT Image Signing Key - separate PKI chain used by mkimage -k to sign FIT
-# images for verified boot. NOT part of the UEFI SB PK/KEK/db/dbx chain: this
-# SoC does not do UEFI Secure Boot, so reusing one of those roles would
-# conflate two unrelated PKI chains under one name.
+# images for verified boot. Deliberately NOT one of the PK/KEK/db/dbx roles
+# above, because the two chains root different things: the FIT key is embedded
+# in U-Boot's own control DTB and verifies a FIT payload, while db is enrolled
+# in the firmware's signature database and verifies an EFI payload. One key
+# serving both would give a single compromise two blast radii instead of one.
 gen_key FIT "FIT Image Signing Key"
 
 echo "gen-sbkeys: key chain complete."
