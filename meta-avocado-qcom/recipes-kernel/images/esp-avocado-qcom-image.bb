@@ -7,7 +7,11 @@ COMPATIBLE_HOST = '(x86_64.*|arm.*|aarch64.*)-(linux.*)'
 # systemd-boot ships only /boot/EFI/BOOT/bootaa64.efi -- the loader UEFI runs
 # off the removable path -- and linux-avocado-qcom-uki the UKI it boots.
 #
-# systemd-bootconf is deliberately absent. It contributes OE's generated
+# systemd-bootconf is not listed, but it arrives anyway: systemd-boot carries a
+# hard `Requires: virtual-systemd-bootconf`, so dnf pulls it in as a dependency
+# ("Installing dependencies: systemd-bootconf" in the do_rootfs log). Its files
+# are kept off the partition by esp_mkvfatfs below, which copies only
+# /boot/EFI. What it contributes is OE's generated
 # /boot/loader/{loader.conf,entries/boot.conf}, and that entry does not
 # describe this board:
 #
@@ -72,7 +76,11 @@ IMAGE_FSTYPES_DEBUGFS = ""
 # another type and this command would be used for it too.
 esp_mkvfatfs() {
     mkfs.vfat ${EXTRA_IMAGECMD} -C ${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat ${ROOTFS_SIZE}
-    mcopy -i "${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat" -vsmpQ ${IMAGE_ROOTFS}/boot/* ::/
+    # /boot/EFI only, not /boot/* -- that leaves systemd-bootconf's
+    # /boot/loader (which comes in as a dependency, see above) off the
+    # partition, so systemd-boot auto-discovers the UKI instead of defaulting
+    # to a loader entry that names a kernel this ESP does not carry.
+    mcopy -i "${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat" -vsmpQ ${IMAGE_ROOTFS}/boot/EFI ::/
 }
 IMAGE_CMD:forcevariable = "esp_mkvfatfs"
 
