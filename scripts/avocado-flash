@@ -1080,7 +1080,13 @@ def main() -> int:
     # caller asked to keep, and the write looks successful either way.
     if args.task != "complete" and args.backend not in (None, "fwup"):
         raise Fatal(f"--task applies to the fwup backend only (got backend '{args.backend}')")
-    if args.task != "complete" and args.medium != "sd":
+    # 'ums' belongs here with 'sd': it resolves the same fwup archive and calls
+    # flash_fwup unconditionally, passing --task straight through, so a task
+    # other than complete is as meaningful there as on a card in a reader.
+    # Excluding it refused the A/B upgrade this tool otherwise supports, which is
+    # the only way to populate the inactive slot on a board whose card never
+    # moves - `complete` memsets that slot rather than writing it.
+    if args.task != "complete" and args.medium not in ("sd", "ums"):
         raise Fatal(f"--task applies to the fwup backend only (medium '{args.medium}')")
 
     if args.medium == "sd":
