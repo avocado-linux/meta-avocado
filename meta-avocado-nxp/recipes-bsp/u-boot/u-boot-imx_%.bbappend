@@ -148,6 +148,54 @@ do_configure:prepend:avocado-imx93-frdm () {
             ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
             >> ${S}/board/nxp/imx93_frdm/avocado.env
     fi
+
+    # Stage the UEFI variable seed where U-Boot's own build can find it.
+    # lib/efi_loader/Makefile resolves CONFIG_EFI_VAR_SEED_FILE as
+    # $(srctree)/$(EFI_VAR_SEED_FILE) - a path relative to the SOURCE tree, not
+    # to the deploy directory - so a seed left where sb-keys deployed it is a
+    # seed U-Boot never reads. It would still build, with an empty variable
+    # store, and the board would come up in setup mode while the build log
+    # claimed enrolment.
+    #
+    # Same `if` wrapper, same reason as the block above and the do_compile
+    # prepend below: a bare `return` at statement position ends the WHOLE
+    # concatenated do_configure, not just this fragment of it.
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        if [ ! -f ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ]; then
+            bbfatal "boot-integrity-poc: ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var is absent, so U-Boot would compile with an empty preseed and the board would come up in setup mode while this build reported enrolment. sb-keys' do_deploy produces it; this recipe DEPENDS on sb-keys under the same gate."
+        fi
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ${S}/ubootefi.var
+    fi
+}
+
+# The fingerprint of the db certificate that went into the seed, written only on
+# the path that actually staged it. Task 4.1 compares the payload it signs
+# against this value before signing, and refuses to sign when the marker is
+# absent - the two halves of one token, each enforcing the half it can observe,
+# since neither recipe can see the other's task outcome.
+#
+# do_deploy rather than the do_configure:prepend that stages the seed, even
+# though that is where the staging is decided: deploy.bbclass sets
+# do_deploy[cleandirs] = "${DEPLOYDIR}", so anything written there earlier in
+# the task graph is erased before do_deploy runs, and the marker would vanish
+# without a trace. The `${S}/ubootefi.var` test below is what keeps the claim
+# honest across the move - the marker is written because the seed IS in the
+# source tree, not because the gate was on.
+do_deploy:append:avocado-imx93-frdm() {
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        if [ ! -f ${S}/ubootefi.var ]; then
+            bbfatal "boot-integrity-poc: ${S}/ubootefi.var is absent at do_deploy, so the seed never reached \$(srctree) and this U-Boot enrols nothing. Refusing to write the db.fingerprint marker that task 4.1 reads as proof it did."
+        fi
+        if [ ! -f ${AVOCADO_SB_KEYS_DIR}/db.crt ]; then
+            bbfatal "boot-integrity-poc: ${AVOCADO_SB_KEYS_DIR}/db.crt is absent, so there is no certificate to fingerprint and the payload signing step has nothing to check itself against."
+        fi
+        install -d ${DEPLOYDIR}/sb-keys
+        # Bare hex, no filename column: the consumer compares a value, and
+        # sha256sum's second field is a build-tree path that would differ
+        # between two builds of the identical certificate.
+        sha256sum ${AVOCADO_SB_KEYS_DIR}/db.crt | awk '{print $1}' \
+            > ${DEPLOYDIR}/sb-keys/db.fingerprint
+    fi
 }
 
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
@@ -242,15 +290,51 @@ python () {
             "write the boot medium can change them. Do not read a value from "
             "this store as evidence about how the device booted.")
 
-    # A store with no EFI boot path to consume it produces no efivarfs, so the
-    # PoC would look enabled and show nothing. Name that rather than letting
-    # someone debug it.
+    # A store with no EFI boot path to consume it produces no efivarfs, and now
+    # that the same token also enrols a key database, that is no longer the
+    # harmless no-op it was when this only warned. Enrolment takes the firmware
+    # out of setup mode, so the board reports SecureBoot=1 on a machine that
+    # will never run bootefi - a device claiming enforcement on a path it does
+    # not take, which is exactly the false claim this change exists to remove.
+    #
+    # Escalated in place rather than added as a second check. A distinct block
+    # would test the identical condition and leave this warning's "nothing will
+    # reach it" reading standing next to a fatal that says the opposite; one
+    # test with one verdict is what a reader can act on.
     if d.getVar('MACHINE') != 'avocado-imx93-frdm':
-        bb.warn("boot-integrity-poc: the EFI boot path is wired for "
-                "avocado-imx93-frdm only, so on %s this sets up a variable "
-                "store that nothing will reach. efivarfs will be absent."
-                % d.getVar('MACHINE'))
-        return
+        bb.fatal("boot-integrity-poc: the EFI boot path is wired for "
+                 "avocado-imx93-frdm only, so on %s this would enrol a UEFI "
+                 "key database and take the firmware out of setup mode on a "
+                 "board that never runs bootefi - the device would report "
+                 "enforcement on a boot path it does not take, and efivarfs "
+                 "would be absent besides. Drop the token for this machine, or "
+                 "wire the EFI boot path for it here first."
+                 % d.getVar('MACHINE'))
+
+    # The preseed fragment. CONFIG_EFI_VARIABLES_PRESEED compiles the seed into
+    # the U-Boot binary, which is what leaves no interval in which the board is
+    # powered on and still accepting any key database, and which also makes
+    # PK/KEK/db/dbx immutable at runtime (see the fragment's own header).
+    #
+    # SRC_URI is the whole mechanism - cml1.bbclass's merge_config.sh over the
+    # file://*.cfg entries is what puts these symbols in .config. Do NOT add a
+    # cat line into do_configure:append for it; see the UBOOT_DEFCONFIG note
+    # below for why every such line writes to a path named ['sd'].
+    d.appendVar('SRC_URI', ' file://efi-secureboot.cfg')
+
+    # sb-keys' do_deploy writes the seed this build consumes, and its do_compile
+    # writes the db.crt the fingerprint below is taken from. Without the
+    # dependency do_configure races the recipe that produces its input.
+    d.appendVar('DEPENDS', ' sb-keys')
+
+    # DEPENDS alone is not enough here and the gap is silent. It orders this
+    # recipe's do_configure after sb-keys:do_populate_sysroot, but the seed is
+    # DEPLOYED, not installed - sb-keys' own `addtask deploy after do_install
+    # before do_build` leaves do_deploy outside that chain entirely. Without
+    # this flag the seed copy races its producer and loses on a clean build,
+    # which surfaces as the bbfatal in do_configure:prepend rather than as a
+    # missing dependency, so the cause would be read as a broken sb-keys.
+    d.appendVarFlag('do_configure', 'depends', ' sb-keys:do_deploy')
 
     # The EFI boot path itself. Machine-gated where the store above is not:
     # the store is board-independent, but this block hardcodes this board's
