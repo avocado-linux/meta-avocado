@@ -64,11 +64,20 @@ end
 -- Interrupt autoboot and land on the U-Boot prompt. Autoboot is unkeyed, so a
 -- newline suffices; newlines specifically because leftover bytes become
 -- commands at the prompt and an empty command is harmless.
+-- Ctrl-C leads the newline, and it is what makes a wedged board recoverable.
+-- Autoboot is unkeyed so 0x03 interrupts it exactly as a newline does; at a
+-- prompt or a getty it does nothing. But if the board is still running `ums`
+-- from a previous session - which survives the host end being killed - Ctrl-C is
+-- the ONLY thing that ends it. Without this a stale export leaves the console
+-- emitting a progress spinner that matches no prompt, so every later assertion
+-- reports an unresponsive console and the cause is invisible.
 local function reach_prompt(deadline_s)
   local deadline = os.time() + deadline_s
   local window_seen = false
   tail = ""
   while os.time() < deadline do
+    tio.write("\003")
+    tio.msleep(50)
     tio.write("\r\n")
     tio.msleep(200)
     local c = tio.read(4096, 20)
@@ -257,8 +266,25 @@ if MODE == "ums_hold" then
     settle(5000)
     held_ms = held_ms + 5000
   end
-  tio.echo("\r\nUMS hold expired after 40 minutes; ending.\r\n")
+  -- End the export on the BOARD before letting go of the console. Dropping the
+  -- host end does not stop `ums` - U-Boot keeps exporting to nobody, and the
+  -- next power cycle happens with the gadget still live, which is how the USB
+  -- controller ends up refusing to initialise afterwards.
+  tio.write("\003")
+  settle(2000)
+  tio.echo("\r\nUMS hold expired after 40 minutes; export stopped.\r\n")
   os.exit(0)
+end
+
+-- Stop an export this script is not holding: the caller's cleanup path, and the
+-- way to recover a board left exporting by a previous run. Idempotent - Ctrl-C
+-- at an idle prompt does nothing, so running it on a board that is not
+-- exporting is safe and still confirms the prompt is reachable.
+if MODE == "ums_stop" then
+  if not reach_prompt(60) then
+    fail("could not reach the U-Boot prompt to stop an export")
+  end
+  pass("export stopped; board is at the U-Boot prompt")
 end
 
 fail("unknown HARNESS_MODE '" .. MODE .. "'")

@@ -94,10 +94,26 @@ run_mode() {
 # - and "the card was exported" is not a check of anything. And it needs far
 # longer than run_mode's 300s: the export must outlive a ~120 MB fwup write, so
 # the bound here is the Lua hold's own 40 minutes plus slack, not a task timeout.
+# Stop an export on the BOARD. Dropping the host end does not: U-Boot keeps
+# exporting, and a power cycle taken with the gadget still live is what leaves
+# the USB controller unable to initialise on the next run ("Failed to initialize
+# board for USB"). Recovering from that has needed physical cable intervention,
+# so the cheap Ctrl-C is worth taking on every exit path.
+#
+# Note the limit honestly: this is a trap, so it runs on a normal exit, on
+# Ctrl-C and on SIGTERM - but NOT on SIGKILL. `pkill -9` on this harness still
+# leaves the board exporting. Use plain kill.
+ums_stop() {
+    HARNESS_MODE="ums_stop" HARNESS_ARG="" \
+        timeout 90 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" \
+        >/dev/null 2>&1 || true
+}
+
 run_ums_hold() {
-  schedule_power_cycle
-  HARNESS_MODE="ums_hold" HARNESS_ARG="" \
-    timeout 2700 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE"
+    trap ums_stop EXIT INT TERM
+    schedule_power_cycle
+    HARNESS_MODE="ums_hold" HARNESS_ARG="" \
+        timeout 2700 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE"
 }
 
 usage() {
@@ -123,8 +139,15 @@ usage: imx93-harness.sh <mode>
                                changing bootloader version and config in one flash
                                is what the runbook warns against, and ums lives in
                                the bootloader being replaced.
+                               Ends the export on exit - but not under SIGKILL, so
+                               stop it with plain kill, never kill -9.
+
+  --ums-stop                   Stop an export left running on the board and return
+                               it to the U-Boot prompt. Idempotent. Use after a
+                               --ums-hold that was killed, or whenever `ums` fails
+                               with "Failed to initialize board for USB".
 EOF
-  exit 2
+    exit 2
 }
 
 case "${1:-}" in
@@ -141,5 +164,6 @@ case "${1:-}" in
     die "${1} is not implemented yet - it lands with the reporter in group 4"
     ;;
   --ums-hold) run_ums_hold ;;
+  --ums-stop) ums_stop ;;
   *) usage ;;
 esac
