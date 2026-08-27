@@ -1,5 +1,9 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
+# No AUTOREV devupstream variant: it makes every parse run `git ls-remote`
+# (see the BBMASK note in conf/layer.conf).
+BBCLASSEXTEND:remove = "devupstream:target"
+
 SRC_URI += " \
     file://avocado-core.cfg \
     file://avocado-extra.cfg \
