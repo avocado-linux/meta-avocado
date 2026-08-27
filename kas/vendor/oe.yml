@@ -42,13 +42,19 @@ repos:
     #             MAX_CONNECT_RETRIES = 1 with no backoff, giving up on a
     #             hashserv restart faster than upstream's 4-attempt loop.
     #
-    # Known fragility, tracked rather than fixed here: this pins a SHA on a
-    # branch the fork rebases by policy. When it is next rebased the SHA leaves
-    # the branch and kas raises RepoRefError until someone edits this file -
-    # loud, but the pre-rebase tip is not on the remote, so an orphaned SHA can
-    # be GC'd. The durable shape is an immutable tag (or landing the commits on
-    # 2.8-avocado, which every other consumer already tracks).
-    branch: "race-review-fixes"
+    # Pinned to a tag, not to the branch. This used to name
+    # branch: "race-review-fixes", which the fork rebases by policy: on the next
+    # rebase the SHA leaves the branch and kas raises RepoRefError. That much is
+    # loud, but the pre-rebase tip is not on the remote, so once it is
+    # garbage-collected no build pinned to it can be reconstructed at all.
+    #
+    # The tag is a ref, so it cannot be collected, and kas checks that it points
+    # at the commit below - the pair asserts what a branch name could not.
+    #
+    # Still not the end state. These 14 commits belong on 2.8-avocado, which
+    # every other consumer already tracks; the tag makes the interim pin
+    # reproducible rather than making the fork layout right.
+    tag: avocado-2.8-race-review
     commit: 7fcf96b2e00e7e41c036a4265820c2b4ef95bfa3
     layers:
       .: disabled
