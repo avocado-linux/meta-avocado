@@ -1,0 +1,28 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] wiringPi: call GetRP1Memory() with no arguments
+
+GetRP1Memory takes no parameters - it fills the file-scope pciemem_RP1
+buffer directly - but the one call site passes (pciemem_RP1,
+sizeof(pciemem_RP1)). Under C17 the empty parameter list left the
+function unprototyped, so the extra arguments were merely ignored; GCC 15
+defaults to C23, where () means (void), and the call is an error:
+
+  wiringPi.c:3281:5: error: too many arguments to function 'GetRP1Memory';
+  expected 0, have 2
+
+Drop the arguments. Nothing else reads them, and the RP1 path is
+Raspberry Pi 5-only code that never runs on this board anyway.
+
+Upstream-Status: Inappropriate [vendor fork, rubikpi-ai/WiringRP]
+---
+--- a/wiringPi/wiringPi.c
++++ b/wiringPi/wiringPi.c
+@@ -3278,7 +3278,7 @@
+ 
+   piBoard();
+   if (PI_MODEL_5 == RaspberryPiModel) {
+-    GetRP1Memory(pciemem_RP1, sizeof(pciemem_RP1));
++    GetRP1Memory();
+     gpiomemGlobal = pciemem_RP1;
+     MMAP_size = pciemem_RP1_Size;
+     BaseAddr  = 0x00000000;
