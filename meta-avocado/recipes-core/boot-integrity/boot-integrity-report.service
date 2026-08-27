@@ -1,0 +1,18 @@
+[Unit]
+Description=Publish boot-integrity state (enforcement and root of trust)
+# efivarfs is mounted by systemd's own generator when the kernel booted through
+# the EFI stub. Ordering only, never a requirement: on a target that did not,
+# the mount unit does not exist and the report must still run - "no efivarfs" is
+# the fact this record exists to carry, so a unit that refused to start there
+# would suppress exactly the case worth reporting.
+After=sys-firmware-efi-efivars.mount local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/boot-integrity/boot-integrity-report.sh
+# The record lives in /run and is rebuilt every boot, so it must not be
+# forgotten the moment the unit exits.
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
