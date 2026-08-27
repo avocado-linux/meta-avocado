@@ -6,9 +6,17 @@ LICENSE = "CLOSED"
 # Source: https://github.com/rubikpi-ai/meta-rubikpi-bsp @ 227631ce94bb
 DEPENDS += "libxcrypt wiringrp python3 swig-native"
 
+# The patch is wiringrp_3.12.bb's - same WiringRP SRCREV, same C23 build
+# failure - so it is shared from this directory's files/ rather than copied.
+# setup.py compiles the WiringPi/ subtree itself (it does not just link the
+# staged libwiringPi), which is why this recipe needs it too. patchdir points
+# at that subtree because the patch paths are relative to the WiringRP repo
+# root, not to S (= .../git/python).
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI = " \
     git://github.com/rubikpi-ai/WiringRP-Python.git;protocol=https;branch=main;name=python;destsuffix=git/python \
     git://github.com/rubikpi-ai/WiringRP.git;protocol=https;branch=main;name=c;destsuffix=git/python/WiringPi \
+    file://0001-wiringPi-call-GetRP1Memory-with-no-arguments.patch;patchdir=${UNPACKDIR}/git/python/WiringPi \
 "
 
 SRCREV_python = "8b797fdde07d564f648bddba900507ac241eba6e"
