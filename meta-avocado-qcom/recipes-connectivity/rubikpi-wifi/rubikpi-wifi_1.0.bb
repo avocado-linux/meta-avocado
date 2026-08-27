@@ -7,6 +7,11 @@ SRC_URI = "file://00-wireless-dhcp.network"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
+# File-only recipe: nothing lands in the default S (${UNPACKDIR}/${BP}),
+# which oe-core now warns about in do_unpack. The files are installed from
+# ${UNPACKDIR} directly.
+S = "${UNPACKDIR}"
+
 do_install() {
     install -d ${D}${sysconfdir}/systemd/network
     install -m 0644 ${UNPACKDIR}/00-wireless-dhcp.network ${D}${sysconfdir}/systemd/network/00-wireless-dhcp.network

@@ -27,6 +27,11 @@ SRC_URI = " \
     file://wifi.service \
 "
 
+# File-only recipe: nothing lands in the default S (${UNPACKDIR}/${BP}),
+# which oe-core now warns about in do_unpack. The files are installed from
+# ${UNPACKDIR} directly.
+S = "${UNPACKDIR}"
+
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 # Note: SYSTEMD_AUTO_ENABLE is intentionally NOT set. These packages ship via

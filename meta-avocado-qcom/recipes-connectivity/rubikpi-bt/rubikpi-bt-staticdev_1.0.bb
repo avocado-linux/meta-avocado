@@ -10,7 +10,6 @@ LIC_FILES_CHKSUM = ""
 SRC_URI = "git://github.com/rubikpi-ai/rubikpi_bt_bsa_demo.git;branch=main;protocol=https"
 SRCREV = "c83d8155df3a9bf381b44552a3a2500eb0c001ab"
 
-
 TARGET_CXX_ARCH += "${LDFLAGS}"
 
 do_compile() {

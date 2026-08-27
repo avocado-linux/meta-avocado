@@ -16,6 +16,11 @@ SRC_URI = " \
     file://sduart8987_combo.bin \
 "
 
+# File-only recipe: nothing lands in the default S (${UNPACKDIR}/${BP}),
+# which oe-core now warns about in do_unpack. The files are installed from
+# ${UNPACKDIR} directly.
+S = "${UNPACKDIR}"
+
 do_install() {
     install -d ${D}${nonarch_base_libdir}/firmware
     install -m 0644 ${UNPACKDIR}/aw882xx_acf.bin       ${D}${nonarch_base_libdir}/firmware/
