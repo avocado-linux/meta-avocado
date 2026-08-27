@@ -28,7 +28,16 @@ RDEPENDS:${PN} = " \
 # not audioreach, which is for the gpr-based SoCs). The meta-qcom-hwe packagegroups
 # this listed before (packagegroup-firmware-qcm6490, -qcom-display/-graphics/
 # -video) were the proprietary adreno/PAL stack and are gone with that layer.
+# systemd-rubikpi3-masks is here, not only in MACHINE_ESSENTIAL_EXTRA_RDEPENDS:
+# that variable feeds packagegroup-core-boot, which is a *Yocto image* concept.
+# Avocado's runtime rootfs is assembled by avocado-cli from its own package
+# list, so nothing ever pulled the recipe -- it was neither built into the feed
+# nor installed, and the board booted degraded with getty@getty.service failing
+# (OE's 90-systemd.preset enables the getty@ template; the masks package's
+# 89- preset is what disables it). Listing it here builds it into the feed;
+# the BSP extension installs it.
 RDEPENDS:${PN}:append:qcm6490 = " \
+    systemd-rubikpi3-masks \
     linux-firmware-qcom-adreno-a660 \
     linux-firmware-qcom-qcm6490-adreno \
     linux-firmware-qcom-qcm6490-audio \

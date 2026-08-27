@@ -8,7 +8,7 @@ SRC_URI += " \
     file://avocado-core.cfg \
     file://avocado-extra.cfg \
 "
-SRC_URI:append:rubikpi3 = " file://rubikpi3-wifi.cfg file://qcs6490-thundercomm-rubikpi3.dts"
+SRC_URI:append:rubikpi3 = " file://rubikpi3-wifi.cfg file://rubikpi3-thermal.cfg file://qcs6490-thundercomm-rubikpi3.dts"
 
 # linux-qcom merges every file://*.cfg through find_cfgs() in its
 # do_configure:prepend, so the fragments need no wiring beyond SRC_URI.
