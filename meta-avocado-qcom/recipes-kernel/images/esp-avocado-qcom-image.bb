@@ -46,13 +46,23 @@ IMAGE_FSTYPES_DEBUGFS = ""
 #
 # and stops there with no kernel handoff.
 #
-# Done as a rootfs postprocess rather than by overriding IMAGE_CMD:vfat,
-# because that override cannot win from a recipe: image.bbclass pulls
+# Two hooks were wrong before this one, so both are recorded here.
+#
+# Overriding IMAGE_CMD:vfat cannot work from a recipe: image.bbclass pulls
 # image_types.bbclass in via `inherit_defer ${IMGCLASSES}` (image.bbclass:25),
 # and a deferred inherit is parsed AFTER the recipe body -- so the class's
-# `IMAGE_CMD:vfat = "oe_mkvfatfs ${EXTRA_IMAGECMD}"` lands on top of anything
-# the recipe sets. (Confirmed against a build: PACKAGE_INSTALL from this file
-# reached the task's sigdata while IMAGE_CMD:vfat still read the class value.)
+# `IMAGE_CMD:vfat = "oe_mkvfatfs ${EXTRA_IMAGECMD}"` lands on top of whatever
+# the recipe set. (Confirmed from a build's sigdata: PACKAGE_INSTALL carried
+# this file's edit while IMAGE_CMD:vfat still read the class value.)
+#
+# ROOTFS_POSTPROCESS_COMMAND is too early: rootfs-postcommands.bbclass appends
+# its own entries, they run after this one, and they expect a normal rootfs --
+# rootfs_update_timestamp writes ${IMAGE_ROOTFS}/etc/timestamp and died with
+# "Directory nonexistent" once /etc was gone.
+#
+# IMAGE_PREPROCESS_COMMAND is a do_image prefunc, so it runs after do_rootfs,
+# the SPDX rootfs scan and do_image_qa have all seen the tree the packages
+# installed, and immediately before IMAGE_CMD packs it.
 esp_promote_boot() {
     [ -d ${IMAGE_ROOTFS}/boot ] || return 0
     tmp="${WORKDIR}/esp-promote"
@@ -64,7 +74,7 @@ esp_promote_boot() {
     find "$tmp" -mindepth 1 -maxdepth 1 -exec mv -t ${IMAGE_ROOTFS} {} +
     rmdir "$tmp"
 }
-ROOTFS_POSTPROCESS_COMMAND += "esp_promote_boot;"
+IMAGE_PREPROCESS_COMMAND += "esp_promote_boot;"
 
 ROOTFS_SIZE ?= "614400"
 IMAGE_ROOTFS_EXTRA_SPACE = "444000"
