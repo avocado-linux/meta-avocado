@@ -188,3 +188,88 @@ do_deploy:append:avocado-imx93-frdm() {
     mv "$manifest.efi-poc" "$manifest"
   fi
 }
+
+# Payload signing for the EFI boot path. sbsigntool-native supplies sbsign and
+# sbverify; sb-keys generates the db key pair, whose private half never leaves
+# AVOCADO_SB_KEYS_DIR on the build host (sb-keys.bb deploys and installs only
+# .crt/.der, deliberately).
+#
+# Gated exactly as the shell block below is - this machine, this token - rather
+# than added unconditionally: the other 29 avocado-* machines have no EFI boot
+# path, and a bare DEPENDS would build a native signing tool for a step they
+# never run.
+DEPENDS:append:avocado-imx93-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', ' sb-keys sbsigntool-native', '', d)}"
+
+# Image comes from linux-imx's own do_deploy; nothing this recipe builds
+# produces it. Declared rather than left to devspec task order or to whatever
+# else happens to pull the kernel in first, because the build graph knows
+# nothing about either: on a clean TMPDIR or an sstate-restored build this task
+# would otherwise reach the signing step with no Image in DEPLOY_DIR_IMAGE, and
+# a developer's warm TMPDIR hides that indefinitely.
+do_deploy[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', ' virtual/kernel:do_deploy', '', d)}"
+
+# Sign a COPY of the deployed kernel and leave the original alone.
+#
+# Image is deployed unconditionally by linux-imx and feeds the FIT path as well
+# as this one, so signing it in place would change what a token-absent build
+# consumes - breaking this change's contract that the FIT path is untouched -
+# and would also destroy the unsigned payload the harness's
+# signed_payload_refused mode needs in order to prove the firmware refuses one.
+#
+# Written to DEPLOYDIR rather than straight into DEPLOY_DIR_IMAGE so the
+# artifact travels with this recipe's own sstate; deploy.bbclass copies it out.
+#
+# Same `if` wrapper and the same reason as the block above: bitbake concatenates
+# every :append into ONE shell function with the recipe's task body, so a bare
+# `return` at statement position would end the WHOLE do_deploy.
+do_deploy:append:avocado-imx93-frdm() {
+  if [ "${AVOCADO_BOOT_INTEGRITY_POC}" = "1" ]; then
+    # The two halves of one token. This recipe cannot see whether the U-Boot
+    # recipe enrolled anything, and that recipe cannot see whether the payload
+    # was signed - so each enforces the half it can observe. u-boot-imx's
+    # do_deploy writes db.fingerprint only after proving the seed really reached
+    # $(srctree), which makes its presence the evidence that enrolment happened.
+    # Absent, under a set token, means the bootloader trusts nothing while we
+    # are about to hand it a payload signed for a key database that was never
+    # enrolled.
+    _fp="${DEPLOY_DIR_IMAGE}/sb-keys/db.fingerprint"
+    if [ ! -f "$_fp" ]; then
+        bbfatal "boot-integrity-poc: ${DEPLOY_DIR_IMAGE}/sb-keys/db.fingerprint is absent, so no U-Boot in this build enrolled a key database. Refusing to sign an EFI payload for a bootloader that would report enforcement it cannot perform."
+    fi
+
+    _crt="${AVOCADO_SB_KEYS_DIR}/db.crt"
+    _key="${AVOCADO_SB_KEYS_DIR}/db.key"
+    if [ ! -f "$_crt" ] || [ ! -f "$_key" ]; then
+        bbfatal "boot-integrity-poc: the db key pair is absent from ${AVOCADO_SB_KEYS_DIR}. sb-keys' gen-sbkeys.sh produces db.crt and db.key; this recipe DEPENDS on sb-keys under the same gate."
+    fi
+
+    # Changing a certificate's CONTENT at an unchanged AVOCADO_SB_KEYS_DIR path
+    # does not invalidate sstate, so a cached signed payload can otherwise pair
+    # with a freshly-built bootloader carrying a different db - which bricks the
+    # board on its next boot with no build error anywhere. Fatal, never a
+    # warning: a warning here ships exactly that image.
+    _have=$(sha256sum "$_crt" | awk '{print $1}')
+    _want=$(awk 'NR==1 {print $1}' "$_fp")
+    if [ "$_have" != "$_want" ]; then
+        bbfatal "boot-integrity-poc: db.crt hashes ${_have} but the bootloader in this build enrolled ${_want}. The payload would be signed by a key the firmware does not trust. Rebuild u-boot-imx and sb-keys together, or clean this recipe's sstate."
+    fi
+
+    _img="${DEPLOY_DIR_IMAGE}/Image"
+    if [ ! -f "$_img" ]; then
+        bbfatal "boot-integrity-poc: ${DEPLOY_DIR_IMAGE}/Image is absent at do_deploy. linux-imx deploys it; do_deploy[depends] on virtual/kernel:do_deploy should have ordered that before this task."
+    fi
+
+    if ! sbsign --key "$_key" --cert "$_crt" \
+                --output ${DEPLOYDIR}/Image.signed "$_img"; then
+        bbfatal "boot-integrity-poc: sbsign failed on ${_img}. The EFI-stub kernel must be a PE/COFF image for sbsign to attach a signature to it."
+    fi
+
+    # sbsign exiting 0 is not evidence the output carries a signature this db
+    # validates - read the output back rather than trusting the writer. Without
+    # this an unsigned or wrongly-signed payload ships on a green build and the
+    # failure surfaces as a board that will not boot.
+    if ! sbverify --cert "$_crt" ${DEPLOYDIR}/Image.signed; then
+        bbfatal "boot-integrity-poc: sbverify rejected ${DEPLOYDIR}/Image.signed against db.crt, so sbsign produced an output this key database does not validate."
+    fi
+  fi
+}
