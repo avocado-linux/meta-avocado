@@ -149,6 +149,22 @@ usage: imx93-harness.sh <mode>
                                fails when the root of trust reads authenticated
                                on this board - its AHAB lifecycle cannot be
                                closed, so that reading is a reader bug.
+  --assert-signed-payload-refused
+                               present a payload the enrolled keys do not vouch
+                               for and confirm the firmware REFUSES it. Proves
+                               enforcement rather than assuming it: a board that
+                               boots correctly signed images proves only that
+                               the good path works, and says nothing about
+                               whether verification is actually gating. Fails
+                               when the bad payload is accepted, and fails when
+                               the refusal cannot be distinguished from an
+                               unrelated boot failure.
+  --assert-keydb-immutable     confirm the enrolled key database resists BOTH a
+                               runtime write from the booted system and an
+                               offline edit of the variable store. Either route
+                               succeeding means the enrolled keys can be
+                               replaced by whoever reaches the board, which
+                               makes every other signing assertion vacuous.
 
   --ums-hold                   NOT an assertion. Power-cycle, stop at the U-Boot
                                prompt, print `version`, export the SD card over
@@ -177,6 +193,8 @@ case "${1:-}" in
     ;;
   --assert-uefi-var-persists) run_mode uefi_var_persists ;;
   --assert-boot-integrity-report) run_mode boot_integrity_report ;;
+  --assert-signed-payload-refused) run_mode signed_payload_refused ;;
+  --assert-keydb-immutable) run_mode keydb_immutable ;;
   --ums-hold) run_ums_hold ;;
   --ums-stop) ums_stop ;;
   *) usage ;;
