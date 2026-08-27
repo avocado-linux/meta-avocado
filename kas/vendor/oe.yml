@@ -62,6 +62,18 @@ repos:
   openembedded-core:
     url: https://github.com/avocado-linux/vendor-openembedded-core
     path: openembedded-core
+    # Repinned to the current scarthgap-avocado tip. The previous pin,
+    # 06b1c4f636f, was orphaned when the vendor update script rebased this
+    # branch on 2026-08-27, and `kas dump` then failed from a clean checkout
+    # with "Needed a single revision" - a hard stop, not a warning, because no
+    # remote ref reached the commit any more. 18263a00da0 is that same change
+    # rebased onto the moved base: identical patch-id b18ba864a974.
+    #
+    # Expect this to recur. Rebasing avocado-<upstream> branches on vendor
+    # update is deliberate - it stops stale forks accumulating - so any SHA
+    # pinned here has a shelf life measured in vendor updates. Bumping it is the
+    # accepted cost until that refresh is automated; the failure is at least
+    # loud when it happens.
     branch: scarthgap-avocado
     commit: 18263a00da055431b55e79b241f1cd7ce84e5e2a
     layers:
