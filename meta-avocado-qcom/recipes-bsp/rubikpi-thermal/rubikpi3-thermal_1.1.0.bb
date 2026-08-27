@@ -30,7 +30,13 @@ do_configure[noexec] = "1"
 do_compile[noexec] = "1"
 do_install() {
     install -d ${D}
-    cp -a ${S}/usr ${S}/etc ${D}/
+    # --no-preserve=ownership matters: the vendor packed this tarball as
+    # uid/gid 1000, do_unpack runs outside pseudo so tar leaves those ids in
+    # ${S}, and a plain 'cp -a' would carry them into ${D}. do_package then
+    # hashes ${D} and calls getpwuid() on every owner, which dies on any host
+    # without a passwd entry for 1000 ("uid not found: 1000", reported as host
+    # contamination). Shipped files want root:root regardless.
+    cp -a --no-preserve=ownership ${S}/usr ${S}/etc ${D}/
     install -d ${D}${bindir}
     if [ -f ${D}${sysconfdir}/rubikpi/rubikpi-thermal ]; then
         mv ${D}${sysconfdir}/rubikpi/rubikpi-thermal ${D}${bindir}/rubikpi-thermal

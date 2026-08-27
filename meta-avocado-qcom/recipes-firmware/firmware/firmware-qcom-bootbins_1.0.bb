@@ -38,7 +38,10 @@ do_install() {
     for f in *; do
         case "$f" in
             partition*.xml|contents*.xml) ;;
-            *) if [ -d "$f" ]; then cp -a "$f" ${D}/; else install -m 0644 "$f" ${D}/; fi ;;
+            # --no-preserve=ownership: do_compile unzips as the build user, so
+            # a plain 'cp -a' would ship those ids and break do_package's
+            # getpwuid() on hosts with no passwd entry for them.
+            *) if [ -d "$f" ]; then cp -a --no-preserve=ownership "$f" ${D}/; else install -m 0644 "$f" ${D}/; fi ;;
         esac
     done
 }
