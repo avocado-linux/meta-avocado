@@ -30,6 +30,19 @@ do_install() {
 disable getty@.service
 EOF
 
+    # The preset above only steers future `systemctl preset` runs; it cannot
+    # undo an enablement that already happened. systemd runs preset-all on
+    # first boot, before avocado merges the extension that carries this
+    # package, so getty@.service gets enabled anyway and the resulting
+    # /etc/systemd/system/getty.target.wants/getty@.service persists on the
+    # writable /etc layer -- observed on hardware as getty@getty.service
+    # failing a start-limit hit and holding systemd in `degraded` even with the
+    # preset installed. Masking the template covers that: instances of a masked
+    # template are masked, so the stale wants symlink resolves to nothing.
+    # Nothing on this board wants a virtual-console getty; the serial console
+    # is serial-getty@ttyMSM0 via systemd-getty-generator.
+    ln -sf /dev/null ${D}${sysconfdir}/systemd/system/getty@.service
+
     # systemd-gpt-auto-generator picks up the rubikpi3 EFI partition by its
     # GPT type GUID (C12A7328-...) and creates boot.mount/boot.automount.
     # Avocado's RO erofs rootfs doesn't need /boot mounted, and the qcom
