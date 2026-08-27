@@ -55,6 +55,15 @@
         "script": "stone-provision-sd.sh",
         "envs": ["device_info"],
         "requires": ["usb"]
+      },
+      "uuu-emmc": {
+        "script": "stone-provision-uuu-emmc.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"],
+        "config": {
+          "emmc_uboot_dev": 0,
+          "emmc_mmcblk": 0
+        }
       }
     }
   },
