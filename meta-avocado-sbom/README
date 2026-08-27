@@ -74,8 +74,9 @@ Variables
                                markers. Defaults to CVE_CHECK_DIR, beside the
                                cve-check results they explain
   AVOCADO_CVE_REPORT_MANIFESTS glob of image manifests naming the base
-                               runtime. Defaults to
-                               ${DEPLOY_DIR_IMAGE}/*.manifest. Matching
+                               runtime. Defaults to ${DEPLOY_DIR_IMAGE}/
+                               avocado-image-*-${MACHINE}.manifest - the
+                               images that ship, this build only. Matching
                                nothing is not an error - see "Scope" below
   AVOCADO_CVE_BOOT_CHAIN       recipes that run on the device but are
                                installed by no package manager, so no manifest
@@ -152,6 +153,15 @@ run before the image tasks have written anything - the recipe warns, and the
 degradation is deliberately toward the wider claim. Feed scope over-reports
 what a device carries; base-runtime scope would under-report it, and for a CVE
 report only one of those is safe to get wrong.
+
+Which manifests get read is the same argument one level down, and the default
+has to be narrow because everything it over-reads scopes base-runtime. A
+machine deploys manifests that are not the runtime - Jetson writes six, two of
+them flashing images that run on the host (gptfdisk, e2fsprogs-mke2fs, a dozen
+kernel-module-*) - hence avocado-image-*. The timestamped file beside each
+IMAGE_LINK_NAME symlink is never pruned, so a name-only glob would also read
+every previous build - hence -${MACHINE}. Override the whole default for a
+board whose runtime image is named differently.
 
 The frozen contract
 -------------------

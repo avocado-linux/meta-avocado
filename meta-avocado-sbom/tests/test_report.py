@@ -25,6 +25,7 @@ from avocado_sbom.report import (  # noqa: E402
     SCOPES,
     Stats,
     build_report,
+    default_manifests,
     read_cve_data,
     read_manifests,
     read_optouts,
@@ -530,6 +531,45 @@ class ReadOptoutsTests(unittest.TestCase):
         declared, unreadable = read_optouts(self.cve_dir)
         self.assertEqual(list(declared), ["good"])
         self.assertEqual(unreadable, 1)
+
+class DefaultManifestsTest(unittest.TestCase):
+    """Anything the default glob over-reads scopes base-runtime."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.images = os.path.join(self.tmp, "deploy", "images", "jetson")
+        os.makedirs(self.images)
+
+    def touch(self, name):
+        path = os.path.join(self.images, name)
+        open(path, "w").close()
+        return path
+
+    def test_only_shipping_images_of_this_build_are_read(self):
+        rootfs = self.touch("avocado-image-rootfs-jetson.manifest")
+        initramfs = self.touch("avocado-image-initramfs-jetson.manifest")
+        # Flashed from the host, not shipped.
+        self.touch("tegra-initrd-flash-initramfs-avocado-jetson.manifest")
+        self.touch("tegra-espimage-avocado-jetson.manifest")
+        # Real files behind the symlink, this build's and an older one's.
+        self.touch("avocado-image-rootfs-jetson.rootfs-20260815021433.manifest")
+        self.touch("avocado-image-rootfs-jetson.rootfs-20260814192228.manifest")
+        self.assertEqual(
+            default_manifests(self.tmp, "jetson"), sorted([initramfs, rootfs])
+        )
+
+    def test_without_a_machine_every_machine_dir_is_globbed(self):
+        other = os.path.join(self.tmp, "deploy", "images", "qemuarm64")
+        os.makedirs(other)
+        open(os.path.join(other, "avocado-image-rootfs-qemuarm64.manifest"), "w").close()
+        rootfs = self.touch("avocado-image-rootfs-jetson.manifest")
+        found = default_manifests(self.tmp)
+        self.assertIn(rootfs, found)
+        self.assertEqual(len(found), 2)
+        # The suffix is that dir's own MACHINE, not any machine's.
+        self.touch("avocado-image-rootfs-qemuarm64.manifest")
+        self.assertEqual(len(default_manifests(self.tmp)), 2)
 
 if __name__ == "__main__":
     unittest.main()

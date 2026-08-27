@@ -597,12 +597,24 @@ def default_paths(tmpdir, machine=None):
 def default_manifests(tmpdir, machine=None):
     """Image manifests under a build's TMPDIR.
 
+    IMAGE_LINK_NAME for the images that ship, so a machine's flashing images
+    and the stale timestamped manifests beside each symlink stay out - both
+    would scope base-runtime.
+
     Kept out of default_paths so its return shape stays frozen: an empty result
     is a normal outcome here, not the failure every branch of default_paths
     raises for.
     """
-    images = os.path.join(tmpdir, "deploy", "images", machine or "*")
-    return sorted(glob.glob(os.path.join(images, "*.manifest")))
+    root = os.path.join(tmpdir, "deploy", "images")
+    return sorted(
+        path
+        for images in glob.glob(os.path.join(root, machine or "*"))
+        for path in glob.glob(
+            os.path.join(
+                images, "avocado-image-*-%s.manifest" % os.path.basename(images)
+            )
+        )
+    )
 
 def main():
     import argparse
@@ -637,7 +649,8 @@ def main():
         action="append",
         default=[],
         help="image manifest naming the base runtime, repeatable; overrides "
-        "the ${DEPLOY_DIR}/images/${MACHINE}/*.manifest default",
+        "the ${DEPLOY_DIR}/images/${MACHINE}/avocado-image-*-${MACHINE}.manifest "
+        "default",
     )
     parser.add_argument(
         "--boot-chain",
