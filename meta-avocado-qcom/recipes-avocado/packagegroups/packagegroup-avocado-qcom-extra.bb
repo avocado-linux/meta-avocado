@@ -24,7 +24,8 @@ RDEPENDS:${PN} = " \
 # the user actually wants display, video accelerator, etc.
 # QCS6490 SoC firmware and userspace on the upstream BSP: linux-firmware's
 # per-block qcm6490 packages (meta-lts-mixins 20260810), mesa/freedreno GPU,
-# mainline venus video and audioreach audio. The meta-qcom-hwe packagegroups
+# mainline venus video and APR/QDSP6 audio (apr + q6core/q6afe/q6asm/q6adm --
+# not audioreach, which is for the gpr-based SoCs). The meta-qcom-hwe packagegroups
 # this listed before (packagegroup-firmware-qcm6490, -qcom-display/-graphics/
 # -video) were the proprietary adreno/PAL stack and are gone with that layer.
 RDEPENDS:${PN}:append:qcm6490 = " \
