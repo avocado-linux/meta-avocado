@@ -13,17 +13,13 @@ FILESEXTRAPATHS:prepend := "${THISDIR}:"
 SRC_URI = " \
     file://boot-integrity-report.sh \
     file://boot-integrity-report.service \
-    file://sys-firmware-efi-efivars.mount \
 "
 
 S = "${UNPACKDIR}"
 
 inherit systemd
 
-# Both units are enabled: the mount is what makes efivarfs readable at all on
-# this image, and it is condition-guarded so it is inert where efivarfs does not
-# exist.
-SYSTEMD_SERVICE:${PN} = "boot-integrity-report.service sys-firmware-efi-efivars.mount"
+SYSTEMD_SERVICE:${PN} = "boot-integrity-report.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 # od(1), for the 5-byte SecureBoot blob. coreutils on a normal image, but busybox
@@ -51,8 +47,6 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/boot-integrity-report.service \
         ${D}${systemd_system_unitdir}/boot-integrity-report.service
-    install -m 0644 ${UNPACKDIR}/sys-firmware-efi-efivars.mount \
-        ${D}${systemd_system_unitdir}/sys-firmware-efi-efivars.mount
 
     if [ "${AVOCADO_BOOT_INTEGRITY_POC}" = "1" ]; then
         install -d ${D}${sysconfdir}/avocado
@@ -73,6 +67,5 @@ EOF
 FILES:${PN} += " \
     ${libexecdir}/boot-integrity/ \
     ${systemd_system_unitdir}/boot-integrity-report.service \
-    ${systemd_system_unitdir}/sys-firmware-efi-efivars.mount \
     ${sysconfdir}/avocado/boot-integrity-store \
 "

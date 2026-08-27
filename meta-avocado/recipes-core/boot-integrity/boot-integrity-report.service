@@ -1,15 +1,15 @@
 [Unit]
 Description=Publish boot-integrity state (enforcement and root of trust)
-# Wants, not Requires, and both are needed. After= alone orders against a unit
-# nothing pulls in, so on this image - whose systemd is built without EFI
-# support and so mounts efivarfs itself - the report ran before anything had
-# mounted it and read an empty directory.
+# Ordering only. systemd mounts efivarfs itself from PID 1, before it loads any
+# unit, so there is nothing here to pull in - the unit systemctl shows for that
+# mount is synthesized from /proc/self/mountinfo rather than shipped as a file.
+# That holds because 'efi' is in DISTRO_FEATURES (avocado.conf); without it
+# is_efi_boot() is compiled out, the mount never happens, and the report
+# correctly says so rather than failing.
 #
-# Requires= would be wrong in the other direction: on a target with no efivarfs
-# the mount cannot start, and this service must still run and report that. "No
-# efivarfs" is a fact the record exists to carry, so a dependency that suppressed
-# the run would hide exactly the case worth reporting.
-Wants=sys-firmware-efi-efivars.mount
+# Requires= would be wrong: on a target with no efivarfs this service must still
+# run and report that. "No efivarfs" is a fact the record exists to carry, so a
+# dependency that suppressed the run would hide the case worth reporting.
 After=sys-firmware-efi-efivars.mount local-fs.target
 
 [Service]
