@@ -33,48 +33,48 @@ inherit image
 IMAGE_FSTYPES = "vfat"
 IMAGE_FSTYPES_DEBUGFS = ""
 
-# Make the rootfs *be* the ESP: /EFI/... at the top level.
+# Pack the vfat from ${IMAGE_ROOTFS}/boot, so the partition root is the ESP.
 #
 # UEFI reads an ESP's root for \EFI\BOOT\BOOTAA64.EFI and \EFI\Linux\*.efi, but
 # both packages install a level down -- linux-avocado-qcom-uki into
-# /boot/EFI/Linux, systemd-boot into /boot/EFI/BOOT. oe_mkvfatfs copies
-# ${IMAGE_ROOTFS}/*, so without this the payloads land under a /boot directory
-# on the partition, beside the empty /bin, /lib, /usr and /var the package file
-# lists drag in. UEFI finds nothing bootable, prints
+# /boot/EFI/Linux, systemd-boot into /boot/EFI/BOOT. Stock oe_mkvfatfs copies
+# ${IMAGE_ROOTFS}/*, which buries them under /boot on the partition next to the
+# empty /bin, /lib, /usr and /var the package file lists drag in; UEFI then
+# finds nothing bootable, prints "[QcomBds] Removable boot path", and stops
+# with no kernel handoff.
 #
-#   [QcomBds] Removable boot path
+# Three hooks were tried before this one; all three are recorded because each
+# looks reasonable until it fails:
 #
-# and stops there with no kernel handoff.
+#   IMAGE_CMD:vfat -- cannot win from a recipe. image.bbclass:25 pulls
+#     image_types.bbclass in with `inherit_defer ${IMGCLASSES}`, and a deferred
+#     inherit is parsed AFTER the recipe body, so the class's
+#     `IMAGE_CMD:vfat = "oe_mkvfatfs ${EXTRA_IMAGECMD}"` lands on top. A build's
+#     sigdata showed it exactly: PACKAGE_INSTALL carried this file's edit while
+#     IMAGE_CMD:vfat still read the class value.
 #
-# Two hooks were wrong before this one, so both are recorded here.
+#   ROOTFS_POSTPROCESS_COMMAND -- too early. rootfs-postcommands.bbclass
+#     appends entries that run afterwards and expect a normal rootfs;
+#     rootfs_update_timestamp died with "cannot create .../rootfs/etc/timestamp:
+#     Directory nonexistent" once the reshaping had removed /etc.
 #
-# Overriding IMAGE_CMD:vfat cannot work from a recipe: image.bbclass pulls
-# image_types.bbclass in via `inherit_defer ${IMGCLASSES}` (image.bbclass:25),
-# and a deferred inherit is parsed AFTER the recipe body -- so the class's
-# `IMAGE_CMD:vfat = "oe_mkvfatfs ${EXTRA_IMAGECMD}"` lands on top of whatever
-# the recipe set. (Confirmed from a build's sigdata: PACKAGE_INSTALL carried
-# this file's edit while IMAGE_CMD:vfat still read the class value.)
+#   IMAGE_PREPROCESS_COMMAND -- right time, wrong idea. Moving directories
+#     inside a pseudo-tracked rootfs desynchronises pseudo's inode->path
+#     database, and the next task to touch the tree aborts:
+#     "path mismatch [2 links]: ino ... db '.../rootfs/boot/EFI/Linux'
+#     req '.../rootfs/EFI/Linux'". Recovering needs `bitbake -c clean`.
 #
-# ROOTFS_POSTPROCESS_COMMAND is too early: rootfs-postcommands.bbclass appends
-# its own entries, they run after this one, and they expect a normal rootfs --
-# rootfs_update_timestamp writes ${IMAGE_ROOTFS}/etc/timestamp and died with
-# "Directory nonexistent" once /etc was gone.
-#
-# IMAGE_PREPROCESS_COMMAND is a do_image prefunc, so it runs after do_rootfs,
-# the SPDX rootfs scan and do_image_qa have all seen the tree the packages
-# installed, and immediately before IMAGE_CMD packs it.
-esp_promote_boot() {
-    [ -d ${IMAGE_ROOTFS}/boot ] || return 0
-    tmp="${WORKDIR}/esp-promote"
-    rm -rf "$tmp"
-    mv ${IMAGE_ROOTFS}/boot "$tmp"
-    # Everything outside /boot is packaging residue -- empty dirs from the file
-    # lists -- and has no meaning on an EFI system partition.
-    find ${IMAGE_ROOTFS} -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-    find "$tmp" -mindepth 1 -maxdepth 1 -exec mv -t ${IMAGE_ROOTFS} {} +
-    rmdir "$tmp"
+# So leave the rootfs alone and change what gets packed. `:forcevariable` is
+# last in OVERRIDES, so it outranks the class's `:vfat` no matter when the
+# deferred inherit runs -- verified against bb.data_smart with OVERRIDES set
+# the way image.bbclass sets it. It is unconditional rather than per-fstype,
+# which is safe only because IMAGE_FSTYPES above is vfat and nothing else; add
+# another type and this command would be used for it too.
+esp_mkvfatfs() {
+    mkfs.vfat ${EXTRA_IMAGECMD} -C ${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat ${ROOTFS_SIZE}
+    mcopy -i "${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat" -vsmpQ ${IMAGE_ROOTFS}/boot/* ::/
 }
-IMAGE_PREPROCESS_COMMAND += "esp_promote_boot;"
+IMAGE_CMD:forcevariable = "esp_mkvfatfs"
 
 ROOTFS_SIZE ?= "614400"
 IMAGE_ROOTFS_EXTRA_SPACE = "444000"
