@@ -140,18 +140,17 @@ do_configure:prepend:avocado-imx93-frdm () {
 python () {
     if bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
         d.appendVar('SRC_URI', ' file://fit-verify.cfg')
-        # env-writeable-list.patch adds CFG_ENV_FLAGS_LIST_STATIC to
-        # include/configs/imx93_frdm.h. It rides the SAME gate as
-        # fit-verify.cfg deliberately: that fragment sets
-        # CONFIG_ENV_WRITEABLE_LIST, and that symbol without this patch leaves
-        # the permit list at its "" default, which rejects every variable
-        # arriving from the saved environment - avocado_boot_slot included -
-        # and silently breaks A/B updates. Neither is safe to ship alone.
-        #
-        # A patch rather than a .cfg entry because the permit list is a C
-        # #define in a board config header, not a Kconfig symbol, so no
-        # fragment can express it.
-        d.appendVar('SRC_URI', ' file://env-writeable-list.patch')
+        # Saved-environment lockdown, for the boards that carry a permit list
+        # and a compiled-in boot flow (env-compiled-in.cfg): the list is
+        # CFG_ENV_FLAGS_LIST_STATIC, a C #define in that board's config header
+        # that env-writeable-list.patch adds, so it cannot be a .cfg entry, and
+        # env-writeable-list.cfg's CONFIG_ENV_WRITEABLE_LIST without it would
+        # reject every saved variable - avocado_boot_slot included. The two
+        # ride the same gate and the same machine scope on purpose; a board
+        # whose Avocado boot flow still lives only in the saved environment
+        # must not get either.
+        if d.getVar('MACHINE') == 'avocado-imx93-frdm':
+            d.appendVar('SRC_URI', ' file://env-writeable-list.cfg file://env-writeable-list.patch')
         d.appendVar('DEPENDS', ' sb-keys')
         d.setVar('UBOOT_SIGN_ENABLE', '1')
         d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
