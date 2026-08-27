@@ -35,8 +35,10 @@ SYSTEMIMAGE_TYPE = "squashfs"
 do_deploy_fixup[dirs] = "${DEPLOY_DIR_IMAGE}/${IMAGE_BASENAME}"
 do_deploy_fixup[cleandirs] = "${DEPLOY_DIR_IMAGE}/${IMAGE_BASENAME}"
 do_deploy_fixup[depends] += "esp-avocado-qcom-image:do_image_complete"
-do_deploy_fixup[depends] += "dtb-qcom-image:do_image_complete"
-do_deploy_fixup[depends] += "dtb-el2-qcom-image:do_image_complete"
+# dtb.bin (dtb_a partition): the vfat image linux-qcom-dtbbin builds around
+# combined-dtb.dtb for KERNEL_DEVICETREE - the same file layout Thundercomm's
+# UEFI reads that the old meta-qcom-hwe dtb-qcom-image produced from mergedtb.
+do_deploy_fixup[depends] += "virtual/kernel:do_qcom_dtbbin_deploy"
 do_deploy_fixup[deptask] = "do_image_complete"
 
 DEPLOYDEPENDS = " \

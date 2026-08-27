@@ -22,12 +22,23 @@ RDEPENDS:${PN} = " \
 # Qualcomm SoC firmware + GPU/display/video/graphics/multimedia stack — heavy
 # graphics packages staged in the feed; the BSP extension installs them when
 # the user actually wants display, video accelerator, etc.
+# QCS6490 SoC firmware and userspace on the upstream BSP: linux-firmware's
+# per-block qcm6490 packages (meta-lts-mixins 20260810), mesa/freedreno GPU,
+# mainline venus video and audioreach audio. The meta-qcom-hwe packagegroups
+# this listed before (packagegroup-firmware-qcm6490, -qcom-display/-graphics/
+# -video) were the proprietary adreno/PAL stack and are gone with that layer.
 RDEPENDS:${PN}:append:qcm6490 = " \
-    packagegroup-firmware-qcm6490 \
-    packagegroup-qcom-data \
-    packagegroup-qcom-display \
-    packagegroup-qcom-graphics \
-    packagegroup-qcom-video \
+    linux-firmware-qcom-adreno-a660 \
+    linux-firmware-qcom-qcm6490-adreno \
+    linux-firmware-qcom-qcm6490-audio \
+    linux-firmware-qcom-qcm6490-compute \
+    linux-firmware-qcom-qcm6490-ipa \
+    linux-firmware-qcom-qcm6490-qupv3fw \
+    linux-firmware-qcom-qcm6490-wifi \
+    linux-firmware-qcom-vpu \
+    packagegroup-qcom-boot-essential \
+    packagegroup-qcom-boot-additional \
+    mesa \
     gstreamer1.0 \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -35,13 +46,9 @@ RDEPENDS:${PN}:append:qcm6490 = " \
     gstreamer1.0-rtsp-server \
     v4l-utils \
 "
-
-# RUBIK Pi 3 board-specific packages — peripheral firmware, BSA Bluetooth
-# stack, Wi-Fi config, fan controller, GPIO library, init services. All
-# published to the feed; BSP extension picks which to install on the device.
 RDEPENDS:${PN}:append:rubikpi3 = " \
     firmware-rubikpi3 \
-    qcom-pw-pal-plugin \
+    linux-firmware-qcom-qcs6490-thundercomm-rubikpi3-audio \
     rubikpi-bt-staticdev \
     rubikpi-wifi \
     rubikpi3-init-services-bt \
