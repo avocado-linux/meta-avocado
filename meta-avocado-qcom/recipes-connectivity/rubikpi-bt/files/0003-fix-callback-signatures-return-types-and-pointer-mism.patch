@@ -1,0 +1,247 @@
+From: Justin Schneck <j.schneck@peridio.com>
+Subject: [PATCH] fix callback signatures, return types and pointer mismatches
+
+GCC 14 promotes -Wincompatible-pointer-types, -Wreturn-mismatch and
+-Wint-conversion to errors, which surfaces sixteen long-standing type
+errors in the demo sources. Each fix takes the type the surrounding
+code already requires -- no behaviour is invented:
+
+fm.c
+  default_rds_cb() is assigned to a tAPP_FM_RDS_CBACK field
+  (void (tBSA_FM_RDS_EVT, UINT8 *), fm.h:61) but took tBSA_FM_EVT.
+  app_fm_rds_cback() is passed to BSA_FmRdsRegister() as a
+  tBSA_FM_RDS_CBACK (bsa_fm_api.h:449, void (tBSA_FM_EVT, UINT8 *))
+  but took UINT16. RDS event values are 2/8/14 so both are lossless.
+
+fm_main.c
+  app_fm_init() returns void; two callers tested "< 0" for failure.
+  Dropped the dead test and kept the call.
+
+test_vsc.c
+  Three error paths in app_tm_vsc_tx_test()/app_tm_vsc_rx_test() did a
+  bare "return;" from an int function documented "0 if success, -1
+  otherwise". Return -1.
+
+test_vse.c / test_vse.h
+  app_tm_vse_pkt_count_callback() is a tAPP_TM_CUSTOM_CBACK
+  (test_vse.h:67, BOOLEAN (tBSA_TM_EVT, tBSA_TM_MSG *)) and its body
+  already ends in "return exit_cback;", but it was declared void.
+  app_tm_vse_pkt_register() then handed that app-level callback
+  straight to BSA instead of the void dispatcher; register
+  app_tm_vse_generic_callback and stash the caller's callback in the
+  control block, exactly as the sibling app_tm_vse_register() does.
+
+app_ble_ancs.c
+  notfn_thread is a tAPP_THREAD (pthread_t, an integer); cleared with
+  NULL while the adjacent fields use 0. And a "return -1;" sat in
+  ancs_client_send_next_get_notification_attributes_command(), whose
+  own header block documents "Returns void".
+
+app_ble_tvselect_server.c
+  service_data_val is UINT8[BSA_DM_BLE_AD_UUID_MAX][BSA_DM_BLE_AD_DATA_LEN]
+  (bsa_dm_api.h:322); the two assignments to a UINT8 * dropped the
+  index that every neighbouring line uses.
+
+pbapc.c (two identical copies in the tree)
+  pbc_is_open() passes its BD_ADDR * to bdcpy(), which takes a BD_ADDR
+  (bd.h:46). Dereference it.
+
+Upstream-Status: Inappropriate [vendor demo tree, no upstream process]
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+diff --git a/src/linux/app_ble_ancs/source/app_ble_ancs.c b/src/linux/app_ble_ancs/source/app_ble_ancs.c
+index b4c016f..fad7422 100644
+--- a/src/linux/app_ble_ancs/source/app_ble_ancs.c
++++ b/src/linux/app_ble_ancs/source/app_ble_ancs.c
+@@ -359,7 +359,7 @@ int app_ble_ancs_register(void)
+     ancs_clcb.thread_client_num = 0;
+     ancs_clcb.thread_uid = 0;
+     ancs_clcb.bNotfnThreadInitialized = FALSE;
+-    ancs_clcb.notfn_thread = NULL;
++    ancs_clcb.notfn_thread = 0;
+ 
+     return 0;
+ }
+@@ -488,7 +488,7 @@ void ancs_client_send_next_get_notification_attributes_command(UINT16 client_num
+     if (status < 0)
+     {
+         APP_ERROR1("app_create_thread failed: %d", status);
+-        return -1;
++        return;
+     }
+     else
+         ancs_clcb.bNotfnThreadInitialized = TRUE;
+diff --git a/src/linux/app_ble_tvselect/source/app_ble_tvselect_server.c b/src/linux/app_ble_tvselect/source/app_ble_tvselect_server.c
+index 735f813..fed0fc1 100644
+--- a/src/linux/app_ble_tvselect/source/app_ble_tvselect_server.c
++++ b/src/linux/app_ble_tvselect/source/app_ble_tvselect_server.c
+@@ -140,7 +140,7 @@ int app_ble_tvselect_server_start(void)
+     adv_conf.service_data_uuid[0].len = sizeof(adv_meta_data.service_uuid);
+     adv_conf.service_data_uuid[0].uu.uuid16 = adv_meta_data.service_uuid;
+ 
+-    p = adv_conf.service_data_val;
++    p = adv_conf.service_data_val[0];
+     UINT8_TO_STREAM(p, adv_meta_data.lt_addr);         /*Byte4  LT Addr */
+     UINT16_TO_STREAM(p, adv_meta_data.attr_data);      /*Byte5-6: attribute data*/
+     ARRAY_TO_STREAM(p, adv_meta_data.channel_name, adv_meta_data.channel_name_len);
+@@ -259,7 +259,7 @@ void app_ble_tvselect_server_update_advertise_packet(UINT16 metatype, UINT8* met
+     adv_conf.service_data_uuid[0].len = LEN_UUID_16;
+     adv_conf.service_data_uuid[0].uu.uuid16 = adv_meta_data.service_uuid;
+ 
+-    p = adv_conf.service_data_val;
++    p = adv_conf.service_data_val[0];
+     UINT8_TO_STREAM(p, adv_meta_data.lt_addr);         /*Byte4  LT Addr */
+     UINT16_TO_STREAM(p, adv_meta_data.attr_data);      /*Byte5-6: attribute data*/
+ 
+diff --git a/src/linux/fm/source/fm.c b/src/linux/fm/source/fm.c
+index 4233dc5..7d75970 100644
+--- a/src/linux/fm/source/fm.c
++++ b/src/linux/fm/source/fm.c
+@@ -80,9 +80,9 @@ tAPP_RDS_CB app_rds_cb;
+ static void app_fm_cback(tBSA_FM_EVT event, tBSA_FM *p_data);
+ static BOOLEAN app_fm_refresh_rssi_threshold(void);
+ void defualt_cb(tBSA_FM_EVT event, tBSA_FM *p_data){}
+-void default_rds_cb(tBSA_FM_EVT event, UINT8*p_data){}
++void default_rds_cb(tBSA_FM_RDS_EVT event, UINT8*p_data){}
+ void app_fm_cback(tBSA_FM_EVT event, tBSA_FM *p_data);
+-void app_fm_rds_cback(UINT16 event, UINT8*p_data);
++void app_fm_rds_cback(tBSA_FM_EVT event, UINT8*p_data);
+ 
+ void app_fm_init(tAPP_FM_CBACK app_cb, tAPP_FM_RDS_CBACK rds_cb)
+ {
+@@ -764,7 +764,7 @@ void app_fm_cback(tBSA_FM_EVT event, tBSA_FM *p_data)
+  **
+  ** Returns          void
+  *******************************************************************************/
+-void app_fm_rds_cback(UINT16 event, UINT8*p_data)
++void app_fm_rds_cback(tBSA_FM_EVT event, UINT8*p_data)
+ {
+ #if APP_FM_DEBUG==TRUE
+     APPL_TRACE_EVENT1("[FM] app_fm_hdl_rds_evt(%d)", event );
+diff --git a/src/linux/fm/source/fm_main.c b/src/linux/fm/source/fm_main.c
+index 03f6802..9d6a71e 100644
+--- a/src/linux/fm/source/fm_main.c
++++ b/src/linux/fm/source/fm_main.c
+@@ -459,11 +459,7 @@ int main(int argc, char **argv)
+     }
+ 
+     /* Initialize FM application */
+-    if (app_fm_init(app_fm_cback,app_main_fm_rds_cback) < 0)
+-    {
+-        APP_ERROR0("Unable to init FM");
+-        return -1;
+-    }
++    app_fm_init(app_fm_cback, app_main_fm_rds_cback);
+ 
+     do
+     {
+@@ -532,11 +528,7 @@ int fm_menu_handle(void)
+ 
+     app_mgt_custom_cback_update(app_fm_mgt_callback);
+     /* Initialize FM application */
+-    if (app_fm_init(app_fm_cback,app_main_fm_rds_cback) < 0)
+-    {
+-        APP_ERROR0("Unable to init FM");
+-        return -1;
+-    }
++    app_fm_init(app_fm_cback, app_main_fm_rds_cback);
+ 
+     do
+     {
+diff --git a/src/linux/pbap/source/pbapc.c b/src/linux/pbap/source/pbapc.c
+index d498571..2cf0fbf 100644
+--- a/src/linux/pbap/source/pbapc.c
++++ b/src/linux/pbap/source/pbapc.c
+@@ -875,7 +875,7 @@ BOOLEAN pbc_is_open(BD_ADDR *bda)
+     BOOLEAN bopen = app_pbc_cb.is_open;
+     if(bopen)
+     {
+-        bdcpy(bda, app_pbc_cb.bda_connected);
++        bdcpy(*bda, app_pbc_cb.bda_connected);
+     }
+ 
+     return bopen;
+diff --git a/src/linux/pbapc/source/pbapc.c b/src/linux/pbapc/source/pbapc.c
+index d498571..2cf0fbf 100644
+--- a/src/linux/pbapc/source/pbapc.c
++++ b/src/linux/pbapc/source/pbapc.c
+@@ -875,7 +875,7 @@ BOOLEAN pbc_is_open(BD_ADDR *bda)
+     BOOLEAN bopen = app_pbc_cb.is_open;
+     if(bopen)
+     {
+-        bdcpy(bda, app_pbc_cb.bda_connected);
++        bdcpy(*bda, app_pbc_cb.bda_connected);
+     }
+ 
+     return bopen;
+diff --git a/src/linux/test/include/test_vse.h b/src/linux/test/include/test_vse.h
+index 9befac6..14efa8d 100644
+--- a/src/linux/test/include/test_vse.h
++++ b/src/linux/test/include/test_vse.h
+@@ -269,6 +269,6 @@ int app_tm_vse_pkt_register(int sub_event, tAPP_TM_CUSTOM_CBACK p_callback);
+  ** Returns        void
+  **
+  *******************************************************************************/
+-void app_tm_vse_pkt_count_callback (tBSA_TM_EVT event, tBSA_TM_MSG *p_data);
++BOOLEAN app_tm_vse_pkt_count_callback (tBSA_TM_EVT event, tBSA_TM_MSG *p_data);
+ #endif /* APP_TM_VSE_H */
+ 
+diff --git a/src/linux/test/source/test_vsc.c b/src/linux/test/source/test_vsc.c
+index 54e73f5..e5f454e 100644
+--- a/src/linux/test/source/test_vsc.c
++++ b/src/linux/test/source/test_vsc.c
+@@ -995,7 +995,7 @@ int app_tm_vsc_tx_test()
+             &tx_test_cmd.bd_addr[4], &tx_test_cmd.bd_addr[5]) != 6)
+     {
+         APP_ERROR0("BD address not entered correctly");
+-        return;
++        return -1;
+     }
+     getchar();
+ 
+@@ -1023,7 +1023,7 @@ int app_tm_vsc_tx_test()
+                     &tx_test_cmd.chan_map[8], &tx_test_cmd.chan_map[9]) != 10)
+         {
+             APP_ERROR0("Channel map not entered correctly");
+-            return;
++            return -1;
+         }
+         getchar();
+     } else {
+@@ -1177,7 +1177,7 @@ int app_tm_vsc_rx_test()
+             &rx_test_cmd.bd_addr[4], &rx_test_cmd.bd_addr[5]) != 6)
+     {
+         APP_ERROR0("BD address not entered correctly");
+-        return;
++        return -1;
+     }
+     getchar();
+ 
+diff --git a/src/linux/test/source/test_vse.c b/src/linux/test/source/test_vse.c
+index 44324ee..e26bfe3 100644
+--- a/src/linux/test/source/test_vse.c
++++ b/src/linux/test/source/test_vse.c
+@@ -624,12 +624,12 @@ int app_tm_vse_pkt_register(int sub_event, tAPP_TM_CUSTOM_CBACK p_callback)
+     APP_DEBUG1("sub_event=%d", sub_event);
+ 
+     /* Save user's callback */
+-    //app_tm_vse_cb.p_callback = p_callback;
++    app_tm_vse_cb.p_callback = p_callback;
+ 
+     /* Initialize parameters */
+     BSA_TmVseRegisterInit(&bsa_register);
+ 
+-    bsa_register.p_callback = p_callback;
++    bsa_register.p_callback = app_tm_vse_generic_callback;
+     bsa_register.sub_event = sub_event;
+     bsa_status = BSA_TmVseRegister(&bsa_register);
+     if (bsa_status != BSA_SUCCESS)
+@@ -652,7 +652,7 @@ int app_tm_vse_pkt_register(int sub_event, tAPP_TM_CUSTOM_CBACK p_callback)
+  ** Returns        void
+  **
+  *******************************************************************************/
+-void app_tm_vse_pkt_count_callback (tBSA_TM_EVT event, tBSA_TM_MSG *p_data)
++BOOLEAN app_tm_vse_pkt_count_callback (tBSA_TM_EVT event, tBSA_TM_MSG *p_data)
+ {
+     BOOLEAN exit_cback= FALSE;
+ 

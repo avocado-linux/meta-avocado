@@ -11,6 +11,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI = "git://github.com/rubikpi-ai/rubikpi_bt_bsa_demo.git;branch=main;protocol=https \
     file://0001-main.h-include-the-headers-that-declare-map-and-ble_hrc-menus.patch \
     file://0002-declare-the-functions-callers-use-and-fix-two-menu-calls.patch \
+    file://0003-fix-callback-signatures-return-types-and-pointer-mism.patch \
 "
 SRCREV = "c83d8155df3a9bf381b44552a3a2500eb0c001ab"
 
