@@ -37,3 +37,19 @@ header:
     file: kas/feature/java.yml
   - repo: meta-avocado
     file: kas/feature/containers.yml
+
+# Security features that are safe to ship whenever the machine can deliver
+# them. Requested through the machine's own AVOCADO_SECURITY_CAPABILITIES
+# declaration rather than appended outright: avocado-security-capabilities
+# bb.fatals on a request the machine has not declared, and this file is built
+# for every machine, so an unconditional token would take down the boards that
+# have not been migrated onto the declaration. A machine that has not declared
+# encrypted-var builds exactly as before.
+#
+# encrypted-var only. verified-boot is NOT here on purpose: it embeds the
+# distro FIT key into U-Boot and enforces it, so a project's own FIT (its
+# initramfs, its rootfs root hash) would not boot without replacing the
+# bootloader. That is a per-product decision made with kas/feature/verified-boot.yml.
+local_conf_header:
+  feature/complete-security: |
+    DISTRO_FEATURES:append = "${@bb.utils.contains('AVOCADO_SECURITY_CAPABILITIES', 'encrypted-var', ' encrypted-var', '', d)}"
