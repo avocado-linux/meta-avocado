@@ -1,0 +1,83 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "http://spdx.org/spdxdocs/example/document",
+      "name": "recipe-example"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/example/package/example",
+      "name": "example",
+      "software_packageVersion": "1.0"
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/example/source/1",
+      "name": "example-1.0.tar.gz",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "aa"}]
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/example/source/2",
+      "name": "CVE-2024-28085-0001.patch",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "bb"}]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/relationship/1",
+      "from": "http://spdx.org/spdxdocs/example/package/example",
+      "relationshipType": "hasInputs",
+      "to": [
+        "http://spdx.org/spdxdocs/example/source/1",
+        "http://spdx.org/spdxdocs/example/source/2"
+      ]
+    },
+    {
+      "type": "security_Vulnerability",
+      "spdxId": "http://spdx.org/spdxdocs/example/vulnerability/CVE-2021-42380",
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2021-42380"
+        }
+      ]
+    },
+    {
+      "type": "security_Vulnerability",
+      "spdxId": "http://spdx.org/spdxdocs/example/vulnerability/CVE-2019-1010022",
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "cve",
+          "identifier": "CVE-2019-1010022"
+        }
+      ]
+    },
+    {
+      "type": "security_VexFixedVulnAssessmentRelationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/vex/1",
+      "from": "http://spdx.org/spdxdocs/example/vulnerability/CVE-2021-42380",
+      "relationshipType": "fixedIn",
+      "to": ["http://spdx.org/spdxdocs/example/package/example"]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/relationship/2",
+      "from": "http://spdx.org/spdxdocs/example/package/example",
+      "relationshipType": "hasAssociatedVulnerability",
+      "to": [
+        "http://spdxdocs.org/openembedded-alias/by-doc-hash/deadbeef/other/UNIHASH/vulnerability/CVE-2019-1010023"
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "http://spdx.org/spdxdocs/example/relationship/3",
+      "from": "http://spdx.org/spdxdocs/example/package/example",
+      "relationshipType": "contains",
+      "to": ["http://spdx.org/spdxdocs/example/vulnerability/CVE-2019-1010022"]
+    }
+  ]
+}
