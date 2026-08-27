@@ -33,28 +33,38 @@ inherit image
 IMAGE_FSTYPES = "vfat"
 IMAGE_FSTYPES_DEBUGFS = ""
 
-# Build the vfat from ${IMAGE_ROOTFS}/boot, not ${IMAGE_ROOTFS}.
+# Make the rootfs *be* the ESP: /EFI/... at the top level.
 #
-# UEFI reads an ESP's *root* for \EFI\BOOT\BOOTAA64.EFI and \EFI\Linux\*.efi,
-# but both packages install a level down -- linux-avocado-qcom-uki into
-# /boot/EFI/Linux, systemd-boot into /boot/EFI/BOOT, systemd-bootconf into
-# /boot/loader. oe_mkvfatfs copies ${IMAGE_ROOTFS}/*, which puts all of that
-# under a /boot directory on the partition, alongside the empty /bin, /lib,
-# /usr and /var the package file lists drag in. UEFI then finds nothing
-# bootable, reports
+# UEFI reads an ESP's root for \EFI\BOOT\BOOTAA64.EFI and \EFI\Linux\*.efi, but
+# both packages install a level down -- linux-avocado-qcom-uki into
+# /boot/EFI/Linux, systemd-boot into /boot/EFI/BOOT. oe_mkvfatfs copies
+# ${IMAGE_ROOTFS}/*, so without this the payloads land under a /boot directory
+# on the partition, beside the empty /bin, /lib, /usr and /var the package file
+# lists drag in. UEFI finds nothing bootable, prints
 #
 #   [QcomBds] Removable boot path
 #
 # and stops there with no kernel handoff.
 #
-# Mirrors oe_mkvfatfs (image_types.bbclass) with the source directory changed;
-# overriding the command rather than reshaping the rootfs keeps do_rootfs and
-# everything derived from it (manifest, SPDX, QA) seeing the tree the packages
-# actually installed.
-IMAGE_CMD:vfat () {
-    mkfs.vfat ${EXTRA_IMAGECMD} -C ${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat ${ROOTFS_SIZE}
-    mcopy -i "${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat" -vsmpQ ${IMAGE_ROOTFS}/boot/* ::/
+# Done as a rootfs postprocess rather than by overriding IMAGE_CMD:vfat,
+# because that override cannot win from a recipe: image.bbclass pulls
+# image_types.bbclass in via `inherit_defer ${IMGCLASSES}` (image.bbclass:25),
+# and a deferred inherit is parsed AFTER the recipe body -- so the class's
+# `IMAGE_CMD:vfat = "oe_mkvfatfs ${EXTRA_IMAGECMD}"` lands on top of anything
+# the recipe sets. (Confirmed against a build: PACKAGE_INSTALL from this file
+# reached the task's sigdata while IMAGE_CMD:vfat still read the class value.)
+esp_promote_boot() {
+    [ -d ${IMAGE_ROOTFS}/boot ] || return 0
+    tmp="${WORKDIR}/esp-promote"
+    rm -rf "$tmp"
+    mv ${IMAGE_ROOTFS}/boot "$tmp"
+    # Everything outside /boot is packaging residue -- empty dirs from the file
+    # lists -- and has no meaning on an EFI system partition.
+    find ${IMAGE_ROOTFS} -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    find "$tmp" -mindepth 1 -maxdepth 1 -exec mv -t ${IMAGE_ROOTFS} {} +
+    rmdir "$tmp"
 }
+ROOTFS_POSTPROCESS_COMMAND += "esp_promote_boot;"
 
 ROOTFS_SIZE ?= "614400"
 IMAGE_ROOTFS_EXTRA_SPACE = "444000"
