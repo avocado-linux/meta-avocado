@@ -163,8 +163,9 @@ do_deploy:append() {
 # to a field the pinned tool has never heard of fails silently and green, which
 # is worse than having no conflict detection.
 #
-# Both inputs are deployed unconditionally by linux-imx, so neither depends on
-# the PoC feature being on.
+# The DTB is deployed unconditionally by linux-imx. Image.signed is not - it is
+# produced by the signing block below, under this same token, so the manifest
+# entry and its input appear and disappear together.
 AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}"
 
 # Wrapped in an `if` rather than guarded by an early `return`, for the reason
@@ -176,12 +177,12 @@ AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-inte
 # it depends on parse order to stay harmless.
 do_deploy:append:avocado-imx93-frdm() {
   if [ "${AVOCADO_BOOT_INTEGRITY_POC}" = "1" ]; then
-    bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is PoC scaffolding: the staged kernel is unauthenticated and writable by anyone with access to the boot medium."
+    bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is PoC scaffolding. The staged kernel is signed against the enrolled db, so the firmware refuses a replacement it cannot verify - but the boot medium is still writable by anyone with access to it, and the bootloader that performs that verification is itself unauthenticated, because AHAB is open on this part and cannot be closed. A boot-medium writer can replace U-Boot, seed and all."
 
     manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
     jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
       '.storage_devices.rootdisk.images.boot.build_args.files += [
-         {"in": "Image", "out": "EFI/BOOT/BOOTAA64.EFI"},
+         {"in": "Image.signed", "out": "EFI/BOOT/BOOTAA64.EFI"},
          {"in": $dtb, "out": $dtb}
        ]' \
       "$manifest" > "$manifest.efi-poc"
