@@ -98,6 +98,16 @@
         },
         "rootfs": "avocado-image-rootfs-imx8mp-var-dart.erofs-lz4",
         "rootfs_hash": "avocado-image-rootfs-imx8mp-var-dart.verity",
+        "esp": {
+          "out": "esp.img",
+          "size": 64,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": []
+          }
+        },
         "var": "avocado-image-var-imx8mp-var-dart.btrfs"
       },
       "partitions": [
@@ -155,6 +165,12 @@
           "name": "rootfs-b-hash",
           "image": "",
           "size": 8,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "esp",
+          "image": "esp",
+          "size": 64,
           "size_unit": "mebibytes"
         },
         {

@@ -96,6 +96,16 @@
         },
         "rootfs": "avocado-image-rootfs-imx91-frdm.erofs-lz4",
         "rootfs_hash": "avocado-image-rootfs-imx91-frdm.verity",
+        "esp": {
+          "out": "esp.img",
+          "size": 64,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "files": []
+          }
+        },
         "var": "avocado-image-var-imx91-frdm.btrfs"
       },
       "partitions": [
@@ -153,6 +163,12 @@
           "name": "rootfs-b-hash",
           "image": "",
           "size": 8,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "esp",
+          "image": "esp",
+          "size": 64,
           "size_unit": "mebibytes"
         },
         {
