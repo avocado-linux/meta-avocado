@@ -1,0 +1,134 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] declare the functions callers use, and fix two hfp_ag menu calls
+
+GCC 14 promoted -Wimplicit-function-declaration to an error. Beyond the two
+wrong #includes fixed in the previous patch, a sweep of all 126 sources this
+build compiles (host gcc, same -D/-I set) found nine more implicit
+declarations. Every one is a missing prototype for a function that IS defined
+in the tree, or a missing libc header:
+
+  app_dm_monitor_txpower    app_dm.c:886      -> common/include/app_dm.h
+  app_mgt_set_cod           manager.c:1652    -> manager/include/manager.h
+  app_av_reset_folder_info  av.c:2829         -> av/include/av.h
+  app_fm_init               fm.c:87           -> fm/include/fm.h
+  app_fm_mute_audio         fm.c:479          -> fm/include/fm.h
+  app_tm_vsc_tx_test        test_vsc.c:975    -> test/include/test_vsc.h
+  app_tm_vsc_rx_test        test_vsc.c:1158   -> test/include/test_vsc.h
+  sleep                     libc              -> <unistd.h> in app_ble_ancs.c
+
+The ninth is a copy-paste bug, twice over: hfp_ag_menu_handle() calls
+hfp_client_menu_display() - another module's menu - for both HELP_MENU and
+the unknown-choice default. Every other module's handler calls its own
+<module>_menu_display(), and hfp_ag_menu_display() is declared in hfp_ag.h,
+which this file already includes. Call it instead; that also removes the
+cross-module dependency rather than papering over it with another #include.
+
+app_alsa.c and app_bthid.c are not covered: this configuration builds neither
+(ENABLE_ALSA and ENABLE_BTHID both default to FALSE in the Makefile, so
+PCM_ALSA / APP_BTHID_INCLUDED are unset), and neither appears in the build
+log.
+
+Upstream-Status: Inappropriate [vendor fork, rubikpi-ai/rubikpi_bt_bsa_demo]
+---
+diff --git a/src/linux/app_ble_ancs/source/app_ble_ancs.c b/src/linux/app_ble_ancs/source/app_ble_ancs.c
+index b59db80..b4c016f 100644
+--- a/src/linux/app_ble_ancs/source/app_ble_ancs.c
++++ b/src/linux/app_ble_ancs/source/app_ble_ancs.c
+@@ -9,6 +9,7 @@
+ **
+ *****************************************************************************/
+ 
++#include <unistd.h>            /* sleep() */
+ #include "app_ble.h"
+ #include "app_xml_utils.h"
+ #include "app_utils.h"
+diff --git a/src/linux/av/include/av.h b/src/linux/av/include/av.h
+index 512c015..afb82f6 100644
+--- a/src/linux/av/include/av.h
++++ b/src/linux/av/include/av.h
+@@ -683,6 +683,9 @@ int app_av_rc_add_to_now_playing_meta_response(int index, tBSA_AV_META_MSG_MSG *
+  *******************************************************************************/
+ void app_av_change_song(BOOLEAN forward);
+ 
++/* Defined in av.c; av_main.c calls it. */
++void app_av_reset_folder_info(void);
++
+ #ifndef DEMO_MODE
+ int av_menu_handle(void);
+ void av_menu_display(void);
+diff --git a/src/linux/common/include/app_dm.h b/src/linux/common/include/app_dm.h
+index 3f89d13..db3c87c 100644
+--- a/src/linux/common/include/app_dm.h
++++ b/src/linux/common/include/app_dm.h
+@@ -286,4 +286,7 @@ int app_dm_set_ble_adv_param(tBSA_DM_BLE_ADV_PARAM *p_req);
+  **
+  *******************************************************************************/
+ int app_dm_monitor_rssi(BOOLEAN enable, UINT16 period);
++
++/* Defined in app_dm.c; manager_main.c calls it. */
++int app_dm_monitor_txpower(BOOLEAN enable, UINT16 period);
+ #endif
+diff --git a/src/linux/fm/include/fm.h b/src/linux/fm/include/fm.h
+index ae21d6c..34aa87a 100644
+--- a/src/linux/fm/include/fm.h
++++ b/src/linux/fm/include/fm.h
+@@ -359,6 +359,10 @@ _EXT_ void app_fm_set_deemphasis(tBSA_FM_DEEMPHA_TIME interval);
+  *******************************************************************************/
+ _EXT_ void app_fm_rdsp_cback(tBSA_RDS_EVT event, tBSA_FM_RDS *p_data, UINT8 app_id);
+ 
++/* Defined in fm.c; fm_main.c calls both. */
++void app_fm_init(tAPP_FM_CBACK app_cb, tAPP_FM_RDS_CBACK rds_cb);
++void app_fm_mute_audio(BOOLEAN mute);
++
+ #ifndef DEMO_MODE
+ int fm_menu_handle(void);
+ void fm_menu_display(void);
+diff --git a/src/linux/hfp_ag/source/hfp_ag_main.c b/src/linux/hfp_ag/source/hfp_ag_main.c
+index 22d8a37..5c8f7d2 100644
+--- a/src/linux/hfp_ag/source/hfp_ag_main.c
++++ b/src/linux/hfp_ag/source/hfp_ag_main.c
+@@ -358,7 +358,7 @@ int hfp_ag_menu_handle(void)
+             APP_INFO0("Back to main menu...");
+             return 0;
+         case HELP_MENU:
+-            hfp_client_menu_display();
++            hfp_ag_menu_display();
+             break;
+         case APP_AG_KEY_INIT:
+             app_ag_init();
+@@ -491,7 +491,7 @@ int hfp_ag_menu_handle(void)
+ 
+         default:
+             APP_ERROR1("Unknown choice:%d", choice);
+-            hfp_client_menu_display();
++            hfp_ag_menu_display();
+             break;
+         }
+     } while (choice != MENU_QUIT); /* While user don't exit application */
+diff --git a/src/linux/manager/include/manager.h b/src/linux/manager/include/manager.h
+index 80d1299..7a888a8 100644
+--- a/src/linux/manager/include/manager.h
++++ b/src/linux/manager/include/manager.h
+@@ -387,6 +387,9 @@ void app_mgr_set_remote_oob();
+  *******************************************************************************/
+ void app_mgr_set_link_policy(BD_ADDR bd_addr, tBSA_DM_LP_MASK policy_mask, BOOLEAN set);
+ 
++/* Defined in manager.c; manager_main.c calls it. */
++int app_mgt_set_cod(void);
++
+ #ifndef DEMO_MODE
+ int manager_menu_handle(void);
+ void manager_menu_display(void);
+diff --git a/src/linux/test/include/test_vsc.h b/src/linux/test/include/test_vsc.h
+index 5eae8fa..df26a1f 100644
+--- a/src/linux/test/include/test_vsc.h
++++ b/src/linux/test/include/test_vsc.h
+@@ -335,4 +335,8 @@ int app_tm_vsc_configure_sco();
+  *******************************************************************************/
+ int app_tm_vsc_set_connection_priority();
+ 
++/* Defined in test_vsc.c; test_main.c calls both. */
++int app_tm_vsc_tx_test(void);
++int app_tm_vsc_rx_test(void);
++
+ #endif /* APP_TM_VSC_H_ */
