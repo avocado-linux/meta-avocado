@@ -10,6 +10,10 @@ PACKAGES = "${PN}"
 TARGET_ARCH = "${SDK_ARCH}"
 
 # These variables are derived from meta-avocado/classes/populate_sdk_base.bbclass
+# u-boot-tools by provider, not package name: BSP layers (meta-imx) ship their
+# own fork that PROVIDES nativesdk-u-boot-tools and set PREFERRED_PROVIDER for
+# it, but the package is still named after the fork. Naming the oe-core package
+# here would pull both recipes into one build.
 TOOLCHAIN_HOST_TASK = " \
     avocado-sdk-target \
     nativesdk-autoconf \
@@ -40,7 +44,7 @@ TOOLCHAIN_HOST_TASK = " \
     nativesdk-erofs-utils \
     nativesdk-squashfs-tools \
     nativesdk-systemd-systemctl \
-    nativesdk-u-boot-tools \
+    ${@d.getVar('PREFERRED_PROVIDER_nativesdk-u-boot-tools') or 'nativesdk-u-boot-tools'} \
     nativesdk-unfs3 \
     nativesdk-util-linux-losetup \
     nativesdk-util-linux-umount \
