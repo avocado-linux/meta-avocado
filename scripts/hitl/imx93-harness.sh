@@ -141,8 +141,14 @@ usage: imx93-harness.sh <mode>
                                store; fails with a clear message on firmware that
                                has none. Proves PERSISTENCE, not tamper-resistance.
   --assert-boot-integrity-report
-                               on-device reporter emits enforcement + root-of-trust
-                                                                 [NOT IMPLEMENTED]
+                               boot, then confirm the record the on-device
+                               reporter publishes carries BOTH an enforcement
+                               value and a root-of-trust indicator. Fails when
+                               enforcement is unavailable (efivarfs never
+                               appeared, so the EFI hand-off did not take), and
+                               fails when the root of trust reads authenticated
+                               on this board - its AHAB lifecycle cannot be
+                               closed, so that reading is a reader bug.
 
   --ums-hold                   NOT an assertion. Power-cycle, stop at the U-Boot
                                prompt, print `version`, export the SD card over
@@ -170,12 +176,7 @@ case "${1:-}" in
     run_mode slot_boots "$2"
     ;;
   --assert-uefi-var-persists) run_mode uefi_var_persists ;;
-  # Deliberately non-zero rather than a no-op that exits 0. A stub that
-  # succeeds is worse than a missing one: it turns an unimplemented check into
-  # a passing verify: line, and the task it gates reads as verified.
-  --assert-boot-integrity-report)
-    die "${1} is not implemented yet - it lands with the reporter in group 4"
-    ;;
+  --assert-boot-integrity-report) run_mode boot_integrity_report ;;
   --ums-hold) run_ums_hold ;;
   --ums-stop) ums_stop ;;
   *) usage ;;

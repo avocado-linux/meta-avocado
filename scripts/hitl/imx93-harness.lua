@@ -287,4 +287,47 @@ if MODE == "ums_stop" then
   pass("export stopped; board is at the U-Boot prompt")
 end
 
+-- Boot, then read the record the on-device reporter publishes and check it
+-- carries BOTH halves. Enforcement alone is the failure this whole change
+-- exists to prevent, so a record with one and not the other fails here rather
+-- than reaching a fleet view.
+if MODE == "boot_integrity_report" then
+  if not reach_prompt(180) then fail("never reached the U-Boot prompt") end
+  cmd("reset", 500)
+  if not await_login(240) then fail("board did not reach a login prompt") end
+
+  -- Passwordless root on the bringup image; the getty says so itself.
+  cmd("root", 4000)
+  if not saw("avocado%-imx93%-frdm:~#") then fail("did not reach a root shell") end
+
+  -- Match ONLY on strings the file contains. The getty echoes its own input, so
+  -- a pattern that also appears in the command sent would report success against
+  -- a board that ran nothing - the failure this harness's header warns about.
+  -- `cat /run/avocado-boot-integrity` carries neither key below.
+  cmd("cat /run/avocado-boot-integrity", 4000)
+
+  if not saw("enforcement=") then
+    fail("no enforcement value in the record - the reporter did not run")
+  end
+  if not saw("rot_state=") then
+    fail("record carries enforcement with no root-of-trust indicator")
+  end
+
+  -- efivarfs never appeared, so the kernel was not entered through the EFI stub
+  -- and the boot path change did not take.
+  if saw("enforcement=unavailable") then
+    fail("enforcement is unavailable - efivarfs did not appear, so the EFI hand-off did not take")
+  end
+
+  -- The expected result on THIS board, and the direction that matters. Its
+  -- SRK_HASH fuse is burned byte-swapped, so AHAB cannot be closed and nothing
+  -- anchors the firmware. An indicator reading authenticated is a defect in the
+  -- reader, not good news, and must fail rather than be reported as a pass.
+  if saw("rot_state=authenticated") then
+    fail("root of trust reads authenticated on a board whose AHAB lifecycle is open")
+  end
+
+  pass("record carries enforcement and a root-of-trust indicator; root of trust is not authenticated")
+end
+
 fail("unknown HARNESS_MODE '" .. MODE .. "'")
