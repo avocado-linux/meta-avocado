@@ -73,11 +73,11 @@ Variables
                                where avocado-cve-optout.bbclass leaves its
                                markers. Defaults to CVE_CHECK_DIR, beside the
                                cve-check results they explain
-  AVOCADO_CVE_REPORT_MANIFESTS glob of image manifests naming the base
+  AVOCADO_CVE_REPORT_MANIFESTS globs of image manifests naming the base
                                runtime. Defaults to ${DEPLOY_DIR_IMAGE}/
-                               avocado-image-*-${MACHINE}.manifest - the
-                               images that ship, this build only. Matching
-                               nothing is not an error - see "Scope" below
+                               avocado-image-{rootfs,initramfs}-*.manifest -
+                               the two images that ship. Matching nothing is
+                               not an error - see "Scope" below
   AVOCADO_CVE_BOOT_CHAIN       recipes that run on the device but are
                                installed by no package manager, so no manifest
                                names them. Defaults to "u-boot
@@ -158,10 +158,16 @@ Which manifests get read is the same argument one level down, and the default
 has to be narrow because everything it over-reads scopes base-runtime. A
 machine deploys manifests that are not the runtime - Jetson writes six, two of
 them flashing images that run on the host (gptfdisk, e2fsprogs-mke2fs, a dozen
-kernel-module-*) - hence avocado-image-*. The timestamped file beside each
-IMAGE_LINK_NAME symlink is never pruned, so a name-only glob would also read
-every previous build - hence -${MACHINE}. Override the whole default for a
-board whose runtime image is named differently.
+kernel-module-*) - and avocado-image-container is the SDK container, which no
+device carries. So the two images that ship are named rather than globbed.
+
+Their machine suffix is globbed, because it is not the one in the path:
+avocado.inc sets MACHINE_SHORT_NAME by stripping the avocado- prefix, and the
+images are named with it, so DEPLOY_DIR_IMAGE is avocado-qemuarm64 while the
+manifests inside it are avocado-image-rootfs-qemuarm64.manifest. Anchoring on
+${MACHINE} matches no shipping image on any machine. The directory already
+scopes the machine, so the glob costs nothing. Override the whole default for
+a board whose runtime image is named differently.
 
 The frozen contract
 -------------------

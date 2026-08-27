@@ -595,11 +595,12 @@ def default_paths(tmpdir, machine=None):
     return cve_dir, pkgdata_dirs
 
 def default_manifests(tmpdir, machine=None):
-    """Image manifests under a build's TMPDIR.
+    """Manifests of the images that ship, under a build's TMPDIR.
 
-    IMAGE_LINK_NAME for the images that ship, so a machine's flashing images
-    and the stale timestamped manifests beside each symlink stay out - both
-    would scope base-runtime.
+    Only the two, so a machine's flashing images and the SDK container stay
+    out - both would scope base-runtime. The machine suffix is globbed: the
+    images carry MACHINE_SHORT_NAME while the directory holding them is
+    MACHINE, and only the datastore knows the difference.
 
     Kept out of default_paths so its return shape stays frozen: an empty result
     is a normal outcome here, not the failure every branch of default_paths
@@ -609,11 +610,8 @@ def default_manifests(tmpdir, machine=None):
     return sorted(
         path
         for images in glob.glob(os.path.join(root, machine or "*"))
-        for path in glob.glob(
-            os.path.join(
-                images, "avocado-image-*-%s.manifest" % os.path.basename(images)
-            )
-        )
+        for image in ("avocado-image-rootfs", "avocado-image-initramfs")
+        for path in glob.glob(os.path.join(images, "%s-*.manifest" % image))
     )
 
 def main():
@@ -649,8 +647,8 @@ def main():
         action="append",
         default=[],
         help="image manifest naming the base runtime, repeatable; overrides "
-        "the ${DEPLOY_DIR}/images/${MACHINE}/avocado-image-*-${MACHINE}.manifest "
-        "default",
+        "the ${DEPLOY_DIR}/images/${MACHINE}/avocado-image-{rootfs,initramfs}-"
+        "*.manifest default",
     )
     parser.add_argument(
         "--boot-chain",
