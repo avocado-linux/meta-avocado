@@ -37,7 +37,32 @@ RDEPENDS:${PN} = "coreutils"
 # recipe that could emit that string is one edit away from emitting it wrongly.
 # A build without the token installs no descriptor and the script reports
 # `unknown`, which is correct - an unknown store is not a trusted one.
+#
+# The descriptor answers two INDEPENDENT questions and they fail separately:
+# how much the variable store is worth (`store_trust`), and where the key
+# database came from (`keydb_origin`). Preseeding compiles the key database
+# into the U-Boot binary, so it is firmware-resident, while every OTHER
+# variable in the same image still lives in the editable file store on the ESP.
+# `store_trust=unauthenticated` next to `keydb_origin=firmware-resident` is
+# therefore the correct pairing for this change, not a contradiction.
+#
+# `keydb_origin` is derived from the ARTIFACT, never from the token. The token
+# says a build ASKED for enrolment; only the marker the U-Boot recipe writes
+# when it has actually staged the seed into $(srctree) says it HAPPENED. A
+# descriptor keyed on the token would publish `firmware-resident` about a
+# bootloader carrying no seed - exactly the false claim this work exists to
+# prevent.
 AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}"
+
+AVOCADO_BOOT_INTEGRITY_DB_FINGERPRINT = "${DEPLOY_DIR_IMAGE}/sb-keys/db.fingerprint"
+
+# Read the marker rather than race it: without this edge the U-Boot deploy may
+# not have run when do_install looks, and an absent marker would be
+# indistinguishable from a preseed that never happened. Gated on the token so a
+# default build's dependency graph is untouched, and routed through
+# virtual/bootloader rather than a hardcoded u-boot-imx - this recipe is
+# machine-agnostic and each BSP picks its own provider.
+do_install[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', 'virtual/bootloader:do_deploy', '', d)}"
 
 do_install() {
     install -d ${D}${libexecdir}/boot-integrity
@@ -49,6 +74,12 @@ do_install() {
         ${D}${systemd_system_unitdir}/boot-integrity-report.service
 
     if [ "${AVOCADO_BOOT_INTEGRITY_POC}" = "1" ]; then
+        if [ -f "${AVOCADO_BOOT_INTEGRITY_DB_FINGERPRINT}" ]; then
+            keydb_origin="firmware-resident"
+        else
+            keydb_origin="runtime-mutable"
+        fi
+
         install -d ${D}${sysconfdir}/avocado
         cat > ${D}${sysconfdir}/avocado/boot-integrity-store <<EOF
 # Written by boot-integrity.bb because this image was built with the
@@ -59,6 +90,17 @@ do_install() {
 # therefore PERSIST across a reboot without RESISTING anything, and a value seen
 # surviving one must not be read as having withstood tampering.
 store_trust=unauthenticated
+#
+# Where the key database came from. This is a SEPARATE question from the line
+# above: firmware-resident means PK/KEK/db were compiled into the U-Boot binary
+# and cannot be replaced by editing the variable store, which says nothing
+# about the other variables kept in that same editable store.
+#
+# firmware-resident is written only when the U-Boot recipe left its
+# db.fingerprint marker in the deploy directory, which it does only after
+# actually staging the seed. Token set but marker absent means the preseed did
+# not run, and the key database is whatever the mutable store holds.
+keydb_origin=$keydb_origin
 EOF
         chmod 0644 ${D}${sysconfdir}/avocado/boot-integrity-store
     fi
