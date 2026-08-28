@@ -15,6 +15,7 @@ RDEPENDS:${PN} = "\
   util-linux \
   util-linux-blkid \
   util-linux-lsblk \
+  avocado-var-grow \
   avocadoctl \
   avocado-users \
   ${@bb.utils.contains('DISTRO_FEATURES','zram','systemd-zram-generator','',d)} \
