@@ -34,7 +34,15 @@ REPORT_COUNTERS = (
     "ignored_cves",
     "patched_cves",
     "unknown_status_cves",
+    "manifests_read",
 )
+
+# The surfaces a finding can occupy. Kept in step with report.SCOPES, but
+# spelled out rather than imported: the checker is what a consumer runs against
+# a document the producer wrote, so it must not take the producer's word for
+# the vocabulary. test_verify.py binds this, report.SCOPES and the schema enum,
+# so spelling it out cannot become drifting from it.
+SCOPES = ("boot-chain", "base-runtime", "feed", "build-only")
 
 # Non-zero means the report is missing data. Silent otherwise: the document
 # stays schema-valid and the loss is just a number nobody reads.
@@ -141,6 +149,9 @@ def _check_entries(report, fail):
                 fail("recipes[%r] has no string version" % name)
             if not isinstance(entry.get("packaged"), bool):
                 fail("recipes[%r].packaged is not a boolean" % name)
+            if entry.get("scope") not in SCOPES:
+                fail("recipes[%r].scope is %r, expected one of %s"
+                     % (name, entry.get("scope"), ", ".join(SCOPES)))
             cves = entry.get("cves")
             if not isinstance(cves, list):
                 fail("recipes[%r].cves is not a list" % name)

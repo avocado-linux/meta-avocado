@@ -18,7 +18,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
-from avocado_sbom import verify  # noqa: E402
+from avocado_sbom import report, verify  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "fixtures", "avocado-cve-report.json")
 
@@ -70,6 +70,19 @@ class FixtureTests(unittest.TestCase):
             if entry["packaged"]:
                 entry["cves"] = entry["cves"][:1]
         self.assertCaught("counts.packaged_cves")
+
+    def test_scope_removed(self):
+        # A producer that predates the scope field, or one that dropped it:
+        # every finding then claims a surface it has not declared.
+        for entry in self.report["recipes"].values():
+            del entry["scope"]
+        self.assertCaught(".scope")
+
+    def test_scope_misspelled(self):
+        # "runtime" reads plausible and means nothing. A free-string scope
+        # would let a producer invent a fourth surface no consumer maps.
+        next(iter(self.report["recipes"].values()))["scope"] = "runtime"
+        self.assertCaught(".scope")
 
     def test_whole_recipe_dropped(self):
         name = next(iter(self.report["recipes"]))
@@ -275,6 +288,7 @@ class FixtureTests(unittest.TestCase):
                 "foo": {
                     "version": "1.0",
                     "packaged": True,
+                    "scope": "feed",
                     "cves": [{"id": "CVE-2026-1"}],
                 },
             },
@@ -313,6 +327,21 @@ class SchemaTests(unittest.TestCase):
             sorted(self.schema["properties"]["status"]["enum"]),
             sorted(verify.CVE_STATUSES),
         )
+
+    def test_schema_scopes_match_the_generator_and_the_checker(self):
+        # Three declarations of one vocabulary: report.SCOPES, verify.SCOPES
+        # (spelled out on purpose, so the checker does not take the producer's
+        # word for it) and this enum. Nothing bound any pair of them.
+        scopes = sorted(verify.SCOPES)
+        self.assertEqual(
+            sorted(
+                self.schema["properties"]["recipes"]["additionalProperties"][
+                    "properties"
+                ]["scope"]["enum"]
+            ),
+            scopes,
+        )
+        self.assertEqual(sorted(report.SCOPES), scopes)
 
     def test_required_top_level_keys_match_the_checker(self):
         self.assertEqual(

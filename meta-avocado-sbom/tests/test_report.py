@@ -22,9 +22,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
 from avocado_sbom.report import (  # noqa: E402
+    SCOPES,
     Stats,
     build_report,
+    default_manifests,
     read_cve_data,
+    read_manifests,
     read_optouts,
 )
 
@@ -274,6 +277,202 @@ class BuildReportTests(unittest.TestCase):
         self.assertEqual(stats.unscanned_recipes, 1)
         self.assertEqual(stats.no_cve_record_recipes, 1)
 
+class ScopeTests(unittest.TestCase):
+    """Scope labels a finding; it never filters the report."""
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+        self.pkgdata = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.pkgdata)
+        os.makedirs(os.path.join(self.pkgdata, "runtime-reverse"))
+        self.images = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.images)
+
+    def package(self, name, recipe, version="1.0"):
+        path = os.path.join(self.pkgdata, "runtime-reverse", name)
+        with open(path, "w") as f:
+            f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n" % (recipe, version, version))
+
+    def write(self, recipe, *entries):
+        path = os.path.join(self.cve_dir, "%s_cve.json" % recipe)
+        with open(path, "w") as f:
+            json.dump({"package": list(entries)}, f)
+
+    def manifest(self, name, *packages):
+        path = os.path.join(self.images, "%s.manifest" % name)
+        with open(path, "w") as f:
+            for pkg in packages:
+                f.write("%s cortexa57 1.0-r0\n" % pkg)
+        return path
+
+    def build(self, **kw):
+        return build_report(self.cve_dir, [self.pkgdata], **kw)
+
+    def populate(self):
+        """One recipe per scope, all four carrying an Unpatched CVE."""
+        cve = [{"id": "CVE-2026-1", "status": "Unpatched"}]
+        self.package("libssl3", "openssl")      # installed -> base-runtime
+        self.package("perl", "perl")            # built, not installed -> feed
+        self.package("u-boot", "u-boot")        # declared boot chain
+        self.write("openssl", entry("openssl", issues=cve))
+        self.write("perl", entry("perl", issues=cve))
+        self.write("u-boot", entry("u-boot", issues=cve))
+        # No package in pkgdata at all -> build-only.
+        self.write("go-cross-cortexa57", entry("go-cross-cortexa57", issues=cve))
+
+    def test_every_scope_is_reachable_and_labelled(self):
+        self.populate()
+        doc, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "libssl3")],
+            boot_chain=["u-boot"],
+        )
+        scopes = {n: e["scope"] for n, e in doc["recipes"].items()}
+        self.assertEqual(scopes, {
+            "openssl": "base-runtime",
+            "perl": "feed",
+            "u-boot": "boot-chain",
+            "go-cross-cortexa57": "build-only",
+        })
+        self.assertEqual(set(scopes.values()), set(SCOPES))
+
+    def test_the_boot_chain_is_scoped_without_appearing_in_any_manifest(self):
+        # u-boot reaches the device through avocado-img-bootfiles, which
+        # scrapes DEPLOY_DIR_IMAGE, so no manifest names it. A scope keyed on
+        # manifest membership would file the bootloader as feed and an
+        # image-scoped report would drop it outright.
+        self.populate()
+        doc, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "libssl3")],
+            boot_chain=["u-boot"],
+        )
+        installed = read_manifests([self.manifest("rootfs", "libssl3")], Stats())
+        self.assertNotIn("u-boot", installed)
+        self.assertEqual(doc["recipes"]["u-boot"]["scope"], "boot-chain")
+        self.assertTrue(doc["recipes"]["u-boot"]["packaged"])
+
+    def test_a_deploy_only_recipe_is_not_called_build_only(self):
+        """imx-atf and friends produce no package and run on the device, so
+        the one value asserting a recipe is absent must not catch them.
+        Naming each in AVOCADO_CVE_BOOT_CHAIN is no fix: a vendor layer adds
+        recipes the default has never heard of, and the mislabel is silent.
+        """
+        cve = [{"id": "CVE-2026-1", "status": "Unpatched"}]
+        for recipe in ("imx-atf", "imx-boot", "firmware-imx", "u-boot-imx"):
+            self.write(recipe, entry(recipe, issues=cve))
+        # -source and -initial are toolchain internals that match none of the
+        # obvious suffixes; both scoped boot-chain on a real build.
+        for recipe in ("go-cross-cortexa57", "expat-native", "gcc-cross",
+                       "nativesdk-cmake", "binutils-cross-aarch64",
+                       "gcc-source-13.4.0", "libgcc-initial", "glibc-initial"):
+            self.write(recipe, entry(recipe, issues=cve))
+
+        doc, _ = self.build(boot_chain=["u-boot", "trusted-firmware-a"])
+        scopes = {n: e["scope"] for n, e in doc["recipes"].items()}
+
+        for recipe in ("imx-atf", "imx-boot", "firmware-imx", "u-boot-imx"):
+            self.assertEqual(scopes[recipe], "boot-chain", recipe)
+        for recipe in ("go-cross-cortexa57", "expat-native", "gcc-cross",
+                       "nativesdk-cmake", "binutils-cross-aarch64",
+                       "gcc-source-13.4.0", "libgcc-initial", "glibc-initial"):
+            self.assertEqual(scopes[recipe], "build-only", recipe)
+
+    def test_a_packaged_nativesdk_recipe_is_still_build_only(self):
+        # do_cve_report reads PKGDATA_DIR_SDK alongside PKGDATA_DIR, so a
+        # nativesdk recipe is packaged and would otherwise read "feed" -
+        # built and installable on a device, which the prefix rules out.
+        # -native and -cross produce no package anywhere, so only this
+        # family has to be decided before package membership.
+        cve = [{"id": "CVE-2026-1", "status": "Unpatched"}]
+        self.package("nativesdk-cmake", "nativesdk-cmake")
+        self.write("nativesdk-cmake", entry("nativesdk-cmake", issues=cve))
+
+        doc, _ = self.build(manifest_paths=[self.manifest("rootfs", "libssl3")])
+        self.assertEqual(doc["recipes"]["nativesdk-cmake"]["scope"], "build-only")
+        self.assertTrue(doc["recipes"]["nativesdk-cmake"]["packaged"])
+
+    def test_scope_totals_are_derivable_from_the_entries(self):
+        # Deliberately not counters. Every entry carries its own scope, so an
+        # aggregate is one pass and cannot drift from what it summarises.
+        self.populate()
+        doc, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "libssl3")],
+            boot_chain=["u-boot"],
+        )
+        self.assertEqual(doc["counts"]["manifests_read"], 1)
+
+        by_scope = {}
+        for entry_ in doc["recipes"].values():
+            by_scope[entry_["scope"]] = by_scope.get(entry_["scope"], 0) + 1
+        self.assertEqual(by_scope, {
+            "base-runtime": 1, "feed": 1, "boot-chain": 1, "build-only": 1,
+        })
+        self.assertEqual(sum(by_scope.values()), doc["counts"]["recipes"])
+
+    def test_a_manifest_that_names_nothing_is_not_counted_as_read(self):
+        # A truncated manifest would otherwise report the image as scoped
+        # while scoping nothing, which is the silent-data-loss shape the
+        # health counters exist to prevent.
+        self.populate()
+        empty = os.path.join(self.images, "truncated.manifest")
+        open(empty, "w").close()
+        doc, _ = self.build(manifest_paths=[empty], boot_chain=["u-boot"])
+        self.assertEqual(doc["counts"]["manifests_read"], 0)
+        self.assertEqual(doc["recipes"]["openssl"]["scope"], "feed")
+
+    def test_the_coverage_denominator_does_not_move(self):
+        """ENG-2200 criterion 3: scope is a field, not a filter, so reading a
+        manifest must leave both coverage lists exactly as they were.
+        """
+        self.populate()
+        self.package("libattr1", "attr")
+        self.package("pg-base", "packagegroup-base")   # no file -> unscanned
+        self.write("attr", entry("attr", in_record="No"))
+
+        wide, _ = self.build()
+        scoped, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "libssl3")],
+            boot_chain=["u-boot"],
+        )
+
+        for key in ("unscanned_recipes", "no_cve_record_recipes"):
+            self.assertEqual(wide[key], scoped[key])
+            self.assertEqual(wide["counts"][key], scoped["counts"][key])
+        # And the findings themselves are the same set - nothing was filtered.
+        self.assertEqual(set(wide["recipes"]), set(scoped["recipes"]))
+        self.assertEqual(wide["counts"]["packages"], scoped["counts"]["packages"])
+        self.assertEqual(wide["packages_digest"], scoped["packages_digest"])
+
+    def test_without_a_manifest_everything_packaged_reads_feed(self):
+        # The degradation when do_cve_report runs before the image tasks. It
+        # must over-report the device's surface, never under-report it.
+        self.populate()
+        doc, _ = self.build(boot_chain=["u-boot"])
+        self.assertEqual(doc["counts"]["manifests_read"], 0)
+        self.assertNotIn(
+            "base-runtime", {e["scope"] for e in doc["recipes"].values()}
+        )
+        self.assertEqual(doc["recipes"]["openssl"]["scope"], "feed")
+        # The boot chain is declared, not measured, so it survives.
+        self.assertEqual(doc["recipes"]["u-boot"]["scope"], "boot-chain")
+
+    def test_an_unreadable_manifest_is_not_counted_and_does_not_raise(self):
+        self.populate()
+        doc, _ = self.build(
+            manifest_paths=[os.path.join(self.images, "absent.manifest")],
+        )
+        self.assertEqual(doc["counts"]["manifests_read"], 0)
+
+    def test_manifests_parse_to_package_names(self):
+        stats = Stats()
+        path = self.manifest("rootfs", "libssl3", "busybox")
+        with open(path, "a") as f:
+            f.write("\n")   # blank lines are ordinary in a manifest
+        self.assertEqual(
+            read_manifests([path], stats), {"libssl3", "busybox"}
+        )
+        self.assertEqual(stats.manifests_read, 1)
+
 class ReadOptoutsTests(unittest.TestCase):
     """The markers avocado-cve-optout.bbclass leaves beside the cve-check
     results. They are what replaced a declared count, so a marker that reads
@@ -346,6 +545,44 @@ class ReadOptoutsTests(unittest.TestCase):
         declared, unreadable = read_optouts(self.cve_dir)
         self.assertEqual(list(declared), ["good"])
         self.assertEqual(unreadable, 1)
+
+class DefaultManifestsTest(unittest.TestCase):
+    """Anything the default glob over-reads scopes base-runtime."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        # The directory is MACHINE; the images inside it are MACHINE_SHORT_NAME.
+        self.images = os.path.join(self.tmp, "deploy", "images", "avocado-jetson")
+        os.makedirs(self.images)
+
+    def touch(self, name):
+        path = os.path.join(self.images, name)
+        open(path, "w").close()
+        return path
+
+    def test_only_the_images_that_ship_are_read(self):
+        rootfs = self.touch("avocado-image-rootfs-jetson.manifest")
+        initramfs = self.touch("avocado-image-initramfs-jetson.manifest")
+        # Flashed from the host, not shipped.
+        self.touch("tegra-initrd-flash-initramfs-avocado-jetson.manifest")
+        self.touch("tegra-espimage-avocado-jetson.manifest")
+        # The SDK container, named by the default IMAGE_NAME: MACHINE, and a
+        # timestamped file beside the IMAGE_LINK_NAME symlink.
+        self.touch("avocado-image-container-avocado-jetson.manifest")
+        self.touch("avocado-image-container-avocado-jetson-20260815021433.manifest")
+        self.assertEqual(
+            default_manifests(self.tmp, "avocado-jetson"), sorted([initramfs, rootfs])
+        )
+
+    def test_without_a_machine_every_machine_dir_is_globbed(self):
+        other = os.path.join(self.tmp, "deploy", "images", "avocado-qemuarm64")
+        os.makedirs(other)
+        open(os.path.join(other, "avocado-image-rootfs-qemuarm64.manifest"), "w").close()
+        rootfs = self.touch("avocado-image-rootfs-jetson.manifest")
+        found = default_manifests(self.tmp)
+        self.assertIn(rootfs, found)
+        self.assertEqual(len(found), 2)
 
 if __name__ == "__main__":
     unittest.main()
