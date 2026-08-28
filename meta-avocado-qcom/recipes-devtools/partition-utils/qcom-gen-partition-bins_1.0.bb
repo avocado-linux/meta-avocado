@@ -21,15 +21,22 @@ do_compile() {
 }
 
 inherit deploy
+# `install -d` once, then `-t`, rather than a trailing `-D` per line. GNU
+# install permutes options, so a trailing `-D` does parse -- but `-D` with a
+# *single* source treats the destination as a file path, so a glob that happens
+# to match exactly one file would write a file named after ${DEPLOYDIR} if the
+# directory did not already exist. `-t` always means "into this directory",
+# whatever the glob matches.
 do_deploy() {
-    install -m 0644 ${B}/gpt_backup*.bin -D ${DEPLOYDIR}
-    install -m 0644 ${B}/gpt_both*.bin -D ${DEPLOYDIR}
-    install -m 0644 ${B}/gpt_empty*.bin -D ${DEPLOYDIR}
-    install -m 0644 ${B}/gpt_main*.bin -D ${DEPLOYDIR}
-    install -m 0644 ${B}/patch*.xml -D ${DEPLOYDIR}
-    install -m 0644 ${B}/rawprogram*.xml -D ${DEPLOYDIR}
-    install -m 0644 ${B}/zeros_*.bin -D ${DEPLOYDIR}
-    install -m 0644 ${B}/wipe_rawprogram_PHY*.xml -D ${DEPLOYDIR}
+    install -d ${DEPLOYDIR}
+    install -m 0644 -t ${DEPLOYDIR} ${B}/gpt_backup*.bin
+    install -m 0644 -t ${DEPLOYDIR} ${B}/gpt_both*.bin
+    install -m 0644 -t ${DEPLOYDIR} ${B}/gpt_empty*.bin
+    install -m 0644 -t ${DEPLOYDIR} ${B}/gpt_main*.bin
+    install -m 0644 -t ${DEPLOYDIR} ${B}/patch*.xml
+    install -m 0644 -t ${DEPLOYDIR} ${B}/rawprogram*.xml
+    install -m 0644 -t ${DEPLOYDIR} ${B}/zeros_*.bin
+    install -m 0644 -t ${DEPLOYDIR} ${B}/wipe_rawprogram_PHY*.xml
 }
 addtask deploy before do_build after do_compile
 PACKAGE_ARCH = "${MACHINE_ARCH}"

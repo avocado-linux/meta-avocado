@@ -49,12 +49,20 @@ do_deploy_fixup[depends] += "${DEPLOYDEPENDS}"
 
 do_deploy_fixup[nostamp] = "1"
 
-# Cross-check the staged tree against what rawprogram*.xml will flash.
+# Cross-check the staged tree against what rawprogram[0-9].xml will flash.
+#
+# The glob is deliberately narrow, here and in the copy loop below.
+# qcom-gen-partition-bins also deploys rawprogram<N>_BLANK_GPT.xml,
+# rawprogram<N>_WIPE_PARTITIONS.xml and wipe_rawprogram_PHY<N>.xml -- destructive
+# variants that must not reach the bootfiles bundle a normal provision flashes.
+# rawprogram[0-9].xml is exactly the non-destructive set, so widening this to
+# rawprogram*.xml would ship partition-wipe scripts and make this check demand
+# the payloads they name.
 #
 # Every copy in do_deploy_fixup is guarded by `if [ -f ... ]`, so a deploy name
-# that stops matching is skipped in silence. rawprogram*.xml still flashes the
-# file, and the miss only surfaces on hardware, tens of partitions into a QDL
-# run, as `unable to open <name>...failing` -- with the device half written.
+# that stops matching is skipped in silence. The rawprogram entry still flashes
+# the file, and the miss only surfaces on hardware, tens of partitions into a
+# QDL run, as `unable to open <name>...failing` -- with the device half written.
 #
 # Call this LAST, from the machine bbappend that finishes staging, immediately
 # before the bootfiles tarball is rolled: do_deploy_fixup:append() bodies run
@@ -81,7 +89,7 @@ qcom_check_rawprogram_payloads() {
         done
     done
     if [ -n "$missing" ]; then
-        bbfatal "rawprogram*.xml flashes files this image does not stage:${missing}." \
+        bbfatal "rawprogram[0-9].xml flashes files this image does not stage:${missing}." \
                 "Provisioning would fail mid-flash. Check the matching deploy-name" \
                 "test in image-avocado-qcom-deploy.bbclass or the machine bbappend."
     fi
@@ -118,7 +126,7 @@ do_deploy_fixup () {
         install -m 0644 ${DEPLOY_DIR_IMAGE}/esp-avocado-qcom-image-${MACHINE}.rootfs.vfat efi.bin
     fi
 
-    # copy dtb.bin -- the payload rawprogram*.xml flashes to dtb_a.
+    # copy dtb.bin -- the payload rawprogram[0-9].xml flashes to dtb_a.
     #
     # Two producers, two names. meta-qcom's multi-dtb `dtb-qcom-image` recipe
     # deploys dtb-qcom-image-${MACHINE}.rootfs.vfat, but a machine that pins a
@@ -158,7 +166,8 @@ do_deploy_fixup () {
         fi
     done
 
-    #Copy rawprogram.xml
+    # Copy rawprogram.xml -- the non-destructive set only; see the note above
+    # qcom_check_rawprogram_payloads for why this glob is not rawprogram*.xml.
     for rawpg in ${DEPLOY_DIR_IMAGE}/rawprogram[0-9].xml; do
         if [ -f "$rawpg" ]; then
             install -m 0644 $rawpg .
