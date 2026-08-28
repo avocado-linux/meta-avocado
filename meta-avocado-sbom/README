@@ -322,6 +322,64 @@ evidence rather than "patch-file" - understating what the build patched, never
 overstating it. Neither kernel emits a backport marker today; key them by
 (name, version) when either one does.
 
+The kernel, and why it is filtered separately
+---------------------------------------------
+
+The kernel is 72% of the report and most of it does not apply. cve-check flags a
+CVE when the vulnerable *source* is present; the kernel CNA records which files
+each CVE lives in, and the kernel's SPDX document records which files this
+configuration compiles. do_kernel_cve_improve joins the three, by running
+oe-core's scripts/contrib/improve_kernel_cve_report.py.
+
+Measured on qemuarm64, linux-yocto 6.6.142+git, 2026-08-28:
+
+  raw cve-check                795 unpatched   43 critical, 347 high
+  + version analysis alone   2,310 unpatched
+  + compiled-files filter      700 unpatched   13 critical, 123 high
+
+Read the middle row before treating this as a filter. The script is an
+enrichment tool first: it merges the CNA's whole vulnerable set for our version
+into the report, which on its own makes the report three times louder. The
+compiled-files filter is what pays for that - it is not an optimisation on top
+of a small win, it is the thing that makes the tool adoptable. Of the original
+795, 494 clear; 399 findings are new, and 395 of those carry no CVSS at all
+because the kernel CNA assigns none. A consumer gating on severity has to decide
+what an unscored kernel finding means; the report states the absence rather than
+inventing a score.
+
+Three settings arm it, all in kas/feature/cve-check.yml, and the task says so
+when one is missing rather than quietly filtering nothing:
+
+  KERNEL_EXTRA_FEATURES:append = " features/debug/debug-kernel.scc"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+  AVOCADO_CVE_KERNEL_VULNS_DIR = "${DL_DIR}/kernel-vulns"
+
+The first is load-bearing: without kernel DWARF the debugsources hold 351
+binaries and zero sources, and the filter cuts nothing. The second is :pn-scoped
+because SPDX_INCLUDE_COMPILED_SOURCES sets SPDX_INCLUDE_SOURCES in that recipe's
+datastore alone (spdx-common.bbclass:44). Tree-wide it measured 5.36 GB of SPDX
+and ~50-70 GB to parse; kernel-only it costs 63 MB. The third points at a clone
+of the CNA data and pulls in avocado-cve-kernel-vulns-native to keep it current.
+
+All three are commented out until the pinned oe-core carries the fix for
+improve_kernel_cve_report.py's unguarded cve_data[cve]['detail'] read: the stock
+script raises KeyError on any real cve-check input, and the task treats a
+failing script as fatal. They go together - the first two on their own would
+cost every build a kernel debug rebuild for a filter that is off.
+
+Unset, the task notes the absence and the report carries cve-check's own kernel
+results. That is also what a vendor kernel gets: KERNEL_EXTRA_FEATURES is a
+kernel-yocto mechanism, so linux-imx and friends produce no DWARF, and the task
+warns and leaves their scan alone rather than filtering it on an empty list.
+
+The improved results are written to ${CVE_CHECK_DIR}/kernel-improved/ and read
+as an overlay: a file there replaces the same-named file from CVE_CHECK_DIR.
+cve-check's own output is never overwritten, so the before and the after both
+stay on disk and stay comparable - which is what an accuracy check needs.
+
+The script is run as a subprocess, never imported. It is GPL-2.0 and this layer
+is Apache-2.0; see "A format, not a tool" above for the same boundary.
+
 The frozen contract
 -------------------
 

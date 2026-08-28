@@ -216,6 +216,10 @@ DEFAULT_STATUSES = ("Unpatched", "Patched")
 # consumer ends up filtering on a value nothing emits.
 CVE_EVIDENCE = ("cve-status", "patch-file", "cve-check")
 
+# Where do_kernel_cve_improve writes, under CVE_CHECK_DIR. Named here because
+# the recipe and the standalone reporter must agree on it.
+OVERLAY_DIRNAME = "kernel-improved"
+
 _FILTERED_COUNTER = {
     "Unpatched": "unpatched_cves",
     "Patched": "patched_cves",
@@ -295,7 +299,8 @@ def _has_cve_record(entry):
     )
 
 def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
-                  summary=True, backports=None, alt_cve_dirs=()):
+                  summary=True, backports=None, alt_cve_dirs=(),
+                  overlay_dir=None):
     """Join the per-recipe cve-check results into one recipe -> CVEs map.
 
     alt_cve_dirs are the per-multiconfig subdirectories
@@ -303,6 +308,10 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
     at a second version becomes an alt_versions record rather than being merged
     into the entry, so the shipped kernel's CVE list stays the shipped
     kernel's.
+
+    overlay_dir is do_kernel_cve_improve's output: a file there replaces the
+    same-named one in cve_dir rather than adding to it, so cve-check's own
+    result stays on disk beside the improved copy and the two stay comparable.
 
     Two versions in cve_dir itself are still merged by id: CVE_CHECK_DIR is
     never pruned, so a result left by an earlier build at an older PV is
@@ -324,8 +333,16 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
     default_versions = {}
     backports = backports or {}
 
-    paths = [(p, False)
-             for p in sorted(glob.glob(os.path.join(cve_dir, "*_cve.json")))]
+    by_name = {
+        os.path.basename(p): p
+        for p in glob.glob(os.path.join(cve_dir, "*_cve.json"))
+    }
+    if overlay_dir:
+        by_name.update(
+            (os.path.basename(p), p)
+            for p in glob.glob(os.path.join(overlay_dir, "*_cve.json"))
+        )
+    paths = [(by_name[name], False) for name in sorted(by_name)]
     for alt_dir in alt_cve_dirs or ():
         paths += [(p, True)
                   for p in sorted(glob.glob(os.path.join(alt_dir, "*_cve.json")))]
@@ -596,6 +613,7 @@ def build_report(
     boot_chain=(),
     backports=None,
     alt_cve_dirs=(),
+    overlay_dir=None,
 ):
     if status not in CVE_STATUSES:
         raise ValueError(
@@ -610,6 +628,7 @@ def build_report(
     recipes, scanned, no_record = read_cve_data(
         cve_dir, recipe_versions, stats, status=status, summary=summary,
         backports=backports, alt_cve_dirs=alt_cve_dirs,
+        overlay_dir=overlay_dir,
     )
 
     installed = read_manifests(manifest_paths, stats)
@@ -760,7 +779,9 @@ def default_paths(tmpdir, machine=None):
     scoped = sorted(
         d
         for d in glob.glob(os.path.join(deploy_cve, "*"))
-        if os.path.isdir(d) and glob.glob(os.path.join(d, "*_cve.json"))
+        if os.path.isdir(d)
+        and os.path.basename(d) != OVERLAY_DIRNAME
+        and glob.glob(os.path.join(d, "*_cve.json"))
     )
     if machine:
         scoped_for_machine = os.path.join(deploy_cve, machine)
@@ -878,6 +899,12 @@ def main():
         "--pkgdata-dir", action="append", default=[], help="override, repeatable"
     )
     parser.add_argument(
+        "--overlay-dir",
+        help="directory of <recipe>_cve.json that replace the same-named file "
+        "in --cve-dir, e.g. the kernel results improved against the kernel "
+        "CNA's data; defaults to <cve-dir>/kernel-improved",
+    )
+    parser.add_argument(
         "--machine",
         help="MACHINE recorded in the report, and the ${DEPLOY_DIR}/cve "
         "subdirectory to read when CVE_CHECK_DIR is machine-scoped",
@@ -955,6 +982,10 @@ def main():
     # Missing globs to nothing, the same as not inheriting the class.
     backports, backports_unreadable = read_backports(backports_dir)
 
+    # No isdir check: a missing directory globs to nothing in read_cve_data,
+    # which is the same as not passing one.
+    overlay_dir = args.overlay_dir or os.path.join(cve_dir, OVERLAY_DIRNAME)
+
     # Every path removed before any is written: a run that fails partway leaves
     # no stale document from a previous run beside a fresh one, which is the
     # pair a consumer would read as one build. Documents this run will not
@@ -980,6 +1011,7 @@ def main():
             summary=not args.no_summary,
             manifest_paths=manifests,
             boot_chain=args.boot_chain.split(),
+            overlay_dir=overlay_dir,
             backports=backports,
             alt_cve_dirs=args.alt_cve_dir,
         )
