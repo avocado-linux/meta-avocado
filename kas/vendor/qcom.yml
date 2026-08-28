@@ -24,13 +24,13 @@ header:
 # these commits yet. Fast-forward the mirrors, then swap the URLs back.
 repos:
   meta-qcom:
-    url: https://github.com/qualcomm-linux/meta-qcom
+    url: https://github.com/avocado-linux/vendor-meta-qcom
     path: meta-qcom
     branch: wrynose
     commit: 18bb43fd5cb616b3079717a6ff15815172c63446
 
   meta-lts-mixins:
-    url: https://git.yoctoproject.org/meta-lts-mixins
+    url: https://github.com/avocado-linux/vendor-meta-lts-mixins
     path: meta-lts-mixins
     branch: wrynose/linux-firmware
     commit: 8bfc4ae8cf7fc835a23d7a27830f866617d9808f

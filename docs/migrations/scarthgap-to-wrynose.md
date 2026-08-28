@@ -40,8 +40,8 @@ For every repo referenced under [kas/](../../kas/):
 | Repo | Commit | kas file |
 |---|---|---|
 | meta-swupdate | `6616d4ec` | [kas/extra/swupdate.yml](../../kas/extra/swupdate.yml) |
-| meta-qcom | `624ea64a` | [kas/vendor/rubikpi.yml](../../kas/vendor/rubikpi.yml) |
-| meta-qcom-distro | `fe659f5a` | [kas/vendor/rubikpi.yml](../../kas/vendor/rubikpi.yml) |
+| meta-qcom | `624ea64a` | [kas/vendor/qcom.yml](../../kas/vendor/qcom.yml) |
+| meta-qcom-distro | `fe659f5a` | [kas/vendor/qcom.yml](../../kas/vendor/qcom.yml) |
 
 ### Pinned to `master`/`main` (LAYERSERIES_COMPAT includes wrynose)
 

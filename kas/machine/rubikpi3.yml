@@ -5,7 +5,7 @@ header:
     - repo: meta-avocado
       file: kas/base.yml
     - repo: meta-avocado
-      file: kas/vendor/rubikpi.yml
+      file: kas/vendor/qcom.yml
     - repo: meta-avocado
       file: kas/target/distro.yml
 
