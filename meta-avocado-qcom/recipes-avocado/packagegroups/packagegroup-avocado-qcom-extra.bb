@@ -56,6 +56,13 @@ RDEPENDS:${PN}:append:qcm6490 = " \
     gstreamer1.0-rtsp-server \
     v4l-utils \
 "
+# wireless-regdb-static is here for the same reason the other machine-extra
+# packagegroups carry it (compulab, variscite, stm): it comes from
+# packagegroup-avocado-feature-networking, which the per-machine feed build does
+# not pull, so the package never reaches the feed and the BSP extension's
+# `ext install` fails with "No match for argument: wireless-regdb-static" even
+# though a local avocado-complete build produces it. brcmfmac needs the
+# regulatory database; see the note in firmware-rubikpi3_1.0.bb.
 RDEPENDS:${PN}:append:rubikpi3 = " \
     firmware-rubikpi3 \
     linux-firmware-qcom-qcs6490-thundercomm-rubikpi3-audio \
@@ -64,6 +71,7 @@ RDEPENDS:${PN}:append:rubikpi3 = " \
     rubikpi3-init-services-bt \
     rubikpi3-init-services-wifi \
     rubikpi3-thermal \
+    wireless-regdb-static \
     wiringrp \
     wiringrp-gpio \
     wiringrp-python \
