@@ -138,6 +138,40 @@ Declaring it (i.MX: `avocado-imx-fit.inc` machines) builds FIT support into
 U-Boot and the kernel's FIT artifacts regardless, so the unsigned and
 project-signed paths are always available.
 
+### Bootloader updates (i.MX8M eMMC)
+
+The bootloader is the thing that enforces the FIT key, so it has to ship with
+the OS update that changes the key. On eMMC the i.MX BootROM loads `imx-boot`
+from a hardware boot partition selected by `PARTITION_CONFIG`; there are two
+(`boot0`, `boot1`), and the manifest couples them to the OS slots so a slot
+always boots with the bootloader that verifies its FIT:
+
+```json
+"os_artifacts": {
+  "imx_boot": { "image_key": "imx_boot", "slot_partitions": ["emmc-boot:0", "emmc-boot:1"] }
+},
+"activate": [
+  { "type": "uboot-env", "set": { "avocado_boot_slot": "{inactive_slot}" } },
+  { "type": "command",   "command": ["avocado-imx-bootpart", "{inactive_slot}"] }
+],
+"rollback": [ ...same with "{previous_slot}" ]
+```
+
+- `emmc-boot:<n>` is an avocadoctl slot target: the n-th boot partition of the
+  disk that holds `var`, written with `force_ro` lifted and verified by
+  read-back. A disk without boot partitions (SD card) is refused.
+- `avocado-imx-bootpart <slot>` (from `meta-avocado-nxp`, in every i.MX
+  rootfs) flips `PARTITION_CONFIG` with `mmc bootpart enable`, and refuses a
+  boot partition that does not hold an i.MX boot image, so a rollback can never
+  point the ROM at an empty partition.
+- `avocado build` puts the re-keyed `imx-boot` in the runtime under the feed's
+  own file names, so this artifact is the project-keyed bootloader whenever
+  `signing.fit_key` is set.
+
+Not covered: a bootloader that does not boot at all. The BootROM has no
+fallback across boot partitions here, so a bad `imx-boot` needs USB recovery
+(`uuu`); validate bootloader changes on a bench device before fleet rollout.
+
 ### rootfs and extension dm-verity
 
 Not a capability token: every i.MX kernel carries `dm-verity.cfg`, every i.MX
@@ -194,6 +228,7 @@ accordingly:
 | OS bundle update on a GPT machine | avocadoctl with `locate_target` (#24) or newer | older builds wrote by layout offset to the manifest's devpath, which is kernel-dependent |
 | OS update onto a device provisioned with the previous partition layout | **no** | an update cannot add partitions and the saved U-Boot env maps the old slots; reprovision |
 | Enabling extension verity (`root_hash` in the manifest) | after avocadoctl #22 is on the device | older builds mount the extension unverified without complaint; ship the new avocadoctl in a plain OS update first |
+| Bootloader (FIT key) change via OS update | i.MX8M eMMC with `emmc-boot:<n>` artifacts | slot a ↔ boot0, slot b ↔ boot1; rollback flips back; an unbootable bootloader still needs `uuu` |
 | Enabling `var.encrypt` via OS update | yes | first boot of the new slot encrypts the flashed `/var` in place, shrinking a grown filesystem to the data in use first |
 | Disabling `var.encrypt` after it encrypted | **no** | the partition stays LUKS; reprovision |
 | `/var` mounted through `by-avocado/var` (this change) | per slot | the old slot keeps its fstab; the two coexist |

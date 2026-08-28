@@ -18,8 +18,12 @@ inherit packagegroup nospdx
 # only, so OE-core's `enable getty@.service` preset can only ever produce a
 # failed getty@getty.service and a `degraded` system (seen on imx95-frdm and
 # imx8mp-evk). Same fix nvidia/qcom carry per-vendor; this is the shared one.
+# avocado-imx-bootpart: the activation step of a bootloader update - flips
+# PARTITION_CONFIG to the eMMC boot partition avocadoctl just wrote imx-boot to
+# (stone slot target emmc-boot:<n>), refusing an empty one.
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
+  avocado-imx-bootpart \
   mmc-utils \
   systemd-serial-console-preset \
 "

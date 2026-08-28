@@ -13,12 +13,17 @@
     "os_artifacts": {
       "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
       "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] },
-      "rootfs_hash": { "image_key": "rootfs_hash", "slot_partitions": ["rootfs-a-hash", "rootfs-b-hash"] }
+      "rootfs_hash": { "image_key": "rootfs_hash", "slot_partitions": ["rootfs-a-hash", "rootfs-b-hash"] },
+      "imx_boot": { "image_key": "imx_boot", "slot_partitions": ["emmc-boot:0", "emmc-boot:1"] }
     },
-    "activate": {
-      "type": "uboot-env",
-      "set": { "avocado_boot_slot": "{inactive_slot}" }
-    }
+    "activate": [
+      { "type": "uboot-env", "set": { "avocado_boot_slot": "{inactive_slot}" } },
+      { "type": "command", "command": ["avocado-imx-bootpart", "{inactive_slot}"] }
+    ],
+    "rollback": [
+      { "type": "uboot-env", "set": { "avocado_boot_slot": "{previous_slot}" } },
+      { "type": "command", "command": ["avocado-imx-bootpart", "{previous_slot}"] }
+    ]
   },
   "provision": {
     "envs": {
