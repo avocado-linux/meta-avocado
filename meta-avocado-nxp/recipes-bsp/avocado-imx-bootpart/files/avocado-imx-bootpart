@@ -11,6 +11,12 @@
 # activate (and rollback) actions after it has written the new imx-boot to the
 # inactive boot partition; the enable is refused unless that partition holds
 # an image, so a rollback can never point the ROM at an empty partition.
+#
+# Medium rule: a manifest describes every medium the machine can be provisioned
+# on. Running from an SD card (or anything without eMMC hardware boot
+# partitions) there is nothing to select, so this exits 0 with a message and
+# the OS update proceeds - avocadoctl skips the matching imx-boot artifact the
+# same way. Only what exists on the running medium is touched.
 set -eu
 
 # AVOCADO_IMX_BOOTPART_DISK / _DEVDIR exist for the host test only.
@@ -35,14 +41,22 @@ current() {
 }
 
 case "${1:-}" in
-    status) current; exit 0 ;;
-    a) n=1 ;;
-    b) n=2 ;;
+    status|a|b) ;;
     *) echo "usage: avocado-imx-bootpart <a|b|status>" >&2; exit 2 ;;
 esac
 
+if [ ! -e "$devdir/${disk}boot0" ]; then
+    echo "avocado-imx-bootpart: $disk has no eMMC hardware boot partitions (SD card or other medium) - bootloader selection does not apply here, nothing to do"
+    exit 0
+fi
+
+case "$1" in
+    status) current; exit 0 ;;
+    a) n=1 ;;
+    b) n=2 ;;
+esac
+
 bootdev="$devdir/${disk}boot$((n - 1))"
-[ -e "$bootdev" ] || { echo "avocado-imx-bootpart: $bootdev does not exist - $disk has no eMMC boot partitions" >&2; exit 1; }
 # i.MX8M boot images start with an IVT: tag 0xD1, length, version 0x41.
 sig=$(dd if="$bootdev" bs=4 count=1 2>/dev/null | head -c 4 | od -A n -t x1 | tr -d ' ')
 case "$sig" in

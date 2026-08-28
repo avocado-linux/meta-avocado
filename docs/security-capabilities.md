@@ -168,6 +168,15 @@ always boots with the bootloader that verifies its FIT:
   own file names, so this artifact is the project-keyed bootloader whenever
   `signing.fit_key` is set.
 
+**Medium rule.** A manifest describes every medium the machine can be
+provisioned on (`sd`, `img`, `uuu-emmc`), and an OS update must work on all of
+them. Targets that name hardware the running medium does not have — an eMMC
+boot partition while booted from SD — are **skipped with a message** by
+avocadoctl, and `avocado-imx-bootpart` exits 0 the same way, so only what exists
+on the running medium is written. On SD the bootloader therefore stays what
+provisioning flashed; the eMMC path is the one that carries bootloader updates.
+Apply the same rule to any future medium-specific target.
+
 Not covered: a bootloader that does not boot at all. The BootROM has no
 fallback across boot partitions here, so a bad `imx-boot` needs USB recovery
 (`uuu`); validate bootloader changes on a bench device before fleet rollout.

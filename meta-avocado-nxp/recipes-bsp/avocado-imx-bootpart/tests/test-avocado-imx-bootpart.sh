@@ -36,4 +36,8 @@ out=$(run b 2>&1)
 out=$(run b 2>&1); echo "$out" | grep -q "already enabled" && ok "enabling the current slot is a no-op" || bad "noop: $out"
 out=$(run a 2>&1); { echo "$out" | grep -q "now boots slot a from $work/mmcblk9boot0" && [ "$(cat "$work/cfg")" = 48 ]; } && ok "rollback to slot a enables boot partition 1" || bad "rollback: $out"
 out=$(run c 2>&1); echo "$out" | grep -q "^usage" && ok "unknown slot is a usage error" || bad "usage: $out"
+# SD card: no hardware boot partitions at all -> nothing to select, exit 0, mmc untouched
+rm -f "$work/mmcblk9boot0" "$work/mmcblk9boot1"; : > "$work/log"
+out=$(run b 2>&1); rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "no eMMC hardware boot partitions" && [ ! -s "$work/log" ]; } && ok "a medium without boot partitions is a no-op exit 0 and mmc is never run" || bad "sd: rc=$rc $out $(cat "$work/log")"
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]

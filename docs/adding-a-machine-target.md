@@ -346,6 +346,12 @@ coupled to OS slots (a → boot0, b → boot1). Provisioning must leave a valid
 image in **both** boot partitions, or the first update to slot b is the first
 thing to populate boot1 — `uuu`'s `flash bootloader` does write both.
 
+Medium rule: the same manifest serves the machine's SD, image and eMMC
+profiles. A target the running medium does not have is skipped with a message
+(avocadoctl) and the activation helper exits 0, so OS updates keep working
+from SD — only the bootloader is left as provisioned there. Any new
+medium-specific target must follow the same rule.
+
 ### Notes on partition layout
 
 - The `var` partition UUID is canonical (`4d21b016-b534-45c2-a9fb-5c16e091fd2d`)
