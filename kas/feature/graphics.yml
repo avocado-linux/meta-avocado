@@ -24,3 +24,50 @@ local_conf_header:
 
   extra-webkit: |
     PREFERRED_PROVIDER_virtual/wpebackend = "wpebackend-fdo"
+
+    # meta-webkit predates oe having recipes for most of webkit's dependency
+    # stack, so it still carries its own -- and its BBFILE_PRIORITY (7) beats
+    # meta-oe's (5). Layer priority is resolved *before* version, so those stale
+    # copies win over oe's newer ones. The recipes below are all strictly older
+    # than what oe already ships:
+    #
+    #   bubblewrap  0.8.0  -> 0.11.1     xdg-dbus-proxy  0.1.4  -> 0.1.7
+    #   libvpx      1.10.0 -> 1.16.0     dav1d           0.9.1  -> 1.5.3
+    #   libavif     0.11.1 -> 1.4.1      libjxl          0.8.1  -> 0.11.2
+    #   highway     1.0.4  -> 1.3.0
+    #
+    # This surfaced as a hard build failure: bubblewrap 0.8.0 has
+    # "typedef int bool" in utils.h, which gcc 15 rejects now that -std=gnu23
+    # is the default ("'bool' is a keyword with '-std=c23' onwards"). 0.11.1
+    # includes <stdbool.h>. Rather than pin -std=gnu17 on a three-year-old
+    # recipe, drop it -- and the rest with it, since five of them are only kept
+    # viable by hand-maintained CVE backports (CVE-2024-11403, CVE-2024-1580,
+    # CVE-2025-48174/48175, highway PR 1589) that the newer versions already
+    # contain natively.
+    #
+    # Safe to take oe's versions: oe-core's own webkitgtk 2.50.6 builds against
+    # libavif 1.4.1 and libjxl 0.11.2 through the same PACKAGECONFIGs, so
+    # meta-webkit's newer 2.52.4 is fine with them too.
+    #
+    # NOT masked, though also older than oe: libwpe (1.16.2 vs 1.16.3) and
+    # wpebackend-fdo (1.16.0 vs 1.16.1). These are not version shadows -- their
+    # .inc files carry meta-webkit's virtual-provider wiring, which oe's
+    # recipes have no equivalent for:
+    #
+    #   libwpe.inc:          PROVIDES  += "virtual/libwpe"
+    #   wpebackend-fdo.inc:  PROVIDES  += "virtual/wpebackend"
+    #                        RPROVIDES += "virtual-wpebackend"
+    #
+    # wpewebkit DEPENDS on virtual/wpebackend (that is how fdo and rdk backends
+    # are made interchangeable), so masking those breaks wpewebkit and takes
+    # packagegroup-avocado-feature-graphics and avocado-complete down with it.
+    # The point-release delta is not worth reimplementing the wiring for.
+    #
+    # Each masked directory holds exactly one recipe, so nothing else is caught.
+    BBMASK += "meta-webkit/recipes-flatpak/bubblewrap/"
+    BBMASK += "meta-webkit/recipes-flatpak/xdg-dbus-proxy/"
+    BBMASK += "meta-webkit/recipes-graphics/libjxl/"
+    BBMASK += "meta-webkit/recipes-multimedia/dav1d/"
+    BBMASK += "meta-webkit/recipes-multimedia/libavif/"
+    BBMASK += "meta-webkit/recipes-multimedia/webm/"
+    BBMASK += "meta-webkit/recipes-extended/highway/"
