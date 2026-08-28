@@ -80,8 +80,8 @@ run() { # run <state-dir>
 # --- Case 1: flashed 128 MiB btrfs -> in-place reencrypt confined to fs+32M ---
 s="$work/c1"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 134217728 > "$s/fsbytes"
 run "$s" || bad "case 1 script exit"
-if grep -q "^cryptsetup reencrypt --encrypt --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --reduce-device-size 32M --device-size 160M --progress-frequency 30 --key-file .* --batch-mode $blk\$" "$s/log"; then
-  ok "plaintext btrfs is re-encrypted in place, confined to fs + 32 MiB (160M), with progress"
+if grep -q "^cryptsetup reencrypt --encrypt --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --reduce-device-size 32M --device-size 128M --progress-frequency 30 --key-file .* --batch-mode $blk\$" "$s/log"; then
+  ok "plaintext btrfs is re-encrypted in place, confined to the filesystem (128M; the 32 MiB shift is added by cryptsetup), with progress"
 else bad "unexpected reencrypt command: $(grep reencrypt "$s/log" || echo none)"; fi
 grep -q "^cryptsetup luksFormat" "$s/log" && bad "luksFormat ran over a flashed filesystem" || ok "luksFormat never touches a flashed filesystem"
 grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "container opened with the recovery key afterwards" || bad "container not opened"
@@ -111,7 +111,7 @@ m=$(grep -n '^mount -t btrfs' "$s/log" | head -1 | cut -d: -f1); r=$(grep -n '^b
 u=$(grep -n '^umount' "$s/log" | head -1 | cut -d: -f1); e=$(grep -n '^cryptsetup reencrypt --encrypt' "$s/log" | head -1 | cut -d: -f1)
 { [ -n "$m" ] && [ -n "$r" ] && [ -n "$u" ] && [ -n "$e" ] && [ "$m" -lt "$r" ] && [ "$r" -lt "$u" ] && [ "$u" -lt "$e" ]; } || seq_ok=0
 [ "$seq_ok" = 1 ] && ok "shrink is mount -> resize -> umount, all before the reencrypt" || bad "wrong shrink ordering: $(grep -n 'mount\|resize\|reencrypt --encrypt' "$s/log")"
-grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2048M " "$s/log" && ok "reencrypt then covers the shrunk fs + header (2048M = whole partition)" || bad "unexpected device-size after shrink: $(grep 'reencrypt --encrypt' "$s/log")"
+grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2016M " "$s/log" && ok "reencrypt then covers the shrunk fs (2016M; with the 32 MiB shift that is the whole partition)" || bad "unexpected device-size after shrink: $(grep 'reencrypt --encrypt' "$s/log")"
 grep -q "MiB to convert" "$s/out" && ok "operator is told how much is being converted" || bad "no size/progress line on the console"
 
 # --- Case 5: flashed small btrfs (case 1 shape) must NOT be shrunk ---
@@ -123,11 +123,11 @@ grep -q "^btrfs filesystem resize" "$work/c1/log" && bad "small flashed btrfs wa
 s="$work/c6"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 2147483648 > "$s/fsbytes"; echo 314572800 > "$s/alloc"
 run "$s" || bad "case 6 script exit"
 grep -q "^btrfs filesystem resize 1836M /run/cryptsetup-var-shrink$" "$s/log" && ok "grown btrfs with little data is shrunk to allocated + relocation room (1836M)" || bad "unexpected resize: $(grep 'btrfs filesystem resize' "$s/log" || echo none)"
-grep -q "^cryptsetup reencrypt --encrypt .*--device-size 1868M " "$s/log" && ok "reencrypt is confined to the shrunk fs + header (1868M), not the partition" || bad "unexpected device-size: $(grep 'reencrypt --encrypt' "$s/log")"
+grep -q "^cryptsetup reencrypt --encrypt .*--device-size 1836M " "$s/log" && ok "reencrypt is confined to the shrunk fs (1836M), not the partition" || bad "unexpected device-size: $(grep 'reencrypt --encrypt' "$s/log")"
 
 # --- Case 7: btrfs refuses the aggressive shrink -> fall back to the 32 MiB one ---
 s="$work/c7"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 2147483648 > "$s/fsbytes"; echo 314572800 > "$s/alloc"; touch "$s/refuse_shrink"
 run "$s" || bad "case 7 script exit"
-{ grep -q "^btrfs filesystem resize 1836M " "$s/log" && grep -q "^btrfs filesystem resize -32M " "$s/log" && grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2048M " "$s/log"; } && ok "a refused aggressive shrink falls back to the 32 MiB shrink and converts the whole fs" || bad "fallback not taken: $(grep -n 'resize\|reencrypt --encrypt' "$s/log")"
+{ grep -q "^btrfs filesystem resize 1836M " "$s/log" && grep -q "^btrfs filesystem resize -32M " "$s/log" && grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2016M " "$s/log"; } && ok "a refused aggressive shrink falls back to the 32 MiB shrink and converts the whole fs" || bad "fallback not taken: $(grep -n 'resize\|reencrypt --encrypt' "$s/log")"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]
