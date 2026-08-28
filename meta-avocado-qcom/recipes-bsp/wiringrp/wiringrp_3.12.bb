@@ -11,7 +11,10 @@ SRCPROJECT = "git://github.com/rubikpi-ai/WiringRP.git;protocol=https"
 SRCBRANCH  = "main"
 SRCREV = "4bfb0de9f6605978e55ee2e89374b2eb2a84358d"
 
-SRC_URI = "${SRCPROJECT};branch=${SRCBRANCH}"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+SRC_URI = "${SRCPROJECT};branch=${SRCBRANCH} \
+    file://0001-wiringPi-call-GetRP1Memory-with-no-arguments.patch \
+"
 
 INSANE_SKIP:${PN} += "ldflags"
 

@@ -6,7 +6,11 @@ HOMEPAGE = "https://github.com/rubikpi-ai/rubikpi3_thermal"
 LICENSE = "CLOSED"
 
 # Source: https://github.com/rubikpi-ai/meta-rubikpi-bsp @ 227631ce94bb
-inherit qprebuilt pkgconfig
+# That layer used meta-qcom-hwe's qprebuilt.bbclass to unpack the tarball's
+# sysroot-shaped tree into ${D}; the HWE layer is gone from this build, so do
+# the same in a plain do_install (the tree is ./usr, ./etc plus a __LIC__ dir).
+inherit pkgconfig
+S = "${UNPACKDIR}"
 
 DEPENDS += "libnl"
 RDEPENDS:${PN} += "glibc"
@@ -22,10 +26,17 @@ SRC_URI[sha256sum] = "510af8ab75910d1e4953011fcab3dd6a35ec1d9ad221c33fa8af1eb6d4
 # binary's mode is 0755. Relocate the binary to /usr/bin/ (which lives on the
 # /usr sysext overlay — exec'able) and patch the .service unit to match.
 #
-# qprebuilt.bbclass declares do_install as a python task, so we attach the
-# shell-side relocation as a postfunc instead of using do_install:append.
-do_install[postfuncs] += "rubikpi3_thermal_relocate"
-rubikpi3_thermal_relocate() {
+do_configure[noexec] = "1"
+do_compile[noexec] = "1"
+do_install() {
+    install -d ${D}
+    # --no-preserve=ownership matters: the vendor packed this tarball as
+    # uid/gid 1000, do_unpack runs outside pseudo so tar leaves those ids in
+    # ${S}, and a plain 'cp -a' would carry them into ${D}. do_package then
+    # hashes ${D} and calls getpwuid() on every owner, which dies on any host
+    # without a passwd entry for 1000 ("uid not found: 1000", reported as host
+    # contamination). Shipped files want root:root regardless.
+    cp -a --no-preserve=ownership ${S}/usr ${S}/etc ${D}/
     install -d ${D}${bindir}
     if [ -f ${D}${sysconfdir}/rubikpi/rubikpi-thermal ]; then
         mv ${D}${sysconfdir}/rubikpi/rubikpi-thermal ${D}${bindir}/rubikpi-thermal

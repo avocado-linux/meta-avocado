@@ -1,0 +1,44 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] main.h: include the headers that declare the map and ble_hrc menus
+
+Two profile blocks include the wrong header, so with the profile enabled the
+functions main.c calls are never declared:
+
+  BTAPP_MAP_ENABLE     -> "ctn.h"      (map_menu_display/_handle are in map.h)
+  BTAPP_BLE_HRC_ENABLE -> "app_ble.h"  (ble_hrc_menu_* are in app_ble_hrc.h)
+
+Both profiles are enabled by the Makefile, so main.c compiled only because C
+let an undeclared call through with a warning. GCC 14 made
+-Wimplicit-function-declaration an error, so it now fails:
+
+  main.c:363:17: error: implicit declaration of function 'map_menu_display';
+  did you mean 'sap_menu_display'?
+  main.c:424:17: error: implicit declaration of function 'ble_hrc_menu_display';
+  did you mean 'ble_htp_menu_display'?
+
+Include the right headers. Every other block already follows this convention
+- the adjacent BTAPP_BLE_HTP_ENABLE block includes "app_ble_htp.h" - and the
+#else stubs stay untouched for builds with the profiles off.
+
+Upstream-Status: Inappropriate [vendor fork, rubikpi-ai/rubikpi_bt_bsa_demo]
+---
+--- a/src/linux/main/include/main.h
++++ b/src/linux/main/include/main.h
+@@ -153,7 +153,7 @@
+ #endif
+ 
+ #ifdef BTAPP_MAP_ENABLE
+-#include "ctn.h"
++#include "map.h"
+ #else
+ void map_menu_display(void)
+ {
+@@ -391,7 +391,7 @@
+ #endif
+ 
+ #ifdef BTAPP_BLE_HRC_ENABLE
+-#include "app_ble.h"
++#include "app_ble_hrc.h"
+ #else
+ void ble_hrc_menu_display(void)
+ {

@@ -1,0 +1,36 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] wiringpi.i: use SWIG_AppendOutput in the argout typemap
+
+SWIG 4.3 gave SWIG_Python_AppendOutput a third parameter:
+
+  SWIG_Python_AppendOutput(PyObject *result, PyObject *obj, int is_void);
+
+so this typemap's two-argument call no longer compiles against the runtime
+SWIG itself generates into the wrapper (swig 4.4.1 here):
+
+  wiringpi_wrap.c:6112:17: error: too few arguments to function
+  'SWIG_Python_AppendOutput'; expected 3, have 2
+
+SWIG's own upgrade note for that change says to use SWIG_AppendOutput
+instead; Lib/python/pytypemaps.swg defines it as
+
+  #define SWIG_AppendOutput(result, obj) SWIG_Python_AppendOutput(result, obj, $isvoid)
+
+which fills in the $isvoid the typemap cannot know by itself. This is the
+idiom upstream's own Examples/python/multimap/example.i uses, and it works
+on SWIG 4.2 and earlier too, where SWIG_AppendOutput expands to the
+two-argument form.
+
+Upstream-Status: Inappropriate [vendor fork, rubikpi-ai/WiringRP-Python]
+---
+--- a/wiringpi.i
++++ b/wiringpi.i
+@@ -286,7 +286,7 @@
+ };
+ 
+ %typemap(argout) (unsigned char *data) {
+-      $result = SWIG_Python_AppendOutput($result, PyString_FromStringAndSize((char *) $1, result));
++      $result = SWIG_AppendOutput($result, PyString_FromStringAndSize((char *) $1, result));
+ };
+ 
+ %include "bindings.i"
