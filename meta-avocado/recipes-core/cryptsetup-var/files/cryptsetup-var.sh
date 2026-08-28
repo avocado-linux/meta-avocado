@@ -244,11 +244,14 @@ maybe_resize() {
 # cannot be encrypted on the host, so first boot converts it here.
 #
 # LUKS2 needs a header in front of the data, so `--reduce-device-size 32M`
-# shifts the data forward by 32 MiB. Nothing needs shrinking: the partition is
-# an expand-to-fill one far larger than the flashed image, and `--device-size`
-# (fs size + 32 MiB) confines the work to the seeded bytes - the shift lands
-# in the partition's free tail and only the data that exists gets encrypted.
-# maybe_resize then grows the mapping to the partition on the following boots.
+# shifts the data forward by 32 MiB, and `--device-size` names the DATA to
+# convert - the filesystem's own size, not the filesystem plus the shift.
+# cryptsetup adds the shift itself and refuses when data + 32 MiB exceeds the
+# partition ("Reduced data size is larger than real device size"), which is
+# exactly the situation on a freshly flashed partition sized to the image once
+# the filesystem has been shrunk to make the 32 MiB. Confining the work to the
+# filesystem also means only the data that exists gets encrypted; maybe_resize
+# then grows the mapping to the partition on the following boots.
 #
 # Interrupted mid-way (power cut), LUKS2 records the reencryption in its
 # metadata; open_var resumes it before opening. A filesystem whose size cannot
@@ -326,9 +329,10 @@ encrypt_in_place() {
     fi
     size_opt=""
     if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null; then
-        # fs + 32 MiB shift, rounded up to whole MiB; must still fit the partition.
-        want_mib=$(( (fs_bytes + 33554432 + 1048575) / 1048576 ))
-        if [ $(( want_mib * 1048576 )) -le "$part_bytes" ]; then
+        # The data to convert is the filesystem, rounded up to whole MiB; it and
+        # the 32 MiB shift must still fit the partition.
+        want_mib=$(( (fs_bytes + 1048575) / 1048576 ))
+        if [ $(( want_mib * 1048576 + 33554432 )) -le "$part_bytes" ]; then
             size_opt="--device-size ${want_mib}M"
         fi
     fi
