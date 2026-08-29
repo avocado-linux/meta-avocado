@@ -130,6 +130,33 @@ ever holds encrypted, the passphrase being AES-256-CBC of a fixed block under it
 Posture publishes `avocado_var_hwkey` = backend name or `no`, and warns when a
 device that has the keyslot opened without it.
 
+**Operator recovery key (`var.recovery`).** Every keyslot above is bound to
+the device: a dead SoC takes `/var` with it. `runtimes.<r>.var.recovery` names
+a registry secret that is a *master*; `avocado var-key enroll --device` derives
+this unit's passphrase as HMAC-SHA256(master, SoC UID) over the device session
+and `avocadoctl var-key enroll` adds it as a keyslot with an `avocado-recovery`
+token. Nothing derived from the master is in any image, and nothing but the
+keyslot is on the device. To make that possible without any keyslot passphrase
+being reachable from the running system, `cryptsetup-var` links the volume key
+into root's user keyring on every open (`--link-vk-to-keyring
+@u::%user:cryptsetup:var`) and avocadoctl authorises with
+`luksAddKey --volume-key-keyring`. Once a recovery token exists, the initrd
+retires the SoC-UID-derived keyslot (the one key a UID reader could derive),
+unless that key is what opened `/var` this boot. Bench recovery:
+`avocado var-key derive <runtime> --uid <UID> --raw | cryptsetup open --key-file - <dev> var`.
+
+**Which engine (`var.hardware`).** Default `auto`: enrol whatever engine the
+machine ships and probes OK, degrade to the derived key and report. `caam` /
+`tpm2`: that engine must hold a keyslot - `cryptsetup-var` refuses to open
+`/var` on the derived key when it is unusable (emergency target), so a product
+that promises hardware binding never silently ships without it. `none`: no
+hardware keyslot at all; avocado-cli refuses it without `var.recovery`. The
+choice rides in the initramfs as `/etc/avocado/var-hardware` next to the
+`var-encrypt` marker, only when it is not `auto`.
+
+Posture adds `avocado_var_recovery` = `key` (operator slot enrolled) or
+`soc-uid` (still on the derived slot), and `VAR_HARDWARE` in the /run file.
+
 **Prerequisites a machine must meet before declaring it:** a dm-crypt kernel
 fragment reachable from its kernel recipe, and a GPT `var` partlabel
 (`cryptsetup-var.service` keys on it). Raspberry Pi has neither today

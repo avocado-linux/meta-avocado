@@ -51,6 +51,7 @@ POSTURE_FILE="/run/avocado-var-posture"
 KEY_UNLOCK="avocado_var_unlock"
 KEY_TOKEN="avocado_var_tpm2_token"
 KEY_HWKEY="avocado_var_hwkey"
+KEY_RECOVERY="avocado_var_recovery"
 KEY_ENCRYPTED="avocado_var_encrypted"
 
 # fw_printenv/fw_setenv come from libubootenv and need a valid fw_env.config,
@@ -102,6 +103,7 @@ VAR_UNLOCK_METHOD=unknown
 VAR_TPM2_TOKEN=unknown
 VAR_HWKEY_TOKEN=unknown
 VAR_HWKEY_BACKEND=none
+VAR_RECOVERY=unknown
 # shellcheck source=/dev/null
 . "$POSTURE_FILE"
 
@@ -123,6 +125,9 @@ put_if_changed "$KEY_TOKEN" "$VAR_TPM2_TOKEN"
 _hwkey=no
 [ "$VAR_HWKEY_TOKEN" = yes ] && _hwkey="$VAR_HWKEY_BACKEND"
 put_if_changed "$KEY_HWKEY" "$_hwkey"
+# What recovers /var if the hardware keyslot is lost: an operator-held key
+# (avocadoctl var-key enroll) or, until then, the key derived from the SoC UID.
+put_if_changed "$KEY_RECOVERY" "$VAR_RECOVERY"
 put_if_changed "$KEY_ENCRYPTED" "$var_encrypted"
 
 # Loud on the degraded case. Everything above is a value in a store someone has

@@ -31,7 +31,12 @@ case "$1" in
   isLuks)     [ -e "$STATE/luks" ] ;;
   luksDump)   cat "$STATE/dump" 2>/dev/null
               printf 'Keyslots:\n  0: luks2\n'
-              [ -e "$STATE/token" ] && printf '  1: luks2\nTokens:\n  0: avocado-hwkey\n\tKeyslot:    1\nDigests:\n'
+              if [ -e "$STATE/token" ]; then
+                printf '  1: luks2\n'; [ -e "$STATE/recovery" ] && printf '  2: luks2\n'
+                printf 'Tokens:\n  0: avocado-hwkey\n\tKeyslot:    1\n'
+                [ -e "$STATE/recovery" ] && printf '  1: avocado-recovery\n\tKeyslot:    2\n'
+                printf 'Digests:\n'
+              fi
               exit 0 ;;
   luksFormat) touch "$STATE/luks" ;;
   reencrypt)  touch "$STATE/luks"; rm -f "$STATE/dump" ;;
@@ -90,8 +95,9 @@ chmod +x "$work/bin/"* "$work/sd/"* "$work/hwkey.sh"
 run() { # run <state-dir>
   LOG="$1/log"; : > "$LOG"
   rm -f "$work/sd/var-hwkey.sh"; [ -e "$1/hwkey" ] && cp "$work/hwkey.sh" "$work/sd/var-hwkey.sh"
+  hw=""; [ -e "$1/hardware" ] && hw="&& echo '$(cat "$1/hardware" 2>/dev/null)' > /etc/avocado/var-hardware"
   unshare -rm bash -c "
-    mount -t tmpfs none /etc && echo 'encrypted-var ftpm tpm2' > /etc/avocado-security-capabilities
+    mount -t tmpfs none /etc && echo 'encrypted-var ftpm tpm2' > /etc/avocado-security-capabilities && mkdir -p /etc/avocado $hw
     mount -t tmpfs none /run
     mkdir -p /sys/module/dm_crypt 2>/dev/null || mount -t tmpfs none /sys/module && mkdir -p /sys/module/dm_crypt
     export PATH='$work/bin':\$PATH LOG='$LOG' STATE='$1' STATE_DEV='$blk'
@@ -105,7 +111,7 @@ if grep -q "^cryptsetup reencrypt --encrypt --type luks2 --cipher aes-xts-plain6
   ok "plaintext btrfs is re-encrypted in place, confined to the filesystem (128M; the 32 MiB shift is added by cryptsetup), with progress"
 else bad "unexpected reencrypt command: $(grep reencrypt "$s/log" || echo none)"; fi
 grep -q "^cryptsetup luksFormat" "$s/log" && bad "luksFormat ran over a flashed filesystem" || ok "luksFormat never touches a flashed filesystem"
-grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "container opened with the recovery key afterwards" || bad "container not opened"
+grep -q "^cryptsetup luksOpen --link-vk-to-keyring @u::%user:cryptsetup:var --key-file" "$s/log" && ok "container opened with the recovery key afterwards" || bad "container not opened"
 
 # --- Case 2: blank partition -> luksFormat (old path unchanged) ---
 s="$work/c2"; mkdir -p "$s"; : > "$s/fstype"
@@ -160,7 +166,7 @@ grep -q "^cryptsetup luksAddKey --key-file .* --new-keyfile .* --new-key-slot 1 
   || bad "unexpected luksAddKey: $(grep luksAddKey "$s/log" || echo none)"
 grep -q '"type":"avocado-hwkey","keyslots":\["1"\],"backend":"stubengine","blob":"YmxvYg=="' "$s/token" 2>/dev/null \
   && ok "token carries type, keyslot, backend name and the blob" || bad "token missing/wrong: $(cat "$s/token" 2>/dev/null)"
-grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "first boot still opened with the recovery key" || bad "no recovery open"
+grep -q "^cryptsetup luksOpen --link-vk-to-keyring @u::%user:cryptsetup:var --key-file" "$s/log" && ok "first boot still opened with the recovery key" || bad "no recovery open"
 grep -q "^VAR_HWKEY_TOKEN=yes$" "$s/posture" 2>/dev/null || true
 
 # --- Case 9: token present and engine up -> open via the engine, never Argon2id ---
@@ -175,7 +181,7 @@ grep -q "opened via hardware key (stubengine)" "$s/out" && ok "posture: unlock m
 # --- Case 10: token present but engine down -> recovery key, loud, no re-enroll ---
 s="$work/c10"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/hwkey_down"; cp "$work/c8/token" "$s/token"
 run "$s" || bad "case 10 script exit"
-grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "falls back to the Argon2id recovery key" || bad "no recovery open"
+grep -q "^cryptsetup luksOpen --link-vk-to-keyring @u::%user:cryptsetup:var --key-file" "$s/log" && ok "falls back to the Argon2id recovery key" || bad "no recovery open"
 grep -q "hardware key unavailable" "$s/out" && ok "fallback is reported" || bad "silent fallback"
 grep -q "^cryptsetup luksAddKey" "$s/log" && bad "tried to enroll with the engine down" || ok "no enroll while the engine is down"
 
@@ -183,5 +189,40 @@ grep -q "^cryptsetup luksAddKey" "$s/log" && bad "tried to enroll with the engin
 s="$work/c11"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/refuse_addkey"
 run "$s" || bad "case 11 script exit"
 [ -e "$s/token" ] && bad "token imported although the keyslot was not added" || ok "no orphan token after a failed keyslot add"
+
+# --- Case 13: recovery slot enrolled by the operator and the engine opened /var
+# -> the derived (untokened) Argon2id slot 0 is retired; volume key linked ---
+s="$work/c13"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/recovery"; cp "$work/c8/token" "$s/token"
+run "$s" || bad "case 13 script exit"
+grep -q "^cryptsetup luksKillSlot --batch-mode $blk 0$" "$s/log" && ok "derived keyslot retired once a recovery slot exists and the engine opened /var" || bad "derived slot kept: $(grep -c luksKillSlot "$s/log")"
+grep -q "^cryptsetup luksOpen --link-vk-to-keyring @u::%user:cryptsetup:var --key-file" "$s/log" && ok "volume key is linked into root's user keyring on open" || bad "no --link-vk-to-keyring: $(grep luksOpen "$s/log")"
+grep -q "^VAR_RECOVERY=key$" /dev/null 2>&1 || true
+
+# --- Case 14: recovery slot present but the engine is down -> the derived slot
+# is what opened /var this boot; it must NOT be retired ---
+s="$work/c14"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/hwkey_down" "$s/recovery"; cp "$work/c8/token" "$s/token"
+run "$s" || bad "case 14 script exit"
+grep -q "^cryptsetup luksKillSlot" "$s/log" && bad "retired the slot that just opened /var" || ok "derived keyslot kept while it is the one that worked"
+
+# --- Case 15: no recovery slot -> nothing retired ---
+grep -q "^cryptsetup luksKillSlot" "$work/c9/log" && bad "retired a slot without a recovery token" || ok "no retirement without an operator recovery slot"
+
+# --- Case 16: var.hardware=caam required but the engine is down -> refuse
+# before touching the container (unit fails -> emergency), no open ---
+s="$work/c16"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 134217728 > "$s/fsbytes"; touch "$s/hwkey" "$s/hwkey_down"; echo caam > "$s/hardware"
+if run "$s"; then bad "booted on the derived key although var.hardware=caam was unmet"; else ok "var.hardware=caam with the engine down refuses to fall back"; fi
+grep -q "var.hardware=caam" "$s/out" && ok "refusal names the requirement" || bad "no requirement in message: $(cat "$s/out")"
+grep -q "^cryptsetup" "$s/log" && bad "cryptsetup ran despite the refusal" || ok "nothing touched before the refusal"
+
+# --- Case 17: var.hardware=caam and the engine is up -> normal enrol ---
+s="$work/c17"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"; echo caam > "$s/hardware"
+run "$s" || bad "case 17 script exit"
+grep -q "^cryptsetup luksAddKey" "$s/log" && ok "var.hardware=caam with the engine up enrols as usual" || bad "no enrol with engine up"
+
+# --- Case 18: var.hardware=none -> no hardware enrol even with an engine present ---
+s="$work/c18"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"; echo none > "$s/hardware"
+run "$s" || bad "case 18 script exit"
+grep -q "^cryptsetup luksAddKey" "$s/log" && bad "enrolled a hardware slot with var.hardware=none" || ok "var.hardware=none enrols no hardware keyslot"
+grep -q "^VAR_HARDWARE=none$" "$s/out" 2>/dev/null || true
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]

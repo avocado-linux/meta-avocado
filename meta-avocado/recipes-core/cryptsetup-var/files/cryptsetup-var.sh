@@ -92,6 +92,68 @@ has_tpm2_token() {
 HWKEY_SCRIPT="${SCRIPT_DIR}/var-hwkey.sh"
 HWKEY_TOKEN_TYPE="avocado-hwkey"
 
+# Every open links the volume key into root's user keyring under this name.
+# Nothing in the running system can reproduce a keyslot passphrase (the
+# hardware backends and the derived key live only in this initramfs), so this
+# is how `avocadoctl var-key` authorises adding or removing the operator's
+# recovery keyslot later: luksAddKey --volume-key-keyring. A `user` key, not
+# `logon`, because cryptsetup has to read it back; root on the device could
+# already reach the volume key through the running dm-crypt mapping.
+VK_LINK="--link-vk-to-keyring @u::%user:cryptsetup:var"
+RECOVERY_TOKEN_TYPE="avocado-recovery"
+
+# avocado.yaml runtimes.<r>.var.hardware, written by avocado-cli next to the
+# var-encrypt marker only when it is not the default "auto": caam|tpm2 = that
+# engine must hold a keyslot, refuse to boot on the derived key if it cannot;
+# none = never enrol a hardware keyslot (the operator's recovery key is the
+# second slot; avocado-cli refuses "none" without one).
+VAR_HARDWARE=$(cat /etc/avocado/var-hardware 2>/dev/null || echo auto)
+
+# Fail closed when an explicitly required engine is not usable. Runs before the
+# container is touched so an unmet requirement never opens /var on the
+# derived key; OnFailure= takes the boot to emergency.
+check_required_hardware() {
+    case "$VAR_HARDWARE" in
+        caam)
+            if ! hwkey_available; then
+                echo "cryptsetup-var: var.hardware=caam but the CAAM key backend is not usable on this device - refusing to fall back to the derived key" >&2
+                exit 1
+            fi ;;
+        tpm2)
+            i=0
+            while [ ! -e /dev/tpm0 ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
+            if [ ! -e /dev/tpm0 ]; then
+                echo "cryptsetup-var: var.hardware=tpm2 but no TPM device appeared - refusing to fall back to the derived key" >&2
+                exit 1
+            fi ;;
+        auto|none) ;;
+        *)
+            echo "cryptsetup-var: unknown var.hardware '$VAR_HARDWARE' - refusing to guess" >&2
+            exit 1 ;;
+    esac
+}
+
+has_recovery_token() {
+    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk -v t="$RECOVERY_TOKEN_TYPE" '
+        /^Tokens:/ {s=1; next}
+        /^[A-Za-z]/ {s=0}
+        s && $2==t {f=1}
+        END {exit !f}'
+}
+
+# Keyslots no token references: the Argon2id slot derived from the SoC UID (or
+# the provisioned secret). With an operator recovery slot enrolled it is the
+# one remaining key anyone who can read the UID could derive, so retire it.
+untokened_keyslots() {
+    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '
+        /^Keyslots:/ {s=1; next}
+        /^Tokens:/ {s=2; next}
+        /^[A-Za-z]/ {s=0}
+        s==1 && /^  [0-9]+: / {sub(":","",$1); k[$1]=1}
+        s==2 && /Keyslot:/ {delete k[$2]}
+        END {for (i in k) print i}'
+}
+
 hwkey_available() {
     [ -x "$HWKEY_SCRIPT" ] && "$HWKEY_SCRIPT" probe >/dev/null 2>&1
 }
@@ -189,7 +251,14 @@ write_posture() {
         _hwkey_backend=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
     fi
 
+    _recovery=soc-uid
+    if has_recovery_token; then
+        _recovery=key
+    fi
+
     {
+        echo "VAR_HARDWARE=${VAR_HARDWARE}"
+        echo "VAR_RECOVERY=${_recovery}"
         echo "VAR_UNLOCK_METHOD=${VAR_UNLOCK_METHOD}"
         echo "VAR_TPM2_TOKEN=${_tpm2_token}"
         echo "VAR_TPM_DEVICE=${_tpm_dev}"
@@ -209,7 +278,7 @@ open_var() {
     if has_hwkey_token; then
         _hwpass=$(mktemp -p /run)
         if hwkey_available && hwkey_passphrase_to "$_hwpass" \
-                && cryptsetup luksOpen --key-file "$_hwpass" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+                && cryptsetup luksOpen $VK_LINK --key-file "$_hwpass" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
             rm -f "$_hwpass"
             echo "cryptsetup-var: opened via hardware key ($("$HWKEY_SCRIPT" name))"
             VAR_UNLOCK_METHOD="hwkey"
@@ -228,7 +297,7 @@ open_var() {
         # The token open needs the libcryptsetup TPM2 plugin, not the
         # systemd-cryptenroll binary - so probe capability by just attempting it
         # and letting it fall through to the Argon2id recovery key on failure.
-        if [ -e /dev/tpm0 ] && cryptsetup open --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+        if [ -e /dev/tpm0 ] && cryptsetup open $VK_LINK --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
             echo "cryptsetup-var: opened via TPM2 token"
             VAR_UNLOCK_METHOD="tpm2"
             return 0
@@ -236,7 +305,7 @@ open_var() {
         echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
     fi
 
-    if ! cryptsetup luksOpen --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+    if ! cryptsetup luksOpen $VK_LINK --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
         echo "cryptsetup-var: Argon2id open failed on $VAR_DEV" >&2
         exit 1
     fi
@@ -274,6 +343,7 @@ ensure_fs() {
 # PBKDF2 like systemd-cryptenroll does for TPM2 slots; the Argon2id cost stays
 # on the recovery slot where the input is a derived secret.
 ensure_hwkey_enroll() {
+    [ "$VAR_HARDWARE" != none ] || return 0
     [ -x "$HWKEY_SCRIPT" ] || return 0
     has_hwkey_token && return 0
     if ! hwkey_available; then
@@ -307,6 +377,22 @@ ensure_hwkey_enroll() {
     return 0
 }
 
+# Once the operator has enrolled a recovery keyslot (avocadoctl var-key, token
+# avocado-recovery), the Argon2id keyslot derived from the SoC UID stops being
+# a recovery path and becomes the one key a UID reader could derive: retire it.
+# Only when this boot did not depend on it - if the hardware slot failed and
+# the derived key is what opened /var, keep it and let posture shout.
+retire_derived_keyslot() {
+    [ "$VAR_UNLOCK_METHOD" != argon2id ] || return 0
+    has_recovery_token || return 0
+    for _slot in $(untokened_keyslots); do
+        echo "cryptsetup-var: recovery keyslot present - retiring derived keyslot $_slot"
+        cryptsetup luksKillSlot --batch-mode "$VAR_DEV" "$_slot" \
+            || echo "cryptsetup-var: could not retire keyslot $_slot" >&2
+    done
+    return 0
+}
+
 # Ensure a TPM2 keyslot sealed to PCR 7 exists, keeping the Argon2id keyslot
 # (slot 0) as the recovery path. Idempotent and best-effort: skips when a token
 # already exists, when no TPM is present, or when systemd-cryptenroll is absent.
@@ -314,6 +400,7 @@ ensure_hwkey_enroll() {
 # encrypted under Argon2id rather than failing the unit. Running on every boot
 # also enrolls a device whose first boot happened before /dev/tpm0 existed.
 ensure_tpm2_enroll() {
+    [ "$VAR_HARDWARE" != none ] || return 0
     has_tpm2_token && return 0
     [ -e /dev/tpm0 ] || return 0
     command -v systemd-cryptenroll >/dev/null 2>&1 || return 0
@@ -491,6 +578,9 @@ resume_reencrypt() {
     fi
 }
 
+# 0. An explicitly required engine must be usable before anything is touched.
+check_required_hardware
+
 # 1. Ensure the LUKS2 container exists: encrypt a flashed filesystem in place,
 #    or format a blank partition on first boot.
 cryptsetup isLuks "$VAR_DEV" 2>/dev/null || {
@@ -523,6 +613,7 @@ ensure_fs
 #    where a TPM is present.
 ensure_hwkey_enroll
 ensure_tpm2_enroll
+retire_derived_keyslot
 
 # 5. Grow the container to fill the partition if it was expanded.
 maybe_resize
