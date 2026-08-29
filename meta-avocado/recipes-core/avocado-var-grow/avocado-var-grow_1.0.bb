@@ -21,10 +21,13 @@ SYSTEMD_SERVICE:${PN} = "avocado-var-grow.service"
 # node and Jetson's "none" never do), so the unit's Requires= on the device
 # unit is always satisfiable where it is installed.
 AVOCADO_VAR_PART_DEV ??= ""
-def avocado_var_device_unit(d):
+python __anonymous() {
     dev = d.getVar('AVOCADO_VAR_PART_DEV') or ''
     if not dev.startswith('/dev/disk/by-partlabel/'):
-        bb.fatal("avocado-var-grow needs AVOCADO_VAR_PART_DEV to be a /dev/disk/by-partlabel/ path (got '%s'); do not install it on this machine" % dev)
+        raise bb.parse.SkipRecipe("AVOCADO_VAR_PART_DEV is '%s', not a /dev/disk/by-partlabel/ path: no GPT var partition to grow on this machine" % dev)
+}
+def avocado_var_device_unit(d):
+    dev = d.getVar('AVOCADO_VAR_PART_DEV') or ''
     # systemd-escape --path: strip the leading '/', escape '-' as \x2d, '/' -> '-'
     return dev.lstrip('/').replace('-', '\\x2d').replace('/', '-') + '.device'
 
