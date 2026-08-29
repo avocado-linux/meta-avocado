@@ -28,11 +28,16 @@ if [ -z "$disk" ]; then
 fi
 dev=$devdir/$disk
 
-current() {
-    # PARTITION_CONFIG bits 5:3: 1 = boot0, 2 = boot1, 7 = user area, 0 = none.
+# PARTITION_CONFIG: bit 6 = BOOT_ACK, bits 5:3 = boot partition (1 = boot0,
+# 2 = boot1, 7 = user area, 0 = none).
+partition_config() {
     cfg=$(mmc extcsd read "$dev" | sed -n 's/.*PARTITION_CONFIG: 0x\([0-9A-Fa-f]*\).*/\1/p' | head -1)
     [ -n "$cfg" ] || { echo "avocado-imx-bootpart: cannot read PARTITION_CONFIG from $dev" >&2; exit 1; }
-    case $(( (0x$cfg >> 3) & 7 )) in
+    echo "$cfg"
+}
+
+current() {
+    case $(( (0x$(partition_config) >> 3) & 7 )) in
         1) echo a ;;
         2) echo b ;;
         7) echo user ;;
@@ -69,8 +74,11 @@ if [ "$before" = "$1" ]; then
     echo "avocado-imx-bootpart: slot $1 ($bootdev) already enabled"
     exit 0
 fi
-# Keep BOOT_ACK set (the second argument), as provisioning left it.
-mmc bootpart enable "$n" 1 "$dev"
+# Preserve BOOT_ACK (the second argument) as provisioning left it rather than
+# forcing it on: it is part of the boot protocol the ROM and U-Boot were
+# provisioned with, and this tool only moves the partition selection.
+ack=$(( (0x$(partition_config) >> 6) & 1 ))
+mmc bootpart enable "$n" "$ack" "$dev"
 after=$(current)
 [ "$after" = "$1" ] || { echo "avocado-imx-bootpart: enable did not take: PARTITION_CONFIG still selects '$after'" >&2; exit 1; }
 echo "avocado-imx-bootpart: $dev now boots slot $1 from $bootdev (was $before)"

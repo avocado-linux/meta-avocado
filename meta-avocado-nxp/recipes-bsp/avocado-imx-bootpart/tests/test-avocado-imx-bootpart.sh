@@ -34,6 +34,8 @@ printf '\xd1\x00\x20\x41new' > "$work/mmcblk9boot1"
 out=$(run b 2>&1)
 { echo "$out" | grep -q "now boots slot b from $work/mmcblk9boot1" && grep -q "^mmc bootpart enable 2 1 $work/mmcblk9$" "$work/log" && [ "$(cat "$work/cfg")" = 50 ]; } && ok "slot b enables boot partition 2 with BOOT_ACK and verifies it" || bad "enable: $out / $(cat "$work/log")"
 out=$(run b 2>&1); echo "$out" | grep -q "already enabled" && ok "enabling the current slot is a no-op" || bad "noop: $out"
+printf '08' > "$work/cfg"; : > "$work/log"
+out=$(run b 2>&1); { grep -q "^mmc bootpart enable 2 0 $work/mmcblk9$" "$work/log"; } && ok "BOOT_ACK is preserved as provisioning left it (off stays off)" || bad "boot_ack: $out / $(cat "$work/log")"
 out=$(run a 2>&1); { echo "$out" | grep -q "now boots slot a from $work/mmcblk9boot0" && [ "$(cat "$work/cfg")" = 48 ]; } && ok "rollback to slot a enables boot partition 1" || bad "rollback: $out"
 out=$(run c 2>&1); echo "$out" | grep -q "^usage" && ok "unknown slot is a usage error" || bad "usage: $out"
 # SD card: no hardware boot partitions at all -> nothing to select, exit 0, mmc untouched

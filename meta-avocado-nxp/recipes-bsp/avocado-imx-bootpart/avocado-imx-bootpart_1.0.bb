@@ -15,4 +15,7 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/avocado-imx-bootpart ${D}${bindir}/
 }
 
-COMPATIBLE_MACHINE = "(mx8m-generic-bsp|mx9-generic-bsp)"
+# i.MX 8M only for now: the image guard checks the HABv4 IVT (0xD1 .. 0x41)
+# that heads 8M boot images. i.MX 9 boots AHAB containers with a different
+# header, so enabling would refuse every image there until the guard learns it.
+COMPATIBLE_MACHINE = "(mx8m-generic-bsp)"

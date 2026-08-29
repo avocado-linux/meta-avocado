@@ -159,7 +159,8 @@ always boots with the bootloader that verifies its FIT:
 
 - `emmc-boot:<n>` is an avocadoctl slot target: the n-th boot partition of the
   disk that holds `var`, written with `force_ro` lifted and verified by
-  read-back. A disk without boot partitions (SD card) is refused.
+  read-back. On a disk without boot partitions (SD card) the target is skipped
+  with a message and the rest of the update proceeds - see the medium rule.
 - `avocado-imx-bootpart <slot>` (from `meta-avocado-nxp`, in every i.MX
   rootfs) flips `PARTITION_CONFIG` with `mmc bootpart enable`, and refuses a
   boot partition that does not hold an i.MX boot image, so a rollback can never

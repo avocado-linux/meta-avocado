@@ -23,10 +23,11 @@ inherit packagegroup nospdx
 # (stone slot target emmc-boot:<n>), refusing an empty one.
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
-  avocado-imx-bootpart \
   mmc-utils \
   systemd-serial-console-preset \
 "
+# 8M only: the recipe's boot-image guard knows the HABv4 IVT, not AHAB.
+RDEPENDS:${PN}:append:mx8m-generic-bsp = " avocado-imx-bootpart"
 
 # SDMA RAM firmware (sdma-imx7d.bin) for the i.MX SDMAv3 controller (audio/SAI,
 # UART, SPI DMA). On the NXP BSP it lives in firmware-imx (IMX_USE_LINUX_FIRMWARE_SDMA=0);
