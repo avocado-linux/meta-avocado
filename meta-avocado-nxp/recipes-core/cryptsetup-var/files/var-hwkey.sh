@@ -50,8 +50,12 @@ derive)
     mkdir -p -m 0700 "$CAAM_DIR"
     work=$(mktemp -d -p "${TMPDIR:-/run}")
     trap 'rm -rf "$work"; scrub' EXIT
-    openssl base64 -d -A -in "$in" -out "$work/blob.bb"
-    [ -s "$work/blob.bb" ] || { echo "var-hwkey: blob is not valid base64" >&2; exit 1; }
+    # A malformed token must be a clean refusal, not an openssl stack trace or
+    # a set -e exit that skips the message.
+    if ! openssl base64 -d -A -in "$in" -out "$work/blob.bb" 2>/dev/null || [ ! -s "$work/blob.bb" ]; then
+        echo "var-hwkey: blob is not valid base64" >&2
+        exit 1
+    fi
     head -c 64 /dev/zero > "$work/zero"
     # caam-crypt imports the black key from the blob (via caam-keygen import),
     # then runs AES-256-CBC over the input with it. Its stdout is chatter.
