@@ -24,6 +24,16 @@ MAPPER="/dev/mapper/${MAP_NAME}"
 [ -z "$VAR_DEV" ] && { echo "Usage: $0 <block-device>" >&2; exit 1; }
 [ -b "$VAR_DEV" ] || { echo "Not a block device: $VAR_DEV" >&2; exit 1; }
 
+# Refuse to touch a mounted partition. Every path below (shrink, reencrypt,
+# luksFormat, open) assumes exclusive ownership; if fstab got there first the
+# ordering is broken and the right outcome is the emergency target, not a
+# live filesystem being resized under the mount. (No grep in the initrd; awk.)
+_var_real=$(readlink -f "$VAR_DEV")
+if awk -v d="$_var_real" '$1==d {f=1} END {exit !f}' "${AVOCADO_PROC_MOUNTS:-/proc/mounts}"; then
+    echo "cryptsetup-var: $VAR_DEV ($_var_real) is already mounted - refusing to encrypt a live filesystem" >&2
+    exit 1
+fi
+
 # Fail-closed pre-flight: refuse before any luksFormat/luksOpen attempt if
 # either (a) this device's base image never declared encrypted-var, or (b)
 # the kernel cannot actually deliver dm-crypt. These two refusal paths must

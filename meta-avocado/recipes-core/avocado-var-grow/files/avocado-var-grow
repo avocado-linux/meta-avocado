@@ -52,4 +52,11 @@ name=$(sgdisk -i "$partno" "$diskdev" | sed -n "s/^Partition name: '\(.*\)'/\1/p
 sgdisk -e "$diskdev" >/dev/null
 sgdisk -d "$partno" -n "$partno:$start:0" -t "$partno:$type" -u "$partno:$guid" -c "$partno:$name" -A "$partno:set:56" "$diskdev" >/dev/null
 partx --update --nr "$partno" "$diskdev"
+# partx re-creates the partition node; udev drops and re-adds its symlinks in
+# the process. Anything ordered after this unit (cryptsetup-var, var.mount)
+# must find /dev/disk/by-partlabel/var back in place, so wait for udev to
+# finish before reporting done - a first boot on imx8mp-evk saw cryptsetup-var
+# evaluate its device check in that gap and get skipped straight to a
+# plaintext mount.
+udevadm settle --timeout=30 || true
 echo "avocado-var-grow: $part now $(( $(cat "$sysblock/$pname/size") / 2048 )) MiB"
