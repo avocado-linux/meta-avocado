@@ -15,8 +15,11 @@ repos:
   bitbake:
     url: https://github.com/avocado-linux/vendor-bitbake
     path: bitbake
-    branch: "2.18"
-    commit: 22021758e66737bcf68dfd2b74adc6a0cb1d42d9
+    # <base>-avocado patch branch (vendor/update.sh rebases it onto upstream
+    # 2.18): carries the cgroup-aware scheduler regulation, see
+    # BB_MAX_MEMORY_USAGE in kas/ci/mirrors.yml.
+    branch: "2.18-avocado"
+    commit: 3792554ff774a7eb072c29fbbdf1f727054b7aeb
     layers:
       .: disabled
 
