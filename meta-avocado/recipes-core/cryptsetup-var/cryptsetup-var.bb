@@ -45,6 +45,12 @@ do_install() {
     install -d ${D}${libexecdir}/cryptsetup-var
     install -m 0750 ${UNPACKDIR}/cryptsetup-var.sh ${D}${libexecdir}/cryptsetup-var/
     install -m 0750 ${UNPACKDIR}/var-key.sh ${D}${libexecdir}/cryptsetup-var/
+    # Optional hardware key backend, added to SRC_URI by a vendor bbappend for
+    # machines with a key-wrapping engine (see var-hwkey.sh's contract in
+    # cryptsetup-var.sh). Absent on machines without one.
+    if [ -e ${UNPACKDIR}/var-hwkey.sh ]; then
+        install -m 0750 ${UNPACKDIR}/var-hwkey.sh ${D}${libexecdir}/cryptsetup-var/
+    fi
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/cryptsetup-var.service ${D}${systemd_system_unitdir}/

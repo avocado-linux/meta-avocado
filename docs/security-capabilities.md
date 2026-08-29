@@ -112,9 +112,23 @@ checks `/etc/avocado/var-encrypt` itself before calling `cryptsetup-var.sh`.
 
 | Platform | `var-key.sh` | Later boots |
 |---|---|---|
-| i.MX 8M / 9 | SoC-UID-derived Argon2id | same key |
+| i.MX 8M | Argon2id recovery key (SoC UID) + keyslot from a CAAM black key, blob stored as an `avocado-hwkey` LUKS2 token | CAAM-derived passphrase, Argon2id fallback |
+| i.MX 9 | SoC-UID-derived Argon2id | same key (ELE backend pending) |
 | Jetson | Argon2id recovery key + TPM2 keyslot sealed to the OP-TEE fTPM (PCR 7) | TPM2 token, Argon2id fallback |
 | qemu / x86 | Argon2id (+ swtpm / TPM2 where present) | as Jetson |
+
+**Hardware key backends without a TPM** plug in through `var-hwkey.sh` next to
+`var-key.sh` (installed by the vendor bbappend, scoped by machine override). The
+contract is four verbs - `probe`, `name`, `new <blob-file>`, `derive <blob-file>`:
+the backend makes a device-bound blob and turns it back into the same passphrase
+on the same device only. `cryptsetup-var.sh` owns everything else: it adds the
+keyslot, stores the blob in the LUKS2 header as an `avocado-hwkey` token (no
+extra partition, travels with the container), opens with it on later boots and
+falls back to the Argon2id recovery slot when the engine refuses. The i.MX 8M
+backend wraps NXP's `caam-keygen`/`caam-crypt`: a CCM black key that CAAM only
+ever holds encrypted, the passphrase being AES-256-CBC of a fixed block under it.
+Posture publishes `avocado_var_hwkey` = backend name or `no`, and warns when a
+device that has the keyslot opened without it.
 
 **Prerequisites a machine must meet before declaring it:** a dm-crypt kernel
 fragment reachable from its kernel recipe, and a GPT `var` partlabel

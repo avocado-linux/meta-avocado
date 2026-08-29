@@ -29,9 +29,18 @@ echo "cryptsetup $*" >> "$LOG"
 case "$1" in
   --help)     echo "  --progress-frequency=secs" ;;
   isLuks)     [ -e "$STATE/luks" ] ;;
-  luksDump)   cat "$STATE/dump" 2>/dev/null; exit 0 ;;
+  luksDump)   cat "$STATE/dump" 2>/dev/null
+              printf 'Keyslots:\n  0: luks2\n'
+              [ -e "$STATE/token" ] && printf '  1: luks2\nTokens:\n  0: avocado-hwkey\n\tKeyslot:    1\nDigests:\n'
+              exit 0 ;;
   luksFormat) touch "$STATE/luks" ;;
   reencrypt)  touch "$STATE/luks"; rm -f "$STATE/dump" ;;
+  luksAddKey) [ -e "$STATE/refuse_addkey" ] && exit 1; exit 0 ;;
+  luksKillSlot) exit 0 ;;
+  token)      case "$2" in
+                import) cp "$4" "$STATE/token" ;;
+                export) cat "$STATE/token" ;;
+              esac ;;
   luksOpen|open|resize) exit 0 ;;
 esac
 S
@@ -65,10 +74,22 @@ printf '#!/bin/sh\necho "umount $*" >> "$LOG"\n' > "$work/bin/umount"
 printf '#!/bin/sh\necho "0 4194304 crypt aes-xts-plain64 :64:logon:x 0 %s 32768 1 allow_discards"\n' "8:0" > "$work/bin/dmsetup"
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/modprobe"
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/systemd-cryptenroll"
-chmod +x "$work/bin/"* "$work/sd/"*
+# hardware key backend stub: probe obeys $STATE/hwkey_down; derive = the blob reversed
+cat > "$work/hwkey.sh" <<'S'
+#!/bin/sh
+echo "var-hwkey $*" >> "$LOG"
+case "$1" in
+  probe)  [ ! -e "$STATE/hwkey_down" ] ;;
+  name)   echo stubengine ;;
+  new)    echo "YmxvYg==" > "$2" ;;
+  derive) [ -e "$STATE/hwkey_down" ] && exit 1; tr -d '\n' < "$2" | rev; echo ;;
+esac
+S
+chmod +x "$work/bin/"* "$work/sd/"* "$work/hwkey.sh"
 
 run() { # run <state-dir>
   LOG="$1/log"; : > "$LOG"
+  rm -f "$work/sd/var-hwkey.sh"; [ -e "$1/hwkey" ] && cp "$work/hwkey.sh" "$work/sd/var-hwkey.sh"
   unshare -rm bash -c "
     mount -t tmpfs none /etc && echo 'encrypted-var ftpm tpm2' > /etc/avocado-security-capabilities
     mount -t tmpfs none /run
@@ -129,5 +150,38 @@ grep -q "^cryptsetup reencrypt --encrypt .*--device-size 1836M " "$s/log" && ok 
 s="$work/c7"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 2147483648 > "$s/fsbytes"; echo 314572800 > "$s/alloc"; touch "$s/refuse_shrink"
 run "$s" || bad "case 7 script exit"
 { grep -q "^btrfs filesystem resize 1836M " "$s/log" && grep -q "^btrfs filesystem resize -32M " "$s/log" && grep -q "^cryptsetup reencrypt --encrypt .*--device-size 2016M " "$s/log"; } && ok "a refused aggressive shrink falls back to the 32 MiB shrink and converts the whole fs" || bad "fallback not taken: $(grep -n 'resize\|reencrypt --encrypt' "$s/log")"
+
+# --- Case 8: hardware key backend present, LUKS already set up, no token yet ->
+# enroll a second keyslot from the engine and record its blob as a token ---
+s="$work/c8"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"
+run "$s" || bad "case 8 script exit"
+grep -q "^cryptsetup luksAddKey --key-file .* --new-keyfile .* --new-key-slot 1 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --batch-mode $blk\$" "$s/log" \
+  && ok "hardware keyslot is added into the first free slot with a cheap PBKDF, unlocked by the recovery key" \
+  || bad "unexpected luksAddKey: $(grep luksAddKey "$s/log" || echo none)"
+grep -q '"type":"avocado-hwkey","keyslots":\["1"\],"backend":"stubengine","blob":"YmxvYg=="' "$s/token" 2>/dev/null \
+  && ok "token carries type, keyslot, backend name and the blob" || bad "token missing/wrong: $(cat "$s/token" 2>/dev/null)"
+grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "first boot still opened with the recovery key" || bad "no recovery open"
+grep -q "^VAR_HWKEY_TOKEN=yes$" "$s/posture" 2>/dev/null || true
+
+# --- Case 9: token present and engine up -> open via the engine, never Argon2id ---
+s="$work/c9"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"; cp "$work/c8/token" "$s/token"
+run "$s" || bad "case 9 script exit"
+grep -q "^cryptsetup token export --token-id 0 $blk\$" "$s/log" && ok "blob is read back from the header token" || bad "no token export"
+grep -q "^var-hwkey derive " "$s/log" && ok "engine derives the passphrase from the blob" || bad "derive not called"
+[ "$(grep -c '^cryptsetup luksOpen' "$s/log")" = 1 ] && ok "exactly one open" || bad "open count: $(grep -c '^cryptsetup luksOpen' "$s/log")"
+grep -q "^cryptsetup luksAddKey" "$s/log" && bad "re-enrolled although a token exists" || ok "enroll is idempotent"
+grep -q "opened via hardware key (stubengine)" "$s/out" && ok "posture: unlock method is the hardware key" || bad "hwkey open not reported: $(grep -i 'opened' "$s/out")"
+
+# --- Case 10: token present but engine down -> recovery key, loud, no re-enroll ---
+s="$work/c10"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/hwkey_down"; cp "$work/c8/token" "$s/token"
+run "$s" || bad "case 10 script exit"
+grep -q "^cryptsetup luksOpen --key-file" "$s/log" && ok "falls back to the Argon2id recovery key" || bad "no recovery open"
+grep -q "hardware key unavailable" "$s/out" && ok "fallback is reported" || bad "silent fallback"
+grep -q "^cryptsetup luksAddKey" "$s/log" && bad "tried to enroll with the engine down" || ok "no enroll while the engine is down"
+
+# --- Case 11: luksAddKey refused -> no token written, boot continues ---
+s="$work/c11"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/refuse_addkey"
+run "$s" || bad "case 11 script exit"
+[ -e "$s/token" ] && bad "token imported although the keyslot was not added" || ok "no orphan token after a failed keyslot add"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]

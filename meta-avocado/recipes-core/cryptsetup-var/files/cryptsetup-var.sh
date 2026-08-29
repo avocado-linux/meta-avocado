@@ -78,6 +78,61 @@ has_tpm2_token() {
     cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/systemd-tpm2/{f=1} END{exit !f}'
 }
 
+# Optional hardware key backend: var-hwkey.sh next to this script, installed by
+# a vendor layer for machines with a key-wrapping engine but no TPM (CAAM on
+# i.MX 8M). It supplies the passphrase of a second keyslot; the Argon2id keyslot
+# stays as the recovery path exactly as with the TPM2 token. Contract:
+#   var-hwkey.sh probe               exit 0 when the engine is usable right now
+#   var-hwkey.sh name                backend name for posture (e.g. "caam")
+#   var-hwkey.sh new    <blob-file>  make a device-bound blob, write it as one text line
+#   var-hwkey.sh derive <blob-file>  print the passphrase that blob yields here
+# The blob is public: it yields the passphrase only on the SoC that made it. It
+# lives in the LUKS2 header as an "avocado-hwkey" token, so it travels with the
+# container and needs no extra partition or writable filesystem.
+HWKEY_SCRIPT="${SCRIPT_DIR}/var-hwkey.sh"
+HWKEY_TOKEN_TYPE="avocado-hwkey"
+
+hwkey_available() {
+    [ -x "$HWKEY_SCRIPT" ] && "$HWKEY_SCRIPT" probe >/dev/null 2>&1
+}
+
+# Id of the avocado-hwkey token in the header, empty when there is none.
+hwkey_token_id() {
+    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk -v t="$HWKEY_TOKEN_TYPE" '
+        /^Tokens:/ {s=1; next}
+        /^[A-Za-z]/ {s=0}
+        s && $2==t {sub(":","",$1); print $1; exit}'
+}
+
+has_hwkey_token() {
+    [ -n "$(hwkey_token_id)" ]
+}
+
+# First unused keyslot number, for luksAddKey --new-key-slot.
+free_keyslot() {
+    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '
+        /^Keyslots:/ {s=1; next}
+        /^[A-Za-z]/ {s=0}
+        s && /^  [0-9]+: / {sub(":","",$1); u[$1]=1}
+        END {for (i = 0; i < 32; i++) if (!u[i]) {print i; exit}}'
+}
+
+# Write the passphrase the token blob yields on this device to $1. Non-zero when
+# there is no token, the engine refuses the blob, or the backend printed nothing.
+hwkey_passphrase_to() {
+    _id=$(hwkey_token_id)
+    [ -n "$_id" ] || return 1
+    _blob=$(mktemp -p /run)
+    cryptsetup token export --token-id "$_id" "$VAR_DEV" 2>/dev/null \
+        | sed -n 's/.*"blob" *: *"\([^"]*\)".*/\1/p' > "$_blob"
+    _rc=1
+    if [ -s "$_blob" ] && "$HWKEY_SCRIPT" derive "$_blob" > "$1" 2>/dev/null && [ -s "$1" ]; then
+        _rc=0
+    fi
+    rm -f "$_blob"
+    return $_rc
+}
+
 # Some firmware TPMs keep no NV state across boots. Measured on Jetson Orin
 # (NVIDIA OP-TEE fTPM, ms-tpm-20-ref): the seeds are stable - a credential
 # sealed on one boot unseals on the next, so a TPM2 keyslot is sound - but the
@@ -127,10 +182,19 @@ write_posture() {
         _tpm_dev=yes
     fi
 
+    _hwkey_token=no
+    _hwkey_backend=none
+    if has_hwkey_token; then
+        _hwkey_token=yes
+        _hwkey_backend=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
+    fi
+
     {
         echo "VAR_UNLOCK_METHOD=${VAR_UNLOCK_METHOD}"
         echo "VAR_TPM2_TOKEN=${_tpm2_token}"
         echo "VAR_TPM_DEVICE=${_tpm_dev}"
+        echo "VAR_HWKEY_TOKEN=${_hwkey_token}"
+        echo "VAR_HWKEY_BACKEND=${_hwkey_backend}"
     } > "$POSTURE_FILE" 2>/dev/null || true
 }
 
@@ -142,6 +206,18 @@ write_posture() {
 # permanently.
 open_var() {
     echo "cryptsetup-var: opening LUKS2 container on $VAR_DEV"
+    if has_hwkey_token; then
+        _hwpass=$(mktemp -p /run)
+        if hwkey_available && hwkey_passphrase_to "$_hwpass" \
+                && cryptsetup luksOpen --key-file "$_hwpass" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+            rm -f "$_hwpass"
+            echo "cryptsetup-var: opened via hardware key ($("$HWKEY_SCRIPT" name))"
+            VAR_UNLOCK_METHOD="hwkey"
+            return 0
+        fi
+        rm -f "$_hwpass"
+        echo "cryptsetup-var: hardware key unavailable - trying the other keyslots" >&2
+    fi
     if has_tpm2_token; then
         # A token exists, so a TPM is expected. On a fast reboot we can reach the
         # open before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall
@@ -188,6 +264,47 @@ ensure_fs() {
     }
     echo "cryptsetup-var: no filesystem on $MAPPER - creating BTRFS (first boot or resumed provisioning)"
     mkfs.btrfs "$MAPPER"
+}
+
+# Ensure a hardware-key keyslot + token exist when a backend is installed and
+# its engine answers. Same posture as the TPM2 enroll: idempotent, best-effort,
+# runs every boot so a device whose engine came up late still gets enrolled, and
+# a failure leaves /var on the Argon2id keyslot rather than failing the unit.
+# The passphrase is high-entropy engine output, so the keyslot uses a cheap
+# PBKDF2 like systemd-cryptenroll does for TPM2 slots; the Argon2id cost stays
+# on the recovery slot where the input is a derived secret.
+ensure_hwkey_enroll() {
+    [ -x "$HWKEY_SCRIPT" ] || return 0
+    has_hwkey_token && return 0
+    if ! hwkey_available; then
+        echo "cryptsetup-var: hardware key engine not usable - retaining Argon2id keyslot" >&2
+        return 0
+    fi
+    _blob=$(mktemp -p /run)
+    _pass=$(mktemp -p /run)
+    _name=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
+    echo "cryptsetup-var: enrolling hardware keyslot ($_name)"
+    if "$HWKEY_SCRIPT" new "$_blob" && "$HWKEY_SCRIPT" derive "$_blob" > "$_pass" && [ -s "$_pass" ]; then
+        _slot=$(free_keyslot)
+        if cryptsetup luksAddKey --key-file "$KEY_FILE" --new-keyfile "$_pass" \
+                --new-key-slot "$_slot" --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
+                --batch-mode "$VAR_DEV"; then
+            printf '{"type":"%s","keyslots":["%s"],"backend":"%s","blob":"%s"}\n' \
+                "$HWKEY_TOKEN_TYPE" "$_slot" "$_name" "$(tr -d '[:space:]' < "$_blob")" > "$_blob.json"
+            if cryptsetup token import --json-file "$_blob.json" "$VAR_DEV"; then
+                echo "cryptsetup-var: hardware keyslot $_slot enrolled ($_name)"
+            else
+                echo "cryptsetup-var: token import failed - removing keyslot $_slot" >&2
+                cryptsetup luksKillSlot --key-file "$KEY_FILE" --batch-mode "$VAR_DEV" "$_slot" 2>/dev/null || true
+            fi
+        else
+            echo "cryptsetup-var: hardware keyslot add failed - retaining Argon2id keyslot" >&2
+        fi
+    else
+        echo "cryptsetup-var: hardware key backend could not produce a blob - retaining Argon2id keyslot" >&2
+    fi
+    rm -f "$_blob" "$_blob.json" "$_pass"
+    return 0
 }
 
 # Ensure a TPM2 keyslot sealed to PCR 7 exists, keeping the Argon2id keyslot
@@ -401,13 +518,16 @@ ensure_tpm2_unlocked
 # 3. Ensure a filesystem exists (self-heal a first boot interrupted before mkfs).
 ensure_fs
 
-# 4. Ensure a TPM2 PCR-7 keyslot exists (best-effort; self-heal / late enroll).
+# 4. Ensure the hardware-bound keyslots exist (best-effort; self-heal / late
+#    enroll): a vendor key engine where one is installed, a TPM2 PCR-7 slot
+#    where a TPM is present.
+ensure_hwkey_enroll
 ensure_tpm2_enroll
 
 # 5. Grow the container to fill the partition if it was expanded.
 maybe_resize
 
-# 6. Publish posture for userspace to pick up. Runs after ensure_tpm2_enroll so a
+# 6. Publish posture for userspace to pick up. Runs after the enrolls so a
 # first boot reports the token it just enrolled rather than the absence it saw
 # on open.
 write_posture
