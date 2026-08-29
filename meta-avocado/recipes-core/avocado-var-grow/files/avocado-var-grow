@@ -16,8 +16,11 @@ set -eu
 GROW_BIT_MASK=0x0100000000000000
 devdir=${AVOCADO_VAR_GROW_DEVDIR:-/dev}
 sysblock=${AVOCADO_VAR_GROW_SYSBLOCK:-/sys/class/block}
+# The machine's var partition (AVOCADO_VAR_PART_DEV, substituted at build), so a
+# machine whose label is not "var" (rubikpi3: "avocado") is served too.
+vardev=${AVOCADO_VAR_GROW_DEV:-@AVOCADO_VAR_PART_DEV@}
 
-part=$(readlink -f "$devdir/disk/by-partlabel/var" 2>/dev/null) || { echo "avocado-var-grow: no var partition by label, nothing to do"; exit 0; }
+part=$(readlink -f "$vardev" 2>/dev/null) || { echo "avocado-var-grow: no var partition at $vardev, nothing to do"; exit 0; }
 pname=$(basename "$part")
 disk=$(basename "$(readlink -f "$sysblock/$pname/..")")
 diskdev=$devdir/$disk
@@ -48,9 +51,10 @@ type=$(sgdisk -i "$partno" "$diskdev" | sed -n 's/^Partition GUID code: \([^ ]*\
 name=$(sgdisk -i "$partno" "$diskdev" | sed -n "s/^Partition name: '\(.*\)'/\1/p")
 # Relocate the backup GPT to the true disk end first (the flashed image's GPT
 # was sized for the image), then recreate the partition with the same start,
-# type, GUID, name and attributes.
+# type, GUID, name and the complete attribute mask it had (which includes the
+# grow bit) - not just bit 56, so no-automount or platform bits survive.
 sgdisk -e "$diskdev" >/dev/null
-sgdisk -d "$partno" -n "$partno:$start:0" -t "$partno:$type" -u "$partno:$guid" -c "$partno:$name" -A "$partno:set:56" "$diskdev" >/dev/null
+sgdisk -d "$partno" -n "$partno:$start:0" -t "$partno:$type" -u "$partno:$guid" -c "$partno:$name" -A "$partno:=:$flags" "$diskdev" >/dev/null
 partx --update --nr "$partno" "$diskdev"
 # partx re-creates the partition node; udev drops and re-adds its symlinks in
 # the process. Anything ordered after this unit (cryptsetup-var, var.mount)
