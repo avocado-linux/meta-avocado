@@ -31,7 +31,9 @@ for f in "$ROOT/etc/initrd-release" "$ROOT/usr/lib/initrd-release" "$ROOT/usr/li
         exit 0
     fi
     if printf '%s\n' "$id" > "$OUT"; then
-        echo "avocado-initramfs-id: $id"
+        # Name the source file: when this went wrong the id was missing from the
+        # image entirely, and one boot log line would have said so.
+        echo "avocado-initramfs-id: $id (from $f)"
     else
         echo "avocado-initramfs-id: cannot write $OUT; not publishing"
     fi

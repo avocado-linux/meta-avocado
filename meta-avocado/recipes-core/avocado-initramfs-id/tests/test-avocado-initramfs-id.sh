@@ -14,6 +14,8 @@ run(){ rm -rf "$w/out/dir"; AVOCADO_INITRAMFS_ID_OUT="$out" AVOCADO_INITRAMFS_ID
 printf 'ID=avocado\nAVOCADO_OS_BUILD_ID=initramfs-abc\n' > "$w/root/usr/lib/initrd-release"
 msg=$(run); rc=$?
 { [ $rc -eq 0 ] && [ "$(cat "$out")" = "initramfs-abc" ]; } && ok "the id is published to /run, creating the directory" || bad "publish: rc=$rc $msg $(cat "$out" 2>&1)"
+# The source path is what makes a missing id diagnosable from a boot log alone.
+echo "$msg" | grep -q "from .*usr/lib/initrd-release" && ok "the log names the file the id came from" || bad "source not logged: $msg"
 
 # /etc/initrd-release is normally a symlink to the usr/lib copy, but when both
 # exist as real files the reader must not have to guess which one it got.
