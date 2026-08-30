@@ -94,8 +94,11 @@ RDEPENDS:packagegroup-avocado-initramfs-modules = " \
 # via do_split_packages — packagegroups have no equivalent magic). The
 # unqualified RPROVIDES on the OOT packagegroup makes this resolve cleanly.
 #
-# Scoped to this bbappend (not the shared
-# avocado-kernel-modules-packagegroup.inc) because linux-yocto 6.18 has no
-# nvidia-kernel-oot build and therefore no OOT sibling to depend on.
+# Kept in the kernel bbappends rather than the shared
+# avocado-kernel-modules-packagegroup.inc so each kernel opts in explicitly.
+# This was originally noble-only because linux-yocto 6.18 had no
+# nvidia-kernel-oot build and therefore no OOT sibling to depend on; that is no
+# longer true, and linux-yocto_6.18.bbappend now carries the same two lines.
+# Boot on tegra264 depends on it -- see the note there.
 RDEPENDS:packagegroup-avocado-initramfs-modules:append = " packagegroup-avocado-initramfs-modules-oot"
 RDEPENDS:packagegroup-avocado-rootfs-modules:append = " packagegroup-avocado-rootfs-modules-oot"
