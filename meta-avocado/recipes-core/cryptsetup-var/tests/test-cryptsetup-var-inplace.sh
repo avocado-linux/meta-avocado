@@ -46,7 +46,9 @@ case "$1" in
                 import) cp "$4" "$STATE/token" ;;
                 export) cat "$STATE/token" ;;
               esac ;;
-  luksOpen|open|resize) exit 0 ;;
+  open)       case "$*" in *--token-only*) [ -e "$STATE/tpm2_fail" ] && exit 1 ;; esac; exit 0 ;;
+  luksOpen|resize) exit 0 ;;
+  luksClose)  exit 0 ;;
 esac
 S
 cat > "$work/bin/blkid" <<'S'
@@ -78,7 +80,7 @@ printf '#!/bin/sh\necho "mount $*" >> "$LOG"\n' > "$work/bin/mount"
 printf '#!/bin/sh\necho "umount $*" >> "$LOG"\n' > "$work/bin/umount"
 printf '#!/bin/sh\necho "0 4194304 crypt aes-xts-plain64 :64:logon:x 0 %s 32768 1 allow_discards"\n' "8:0" > "$work/bin/dmsetup"
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/modprobe"
-printf '#!/bin/sh\nexit 0\n' > "$work/bin/systemd-cryptenroll"
+printf '#!/bin/sh\n[ -e "$STATE/refuse_tpm2_enroll" ] && exit 1\nexit 0\n' > "$work/bin/systemd-cryptenroll"
 # hardware key backend stub: probe obeys $STATE/hwkey_down; derive = the blob reversed
 cat > "$work/hwkey.sh" <<'S'
 #!/bin/sh
@@ -87,7 +89,8 @@ case "$1" in
   probe)  [ ! -e "$STATE/hwkey_down" ] ;;
   name)   echo stubengine ;;
   new)    echo "YmxvYg==" > "$2" ;;
-  derive) [ -e "$STATE/hwkey_down" ] && exit 1; tr -d '\n' < "$2" | rev; echo ;;
+  derive) { [ -e "$STATE/hwkey_down" ] || [ -e "$STATE/hwkey_stale_blob" ]; } && exit 1
+          tr -d '\n' < "$2" | rev; echo ;;
 esac
 S
 chmod +x "$work/bin/"* "$work/sd/"* "$work/hwkey.sh"
@@ -100,7 +103,7 @@ run() { # run <state-dir>
     mount -t tmpfs none /etc && echo 'encrypted-var ftpm tpm2' > /etc/avocado-security-capabilities && mkdir -p /etc/avocado $hw
     mount -t tmpfs none /run
     mkdir -p /sys/module/dm_crypt 2>/dev/null || mount -t tmpfs none /sys/module && mkdir -p /sys/module/dm_crypt
-    export PATH='$work/bin':\$PATH LOG='$LOG' STATE='$1' STATE_DEV='$blk'
+    export PATH='$work/bin':\$PATH LOG='$LOG' STATE='$1' STATE_DEV='$blk' TPM_DEV='$1/tpm0'
     sh '$work/sd/cryptsetup-var.sh' '$blk'; rc=\$?
     # /run is this namespace's own tmpfs: the posture file goes with it, so
     # copy it out before we leave or nothing can assert on it.
@@ -228,5 +231,48 @@ s="$work/c18"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"; echo none > "$s/hardwa
 run "$s" || bad "case 18 script exit"
 grep -q "^cryptsetup luksAddKey" "$s/log" && bad "enrolled a hardware slot with var.hardware=none" || ok "var.hardware=none enrols no hardware keyslot"
 grep -q "^VAR_HARDWARE=none$" "$s/posture" && ok "posture reports var.hardware=none" || bad "posture VAR_HARDWARE: $(cat "$s/posture" 2>/dev/null)"
+
+# --- Cases 19-24: what var.hardware=caam|tpm2 actually promise. The preflight
+# (case 16) only proves the engine probes; these cover the two ways a boot could
+# still end up on the derived key afterwards - an existing hardware token that
+# will not unlock, and an enrolment that fails - and the first-enrolment open
+# that must stay allowed. ---
+
+# Case 19: caam, a hardware token exists, engine down -> must NOT open on the
+# derived key. The engine is down, so the hwkey open is never attempted: any
+# luksOpen in the log is the derived one.
+# The engine probes fine here, so the preflight passes and this reaches the
+# open - the blob just no longer derives (key store wiped, fuses changed).
+s="$work/c19"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/hwkey_stale_blob"; cp "$work/c8/token" "$s/token"; echo caam > "$s/hardware"
+if run "$s"; then bad "opened /var although the required caam keyslot failed"; else ok "var.hardware=caam refuses the derived fallback once a hardware token exists"; fi
+grep -q "^cryptsetup luksOpen" "$s/log" && bad "opened on the derived key: $(grep luksOpen "$s/log")" || ok "no derived open when the required engine cannot unlock"
+
+# Case 20: same state under auto -> still falls back, so the default is unchanged.
+s="$work/c20"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/hwkey_stale_blob"; cp "$work/c8/token" "$s/token"
+run "$s" || bad "case 20 script exit"
+grep -q "^VAR_UNLOCK_METHOD=argon2id$" "$s/posture" && ok "var.hardware=auto still degrades to the derived key" || bad "auto did not fall back: $(cat "$s/posture" 2>/dev/null)"
+
+# Case 21: caam, no token yet (first enrolment) but the keyslot add fails ->
+# the boot must not be left on the derived key, and /var is closed again.
+s="$work/c21"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/refuse_addkey"; echo caam > "$s/hardware"
+if run "$s"; then bad "completed the boot although the caam keyslot could not be enrolled"; else ok "var.hardware=caam aborts when enrolment fails"; fi
+grep -q "^cryptsetup luksClose var$" "$s/log" && ok "the derived-key mapping is torn down on a failed requirement" || bad "left /var open: $(grep -c luksClose "$s/log") luksClose"
+
+# Case 22: same failure under auto -> warns and boots on the derived key.
+s="$work/c22"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/refuse_addkey"
+run "$s" || bad "case 22 script exit"
+grep -q "hardware keyslot add failed" "$s/out" && ok "var.hardware=auto reports a failed enrol and carries on" || bad "no warning: $(cat "$s/out")"
+
+# Case 23: tpm2, a TPM2 token exists and the TPM is present, but the unseal
+# fails -> no derived fallback. (Case 10 covers the same shape under auto.)
+s="$work/c23"; mkdir -p "$s"; touch "$s/luks" "$s/tpm0" "$s/tpm2_fail"; printf 'Tokens:\n  0: systemd-tpm2\n' > "$s/dump"; echo tpm2 > "$s/hardware"
+if run "$s"; then bad "opened /var although the required TPM2 keyslot failed"; else ok "var.hardware=tpm2 refuses the derived fallback once a TPM2 token exists"; fi
+grep -q "^cryptsetup luksOpen" "$s/log" && bad "opened on the derived key: $(grep luksOpen "$s/log")" || ok "no derived open when the TPM2 keyslot cannot unlock"
+
+# Case 24: tpm2, no token yet -> the derived open IS allowed (it is the only way
+# in before a keyslot exists), but a refused enrolment still fails the boot.
+s="$work/c24"; mkdir -p "$s"; touch "$s/luks" "$s/tpm0" "$s/refuse_tpm2_enroll"; echo tpm2 > "$s/hardware"
+if run "$s"; then bad "completed the boot although the TPM2 keyslot could not be enrolled"; else ok "var.hardware=tpm2 aborts when enrolment fails"; fi
+grep -q "^cryptsetup luksOpen" "$s/log" && ok "the first-enrolment derived open is still allowed" || bad "no derived open on the first-enrolment boot"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]

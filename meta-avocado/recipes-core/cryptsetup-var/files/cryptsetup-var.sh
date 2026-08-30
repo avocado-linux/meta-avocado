@@ -109,6 +109,39 @@ RECOVERY_TOKEN_TYPE="avocado-recovery"
 # second slot; avocado-cli refuses "none" without one).
 VAR_HARDWARE=$(cat /etc/avocado/var-hardware 2>/dev/null || echo auto)
 
+# Overridable only so the host test can drive the TPM paths without a TPM.
+TPM_DEV="${TPM_DEV:-/dev/tpm0}"
+
+# An explicit var.hardware=caam|tpm2 is a promise that /var is reachable only
+# through that engine's keyslot. Wherever the promise cannot be kept, leaving
+# the boot on the derived key is precisely the fallback the mode exists to
+# refuse: tear the mapping down - the enrolments run after the open, so /var
+# may already be open on the derived key - and fail the unit, which OnFailure=
+# takes to the emergency target.
+#
+# The one derived-key open that stays legitimate is the first-enrolment boot:
+# before any hardware token exists there is no other way into the container,
+# and luksAddKey needs it to add the hardware slot. That case is distinguished
+# by the absence of the token, not by the mode.
+fail_closed() { # fail_closed <reason>
+    echo "cryptsetup-var: var.hardware=$VAR_HARDWARE but $1 - refusing to leave /var on the derived key" >&2
+    # Unconditional: a close with nothing open is a no-op, and guarding on
+    # [ -b "$MAPPER" ] would skip the teardown in exactly the odd states where
+    # it matters most. (The preflight refusal has its own exit and never gets
+    # here, so nothing is touched when the requirement fails before the open.)
+    cryptsetup luksClose "$MAP_NAME" 2>/dev/null || true
+    exit 1
+}
+
+# A hardware unlock or enrolment that did not work out: fatal when that engine
+# is the explicitly required one, a reported degradation under "auto".
+degrade_or_fail() { # degrade_or_fail <mode-that-requires-it> <reason>
+    if [ "$VAR_HARDWARE" = "$1" ]; then
+        fail_closed "$2"
+    fi
+    echo "cryptsetup-var: $2 - retaining Argon2id keyslot" >&2
+}
+
 # Fail closed when an explicitly required engine is not usable. Runs before the
 # container is touched so an unmet requirement never opens /var on the
 # derived key; OnFailure= takes the boot to emergency.
@@ -121,8 +154,8 @@ check_required_hardware() {
             fi ;;
         tpm2)
             i=0
-            while [ ! -e /dev/tpm0 ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
-            if [ ! -e /dev/tpm0 ]; then
+            while [ ! -e "$TPM_DEV" ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
+            if [ ! -e "$TPM_DEV" ]; then
                 echo "cryptsetup-var: var.hardware=tpm2 but no TPM device appeared - refusing to fall back to the derived key" >&2
                 exit 1
             fi ;;
@@ -206,7 +239,7 @@ hwkey_passphrase_to() {
 # value. Best-effort and silent where tpm2-tools are absent or the TPM is not
 # in lockout.
 ensure_tpm2_unlocked() {
-    [ -e /dev/tpm0 ] || return 0
+    [ -e "$TPM_DEV" ] || return 0
     command -v tpm2_getcap >/dev/null 2>&1 || return 0
     if tpm2_getcap properties-variable 2>/dev/null | awk '/inLockout:/{f=($2==1)} END{exit !f}'; then
         echo "cryptsetup-var: TPM is in dictionary-attack lockout at boot - resetting"
@@ -240,7 +273,7 @@ write_posture() {
     fi
 
     _tpm_dev=no
-    if [ -e /dev/tpm0 ]; then
+    if [ -e "$TPM_DEV" ]; then
         _tpm_dev=yes
     fi
 
@@ -285,6 +318,11 @@ open_var() {
             return 0
         fi
         rm -f "$_hwpass"
+        # A hardware token exists, so this is not the first-enrolment boot and
+        # the Argon2id open below is the fallback caam mode refuses.
+        if [ "$VAR_HARDWARE" = caam ]; then
+            fail_closed "the hardware keyslot did not open /var"
+        fi
         echo "cryptsetup-var: hardware key unavailable - trying the other keyslots" >&2
     fi
     if has_tpm2_token; then
@@ -292,15 +330,20 @@ open_var() {
         # open before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall
         # back to Argon2id. Wait briefly for the device before deciding.
         i=0
-        while [ ! -e /dev/tpm0 ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
+        while [ ! -e "$TPM_DEV" ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
 
         # The token open needs the libcryptsetup TPM2 plugin, not the
         # systemd-cryptenroll binary - so probe capability by just attempting it
         # and letting it fall through to the Argon2id recovery key on failure.
-        if [ -e /dev/tpm0 ] && cryptsetup open $VK_LINK --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+        if [ -e "$TPM_DEV" ] && cryptsetup open $VK_LINK --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
             echo "cryptsetup-var: opened via TPM2 token"
             VAR_UNLOCK_METHOD="tpm2"
             return 0
+        fi
+        # Same rule as the hardware key above: a token exists, so the derived
+        # key is a fallback, not the first-enrolment path.
+        if [ "$VAR_HARDWARE" = tpm2 ]; then
+            fail_closed "the TPM2 keyslot did not open /var"
         fi
         echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
     fi
@@ -337,17 +380,25 @@ ensure_fs() {
 
 # Ensure a hardware-key keyslot + token exist when a backend is installed and
 # its engine answers. Same posture as the TPM2 enroll: idempotent, best-effort,
-# runs every boot so a device whose engine came up late still gets enrolled, and
-# a failure leaves /var on the Argon2id keyslot rather than failing the unit.
+# runs every boot so a device whose engine came up late still gets enrolled.
+# Under var.hardware=auto a failure leaves /var on the Argon2id keyslot rather
+# than failing the unit; under var.hardware=caam it is fatal, because that mode
+# promises the boot never ends on the derived key.
 # The passphrase is high-entropy engine output, so the keyslot uses a cheap
 # PBKDF2 like systemd-cryptenroll does for TPM2 slots; the Argon2id cost stays
 # on the recovery slot where the input is a derived secret.
 ensure_hwkey_enroll() {
     [ "$VAR_HARDWARE" != none ] || return 0
-    [ -x "$HWKEY_SCRIPT" ] || return 0
+    if [ ! -x "$HWKEY_SCRIPT" ]; then
+        # Silent under auto: most machines ship no backend at all.
+        if [ "$VAR_HARDWARE" = caam ]; then
+            fail_closed "no hardware key backend is installed"
+        fi
+        return 0
+    fi
     has_hwkey_token && return 0
     if ! hwkey_available; then
-        echo "cryptsetup-var: hardware key engine not usable - retaining Argon2id keyslot" >&2
+        degrade_or_fail caam "the hardware key engine is not usable"
         return 0
     fi
     _blob=$(mktemp -p /run)
@@ -366,12 +417,13 @@ ensure_hwkey_enroll() {
             else
                 echo "cryptsetup-var: token import failed - removing keyslot $_slot" >&2
                 cryptsetup luksKillSlot --key-file "$KEY_FILE" --batch-mode "$VAR_DEV" "$_slot" 2>/dev/null || true
+                degrade_or_fail caam "the hardware key token import failed"
             fi
         else
-            echo "cryptsetup-var: hardware keyslot add failed - retaining Argon2id keyslot" >&2
+            degrade_or_fail caam "the hardware keyslot add failed"
         fi
     else
-        echo "cryptsetup-var: hardware key backend could not produce a blob - retaining Argon2id keyslot" >&2
+        degrade_or_fail caam "the hardware key backend could not produce a blob"
     fi
     rm -f "$_blob" "$_blob.json" "$_pass"
     return 0
@@ -394,16 +446,27 @@ retire_derived_keyslot() {
 }
 
 # Ensure a TPM2 keyslot sealed to PCR 7 exists, keeping the Argon2id keyslot
-# (slot 0) as the recovery path. Idempotent and best-effort: skips when a token
-# already exists, when no TPM is present, or when systemd-cryptenroll is absent.
-# A failed enroll (e.g. firmware without measured boot) leaves the volume
-# encrypted under Argon2id rather than failing the unit. Running on every boot
-# also enrolls a device whose first boot happened before /dev/tpm0 existed.
+# (slot 0) as the recovery path. Idempotent: skips when a token already exists.
+# Under var.hardware=auto it is best-effort - no TPM, no systemd-cryptenroll, or
+# a failed enroll (firmware without measured boot) leaves the volume encrypted
+# under Argon2id rather than failing the unit. Under var.hardware=tpm2 each of
+# those is fatal. Running on every boot also enrolls a device whose first boot
+# happened before the TPM device existed.
 ensure_tpm2_enroll() {
     [ "$VAR_HARDWARE" != none ] || return 0
     has_tpm2_token && return 0
-    [ -e /dev/tpm0 ] || return 0
-    command -v systemd-cryptenroll >/dev/null 2>&1 || return 0
+    if [ ! -e "$TPM_DEV" ]; then
+        if [ "$VAR_HARDWARE" = tpm2 ]; then
+            fail_closed "no TPM device is present"
+        fi
+        return 0
+    fi
+    if ! command -v systemd-cryptenroll >/dev/null 2>&1; then
+        if [ "$VAR_HARDWARE" = tpm2 ]; then
+            fail_closed "systemd-cryptenroll is not present to enrol the TPM2 keyslot"
+        fi
+        return 0
+    fi
 
     echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
     # --unlock-key-file is required: without it systemd-cryptenroll prompts for a
@@ -413,7 +476,7 @@ ensure_tpm2_enroll() {
             --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"; then
         echo "cryptsetup-var: TPM2 PCR-7 keyslot enrolled"
     else
-        echo "cryptsetup-var: TPM2 PCR-7 enroll failed - retaining Argon2id keyslot (firmware measured boot may be unavailable)" >&2
+        degrade_or_fail tpm2 "the TPM2 PCR-7 enrol failed (firmware measured boot may be unavailable)"
     fi
     return 0
 }

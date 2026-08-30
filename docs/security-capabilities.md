@@ -147,9 +147,16 @@ unless that key is what opened `/var` this boot. Bench recovery:
 
 **Which engine (`var.hardware`).** Default `auto`: enrol whatever engine the
 machine ships and probes OK, degrade to the derived key and report. `caam` /
-`tpm2`: that engine must hold a keyslot - `cryptsetup-var` refuses to open
-`/var` on the derived key when it is unusable (emergency target), so a product
-that promises hardware binding never silently ships without it. `none`: no
+`tpm2`: that engine must hold a keyslot, and the boot fails to the emergency
+target (tearing the mapping down again) rather than leaving `/var` reachable
+on the derived key. That covers all three ways it could otherwise slip
+through - the engine is unusable at preflight, an *existing* hardware keyslot
+will not unlock (a wiped key store, moved PCRs), or the enrolment itself
+fails - so a product that promises hardware binding never silently ships
+without it. The single exception is the first-enrolment boot: before any
+hardware token exists the derived key is the only way into the container and
+the only thing `luksAddKey` can authenticate with, so that open is allowed -
+the carve-out keys on the absence of the token, not on the mode. `none`: no
 hardware keyslot at all; avocado-cli refuses it without `var.recovery`. The
 choice rides in the initramfs as `/etc/avocado/var-hardware` next to the
 `var-encrypt` marker, only when it is not `auto`.
