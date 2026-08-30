@@ -27,9 +27,14 @@ python __anonymous() {
         raise bb.parse.SkipRecipe("AVOCADO_VAR_PART_DEV is '%s', not a /dev/disk/by-partlabel/ path: no GPT var partition to grow on this machine" % dev)
 }
 def avocado_var_device_unit(d):
+    """systemd-escape --path of AVOCADO_VAR_PART_DEV: leading '/' dropped,
+    '-' escaped as \\x2d, '/' -> '-'. The backslash is doubled on the way out
+    because the only consumer is a sed replacement, where a lone \\x is an
+    escape sequence and would be eaten - which is how imx8mp-evk ended up
+    waiting for `/dev/disk/by/partlabel/var` and dropping to emergency."""
     dev = d.getVar('AVOCADO_VAR_PART_DEV') or ''
-    # systemd-escape --path: strip the leading '/', escape '-' as \x2d, '/' -> '-'
-    return dev.lstrip('/').replace('-', '\\x2d').replace('/', '-') + '.device'
+    escaped = dev.lstrip('/').replace('-', '\\x2d').replace('/', '-') + '.device'
+    return escaped.replace('\\', '\\\\')
 
 do_install() {
     install -d ${D}${libexecdir}

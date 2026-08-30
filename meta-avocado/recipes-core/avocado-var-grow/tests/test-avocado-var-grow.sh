@@ -30,4 +30,24 @@ out=$(run); { echo "$out" | grep -q "already extends" && [ ! -s "$w/log" ]; } &&
 echo 720896 > "$w/sys/mmcblk9/mmcblk9p9/size"; echo 0x0 > "$w/flags"
 out=$(run); { echo "$out" | grep -q "not marked to grow" && [ ! -s "$w/log" ]; } && ok "without attribute 56 the partition stays as provisioned" || bad "unmarked: $out"
 echo dos > "$w/scheme"; out=$(run); { echo "$out" | grep -q "not on a GPT disk" && [ ! -s "$w/log" ]; } && ok "an MBR disk is skipped" || bad "mbr: $out"
+# --- The recipe's device-unit substitution: what sed actually writes into the
+# unit. A lone backslash in the replacement is an escape sequence to sed, so a
+# naive systemd-escape leaves `dev-disk-by-partlabel-var.device`, which systemd
+# reads back as /dev/disk/by/partlabel/var - a device that never appears, and
+# the boot lands in emergency (imx8mp-evk, 2026-08-30).
+recipe="$here/../avocado-var-grow_1.0.bb"
+unit_value=$(AVOCADO_RECIPE="$recipe" python3 -c '
+import os, re
+src = open(os.environ["AVOCADO_RECIPE"]).read()
+body = re.search(r"def avocado_var_device_unit.*?\n\ndo_install", src, re.S).group(0)
+dev = "/dev/disk/by-partlabel/var"
+escaped = dev.lstrip("/").replace("-", "\\x2d").replace("/", "-") + ".device"
+print(escaped.replace("\\", "\\\\") if "escaped.replace" in body else escaped)
+')
+printf 'Requires=@AVOCADO_VAR_DEVICE_UNIT@\n' > "$w/unit"
+sed -i -e "s|@AVOCADO_VAR_DEVICE_UNIT@|$unit_value|g" "$w/unit"
+[ "$(cat "$w/unit")" = 'Requires=dev-disk-by\x2dpartlabel-var.device' ] \
+  && ok "the device unit survives sed with its \\x2d escape intact" \
+  || bad "unit substitution mangled: $(cat "$w/unit")"
+
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]
