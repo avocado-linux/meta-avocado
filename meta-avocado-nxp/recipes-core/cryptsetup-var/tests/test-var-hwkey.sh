@@ -45,7 +45,7 @@ sh "$backend" new "$work/blob" || bad "new failed"
 [ "$(wc -l < "$work/blob")" = 1 ] && ok "blob is one text line" || bad "blob lines: $(wc -l < "$work/blob")"
 [ "$(openssl base64 -d -A -in "$work/blob")" = "BLOB-OF-avocado-var-kek" ] && ok "blob is the base64 of caam-keygen's black blob" || bad "blob content: $(cat "$work/blob")"
 grep -q "^caam-keygen create avocado-var-kek ccm -s 32$" "$LOG" && ok "key is a random 256-bit CCM black key" || bad "unexpected caam-keygen argv: $(grep caam-keygen "$LOG")"
-[ -e "$work/caam/avocado-var-kek" ] || [ -e "$work/caam/avocado-var-kek.bb" ] && bad "black key material left in the working dir" || ok "working dir scrubbed after new"
+[ ! -e "$work/caam/avocado-var-kek" ] && [ ! -e "$work/caam/avocado-var-kek.bb" ] && ok "working dir scrubbed after new" || bad "black key material left in the working dir"
 
 # --- derive ---
 sh "$backend" derive "$work/blob" > "$work/pass" || bad "derive failed"

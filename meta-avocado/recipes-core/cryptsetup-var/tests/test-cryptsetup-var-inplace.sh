@@ -93,7 +93,7 @@ S
 chmod +x "$work/bin/"* "$work/sd/"* "$work/hwkey.sh"
 
 run() { # run <state-dir>
-  LOG="$1/log"; : > "$LOG"
+  LOG="$1/log"; : > "$LOG"; rm -f "$1/posture"
   rm -f "$work/sd/var-hwkey.sh"; [ -e "$1/hwkey" ] && cp "$work/hwkey.sh" "$work/sd/var-hwkey.sh"
   hw=""; [ -e "$1/hardware" ] && hw="&& echo '$(cat "$1/hardware" 2>/dev/null)' > /etc/avocado/var-hardware"
   unshare -rm bash -c "
@@ -101,7 +101,11 @@ run() { # run <state-dir>
     mount -t tmpfs none /run
     mkdir -p /sys/module/dm_crypt 2>/dev/null || mount -t tmpfs none /sys/module && mkdir -p /sys/module/dm_crypt
     export PATH='$work/bin':\$PATH LOG='$LOG' STATE='$1' STATE_DEV='$blk'
-    sh '$work/sd/cryptsetup-var.sh' '$blk'" >"$1/out" 2>&1 || { echo "script failed:"; cat "$1/out"; return 1; }
+    sh '$work/sd/cryptsetup-var.sh' '$blk'; rc=\$?
+    # /run is this namespace's own tmpfs: the posture file goes with it, so
+    # copy it out before we leave or nothing can assert on it.
+    cp /run/avocado-var-posture '$1/posture' 2>/dev/null || true
+    exit \$rc" >"$1/out" 2>&1 || { echo "script failed:"; cat "$1/out"; return 1; }
 }
 
 # --- Case 1: flashed 128 MiB btrfs -> in-place reencrypt confined to fs+32M ---
@@ -167,7 +171,7 @@ grep -q "^cryptsetup luksAddKey --key-file .* --new-keyfile .* --new-key-slot 1 
 grep -q '"type":"avocado-hwkey","keyslots":\["1"\],"backend":"stubengine","blob":"YmxvYg=="' "$s/token" 2>/dev/null \
   && ok "token carries type, keyslot, backend name and the blob" || bad "token missing/wrong: $(cat "$s/token" 2>/dev/null)"
 grep -q "^cryptsetup luksOpen --link-vk-to-keyring @u::%user:cryptsetup:var --key-file" "$s/log" && ok "first boot still opened with the recovery key" || bad "no recovery open"
-grep -q "^VAR_HWKEY_TOKEN=yes$" "$s/posture" 2>/dev/null || true
+grep -q "^VAR_HWKEY_TOKEN=yes$" "$s/posture" && ok "posture records the hardware keyslot token" || bad "posture VAR_HWKEY_TOKEN: $(cat "$s/posture" 2>/dev/null)"
 
 # --- Case 9: token present and engine up -> open via the engine, never Argon2id ---
 s="$work/c9"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"; cp "$work/c8/token" "$s/token"
@@ -196,7 +200,7 @@ s="$work/c13"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey" "$s/recovery"; cp "$wor
 run "$s" || bad "case 13 script exit"
 grep -q "^cryptsetup luksKillSlot --batch-mode $blk 0$" "$s/log" && ok "derived keyslot retired once a recovery slot exists and the engine opened /var" || bad "derived slot kept: $(grep -c luksKillSlot "$s/log")"
 grep -q "^cryptsetup luksOpen --link-vk-to-keyring @u::%user:cryptsetup:var --key-file" "$s/log" && ok "volume key is linked into root's user keyring on open" || bad "no --link-vk-to-keyring: $(grep luksOpen "$s/log")"
-grep -q "^VAR_RECOVERY=key$" /dev/null 2>&1 || true
+grep -q "^VAR_RECOVERY=key$" "$s/posture" && ok "posture reports the operator recovery key" || bad "posture VAR_RECOVERY: $(cat "$s/posture" 2>/dev/null)"
 
 # --- Case 14: recovery slot present but the engine is down -> the derived slot
 # is what opened /var this boot; it must NOT be retired ---
@@ -223,6 +227,6 @@ grep -q "^cryptsetup luksAddKey" "$s/log" && ok "var.hardware=caam with the engi
 s="$work/c18"; mkdir -p "$s"; touch "$s/luks" "$s/hwkey"; echo none > "$s/hardware"
 run "$s" || bad "case 18 script exit"
 grep -q "^cryptsetup luksAddKey" "$s/log" && bad "enrolled a hardware slot with var.hardware=none" || ok "var.hardware=none enrols no hardware keyslot"
-grep -q "^VAR_HARDWARE=none$" "$s/out" 2>/dev/null || true
+grep -q "^VAR_HARDWARE=none$" "$s/posture" && ok "posture reports var.hardware=none" || bad "posture VAR_HARDWARE: $(cat "$s/posture" 2>/dev/null)"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]
