@@ -1,0 +1,44 @@
+#!/bin/sh
+# Publish the running initramfs's build id to /run, so the booted system can
+# ask what is actually running instead of trusting the previous runtime
+# manifest's bookkeeping.
+#
+# /run is created by the initrd and carried across switch-root, so this value
+# always describes THIS boot: it cannot go stale across an A/B rollback the way
+# a persisted stamp would, and it needs no writable persistent storage - /var is
+# still a locked LUKS container at this point on an encrypted-var machine.
+#
+# The id lives in the initramfs release files as AVOCADO_OS_BUILD_ID (the
+# initramfs build writes it there; the name is shared with the rootfs field, the
+# value is the initramfs's own id).
+#
+# Absence is a valid answer: an initramfs from before this recipe publishes
+# nothing, and the reader falls back to comparing manifests as it did before.
+# Nothing here is worth failing a boot over, so every path exits 0.
+
+set -u
+
+# Overridable for the host test only, like avocado-var-grow's *_DEV vars.
+OUT=${AVOCADO_INITRAMFS_ID_OUT:-/run/avocado/initramfs-build-id}
+ROOT=${AVOCADO_INITRAMFS_ID_ROOT:-}
+
+for f in "$ROOT/etc/initrd-release" "$ROOT/usr/lib/initrd-release" "$ROOT/usr/lib/os-release-initrd"; do
+    [ -r "$f" ] || continue
+    id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -n 1)
+    [ -n "$id" ] || continue
+    if ! mkdir -p "${OUT%/*}"; then
+        echo "avocado-initramfs-id: cannot create ${OUT%/*}; not publishing"
+        exit 0
+    fi
+    if printf '%s\n' "$id" > "$OUT"; then
+        # Name the source file: when this went wrong the id was missing from the
+        # image entirely, and one boot log line would have said so.
+        echo "avocado-initramfs-id: $id (from $f)"
+    else
+        echo "avocado-initramfs-id: cannot write $OUT; not publishing"
+    fi
+    exit 0
+done
+
+echo "avocado-initramfs-id: no AVOCADO_OS_BUILD_ID in the initramfs release files; not publishing"
+exit 0

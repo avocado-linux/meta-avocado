@@ -1,0 +1,16 @@
+[Unit]
+Description=Publish the running initramfs build id to /run
+DefaultDependencies=no
+# /run is the handoff to the booted system, so this only has to happen before
+# the initrd hands over. It reads two files and writes one; it depends on
+# nothing and nothing in the initrd depends on it.
+Before=initrd-switch-root.target
+ConditionPathIsReadWrite=/run
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/avocado-initramfs-id
+
+[Install]
+WantedBy=initrd.target
