@@ -32,8 +32,16 @@ NXP_WIFI_FIRMWARE = "${MACHINE_FIRMWARE}"
 # mwifiex.cfg kernel fragment). Feed-only here; the BSP extension installs it.
 NXP_WIFI_FIRMWARE:append:avocado-imx8mp-evk = " firmware-nxp-wifi-8997"
 
+# wireless-regdb-static is here for the same reason the other machine-extra
+# packagegroups carry it (compulab, variscite, stm, qcom): it comes from
+# packagegroup-avocado-feature-networking, which the per-machine feed build does
+# not pull, so the package never reaches the feed and a BSP extension's
+# `ext install` fails with "No match for argument: wireless-regdb-static" even
+# though a local avocado-complete build produces it. Every NXP WiFi driver here
+# needs the regulatory database.
 RDEPENDS:${PN} = " \
   ${NXP_WIFI_DRIVER} \
   ${NXP_WIFI_FIRMWARE} \
   kernel-modules \
+  wireless-regdb-static \
 "
