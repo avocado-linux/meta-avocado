@@ -50,6 +50,8 @@ POSTURE_FILE="/run/avocado-var-posture"
 # taking this PR out of draft.
 KEY_UNLOCK="avocado_var_unlock"
 KEY_TOKEN="avocado_var_tpm2_token"
+KEY_HWKEY="avocado_var_hwkey"
+KEY_RECOVERY="avocado_var_recovery"
 KEY_ENCRYPTED="avocado_var_encrypted"
 
 # fw_printenv/fw_setenv come from libubootenv and need a valid fw_env.config,
@@ -99,6 +101,9 @@ fi
 
 VAR_UNLOCK_METHOD=unknown
 VAR_TPM2_TOKEN=unknown
+VAR_HWKEY_TOKEN=unknown
+VAR_HWKEY_BACKEND=none
+VAR_RECOVERY=unknown
 # shellcheck source=/dev/null
 . "$POSTURE_FILE"
 
@@ -116,6 +121,13 @@ fi
 
 put_if_changed "$KEY_UNLOCK" "$VAR_UNLOCK_METHOD"
 put_if_changed "$KEY_TOKEN" "$VAR_TPM2_TOKEN"
+# The vendor key engine, when one holds a keyslot: its name ("caam"), else "no".
+_hwkey=no
+[ "$VAR_HWKEY_TOKEN" = yes ] && _hwkey="$VAR_HWKEY_BACKEND"
+put_if_changed "$KEY_HWKEY" "$_hwkey"
+# What recovers /var if the hardware keyslot is lost: an operator-held key
+# (avocadoctl var-key enroll) or, until then, the key derived from the SoC UID.
+put_if_changed "$KEY_RECOVERY" "$VAR_RECOVERY"
 put_if_changed "$KEY_ENCRYPTED" "$var_encrypted"
 
 # Loud on the degraded case. Everything above is a value in a store someone has
@@ -123,4 +135,7 @@ put_if_changed "$KEY_ENCRYPTED" "$var_encrypted"
 # device that is encrypted but no longer TPM-bound.
 if [ "$var_encrypted" = yes ] && [ "$VAR_TPM2_TOKEN" = yes ] && [ "$VAR_UNLOCK_METHOD" = argon2id ]; then
     echo "avocado-posture: /var has a TPM2 keyslot but opened with the Argon2id recovery key - PCR 7 no longer matches what was sealed" >&2
+fi
+if [ "$var_encrypted" = yes ] && [ "$VAR_HWKEY_TOKEN" = yes ] && [ "$VAR_UNLOCK_METHOD" != hwkey ]; then
+    echo "avocado-posture: /var has a ${VAR_HWKEY_BACKEND} keyslot but opened with ${VAR_UNLOCK_METHOD} - the key engine refused its blob or was unavailable" >&2
 fi

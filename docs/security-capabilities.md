@@ -112,9 +112,57 @@ checks `/etc/avocado/var-encrypt` itself before calling `cryptsetup-var.sh`.
 
 | Platform | `var-key.sh` | Later boots |
 |---|---|---|
-| i.MX 8M / 9 | SoC-UID-derived Argon2id | same key |
+| i.MX 8M | Argon2id recovery key (SoC UID) + keyslot from a CAAM black key, blob stored as an `avocado-hwkey` LUKS2 token | CAAM-derived passphrase, Argon2id fallback |
+| i.MX 9 | SoC-UID-derived Argon2id | same key (ELE backend pending) |
 | Jetson | Argon2id recovery key + TPM2 keyslot sealed to the OP-TEE fTPM (PCR 7) | TPM2 token, Argon2id fallback |
 | qemu / x86 | Argon2id (+ swtpm / TPM2 where present) | as Jetson |
+
+**Hardware key backends without a TPM** plug in through `var-hwkey.sh` next to
+`var-key.sh` (installed by the vendor bbappend, scoped by machine override). The
+contract is four verbs - `probe`, `name`, `new <blob-file>`, `derive <blob-file>`:
+the backend makes a device-bound blob and turns it back into the same passphrase
+on the same device only. `cryptsetup-var.sh` owns everything else: it adds the
+keyslot, stores the blob in the LUKS2 header as an `avocado-hwkey` token (no
+extra partition, travels with the container), opens with it on later boots and
+falls back to the Argon2id recovery slot when the engine refuses. The i.MX 8M
+backend wraps NXP's `caam-keygen`/`caam-crypt`: a CCM black key that CAAM only
+ever holds encrypted, the passphrase being AES-256-CBC of a fixed block under it.
+Posture publishes `avocado_var_hwkey` = backend name or `no`, and warns when a
+device that has the keyslot opened without it.
+
+**Operator recovery key (`var.recovery`).** Every keyslot above is bound to
+the device: a dead SoC takes `/var` with it. `runtimes.<r>.var.recovery` names
+a registry secret that is a *master*; `avocado var-key enroll --device` derives
+this unit's passphrase as HMAC-SHA256(master, SoC UID) over the device session
+and `avocadoctl var-key enroll` adds it as a keyslot with an `avocado-recovery`
+token. Nothing derived from the master is in any image, and nothing but the
+keyslot is on the device. To make that possible without any keyslot passphrase
+being reachable from the running system, `cryptsetup-var` links the volume key
+into root's user keyring on every open (`--link-vk-to-keyring
+@u::%user:cryptsetup:var`) and avocadoctl authorises with
+`luksAddKey --volume-key-keyring`. Once a recovery token exists, the initrd
+retires the SoC-UID-derived keyslot (the one key a UID reader could derive),
+unless that key is what opened `/var` this boot. Bench recovery:
+`avocado var-key derive <runtime> --uid <UID> --raw | cryptsetup open --key-file - <dev> var`.
+
+**Which engine (`var.hardware`).** Default `auto`: enrol whatever engine the
+machine ships and probes OK, degrade to the derived key and report. `caam` /
+`tpm2`: that engine must hold a keyslot, and the boot fails to the emergency
+target (tearing the mapping down again) rather than leaving `/var` reachable
+on the derived key. That covers all three ways it could otherwise slip
+through - the engine is unusable at preflight, an *existing* hardware keyslot
+will not unlock (a wiped key store, moved PCRs), or the enrolment itself
+fails - so a product that promises hardware binding never silently ships
+without it. The single exception is the first-enrolment boot: before any
+hardware token exists the derived key is the only way into the container and
+the only thing `luksAddKey` can authenticate with, so that open is allowed -
+the carve-out keys on the absence of the token, not on the mode. `none`: no
+hardware keyslot at all; avocado-cli refuses it without `var.recovery`. The
+choice rides in the initramfs as `/etc/avocado/var-hardware` next to the
+`var-encrypt` marker, only when it is not `auto`.
+
+Posture adds `avocado_var_recovery` = `key` (operator slot enrolled) or
+`soc-uid` (still on the derived slot), and `VAR_HARDWARE` in the /run file.
 
 **Prerequisites a machine must meet before declaring it:** a dm-crypt kernel
 fragment reachable from its kernel recipe, and a GPT `var` partlabel
