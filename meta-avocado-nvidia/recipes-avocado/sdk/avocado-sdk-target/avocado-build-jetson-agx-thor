@@ -68,7 +68,10 @@ esp_image=$(jq -r '.storage_devices.rootdisk.images.esp // empty' "$manifest")
 tos_image=$(jq -r '.storage_devices.rootdisk.images.tos // empty' "$manifest")
 dtb_image=$(jq -r '.storage_devices.rootdisk.images.dtb // empty' "$manifest")
 bpmp_dtb_image=$(jq -r '.storage_devices.rootdisk.images.bpmp_dtb // empty' "$manifest")
-boot_image=$(jq -r '.storage_devices.rootdisk.images.boot // empty' "$manifest")
+# `boot` is declared in object form ({out,size,...}) so `stone validate` skips
+# the existence check for a file this hook has not written yet. Plain `jq -r`
+# on that returns the whole JSON object, so pull `.out` when it is one.
+boot_image=$(jq -r '(.storage_devices.rootdisk.images.boot // empty) | if type == "object" then (.out // empty) else . end' "$manifest")
 
 echo -e "\033[94m[INFO]\033[0m Extracted image names from manifest:
   Rootfs:    ${rootfs_image}
