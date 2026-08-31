@@ -11,7 +11,8 @@
       "command": ["nvbootctrl", "get-current-slot"]
     },
     "os_artifacts": {
-      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] }
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] },
+      "boot": { "image_key": "boot", "slot_partitions": ["A_kernel", "B_kernel"] }
     },
     "activate": [
       {
@@ -72,11 +73,17 @@
         "rootfs": "avocado-image-rootfs-jetson-agx-thor.erofs-lz4",
         "var": "avocado-image-var-jetson-agx-thor.btrfs",
         "initramfs": "avocado-image-initramfs-jetson-agx-thor.cpio.zst",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-thor.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-thor.esp",
         "tegraflash_tos": "tos-avocado-jetson-agx-thor.img",
         "tegraflash_bsp": "tegraflash-bsp",
-        "tegraflash_tools": "tegraflash-tools"
+        "tegraflash_tools": "tegraflash-tools",
+        "tegraflash_carrier_bsp": "carrier-bsp"
       }
     }
   }
