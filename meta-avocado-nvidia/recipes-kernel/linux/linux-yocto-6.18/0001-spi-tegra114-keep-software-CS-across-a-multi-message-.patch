@@ -1,0 +1,82 @@
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 31 Aug 2026 00:30:00 -0400
+Subject: [PATCH] spi: tegra114: keep software CS across a multi-message
+ transaction
+
+A driver can build one SPI transaction from several spi_message
+submissions by setting cs_change on the last transfer of each message and
+holding the bus with spi_bus_lock(). include/linux/spi/spi.h documents
+this as a correctness guarantee, not a hint: "Some devices need protocol
+transactions to be built from a series of spi_message submissions [...]
+where the whole transaction ends when the chipselect goes inactive."
+
+tegra114 honours the first half of that. The last transfer with cs_change
+set skips tegra_spi_transfer_end() and records tspi->cs_control, so CS
+stays asserted after the message completes.
+
+It then drops it on the next message. tegra_spi_setup_transfer_one()
+clears tspi->cs_control before deciding the CS mode, so a following
+single-transfer message with cs_change clear takes the hardware-CS branch
+and rewrites COMMAND1 without SPI_CS_SW_HW. That releases the
+software-held CS, and the peripheral sees the transaction end mid-way.
+
+tpm_tis_spi hits this on every access: it sends the 4-byte TIS header in
+one message with cs_change set and the data phase in a second. On an
+AGX Thor with a discrete SPI TPM the data phase reads back as zeros, so
+wait_startup() never sees TPM_ACCESS validSts and tpm_tis_core_init()
+fails with -ENODEV after timeout_a, before tpm_chip_start() is ever
+reached. Reproduced from userspace with spidev on the same chip, which
+isolates it from the TPM driver:
+
+  one spi_message  (header+data)            ACCESS 0x81  DID_VID 0x001D15D1
+  two spi_messages (cs_change on header)    ACCESS 0x00  DID_VID 0x01000000
+
+Identical at 1, 5, 10 and 18 MHz, so it is not a timing or flow-control
+problem. tpm_tis_spi is not special here; cros_ec_spi, ad_sigma_delta,
+mmc_spi, gehc-achc and ice40-spi build transactions the same way.
+
+Remember that CS was still asserted on entry and stay in software CS mode
+for that message, so it remains asserted until a message without
+cs_change reaches tegra_spi_transfer_end() and drives it inactive.
+
+Upstream-Status: Pending
+
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+--- a/drivers/spi/spi-tegra114.c
++++ b/drivers/spi/spi-tegra114.c
+@@ -837,6 +837,8 @@
+ 	tspi->curr_xfer = t;
+ 
+ 	if (is_first_of_msg) {
++		bool cs_held = false;
++
+ 		tegra_spi_clear_status(tspi);
+ 
+ 		command1 = tspi->def_command1_reg;
+@@ -867,6 +869,7 @@
+ 			if (tspi->cs_control != spi)
+ 				tegra_spi_writel(tspi, command1, SPI_COMMAND1);
+ 			tspi->cs_control = NULL;
++			cs_held = true;
+ 		} else
+ 			if (SPI_MODE_VAL(command1) !=
+ 				SPI_MODE_VAL(tspi->def_command1_reg))
+@@ -876,7 +879,16 @@
+ 		if (spi_get_csgpiod(spi, 0))
+ 			gpiod_set_value(spi_get_csgpiod(spi, 0), 1);
+ 
+-		if (is_single_xfer && !(t->cs_change)) {
++		/*
++		 * A previous message ended with cs_change set, so CS is still
++		 * asserted and this message continues that transaction. Falling
++		 * back to hardware CS here rewrites COMMAND1 without
++		 * SPI_CS_SW_HW, which drops the software-held CS and ends the
++		 * transaction early -- the peripheral then sees the remainder as
++		 * a new one. Stay in software CS mode so it stays asserted until
++		 * a message without cs_change calls tegra_spi_transfer_end().
++		 */
++		if (is_single_xfer && !(t->cs_change) && !cs_held) {
+ 			tspi->use_hw_based_cs = true;
+ 			command1 &= ~(SPI_CS_SW_HW | SPI_CS_SW_VAL);
+ 		} else {

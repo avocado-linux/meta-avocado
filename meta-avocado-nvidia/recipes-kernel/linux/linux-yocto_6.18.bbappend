@@ -5,6 +5,15 @@ SRC_URI += " \
   file://avocado-extra.cfg \
 "
 
+# spi-tegra114 drops a software-held chip select on the next spi_message, which
+# breaks any driver that builds one transaction out of several messages with
+# cs_change (tpm_tis_spi, cros_ec_spi, mmc_spi, ad_sigma_delta, ...). On Thor
+# this is why a discrete SPI TPM never binds: the TIS data phase reads back as
+# zeros and tpm_tis_core_init() gives up with -ENODEV before tpm_chip_start().
+# See the patch header for the userspace reproduction that isolates it from the
+# TPM driver.
+SRC_URI += " file://0001-spi-tegra114-keep-software-CS-across-a-multi-message-.patch"
+
 # dm-crypt/dm-verity capability (shared fragments) + the OP-TEE fTPM driver.
 # Unconditional: see avocado-security-kernel.inc for why capability is not
 # gated on a DISTRO_FEATURE. files/ftpm.cfg is shared by both Jetson kernels.
