@@ -18,11 +18,16 @@ inherit packagegroup nospdx
 # only, so OE-core's `enable getty@.service` preset can only ever produce a
 # failed getty@getty.service and a `degraded` system (seen on imx95-frdm and
 # imx8mp-evk). Same fix nvidia/qcom carry per-vendor; this is the shared one.
+# avocado-imx-bootpart: the activation step of a bootloader update - flips
+# PARTITION_CONFIG to the eMMC boot partition avocadoctl just wrote imx-boot to
+# (stone slot target emmc-boot:<n>), refusing an empty one.
 RDEPENDS:${PN} = " \
   avocado-uboot-env \
   mmc-utils \
   systemd-serial-console-preset \
 "
+# 8M only: the recipe's boot-image guard knows the HABv4 IVT, not AHAB.
+RDEPENDS:${PN}:append:mx8m-generic-bsp = " avocado-imx-bootpart"
 
 # SDMA RAM firmware (sdma-imx7d.bin) for the i.MX SDMAv3 controller (audio/SAI,
 # UART, SPI DMA). On the NXP BSP it lives in firmware-imx (IMX_USE_LINUX_FIRMWARE_SDMA=0);

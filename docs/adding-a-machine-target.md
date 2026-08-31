@@ -335,6 +335,23 @@ OTA updates can flip slots without touching the bootloader.
 }
 ```
 
+### Bootloader as an OS artifact (eMMC boot partitions)
+
+A machine that boots `imx-boot` from an eMMC hardware boot partition can ship
+the bootloader with each OS update by adding an `os_artifacts` entry whose slot
+targets are `emmc-boot:0` / `emmc-boot:1` and an `activate`/`rollback` step
+that runs `avocado-imx-bootpart {inactive_slot}` / `{previous_slot}` (see
+`docs/security-capabilities.md`, "Bootloader updates"). Boot partitions are
+coupled to OS slots (a → boot0, b → boot1). Provisioning must leave a valid
+image in **both** boot partitions, or the first update to slot b is the first
+thing to populate boot1 — `uuu`'s `flash bootloader` does write both.
+
+Medium rule: the same manifest serves the machine's SD, image and eMMC
+profiles. A target the running medium does not have is skipped with a message
+(avocadoctl) and the activation helper exits 0, so OS updates keep working
+from SD — only the bootloader is left as provisioned there. Any new
+medium-specific target must follow the same rule.
+
 ### Notes on partition layout
 
 - The `var` partition UUID is canonical (`4d21b016-b534-45c2-a9fb-5c16e091fd2d`)
