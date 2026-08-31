@@ -269,7 +269,7 @@ grep -q "hardware keyslot add failed" "$s/out" && ok "var.hardware=auto reports 
 
 # Case 23: tpm2, a TPM2 token exists and the TPM is present, but the unseal
 # fails -> no derived fallback. (Case 10 covers the same shape under auto.)
-s="$work/c23"; mkdir -p "$s"; touch "$s/luks" "$s/tpm0" "$s/tpm2_fail"; printf 'Tokens:\n  0: systemd-tpm2\n' > "$s/dump"; echo tpm2 > "$s/hardware"
+s="$work/c25"; mkdir -p "$s"; touch "$s/luks" "$s/tpm0" "$s/tpm2_fail"; printf 'Tokens:\n  0: systemd-tpm2\n' > "$s/dump"; echo tpm2 > "$s/hardware"
 if run "$s"; then bad "opened /var although the required TPM2 keyslot failed"; else ok "var.hardware=tpm2 refuses the derived fallback once a TPM2 token exists"; fi
 grep -q "^cryptsetup luksOpen" "$s/log" && bad "opened on the derived key: $(grep luksOpen "$s/log")" || ok "no derived open when the TPM2 keyslot cannot unlock"
 
@@ -299,5 +299,17 @@ run "$s" || bad "case 22 script exit"
 { grep -q "^cryptsetup token export --token-id 0 " "$s/log" && ! grep -q -- "--token-only" "$s/log"; } \
   && ok "auto still opens with the hardware key and never reaches the failing TPM2" \
   || bad "case 22: auto did not use the hardware key"
+
+# --- Case 25: the var partition is already mounted -> refuse, touch nothing ---
+s="$work/c25"; mkdir -p "$s"; echo btrfs > "$s/fstype"; echo 134217728 > "$s/fsbytes"
+printf '%s /var btrfs rw 0 0\n' "$blk" > "$s/mounts"
+LOG="$s/log"; : > "$LOG"
+if unshare -rm bash -c "
+    mount -t tmpfs none /etc && echo 'encrypted-var' > /etc/avocado-security-capabilities
+    mount -t tmpfs none /run; mkdir -p /sys/module/dm_crypt 2>/dev/null || { mount -t tmpfs none /sys/module && mkdir -p /sys/module/dm_crypt; }
+    export PATH='$work/bin':\$PATH LOG='$LOG' STATE='$s' STATE_DEV='$blk' AVOCADO_PROC_MOUNTS='$s/mounts'
+    sh '$work/sd/cryptsetup-var.sh' '$blk'" >"$s/out" 2>&1; then bad "script succeeded on a mounted var partition"; else ok "a mounted var partition is refused (unit fails -> emergency)"; fi
+grep -q "already mounted" "$s/out" && ok "refusal names the mounted device" || bad "no refusal message: $(cat "$s/out")"
+grep -q "^cryptsetup" "$s/log" && bad "cryptsetup was invoked on a mounted device" || ok "no cryptsetup call before the refusal"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]

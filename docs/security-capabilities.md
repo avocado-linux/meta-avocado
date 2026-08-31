@@ -88,6 +88,11 @@ open it as `/dev/mapper/var`.
 - `99-zz-cryptsetup-var.rules` (in `cryptsetup-var-udev`, rootfs) re-asserts the
   mapping after switch-root, where the udev database has been cleared.
 
+On a fresh flash the var partition is grown to its disk by the initramfs
+(`avocado-var-grow`, when the manifest said `expand: true`) *before* the
+container is opened, so the LUKS mapping and the filesystem are full size from
+the first boot and the first OTA has room.
+
 Turning `var.encrypt` back off on a device that already encrypted is not a
 supported downgrade: the partition stays LUKS, nothing opens it, `/var` does not
 mount. Reprovision instead.

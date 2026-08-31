@@ -1,0 +1,66 @@
+#!/bin/sh
+# avocado-var-grow - in the initramfs, extend the var partition to the end of
+# its disk when provisioning marked it for that, before anything opens or
+# mounts it.
+#
+# The mark is GPT attribute bit 56 on the var partition, set by stone/fwup from
+# the manifest's `expand: true` (see the rootdisk.conf templates). Reading it
+# from the disk keeps the build medium-agnostic: an image written to a file
+# and flashed by uuu could not be expanded at flash time, one written straight
+# to an SD card was - either way the bit says what the manifest asked for, and
+# "partition already ends at the disk" makes the step idempotent without any
+# state in /var (which does not exist yet). The LUKS mapping (cryptsetup-var)
+# and the btrfs (x-systemd.growfs) grow to the new size later in this boot.
+set -eu
+
+GROW_BIT_MASK=0x0100000000000000
+devdir=${AVOCADO_VAR_GROW_DEVDIR:-/dev}
+sysblock=${AVOCADO_VAR_GROW_SYSBLOCK:-/sys/class/block}
+# The machine's var partition (AVOCADO_VAR_PART_DEV, substituted at build), so a
+# machine whose label is not "var" (rubikpi3: "avocado") is served too.
+vardev=${AVOCADO_VAR_GROW_DEV:-@AVOCADO_VAR_PART_DEV@}
+
+part=$(readlink -f "$vardev" 2>/dev/null) || { echo "avocado-var-grow: no var partition at $vardev, nothing to do"; exit 0; }
+pname=$(basename "$part")
+disk=$(basename "$(readlink -f "$sysblock/$pname/..")")
+diskdev=$devdir/$disk
+partno=$(cat "$sysblock/$pname/partition")
+
+scheme=$(blkid -p -s PART_ENTRY_SCHEME -o value "$part" 2>/dev/null || true)
+[ "$scheme" = gpt ] || { echo "avocado-var-grow: $part is not on a GPT disk ($scheme), nothing to do"; exit 0; }
+flags=$(blkid -p -s PART_ENTRY_FLAGS -o value "$part" 2>/dev/null || echo 0x0)
+if [ $(( ${flags:-0} & GROW_BIT_MASK )) -eq 0 ]; then
+    echo "avocado-var-grow: $part not marked to grow (flags ${flags:-0x0}), leaving it as provisioned"
+    exit 0
+fi
+
+disk_sectors=$(cat "$sysblock/$disk/size")
+start=$(cat "$sysblock/$pname/start")
+size=$(cat "$sysblock/$pname/size")
+end=$((start + size))
+# GPT keeps 33 sectors of backup header/entries at the end; sgdisk also aligns
+# the end down, so anything within 2048 sectors of the disk end is "full".
+if [ $((disk_sectors - end)) -le 2048 ]; then
+    echo "avocado-var-grow: $part already extends to the end of $diskdev"
+    exit 0
+fi
+
+echo "avocado-var-grow: extending $part ($((size / 2048)) MiB) to the end of $diskdev ($((disk_sectors / 2048)) MiB)"
+guid=$(sgdisk -i "$partno" "$diskdev" | sed -n 's/^Partition unique GUID: //p')
+type=$(sgdisk -i "$partno" "$diskdev" | sed -n 's/^Partition GUID code: \([^ ]*\).*/\1/p')
+name=$(sgdisk -i "$partno" "$diskdev" | sed -n "s/^Partition name: '\(.*\)'/\1/p")
+# Relocate the backup GPT to the true disk end first (the flashed image's GPT
+# was sized for the image), then recreate the partition with the same start,
+# type, GUID, name and the complete attribute mask it had (which includes the
+# grow bit) - not just bit 56, so no-automount or platform bits survive.
+sgdisk -e "$diskdev" >/dev/null
+sgdisk -d "$partno" -n "$partno:$start:0" -t "$partno:$type" -u "$partno:$guid" -c "$partno:$name" -A "$partno:=:$flags" "$diskdev" >/dev/null
+partx --update --nr "$partno" "$diskdev"
+# partx re-creates the partition node; udev drops and re-adds its symlinks in
+# the process. Anything ordered after this unit (cryptsetup-var, var.mount)
+# must find /dev/disk/by-partlabel/var back in place, so wait for udev to
+# finish before reporting done - a first boot on imx8mp-evk saw cryptsetup-var
+# evaluate its device check in that gap and get skipped straight to a
+# plaintext mount.
+udevadm settle --timeout=30 || true
+echo "avocado-var-grow: $part now $(( $(cat "$sysblock/$pname/size") / 2048 )) MiB"

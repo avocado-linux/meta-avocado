@@ -12,16 +12,18 @@ Before=var.mount
 # plaintext mount that fstab would otherwise happily perform.
 OnFailure=emergency.target
 # Wait for the var partition's by-partlabel symlink to actually exist before
-# running. A bare ConditionPathExists is evaluated once, the instant the service
-# is activated - if udev has not yet created /dev/disk/by-partlabel/var the
-# service is silently skipped, /dev/mapper/var never appears, and var.mount
-# times out into the emergency shell. Ordering after (and requiring) the device
-# unit makes the service block until udev has processed the partition instead.
+# running: ordering after (and requiring) the device unit makes the service
+# block until udev has processed the partition. Deliberately NO
+# ConditionPathExists on the symlink: a condition is evaluated once, the
+# instant the job starts, and if the link is momentarily gone (avocado-var-grow
+# re-reading the partition table) the unit is silently skipped and fstab mounts
+# the plaintext partition. With the marker below present, a missing device must
+# be a failure (the script refuses a non-block path), which OnFailure turns
+# into the emergency target - never a quiet plaintext /var.
 Requires=dev-disk-by\x2dpartlabel-var.device
-After=dev-disk-by\x2dpartlabel-var.device
+After=dev-disk-by\x2dpartlabel-var.device avocado-var-grow.service
 After=systemd-udevd.service
 Wants=systemd-udevd.service
-ConditionPathExists=/dev/disk/by-partlabel/var
 # The per-runtime opt-in. avocado-cli writes this marker into a runtime's
 # initramfs when avocado.yaml sets var.encrypt; the feed's own initramfs and a
 # runtime that did not opt in have no marker and mount the plaintext /var.

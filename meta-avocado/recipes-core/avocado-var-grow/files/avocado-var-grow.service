@@ -1,0 +1,17 @@
+[Unit]
+Description=Grow the var partition to its disk (when provisioning marked it)
+DefaultDependencies=no
+# Before the container is opened or the filesystem mounted: both size
+# themselves from the partition they find.
+Before=cryptsetup-var.service var.mount initrd-root-fs.target
+Requires=@AVOCADO_VAR_DEVICE_UNIT@
+After=@AVOCADO_VAR_DEVICE_UNIT@ systemd-udevd.service
+ConditionPathExists=@AVOCADO_VAR_PART_DEV@
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/avocado-var-grow
+
+[Install]
+WantedBy=initrd-root-fs.target

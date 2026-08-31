@@ -352,6 +352,20 @@ profiles. A target the running medium does not have is skipped with a message
 from SD — only the bootloader is left as provisioned there. Any new
 medium-specific target must follow the same rule.
 
+### `expand: true` and how the device grows `/var`
+
+`expand: "true"` on the last partition means "fill the disk". fwup can only do
+that when it writes the real device (`sd` profile); an image written to a file
+(`uuu`, `img`) is provisioned at the image size. So provisioning also records the
+intent **on the disk**: stone sets GPT attribute bit 56 on that partition
+(`AVOCADO_PARTITION_<NAME>_FLAGS` → `flags = ${VAR_PART_FLAGS}` in the fwup
+template), and the initramfs unit `avocado-var-grow` extends any partition that
+carries the bit to the end of its disk before `cryptsetup-var` opens it or
+`var.mount` mounts it. The LUKS mapping and btrfs then grow to the new size in
+the same boot. No manifest → no bit → nothing grows; a partition already at the
+disk end is a no-op. A new GPT template must carry `flags = ${VAR_PART_FLAGS}`
+on its var partition to take part; MBR layouts do not.
+
 ### Notes on partition layout
 
 - The `var` partition UUID is canonical (`4d21b016-b534-45c2-a9fb-5c16e091fd2d`)
