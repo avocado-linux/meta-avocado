@@ -31,10 +31,14 @@ case "$1" in
   isLuks)     [ -e "$STATE/luks" ] ;;
   luksDump)   cat "$STATE/dump" 2>/dev/null
               printf 'Keyslots:\n  0: luks2\n'
-              if [ -e "$STATE/token" ]; then
-                printf '  1: luks2\n'; [ -e "$STATE/recovery" ] && printf '  2: luks2\n'
-                printf 'Tokens:\n  0: avocado-hwkey\n\tKeyslot:    1\n'
+              [ -e "$STATE/token" ] && printf '  1: luks2\n'
+              [ -e "$STATE/recovery" ] && printf '  2: luks2\n'
+              [ -e "$STATE/tpm2_token" ] && printf '  3: luks2\n'
+              if [ -e "$STATE/token" ] || [ -e "$STATE/tpm2_token" ]; then
+                printf 'Tokens:\n'
+                [ -e "$STATE/token" ] && printf '  0: avocado-hwkey\n\tKeyslot:    1\n'
                 [ -e "$STATE/recovery" ] && printf '  1: avocado-recovery\n\tKeyslot:    2\n'
+                [ -e "$STATE/tpm2_token" ] && printf '  3: systemd-tpm2\n\tKeyslot:    3\n'
                 printf 'Digests:\n'
               fi
               exit 0 ;;
@@ -274,5 +278,26 @@ grep -q "^cryptsetup luksOpen" "$s/log" && bad "opened on the derived key: $(gre
 s="$work/c24"; mkdir -p "$s"; touch "$s/luks" "$s/tpm0" "$s/refuse_tpm2_enroll"; echo tpm2 > "$s/hardware"
 if run "$s"; then bad "completed the boot although the TPM2 keyslot could not be enrolled"; else ok "var.hardware=tpm2 aborts when enrolment fails"; fi
 grep -q "^cryptsetup luksOpen" "$s/log" && ok "the first-enrolment derived open is still allowed" || bad "no derived open on the first-enrolment boot"
+
+# --- Case 20: a device enrolled under `auto` carries BOTH tokens; var.hardware=tpm2
+# with a failing TPM2 unseal must NOT be satisfied by the working hardware key ---
+s="$work/c20"; mkdir -p "$s"; touch "$s/luks" "$s/token" "$s/tpm2_token" "$s/hwkey" "$s/tpm2_fail"; echo tpm2 > "$s/hardware"
+run "$s" && bad "case 20: mixed tokens with a failing TPM2 opened anyway" || ok "an explicit tpm2 mode is not satisfied by a working hardware keyslot"
+# The blob export is how the hardware key is read to open the container, so its
+# absence is proof that engine was never tried.
+grep -q "^cryptsetup token export --token-id 0 " "$s/log" && bad "case 20: read the hardware key blob under var.hardware=tpm2" || ok "the hardware key is not even attempted in tpm2 mode"
+
+# --- Case 21: the mirror image - var.hardware=caam on a device whose only
+# hardware token is TPM2 must refuse rather than open on the derived key ---
+s="$work/c21"; mkdir -p "$s"; touch "$s/luks" "$s/tpm2_token" "$s/hwkey"; echo caam > "$s/hardware"
+run "$s" && bad "case 21: caam mode opened a TPM2-enrolled device" || ok "an explicit caam mode refuses a device enrolled only with TPM2"
+
+# --- Case 22: `auto` still tries both, so a working hardware key opens a
+# mixed-token device even when the TPM2 unseal fails ---
+s="$work/c22"; mkdir -p "$s"; touch "$s/luks" "$s/token" "$s/tpm2_token" "$s/hwkey" "$s/tpm2_fail"; echo auto > "$s/hardware"
+run "$s" || bad "case 22 script exit"
+{ grep -q "^cryptsetup token export --token-id 0 " "$s/log" && ! grep -q -- "--token-only" "$s/log"; } \
+  && ok "auto still opens with the hardware key and never reaches the failing TPM2" \
+  || bad "case 22: auto did not use the hardware key"
 
 echo; echo "passed: $pass  failed: $fail"; [ "$fail" -eq 0 ]

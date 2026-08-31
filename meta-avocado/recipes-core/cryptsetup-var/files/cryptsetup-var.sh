@@ -308,7 +308,23 @@ write_posture() {
 # permanently.
 open_var() {
     echo "cryptsetup-var: opening LUKS2 container on $VAR_DEV"
-    if has_hwkey_token; then
+
+    # An explicit mode may only be opened by the engine it names. A device that
+    # was enrolled under `auto` can carry both tokens, and trying them in a
+    # fixed order lets a working CAAM slot satisfy var.hardware=tpm2 - the open
+    # returns before TPM2 is attempted, ensure_tpm2_enroll then returns because
+    # a token exists, and the boot succeeds without the required engine ever
+    # being exercised. `auto` still tries both; `none` neither.
+    _try_hwkey=yes
+    _try_tpm2=yes
+    case "$VAR_HARDWARE" in
+        tpm2) _try_hwkey=no ;;
+        auto) ;;
+        none) _try_hwkey=no; _try_tpm2=no ;;
+        *)    _try_tpm2=no ;;
+    esac
+
+    if [ "$_try_hwkey" = yes ] && has_hwkey_token; then
         _hwpass=$(mktemp -p /run)
         if hwkey_available && hwkey_passphrase_to "$_hwpass" \
                 && cryptsetup luksOpen $VK_LINK --key-file "$_hwpass" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
@@ -325,7 +341,7 @@ open_var() {
         fi
         echo "cryptsetup-var: hardware key unavailable - trying the other keyslots" >&2
     fi
-    if has_tpm2_token; then
+    if [ "$_try_tpm2" = yes ] && has_tpm2_token; then
         # A token exists, so a TPM is expected. On a fast reboot we can reach the
         # open before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall
         # back to Argon2id. Wait briefly for the device before deciding.
@@ -347,6 +363,18 @@ open_var() {
         fi
         echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
     fi
+
+    # The selected engine had no token to try at all. On a first-enrolment boot
+    # that is expected - the derived key is how the container opens before the
+    # hardware keyslot exists - so only refuse once a token of the OTHER kind
+    # proves this device is already enrolled, just under the wrong engine.
+    case "$VAR_HARDWARE" in
+        tpm2) has_hwkey_token && ! has_tpm2_token \
+                  && fail_closed "the device is enrolled with a hardware key, not the required TPM2" ;;
+        auto|none) ;;
+        *) has_tpm2_token && ! has_hwkey_token \
+               && fail_closed "the device is enrolled with TPM2, not the required hardware key" ;;
+    esac
 
     if ! cryptsetup luksOpen $VK_LINK --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
         echo "cryptsetup-var: Argon2id open failed on $VAR_DEV" >&2
