@@ -176,8 +176,20 @@ if [ -r "$STORE_DESC" ]; then
   # bare, the fixture test writes it double-quoted, and sourcing accepted either
   # without anyone having to think about it. Parsing has to accept both or it
   # silently drops a descriptor it should have read.
-  _sd_store=$(sed -n 's/^store_trust=//p' "$STORE_DESC" | head -1 | tr -d '"')
-  _sd_keydb=$(sed -n 's/^keydb_origin=//p' "$STORE_DESC" | head -1 | tr -d '"')
+  # tail -1, not head -1. Sourcing gave LAST-assignment-wins, and the direction
+  # matters: with first-wins, an optimistic line beats a pessimistic override
+  # placed after it, which is the natural shape of a per-machine override in
+  # boot-integrity.bb's heredoc. Keep the safe direction the source form had.
+  #
+  # Whitespace and quotes are stripped because sourcing stripped them too - a
+  # trailing space or a single-quoted value is a correct descriptor, and turning
+  # one into "unknown" reports a device as unprovisioned when it is not.
+  _sd_read() {
+    sed -n "s/^$1=//p" "$STORE_DESC" | tail -1 |
+      sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']\$//"
+  }
+  _sd_store=$(_sd_read store_trust)
+  _sd_keydb=$(_sd_read keydb_origin)
 
   # A value carrying anything outside this set is malformed, not hostile - we
   # never execute it either way - so it lands on the same "unknown" a missing
@@ -216,6 +228,13 @@ esac
 # parsed rather than sourced (see STORE_DESC above), so it can no longer
 # introduce any name into this script. Keep both; neither is sufficient alone.
 rot_state=$(read_rot_evidence)
+if [ "$rot_state" = "authenticated" ]; then
+  # Without this the authenticated path keeps the "no probe ran" sentinel from
+  # the top of the file - the one path where a probe DID run and succeeded would
+  # be the one reporting that none had. Unreachable on this board, since nothing
+  # here exposes an attestation, which is exactly why it went unnoticed.
+  detail="hardware attestation read: the firmware that reported enforcement is itself attested"
+fi
 if [ "$rot_state" = "unauthenticated" ]; then
   # Worded to hold for enforcement=disabled as well as enabled: what is
   # unanchored is the firmware's answer, whichever answer it gave.
