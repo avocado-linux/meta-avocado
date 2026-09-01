@@ -1334,10 +1334,31 @@ EOF
             adb_bin="$(command -v adb)"
         fi
         if [ -n "$adb_bin" ]; then
-            echo "Issuing 'adb shell reboot -f' to leave flashing initramfs..." | tee -a "$logfile"
+            # Scope the reboot to the device we just flashed. With a second
+            # Jetson attached, a bare `adb shell` either aborts with "more than
+            # one device" (silently, thanks to the `|| true` below) or picks the
+            # wrong board and reboots it. $usb_instance is <busnum>-<devpath>
+            # (e.g. 7-2.3), the same form `adb devices -l` prints as usb:<path>,
+            # so it maps 1:1 onto an adb serial.
+            adb_serial=""
+            if [ -n "$usb_instance" ]; then
+                adb_serial=$("$adb_bin" devices -l 2>/dev/null \
+                    | awk -v want="usb:$usb_instance" '$2 == "device" { for (i = 3; i <= NF; i++) if ($i == want) { print $1; exit } }')
+            fi
+            if [ -n "$adb_serial" ]; then
+                echo "Issuing 'adb -s $adb_serial shell reboot -f' to leave flashing initramfs..." | tee -a "$logfile"
+            else
+                # No match: either adb has not enumerated it yet, or the device
+                # reports a usb: path we did not expect. Fall back to the
+                # unscoped call, but say so -- on a multi-device host this is
+                # exactly where the wrong board gets rebooted.
+                echo "WARN: could not map USB instance '$usb_instance' to an adb serial;" | tee -a "$logfile"
+                echo "      falling back to an unscoped 'adb shell reboot -f'. If another Jetson" | tee -a "$logfile"
+                echo "      is attached, verify the correct board rebooted." | tee -a "$logfile"
+            fi
             # Returns non-zero because the device disconnects mid-call; the
             # reboot has already been initiated by then.
-            "$adb_bin" shell reboot -f 2>&1 | tee -a "$logfile" || true
+            "$adb_bin" ${adb_serial:+-s "$adb_serial"} shell reboot -f 2>&1 | tee -a "$logfile" || true
 
             # T264 keeps the RCM boot mode across the warm reset the initramfs
             # just performed, so instead of cold-booting the flashed system the
@@ -1349,14 +1370,45 @@ EOF
             # MCU (boardctl) when one is attached, else ask the user.
             echo "Waiting for the device to re-enter RCM after reboot..." | tee -a "$logfile"
             if timeout 60 "$here/find-jetson-usb" --wait $usb_instance >>"$logfile" 2>&1; then
+                # Locate the TOPO debug MCU (0955:7045) belonging to THIS board.
+                # A bare glob over /sys/bus/usb/devices/*/idProduct answers "is
+                # there a debug MCU anywhere on this host", which a second
+                # attached Jetson satisfies -- and boardctl with no --serial
+                # then presses reset on whichever board it picks. Since
+                # boardctl reset is the one step here that physically actuates
+                # hardware, getting it wrong reboots someone else's board
+                # mid-work. Restrict the search to the same bus and hub branch
+                # as $usb_instance (<busnum>-<devpath>, e.g. 7-2.3 -> 7-2*).
+                topo_serial=""
+                topo_found=
+                if [ -n "$usb_instance" ]; then
+                    for _p in /sys/bus/usb/devices/"${usb_instance%.*}"*; do
+                        [ -r "$_p/idVendor" ] && [ -r "$_p/idProduct" ] || continue
+                        [ "$(cat "$_p/idVendor" 2>/dev/null)" = "0955" ] || continue
+                        [ "$(cat "$_p/idProduct" 2>/dev/null)" = "7045" ] || continue
+                        topo_found=yes
+                        topo_serial=$(cat "$_p/serial" 2>/dev/null)
+                        break
+                    done
+                fi
+
                 boardctl_target="${BOARDCTL_TARGET:-}"
-                if [ -z "$boardctl_target" ] && [ "$CHIPID" = "0x26" ] && \
-                   grep -qs "^7045$" /sys/bus/usb/devices/*/idProduct 2>/dev/null; then
+                if [ -z "$boardctl_target" ] && [ "$CHIPID" = "0x26" ] && [ -n "$topo_found" ]; then
                     boardctl_target="thor-jetson-devkit"
                 fi
+                # An explicit BOARDCTL_SERIAL always wins; otherwise use the
+                # serial of the MCU we just matched to this board. Passing no
+                # serial at all is only safe with a single board attached.
+                boardctl_serial="${BOARDCTL_SERIAL:-$topo_serial}"
                 if [ -n "$boardctl_target" ] && command -v boardctl >/dev/null 2>&1; then
-                    echo "Device is back in RCM; pressing SYS_RESET via boardctl (target=$boardctl_target)..." | tee -a "$logfile"
-                    boardctl -t "$boardctl_target" ${BOARDCTL_SERIAL:+-s "$BOARDCTL_SERIAL"} reset 2>&1 | tee -a "$logfile" || \
+                    if [ -n "$boardctl_serial" ]; then
+                        echo "Device is back in RCM; pressing SYS_RESET via boardctl (target=$boardctl_target, serial=$boardctl_serial)..." | tee -a "$logfile"
+                    else
+                        echo "Device is back in RCM; pressing SYS_RESET via boardctl (target=$boardctl_target, no serial)..." | tee -a "$logfile"
+                        echo "WARN: no debug-MCU serial resolved for USB instance '$usb_instance'; boardctl will" | tee -a "$logfile"
+                        echo "      choose a board itself. With more than one attached, set BOARDCTL_SERIAL." | tee -a "$logfile"
+                    fi
+                    boardctl -t "$boardctl_target" ${boardctl_serial:+-s "$boardctl_serial"} reset 2>&1 | tee -a "$logfile" || \
                         echo "WARN: boardctl reset failed; press the RESET button to boot the flashed system" | tee -a "$logfile"
                 else
                     echo "ACTION NEEDED: device is back in recovery mode; press the RESET button to boot the flashed system" | tee -a "$logfile"
