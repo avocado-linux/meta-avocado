@@ -36,6 +36,12 @@ local_conf_header:
     BB_PRESSURE_MAX_MEMORY = "20000"
     BB_PRESSURE_MAX_CPU    = "500000"
     BB_PRESSURE_MAX_IO     = "100000"
+    # Build pods run under a hard memory cgroup limit with no swap. Compiler
+    # memory is anonymous, so the cgroup shows no memory pressure until the
+    # OOM kill; gate new tasks on the cgroup's usage instead (vendor-bitbake
+    # 2.18-avocado). 75% leaves ~6 x 2 GiB of headroom under a 48 GiB limit
+    # for the tasks already running when the gate closes.
+    BB_MAX_MEMORY_USAGE    = "75"
 
     # Chromium's link phase is memory-heavy: max_jobs_per_link is bound to PARALLEL_MAKE
     # in chromium-gn.inc. Cap chromium below the global -j to bound peak link-time memory —
