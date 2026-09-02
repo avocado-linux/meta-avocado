@@ -31,6 +31,7 @@ from avocado_sbom.report import (  # noqa: E402
     read_cve_data,
     read_manifests,
     filtered_counts,
+    obsolete_paths,
     parse_statuses,
     read_backports,
     read_optouts,
@@ -616,6 +617,38 @@ class FilteredCountsTests(unittest.TestCase):
 
     def test_nothing_filtered_is_the_empty_string(self):
         self.assertEqual(filtered_counts({"unpatched_cves": 0}), "")
+
+class ObsoletePathsTests(unittest.TestCase):
+    """Switching which statuses are asked for changes which suffixed documents
+    exist, and nothing prunes DEPLOY_DIR. The leftover is what a consumer reads
+    as current.
+    """
+
+    def paths(self, out_path, statuses):
+        return obsolete_paths(out_path, status_paths(out_path, statuses))
+
+    def test_the_first_status_document_is_never_dropped(self):
+        for statuses in (["Unpatched"], ["Unpatched", "Patched"],
+                         ["Unpatched", "Patched", "Ignored"]):
+            self.assertNotIn("/d/r.json", self.paths("/d/r.json", statuses))
+
+    def test_the_suffix_the_first_status_no_longer_uses_is_dropped(self):
+        # Earlier runs suffixed every document, this one names the first
+        # r.json, so r-unpatched.json is left describing the same half.
+        self.assertEqual(self.paths("/d/r.json", ["Unpatched", "Patched"]),
+                         ["/d/r-ignored.json", "/d/r-unpatched.json"])
+
+    def test_going_single_drops_the_suffixed_names(self):
+        self.assertEqual(
+            self.paths("/d/r.json", ["Unpatched"]),
+            ["/d/r-ignored.json", "/d/r-patched.json", "/d/r-unpatched.json"],
+        )
+
+    def test_nothing_written_is_ever_listed_for_removal(self):
+        for statuses in (["Unpatched"], ["Unpatched", "Patched"],
+                         ["Unpatched", "Patched", "Ignored"]):
+            written = set(status_paths("/d/r.json", statuses).values())
+            self.assertFalse(written & set(self.paths("/d/r.json", statuses)))
 
 class DefaultStatusesTest(unittest.TestCase):
     def test_the_cli_and_the_recipe_default_to_the_same_statuses(self):
