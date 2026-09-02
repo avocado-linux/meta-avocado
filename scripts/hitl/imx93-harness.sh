@@ -68,16 +68,16 @@ RESULT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/avocado-hitl"
 # is a check reporting a result for work it never did, which is the failure this
 # whole record mechanism exists to prevent.
 result_file() {
-    local mode="$1" arg="${2:-}"
-    if [ -n "$arg" ]; then
-        printf '%s/%s_%s.result' "$RESULT_DIR" "$mode" "$arg"
-    else
-        printf '%s/%s.result' "$RESULT_DIR" "$mode"
-    fi
+  local mode="$1" arg="${2:-}"
+  if [ -n "$arg" ]; then
+    printf '%s/%s_%s.result' "$RESULT_DIR" "$mode" "$arg"
+  else
+    printf '%s/%s.result' "$RESULT_DIR" "$mode"
+  fi
 }
 
 record_result() {
-    local mode="$1" verdict="$2" arg="${3:-}" commit
+  local mode="$1" verdict="$2" arg="${3:-}" commit tree
   # -C "$HERE", not a bare git. meta-avocado is a sub-repo inside the peridio
   # workspace, which is ITSELF a git repo, so a bare `git rev-parse` records
   # whichever repo the caller's cwd happened to land in. Invoked from the
@@ -88,9 +88,34 @@ record_result() {
   # case the ancestry guard exists to prevent, and it is silent. Observed: a run
   # stamped 95143a88, a workspace-root commit that does not exist here.
   commit="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
+
+  # The commit alone does not describe what ran. A dirty tree at record time
+  # means the board was flashed from code that is in NO commit, while the record
+  # names one - so every ancestry and freshness guard downstream evaluates a
+  # tree the run never saw, and each of them passes. That is not hypothetical:
+  # this harness recorded a PASS against uncommitted code during the work that
+  # added these assertions, and nothing anywhere reported it.
+  #
+  # Untracked files count as dirty, deliberately. In a Yocto layer an untracked
+  # .bbappend or .cfg fragment changes the produced image exactly as an edited
+  # one does, so excluding them would leave the largest class of unrecorded
+  # change looking clean. Ignored paths (tmp/, build output) do not appear in
+  # --porcelain at all, so a normal build tree still records clean.
+  #
+  # `unknown` is a THIRD state, not a synonym for clean: it means the question
+  # could not be asked. check-result.sh rejects it for the same reason it
+  # rejects dirty - failing to look is not evidence that nothing was there.
+  if ! git -C "$HERE" rev-parse --git-dir >/dev/null 2>&1; then
+    tree=unknown
+  elif [ -n "$(git -C "$HERE" status --porcelain 2>/dev/null)" ]; then
+    tree=dirty
+  else
+    tree=clean
+  fi
+
   mkdir -p "$RESULT_DIR"
-  printf '%s %s %s\n' "$verdict" "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        > "$(result_file "$mode" "$arg")"
+  printf '%s %s %s %s\n' "$verdict" "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$tree" >"$(result_file "$mode" "$arg")"
 }
 
 run_mode() {
@@ -98,11 +123,11 @@ run_mode() {
   schedule_power_cycle
   HARNESS_MODE="$mode" HARNESS_ARG="$arg" \
     timeout 300 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" || rc=$?
-    if [ "$rc" -eq 0 ]; then
-        record_result "$mode" PASS "$arg"
-    else
-        record_result "$mode" FAIL "$arg"
-    fi
+  if [ "$rc" -eq 0 ]; then
+    record_result "$mode" PASS "$arg"
+  else
+    record_result "$mode" FAIL "$arg"
+  fi
   return "$rc"
 }
 
@@ -126,16 +151,16 @@ run_mode() {
 # Ctrl-C and on SIGTERM - but NOT on SIGKILL. `pkill -9` on this harness still
 # leaves the board exporting. Use plain kill.
 ums_stop() {
-    HARNESS_MODE="ums_stop" HARNESS_ARG="" \
-        timeout 90 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" \
-        >/dev/null 2>&1 || true
+  HARNESS_MODE="ums_stop" HARNESS_ARG="" \
+    timeout 90 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" \
+    >/dev/null 2>&1 || true
 }
 
 run_ums_hold() {
-    trap ums_stop EXIT INT TERM
-    schedule_power_cycle
-    HARNESS_MODE="ums_hold" HARNESS_ARG="" \
-        timeout 2700 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE"
+  trap ums_stop EXIT INT TERM
+  schedule_power_cycle
+  HARNESS_MODE="ums_hold" HARNESS_ARG="" \
+    timeout 2700 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE"
 }
 
 usage() {
@@ -191,7 +216,7 @@ usage: imx93-harness.sh <mode>
                                --ums-hold that was killed, or whenever `ums` fails
                                with "Failed to initialize board for USB".
 EOF
-    exit 2
+  exit 2
 }
 
 case "${1:-}" in

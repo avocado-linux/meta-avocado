@@ -7,13 +7,16 @@
 # (test-class) evidence instead of a prose "verify: manual" line, which is what
 # sits below the risk evidence floor.
 #
-# Exits non-zero when there is no record, when the record is a FAIL, when the
-# commit it ran against is not an ancestor of HEAD, or - with --since - when that
-# commit is not a strict descendant of the named commit. The last two answer
-# different questions: ancestor-of-HEAD rejects a result from a rewritten or
-# unrelated history, --since rejects a result that is merely old. Without both, a
-# record made for an EARLIER change is still an ancestor of HEAD and would vouch
-# for work it never saw.
+# Exits non-zero when there is no record, when the record is a FAIL, when the run
+# was made against a dirty or unknown working tree, when the commit it ran against
+# is not an ancestor of HEAD, or - with --since - when that commit is not a strict
+# descendant of the named commit. The last three answer different questions:
+# tree-state rejects a result whose commit describes code the run did not use,
+# ancestor-of-HEAD rejects a result from a rewritten or unrelated history, and
+# --since rejects a result that is merely old. Without all three, a record made
+# for an EARLIER change is still an ancestor of HEAD and would vouch for work it
+# never saw - and a record made mid-edit names a commit that is real and a tree
+# that is not.
 set -euo pipefail
 
 # Every git query below is anchored HERE, to this script's own repository, not
@@ -100,12 +103,39 @@ if [ ! -r "$FILE" ]; then
   exit 1
 fi
 
-read -r verdict commit stamp <"$FILE"
+read -r verdict commit stamp tree <"$FILE"
 
 if [ "$verdict" != PASS ]; then
   printf 'hitl: %s recorded %s at %s (commit %s)\n' "$LABEL" "$verdict" "$stamp" "$commit" >&2
   exit 1
 fi
+
+# The commit names a tree; this says whether the run actually used it. A record
+# made while the working tree was dirty describes code that is in no commit, so
+# the ancestry and freshness guards below both evaluate a tree the board never
+# ran - and both pass, because the commit they check is real. Rejecting here is
+# what makes the two guards below mean what they say.
+#
+# `clean` is the only accepted value, and the two rejected ones are distinct on
+# purpose. `dirty` says the run is known to have used uncommitted code.
+# Anything else - `unknown` from a harness that could not query git, or an
+# EMPTY field from a record written before the harness stamped one at all -
+# says the question was never answered, and an unanswered question is not a
+# clean answer. A legacy record therefore fails loudly and is re-run, rather
+# than being grandfathered in on the strength of a field it does not carry.
+case "$tree" in
+  clean) ;;
+  dirty)
+    printf 'hitl: %s passed at commit %s but the working tree was DIRTY - the board ran code that is in no commit, so this record vouches for a tree nobody has. Commit the work and re-run.\n' \
+      "$LABEL" "$commit" >&2
+    exit 1
+    ;;
+  *)
+    printf 'hitl: %s recorded no working-tree state (got %s) - either the harness could not query git, or the record predates this check. Re-run it.\n' \
+      "$LABEL" "${tree:-<absent>}" >&2
+    exit 1
+    ;;
+esac
 
 if ! git -C "$HERE" merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
   printf 'hitl: %s passed at commit %s, which is not an ancestor of HEAD - re-run on this tree\n' \
