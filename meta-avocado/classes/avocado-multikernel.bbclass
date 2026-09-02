@@ -20,11 +20,19 @@
 #      version-tagged RPMs (the genuinely-unique ones — shared MACHINE_ARCH
 #      NEVRAs the default mc owns are skipped, else they collide with the
 #      default mc's own do_package_write_rpm), plus pulp-uploads/ additively.
-#      spdx/ is intentionally excluded: both kernels produce
-#      SPDX files with the same unversioned package names (kernel.spdx.json
-#      etc.), so merging them into the shared deploy area causes a "files
-#      already exist" collision in do_create_spdx. Each mc's spdx/ stays in
-#      its own tmp-<mc>/deploy/spdx/ and is collected separately if needed.
+#   3. Each alt-mc recipe's evidence — its cve-check results under
+#      CVE_CHECK_DIR, its SPDX documents under DEPLOY_DIR_SPDX — into a <mc>/
+#      subdirectory of each. Both mcs write the same recipe's results under one
+#      filename (linux-raspberrypi_cve.json), so no additive copy keeps both,
+#      and a subdirectory is a path no task installs — which is what keeps
+#      do_create_spdx's "files already exist" shared-area guard out of it.
+#      avocado-cve-report reads it back as alt_versions on the recipe.
+#
+#      ponytail: the opt-out and backport markers land there too, and
+#      read_optouts/read_backports glob the top level only, so an alt-mc
+#      backport reports "cve-check" evidence instead of "patch-file" —
+#      understating what we patched. Neither kernel emits one today. The fix is
+#      a (name, version) key, which reaches check_unscanned_declared too.
 
 python () {
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()
@@ -45,6 +53,59 @@ do_multikernel_merge() {
     for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
         mc="${pair%%:*}"
         base="${TOPDIR}/tmp-${mc}/deploy"
+
+        # Both evidence trees are under ${DEPLOY_DIR}, and the alt mc's copy is
+        # the same path with its own tmp tree in front, so each source is
+        # derived by swapping that prefix. Unset or outside ${DEPLOY_DIR} - no
+        # cve-check, no create-spdx, a relocated tree - is skipped.
+        #
+        # What to copy is decided from the alt mc's own output alone, like the
+        # rpm filter below and for the same reason: this task runs before
+        # do_compile, and do_compile is what depends on the rest of the distro,
+        # so the default mc's cve/ and spdx/ are mostly absent here. Comparing
+        # against them would copy a different set depending on when it ran.
+        #
+        # Read into shell variables first: bitbake expands a bare ${VAR} in a
+        # shell function, but leaves ${VAR#...} alone - its expansion regexp
+        # rejects the '#' - and emits neither name into the run script, so
+        # stripping the prefix off the bitbake form yields "" every time.
+        recipe="${pair#*:}"
+        deploy_dir="${DEPLOY_DIR}"
+        cve_dir="${CVE_CHECK_DIR}"
+        spdx_dir="${DEPLOY_DIR_SPDX}"
+
+        cve_rel="${cve_dir#$deploy_dir/}"
+        if [ -n "${cve_dir}" ] && [ "${cve_rel}" != "${cve_dir}" ]; then
+            for suffix in "" _cve.json _backports.json _optout.json; do
+                src="${base}/${cve_rel}/${recipe}${suffix}"
+                [ -f "${src}" ] || continue
+                bbnote "avocado-multikernel: merging alt-mc ${mc} ${recipe}${suffix} into ${cve_dir}/${mc}"
+                mkdir -p "${cve_dir}/${mc}"
+                cp -a "${src}" "${cve_dir}/${mc}/${recipe}${suffix}"
+            done
+        fi
+
+        spdx_rel="${spdx_dir#$deploy_dir/}"
+        spdx_src="${base}/${spdx_rel}"
+        if [ -n "${spdx_dir}" ] && \
+           [ "${spdx_rel}" != "${spdx_dir}" ] && [ -d "${spdx_src}" ]; then
+            # Selected on the document namespace, spdxdocs/<PN>-<uuid>, rather
+            # than on the filename: that names the unversioned alias packages
+            # too - package-kernel.spdx.json, -dbg, -dev, -vmlinux - whose RPMs
+            # ship in the merged feed while their names carry no version. The
+            # uuid is part of the pattern, or a recipe whose name prefixes
+            # another's would claim its documents.
+            #
+            # grep -r does not follow symlinks met while recursing, which keeps
+            # the by-hash/, by-namespace/ and by-spdxid-hash/ mirrors out.
+            bbnote "avocado-multikernel: merging alt-mc ${mc} ${recipe} SPDX documents into ${spdx_dir}/${mc}"
+            ( cd "${spdx_src}" && grep -rl --include='*.spdx.json' \
+                  "spdxdocs/${recipe}-[0-9a-f]\{8\}-" . ) | while read -r f; do
+                dest="${spdx_dir}/${mc}/${f}"
+                mkdir -p "$(dirname "${dest}")"
+                cp -a "${spdx_src}/${f}" "${dest}"
+            done
+        fi
 
         # The alt mc's UNIQUE contribution is everything built against its
         # kernel version. Every other RPM it emits (base-files, systemd-conf,
@@ -103,6 +164,7 @@ do_multikernel_merge() {
                 done
             fi
         done
+
     done
 }
 addtask multikernel_merge after do_configure before do_compile
