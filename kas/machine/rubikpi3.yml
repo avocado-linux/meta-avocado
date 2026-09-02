@@ -7,6 +7,8 @@ header:
     - repo: meta-avocado
       file: kas/vendor/qcom.yml
     - repo: meta-avocado
+      file: kas/feature/multi-kernel-qcom.yml
+    - repo: meta-avocado
       file: kas/target/distro.yml
 
 repos:
