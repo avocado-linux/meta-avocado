@@ -30,8 +30,13 @@
           "size": 600,
           "size_unit": "mebibytes"
         },
-        "uki": {
-          "out": "uki.efi",
+        "uki_a": {
+          "out": "uki_a.efi",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        "uki_b": {
+          "out": "uki_b.efi",
           "size": 128,
           "size_unit": "mebibytes"
         }
@@ -47,10 +52,24 @@
       ]
     },
     "os_artifacts": {
-      "uki": {
-        "image_key": "uki",
+      "rootfs": {
+        "image_key": "rootfs",
+        "slot_partitions": [
+          "system_a",
+          "system_b"
+        ]
+      },
+      "uki_a": {
+        "image_key": "uki_a",
         "slot_partitions": [
           "file:efi:EFI/Linux/avocado-a+3.efi",
+          "skip"
+        ]
+      },
+      "uki_b": {
+        "image_key": "uki_b",
+        "slot_partitions": [
+          "skip",
           "file:efi:EFI/Linux/avocado-b+3.efi"
         ]
       }
@@ -71,7 +90,7 @@
         "command": [
           "avocado-bls",
           "demote",
-          "{previous_slot}"
+          "{new_slot}"
         ]
       }
     ]

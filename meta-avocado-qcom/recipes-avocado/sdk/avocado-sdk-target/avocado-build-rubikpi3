@@ -87,9 +87,8 @@ build_include_display() {
 # that have not opted in.
 esp_image=$(jq -r '(.storage_devices.rootdisk.images.efi // empty) | if type == "object" then (.out // empty) else . end' "$manifest")
 initramfs_name=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
-# Declared in object form so `stone validate` does not demand a file this hook
-# has not written yet, so the name is under .out -- same as images.efi.
-uki_artifact=$(jq -r '(.storage_devices.rootdisk.images.uki // empty) | if type == "object" then (.out // empty) else . end' "$manifest")
+# images.uki_a / images.uki_b are looked up where they are staged, below: their
+# names depend on the slot list, which is established inside the ESP branch.
 bootfiles_name=$(jq -r '.storage_devices.rootdisk.images.bootfiles // empty' "$manifest")
 
 if [ -n "$esp_image" ]; then
@@ -129,6 +128,13 @@ if [ -n "$esp_image" ]; then
     kver="$KERNEL_VERSION_RESOLVED"
     stub="$esp_work/linuxaa64.efi.stub"
     esp_img="$esp_work/efi.bin"
+    # The rootfs slots this board carries, and which one a fresh provision
+    # populates. partition_ufs.xml gives system_a the rootfs image and leaves
+    # system_b empty, so a provisioned board runs slot a and the first update
+    # lands in b.
+    AVOCADO_BLS_SLOTS="${AVOCADO_BLS_SLOTS:-a b}"
+    AVOCADO_BLS_PROVISION_SLOT="${AVOCADO_BLS_PROVISION_SLOT:-a}"
+
     uki_path="EFI/Linux/${AVOCADO_BLS_ENTRY:-avocado-a}.efi"
 
     # Rebuild the UKI around the kernel this project pinned, into the runtime
@@ -296,16 +302,45 @@ if [ -n "$esp_image" ]; then
             echo "ERROR: ukify not in the SDK (need nativesdk-systemd-boot)" >&2
             exit 1; }
 
-        ukify build \
-            --linux="$KERNEL_IMAGE" \
-            --initrd="$initramfs" \
-            --cmdline="@$uki_dir/cmdline.txt" \
-            --os-release="@$uki_dir/osrel" \
-            --uname="$kver" \
-            --stub="$stub" \
-            --efi-arch=aa64 \
-            --output="$uki_dir/new.efi" || {
-                echo "ERROR: ukify failed to build the UKI" >&2; exit 1; }
+        # One entry per rootfs slot, differing only in which partition root=
+        # names.
+        #
+        # This is what makes the loader's own fallback safe. systemd-boot chooses
+        # between the entries in EFI/Linux and, when the newest exhausts its boot
+        # counter, falls back to the previous one. If both entries carried the
+        # same root=, that fallback would boot the previous KERNEL against the
+        # new ROOTFS -- whose /lib/modules matches neither -- so an update that
+        # failed to boot would leave the board worse off than before it. Pairing
+        # each entry with its own rootfs means falling back to the previous entry
+        # falls back to the previous rootfs too, with no marker anywhere that can
+        # get out of step with the entry that actually booted.
+        #
+        # It is also why these are two artifacts and not one: a stone
+        # os_artifact shares a single image_key across every slot in
+        # slot_partitions, so an image whose bytes must differ per slot cannot be
+        # expressed as one artifact. Each declares `skip` for the other slot.
+        for slot in $AVOCADO_BLS_SLOTS; do
+            sed -e "s#root=[^ ]*#root=/dev/disk/by-partlabel/system_${slot}#" \
+                "$uki_dir/cmdline.txt" > "$uki_dir/cmdline-${slot}.txt"
+            grep -q "system_${slot}" "$uki_dir/cmdline-${slot}.txt" || {
+                echo "ERROR: no root= in the command line to retarget at slot ${slot}" >&2
+                echo "       Command line was: $(cat "$uki_dir/cmdline.txt")" >&2
+                exit 1; }
+            ukify build \
+                --linux="$KERNEL_IMAGE" \
+                --initrd="$initramfs" \
+                --cmdline="@$uki_dir/cmdline-${slot}.txt" \
+                --os-release="@$uki_dir/osrel" \
+                --uname="$kver" \
+                --stub="$stub" \
+                --efi-arch=aa64 \
+                --output="$uki_dir/uki_${slot}.efi" || {
+                    echo "ERROR: ukify failed to build the entry for slot ${slot}" >&2; exit 1; }
+            echo "Built entry for slot ${slot}: root=/dev/disk/by-partlabel/system_${slot}"
+        done
+
+        # The ESP ships the slot a fresh provision writes the rootfs to.
+        cp "$uki_dir/uki_${AVOCADO_BLS_PROVISION_SLOT}.efi" "$uki_dir/new.efi"
 
         mcopy -o -i "$esp_img" "$uki_dir/new.efi" "::/$uki_path" || {
             echo "ERROR: could not write the rebuilt UKI back into $esp_img" >&2; exit 1; }
@@ -329,10 +364,17 @@ if [ -n "$esp_image" ]; then
     # raw rewrite has no second copy to fall back to). The update ships the
     # entry alone and installs it alongside the running one, which is what makes
     # the loader's boot assessment able to fall back at all.
-    if [ -n "${uki_artifact:-}" ] && [ -f "$uki_dir/new.efi" ]; then
-        cp "$uki_dir/new.efi" "$input_dir/$uki_artifact"
-        echo "Staged ${uki_artifact} ($(stat -c %s "$uki_dir/new.efi") bytes) as an OS update artifact."
-    fi
+    for slot in $AVOCADO_BLS_SLOTS; do
+        artifact=$(jq -r --arg k "uki_${slot}" \
+            '(.storage_devices.rootdisk.images[$k] // empty) | if type == "object" then (.out // empty) else . end' \
+            "$manifest")
+        [ -n "$artifact" ] || continue
+        [ -f "$uki_dir/uki_${slot}.efi" ] || {
+            echo "ERROR: manifest declares images.uki_${slot} but slot ${slot} built no entry" >&2
+            exit 1; }
+        cp "$uki_dir/uki_${slot}.efi" "$input_dir/$artifact"
+        echo "Staged ${artifact} ($(stat -c %s "$uki_dir/uki_${slot}.efi") bytes) as the slot-${slot} update artifact."
+    done
 
     # Hand the rebuilt ESP to stone as the images.efi artifact.
     cp "$esp_img" "$input_dir/$esp_image"
