@@ -1,0 +1,146 @@
+#!/bin/sh
+# Boot Loader Specification entry management for OS updates.
+#
+# systemd-boot's automatic boot assessment keeps a retry counter in the entry's
+# FILENAME -- `name+<tries_left>-<tries_done>.efi` -- and maintains it itself at
+# boot, before Linux runs. That makes it the one fault-tolerance mechanism
+# available on a UEFI board with no writable EFI variables, which is not exotic:
+# plenty of embedded UEFI implementations expose no runtime services at all, so
+# efibootmgr, bootctl and systemd-bless-boot are all unavailable.
+#
+# What is missing on such a board is the other half. systemd-bless-boot clears
+# the counter after a good boot by reading LoaderBootCountPath from an EFI
+# variable; with no variables it cannot run, and an uncleared counter keeps
+# counting down across later reboots until it demotes an entry that has been
+# working for months. This finds the entry by matching the running
+# AVOCADO_OS_BUILD_ID against each entry's embedded .osrel, which needs no
+# firmware cooperation.
+#
+# Wired into avocadoctl's `update.commit` actions, which run once the new OS has
+# booted and verified.
+set -eu
+
+ESP_LABEL="${AVOCADO_ESP_LABEL:-efi}"
+ENTRY_DIR="EFI/Linux"
+
+die() { echo "avocado-bls: $*" >&2; exit 1; }
+
+# The running OS's build id. Also the value baked into the .osrel of the UKI
+# that booted it, which is the link this script relies on.
+running_build_id() {
+    for f in /etc/os-release /usr/lib/os-release; do
+        [ -f "$f" ] || continue
+        id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -1)
+        [ -n "$id" ] && { echo "$id"; return 0; }
+    done
+    return 1
+}
+
+# Mount the ESP if it is not already mounted, and print the mount point.
+# Reuses an existing mount: two concurrent read-write mounts of one FAT
+# filesystem corrupt it.
+esp_mount() {
+    dev=$(readlink -f "/dev/disk/by-partlabel/${ESP_LABEL}" 2>/dev/null) \
+        || die "no partition labeled '${ESP_LABEL}'"
+    [ -b "$dev" ] || die "no partition labeled '${ESP_LABEL}'"
+    existing=$(awk -v d="$dev" '$1 == d { print $2; exit }' /proc/mounts)
+    if [ -n "$existing" ]; then
+        echo "$existing"
+        return 0
+    fi
+    mp="/run/avocado-bls-esp"
+    mkdir -p "$mp"
+    mount "$dev" "$mp" || die "cannot mount $dev at $mp"
+    echo "MOUNTED:$mp"
+}
+
+esp_unmount() {
+    case "$1" in
+        MOUNTED:*) umount "${1#MOUNTED:}" || true; rmdir "${1#MOUNTED:}" 2>/dev/null || true ;;
+    esac
+}
+
+mp_of() { echo "${1#MOUNTED:}"; }
+
+# The entry file whose .osrel carries this build id. Matched with grep over the
+# whole PE rather than by extracting the section: the .osrel is plain text
+# inside the file, and objcopy is not on a production rootfs.
+entry_for_build_id() {
+    mp="$1"; want="$2"
+    for f in "$mp/$ENTRY_DIR"/*.efi; do
+        [ -f "$f" ] || continue
+        if grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null; then
+            echo "$f"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# `name+2-1.efi` -> `name`. An entry with no counter returns its own stem.
+entry_stem() {
+    b=$(basename "$1" .efi)
+    echo "${b%%+*}"
+}
+
+cmd_current_slot() {
+    id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
+    m=$(esp_mount); mp=$(mp_of "$m")
+    slot=""
+    if entry=$(entry_for_build_id "$mp" "$id"); then
+        # Entries are named avocado-<slot>, so the slot is the trailing field.
+        stem=$(entry_stem "$entry")
+        slot="${stem##*-}"
+    fi
+    esp_unmount "$m"
+    [ -n "$slot" ] || die "no entry in $ENTRY_DIR carries AVOCADO_OS_BUILD_ID=$id"
+    echo "$slot"
+}
+
+cmd_bless() {
+    id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
+    m=$(esp_mount); mp=$(mp_of "$m")
+    rc=0
+    if entry=$(entry_for_build_id "$mp" "$id"); then
+        base=$(basename "$entry")
+        case "$base" in
+            *+*)
+                stem=$(entry_stem "$entry")
+                mv "$entry" "$(dirname "$entry")/${stem}.efi" \
+                    && sync \
+                    && echo "avocado-bls: blessed ${base} -> ${stem}.efi"
+                ;;
+            *) echo "avocado-bls: ${base} carries no boot counter, nothing to bless" ;;
+        esac
+    else
+        echo "avocado-bls: no entry carries AVOCADO_OS_BUILD_ID=$id" >&2
+        rc=1
+    fi
+    esp_unmount "$m"
+    return $rc
+}
+
+# Mark an entry unbootable without deleting it, by exhausting its counter.
+# Used as a rollback action: the OS booted but failed verification, so the
+# entry must stop being chosen while its bytes stay available for inspection.
+cmd_demote() {
+    slot="${1:?usage: avocado-bls demote <slot>}"
+    m=$(esp_mount); mp=$(mp_of "$m")
+    rc=1
+    for f in "$mp/$ENTRY_DIR/avocado-${slot}"*.efi; do
+        [ -f "$f" ] || continue
+        stem=$(entry_stem "$f")
+        mv "$f" "$(dirname "$f")/${stem}+0-9.efi" && sync
+        echo "avocado-bls: demoted $(basename "$f") -> ${stem}+0-9.efi"
+        rc=0
+    done
+    esp_unmount "$m"
+    return $rc
+}
+
+case "${1:-}" in
+    current-slot) cmd_current_slot ;;
+    bless)        cmd_bless ;;
+    demote)       shift; cmd_demote "$@" ;;
+    *) die "usage: avocado-bls {current-slot|bless|demote <slot>}" ;;
+esac

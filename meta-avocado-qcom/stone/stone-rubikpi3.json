@@ -22,15 +22,58 @@
       "partitions": [],
       "images": {
         "bootfiles": "avocado-image-rootfs-rubikpi3.bootfiles.tar.gz",
-        "rootfs":    "avocado-image-rootfs-rubikpi3.erofs-lz4",
-        "var":       "avocado-image-var-rubikpi3.btrfs",
+        "rootfs": "avocado-image-rootfs-rubikpi3.erofs-lz4",
+        "var": "avocado-image-var-rubikpi3.btrfs",
         "initramfs": "avocado-image-initramfs-rubikpi3.cpio.zst",
         "efi": {
           "out": "efi.bin",
           "size": 600,
           "size_unit": "mebibytes"
+        },
+        "uki": {
+          "out": "uki.efi",
+          "size": 128,
+          "size_unit": "mebibytes"
         }
       }
     }
+  },
+  "update": {
+    "slot_detection": {
+      "type": "command",
+      "command": [
+        "avocado-bls",
+        "current-slot"
+      ]
+    },
+    "os_artifacts": {
+      "uki": {
+        "image_key": "uki",
+        "slot_partitions": [
+          "file:efi:EFI/Linux/avocado-a+3.efi",
+          "file:efi:EFI/Linux/avocado-b+3.efi"
+        ]
+      }
+    },
+    "activate": [],
+    "commit": [
+      {
+        "type": "command",
+        "command": [
+          "avocado-bls",
+          "bless"
+        ]
+      }
+    ],
+    "rollback": [
+      {
+        "type": "command",
+        "command": [
+          "avocado-bls",
+          "demote",
+          "{previous_slot}"
+        ]
+      }
+    ]
   }
 }

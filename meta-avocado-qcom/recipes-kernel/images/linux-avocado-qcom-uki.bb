@@ -114,6 +114,16 @@ inherit deploy
 
 do_deploy() {
     install ${B}${EFI_UKI_PATH}/${EFI_LINUX_IMG} ${DEPLOY_DIR_IMAGE}/${EFI_LINUX_IMG}
+    # Also under the fixed name the stone manifest names as images.uki, so an
+    # OS update can carry the boot entry as its own artifact.
+    #
+    # Deployed here even though avocado-build-rubikpi3 overwrites it with the
+    # UKI built around the kernel the PROJECT pinned: stone validates and
+    # bundles during the Yocto build too, long before any project exists, and
+    # an artifact the manifest references has to be there both times. This copy
+    # is the machine's own default -- the kernel from the default multiconfig --
+    # which is the right thing for a bundle built without a project.
+    install ${B}${EFI_UKI_PATH}/${EFI_LINUX_IMG} ${DEPLOY_DIR_IMAGE}/uki.efi
 }
 
 FILES:${PN} = "${EFI_UKI_PATH}/${EFI_LINUX_IMG}"

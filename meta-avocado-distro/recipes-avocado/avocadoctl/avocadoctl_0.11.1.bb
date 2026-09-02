@@ -1,7 +1,11 @@
 inherit cargo cargo-update-recipe-crates systemd useradd
 
-SRCBRANCH = "main"
-SRCREV = "ba7b37056303a101352c475021a89a3783e385c9"
+# TEMPORARY: jschneck/bls-entry-updates, pending review and merge to main.
+# Adds the `file:<partlabel>:<path>` slot target and `update.commit` actions,
+# which rubikpi3's stone manifest needs to update its UKI on the ESP. Move back
+# to main (and drop SRCBRANCH) once that branch lands.
+SRCBRANCH = "jschneck/bls-entry-updates"
+SRCREV = "2af3d365ff5593094e9fc4443b3af8b404040901"
 SRC_URI = " \
     git://git@github.com/avocado-linux/avocado-control.git;protocol=https;nobranch=1;branch=${SRCBRANCH} \
     file://00-avocado.preset \

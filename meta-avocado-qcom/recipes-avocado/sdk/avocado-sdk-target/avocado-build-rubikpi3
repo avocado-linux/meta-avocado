@@ -87,6 +87,9 @@ build_include_display() {
 # that have not opted in.
 esp_image=$(jq -r '(.storage_devices.rootdisk.images.efi // empty) | if type == "object" then (.out // empty) else . end' "$manifest")
 initramfs_name=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
+# Declared in object form so `stone validate` does not demand a file this hook
+# has not written yet, so the name is under .out -- same as images.efi.
+uki_artifact=$(jq -r '(.storage_devices.rootdisk.images.uki // empty) | if type == "object" then (.out // empty) else . end' "$manifest")
 bootfiles_name=$(jq -r '.storage_devices.rootdisk.images.bootfiles // empty' "$manifest")
 
 if [ -n "$esp_image" ]; then
@@ -126,7 +129,7 @@ if [ -n "$esp_image" ]; then
     kver="$KERNEL_VERSION_RESOLVED"
     stub="$esp_work/linuxaa64.efi.stub"
     esp_img="$esp_work/efi.bin"
-    uki_path="EFI/Linux/linux-avocado-rubikpi3.efi"
+    uki_path="EFI/Linux/${AVOCADO_BLS_ENTRY:-avocado-a}.efi"
 
     # Rebuild the UKI around the kernel this project pinned, into the runtime
     # input dir so `stone bundle` picks it up as a manifest artifact.
@@ -151,7 +154,7 @@ if [ -n "$esp_image" ]; then
     # .cmdline and .osrel are lifted from the UKI already in the ESP instead of
     # being restated here, so the Yocto build stays the single source of truth for
     # the kernel command line (root=, console=, KERNEL_CMDLINE_EXTRA).
-    uki_path="EFI/Linux/linux-avocado-rubikpi3.efi"
+    uki_path="EFI/Linux/${AVOCADO_BLS_ENTRY:-avocado-a}.efi"
     esp_img="$esp_work/efi.bin"
 
     if [ -z "${KERNEL_IMAGE:-}" ]; then
@@ -179,13 +182,62 @@ if [ -n "$esp_image" ]; then
         uki_dir="$input_dir/uki"
         rm -rf "$uki_dir"; mkdir -p "$uki_dir"
 
-        mcopy -i "$esp_img" "::/$uki_path" "$uki_dir/old.efi" || {
-            echo "ERROR: could not read $uki_path out of $esp_img" >&2; exit 1; }
+        # The entry Yocto shipped, whatever it called it: linux-avocado-qcom-uki
+        # names it after the machine, and this hook renames it to the slot form.
+        # Discovered rather than assumed so the two cannot drift apart.
+        old_entry=$(mdir -b -i "$esp_img" ::/EFI/Linux 2>/dev/null \
+            | sed -n 's#^::/EFI/Linux/##p' | grep -i '\.efi$' | head -1)
+        [ -n "$old_entry" ] || {
+            echo "ERROR: no UKI in ::/EFI/Linux of $esp_img" >&2; exit 1; }
+        mcopy -i "$esp_img" "::/EFI/Linux/$old_entry" "$uki_dir/old.efi" || {
+            echo "ERROR: could not read EFI/Linux/$old_entry out of $esp_img" >&2; exit 1; }
 
         # Reuse the Yocto-baked cmdline and os-release. Fail closed on an empty
         # cmdline: without root=/console= the board flashes and boots to nothing.
         "$oc" -O binary --only-section=.cmdline "$uki_dir/old.efi" "$uki_dir/cmdline" 2>/dev/null || true
         "$oc" -O binary --only-section=.osrel   "$uki_dir/old.efi" "$uki_dir/osrel"   2>/dev/null || true
+
+        # Rebuild .osrel from the rootfs this UKI actually boots, and add the two
+        # fields an OS update needs. The section carried over from the previous
+        # UKI describes whatever rootfs THAT one booted, which is wrong the moment
+        # the runtime changes.
+        #
+        #   IMAGE_VERSION  is what systemd-boot sorts entries by (its binary reads
+        #                  IMAGE_VERSION, then VERSION_ID). Every avocado build
+        #                  carries VERSION_ID=0.0.0 in a dev feed, so without this
+        #                  every entry ties and ordering falls back to the entry
+        #                  id -- which means a freshly installed update does NOT
+        #                  sort ahead of the entry it replaces, and would only be
+        #                  chosen by accident. Sorting is the whole selection
+        #                  mechanism here: this board has no EFI variables (no
+        #                  efivarfs at all), so a one-shot boot entry is not
+        #                  available, and pinning `default` in loader.conf was
+        #                  measured to override boot assessment completely -- an
+        #                  entry with its tries exhausted (+0-3) was still chosen,
+        #                  and booted, and incremented to +0-4. A pinned default
+        #                  means no automatic recovery, so selection has to come
+        #                  from the ordering, and the ordering has to be real.
+        #
+        #   AVOCADO_OS_BUILD_ID  lets the running system find the entry it booted
+        #                  from, which is how the boot counter gets cleared on
+        #                  success. systemd-bless-boot cannot do it here: it
+        #                  learns the path from the LoaderBootCountPath EFI
+        #                  variable, and there are none.
+        rootfs_osrel="$AVOCADO_PREFIX/rootfs/usr/lib/os-release"
+        if [ -f "$rootfs_osrel" ]; then
+            grep -vE '^(IMAGE_VERSION|IMAGE_ID)=' "$rootfs_osrel" > "$uki_dir/osrel"
+            # Monotonic, and ordered the way strverscmp orders: a build that
+            # happens later must sort ahead of one that happened earlier, or an
+            # update installs and is never selected. SOURCE_DATE_EPOCH when the
+            # build set one, so a reproducible build stays reproducible.
+            version_id=$(sed -n 's/^VERSION_ID=//p' "$rootfs_osrel" | tr -d '"')
+            printf 'IMAGE_VERSION="%s+%s"\n' \
+                "${version_id:-0}" "${SOURCE_DATE_EPOCH:-$(date -u +%s)}" \
+                >> "$uki_dir/osrel"
+        else
+            echo "WARNING: no $rootfs_osrel; keeping the previous UKI's .osrel," >&2
+            echo "         which leaves this entry unsortable against the one it replaces." >&2
+        fi
         # .sbat carries the Secure Boot revocation generation. Dropping it silently
         # changes what the loader is willing to run, so it is carried across.
         "$oc" -O binary --only-section=.sbat    "$uki_dir/old.efi" "$uki_dir/sbat"    2>/dev/null || : > "$uki_dir/sbat"
@@ -257,7 +309,29 @@ if [ -n "$esp_image" ]; then
 
         mcopy -o -i "$esp_img" "$uki_dir/new.efi" "::/$uki_path" || {
             echo "ERROR: could not write the rebuilt UKI back into $esp_img" >&2; exit 1; }
+        # Remove the entry this one replaces. Leaving it would ship an ESP with
+        # two entries for the same generation, and the loader picks by version:
+        # they would tie, and which one boots would come down to directory order.
+        if [ "EFI/Linux/$old_entry" != "$uki_path" ]; then
+            mdel -i "$esp_img" "::/EFI/Linux/$old_entry" || {
+                echo "ERROR: could not remove superseded entry EFI/Linux/$old_entry" >&2
+                exit 1; }
+            echo "Replaced entry EFI/Linux/$old_entry with $uki_path"
+        fi
         echo "ESP now boots $kver ($(stat -c %s "$uki_dir/new.efi") bytes)"
+    fi
+
+    # The UKI on its own, as an OTA artifact.
+    #
+    # Provisioning flashes the whole 600 MiB FAT image over QDL; an update has
+    # no business rewriting a boot filesystem to change a 75 MB file inside it,
+    # and could not do it safely anyway (there is one ESP on this board, so a
+    # raw rewrite has no second copy to fall back to). The update ships the
+    # entry alone and installs it alongside the running one, which is what makes
+    # the loader's boot assessment able to fall back at all.
+    if [ -n "${uki_artifact:-}" ] && [ -f "$uki_dir/new.efi" ]; then
+        cp "$uki_dir/new.efi" "$input_dir/$uki_artifact"
+        echo "Staged ${uki_artifact} ($(stat -c %s "$uki_dir/new.efi") bytes) as an OS update artifact."
     fi
 
     # Hand the rebuilt ESP to stone as the images.efi artifact.
