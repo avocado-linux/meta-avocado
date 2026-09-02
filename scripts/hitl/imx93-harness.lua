@@ -319,21 +319,58 @@ if MODE == "boot_integrity_report" then
     fail("record carries no keydb_origin field - the reporter predates the key-database contract")
   end
 
-  -- efivarfs never appeared, so the kernel was not entered through the EFI stub
-  -- and the boot path change did not take.
-  if saw("enforcement=unavailable") then
-    fail("enforcement is unavailable - efivarfs did not appear, so the EFI hand-off did not take")
+  -- EXACT values from here down, not merely "not the worst value". Requiring
+  -- field presence and rejecting two known-bad readings let the original broken
+  -- state pass this mode: `enforcement=disabled` with `keydb_origin=unknown`
+  -- satisfied every check above, which is precisely SecureBoot off and no
+  -- enrolled database - the state this change exists to replace. This mode is
+  -- the positive validation of that premise, so it has to assert the premise.
+  --
+  -- Safe against the getty echo for the same reason the presence checks are:
+  -- the command sent is `cat /run/avocado-boot-integrity`, which contains none
+  -- of these value strings, so a match can only come from the record.
+  if not saw("enforcement=enabled") then
+    fail("enforcement does not read `enabled` - the firmware is not gating anything, " ..
+         "so no other field in this record is worth reading. efivarfs absent reads " ..
+         "`unavailable`; secure boot off reads `disabled`; both fail here")
   end
 
   -- The expected result on THIS board, and the direction that matters. Its
   -- SRK_HASH fuse is burned byte-swapped, so AHAB cannot be closed and nothing
   -- anchors the firmware. An indicator reading authenticated is a defect in the
   -- reader, not good news, and must fail rather than be reported as a pass.
-  if saw("rot_state=authenticated") then
-    fail("root of trust reads authenticated on a board whose AHAB lifecycle is open")
+  if not saw("rot_state=unauthenticated") then
+    fail("root of trust does not read `unauthenticated` on a board whose AHAB " ..
+         "lifecycle is open and cannot be closed. `authenticated` is a reader " ..
+         "defect rather than good news; `unavailable` means enforcement was not " ..
+         "readable either")
   end
 
-  pass("record carries enforcement, a root-of-trust indicator and a keydb_origin; root of trust is not authenticated")
+  -- The PoC store is a file on a FAT partition, so this is the only honest
+  -- value here. Asserted rather than assumed because a reader that started
+  -- claiming otherwise would be the same class of defect as an authenticated
+  -- root of trust.
+  if not saw("store_trust=unauthenticated") then
+    fail("store_trust does not read `unauthenticated` - the PoC keeps variables " ..
+         "in a file anyone able to write the boot medium can edit, and any other " ..
+         "value overstates it")
+  end
+
+  -- The claim the whole enrolment exists to earn. The reporter honours it only
+  -- when the enrolled db matches the certificate the image shipped, so
+  -- `unknown` here means either the preseed did not happen or the enrolled key
+  -- database is not ours - and both must fail rather than pass quietly.
+  if not saw("keydb_origin=firmware-resident") then
+    fail("keydb_origin does not read `firmware-resident` - the key database was " ..
+         "either not compiled into the bootloader, or does not match the " ..
+         "certificate this image shipped. The reporter downgrades to `unknown` " ..
+         "in both cases and this mode must not pass on either")
+  end
+
+  pass("record reads enforcement=enabled, rot_state=unauthenticated, " ..
+       "store_trust=unauthenticated and keydb_origin=firmware-resident - " ..
+       "enforcement is on, its root of trust is honestly unanchored, and the " ..
+       "key database is corroborated as firmware-resident")
 end
 
 -- Offer the firmware a payload the enrolled key database does not vouch for and
