@@ -22,6 +22,8 @@ REPORT_COUNTERS = (
     "cves",
     "packaged_recipes",
     "packaged_cves",
+    "device_recipes",
+    "device_cves",
     "packages",
     "cve_files",
     "stale_dropped",
@@ -235,6 +237,10 @@ def _check_derived(report, fail):
         return
 
     packaged = [e for e in entries if e.get("packaged") is True]
+    # Any scope but build-only, so an entry whose scope is missing or
+    # misspelled counts as on the device. The shape check above already failed
+    # it; over-counting here is the safe direction for a CVE report.
+    on_device = [e for e in entries if e.get("scope") != "build-only"]
 
     def cve_count(items):
         return sum(len(e["cves"]) for e in items if isinstance(e.get("cves"), list))
@@ -252,8 +258,10 @@ def _check_derived(report, fail):
         "recipes": len(recipes),
         "packages": len(packages),
         "packaged_recipes": len(packaged),
+        "device_recipes": len(on_device),
         "cves": cve_count(entries),
         "packaged_cves": cve_count(packaged),
+        "device_cves": cve_count(on_device),
         "unscanned_recipes": len(unscanned),
         "no_cve_record_recipes": len(no_record),
         "alt_recipes": sum(1 for e in entries if e.get("alt_versions")),
@@ -544,16 +552,19 @@ def main():
 
         counts = report.get("counts", {})
         print(
-            "%s: ok, version %s, %d packages, %d recipes, %d CVEs "
-            "(%d recipes, %d CVEs packaged), health counters zero%s"
+            "%s: ok, version %s, %d recipes, %d CVEs on the device "
+            "(%d recipes, %d CVEs scanned; %d, %d packaged; %d packages), "
+            "health counters zero%s"
             % (
                 path,
                 report.get("version"),
-                counts.get("packages", 0),
+                counts.get("device_recipes", 0),
+                counts.get("device_cves", 0),
                 counts.get("recipes", 0),
                 counts.get("cves", 0),
                 counts.get("packaged_recipes", 0),
                 counts.get("packaged_cves", 0),
+                counts.get("packages", 0),
                 # Silence would not distinguish a match from no declaration.
                 "" if declared is None
                 else ", every unscanned recipe declared",

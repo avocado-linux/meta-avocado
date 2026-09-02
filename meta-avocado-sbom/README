@@ -121,7 +121,12 @@ Variables
                                names them. Defaults to "u-boot
                                trusted-firmware-a optee-os". Override per
                                machine: a board with a different
-                               secure-firmware stack has a different list
+                               secure-firmware stack has a different list.
+                               avocado-imx.inc, avocado-raspberrypi.inc and
+                               avocado-jetson.inc append theirs - the default
+                               names three generic recipes and i.MX builds
+                               none of them. Append rather than set, or the
+                               default's optee-os goes with it
 
 Evidence
 --------
@@ -213,9 +218,15 @@ in three separate directions:
     the device.
 
 That last point is why boot-chain is decided by recipe name, from
-AVOCADO_CVE_BOOT_CHAIN, and checked before package membership. It also makes
-the label independent of whether a given machine's u-boot sets PACKAGES = ""
-(see "packaged" below): the bootloader scopes boot-chain either way.
+AVOCADO_CVE_BOOT_CHAIN. It also makes the label independent of whether a given
+machine's u-boot sets PACKAGES = "" (see "packaged" below): the bootloader
+scopes boot-chain either way.
+
+An installed package still wins over the name. firmware-imx and tegra-firmware
+are boot chain and also ship packages the rootfs installs, and base-runtime is
+the set a consumer filters on to ask what is in the rootfs, so they must not
+leave it. Naming a recipe in AVOCADO_CVE_BOOT_CHAIN therefore only ever adds
+scope to a recipe no manifest names; it never moves one out of base-runtime.
 
 The coverage denominator does not move. unscanned_recipes and
 no_cve_record_recipes are derived from pkgdata - everything this build produced
@@ -230,6 +241,14 @@ Per-scope totals are deliberately not counters. Every recipe entry carries its
 own scope, so any aggregate a consumer wants is one pass over "recipes" and
 cannot drift from the entries it summarises - which is the failure the derived
 -count checks in verify.py exist to catch for the counters that do exist.
+
+device_recipes and device_cves are not an exception to that. They are not a
+per-scope total but the partition the report exists to answer - on the device
+or not - and they are counters for the one reason a per-scope breakdown is not:
+every consumer needs that number, so leaving it out puts the same pass in each
+of them, spelt differently. They are derived after the scope pass and
+re-derived by verify.py from the entries, so they are held to the same standard
+as the aggregates that are not counters.
 
 When no manifest is read, manifests_read is 0 and every packaged recipe scopes
 "feed". do_cve_report is ordered before do_build only, so it can legitimately
@@ -511,9 +530,10 @@ Requires a new major:
 
 Adding a counter means updating four files in one change: the Stats namespace
 and the counts block in report.py, the schema, REPORT_COUNTERS in verify.py,
-and the counts block in tests/fixtures/make-fixture.py. A test asserts the
-schema and the checker agree, so a change that touches only one of the first
-three fails before it reaches a consumer. make-fixture.py has no such test: it
+and the counts block in tests/fixtures/make-fixture.py. Tests bind the schema,
+the checker and Stats to each other, so a change that touches only some of the
+first three fails before it reaches a consumer. make-fixture.py has no such
+test - binding it would mean running it, which needs a real report - and it
 builds counts from its own key list, so a counter missing there is only found
 when someone regenerates the fixture and CI reports it missing. It does import
 HEALTH_COUNTERS from verify rather than restating it, so at least the question
@@ -544,6 +564,12 @@ that cannot label a finding say so through manifests_read instead. The cost is
 bounded: do_cve_report is nostamp, so every build regenerates the report, and
 ENG-2363 rejects stale documents at the Connect boundary regardless.
 
+A third, on the same footing. device_recipes and device_cves are new counters,
+which the rules allow, but both are required rather than optional, so an
+archived pre-PR report fails the current checker. Same reasoning as scope: an
+optional counter a consumer has to guess the absence of is worse than one it
+can rely on, and do_cve_report is nostamp so every build regenerates.
+
 Consumers reading version 1 are unaffected either way - this tightens what a
 producer must emit, never what a reader must understand.
 
@@ -564,6 +590,7 @@ Report format
     "no_cve_record_recipes": [ "attr", "..." ],
     "counts": { "recipes": 225, "cves": 2206,
                 "packaged_recipes": 177, "packaged_cves": 1927,
+                "device_recipes": 181, "device_cves": 1963,
                 "packages": 30747, "cve_files": 3571, "stale_dropped": 0,
                 "unscanned_recipes": 71, "no_cve_record_recipes": 402,
                 "cve_files_unreadable": 0,
@@ -585,8 +612,20 @@ Report format
     }
   }
 
+device_cves is the headline: CVEs over every recipe whose scope is anything but
+build-only. Read that one, not packaged_cves.
+
+packaged_cves counts pkgdata membership, which is not the same question and is
+wrong in both directions for this one. A deploy-only bootloader packages
+nothing and ships anyway, so it is missing from it; a nativesdk recipe packages
+something and reaches no device, so it is inside it. Both counters are kept:
+the compatibility policy below makes redefining one a new major, and the
+pkgdata number is still what answers "how much of this correlated to something
+installed". Where they differ, the difference is the two cases above plus the
+stale leftover below, and every recipe entry says which it is.
+
 "packaged": false marks a recipe absent from pkgdata, i.e. one that produced no
-runtime package. Two different things land there:
+runtime package. Three different things land there:
 
   - -native and -cross recipes, which run on the build host and correlate to
     nothing installed. They are kept because they still describe the build's
@@ -594,7 +633,8 @@ runtime package. Two different things land there:
   - deploy-only target recipes, which do ship on the device but outside any
     package: imx-atf and imx-boot (do_install[noexec], inherit deploy),
     u-boot variants with PACKAGES = "", optee-os, firmware-* recipes. Their
-    CVEs are real and on the device.
+    CVEs are real and on the device, they scope boot-chain, and device_cves
+    counts them. packaged_cves does not, which is why it is not the headline.
   - recipes this build no longer produces at all, whose <PN>_cve.json is left
     over from an earlier configuration. Switching
     PREFERRED_PROVIDER_virtual/kernel, or dropping an AVOCADO_FEATURE_GROUPS
@@ -625,6 +665,11 @@ clean either, and it reads as the first state. That is why stale_dropped is a
 health counter: a report carrying one is not fit to publish, and
 AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
 
+  device_recipes        recipes whose scope is anything but build-only, and so
+                        not the same set as packaged_recipes - see the
+                        "packaged" section above
+  device_cves           CVEs over those recipes. The headline number, and the
+                        one the layer's own output leads with
   cve_files             cve-check files consumed
   unscanned_recipes     recipes that shipped packages and have no cve-check
                         entry at all - nothing looked at them. Named
