@@ -26,6 +26,20 @@ def load():
     with open(FIXTURE) as f:
         return json.load(f)
 
+def load_patched():
+    """The fixture as the Patched half of the same build. The fixture is the
+    Unpatched one, so nothing else here sees a Patched status or an evidence.
+    """
+    doc = load()
+    doc["status"] = "Patched"
+    counts = doc["counts"]
+    counts["unpatched_cves"], counts["patched_cves"] = (
+        counts["patched_cves"], counts["unpatched_cves"])
+    for recipe in doc["recipes"].values():
+        for cve in recipe["cves"]:
+            cve["evidence"] = "patch-file"
+    return doc
+
 class FixtureTests(unittest.TestCase):
     def setUp(self):
         self.report = load()
@@ -45,6 +59,11 @@ class FixtureTests(unittest.TestCase):
     def test_fixture_passes(self):
         self.assertClean()
         self.assertEqual(verify.additions(self.report), [])
+
+    def test_the_patched_half_passes(self):
+        patched = load_patched()
+        self.assertEqual(verify.check_report(patched), [])
+        self.assertEqual(verify.additions(patched), [])
 
     # Packages disappear, the counter does not notice.
 
@@ -328,6 +347,20 @@ class SchemaTests(unittest.TestCase):
             sorted(verify.CVE_STATUSES),
         )
 
+    def test_schema_evidence_matches_the_generator(self):
+        # Same drift risk as the status enum: _evidence() picks from a tuple
+        # the schema repeats by hand.
+        from avocado_sbom.report import CVE_EVIDENCE
+
+        self.assertEqual(
+            sorted(
+                self.schema["properties"]["recipes"]["additionalProperties"][
+                    "properties"
+                ]["cves"]["items"]["properties"]["evidence"]["enum"]
+            ),
+            sorted(CVE_EVIDENCE),
+        )
+
     def test_schema_scopes_match_the_generator_and_the_checker(self):
         # Three declarations of one vocabulary: report.SCOPES, verify.SCOPES
         # (spelled out on purpose, so the checker does not take the producer's
@@ -391,6 +424,13 @@ class SchemaTests(unittest.TestCase):
         except ImportError:
             self.skipTest("jsonschema not installed")
         jsonschema.validate(load(), self.schema)
+
+    def test_the_patched_half_validates(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        jsonschema.validate(load_patched(), self.schema)
 
     def test_schema_rejects_a_report_missing_a_counter(self):
         try:
