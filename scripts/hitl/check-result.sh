@@ -16,6 +16,16 @@
 # for work it never saw.
 set -euo pipefail
 
+# Every git query below is anchored HERE, to this script's own repository, not
+# to the caller's cwd. meta-avocado is a sub-repo inside the peridio workspace,
+# which is itself a git repo, so a bare `git` resolves to whichever of the two
+# the caller happened to be standing in. Run from the workspace root, the
+# ancestry and freshness guards would then be evaluated against the WORKSPACE
+# history - a different set of commits entirely - and a record could be
+# validated, or rejected, on the strength of a tree it has nothing to do with.
+# The guard has to ask about the repo whose commits the records name.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
   if [ $# -gt 0 ]; then
     printf 'check-result.sh: %s\n' "$1" >&2
@@ -37,7 +47,16 @@ have_arg=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --since)
+      # Both halves matter. The arity check catches `--since` with nothing after
+      # it; the emptiness check catches `--since "$VAR"` where VAR is unset,
+      # which passes arity, sets SINCE="", and then fails the `[ -n "$SINCE" ]`
+      # test below - silently skipping the entire freshness block. A stale
+      # record from before the work under test would then satisfy the
+      # ancestor-of-HEAD test and print a green line, which is precisely the
+      # record class --since was added to reject. An unset variable in a
+      # verify: line must fail loudly, not disable the guard.
       [ $# -ge 2 ] || usage '--since requires a commit-ish'
+      [ -n "$2" ] || usage '--since requires a NON-EMPTY commit-ish (an unset variable would otherwise disable the freshness check silently)'
       SINCE="$2"
       shift 2
       ;;
@@ -88,25 +107,25 @@ if [ "$verdict" != PASS ]; then
   exit 1
 fi
 
-if ! git merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
+if ! git -C "$HERE" merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
   printf 'hitl: %s passed at commit %s, which is not an ancestor of HEAD - re-run on this tree\n' \
     "$LABEL" "$commit" >&2
   exit 1
 fi
 
 if [ -n "$SINCE" ]; then
-  since_sha=$(git rev-parse --verify --quiet "${SINCE}^{commit}") || {
+  since_sha=$(git -C "$HERE" rev-parse --verify --quiet "${SINCE}^{commit}") || {
     printf 'hitl: --since %s does not resolve to a commit\n' "$SINCE" >&2
     exit 2
   }
-  commit_sha=$(git rev-parse --verify --quiet "${commit}^{commit}") || {
+  commit_sha=$(git -C "$HERE" rev-parse --verify --quiet "${commit}^{commit}") || {
     printf 'hitl: %s recorded commit %s does not resolve in this tree\n' "$LABEL" "$commit" >&2
     exit 1
   }
   # Strict: a record AT the named commit predates the work that starts there, and
   # `git merge-base --is-ancestor A A` is true, so the equality case is rejected
   # separately rather than left to the ancestor test.
-  if [ "$commit_sha" = "$since_sha" ] || ! git merge-base --is-ancestor "$since_sha" "$commit_sha"; then
+  if [ "$commit_sha" = "$since_sha" ] || ! git -C "$HERE" merge-base --is-ancestor "$since_sha" "$commit_sha"; then
     printf 'hitl: %s passed at commit %s, which is not newer than %s - the record predates this work, re-run\n' \
       "$LABEL" "$commit" "$SINCE" >&2
     exit 1

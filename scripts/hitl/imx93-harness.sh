@@ -78,7 +78,16 @@ result_file() {
 
 record_result() {
     local mode="$1" verdict="$2" arg="${3:-}" commit
-  commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+  # -C "$HERE", not a bare git. meta-avocado is a sub-repo inside the peridio
+  # workspace, which is ITSELF a git repo, so a bare `git rev-parse` records
+  # whichever repo the caller's cwd happened to land in. Invoked from the
+  # workspace root it stamps the record with the WORKSPACE commit, and
+  # check-result.sh then validates that commit against the workspace history and
+  # prints PASS - while meta-avocado's own tree may have been rebased or moved
+  # since the board ran. That is exactly the "vouch for a tree it never saw"
+  # case the ancestry guard exists to prevent, and it is silent. Observed: a run
+  # stamped 95143a88, a workspace-root commit that does not exist here.
+  commit="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
   mkdir -p "$RESULT_DIR"
   printf '%s %s %s\n' "$verdict" "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         > "$(result_file "$mode" "$arg")"
