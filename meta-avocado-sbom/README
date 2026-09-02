@@ -63,7 +63,18 @@ Usage
   bitbake world
   bitbake avocado-cve-report
 
-Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json.
+Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json and
+-patched.json: one document per status in AVOCADO_CVE_REPORT_STATUS, which
+defaults to both. The first status keeps the unsuffixed name, so the file
+existing consumers fetch keeps holding what it always held; each further status
+adds a suffixed document beside it.
+
+The two are one build's evidence, split by what a consumer does with each half.
+Unpatched is what a user can act upon. Patched is what our patches and
+CVE_STATUS declarations already fix - the half no server can reconstruct from
+an SBOM, because "openssl 3.0.12" plus an advisory feed cannot know this recipe
+carries a backport. Both carry the same packages_digest, which is what proves
+they describe the same build.
 
 The same code can run standalone against a build tree, if needed:
 
@@ -74,8 +85,11 @@ Variables
 ---------
 
   AVOCADO_CVE_REPORT_FILE      output path
-  AVOCADO_CVE_REPORT_STATUS    cve-check status to report, default "Unpatched".
-                               Set to "Ignored" to audit what
+  AVOCADO_CVE_REPORT_STATUS    cve-check statuses to report, one document
+                               each, default "Unpatched Patched". The first
+                               keeps AVOCADO_CVE_REPORT_FILE verbatim; each
+                               further one is suffixed with its status.
+                               Add "Ignored" to audit what
                                cve-extra-exclusions.inc and any local
                                CVE_STATUS declaration suppress; each issue then
                                carries "detail" (the CVE_STATUS keyword -
@@ -106,6 +120,39 @@ Variables
                                trusted-firmware-a optee-os". Override per
                                machine: a board with a different
                                secure-firmware stack has a different list
+
+Evidence
+--------
+
+Every issue carries an "evidence": who decided its status. Two values, and the
+gap between them is the point.
+
+  cve-status   A recipe declared it. "detail" names the CVE_STATUS keyword and
+               "description" carries the maintainer's rationale. This is a
+               claim inherited from layer metadata - true of the version, not
+               of what this build compiled.
+
+  cve-check    cve-check decided a Patched issue itself, and its output does
+               not say how. Two routes reach here and they are not separable
+               from the JSON: an applied patch in SRC_URI whose filename or
+               "CVE:" line names the CVE, or the shipped version falling
+               outside every affected range in the CVE database.
+
+On qemuarm64 that is 11930 cve-status against 10278 cve-check, out of 22208
+patched.
+
+Only the applied-patch half of "cve-check" is a backport of ours, and that is
+the set worth publishing: it is the one fact a server holding the same SBOM and
+the same advisory feed cannot reconstruct. cve-check does not record it -
+get_patched_cves() returns a bare set, and check_cves() adds the
+version-comparison verdicts to the same set. Splitting them needs a second
+source. The SPDX 3.0 recipe documents already carry it: _get_cves_info() in
+oe/spdx30_tasks.py discards every CVE_STATUS entry from get_patched_cves() and
+labels the patch-derived remainder "backported-patch". Joining the two is not
+done here yet.
+
+Absent on an Unpatched issue with no detail: nothing decided it, it is what the
+scan found.
 
 Scope
 -----

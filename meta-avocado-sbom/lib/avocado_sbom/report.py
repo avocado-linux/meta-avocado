@@ -186,11 +186,60 @@ CVE_SUMMARY_FIELDS = ("summary", "description")
 # match no issue at all and produce an empty, CVE-free-looking report.
 CVE_STATUSES = ("Unpatched", "Patched", "Ignored")
 
+# Kept in step with the recipe's AVOCADO_CVE_REPORT_STATUS: a run prunes the
+# documents its statuses do not cover, so two defaults that disagreed would
+# delete each other's output.
+DEFAULT_STATUSES = ("Unpatched", "Patched")
+
+# The whole vocabulary of the "evidence" field. Mirrored by the schema's enum,
+# which test_verify pins to this tuple - the two drifting apart is how a
+# consumer ends up filtering on a value nothing emits.
+CVE_EVIDENCE = ("cve-status", "cve-check")
+
 _FILTERED_COUNTER = {
     "Unpatched": "unpatched_cves",
     "Patched": "patched_cves",
     "Ignored": "ignored_cves",
 }
+
+def _evidence(issue, status):
+    """Who decided this issue's status, which the fields cve-check supplies do
+    not say outright.
+
+    "cve-status" - a recipe declared it. A "detail" is the CVE_STATUS keyword
+    decode_cve_status() read off the recipe (oe/cve_check.py), so its presence
+    means someone wrote this verdict down; "detail" itself says which keyword.
+    A claim inherited from layer metadata, true of the version rather than of
+    this build.
+
+    "cve-check" - cve-check decided it, and its output does not say how. Two
+    routes reach a Patched issue with no detail, and they are not separable
+    here:
+
+      - an applied patch in SRC_URI whose filename or "CVE:" line names the
+        CVE (oe.cve_check.get_patched_cves)
+      - the shipped version falling outside every affected range in the CVE
+        database, so check_cves() adds it to patched_cves at the bottom of its
+        version comparison (cve-check.bbclass)
+
+    Only the first is a backport of ours, and it is the set ENG-2281 exists to
+    publish. Splitting them needs a source this report does not read: the SPDX
+    3.0 recipe documents carry it, since oe.spdx30_tasks._get_cves_info()
+    labels the patch-derived remainder "backported-patch" after discarding
+    every CVE_STATUS entry. Until that join exists, claiming the patch half
+    here would be a conclusion drawn from an absent field, and wrong for the
+    version-comparison majority.
+
+    Both values are emitted, never one plus an absence: a consumer filtering
+    on "cve-status" would otherwise silently match nothing. Nothing is claimed
+    for an Unpatched issue with no detail - nothing decided it, it is what
+    cve-check found.
+    """
+    if issue.get("detail"):
+        return CVE_EVIDENCE[0]
+    if status == "Patched":
+        return CVE_EVIDENCE[1]
+    return None
 
 def _strip_pe(version):
     """Drop the EXTENDPE prefix cve-check puts in front of PV, as in
@@ -287,7 +336,13 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                     if issue.get("id") in seen_here:
                         continue
                     seen_here.add(issue.get("id"))
-                    issues.append({k: issue[k] for k in fields if k in issue})
+                    kept = {k: issue[k] for k in fields if k in issue}
+                    # Read off the raw issue, not off kept: --no-summary drops
+                    # prose, never what decided a status.
+                    evidence = _evidence(issue, status)
+                    if evidence:
+                        kept["evidence"] = evidence
+                    issues.append(kept)
                     continue
 
                 counter = _FILTERED_COUNTER.get(issue_status)
@@ -482,6 +537,25 @@ def build_report(
 
     return report, stats
 
+def status_paths(out_path, statuses):
+    """Map each requested status to the file its document is written to.
+
+    The first status keeps out_path. That name is the frozen contract - what
+    avocado-cli and Peridio fetch - so asking for a second status adds a
+    document beside it rather than renaming the one they read. Every further
+    status is suffixed with its own name.
+
+    One document per status rather than one carrying all of them: the envelope
+    ENG-2347 froze has a single top-level "status", so this stays an additive
+    change to a v1 report instead of a v2. That same field is what says which
+    status the unsuffixed document holds.
+    """
+    stem, ext = os.path.splitext(out_path)
+    return {
+        s: out_path if i == 0 else "%s-%s%s" % (stem, s.lower(), ext)
+        for i, s in enumerate(statuses)
+    }
+
 def write_report(report, out_path, indent=2):
     """Write one JSON document atomically. indent=None emits it compact."""
     out_dir = os.path.dirname(out_path)
@@ -639,9 +713,13 @@ def main():
     )
     parser.add_argument(
         "--status",
-        default="Unpatched",
+        default=list(DEFAULT_STATUSES),
+        nargs="+",
         choices=CVE_STATUSES,
-        help="cve-check status to report on",
+        metavar="STATUS",
+        help="cve-check status(es) to report on: %s. More than one writes one "
+             "document per status, each suffixed onto --output."
+             % ", ".join(CVE_STATUSES),
     )
     parser.add_argument(
         "--no-summary", action="store_true", help="drop CVE description text"
@@ -678,70 +756,113 @@ def main():
     if not cve_dir or not pkgdata_dirs:
         parser.error("need --tmpdir, or both --cve-dir and --pkgdata-dir")
 
-    if os.path.isdir(args.output):
-        parser.error("--output %s is a directory" % args.output)
+    # Deduplicated in the order given: --status Patched Patched asks for one
+    # document, and would otherwise write the same path twice.
+    statuses = list(dict.fromkeys(args.status))
+    out_paths = status_paths(args.output, statuses)
 
-    if os.path.exists(args.output):
-        os.unlink(args.output)
+    for path in out_paths.values():
+        if os.path.isdir(path):
+            parser.error("--output %s is a directory" % path)
 
-    report, stats = build_report(
-        cve_dir,
-        pkgdata_dirs,
-        machine=args.machine,
-        status=args.status,
-        summary=not args.no_summary,
-        manifest_paths=manifests,
-        boot_chain=args.boot_chain.split(),
-    )
+    # Every path removed before any is written: a run that fails partway leaves
+    # no stale document from a previous run beside a fresh one, which is the
+    # pair a consumer would read as one build.
+    for path in out_paths.values():
+        if os.path.exists(path):
+            os.unlink(path)
 
-    if not stats.cve_files:
+    # One pass per status. pkgdata and the manifests are re-read each time,
+    # which is a few seconds against a task whose cost is the world build
+    # before it; sharing them would mean threading a prepared state through
+    # build_report for no gain a build would notice.
+    reports = {}
+    for status in statuses:
+        report, stats = build_report(
+            cve_dir,
+            pkgdata_dirs,
+            machine=args.machine,
+            status=status,
+            summary=not args.no_summary,
+            manifest_paths=manifests,
+            boot_chain=args.boot_chain.split(),
+        )
+        reports[status] = report
+
+        if not stats.cve_files:
+            print(
+                "no *_cve.json in %s; nothing was scanned. Was the build run "
+                'with INHERIT += "cve-check"? Point --cve-dir at CVE_CHECK_DIR '
+                "if it was set to something other than ${DEPLOY_DIR}/cve."
+                % cve_dir,
+                file=sys.stderr,
+            )
+            return 1
+
+        # Files found is not files read. A directory of truncated cve-check
+        # results passes the check above and produces the same zero-CVE
+        # document it exists to prevent, with only a counter line to tell them
+        # apart.
+        if stats.cve_files_unreadable >= stats.cve_files:
+            print(
+                "all %d *_cve.json in %s failed to parse; nothing was scanned. "
+                "An interrupted build leaves truncated files behind - rerun "
+                "the world build, or delete the unreadable ones."
+                % (stats.cve_files, cve_dir),
+                file=sys.stderr,
+            )
+            return 1
+
+        if not stats.packages:
+            print(
+                "no runtime packages found in %s; nothing could be correlated. "
+                "pkgdata is written by the packaging tasks, so a cve_check-only "
+                "run ('bitbake -c cve_check world') never populates it."
+                % ", ".join(pkgdata_dirs),
+                file=sys.stderr,
+            )
+            return 1
+
+        write_report(report, out_paths[status])
+
+        counts = report["counts"]
+
         print(
-            "no *_cve.json in %s; nothing was scanned. Was the build run with "
-            'INHERIT += "cve-check"? Point --cve-dir at CVE_CHECK_DIR if it was '
-            "set to something other than ${DEPLOY_DIR}/cve." % cve_dir,
+            "%s: %d packages, %d recipes, %d %s CVEs (%d recipes, %d CVEs "
+            "packaged)"
+            % (
+                out_paths[status],
+                counts["packages"],
+                counts["recipes"],
+                counts["cves"],
+                status.lower(),
+                counts["packaged_recipes"],
+                counts["packaged_cves"],
+            ),
             file=sys.stderr,
         )
-        return 1
-
-    # Files found is not files read. A directory of truncated cve-check results
-    # passes the check above and produces the same zero-CVE document it exists
-    # to prevent, with only a counter line to tell them apart.
-    if stats.cve_files_unreadable >= stats.cve_files:
-        print(
-            "all %d *_cve.json in %s failed to parse; nothing was scanned. An "
-            "interrupted build leaves truncated files behind - rerun the world "
-            "build, or delete the unreadable ones." % (stats.cve_files, cve_dir),
-            file=sys.stderr,
+        # In the loop, unlike the counters below: what a document filtered out
+        # is the complement of what it kept, so these three move with status.
+        filtered = ", ".join(
+            "%d %s" % (counts[k], k[: -len("_cves")])
+            for k in ("unpatched_cves", "patched_cves", "ignored_cves",
+                      "unknown_status_cves")
+            if counts.get(k)
         )
-        return 1
+        if filtered:
+            print("  filtered out: %s" % filtered, file=sys.stderr)
+        # In the loop for the same reason: a recipe whose every record
+        # cve-check ignored or found patched carries CVEs in the Patched
+        # document and none in the Unpatched one, so which recipes land here
+        # moves with the status. read_cve_data() has the reasoning.
+        if stats.no_cve_record_recipes:
+            print("  no_cve_record_recipes: %d" % stats.no_cve_record_recipes,
+                  file=sys.stderr)
 
-    if not stats.packages:
-        print(
-            "no runtime packages found in %s; nothing could be correlated. "
-            "pkgdata is written by the packaging tasks, so a cve_check-only "
-            "run ('bitbake -c cve_check world') never populates it."
-            % ", ".join(pkgdata_dirs),
-            file=sys.stderr,
-        )
-        return 1
-
-    write_report(report, args.output)
-
-    counts = report["counts"]
-
-    print(
-        "%s: %d packages, %d recipes, %d %s CVEs (%d recipes, %d CVEs packaged)"
-        % (
-            args.output,
-            counts["packages"],
-            counts["recipes"],
-            counts["cves"],
-            args.status.lower(),
-            counts["packaged_recipes"],
-            counts["packaged_cves"],
-        ),
-        file=sys.stderr,
-    )
+    # Once, after the loop: every counter below describes the build rather than
+    # the status asked for, so it is identical on every pass and the last one
+    # speaks for all of them. Repeating them per status would only double the
+    # noise.
     if not stats.manifests_read:
         print(
             "  no image manifest read: every packaged recipe scopes 'feed'. "
@@ -753,15 +874,10 @@ def main():
     for key in (
         "manifests_read",
         "unscanned_recipes",
-        "no_cve_record_recipes",
         "stale_dropped",
         "package_collisions",
         "cve_files_unreadable",
         "pkgdata_unreadable",
-        "unpatched_cves",
-        "ignored_cves",
-        "patched_cves",
-        "unknown_status_cves",
     ):
         if stats.get(key):
             print("  %s: %d" % (key, stats[key]), file=sys.stderr)

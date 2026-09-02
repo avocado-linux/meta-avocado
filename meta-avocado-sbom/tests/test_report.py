@@ -13,6 +13,7 @@ which is the opposite of the truth.
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -22,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
 from avocado_sbom.report import (  # noqa: E402
+    DEFAULT_STATUSES,
     SCOPES,
     Stats,
     build_report,
@@ -29,6 +31,7 @@ from avocado_sbom.report import (  # noqa: E402
     read_cve_data,
     read_manifests,
     read_optouts,
+    status_paths,
 )
 
 def entry(name, version="1.0", in_record="Yes", issues=(), products=None):
@@ -472,6 +475,118 @@ class ScopeTests(unittest.TestCase):
             read_manifests([path], stats), {"libssl3", "busybox"}
         )
         self.assertEqual(stats.manifests_read, 1)
+
+class EvidenceTests(unittest.TestCase):
+    """Who decided a status, and the one thing this field must never claim.
+
+    The defect this file exists to prevent: labelling every detail-less Patched
+    issue a backport of ours. Three routes reach Patched and only one of them
+    is a patch we carry - cve-check.bbclass adds a CVE to patched_cves whenever
+    the shipped version falls outside every affected range, which on qemuarm64
+    is the majority. A report that called those "our patch" would hand the
+    correlation service a subtraction set built on a guess.
+    """
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+        self.stats = Stats()
+
+    def write(self, recipe, *entries):
+        path = os.path.join(self.cve_dir, "%s_cve.json" % recipe)
+        with open(path, "w") as f:
+            json.dump({"package": list(entries)}, f)
+
+    def cves(self, recipe, status):
+        recipes, _, _ = read_cve_data(
+            self.cve_dir, {recipe: {"1.0"}}, self.stats, status=status
+        )
+        return {c["id"]: c for c in recipes[recipe]["cves"]}
+
+    def test_a_declared_status_is_attributed_to_the_declaration(self):
+        self.write("openssl", entry("openssl", issues=[
+            {"id": "CVE-1", "status": "Patched", "detail": "backported-patch"},
+        ]))
+        self.assertEqual(self.cves("openssl", "Patched")["CVE-1"]["evidence"],
+                         "cve-status")
+
+    def test_an_undeclared_patched_issue_is_not_attributed_to_our_patches(self):
+        # The whole point. cve-check supplies no detail for either an applied
+        # patch or a version comparison, so neither may be named.
+        self.write("acl", entry("acl", issues=[
+            {"id": "CVE-2", "status": "Patched"},
+        ]))
+        self.assertEqual(self.cves("acl", "Patched")["CVE-2"]["evidence"],
+                         "cve-check")
+
+    def test_nothing_is_claimed_for_an_undeclared_unpatched_issue(self):
+        self.write("zlib", entry("zlib", issues=[
+            {"id": "CVE-3", "status": "Unpatched"},
+        ]))
+        self.assertNotIn("evidence", self.cves("zlib", "Unpatched")["CVE-3"])
+
+    def test_a_declared_unpatched_issue_still_names_its_declaration(self):
+        self.write("glibc", entry("glibc", issues=[
+            {"id": "CVE-4", "status": "Unpatched", "detail": "upstream-wontfix"},
+        ]))
+        self.assertEqual(self.cves("glibc", "Unpatched")["CVE-4"]["evidence"],
+                         "cve-status")
+
+    def test_dropping_the_prose_does_not_drop_the_attribution(self):
+        # --no-summary drops free text, never what decided a status.
+        self.write("curl", entry("curl", issues=[
+            {"id": "CVE-5", "status": "Patched", "detail": "fixed-version",
+             "summary": "s", "description": "d"},
+        ]))
+        recipes, _, _ = read_cve_data(
+            self.cve_dir, {"curl": {"1.0"}}, self.stats, status="Patched",
+            summary=False,
+        )
+        cve = recipes["curl"]["cves"][0]
+        self.assertEqual(cve["evidence"], "cve-status")
+        self.assertNotIn("summary", cve)
+
+class DefaultStatusesTest(unittest.TestCase):
+    def test_the_cli_and_the_recipe_default_to_the_same_statuses(self):
+        # They did not, and a bare standalone run deleted both documents the
+        # build had written.
+        recipe = os.path.join(
+            HERE, "..", "recipes-avocado", "avocado-cve-report",
+            "avocado-cve-report.bb",
+        )
+        with open(recipe) as f:
+            declared = re.search(
+                r'^AVOCADO_CVE_REPORT_STATUS \?= "([^"]*)"', f.read(), re.M
+            )
+        self.assertTrue(declared, "the recipe no longer declares a default")
+        self.assertEqual(declared.group(1).split(), list(DEFAULT_STATUSES))
+
+class StatusPathsTests(unittest.TestCase):
+    """The first status keeps the historical filename, so asking for a second
+    adds a document rather than renaming the one consumers fetch.
+    """
+
+    def test_a_single_status_keeps_the_path_verbatim(self):
+        self.assertEqual(status_paths("/d/report.json", ["Unpatched"]),
+                         {"Unpatched": "/d/report.json"})
+
+    def test_only_the_statuses_after_the_first_are_suffixed(self):
+        self.assertEqual(
+            status_paths("/d/report.json", ["Unpatched", "Patched"]),
+            {"Unpatched": "/d/report.json",
+             "Patched": "/d/report-patched.json"},
+        )
+
+    def test_every_path_is_distinct(self):
+        paths = status_paths("/d/r.json", ["Unpatched", "Patched", "Ignored"])
+        self.assertEqual(len(set(paths.values())), 3)
+
+    def test_a_path_without_an_extension_still_separates(self):
+        self.assertEqual(
+            status_paths("/d/report", ["Unpatched", "Patched"]),
+            {"Unpatched": "/d/report",
+             "Patched": "/d/report-patched"},
+        )
 
 class ReadOptoutsTests(unittest.TestCase):
     """The markers avocado-cve-optout.bbclass leaves beside the cve-check
