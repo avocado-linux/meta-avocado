@@ -44,6 +44,7 @@ RDEPENDS:${PN} = " \
 # the BSP extension installs it.
 RDEPENDS:${PN}:append:qcm6490 = " \
     systemd-rubikpi3-masks \
+    avocado-bls \
     linux-firmware-qcom-adreno-a660 \
     linux-firmware-qcom-qcm6490-adreno \
     linux-firmware-qcom-qcm6490-audio \

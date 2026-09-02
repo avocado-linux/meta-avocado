@@ -62,18 +62,55 @@ esp_unmount() {
 
 mp_of() { echo "${1#MOUNTED:}"; }
 
-# The entry file whose .osrel carries this build id. Matched with grep over the
-# whole PE rather than by extracting the section: the .osrel is plain text
-# inside the file, and objcopy is not on a production rootfs.
-entry_for_build_id() {
+# The entry this system booted from.
+#
+# Matched with grep over the whole PE rather than by extracting sections: both
+# .osrel and .cmdline are plain text inside the file, and objcopy is not on a
+# production rootfs.
+#
+# Two keys, because either alone is ambiguous:
+#
+#   AVOCADO_OS_BUILD_ID  identifies the OS, and an update that changes only the
+#                        boot entry -- a kernel command line, a different kernel
+#                        from the same feed -- leaves the rootfs untouched, so
+#                        BOTH generations carry the same id. Observed exactly
+#                        that: avocado-a.efi and avocado-b+2-1.efi with one id
+#                        between them.
+#
+#   the kernel command line  distinguishes those, since it is what such an
+#                        update changed, and /proc/cmdline is the one the
+#                        running kernel was handed. Not sufficient alone either:
+#                        two generations can share a command line while
+#                        differing in kernel or rootfs.
+#
+# Falls back to the build id plus a boot counter when the command line does not
+# appear -- if firmware ever appends to it, the exact match stops working, and
+# an entry still under assessment is a better guess than the first id match.
+entry_for_running_system() {
     mp="$1"; want="$2"
+    cmdline=$(tr -d '\n' < /proc/cmdline)
+
     for f in "$mp/$ENTRY_DIR"/*.efi; do
         [ -f "$f" ] || continue
-        if grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null; then
+        grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null || continue
+        if [ -n "$cmdline" ] && grep -aqF "$cmdline" "$f" 2>/dev/null; then
             echo "$f"
             return 0
         fi
     done
+
+    # No command-line match: prefer an entry that is still being assessed, as
+    # that is the one a commit is for.
+    fallback=""
+    for f in "$mp/$ENTRY_DIR"/*.efi; do
+        [ -f "$f" ] || continue
+        grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null || continue
+        case "$(basename "$f")" in
+            *+*) echo "$f"; return 0 ;;
+            *)   [ -n "$fallback" ] || fallback="$f" ;;
+        esac
+    done
+    [ -n "$fallback" ] && { echo "$fallback"; return 0; }
     return 1
 }
 
@@ -87,7 +124,7 @@ cmd_current_slot() {
     id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
     m=$(esp_mount); mp=$(mp_of "$m")
     slot=""
-    if entry=$(entry_for_build_id "$mp" "$id"); then
+    if entry=$(entry_for_running_system "$mp" "$id"); then
         # Entries are named avocado-<slot>, so the slot is the trailing field.
         stem=$(entry_stem "$entry")
         slot="${stem##*-}"
@@ -101,7 +138,7 @@ cmd_bless() {
     id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
     m=$(esp_mount); mp=$(mp_of "$m")
     rc=0
-    if entry=$(entry_for_build_id "$mp" "$id"); then
+    if entry=$(entry_for_running_system "$mp" "$id"); then
         base=$(basename "$entry")
         case "$base" in
             *+*)

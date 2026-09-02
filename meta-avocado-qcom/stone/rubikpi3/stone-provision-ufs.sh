@@ -67,11 +67,31 @@ cp "$var_file" "$var_name"
 #    Fail closed. Flashing the tarball's ESP instead is not a degraded mode,
 #    it is a board that boots a kernel nobody asked for.
 if [ -n "$efi_name" ]; then
-    efi_file="${AVOCADO_STONE_DATA_DIR}/${efi_name}"
-    [ -f "$efi_file" ] || efi_file="${AVOCADO_STONE_DATA_DIR}/images/${efi_name}"
-    if [ ! -f "$efi_file" ]; then
+    # Three places, in order of how directly they belong to this provision.
+    #
+    # The third is the runtime input directory, which is where the build hook
+    # writes it. That used to be unnecessary: with no `update` block in the
+    # manifest, `stone bundle` staged every declared image into the data dir.
+    # Once os_artifacts exists, the data dir's images/ holds the UPDATE
+    # artifacts only -- the boot entry -- and the ESP image, which no update
+    # ships, stops being copied there at all. Deriving the input dir keeps the
+    # provisioned ESP the one the build produced rather than silently falling
+    # back to the pristine one in the bootfiles tarball, which carries the
+    # default multiconfig's kernel.
+    input_dir_guess=$(printf '%s' "$AVOCADO_STONE_DATA_DIR" \
+        | sed -e 's#/output/runtimes/#/runtimes/#' -e 's#/stone$##')
+    efi_file=""
+    for candidate in \
+        "${AVOCADO_STONE_DATA_DIR}/${efi_name}" \
+        "${AVOCADO_STONE_DATA_DIR}/images/${efi_name}" \
+        "${input_dir_guess}/${efi_name}"
+    do
+        [ -f "$candidate" ] && { efi_file="$candidate"; break; }
+    done
+    if [ -z "$efi_file" ]; then
         echo "ERROR: manifest declares images.efi as '$efi_name' but no such file" >&2
-        echo "       under ${AVOCADO_STONE_DATA_DIR}[/images]. Did the avocado-build hook run?" >&2
+        echo "       under ${AVOCADO_STONE_DATA_DIR}[/images] or ${input_dir_guess}." >&2
+        echo "       Did the avocado-build hook run?" >&2
         exit 1
     fi
     echo "Injecting build-time ESP as efi.bin ($(stat -c%s "$efi_file") bytes)"
