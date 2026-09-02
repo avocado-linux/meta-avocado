@@ -610,6 +610,22 @@ def status_paths(out_path, statuses):
         for i, s in enumerate(statuses)
     }
 
+def obsolete_paths(out_path, out_paths):
+    """The documents a previous run may have written that this one will not.
+
+    Changing which statuses are asked for changes which suffixed documents
+    exist, and nothing prunes DEPLOY_DIR. A
+    document left from the other naming reads as a current one: same
+    directory, same machine, plausible contents, and only its "generated"
+    to give it away. So it is removed rather than left to be found.
+    """
+    written = set(out_paths.values())
+    stem, ext = os.path.splitext(out_path)
+    candidates = {out_path} | {
+        "%s-%s%s" % (stem, status.lower(), ext) for status in CVE_STATUSES
+    }
+    return sorted(candidates - written)
+
 def write_report(report, out_path, indent=2):
     """Write one JSON document atomically. indent=None emits it compact."""
     out_dir = os.path.dirname(out_path)
@@ -826,16 +842,17 @@ def main():
     # Missing globs to nothing, the same as not inheriting the class.
     backports, backports_unreadable = read_backports(backports_dir)
 
-    for path in out_paths.values():
-        if os.path.isdir(path):
-            parser.error("--output %s is a directory" % path)
-
     # Every path removed before any is written: a run that fails partway leaves
     # no stale document from a previous run beside a fresh one, which is the
-    # pair a consumer would read as one build.
-    for path in out_paths.values():
-        if os.path.exists(path):
-            os.unlink(path)
+    # pair a consumer would read as one build. Documents this run will not
+    # write go too - see obsolete_paths().
+    doomed = list(out_paths.values()) + obsolete_paths(args.output, out_paths)
+    pruned = False
+
+    # Over every path, not just the ones written: unlinking a directory raises.
+    for path in doomed:
+        if os.path.isdir(path):
+            parser.error("%s is a directory" % path)
 
     # One pass per status. pkgdata and the manifests are re-read each time,
     # which is a few seconds against a task whose cost is the world build
@@ -886,6 +903,14 @@ def main():
                 file=sys.stderr,
             )
             return 1
+
+        if not pruned:
+            # After the checks above, not before: a run that bails on one must
+            # not leave the tree emptier than it found it.
+            for path in doomed:
+                if os.path.exists(path):
+                    os.unlink(path)
+            pruned = True
 
         write_report(report, out_paths[status])
 
