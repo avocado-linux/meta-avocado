@@ -480,6 +480,257 @@ class ScopeTests(unittest.TestCase):
         )
         self.assertEqual(stats.manifests_read, 1)
 
+class AltVersionsTests(unittest.TestCase):
+    """One recipe, two versions, both shipping.
+
+    The defect this prevents: read_cve_data merges two entries of one recipe
+    name by CVE id under the first version seen, so a second kernel's CVEs
+    would be reported against the shipped kernel's version.
+    """
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+        self.alt_cve_dir = os.path.join(self.cve_dir, "raspberrypi-6_6")
+        os.makedirs(self.alt_cve_dir)
+        self.pkgdata = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.pkgdata)
+        self.alt_pkgdata = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.alt_pkgdata)
+        for root in (self.pkgdata, self.alt_pkgdata):
+            os.makedirs(os.path.join(root, "runtime-reverse"))
+        self.images = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.images)
+
+    def package(self, name, recipe, version, root=None):
+        path = os.path.join(root or self.pkgdata, "runtime-reverse", name)
+        with open(path, "w") as f:
+            f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n"
+                    % (recipe, version, version))
+
+    def write(self, recipe, *entries, alt=False):
+        root = self.alt_cve_dir if alt else self.cve_dir
+        with open(os.path.join(root, "%s_cve.json" % recipe), "w") as f:
+            json.dump({"package": list(entries)}, f)
+
+    def manifest(self, *packages):
+        path = os.path.join(self.images, "rootfs.manifest")
+        with open(path, "w") as f:
+            for pkg in packages:
+                f.write("%s cortexa72 1.0-r0\n" % pkg)
+        return path
+
+    def populate(self):
+        """The raspberrypi4 shape: 6.12 in the rootfs, 6.6 in the feed."""
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+
+    def build(self, **kw):
+        # Not setdefault: manifest() writes the file, and its argument is
+        # evaluated even when the caller passed its own manifest.
+        if "manifest_paths" not in kw:
+            kw["manifest_paths"] = [self.manifest("kernel-6.12.25")]
+        return build_report(
+            self.cve_dir,
+            [self.pkgdata, self.alt_pkgdata],
+            alt_cve_dirs=[self.alt_cve_dir],
+            **kw
+        )
+
+    def test_the_second_version_is_carried_beside_the_first(self):
+        self.populate()
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+
+        self.assertEqual(entry_["version"], "6.12.25")
+        self.assertEqual([c["id"] for c in entry_["cves"]], ["CVE-2026-1"])
+        self.assertEqual(len(entry_["alt_versions"]), 1)
+        alt = entry_["alt_versions"][0]
+        self.assertEqual(alt["version"], "6.6.63")
+        self.assertEqual([c["id"] for c in alt["cves"]], ["CVE-2026-2"])
+
+    def test_each_version_is_scoped_on_its_own_packages(self):
+        # The whole reason the versions are kept apart.
+        self.populate()
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual(entry_["scope"], "base-runtime")
+        self.assertEqual(entry_["alt_versions"][0]["scope"], "feed")
+
+    def test_a_name_both_kernels_package_scopes_only_the_shipped_one(self):
+        # The real shape: kernel, kernel-dbg and kernel-dev are packaged by
+        # both multiconfigs under one unversioned name, and the manifest names
+        # it without a version. Scored on the bare name, both versions read
+        # base-runtime and the feed-only kernel overstates device exposure.
+        self.package("kernel", "linux-raspberrypi", "6.12.25")
+        self.package("kernel", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build(manifest_paths=[self.manifest("kernel")])
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual(entry_["scope"], "base-runtime")
+        self.assertEqual(entry_["alt_versions"][0]["scope"], "feed")
+
+    def test_the_alt_cves_are_counted_apart_from_the_entries(self):
+        # A consumer that ignores alt_versions must still read counters that
+        # describe what it read.
+        self.populate()
+        doc, _ = self.build()
+        counts = doc["counts"]
+        self.assertEqual(counts["cves"], 1)
+        self.assertEqual(counts["packaged_cves"], 1)
+        self.assertEqual(counts["recipes"], 1)
+        self.assertEqual(counts["alt_recipes"], 1)
+        self.assertEqual(counts["alt_cves"], 1)
+
+    def test_the_alt_never_becomes_the_entry_when_the_first_has_no_issues(self):
+        # The shipped kernel carries nothing at this status, so no entry
+        # records it. The alt must not take its place and name the version the
+        # image does not install as the shipped one.
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Patched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual(entry_["version"], "6.12.25")
+        self.assertEqual(entry_["cves"], [])
+        self.assertEqual([c["id"] for c in entry_["alt_versions"][0]["cves"]],
+                         ["CVE-2026-2"])
+        self.assertEqual(doc["counts"]["cves"], 0)
+        self.assertEqual(doc["counts"]["alt_cves"], 1)
+
+    def test_a_recipe_only_the_second_multiconfig_built_is_an_ordinary_entry(self):
+        # Jetson: the two kernels are different recipes, so there is no second
+        # version of anything and nothing needs alt_versions.
+        self.package("kernel-6.6.63", "linux-jammy-nvidia-tegra", "5.15.0",
+                     root=self.alt_pkgdata)
+        self.write("linux-jammy-nvidia-tegra", entry(
+            "linux-jammy-nvidia-tegra", version="5.15.0",
+            issues=[{"id": "CVE-2026-3", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-jammy-nvidia-tegra"]
+        self.assertEqual(entry_["version"], "5.15.0")
+        self.assertNotIn("alt_versions", entry_)
+        self.assertEqual(doc["counts"]["alt_recipes"], 0)
+        self.assertEqual(doc["counts"]["cves"], 1)
+
+    def test_the_same_version_in_both_multiconfigs_is_one_version(self):
+        # A shared build dependency the alt multiconfig also scanned, at the
+        # same version. It must not fork the entry.
+        self.package("libssl3", "openssl", "3.0.12")
+        self.write("openssl", entry(
+            "openssl", version="3.0.12",
+            issues=[{"id": "CVE-2026-4", "status": "Unpatched"}]))
+        self.write("openssl", entry(
+            "openssl", version="3.0.12",
+            issues=[{"id": "CVE-2026-5", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["openssl"]
+        self.assertNotIn("alt_versions", entry_)
+        self.assertEqual(sorted(c["id"] for c in entry_["cves"]),
+                         ["CVE-2026-4", "CVE-2026-5"])
+        self.assertEqual(doc["counts"]["alt_cves"], 0)
+
+    def test_two_versions_in_the_main_directory_are_still_merged(self):
+        # CVE_CHECK_DIR is never pruned, so a result left by an earlier build
+        # at an older PV sits beside the current one indistinguishably. Only a
+        # multiconfig subdirectory says a second version was built now.
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        with open(os.path.join(self.cve_dir, "stale_cve.json"), "w") as f:
+            json.dump({"package": [entry(
+                "linux-raspberrypi", version="6.11.0",
+                issues=[{"id": "CVE-2026-9", "status": "Unpatched"}])]}, f)
+
+        doc, stats = self.build()
+        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
+        self.assertEqual(stats.stale_dropped, 1)
+
+    def test_an_alt_version_with_no_pkgdata_is_dropped_as_stale(self):
+        # What the recipe's warning exists to pre-empt: nothing declares that
+        # version, so the entry goes to stale_dropped - a health counter.
+        self.populate()
+        doc, stats = build_report(
+            self.cve_dir, [self.pkgdata], alt_cve_dirs=[self.alt_cve_dir],
+            manifest_paths=[self.manifest("kernel-6.12.25")],
+        )
+        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
+        self.assertEqual(stats.stale_dropped, 1)
+
+    def test_the_second_version_counts_as_a_scanned_recipe_once(self):
+        # scanned is a set of names, and both versions are the same name.
+        self.populate()
+        doc, _ = self.build()
+        self.assertEqual(doc["counts"]["recipes"], 1)
+        self.assertNotIn("linux-raspberrypi", doc["unscanned_recipes"])
+
+    def test_one_cve_reported_at_both_versions_is_kept_at_both(self):
+        # The opposite of the id-merge inside one version: the CVE really is
+        # unpatched in both kernels.
+        issue = {"id": "CVE-2026-1", "status": "Unpatched"}
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25", issues=[issue]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63", issues=[dict(issue)]),
+            alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual([c["id"] for c in entry_["cves"]], ["CVE-2026-1"])
+        self.assertEqual(
+            [c["id"] for c in entry_["alt_versions"][0]["cves"]],
+            ["CVE-2026-1"],
+        )
+
+    def test_an_id_repeated_across_two_alt_files_is_one_cve(self):
+        # Two files in one subdirectory naming the same recipe.
+        issue = {"id": "CVE-2026-1", "status": "Unpatched"}
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-0", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63", issues=[issue]), alt=True)
+        with open(os.path.join(self.alt_cve_dir, "again_cve.json"), "w") as f:
+            json.dump({"package": [entry(
+                "linux-raspberrypi", version="6.6.63",
+                issues=[dict(issue)])]}, f)
+
+        doc, _ = self.build()
+        alts = doc["recipes"]["linux-raspberrypi"]["alt_versions"]
+        self.assertEqual(len(alts), 1)
+        self.assertEqual(len(alts[0]["cves"]), 1)
+        self.assertEqual(doc["counts"]["alt_cves"], 1)
+
 class EvidenceTests(unittest.TestCase):
     """Who decided a status, and the one thing this field must never claim.
 

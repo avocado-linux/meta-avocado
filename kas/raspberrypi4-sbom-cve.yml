@@ -9,11 +9,10 @@
 # build afterwards, avocado-cve-report has no *_cve.json to read and produces an
 # empty report rather than failing.
 #
-# machine/raspberrypi4.yml stacks feature/multi-kernel-raspberrypi.yml, whose
-# alt multiconfig has its own TMPDIR. CVE_CHECK_DIR is under DEPLOY_DIR, and
-# avocado-multikernel.bbclass merges only rpm/ and pulp-uploads/, so the 6.6
-# kernel's cve-check results stay in tmp-raspberrypi-6_6/deploy/cve and this
-# report covers the default 6.12 kernel alone.
+# machine/raspberrypi4.yml stacks feature/multi-kernel-raspberrypi.yml, so this
+# builds two kernels and the report covers both: the 6.12 one the image
+# installs as the recipe's own entry, the 6.6 one the feed carries as an
+# alt_versions record on it.
 
 header:
   version: 16

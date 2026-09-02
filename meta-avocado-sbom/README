@@ -253,6 +253,69 @@ ${MACHINE} matches no shipping image on any machine. The directory already
 scopes the machine, so the glob costs nothing. Override the whole default for
 a board whose runtime image is named differently.
 
+More than one version of a recipe
+--------------------------------
+
+Raspberry Pi and Jetson build two kernels, in two multiconfigs, and both ship
+in the same feed. The second multiconfig has its own TMPDIR, so its cve-check
+results are not the ones this report reads until avocado-multikernel.bbclass
+merges that kernel recipe's own results into ${CVE_CHECK_DIR}/<mc>.
+
+Where that leaves a recipe built at two versions - linux-raspberrypi at 6.12
+and 6.6 - the entry stays the version the image installs, and the other one is
+an "alt_versions" record on it:
+
+  "linux-raspberrypi": {
+    "version": "6.12.25+git",
+    "packaged": true,
+    "scope": "base-runtime",
+    "cves": [ ... ],
+    "alt_versions": [
+      { "version": "6.6.63+git", "packaged": true, "scope": "feed",
+        "cves": [ ... ] }
+    ]
+  }
+
+A record carries the same four fields as the entry and is read the same way.
+Its scope is its own: one kernel is in the rootfs manifest and the other is
+only in the feed, which is exactly the distinction scope exists to make.
+
+The entry's own "cves", and the "cves" and "packaged_cves" counters, exclude
+them. A consumer that ignores the key reads counters describing exactly what
+it read, and "alt_recipes" and "alt_cves" say what it skipped. Both are zero on
+every single-kernel machine, where no key is emitted at all.
+
+Two versions in CVE_CHECK_DIR itself are still merged into one entry by CVE id.
+That directory is never pruned, so a result left behind by an earlier build at
+an older PV is indistinguishable from a current one; only a multiconfig
+subdirectory says a second version was built in this build.
+
+The alt multiconfig's pkgdata is read in place, from
+${TOPDIR}/tmp-<mc>/pkgdata/${MACHINE}, and cannot be merged - it is the default
+multiconfig's own sstate-managed directory. Without it nothing declares the
+second kernel's version and every entry is dropped as stale, so the two are
+found together or neither is used. Its packages come last, because a name both
+kernels package - kernel, kernel-dbg, kernel-dev - goes to the first pkgdata
+directory, and that has to be the kernel the image installs. Scope leans on
+the same order: a manifest names a package without a version, so an installed
+name counts for the version that won it, and the feed-only kernel reads "feed"
+rather than base-runtime on a name it shares.
+
+Standalone, the same shape needs both directories named:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --cve-dir build/tmp/deploy/cve/$MACHINE \
+      --alt-cve-dir build/tmp/deploy/cve/$MACHINE/raspberrypi-6_6 \
+      --pkgdata-dir build/tmp/pkgdata/$MACHINE \
+      --pkgdata-dir build/tmp-raspberrypi-6_6/pkgdata/$MACHINE \
+      --machine $MACHINE -o avocado-cve-report.json
+
+Known ceiling: the opt-out and backport markers merged into that subdirectory
+are keyed by recipe name, and read_optouts/read_backports glob the top level
+only. So a backport carried by the second kernel alone reports "cve-check"
+evidence rather than "patch-file" - understating what the build patched, never
+overstating it. Neither kernel emits a backport marker today.
+
 The frozen contract
 -------------------
 

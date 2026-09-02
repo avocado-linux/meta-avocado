@@ -91,6 +91,12 @@ def trim(full):
     no_record = [r for r in full["no_cve_record_recipes"] if r in kept_recipes]
 
     packaged = [e for e in recipes.values() if e["packaged"]]
+    # Derived, not carried: trimming can drop the one recipe a multi-kernel
+    # machine built twice, and a carried figure would then describe versions
+    # the fixture no longer holds.
+    alt_records = [
+        alt for e in recipes.values() for alt in e.get("alt_versions", ())
+    ]
     counts = {
         "recipes": len(recipes),
         "packages": len(packages),
@@ -99,6 +105,8 @@ def trim(full):
         "packaged_cves": sum(len(e["cves"]) for e in packaged),
         "unscanned_recipes": len(unscanned),
         "no_cve_record_recipes": len(no_record),
+        "alt_recipes": sum(1 for e in recipes.values() if e.get("alt_versions")),
+        "alt_cves": sum(len(alt["cves"]) for alt in alt_records),
     }
     for name in CARRIED:
         counts[name] = full["counts"][name]

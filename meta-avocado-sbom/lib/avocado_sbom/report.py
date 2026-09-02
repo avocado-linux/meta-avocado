@@ -25,6 +25,8 @@ class Stats(dict):
         "patched_cves",
         "unknown_status_cves",
         "manifests_read",
+        "alt_recipes",
+        "alt_cves",
     )
 
     def __init__(self):
@@ -59,8 +61,23 @@ def _read_pkgdata_fields(path):
     return fields
 
 def read_pkgdata(pkgdata_dirs, stats):
+    """Read the runtime package map.
+
+    The third return splits a recipe's package names by version, so a recipe
+    built twice in one build - a multi-kernel machine's kernel - is scoped on
+    the packages of the version being scoped rather than on both versions'.
+    Keyed on PV and PKGV alike, because a cve-check entry's version is one or
+    the other.
+
+    The fourth says which version each package name was built at, for the
+    directory that won the name. Both kernels package "kernel", "kernel-dbg"
+    and "kernel-dev", so the third alone cannot tell whose an installed name
+    is.
+    """
     packages = {}
     recipe_versions = {}
+    recipe_version_packages = {}
+    package_versions = {}
 
     for pkgdata_dir in pkgdata_dirs:
         origin = os.path.basename(pkgdata_dir.rstrip("/"))
@@ -77,9 +94,11 @@ def read_pkgdata(pkgdata_dirs, stats):
                 continue
 
             version = _join_version(fields.get("PKGV"), fields.get("PKGR"))
-            recipe_versions.setdefault(recipe, set()).update(
-                v for v in (fields.get("PV"), fields.get("PKGV")) if v
-            )
+            keys = {v for v in (fields.get("PV"), fields.get("PKGV")) if v}
+            recipe_versions.setdefault(recipe, set()).update(keys)
+            by_version = recipe_version_packages.setdefault(recipe, {})
+            for v in keys:
+                by_version.setdefault(v, []).append(name)
 
             if name in packages:
                 if (packages[name]["recipe"] != recipe or
@@ -87,6 +106,7 @@ def read_pkgdata(pkgdata_dirs, stats):
                     stats.package_collisions += 1
                 continue
 
+            package_versions[name] = keys
             packages[name] = {
                 "recipe": recipe,
                 "version": version,
@@ -94,7 +114,7 @@ def read_pkgdata(pkgdata_dirs, stats):
             }
 
     stats.packages = len(packages)
-    return packages, recipe_versions
+    return packages, recipe_versions, recipe_version_packages, package_versions
 
 def read_manifests(manifest_paths, stats):
     """Package names installed by the given image manifests.
@@ -275,7 +295,20 @@ def _has_cve_record(entry):
     )
 
 def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
-                  summary=True, backports=None):
+                  summary=True, backports=None, alt_cve_dirs=()):
+    """Join the per-recipe cve-check results into one recipe -> CVEs map.
+
+    alt_cve_dirs are the per-multiconfig subdirectories
+    avocado-multikernel.bbclass merges into CVE_CHECK_DIR. A recipe they hold
+    at a second version becomes an alt_versions record rather than being merged
+    into the entry, so the shipped kernel's CVE list stays the shipped
+    kernel's.
+
+    Two versions in cve_dir itself are still merged by id: CVE_CHECK_DIR is
+    never pruned, so a result left by an earlier build at an older PV is
+    indistinguishable from a current one. Only a subdirectory says a second
+    multiconfig built this now.
+    """
     fields = (
         CVE_FIELDS
         if summary
@@ -284,12 +317,21 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
     recipes = {}
     scanned = set()
     with_record = set()
+    # The version the default multiconfig built each recipe at, recorded
+    # whether or not its entry carried a CVE at this status. An entry is what
+    # says which version ships, and one with no issue at this status writes
+    # none - so recipes alone cannot answer that for the alt merge below.
+    default_versions = {}
     backports = backports or {}
 
-    paths = sorted(glob.glob(os.path.join(cve_dir, "*_cve.json")))
+    paths = [(p, False)
+             for p in sorted(glob.glob(os.path.join(cve_dir, "*_cve.json")))]
+    for alt_dir in alt_cve_dirs or ():
+        paths += [(p, True)
+                  for p in sorted(glob.glob(os.path.join(alt_dir, "*_cve.json")))]
     stats.cve_files = len(paths)
 
-    for path in paths:
+    for path, is_alt in paths:
         try:
             with open(path) as f:
                 data = json.load(f)
@@ -330,6 +372,9 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                     continue
                 version = stripped
 
+            if not is_alt:
+                default_versions.setdefault(name, version)
+
             raw_issues = entry.get("issue", [])
             if not isinstance(raw_issues, list) or not all(
                 isinstance(i, dict) for i in raw_issues):
@@ -368,6 +413,42 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
 
             packaged = name in recipe_versions
             existing = recipes.get(name)
+            default_version = default_versions.get(name)
+            if is_alt and default_version is not None and version != default_version:
+                # Merging by id would file this version's CVEs under the other
+                # version's number.
+                #
+                # packaged is the entry's: the stale drop above has already
+                # established that pkgdata knows this version. scope is not -
+                # build_report fills it from this version's own packages.
+                if existing is None:
+                    # The default multiconfig built this recipe but carried no
+                    # CVE at this status, so nothing recorded it. Its version is
+                    # still the one that ships, so the entry is created at that
+                    # version and the alt hangs off it rather than replacing it.
+                    existing = recipes[name] = {
+                        "version": default_version,
+                        "packaged": packaged,
+                        "cves": [],
+                    }
+                    if packaged:
+                        stats.packaged_recipes += 1
+                alt = next(
+                    (a for a in existing.setdefault("alt_versions", [])
+                     if a["version"] == version),
+                    None,
+                )
+                if alt is None:
+                    if not existing["alt_versions"]:
+                        stats.alt_recipes += 1
+                    alt = {"version": version, "packaged": packaged, "cves": []}
+                    existing["alt_versions"].append(alt)
+                seen_ids = {c.get("id") for c in alt["cves"]}
+                added = [c for c in issues if c.get("id") not in seen_ids]
+                alt["cves"].extend(added)
+                stats.alt_cves += len(added)
+                continue
+
             if existing is not None:
                 # Two entries for one recipe - two files naming it, or two
                 # entries in one file. Overwriting would leave the counters
@@ -514,6 +595,7 @@ def build_report(
     manifest_paths=(),
     boot_chain=(),
     backports=None,
+    alt_cve_dirs=(),
 ):
     if status not in CVE_STATUSES:
         raise ValueError(
@@ -522,10 +604,12 @@ def build_report(
         )
 
     stats = Stats()
-    packages, recipe_versions = read_pkgdata(pkgdata_dirs, stats)
+    packages, recipe_versions, recipe_version_packages, package_versions = (
+        read_pkgdata(pkgdata_dirs, stats)
+    )
     recipes, scanned, no_record = read_cve_data(
         cve_dir, recipe_versions, stats, status=status, summary=summary,
-        backports=backports,
+        backports=backports, alt_cve_dirs=alt_cve_dirs,
     )
 
     installed = read_manifests(manifest_paths, stats)
@@ -537,9 +621,24 @@ def build_report(
     # Scope totals are deliberately not counters: every entry carries its own,
     # so an aggregate cannot drift from what the entries say.
     for name, entry in recipes.items():
-        entry["scope"] = _scope(
-            name, recipe_packages.get(name, ()), installed, declared_boot_chain
-        )
+        # Per version: a multi-kernel machine ships one kernel in the rootfs
+        # and the other in the feed. The fallback covers a version pkgdata
+        # knows no packages under, where both sets are empty anyway.
+        by_version = recipe_version_packages.get(name, {})
+        for record in [entry] + list(entry.get("alt_versions", ())):
+            names = by_version.get(record["version"])
+            if names is None and record is entry:
+                names = recipe_packages.get(name, ())
+            names = names or ()
+            # An installed name both versions package belongs to the version
+            # the first pkgdata directory - the image's - built. Scored on the
+            # bare name, the feed-only kernel reads base-runtime too, which is
+            # the one distinction this record exists to make.
+            mine = installed.intersection(
+                n for n in names
+                if record["version"] in package_versions.get(n, ())
+            )
+            record["scope"] = _scope(name, names, mine, declared_boot_chain)
 
     # Scope is a field, not a filter, so this denominator does not move: both
     # lists stay derived from pkgdata, and reading a manifest leaves them
@@ -580,6 +679,8 @@ def build_report(
             "patched_cves": stats.patched_cves,
             "unknown_status_cves": stats.unknown_status_cves,
             "manifests_read": stats.manifests_read,
+            "alt_recipes": stats.alt_recipes,
+            "alt_cves": stats.alt_cves,
         },
         "recipes": recipes,
         "packages": packages,
@@ -782,6 +883,18 @@ def main():
         "subdirectory to read when CVE_CHECK_DIR is machine-scoped",
     )
     parser.add_argument(
+        "--alt-cve-dir",
+        action="append",
+        default=[],
+        help="a second multiconfig's cve-check results for the same MACHINE, "
+        "as avocado-multikernel.bbclass merges them into "
+        "${CVE_CHECK_DIR}/<mc>; repeatable. A recipe held here at a second "
+        "version becomes an alt_versions record. Not discovered by walking "
+        "--cve-dir, which on the unscoped upstream ${DEPLOY_DIR}/cve has one "
+        "subdirectory per machine. Pass the matching --pkgdata-dir too, or "
+        "every entry is dropped as a stale version",
+    )
+    parser.add_argument(
         "--status",
         default=list(DEFAULT_STATUSES),
         nargs="+",
@@ -868,6 +981,7 @@ def main():
             manifest_paths=manifests,
             boot_chain=args.boot_chain.split(),
             backports=backports,
+            alt_cve_dirs=args.alt_cve_dir,
         )
 
         if not stats.cve_files:
