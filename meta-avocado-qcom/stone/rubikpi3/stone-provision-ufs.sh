@@ -87,7 +87,18 @@ for i in {1..30}; do
         break
     fi
     if [ $i -eq 30 ]; then
-        echo "ERROR: QDL device not found after 30 seconds, aborting"
+        echo "ERROR: no QDL device (05c6:9008) after 30 seconds, aborting" >&2
+        # 05c6:900e is the SoC's dload/ramdump mode, which is where the board
+        # lands after a failed boot and where `reboot edl` from Linux puts it.
+        # It looks like EDL and is not: qdl always starts with a Sahara
+        # handshake and has no flag to skip it (see `qdl` usage), so a 900e
+        # board cannot be flashed. Only a physical power cycle into EDL gets
+        # back to 9008. Worth saying out loud -- otherwise this reads as a
+        # missing cable or a udev problem.
+        if lsusb | grep -q "05c6:900e"; then
+            echo "       Board is in dload/ramdump mode (05c6:900e), not EDL." >&2
+            echo "       qdl cannot flash that -- power cycle the board into EDL." >&2
+        fi
         exit 1
     fi
     sleep 1

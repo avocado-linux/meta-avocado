@@ -90,27 +90,31 @@ initramfs_name=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$m
 bootfiles_name=$(jq -r '.storage_devices.rootdisk.images.bootfiles // empty' "$manifest")
 
 if [ -n "$esp_image" ]; then
-    # The pinned kernel, taken from the ROOTFS sysroot -- deliberately not from
-    # $AVOCADO_PREFIX/kernel/*/Image.
+    # The pinned kernel, as avocado-cli resolved it from the lockfile.
     #
-    # That kernel sysroot is content-addressed and accumulates a directory per
-    # kernel ever installed, so on a multi-kernel feed the glob is ambiguous
-    # and picks whichever sorts first. Observed doing exactly that: with both
-    # kernels staged it chose 6.18.37-02315-... while the project had pinned
-    # 6.18.37-rt-..., which would have flashed a UKI whose kernel did not match
-    # the modules in the rootfs -- the precise mismatch that leaves /lib/modules
-    # matching no running kernel and every modular driver dead.
+    # Not globbed. Both $AVOCADO_PREFIX/kernel and $AVOCADO_PREFIX/rootfs/boot
+    # accumulate an entry per kernel version ever installed, so on a
+    # multi-kernel feed either glob is ambiguous and `head -1` silently prefers
+    # the alphabetically first -- which for 6.18.37-<scm> versus
+    # 6.18.37-rt-<scm> is the stock kernel. Observed doing exactly that: a
+    # project pinning RT got a UKI built around stock, flashed a board whose
+    # /lib/modules matched no running kernel, and lost every modular driver
+    # (ethernet, wifi, thermal) with nothing in the logs pointing at the cause.
     #
-    # `avocado install` puts exactly the pinned kernel's image in the rootfs
-    # sysroot, so there is one and it is the right one. Assert that rather than
-    # taking the first of a glob.
-    set -- "$AVOCADO_PREFIX"/rootfs/boot/Image-*
-    if [ ! -e "$1" ] || [ "$#" -ne 1 ]; then
-        echo -e "\033[91m[ERROR]\033[0m Expected exactly one kernel in $AVOCADO_PREFIX/rootfs/boot, found $#: $*" >&2
+    # AVOCADO_KERNEL_IMAGE is the lockfile pin, which is the same authority
+    # that decided which kernel's modules went into the rootfs. Fail closed:
+    # boot and modules disagreeing is worse than not building an ESP.
+    if [ -z "${AVOCADO_KERNEL_IMAGE:-}" ]; then
+        echo -e "\033[91m[ERROR]\033[0m AVOCADO_KERNEL_IMAGE not set by avocado-cli." >&2
+        echo -e "        Needs a CLI that exports the lockfile-pinned kernel to build hooks." >&2
         exit 1
     fi
-    KERNEL_IMAGE="$1"
-    KERNEL_VERSION_RESOLVED=$(basename "$KERNEL_IMAGE" | sed 's/^Image-//')
+    if [ ! -f "$AVOCADO_KERNEL_IMAGE" ]; then
+        echo -e "\033[91m[ERROR]\033[0m Pinned kernel $AVOCADO_KERNEL_IMAGE does not exist; run 'avocado install'." >&2
+        exit 1
+    fi
+    KERNEL_IMAGE="$AVOCADO_KERNEL_IMAGE"
+    KERNEL_VERSION_RESOLVED="${AVOCADO_KERNEL_VERSION:-$(basename "$(dirname "$KERNEL_IMAGE")")}"
 
     # The stub and the current ESP come out of the yocto-static bootfiles
     # bundle, which is the input to this whole flow.
