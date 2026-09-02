@@ -1,0 +1,29 @@
+Use the callback-local `client` in the MQTT on_connect/on_disconnect handlers
+instead of `self.client`.
+
+`self.client = self.init()` is assigned only after init() returns, but paho's
+loop_forever(retry_first_connection=True) can fire on_connect on CONNACK before
+that assignment completes. `self.client` is then unset, on_connect raises
+AttributeError, the paho network thread dies, and glances silently stops
+publishing (service stays "active", no metrics). The callbacks already receive
+the connected client as their first arg; use it.
+
+Upstream glances 4.5.6.
+
+--- a/glances/exports/glances_mqtt/__init__.py
++++ b/glances/exports/glances_mqtt/__init__.py
+@@ -80,13 +80,13 @@ class Export(GlancesExport):
+
+             def on_connect(client, userdata, flags, reason_code, properties):
+                 """Action to perform when connecting."""
+-                self.client.publish(
++                client.publish(
+                     topic='/'.join([self.topic, self.devicename, "availability"]), payload="online", retain=True
+                 )
+
+             def on_disconnect(client, userdata, flags, reason_code, properties):
+                 """Action to perform when the connection is over."""
+-                self.client.publish(
++                client.publish(
+                     topic='/'.join([self.topic, self.devicename, "availability"]), payload="offline", retain=True
+                 )
