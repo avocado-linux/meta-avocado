@@ -571,12 +571,19 @@ end
 -- Assert the enrolled key database cannot be replaced, covering BOTH halves of
 -- the spec requirement in one run:
 --
---   part one, RUNTIME  - a write to PK from a booted root shell is refused and
---                        leaves PK byte-identical;
---   part two, OFFLINE  - deleting the variable store from the boot medium and
---                        resetting leaves the SAME PK in place, because the
---                        seed compiled into the bootloader is authoritative and
---                        the file store cannot override it.
+--   part one,   RUNTIME  - a write to PK from a booted root shell is refused and
+--                          leaves PK byte-identical;
+--   part two-a, OVERRIDE - a well-formed rival store naming a DIFFERENT PK is
+--                          written over ubootefi.var on the ESP, and the
+--                          enrolled PK still does not change;
+--   part two-b, ABSENCE  - deleting the variable store outright leaves the SAME
+--                          PK in place.
+--
+-- Two-a and two-b are different claims and the weaker one is easy to mistake for
+-- the stronger. Absence shows only that the seed is used when nothing competes -
+-- firmware with no precedence rule at all passes it. Override is what shows the
+-- seed WINS. Part two used to be the absence leg alone, and its verdict read as
+-- though it had established precedence.
 --
 -- The hash is read ONCE, before any tamper, and compared twice. Re-reading it
 -- after a tamper and comparing that against itself would pass on a PK that had
@@ -805,7 +812,137 @@ if MODE == "keydb_immutable" then
   end
   if not saw("ubootefi%.var") then
     fail("no ubootefi.var on the ESP (partition " .. esppart .. "), so there " ..
-         "is no store to delete and part two cannot run")
+         "is no store to substitute or delete and part two cannot run")
+  end
+  if not saw("advstore%.var") then
+    fail("no advstore.var on the ESP (partition " .. esppart .. ") - the rival " ..
+         "variable store is staged there by avocado-stone under " ..
+         "boot-integrity-poc, so this card predates that change or was flashed " ..
+         "from a token-absent build. Reflash; without it only the weaker " ..
+         "absent-store leg can run")
+  end
+
+  ------------------------------------------------------ part two-a: override ---
+  --
+  -- Substitute a WELL-FORMED rival store that names PK with a different
+  -- certificate, and confirm the compiled-in seed still wins.
+  --
+  -- This is the leg that tests precedence. Deleting the store (part two-b below)
+  -- only shows the seed is used when no file is there, which any firmware with
+  -- no precedence rule whatsoever would also pass. The claim worth checking is
+  -- that a store which IS present and DOES collide loses anyway.
+  --
+  -- Why a properly-packed rival and not a corrupted one: efi_var_restore()
+  -- rejects a bad magic or CRC outright, which puts us straight back on the
+  -- absent-store case wearing a disguise. gen-efi-seed.sh packs this one with
+  -- the same packer as the real seed and refuses to emit it if it comes out
+  -- byte-identical.
+  --
+  -- Expected to pass by construction rather than by luck: the file-store path is
+  -- efi_var_restore(buf, safe=false), and that branch skips every variable whose
+  -- efi_auth_var_get_type() is not EFI_AUTH_VAR_NONE - PK, KEK, db and dbx are
+  -- all of them. So this leg is a regression guard on that filter across a
+  -- firmware bump, not a discovery. If it ever fails, the enrolled key database
+  -- is replaceable by anyone who can write the boot medium and every other
+  -- assertion in this mode is vacuous.
+
+  -- A scratch address from the board's own environment rather than a literal.
+  -- The sent command is `printenv <name>` with no `=`, so the console echoing it
+  -- back cannot satisfy a pattern that requires one.
+  --
+  -- `loadaddr` is tried first and is NOT guaranteed to exist: the board sets
+  -- CONFIG_SYS_LOAD_ADDR, which common/board_r.c reads as a FALLBACK
+  -- (env_get_ulong("loadaddr", 16, image_load_addr)), so the compiled default
+  -- can be in force with no environment variable of that name at all. Falling
+  -- back to image_addr keeps this on a board-supplied address either way rather
+  -- than hardcoding one here, which is the thing that would pass today and
+  -- silently write somewhere wrong after a memory-map change.
+  cmd("printenv loadaddr", 1500)
+  local scratch = string.match(tail, "loadaddr=(0?x?%x+)") and "${loadaddr}" or nil
+
+  if not scratch then
+    -- image_addr is set by the board's own boot script, which is why it is run
+    -- first. signed_payload_refused relies on the same variable from the same
+    -- source, so this introduces no new assumption.
+    cmd("run avocado_boot_init", 1500)
+    cmd("printenv image_addr", 1500)
+    if string.match(tail, "image_addr=(0?x?%x+)") then
+      scratch = "${image_addr}"
+    end
+  end
+
+  if not scratch then
+    fail("the environment defines neither loadaddr nor image_addr, so there is " ..
+         "no board-supplied scratch address to stage the rival store at - " ..
+         "part two-a cannot run")
+  end
+  tio.echo("\r\n>>> staging the rival store at " .. scratch .. " <<<\r\n")
+
+  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " advstore.var", 8000)
+  if not saw("bytes read") then
+    fail("advstore.var did not load from the ESP, so nothing was staged to " ..
+         "substitute and the override leg would test nothing")
+  end
+
+  -- ${filesize} is set by the load above, so the write length is the file's own
+  -- rather than a number spelled here that could drift from it.
+  cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
+      " ubootefi.var ${filesize}", 8000)
+  if saw("Unknown command") then
+    fail("fatwrite is unavailable on this firmware (CONFIG_FAT_WRITE), so the " ..
+         "override leg cannot run - do not record a pass from the delete leg alone")
+  end
+  if not saw("bytes written") then
+    fail("the rival store was not written over ubootefi.var, so the real store " ..
+         "is still in place and the override leg would test nothing")
+  end
+  tio.echo("\r\n>>> rival PK store written over ubootefi.var on the ESP <<<\r\n")
+
+  cmd("reset", 500)
+  if not await_login(240) then
+    fail("board did not reach a login prompt with the rival store in place")
+  end
+  login_root()
+
+  local size_ov, hash_ov = probe_pk()
+  if not size_ov then
+    fail("PK does not read back with the rival store in place - the enrolled " ..
+         "key database was displaced by a file on the boot medium, which is the " ..
+         "failure this whole mode exists to detect")
+  end
+  -- Compared against the hash taken before ANY tamper. Comparing against a
+  -- re-read would pass on a wholesale substitution, since a substituted PK
+  -- hashes consistently with itself.
+  if size_ov ~= size0 or hash_ov ~= hash0 then
+    fail("PK CHANGED after substituting a rival store: was " .. size0 .. "/" ..
+         hash0 .. ", now " .. size_ov .. "/" .. hash_ov .. " - the on-medium " ..
+         "file store OVERRODE the compiled-in seed, so the enrolled keys can be " ..
+         "replaced by anyone who can write the card")
+  end
+  tio.echo("\r\n>>> part two-a: rival store ignored, PK unchanged <<<\r\n")
+
+  ------------------------------------------------------ part two-b: absence ---
+  --
+  -- The weaker leg, kept because it covers a different failure: the seed being
+  -- used at all when no file store is present. Runs second so the substitution
+  -- above is exercised against a real store rather than against the rival this
+  -- leg would have deleted.
+
+  cmd("reboot", 3000)
+  if not reach_prompt(240) then
+    fail("board did not return to the U-Boot prompt after part two-a - the " ..
+         "absent-store leg did not run")
+  end
+  cmd("version", 1500)
+  if not saw("U%-Boot") then fail("no version banner - console not actually live") end
+
+  -- Re-resolved rather than reused: the variable was set before a reboot, and
+  -- carrying a stale value across one is how a check comes to address the wrong
+  -- partition.
+  cmd("part number ${devtype} ${devnum} esp espp; echo 'ESPPART''='${espp}", 4000)
+  if not string.match(tail, "ESPPART=(%S+)") then
+    fail("could not re-resolve the esp partition after the reboot - the " ..
+         "absent-store leg cannot run")
   end
 
   cmd("fatrm ${devtype} ${devnum}:${espp} ubootefi.var", 4000)
@@ -820,7 +957,7 @@ if MODE == "keydb_immutable" then
   cmd("fatls ${devtype} ${devnum}:${espp}", 4000)
   if not saw("file%(s%)") then
     fail("could not re-list the ESP, so the delete is unconfirmed - " ..
-         "part two did not run")
+         "the absent-store leg did not run")
   end
   if saw("ubootefi%.var") then
     fail("ubootefi.var is still on the boot partition after fatrm - the delete " ..
@@ -861,8 +998,14 @@ if MODE == "keydb_immutable" then
     runtime_verdict = "runtime write to PK refused with PK unchanged"
   end
 
-  pass(runtime_verdict .. ", and the same PK survived deletion of the variable " ..
-       "store on the boot medium - the compiled-in seed is authoritative")
+  -- Both offline legs are named, because they are different claims and only the
+  -- first is about precedence. A verdict citing the deletion alone reads as
+  -- "the seed wins" when it only shows "the seed is used when nothing competes".
+  pass(runtime_verdict .. "; a well-formed rival store naming a DIFFERENT PK " ..
+       "was written over ubootefi.var on the ESP and the enrolled PK did not " ..
+       "change, and the same PK also survived deleting the store outright - the " ..
+       "compiled-in seed beats an on-medium store rather than merely filling in " ..
+       "for a missing one")
 end
 
 fail("unknown HARNESS_MODE '" .. MODE .. "'")

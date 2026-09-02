@@ -49,6 +49,32 @@ SEED_OUT="${SBKEYS_DIR}/ubootefi.var"
 # consumer must not re-derive these from the key directory.
 SEED_MANIFEST="${SBKEYS_DIR}/ubootefi.var.manifest"
 
+# A SECOND, deliberately hostile variable store, used by the HITL harness to
+# prove the compiled-in seed OVERRIDES an on-medium store rather than merely
+# filling in for a missing one.
+#
+# The harness used to test this by DELETING ubootefi.var from the ESP and
+# confirming PK survived. That proves fallback-when-absent and nothing more: an
+# absent file cannot override anything, so the check passes on firmware with no
+# precedence rule at all. The interesting claim is that a store which IS present
+# and DOES carry a different PK still loses, and only a well-formed rival store
+# can test it.
+#
+# Well-formed is the operative word. efi_var_restore() rejects a bad magic or a
+# bad CRC outright with "Invalid EFI variables file", which lands the test back
+# on the absent-file case wearing a disguise. So this is packed by the same
+# pack.py, from a real certificate, and differs from the true seed only in whose
+# key it names.
+#
+# It is inert on the device by construction, not by our care: the file-store
+# path calls efi_var_restore(buf, safe=false), and that branch skips every
+# variable whose efi_auth_var_get_type() is not EFI_AUTH_VAR_NONE - PK, KEK, db
+# and dbx are all of them. See lib/efi_loader/efi_var_file.c and efi_variable.c
+# in the pinned U-Boot. The store therefore cannot enrol anything on any boot;
+# the harness exists to keep that true across a firmware bump, not to discover
+# whether it is true today.
+SEED_ADV_OUT="${SBKEYS_DIR}/ubootefi.var.adversarial"
+
 # Deliberately not `date +%s`. Defaulting to 0 keeps the output deterministic
 # even in an environment that does not export SOURCE_DATE_EPOCH.
 SEED_EPOCH="${SOURCE_DATE_EPOCH:-0}"
@@ -56,7 +82,7 @@ SEED_EPOCH="${SOURCE_DATE_EPOCH:-0}"
 EFI_GLOBAL_VARIABLE_GUID="8be4df61-93ca-11d2-aa0d-00e098032b8c"
 EFI_IMAGE_SECURITY_DATABASE_GUID="d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 
-for tool in sbsiglist python3; do
+for tool in sbsiglist python3 openssl; do
   command -v "${tool}" >/dev/null 2>&1 || {
     echo "gen-efi-seed: ${tool} not found on PATH" >&2
     exit 1
@@ -70,12 +96,34 @@ for role in PK KEK db dbx; do
   fi
 done
 
+# The adversarial key. Minted here rather than in gen-sbkeys.sh on purpose:
+# gen-sbkeys.sh runs on EVERY machine, and a test fixture has no business in the
+# key directory of a board that never builds a seed. This script is reached only
+# under the boot-integrity-poc token, which is exactly the scope the fixture has.
+#
+# Retained once generated, like every real role, so a rebuild does not change the
+# packed bytes and a genuine key rotation stays distinguishable from a rebuild.
+# The retain rule is about REPRODUCIBILITY here, not about orphaning: nothing is
+# ever signed with this key, so regenerating it would break nothing - which is
+# also why it needs no place in the manifest below.
+if [ ! -f "${SBKEYS_DIR}/ADV.crt" ]; then
+  echo "gen-efi-seed: generating the adversarial test key (signs nothing, ever)"
+  openssl req -newkey rsa:2048 -nodes -keyout "${SBKEYS_DIR}/ADV.key" \
+    -new -x509 -sha256 -days 3650 \
+    -subj "/O=Avocado OS/CN=ADVERSARIAL Test Key DO NOT TRUST" \
+    -out "${SBKEYS_DIR}/ADV.crt"
+fi
+# Re-derived every run for the same reason gen-sbkeys.sh re-derives its own: a
+# .der left disagreeing with its .crt is a split nothing downstream detects.
+openssl x509 -in "${SBKEYS_DIR}/ADV.crt" \
+  -out "${SBKEYS_DIR}/ADV.der" -outform DER
+
 workdir="$(mktemp -d)"
 trap 'rm -rf "${workdir}"' EXIT
 
 # SignatureOwner is informational - it identifies who contributed the entry, not
 # who may use it. One value for all three keeps the seed self-describing.
-for role in PK KEK db dbx; do
+for role in PK KEK db dbx ADV; do
   sbsiglist --owner "${EFI_GLOBAL_VARIABLE_GUID}" --type x509 \
     --output "${workdir}/${role}.esl" "${SBKEYS_DIR}/${role}.der"
 done
@@ -198,5 +246,29 @@ for role in PK KEK db dbx; do
     >>"${SEED_MANIFEST}"
 done
 
+# The rival store. PK ONLY, and only PK, because PK is what the harness compares
+# and a fixture should carry nothing it does not need. A store naming just one
+# variable is as well-formed as one naming four - same header, same CRC over the
+# entries - so the minimal form tests the precedence rule exactly as a fuller
+# one would.
+#
+# Under the SAME name and GUID as the real PK. Substituting a DIFFERENT variable
+# would test nothing: the question is whether an on-medium store can win a
+# collision with the compiled-in seed, and there is no collision unless both name
+# the same variable.
+python3 "${workdir}/pack.py" "${SEED_ADV_OUT}" "${SEED_EPOCH}" \
+  "PK=${EFI_GLOBAL_VARIABLE_GUID}=${workdir}/ADV.esl"
+
+# Refuse to ship a rival that is accidentally the real thing. If these two ever
+# compare equal, the substitution test would "pass" while proving nothing at all,
+# because the store it wrote and the seed it is testing against would carry the
+# same key. Cheap to check, and the failure it guards is invisible from the
+# harness end.
+if cmp -s "${SEED_OUT}" "${SEED_ADV_OUT}"; then
+  echo "gen-efi-seed: the adversarial store is byte-identical to the real seed; the substitution test would prove nothing" >&2
+  exit 1
+fi
+
 echo "gen-efi-seed: wrote ${SEED_OUT} (PK, KEK, db enrolled; dbx placeholder)"
 echo "gen-efi-seed: wrote ${SEED_MANIFEST} (per-role DER digests as packed)"
+echo "gen-efi-seed: wrote ${SEED_ADV_OUT} (rival PK, for the HITL precedence test)"

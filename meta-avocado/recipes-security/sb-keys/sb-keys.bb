@@ -118,6 +118,18 @@ do_deploy() {
         install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var.manifest" \
             "${DEPLOYDIR}/sb-keys/ubootefi.var.manifest"
     fi
+
+    # The rival variable store, for the HITL precedence test. Deployed, never
+    # installed, and never compiled into anything - avocado-stone stages it onto
+    # the ESP under a distinct name so the harness can substitute it for the real
+    # store and confirm the compiled-in seed still wins.
+    #
+    # Guarded like the seed above because gen-efi-seed.sh only writes it under
+    # the boot-integrity-poc token.
+    if [ -f "${AVOCADO_SB_KEYS_DIR}/ubootefi.var.adversarial" ]; then
+        install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var.adversarial" \
+            "${DEPLOYDIR}/sb-keys/ubootefi.var.adversarial"
+    fi
 }
 
 addtask deploy after do_install before do_build

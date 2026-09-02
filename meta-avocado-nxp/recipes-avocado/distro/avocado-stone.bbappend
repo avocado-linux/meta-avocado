@@ -192,13 +192,22 @@ do_deploy:append:avocado-imx93-frdm() {
         bbfatal "boot-integrity-poc: $manifest declares no esp image with a build_args.files array, so the unsigned negative-test fixture has nowhere declared to go and jq would invent one. Add the esp image to the manifest, or drop the fixture entry from this block."
     fi
     # Image.unsigned goes on the ESP, NOT on the boot partition, and the reason
-    # is arithmetic rather than taste. boot is 128 MiB and already carries
-    # fitImage (58 MiB) plus BOOTAA64.EFI (34 MiB) plus the dtb, leaving under
-    # 2 MiB free - and mkfs.vfat gives a 128 MiB FAT32 volume single-sector
-    # clusters, so its two FAT tables alone are about 2 MiB. A 34 MiB fixture
-    # does not fit, and the way it would fail is the way this file has already
-    # been bitten once (see the files_append note above): a green build
-    # producing a boot.img with a file silently missing from it.
+    # is measured rather than estimated. boot is 128 MiB carrying fitImage
+    # (60,907,572), BOOTAA64.EFI (35,582,048) and the dtb (61,248); mdir reports
+    # 35,594,752 bytes free against a 35,580,416-byte fixture. So it FITS - by
+    # 14,336 bytes.
+    #
+    # That is not a margin, it is a coincidence. Any kernel growth at all pushes
+    # it over, and the way it would fail is the way this file has already been
+    # bitten once (see the files_append note above): a green build producing a
+    # boot.img with a file silently missing from it. Seating a test fixture in
+    # 14 KB of slack would make every future kernel bump a coin toss on whether
+    # the negative test still has a payload to offer.
+    #
+    # Stated as a measurement because the obvious estimate gets it wrong in the
+    # other direction: counting the fixture into the total and reading the
+    # remainder as the space available beforehand says it does not fit at all.
+    # It does. Re-derive from mdir on the built boot.img, not from arithmetic.
     #
     # fitImage is the 58 MiB that makes boot tight, and dropping it under this
     # token would free the room - the PoC path is bootefi on BOOTAA64.EFI and
@@ -216,7 +225,8 @@ do_deploy:append:avocado-imx93-frdm() {
          {"in": $dtb, "out": $dtb}
        ]
        | .storage_devices.rootdisk.images.esp.build_args.files += [
-         {"in": "Image.unsigned", "out": "Image.unsigned"}
+         {"in": "Image.unsigned", "out": "Image.unsigned"},
+         {"in": "advstore.var", "out": "advstore.var"}
        ]' \
       "$manifest" > "$manifest.efi-poc"
     mv "$manifest.efi-poc" "$manifest"
@@ -241,6 +251,14 @@ DEPENDS:append:avocado-imx93-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'bo
 # would otherwise reach the signing step with no Image in DEPLOY_DIR_IMAGE, and
 # a developer's warm TMPDIR hides that indefinitely.
 do_deploy[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', ' virtual/kernel:do_deploy', '', d)}"
+
+# sb-keys:do_deploy for the rival variable store staged onto the ESP below.
+# DEPENDS on sb-keys is NOT enough and the gap is silent, exactly as
+# u-boot-imx_%.bbappend spells out for the seed: sb-keys' own
+# `addtask deploy after do_install before do_build` leaves do_deploy outside the
+# populate_sysroot chain that DEPENDS orders. Without this flag the copy races
+# its producer and loses on a clean build.
+do_deploy[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', ' sb-keys:do_deploy', '', d)}"
 
 # Sign a COPY of the deployed kernel and leave the original alone.
 #
@@ -352,6 +370,30 @@ do_deploy:append:avocado-imx93-frdm() {
     # either record a refusal that never happened, or read a successful boot as
     # enforcement failing. Both are wrong in the dangerous direction, and
     # neither is visible from the harness end.
+    # The rival variable store, staged flat as advstore.var so the harness can
+    # copy it over ubootefi.var from the U-Boot prompt and confirm the
+    # compiled-in seed still wins the collision. Flat rather than under
+    # sb-keys/, matching how Image.unsigned is staged, so the manifest entry
+    # needs no assumption about how stone resolves a subdirectory.
+    #
+    # The name is deliberately NOT ubootefi.var-something: U-Boot reads
+    # ubootefi.var by exact name from the ESP, and a fixture whose name could be
+    # mistaken for the real store by a future glob is a fixture that could become
+    # the store.
+    _adv="${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var.adversarial"
+    if [ ! -f "$_adv" ]; then
+        bbfatal "boot-integrity-poc: $_adv is absent, so the key-database precedence test has no rival store to substitute and would fall back to proving only that an ABSENT store cannot override the seed. gen-efi-seed.sh writes it beside the seed; this recipe's do_deploy depends on sb-keys:do_deploy."
+    fi
+    install -m 0644 "$_adv" ${DEPLOYDIR}/advstore.var
+
+    # It must not be the real seed. If these ever match, the substitution test
+    # would write the genuine store over itself and pass while proving nothing.
+    # gen-efi-seed.sh checks this too; checked again here because this is the
+    # copy that actually reaches the medium.
+    if cmp -s ${DEPLOYDIR}/advstore.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
+        bbfatal "boot-integrity-poc: advstore.var is byte-identical to the real ubootefi.var, so substituting one for the other tests nothing. The rival store must carry a different PK."
+    fi
+
     if cmp -s ${DEPLOYDIR}/Image.unsigned ${DEPLOYDIR}/Image.signed; then
         bbfatal "boot-integrity-poc: ${DEPLOYDIR}/Image.unsigned is byte-identical to Image.signed, so sbsign attached nothing and the negative test would offer the firmware a payload it is meant to ACCEPT. That would record a refusal that never happened, or a boot that reads as enforcement failing."
     fi
