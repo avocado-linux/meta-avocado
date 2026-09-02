@@ -360,7 +360,13 @@ if MODE == "boot_integrity_report" then
   -- when the enrolled db matches the certificate the image shipped, so
   -- `unknown` here means either the preseed did not happen or the enrolled key
   -- database is not ours - and both must fail rather than pass quietly.
-  if not saw("keydb_origin=firmware-resident") then
+  -- `%-` because saw() takes a Lua PATTERN, where a bare `-` is the lazy
+  -- repetition quantifier rather than a hyphen. Unescaped, this never matches
+  -- and the mode fails on a record that plainly carries the value - observed on
+  -- hardware, where the other three assertions passed and this one did not.
+  -- The three values above contain no magic characters, which is why they are
+  -- written plainly and this one cannot be.
+  if not saw("keydb_origin=firmware%-resident") then
     fail("keydb_origin does not read `firmware-resident` - the key database was " ..
          "either not compiled into the bootloader, or does not match the " ..
          "certificate this image shipped. The reporter downgrades to `unknown` " ..
