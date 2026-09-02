@@ -65,7 +65,10 @@ fixture() {
         local payload="STAND-IN-FOR-A-DER-CERTIFICATE"
         : >"$dbvar"
         local i=0
-        while [ "$i" -lt 48 ]; do printf '\000' >>"$dbvar"; i=$((i + 1)); done
+        while [ "$i" -lt 48 ]; do
+          printf '\000' >>"$dbvar"
+          i=$((i + 1))
+        done
         printf '%s' "$payload" >>"$dbvar"
         case "${opt#keydb=}" in
           match) printf '%s' "$payload" | sha256sum | awk '{print $1}' >"$root/db.der.sha256" ;;
@@ -121,6 +124,26 @@ expect() {
   else
     fail "$label (${field}=${got}, wanted ${want})"
   fi
+}
+
+# Substring form, for `detail`. Exact equality is wrong for that field on
+# purpose: it carries the diagnostics of several independent probes joined
+# together, so an exact-match assertion would have to spell out every message
+# that happened to fire and would break whenever an unrelated probe gained one.
+# What must hold is that a given probe's message is PRESENT - the property that
+# was silently false while the field was assigned rather than appended.
+expect_has() {
+  local label="$1" root="$2" field="$3" want="$4"
+  local out got
+  out="$(sh "$root/report.sh" 2>/dev/null)" || {
+    fail "$label (reporter exited non-zero)"
+    return
+  }
+  got="$(printf '%s\n' "$out" | sed -n "s/^${field}=//p")"
+  case "$got" in
+    *"$want"*) pass "$label" ;;
+    *) fail "$label (${field}=${got}, wanted it to contain ${want})" ;;
+  esac
 }
 
 printf '\n== single emission ==\n'
@@ -202,6 +225,53 @@ expect "an unrecognised provenance falls back to unknown" "$r" keydb_origin unkn
 
 r="$(fixture secureboot=1 'store=keydb_origin=""')"
 expect "an empty provenance falls back to unknown" "$r" keydb_origin unknown
+
+printf '\n== detail ==\n'
+
+# The case that was silently broken. A board whose descriptor claims a
+# firmware-resident key database it cannot corroborate has TWO things to say,
+# and `rot_state=unauthenticated` is true on every board this ships to - so the
+# root-of-trust message fired on every boot and erased the corroboration
+# failure. The record then read `keydb_origin=unknown` with a detail about
+# hardware attestation, which points a reader at the wrong subsystem entirely.
+r="$(fixture secureboot=1 keydb=mismatch 'store=keydb_origin="firmware-resident"')"
+expect_has "a refused keydb claim keeps its own explanation" "$r" \
+  detail "does not contain the certificate this image shipped"
+expect_has "and the root-of-trust message is still there beside it" "$r" \
+  detail "no hardware attestation"
+
+# One key per line is the record's whole format, so a joined detail must not
+# introduce a newline - a consumer splitting on it would read the second half as
+# a malformed field rather than as part of this one.
+n="$(sh "$r/report.sh" 2>/dev/null | grep -c '^detail=')"
+m="$(sh "$r/report.sh" 2>/dev/null | wc -l)"
+if [ "$n" -eq 1 ] && [ "$m" -eq 5 ]; then
+  pass "a joined detail stays on one line"
+else
+  fail "record has $m lines and $n detail lines, wanted 5 and 1"
+fi
+
+# The sentinel is REPLACED by the first real message, never accumulated onto.
+# Appending to it would prefix every diagnosed board's detail with a claim that
+# no probe ran, which contradicts the message immediately following it.
+#
+# The sentinel itself is unreachable on any real path - the enforcement branch
+# writes on all four of its failure routes, and `read_rot_evidence` returns one
+# of three values that all write - so it is a defensive default rather than an
+# outcome. What is testable, and what these two cases cover, is that it never
+# survives INTO a message.
+for c in efivars-unmounted secureboot=0; do
+  r="$(fixture $c)"
+  out="$(sh "$r/report.sh" 2>/dev/null | sed -n 's/^detail=//p')"
+  case "$out" in
+    "no probe ran"*) fail "the sentinel leaked into a real detail ($c): $out" ;;
+    *) pass "the sentinel does not survive into a real detail ($c)" ;;
+  esac
+done
+
+r="$(fixture efivars-unmounted)"
+expect "the first real message replaces the sentinel outright" "$r" \
+  detail "efivarfs directory present but not mounted - no variables are readable"
 
 printf '\n'
 if [ "$failures" -ne 0 ]; then

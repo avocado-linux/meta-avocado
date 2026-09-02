@@ -54,21 +54,45 @@ store_trust="unknown"
 keydb_origin="unknown"
 detail="no probe ran"
 
+# `detail` carries the diagnostics for FOUR independent probes - the enforcement
+# read, the key-database corroboration, and the root-of-trust attestation - and
+# more than one of them can have something to say on a single boot. Plain
+# assignment made the last writer win, so the root-of-trust line at the bottom
+# of this file silently erased whatever the key-database check had recorded.
+#
+# That was not an edge case, it was the norm: `rot_state` is `unauthenticated`
+# on every board this ships to today, so its message fired on every boot and
+# the corroboration failure - the one explaining why `keydb_origin` had just
+# dropped to `unknown` - never reached a reader. A record saying
+# `keydb_origin=unknown` with a detail about hardware attestation invites
+# exactly the wrong investigation.
+#
+# So append instead, and drop the "no probe ran" sentinel on the first real
+# message rather than accumulating onto it. One line, `; `-joined, because the
+# record's format is one key per line and a multi-line value would break it.
+add_detail() {
+  if [ "$detail" = "no probe ran" ]; then
+    detail="$1"
+  else
+    detail="${detail}; $1"
+  fi
+}
+
 # --- enforcement: what the firmware reports about itself --------------------
 if [ ! -d "$EFIVARS" ]; then
   # No efivarfs at all. Either the kernel was not entered through the EFI
   # stub, or this is a boot path with no UEFI variable store behind it.
-  detail="efivarfs absent - kernel was not entered through the EFI stub"
+  add_detail "efivarfs absent - kernel was not entered through the EFI stub"
 elif [ -r "$MOUNTS" ] && ! awk -v p="$EFIVARS" '$2 == p { found = 1 } END { exit !found }' "$MOUNTS"; then
   # The mount point is there and nothing is on it. Distinguished from the
   # branch below because the causes are opposite: this is a userspace mount
   # that did not happen, not firmware that reported nothing, and a consumer
   # chasing the wrong one wastes the whole investigation.
-  detail="efivarfs directory present but not mounted - no variables are readable"
+  add_detail "efivarfs directory present but not mounted - no variables are readable"
 elif ! _sb=$(od -An -N5 -tu1 "${EFIVARS}/SecureBoot-${EFI_GLOBAL_GUID}" 2>/dev/null); then
   # efivarfs is mounted but the variable is not there. Reported distinctly
   # from an absent efivarfs because the causes and the fixes differ.
-  detail="efivarfs present but SecureBoot variable absent"
+  add_detail "efivarfs present but SecureBoot variable absent"
 else
   # Byte 5 is the value; bytes 1-4 are the attribute header.
   _sb_value=$(printf '%s\n' "$_sb" | awk 'NF { print $5; exit }')
@@ -77,7 +101,7 @@ else
     0) enforcement="disabled" ;;
     *)
       enforcement="unavailable"
-      detail="SecureBoot variable unreadable or malformed"
+      add_detail "SecureBoot variable unreadable or malformed"
       ;;
   esac
 fi
@@ -185,8 +209,8 @@ if [ -r "$STORE_DESC" ]; then
   # trailing space or a single-quoted value is a correct descriptor, and turning
   # one into "unknown" reports a device as unprovisioned when it is not.
   _sd_read() {
-    sed -n "s/^$1=//p" "$STORE_DESC" | tail -1 |
-      sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']\$//"
+    sed -n "s/^$1=//p" "$STORE_DESC" | tail -1 \
+      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']\$//"
   }
   _sd_store=$(_sd_read store_trust)
   _sd_keydb=$(_sd_read keydb_origin)
@@ -247,18 +271,34 @@ EFI_IMAGE_SECURITY_GUID="d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 # against the board: db reads 889 bytes, the shipped DER is 841, and 889 - 48
 # is exactly 841.
 corroborate_keydb() {
-  [ -r "$KEYDB_REF" ] || { echo unknown; return 0; }
+  [ -r "$KEYDB_REF" ] || {
+    echo unknown
+    return 0
+  }
 
   _kd_var="${EFIVARS}/db-${EFI_IMAGE_SECURITY_GUID}"
-  [ -r "$_kd_var" ] || { echo unknown; return 0; }
+  [ -r "$_kd_var" ] || {
+    echo unknown
+    return 0
+  }
 
-  _kd_want=$(cat "$KEYDB_REF" 2>/dev/null) || { echo unknown; return 0; }
-  case "$_kd_want" in *[!0-9a-f]* | "") echo unknown; return 0 ;; esac
+  _kd_want=$(cat "$KEYDB_REF" 2>/dev/null) || {
+    echo unknown
+    return 0
+  }
+  case "$_kd_want" in *[!0-9a-f]* | "")
+    echo unknown
+    return 0
+    ;;
+  esac
 
   # tail -c +49 skips the 48-byte prefix. A short or malformed variable yields a
   # digest that simply does not match, which is `no` rather than a crash.
   _kd_have=$(tail -c +49 "$_kd_var" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}')
-  [ -n "$_kd_have" ] || { echo unknown; return 0; }
+  [ -n "$_kd_have" ] || {
+    echo unknown
+    return 0
+  }
 
   if [ "$_kd_have" = "$_kd_want" ]; then echo yes; else echo no; fi
 }
@@ -274,9 +314,9 @@ case "$keydb_origin" in
     if [ "$_kd" != "yes" ]; then
       keydb_origin="unknown"
       if [ "$_kd" = "no" ]; then
-        detail="descriptor claims a firmware-resident key database, but the enrolled db does not contain the certificate this image shipped"
+        add_detail "descriptor claims a firmware-resident key database, but the enrolled db does not contain the certificate this image shipped"
       else
-        detail="descriptor claims a firmware-resident key database and it could not be corroborated against the enrolled db"
+        add_detail "descriptor claims a firmware-resident key database and it could not be corroborated against the enrolled db"
       fi
     fi
     ;;
@@ -299,12 +339,12 @@ if [ "$rot_state" = "authenticated" ]; then
   # the top of the file - the one path where a probe DID run and succeeded would
   # be the one reporting that none had. Unreachable on this board, since nothing
   # here exposes an attestation, which is exactly why it went unnoticed.
-  detail="hardware attestation read: the firmware that reported enforcement is itself attested"
+  add_detail "hardware attestation read: the firmware that reported enforcement is itself attested"
 fi
 if [ "$rot_state" = "unauthenticated" ]; then
   # Worded to hold for enforcement=disabled as well as enabled: what is
   # unanchored is the firmware's answer, whichever answer it gave.
-  detail="firmware answered, but no hardware attestation of the firmware is readable from Linux"
+  add_detail "firmware answered, but no hardware attestation of the firmware is readable from Linux"
 fi
 
 emit() {
