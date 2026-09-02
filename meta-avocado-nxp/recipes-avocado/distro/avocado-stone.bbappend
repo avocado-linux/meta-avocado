@@ -163,9 +163,10 @@ do_deploy:append() {
 # to a field the pinned tool has never heard of fails silently and green, which
 # is worse than having no conflict detection.
 #
-# The DTB is deployed unconditionally by linux-imx. Image.signed is not - it is
-# produced by the signing block below, under this same token, so the manifest
-# entry and its input appear and disappear together.
+# The DTB is deployed unconditionally by linux-imx. Image.signed and
+# Image.unsigned are not - both are produced by the signing block below, under
+# this same token, so the manifest entries and their inputs appear and disappear
+# together.
 AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}"
 
 # Wrapped in an `if` rather than guarded by an early `return`, for the reason
@@ -177,13 +178,45 @@ AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-inte
 # it depends on parse order to stay harmless.
 do_deploy:append:avocado-imx93-frdm() {
   if [ "${AVOCADO_BOOT_INTEGRITY_POC}" = "1" ]; then
-    bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json. This is PoC scaffolding. The staged kernel is signed against the enrolled db, so the firmware refuses a replacement it cannot verify - but the boot medium is still writable by anyone with access to it, and the bootloader that performs that verification is itself unauthenticated, because AHAB is open on this part and cannot be closed. A boot-medium writer can replace U-Boot, seed and all."
+    bbwarn "boot-integrity-poc: staging EFI/BOOT/BOOTAA64.EFI and ${FIT_CONF_DEFAULT_DTB} in the boot partition of stone-${MACHINE_SHORT_NAME}.json, plus an UNSIGNED Image.unsigned on the ESP (the negative-test fixture the HITL harness offers the firmware in order to observe a refusal - nothing boots it). This is PoC scaffolding. The staged kernel is signed against the enrolled db, so the firmware refuses a replacement it cannot verify - but the boot medium is still writable by anyone with access to it, and the bootloader that performs that verification is itself unauthenticated, because AHAB is open on this part and cannot be closed. A boot-medium writer can replace U-Boot, seed and all."
 
     manifest="${DEPLOYDIR}/stone-${MACHINE_SHORT_NAME}.json"
+
+    # jq's `.a.b.c += [x]` CREATES every missing level rather than failing, so a
+    # manifest that had no `esp` image would silently gain a fabricated one
+    # carrying the fixture and nothing else - a green build producing a card
+    # whose ESP is not the ESP anyone declared. Assert the target exists first.
+    # This is the same silent-success shape as the files_append note above, and
+    # this file has now been bitten by that shape twice.
+    if [ "$(jq -r '.storage_devices.rootdisk.images.esp.build_args.files | type' "$manifest")" != "array" ]; then
+        bbfatal "boot-integrity-poc: $manifest declares no esp image with a build_args.files array, so the unsigned negative-test fixture has nowhere declared to go and jq would invent one. Add the esp image to the manifest, or drop the fixture entry from this block."
+    fi
+    # Image.unsigned goes on the ESP, NOT on the boot partition, and the reason
+    # is arithmetic rather than taste. boot is 128 MiB and already carries
+    # fitImage (58 MiB) plus BOOTAA64.EFI (34 MiB) plus the dtb, leaving under
+    # 2 MiB free - and mkfs.vfat gives a 128 MiB FAT32 volume single-sector
+    # clusters, so its two FAT tables alone are about 2 MiB. A 34 MiB fixture
+    # does not fit, and the way it would fail is the way this file has already
+    # been bitten once (see the files_append note above): a green build
+    # producing a boot.img with a file silently missing from it.
+    #
+    # fitImage is the 58 MiB that makes boot tight, and dropping it under this
+    # token would free the room - the PoC path is bootefi on BOOTAA64.EFI and
+    # never reads the FIT. It stays anyway: it is the only fallback if the EFI
+    # hand-off fails, and removing a working boot path to make space for a test
+    # fixture trades a real capability for a convenience.
+    #
+    # The ESP is 64 MiB and ships EMPTY - U-Boot writes ubootefi.var into it at
+    # runtime, which is 3 KB - so the fixture lands in space that is otherwise
+    # unused. That is also why the ESP is NOT a shrink candidate while this
+    # fixture exists.
     jq --arg dtb "${FIT_CONF_DEFAULT_DTB}" \
       '.storage_devices.rootdisk.images.boot.build_args.files += [
          {"in": "Image.signed", "out": "EFI/BOOT/BOOTAA64.EFI"},
          {"in": $dtb, "out": $dtb}
+       ]
+       | .storage_devices.rootdisk.images.esp.build_args.files += [
+         {"in": "Image.unsigned", "out": "Image.unsigned"}
        ]' \
       "$manifest" > "$manifest.efi-poc"
     mv "$manifest.efi-poc" "$manifest"
@@ -281,6 +314,46 @@ do_deploy:append:avocado-imx93-frdm() {
     # failure surfaces as a board that will not boot.
     if ! sbverify --cert "$_crt" ${DEPLOYDIR}/Image.signed; then
         bbfatal "boot-integrity-poc: sbverify rejected ${DEPLOYDIR}/Image.signed against db.crt, so sbsign produced an output this key database does not validate."
+    fi
+
+    # The negative-test payload, produced by the build rather than staged by
+    # hand. The harness's signed_payload_refused mode needs a payload the
+    # enrolled db does not vouch for, and until now its only source was a human
+    # copying the unsigned Image onto the card with --ums-hold. A test whose
+    # fixture is assembled by hand is a test that silently stops running: the
+    # mode fails with "stage the unsigned kernel Image there first", and the
+    # cheapest way past that message is to skip the assertion.
+    #
+    # It is the SAME bytes sbsign just consumed, taken here rather than
+    # re-derived later, so the thing the firmware is asked to refuse is exactly
+    # the thing it would have accepted had it been signed. That is what makes a
+    # refusal attributable to the signature and not to some other difference.
+    #
+    # The distinct name matters and is not cosmetic. Nothing boots
+    # Image.unsigned - the boot path is bootefi on EFI/BOOT/BOOTAA64.EFI - so it
+    # is inert cargo that exists to be offered and refused. Naming it `Image`
+    # would let a future manifest entry stage something else under that name and
+    # have this assertion quietly test a file nobody chose.
+    #
+    # It ships only under this token, on a PoC image whose own build warning
+    # already says the boot medium is writable by anyone with access to it. It
+    # adds no capability an attacker at the U-Boot prompt did not already have,
+    # since that prompt loads any file from any partition. Do not carry this
+    # into a build that drops the PoC token.
+    install -m 0644 "$_img" ${DEPLOYDIR}/Image.unsigned
+
+    # Compared against Image.SIGNED, not against $_img. Checking the copy
+    # against the file it was just copied from would be a tautology - install
+    # runs under set -e, so a failed copy already aborts the task.
+    #
+    # What is worth asserting is that the two payloads DIFFER. If a later change
+    # signs in place, or repoints $_img at the signed artifact, the negative test
+    # would hand the firmware a payload it is supposed to ACCEPT - and then
+    # either record a refusal that never happened, or read a successful boot as
+    # enforcement failing. Both are wrong in the dangerous direction, and
+    # neither is visible from the harness end.
+    if cmp -s ${DEPLOYDIR}/Image.unsigned ${DEPLOYDIR}/Image.signed; then
+        bbfatal "boot-integrity-poc: ${DEPLOYDIR}/Image.unsigned is byte-identical to Image.signed, so sbsign attached nothing and the negative test would offer the firmware a payload it is meant to ACCEPT. That would record a refusal that never happened, or a boot that reads as enforcement failing."
     fi
   fi
 }

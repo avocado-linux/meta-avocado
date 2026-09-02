@@ -395,13 +395,22 @@ end
 -- neither observes a refusal. This mode exists to replace both inferences with
 -- an observation.
 --
--- STAGING PREREQUISITE. The boot partition must carry `Image.unsigned`: a copy
--- of the unsigned kernel `Image` that the deploy step deliberately leaves
--- byte-identical while signing a separate `Image.signed` for the ESP. Put it
--- there with `--ums-hold` before running this mode. The distinct filename is
--- deliberate - loading a bare `Image` would silently pick up whatever a future
--- manifest happens to stage under that name, and this check must never be
--- satisfied by a file nobody chose.
+-- THE FIXTURE COMES FROM THE BUILD. The boot partition carries
+-- `Image.unsigned`, a copy of the unsigned kernel `Image` that avocado-stone's
+-- do_deploy takes from the same bytes it hands sbsign, staged there by the
+-- boot-integrity-poc manifest entry. Nothing boots it.
+--
+-- It used to be a manual step - copy the Image onto the card with `--ums-hold`
+-- before running this mode - and that is why it is worth stating that it no
+-- longer is. A test whose fixture a human assembles is a test that quietly
+-- stops running: this mode failed with "stage the unsigned kernel Image there
+-- first", and the cheapest way past that message is to skip the assertion
+-- rather than to satisfy it. The build now cannot produce a PoC image whose
+-- enforcement claim has no way to be falsified.
+--
+-- The distinct filename is deliberate - loading a bare `Image` would silently
+-- pick up whatever a future manifest happens to stage under that name, and this
+-- check must never be satisfied by a file nobody chose.
 --
 -- The load address, device tree and boot command are the board's own
 -- (`image_addr`, `load_devicetree`, `avocado_boot`), so a refusal observed here
@@ -438,14 +447,33 @@ if MODE == "signed_payload_refused" then
          "would say nothing about signature enforcement")
   end
 
+  -- The fixture lives on the ESP, not on ${bootpart}. boot is 128 MiB and is
+  -- already ~126 MiB full of fitImage, BOOTAA64.EFI and the dtb, so a 34 MiB
+  -- unsigned kernel does not fit there; the ESP ships empty apart from the
+  -- runtime-written ubootefi.var. See avocado-stone.bbappend for the arithmetic.
+  --
+  -- Resolved by NAME, for the reason part two of keydb_immutable spells out at
+  -- length: this card went from 8 partitions to 10 inside two days, so a
+  -- hardcoded index would pass today by pointing at the right partition and
+  -- later pass by pointing at the wrong one.
+  cmd("part number ${devtype} ${devnum} esp espp; echo 'ESPPART''='${espp}", 4000)
+  local esppart = string.match(tail, "ESPPART=(%S+)")
+  if not esppart or esppart == "" then
+    fail("could not resolve a partition named 'esp' on the boot medium - the " ..
+         "unsigned fixture cannot be located, so nothing can be offered to the " ..
+         "firmware and nothing would be refused")
+  end
+
   -- Overwrite image_addr with the UNSIGNED payload, replacing the signed one the
   -- board would otherwise run. Asserting this read is what separates "the
   -- firmware refused it" from "there was nothing to refuse".
-  cmd("load ${devtype} ${devnum}:${bootpart} ${image_addr} Image.unsigned", 15000)
+  cmd("load ${devtype} ${devnum}:${espp} ${image_addr} Image.unsigned", 15000)
   if not saw("bytes read") then
-    fail("Image.unsigned did not load from the boot partition - stage the " ..
-         "unsigned kernel Image there with --ums-hold first. Nothing was " ..
-         "offered to the firmware, so nothing was refused")
+    fail("Image.unsigned did not load from the ESP (partition " .. esppart ..
+         "). The build stages it there under boot-integrity-poc, so this means " ..
+         "the card predates that change or was flashed from a token-absent " ..
+         "build - reflash. Nothing was offered to the firmware, so nothing " ..
+         "was refused")
   end
   tio.echo("\r\n>>> unsigned payload loaded at image_addr <<<\r\n")
 
