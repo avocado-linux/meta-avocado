@@ -121,6 +121,41 @@ local function await_login(deadline_s)
   return false
 end
 
+-- Log in as root, or fail naming WHICH way it went wrong.
+--
+-- Shared by every mode that needs a shell. It used to be two copies - one
+-- inline, one a local inside keydb_immutable - which is why the two reported
+-- the same failure with different wording.
+--
+-- The password branch is the point. An image built WITHOUT
+-- kas/target/bringup.yml has a locked root: avocado-users ships `root:*:`, and
+-- the empty-root-password image feature only preserves an already-empty
+-- password rather than creating one, so only that overlay's
+-- AVOCADO_DEV_ROOT_LOGIN=1 unlocks it. The board then boots perfectly, reaches
+-- a login prompt, and answers `root` with `Password:` - and the old message,
+-- "did not reach a root shell", reads as a wedged or broken board. It cost a
+-- full build-flash-assert cycle to work out that the image was simply built
+-- without the overlay, so the message now says so.
+local function login_root()
+  cmd("root", 4000)
+  if saw("avocado%-imx93%-frdm:~#") then return end
+
+  -- Checked before the generic failure because it is the specific, actionable
+  -- cause. "Password:" comes from the getty, not from the string sent, so the
+  -- console echoing its own input cannot satisfy it.
+  if saw("Password:") then
+    fail("the console prompted root for a PASSWORD, so this image has no " ..
+         "passwordless login and no assertion needing a shell can run. This " ..
+         "is a BUILD problem, not a board problem: avocado-users ships a " ..
+         "locked root (root:*:) and only AVOCADO_DEV_ROOT_LOGIN=1 unlocks it, " ..
+         "which kas/target/bringup.yml sets. Rebuild with that overlay in the " ..
+         "kas chain and reflash")
+  end
+
+  fail("did not reach a root shell and the console did not ask for a " ..
+       "password either - the board is not where this mode expects it")
+end
+
 if MODE == "env_lockdown" then
   if not reach_prompt(180) then fail("never reached the U-Boot prompt") end
   tio.echo("\r\n>>> at the prompt <<<\r\n")
@@ -296,9 +331,9 @@ if MODE == "boot_integrity_report" then
   cmd("reset", 500)
   if not await_login(240) then fail("board did not reach a login prompt") end
 
-  -- Passwordless root on the bringup image; the getty says so itself.
-  cmd("root", 4000)
-  if not saw("avocado%-imx93%-frdm:~#") then fail("did not reach a root shell") end
+  -- Passwordless root, which only the bringup overlay provides; login_root
+  -- names that as the cause when it is missing.
+  login_root()
 
   -- Match ONLY on strings the file contains. The getty echoes its own input, so
   -- a pattern that also appears in the command sent would report success against
@@ -566,13 +601,6 @@ if MODE == "keydb_immutable" then
     -- count into a fixed-width field, and command substitution keeps the leading
     -- spaces. Without it the probe would read as "PK absent" on such an image.
     return string.match(tail, "PKPROBE%-%s*(%d+)%-(%x+)")
-  end
-
-  local function login_root()
-    cmd("root", 4000)
-    if not saw("avocado%-imx93%-frdm:~#") then
-      fail("did not reach a root shell - neither half of this mode can run")
-    end
   end
 
   if not reach_prompt(180) then fail("never reached the U-Boot prompt") end
