@@ -245,7 +245,7 @@ do_deploy:append:avocado-imx93-frdm() {
             _cfg_seen=yes
             for _sym in CONFIG_EFI_VARIABLES_PRESEED CONFIG_EFI_SECURE_BOOT; do
                 if ! grep -q "^${_sym}=y\$" "$_cfg"; then
-                    bbfatal "boot-integrity-poc: ${_sym} is not set in the produced $_cfg, so this U-Boot does not do what the enrolment claims. efi-secureboot.cfg requests it; Kconfig did not grant it - check for a defconfig or version bump that changed a dependency. Refusing to write db.fingerprint."
+                    bbfatal "boot-integrity-poc: ${_sym} is not set in the produced $_cfg, so this U-Boot does not do what the enrolment claims. The fragment requests it; Kconfig did not grant it, which means an unmet dependency rather than a missing request. Check those first: EFI_SECURE_BOOT needs EFI_LOADER and FIT_SIGNATURE (fit-verify.cfg supplies the latter), and EFI_VARIABLES_PRESEED needs EFI_MM_COMM_TEE off. Refusing to write db.fingerprint."
                 fi
             done
         done
@@ -408,6 +408,28 @@ python () {
                  "would be absent besides. Drop the token for this machine, or "
                  "wire the EFI boot path for it here first."
                  % d.getVar('MACHINE'))
+
+    # CONFIG_EFI_SECURE_BOOT is `depends on EFI_LOADER && FIT_SIGNATURE`, and
+    # FIT_SIGNATURE is carried by fit-verify.cfg under the SEPARATE verified-boot
+    # token - which kas/feature/boot-integrity-poc.yml does not set. So the
+    # documented PoC build (that feature file on top of the machine file) selects
+    # EFI_SECURE_BOOT only because the pinned vendor defconfig happens to set
+    # FIT_SIGNATURE itself, at configs/imx93_11x11_frdm_defconfig:37.
+    #
+    # Requesting the fragment here removes that dependency on a vendor default
+    # rather than documenting it. It is a NO-OP against today's defconfig - both
+    # symbols are already =y - and becomes load-bearing the moment a u-boot-imx
+    # bump drops either one, which is the case the do_deploy assertion below can
+    # detect but not prevent.
+    #
+    # Only the FRAGMENT, not the signing wiring. UBOOT_SIGN_ENABLE and the
+    # UBOOT_SIGN_KEYDIR/KEYNAME pair stay in the verified-boot block above, so a
+    # PoC-only build gets the Kconfig symbols and runs no signing step - exactly
+    # what it does today via the defconfig. Skipped when verified-boot is also
+    # set, because that block has already appended the same file and unpacking
+    # one SRC_URI entry twice is not something to rely on.
+    if not bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
+        d.appendVar('SRC_URI', ' file://fit-verify.cfg')
 
     # The preseed fragment. CONFIG_EFI_VARIABLES_PRESEED compiles the seed into
     # the U-Boot binary, which is what leaves no interval in which the board is
@@ -589,7 +611,8 @@ do_compile:prepend:bootvars-ubootenv() {
             bbfatal "AHAB bootcmd still loads a separate device tree; the container carries that address itself"
         fi
 
-        # The whole point of ENG-2418. A separate initramfs load reintroduces an
+        # The whole point of bundling the initramfs into the signed container in
+        # the first place. A separate initramfs load reintroduces an
         # unauthenticated argv[1], and it fails open rather than loudly: the
         # board boots, /var unlocks, and nothing reports that the initrd that
         # derived the key was never checked.
