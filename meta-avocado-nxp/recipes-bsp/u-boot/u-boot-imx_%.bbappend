@@ -226,24 +226,73 @@ do_deploy:append:avocado-imx93-frdm() {
         # request, the .config is the answer. This layer's own convention
         # elsewhere is the same, because linux-imx applies fragments with a raw
         # cat that can lose a symbol without saying so.
-        _cfg="${B}/.config"
-        if [ ! -f "$_cfg" ]; then
-            bbfatal "boot-integrity-poc: ${B}/.config is absent at do_deploy, so it cannot be confirmed that the seed was compiled in rather than merely staged."
-        fi
-        for _sym in CONFIG_EFI_VARIABLES_PRESEED CONFIG_EFI_SECURE_BOOT; do
-            if ! grep -q "^${_sym}=y\$" "$_cfg"; then
-                bbfatal "boot-integrity-poc: ${_sym} is not set in the produced ${B}/.config, so this U-Boot does not do what the enrolment claims. efi-secureboot.cfg requests it; Kconfig did not grant it - check for a defconfig or version bump that changed a dependency. Refusing to write db.fingerprint."
-            fi
+        # This recipe builds one directory PER UBOOT_CONFIG - the observed layout
+        # is ${B}/imx93_11x11_frdm_defconfig-sd/.config, not ${B}/.config - and
+        # every variant it produces has to enforce, so check them all rather
+        # than reconstructing one name from UBOOT_CONFIG. Both layouts are
+        # globbed so a single-config recipe still works.
+        #
+        # Finding NO config is a failure, not a pass: it means this check could
+        # not run, and a check that silently does not run is worse than none.
+        # A string flag, not a counter. BitBake's build_dependencies shell
+        # parser raises NotImplementedError('$((') on arithmetic expansion in a
+        # task body, and it does so at PARSE time for every u-boot-imx recipe in
+        # the tree - including versions this machine never builds - so the whole
+        # parse halts rather than the one task failing.
+        _cfg_seen=no
+        for _cfg in ${B}/.config ${B}/*/.config; do
+            [ -f "$_cfg" ] || continue
+            _cfg_seen=yes
+            for _sym in CONFIG_EFI_VARIABLES_PRESEED CONFIG_EFI_SECURE_BOOT; do
+                if ! grep -q "^${_sym}=y\$" "$_cfg"; then
+                    bbfatal "boot-integrity-poc: ${_sym} is not set in the produced $_cfg, so this U-Boot does not do what the enrolment claims. efi-secureboot.cfg requests it; Kconfig did not grant it - check for a defconfig or version bump that changed a dependency. Refusing to write db.fingerprint."
+                fi
+            done
         done
-        if [ ! -f ${AVOCADO_SB_KEYS_DIR}/db.crt ]; then
-            bbfatal "boot-integrity-poc: ${AVOCADO_SB_KEYS_DIR}/db.crt is absent, so there is no certificate to fingerprint and the payload signing step has nothing to check itself against."
+        if [ "$_cfg_seen" != yes ]; then
+            bbfatal "boot-integrity-poc: no .config found under ${B} at do_deploy, so it cannot be confirmed that the seed was compiled in rather than merely staged. Refusing to write db.fingerprint on an unverifiable build."
         fi
+        # LEG 2: is the seed in $(srctree) the seed sb-keys just produced?
+        #
+        # The staging install lives in do_configure:prepend, so a valid
+        # do_configure stamp means it does not re-run. Rotate the keys and
+        # rebuild without invalidating that stamp - the key directory sits
+        # outside tmp/ and is excluded from task hashing, so this is easy to do
+        # accidentally - and $(srctree) keeps the OLD seed while the deploy
+        # directory holds the new one. This task would then publish a marker
+        # describing the new keys for a bootloader compiling the old ones.
+        #
+        # A whole-file compare rather than a db-only one: the seed now carries
+        # four variables, and a stale PK or dbx is just as wrong as a stale db.
+        if ! cmp -s ${S}/ubootefi.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
+            bbfatal "boot-integrity-poc: the seed staged at ${S}/ubootefi.var differs from the one sb-keys deployed. do_configure staged an older seed and its stamp is still valid, so this U-Boot compiles a key database that is not the current one. Run 'bitbake -c cleansstate u-boot-imx' (or -c configure) so the current seed is staged, rather than publishing a marker for keys this binary does not carry."
+        fi
+
+        # LEG 1: fingerprint what was PACKED, not what is in the key directory.
+        #
+        # This used to be sha256(${AVOCADO_SB_KEYS_DIR}/db.crt), read fresh at
+        # this task - a different artifact, at a later time, than the DER
+        # gen-efi-seed.sh actually packed. The manifest records that digest in
+        # the same run as the pack, so there is no window between the two.
+        #
+        # Note it is the DER's digest, not the .crt's: the firmware enrols DER,
+        # so the DER hash is what the on-device reporter can compare against the
+        # db efivar. avocado-stone compares against db.der for the same reason.
+        _mf="${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var.manifest"
+        if [ ! -f "$_mf" ]; then
+            bbfatal "boot-integrity-poc: $_mf is absent, so the digest of the db certificate actually packed into the seed is unavailable. Re-hashing the key directory here is what this marker was changed to stop doing. sb-keys' gen-efi-seed.sh writes it beside the seed."
+        fi
+        _db_digest=$(awk '$1 == "db" { print $2 }' "$_mf")
+        case "$_db_digest" in
+            "" | *[!0-9a-f]*)
+                bbfatal "boot-integrity-poc: $_mf carries no usable db digest (got '$_db_digest'). Refusing to write db.fingerprint from a manifest this task cannot read."
+                ;;
+        esac
         install -d ${DEPLOYDIR}/sb-keys
         # Bare hex, no filename column: the consumer compares a value, and
         # sha256sum's second field is a build-tree path that would differ
         # between two builds of the identical certificate.
-        sha256sum ${AVOCADO_SB_KEYS_DIR}/db.crt | awk '{print $1}' \
-            > ${DEPLOYDIR}/sb-keys/db.fingerprint
+        printf '%s\n' "$_db_digest" > ${DEPLOYDIR}/sb-keys/db.fingerprint
     fi
 }
 

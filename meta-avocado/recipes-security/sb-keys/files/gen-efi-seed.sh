@@ -44,6 +44,11 @@ set -eu
 SBKEYS_DIR="${SBKEYS_DIR:-./sb-keys}"
 SEED_OUT="${SBKEYS_DIR}/ubootefi.var"
 
+# Digests of the DERs this run packs, written beside the seed and travelling
+# with it. See the manifest block at the end of this file for why a later
+# consumer must not re-derive these from the key directory.
+SEED_MANIFEST="${SBKEYS_DIR}/ubootefi.var.manifest"
+
 # Deliberately not `date +%s`. Defaulting to 0 keeps the output deterministic
 # even in an environment that does not export SOURCE_DATE_EPOCH.
 SEED_EPOCH="${SOURCE_DATE_EPOCH:-0}"
@@ -169,4 +174,29 @@ python3 "${workdir}/pack.py" "${SEED_OUT}" "${SEED_EPOCH}" \
   "db=${EFI_IMAGE_SECURITY_DATABASE_GUID}=${workdir}/db.esl" \
   "dbx=${EFI_IMAGE_SECURITY_DATABASE_GUID}=${workdir}/dbx.esl"
 
+# The manifest: for each role, the SHA-256 of the DER this run actually packed.
+#
+# It exists because every consumer downstream was hashing the LIVE key directory
+# instead, at a later task, and the two are not the same claim. The key
+# directory defaults outside tmp/ and is excluded from task hashing, so it can
+# be rotated in place without invalidating anything that consumed it - after
+# which a fingerprint taken at u-boot's do_deploy describes a certificate the
+# compiled-in seed does not carry. The board then enrols one key and is handed a
+# payload signed by another, and every build-time check passes.
+#
+# Taken HERE, in the same run that packed the seed, from the same files the pack
+# consumed. There is no window between the two for anything to change, which is
+# the whole point and the reason this cannot be reconstructed later.
+#
+# Format: one `<role> <sha256>` line per enrolled variable. Extensible on
+# purpose - dbx joined the seed after PK/KEK/db, and the next variable should
+# not need a new file.
+: >"${SEED_MANIFEST}"
+for role in PK KEK db dbx; do
+  printf '%s %s\n' "${role}" \
+    "$(sha256sum "${SBKEYS_DIR}/${role}.der" | awk '{print $1}')" \
+    >>"${SEED_MANIFEST}"
+done
+
 echo "gen-efi-seed: wrote ${SEED_OUT} (PK, KEK, db enrolled; dbx placeholder)"
+echo "gen-efi-seed: wrote ${SEED_MANIFEST} (per-role DER digests as packed)"

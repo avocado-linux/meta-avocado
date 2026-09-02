@@ -249,10 +249,20 @@ do_deploy:append:avocado-imx93-frdm() {
     # with a freshly-built bootloader carrying a different db - which bricks the
     # board on its next boot with no build error anywhere. Fatal, never a
     # warning: a warning here ships exactly that image.
-    _have=$(sha256sum "$_crt" | awk '{print $1}')
+    # Compare the DER, not the .crt. db.fingerprint is now the digest of the DER
+    # that gen-efi-seed.sh actually packed into the seed - recorded in the same
+    # run as the pack, rather than re-hashed from the key directory at a later
+    # task - so the value to compare it against is the DER of the certificate
+    # this step is about to sign with. Hashing the PEM here would never match
+    # the marker and would fail every build.
+    _der="${AVOCADO_SB_KEYS_DIR}/db.der"
+    if [ ! -f "$_der" ]; then
+        bbfatal "boot-integrity-poc: ${AVOCADO_SB_KEYS_DIR}/db.der is absent, so the certificate about to sign the payload cannot be checked against the key database the bootloader enrolled. gen-sbkeys.sh writes it beside db.crt."
+    fi
+    _have=$(sha256sum "$_der" | awk '{print $1}')
     _want=$(awk 'NR==1 {print $1}' "$_fp")
     if [ "$_have" != "$_want" ]; then
-        bbfatal "boot-integrity-poc: db.crt hashes ${_have} but the bootloader in this build enrolled ${_want}. The payload would be signed by a key the firmware does not trust. Rebuild u-boot-imx and sb-keys together, or clean this recipe's sstate."
+        bbfatal "boot-integrity-poc: db.der hashes ${_have} but the seed compiled into the bootloader in this build enrolled ${_want}. The payload would be signed by a key the firmware does not trust, and every device flashed with the pair would refuse its own kernel. Rebuild u-boot-imx and sb-keys together, or clean this recipe's sstate."
     fi
 
     _img="${DEPLOY_DIR_IMAGE}/Image"

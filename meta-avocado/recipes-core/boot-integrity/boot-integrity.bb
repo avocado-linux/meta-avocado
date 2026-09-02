@@ -56,10 +56,12 @@ AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-inte
 
 AVOCADO_BOOT_INTEGRITY_DB_FINGERPRINT = "${DEPLOY_DIR_IMAGE}/sb-keys/db.fingerprint"
 
-# The DER, not the .crt the fingerprint above hashes. What the firmware enrols
-# is DER inside an EFI_SIGNATURE_LIST, so a DER hash is the one the on-device
-# reporter can compare against the db efivar; a PEM hash would never match.
-AVOCADO_BOOT_INTEGRITY_DB_DER = "${DEPLOY_DIR_IMAGE}/sb-keys/db.der"
+# Per-role digests of the DERs gen-efi-seed.sh packed, written beside the seed
+# in the same run as the pack. The db entry is the DER digest specifically -
+# what the firmware enrols is DER inside an EFI_SIGNATURE_LIST, so a DER hash is
+# the one the on-device reporter can compare against the db efivar and a PEM
+# hash would never match.
+AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST = "${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var.manifest"
 
 # Read the marker rather than race it: without this edge the U-Boot deploy may
 # not have run when do_install looks, and an absent marker would be
@@ -126,8 +128,15 @@ EOF
         # A hash, not the certificate: the reporter only has to answer "is the
         # enrolled db the one this image shipped", and 64 hex characters answer
         # it without putting a cert on the device or growing the image.
-        if [ -f "${AVOCADO_BOOT_INTEGRITY_DB_DER}" ]; then
-            sha256sum "${AVOCADO_BOOT_INTEGRITY_DB_DER}" | awk '{print $1}' \
+        # Read from the seed manifest, not by hashing the deployed db.der. Both
+        # describe a certificate, but only the manifest describes the one that
+        # was PACKED into the seed the bootloader compiled - recorded in the
+        # same run as the pack. Hashing the live DER here would reintroduce the
+        # divergence the manifest exists to remove, and it would do it in the
+        # reference the on-device check compares against, so a rotation would
+        # make the device report a mismatch it has no way to explain.
+        if [ -f "${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST}" ]; then
+            awk '$1 == "db" { print $2 }' "${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST}" \
                 > ${D}${libexecdir}/boot-integrity/db.der.sha256
             chmod 0644 ${D}${libexecdir}/boot-integrity/db.der.sha256
         fi

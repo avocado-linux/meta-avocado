@@ -107,6 +107,17 @@ do_deploy() {
         install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var" \
             "${DEPLOYDIR}/sb-keys/ubootefi.var"
     fi
+
+    # The manifest travels WITH the seed, and both consumers read it rather than
+    # re-hashing this directory: u-boot's do_deploy for the db.fingerprint it
+    # publishes, and boot-integrity for the on-device corroboration reference.
+    # Deploying one without the other would leave a consumer silently falling
+    # back to the live key directory, which is the divergence the manifest
+    # exists to remove.
+    if [ -f "${AVOCADO_SB_KEYS_DIR}/ubootefi.var.manifest" ]; then
+        install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var.manifest" \
+            "${DEPLOYDIR}/sb-keys/ubootefi.var.manifest"
+    fi
 }
 
 addtask deploy after do_install before do_build
