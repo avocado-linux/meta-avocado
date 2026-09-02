@@ -23,7 +23,13 @@
       "images": {
         "bootfiles": "avocado-image-rootfs-rubikpi3.bootfiles.tar.gz",
         "rootfs":    "avocado-image-rootfs-rubikpi3.erofs-lz4",
-        "var":       "avocado-image-var-rubikpi3.btrfs"
+        "var":       "avocado-image-var-rubikpi3.btrfs",
+        "initramfs": "avocado-image-initramfs-rubikpi3.cpio.zst",
+        "efi": {
+          "out": "efi.bin",
+          "size": 600,
+          "size_unit": "mebibytes"
+        }
       }
     }
   }

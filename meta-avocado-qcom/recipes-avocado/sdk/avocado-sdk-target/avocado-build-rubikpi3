@@ -69,5 +69,197 @@ build_include_display() {
 # now the pre-bundle seam only: stage artifacts the manifest references that the
 # generic pipeline cannot build, and let stone bundle consume them.
 
+
+# --- Rebuild the ESP so the boot path is an OTA artifact ---------------------
+#
+# What boots this board is a UKI inside efi.bin, and Yocto builds that UKI from
+# the DEFAULT multiconfig's kernel -- so on a feed carrying more than one
+# kernel it is simply the wrong one, and the rootfs ends up with a module tree
+# that matches no running kernel.
+#
+# This used to be fixed in stone-provision-ufs.sh, which worked but made the
+# boot path un-OTA-able: `stone bundle` only bundles what exists at build time,
+# so a kernel or command-line change needed a physical reflash. Doing it here,
+# before bundle, puts the rebuilt ESP in the manifest alongside rootfs and var
+# -- deployable and uploadable like anything else.
+#
+# Only runs when the manifest declares images.efi, so it is a no-op for targets
+# that have not opted in.
+esp_image=$(jq -r '(.storage_devices.rootdisk.images.efi // empty) | if type == "object" then (.out // empty) else . end' "$manifest")
+initramfs_name=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
+bootfiles_name=$(jq -r '.storage_devices.rootdisk.images.bootfiles // empty' "$manifest")
+
+if [ -n "$esp_image" ]; then
+    # The pinned kernel, taken from the ROOTFS sysroot -- deliberately not from
+    # $AVOCADO_PREFIX/kernel/*/Image.
+    #
+    # That kernel sysroot is content-addressed and accumulates a directory per
+    # kernel ever installed, so on a multi-kernel feed the glob is ambiguous
+    # and picks whichever sorts first. Observed doing exactly that: with both
+    # kernels staged it chose 6.18.37-02315-... while the project had pinned
+    # 6.18.37-rt-..., which would have flashed a UKI whose kernel did not match
+    # the modules in the rootfs -- the precise mismatch that leaves /lib/modules
+    # matching no running kernel and every modular driver dead.
+    #
+    # `avocado install` puts exactly the pinned kernel's image in the rootfs
+    # sysroot, so there is one and it is the right one. Assert that rather than
+    # taking the first of a glob.
+    set -- "$AVOCADO_PREFIX"/rootfs/boot/Image-*
+    if [ ! -e "$1" ] || [ "$#" -ne 1 ]; then
+        echo -e "\033[91m[ERROR]\033[0m Expected exactly one kernel in $AVOCADO_PREFIX/rootfs/boot, found $#: $*" >&2
+        exit 1
+    fi
+    KERNEL_IMAGE="$1"
+    KERNEL_VERSION_RESOLVED=$(basename "$KERNEL_IMAGE" | sed 's/^Image-//')
+
+    # The stub and the current ESP come out of the yocto-static bootfiles
+    # bundle, which is the input to this whole flow.
+    esp_work="$input_dir/esp-work"
+    rm -rf "$esp_work"; mkdir -p "$esp_work"
+    tar -xzf "$input_dir/$bootfiles_name" -C "$esp_work" --strip-components=1 \
+        avocado-image-rootfs/efi.bin avocado-image-rootfs/linuxaa64.efi.stub
+
+    kver="$KERNEL_VERSION_RESOLVED"
+    stub="$esp_work/linuxaa64.efi.stub"
+    esp_img="$esp_work/efi.bin"
+    uki_path="EFI/Linux/linux-avocado-rubikpi3.efi"
+
+    # Rebuild the UKI around the kernel this project pinned, into the runtime
+    # input dir so `stone bundle` picks it up as a manifest artifact.
+    #
+    # What boots this board is the UKI in efi.bin, and efi.bin comes out of the
+    # yocto-static bootfiles bundle -- where linux-avocado-qcom-uki built that UKI
+    # from the DEFAULT multiconfig's Image. That was harmless while the feed
+    # carried one kernel. It is not harmless with two: `kernel.version` decides
+    # which kernel's MODULES land in the rootfs, the ESP independently decides
+    # which kernel BOOTS, and when they disagree /lib/modules matches no running
+    # kernel and nothing modular loads at all. On this board that takes out
+    # ethernet (the NIC is USB-attached behind the Renesas PCIe USB3 bridge, so it
+    # needs xhci-pci + xhci-pci-renesas + usbnet), wifi and rubikpi-thermal.
+    #
+    # avocado-cli hands us the pinned kernel directly, so rebuild the UKI here --
+    # the same place the runtime-built rootfs and var already get injected.
+    #
+    # Assembled with the cross objcopy rather than ukify: ukify lives in oe-core's
+    # systemd recipe, which has no nativesdk variant, and a UKI is just the stub
+    # with .osrel/.cmdline/.uname/.initrd/.linux appended at ascending VMAs.
+    #
+    # .cmdline and .osrel are lifted from the UKI already in the ESP instead of
+    # being restated here, so the Yocto build stays the single source of truth for
+    # the kernel command line (root=, console=, KERNEL_CMDLINE_EXTRA).
+    uki_path="EFI/Linux/linux-avocado-rubikpi3.efi"
+    esp_img="$esp_work/efi.bin"
+
+    if [ -z "${KERNEL_IMAGE:-}" ]; then
+        echo "No KERNEL_IMAGE from avocado-cli; keeping the UKI from the bootfiles bundle" >&2
+    elif [ ! -f "$KERNEL_IMAGE" ]; then
+        echo "ERROR: pinned kernel $KERNEL_IMAGE does not exist" >&2
+        exit 1
+    elif [ ! -f "$esp_img" ]; then
+        echo "ERROR: no ESP image at $esp_img" >&2
+        exit 1
+    else
+        kver="${KERNEL_VERSION_RESOLVED:-unknown}"
+        echo "Rebuilding the UKI around the pinned kernel $kver"
+
+        # Cross objcopy/objdump. CROSS_COMPILE is exported by the SDK entrypoint;
+        # fall back to the known SDK path so this also works if it is not.
+        oc="${CROSS_COMPILE:-}objcopy"
+        od="${CROSS_COMPILE:-}objdump"
+        command -v "$oc" >/dev/null 2>&1 || {
+            oc=$(echo "$AVOCADO_SDK_PREFIX"/usr/bin/*/[a-z]*-objcopy | cut -d' ' -f1)
+            od=$(echo "$AVOCADO_SDK_PREFIX"/usr/bin/*/[a-z]*-objdump | cut -d' ' -f1)
+        }
+        [ -x "$oc" ] || command -v "$oc" >/dev/null 2>&1 || { echo "ERROR: no objcopy in the SDK" >&2; exit 1; }
+
+        uki_dir="$input_dir/uki"
+        rm -rf "$uki_dir"; mkdir -p "$uki_dir"
+
+        mcopy -i "$esp_img" "::/$uki_path" "$uki_dir/old.efi" || {
+            echo "ERROR: could not read $uki_path out of $esp_img" >&2; exit 1; }
+
+        # Reuse the Yocto-baked cmdline and os-release. Fail closed on an empty
+        # cmdline: without root=/console= the board flashes and boots to nothing.
+        "$oc" -O binary --only-section=.cmdline "$uki_dir/old.efi" "$uki_dir/cmdline" 2>/dev/null || true
+        "$oc" -O binary --only-section=.osrel   "$uki_dir/old.efi" "$uki_dir/osrel"   2>/dev/null || true
+        # .sbat carries the Secure Boot revocation generation. Dropping it silently
+        # changes what the loader is willing to run, so it is carried across.
+        "$oc" -O binary --only-section=.sbat    "$uki_dir/old.efi" "$uki_dir/sbat"    2>/dev/null || : > "$uki_dir/sbat"
+        tr -d '\0' < "$uki_dir/cmdline" > "$uki_dir/cmdline.txt" 2>/dev/null || true
+        # Amend the command line from the project, not from this layer.
+        #
+        # The base comes from the UKI already in the ESP, so the Yocto build stays
+        # the source of truth for the board-specific parts it alone knows (root=,
+        # console=, KERNEL_CMDLINE_EXTRA). Anything project-specific -- isolcpus,
+        # nohz_full, earlycon, a custom console -- is composed on top from the
+        # avocado side, so the BSP does not have to be rebuilt to change it and
+        # nothing implementation-specific gets frozen into the image.
+        #
+        #   AVOCADO_KERNEL_CMDLINE        replace the line outright
+        #   AVOCADO_KERNEL_CMDLINE_EXTRA  append to it
+        #
+        # Settable today with `avocado provision --env NAME=...`. These names match
+        # the KERNEL_IMAGE / _VERSION pair avocado-cli already
+        # exports, so a future `kernel.cmdline_extra` config field can export the
+        # same variable and projects can declare it in avocado.yaml instead.
+        if [ -n "${AVOCADO_KERNEL_CMDLINE:-}" ]; then
+            printf '%s' "$AVOCADO_KERNEL_CMDLINE" > "$uki_dir/cmdline.txt"
+            echo "Kernel cmdline replaced from project config"
+        fi
+        if [ -n "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+            printf ' %s' "$AVOCADO_KERNEL_CMDLINE_EXTRA" >> "$uki_dir/cmdline.txt"
+            echo "Kernel cmdline extended from project config: $AVOCADO_KERNEL_CMDLINE_EXTRA"
+        fi
+        [ -s "$uki_dir/cmdline.txt" ] || {
+            echo "ERROR: no kernel command line recoverable from the existing UKI" >&2
+            echo "       Building one without it yields a board that flashes and never boots." >&2
+            exit 1; }
+        [ -s "$uki_dir/osrel" ] || cp "$input_dir/os-release" "$uki_dir/osrel" 2>/dev/null || : > "$uki_dir/osrel"
+        printf '%s' "$kver" > "$uki_dir/uname"
+        echo "Kernel cmdline: $(cat "$uki_dir/cmdline.txt")"
+
+        initramfs="$input_dir/$initramfs_name"
+        [ -f "$initramfs" ] || initramfs="$input_dir/$initramfs_name"
+        [ -f "$initramfs" ] || { echo "ERROR: initramfs $initramfs_name not staged" >&2; exit 1; }
+
+        # Sections go after the stub's last one, each 4 KiB aligned.
+        stub="$esp_work/linuxaa64.efi.stub"
+        [ -f "$stub" ] || { echo "ERROR: no linuxaa64.efi.stub in the bootfiles bundle" >&2; exit 1; }
+        # Assemble with ukify -- the same tool linux-avocado-qcom-uki uses during
+        # the Yocto build, so the rebuilt UKI is produced exactly the way the
+        # working one was. Comes from nativesdk-systemd-boot.
+        #
+        # Hand-assembling the PE was tried twice and is not worth it. objcopy
+        # produces an image matching a known-good UKI on every axis objdump shows
+        # and still cannot boot (UEFI takes an undefined-instruction exception,
+        # ESR 0x2000000, during "OS Loader" -- reproduced with a kernel known to
+        # boot, so it is the assembly). A pefile reimplementation landed within 5
+        # bytes of ukify's output but still differed on SizeOfInitializedData and
+        # marked .linux as initialized data rather than code.
+        command -v ukify >/dev/null 2>&1 || {
+            echo "ERROR: ukify not in the SDK (need nativesdk-systemd-boot)" >&2
+            exit 1; }
+
+        ukify build \
+            --linux="$KERNEL_IMAGE" \
+            --initrd="$initramfs" \
+            --cmdline="@$uki_dir/cmdline.txt" \
+            --os-release="@$uki_dir/osrel" \
+            --uname="$kver" \
+            --stub="$stub" \
+            --efi-arch=aa64 \
+            --output="$uki_dir/new.efi" || {
+                echo "ERROR: ukify failed to build the UKI" >&2; exit 1; }
+
+        mcopy -o -i "$esp_img" "$uki_dir/new.efi" "::/$uki_path" || {
+            echo "ERROR: could not write the rebuilt UKI back into $esp_img" >&2; exit 1; }
+        echo "ESP now boots $kver ($(stat -c %s "$uki_dir/new.efi") bytes)"
+    fi
+
+    # Hand the rebuilt ESP to stone as the images.efi artifact.
+    cp "$esp_img" "$input_dir/$esp_image"
+    echo -e "\033[92m[SUCCESS]\033[0m Rebuilt ${esp_image} around kernel ${kver}; it is now a manifest artifact."
+fi
+
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
