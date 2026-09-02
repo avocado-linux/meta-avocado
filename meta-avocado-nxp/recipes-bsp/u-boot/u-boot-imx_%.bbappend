@@ -209,6 +209,32 @@ do_deploy:append:avocado-imx93-frdm() {
         if [ ! -f ${S}/ubootefi.var ]; then
             bbfatal "boot-integrity-poc: ${S}/ubootefi.var is absent at do_deploy, so the seed never reached \$(srctree) and this U-Boot enrols nothing. Refusing to write the db.fingerprint marker that task 4.1 reads as proof it did."
         fi
+
+        # The seed file existing proves it was STAGED, not that it was COMPILED
+        # IN. Those come apart quietly: merge_config.sh warns rather than fails
+        # when a requested symbol loses to a dependency, so a defconfig bump
+        # that turns EFI_MM_COMM_TEE back on (PRESEED depends on !that) drops
+        # PRESEED, `obj-$(CONFIG_EFI_VARIABLES_PRESEED) += efi_var_seed.o`
+        # simply never builds, and the staged file sits in $(srctree) unread.
+        # Every downstream gate then passes on a bootloader that enrols nothing.
+        #
+        # EFI_SECURE_BOOT is checked for the same reason and is the worse loss:
+        # without it efi_image_authenticate() is not compiled, so the firmware
+        # admits any payload while still reporting a key database.
+        #
+        # Read the PRODUCED config, not the fragment: the fragment is the
+        # request, the .config is the answer. This layer's own convention
+        # elsewhere is the same, because linux-imx applies fragments with a raw
+        # cat that can lose a symbol without saying so.
+        _cfg="${B}/.config"
+        if [ ! -f "$_cfg" ]; then
+            bbfatal "boot-integrity-poc: ${B}/.config is absent at do_deploy, so it cannot be confirmed that the seed was compiled in rather than merely staged."
+        fi
+        for _sym in CONFIG_EFI_VARIABLES_PRESEED CONFIG_EFI_SECURE_BOOT; do
+            if ! grep -q "^${_sym}=y\$" "$_cfg"; then
+                bbfatal "boot-integrity-poc: ${_sym} is not set in the produced ${B}/.config, so this U-Boot does not do what the enrolment claims. efi-secureboot.cfg requests it; Kconfig did not grant it - check for a defconfig or version bump that changed a dependency. Refusing to write db.fingerprint."
+            fi
+        done
         if [ ! -f ${AVOCADO_SB_KEYS_DIR}/db.crt ]; then
             bbfatal "boot-integrity-poc: ${AVOCADO_SB_KEYS_DIR}/db.crt is absent, so there is no certificate to fingerprint and the payload signing step has nothing to check itself against."
         fi

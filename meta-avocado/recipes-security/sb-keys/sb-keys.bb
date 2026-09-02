@@ -6,9 +6,26 @@ Private keys are never installed to the target."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-# sbsiglist builds the EFI signature lists the seed carries; python3-native packs
-# them into U-Boot's variable-store container.
-DEPENDS = "openssl-native sbsigntool-native python3-native"
+# openssl-native mints the keys and is needed on every machine. The other two
+# serve the UEFI variable seed only - sbsiglist builds the EFI signature lists,
+# python3-native packs them into U-Boot's variable-store container - so they are
+# pulled in only where that seed is actually built.
+#
+# That conditional is not tidiness. sbsigntool exists ONLY in vendor BSP layers
+# (meta-imx/meta-imx-bsp and meta-tegra); meta-openembedded carries no such
+# recipe. This recipe lives in machine-agnostic meta-avocado and has no
+# COMPATIBLE_MACHINE, so an unconditional DEPENDS breaks `bitbake sb-keys` on
+# every non-NXP, non-Tegra target - qemu, raspberrypi, rockchip, stm, renesas,
+# alif, qcom, synaptics, x86-64 - with `Nothing PROVIDES 'sbsigntool-native'`,
+# for a seed those boards never consume. The active dm-verity and sysext-signing
+# work targets rpi and x86-64 and would hit exactly this.
+#
+# The upstream fix is for sbsigntool and efitools to live in meta-oe rather than
+# in each vendor layer; until they do, gate rather than assume. The alternative
+# pattern - the layer that needs the tool carries its own recipe, which is what
+# meta-secure-core does - is the fallback if the gate ever has to go.
+DEPENDS = "openssl-native"
+DEPENDS:append = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', ' sbsigntool-native python3-native', '', d)}"
 
 SRC_URI = "file://gen-sbkeys.sh file://gen-efi-seed.sh"
 
@@ -35,9 +52,14 @@ do_compile() {
 # Runs after gen-sbkeys.sh so PK/KEK/db certificates already exist. Produces the
 # UEFI variable seed that CONFIG_EFI_VARIABLES_PRESEED compiles into U-Boot, so
 # the board leaves setup mode with no first-boot enrolment window.
+# Gated on the same token as the DEPENDS above: without sbsigntool-native on the
+# sysroot this cannot run at all, so the two must agree or the recipe fails on
+# the boards the gate exists to spare.
 do_compile:append() {
-    chmod +x "${UNPACKDIR}/gen-efi-seed.sh"
-    SBKEYS_DIR="${AVOCADO_SB_KEYS_DIR}" "${UNPACKDIR}/gen-efi-seed.sh"
+    if [ "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', '1', '0', d)}" = "1" ]; then
+        chmod +x "${UNPACKDIR}/gen-efi-seed.sh"
+        SBKEYS_DIR="${AVOCADO_SB_KEYS_DIR}" "${UNPACKDIR}/gen-efi-seed.sh"
+    fi
 }
 
 do_install() {
@@ -74,8 +96,17 @@ do_deploy() {
 
     # The UEFI variable seed. Deployed, never installed: it is consumed by the
     # U-Boot build, not shipped to the rootfs.
-    install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var" \
-        "${DEPLOYDIR}/sb-keys/ubootefi.var"
+    #
+    # Guarded like the five cert installs above, and for a sharper reason than
+    # symmetry: do_compile only writes this file under the boot-integrity-poc
+    # token, and AVOCADO_SB_KEYS_DIR defaults outside tmp/ (avocado-security.inc)
+    # so emptying it to rotate keys does not invalidate do_compile's stamp. An
+    # unguarded install therefore fails with `cannot stat .../ubootefi.var`,
+    # pointing at the deploy step rather than at the generator that was skipped.
+    if [ -f "${AVOCADO_SB_KEYS_DIR}/ubootefi.var" ]; then
+        install -m 0644 "${AVOCADO_SB_KEYS_DIR}/ubootefi.var" \
+            "${DEPLOYDIR}/sb-keys/ubootefi.var"
+    fi
 }
 
 addtask deploy after do_install before do_build

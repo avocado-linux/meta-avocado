@@ -1,9 +1,10 @@
 #!/bin/sh
 # gen-efi-seed.sh - Build the U-Boot UEFI variable seed (ubootefi.var) that
-# enrols PK, KEK and db at build time, so the firmware leaves setup mode with
-# no first-boot enrolment window.
+# enrols PK, KEK, db and a placeholder dbx at build time, so the firmware leaves
+# setup mode with no first-boot enrolment window. See the dbx note above the
+# pack invocation for what that placeholder is and is not.
 #
-# Input:  ${SBKEYS_DIR}/{PK,KEK,db}.der  (written by gen-sbkeys.sh)
+# Input:  ${SBKEYS_DIR}/{PK,KEK,db,dbx}.der  (written by gen-sbkeys.sh)
 # Output: ${SBKEYS_DIR}/ubootefi.var
 #
 # Usage:
@@ -57,7 +58,7 @@ for tool in sbsiglist python3; do
   }
 done
 
-for role in PK KEK db; do
+for role in PK KEK db dbx; do
   if [ ! -f "${SBKEYS_DIR}/${role}.der" ]; then
     echo "gen-efi-seed: ${SBKEYS_DIR}/${role}.der missing; run gen-sbkeys.sh first" >&2
     exit 1
@@ -69,7 +70,7 @@ trap 'rm -rf "${workdir}"' EXIT
 
 # SignatureOwner is informational - it identifies who contributed the entry, not
 # who may use it. One value for all three keeps the seed self-describing.
-for role in PK KEK db; do
+for role in PK KEK db dbx; do
   sbsiglist --owner "${EFI_GLOBAL_VARIABLE_GUID}" --type x509 \
     --output "${workdir}/${role}.esl" "${SBKEYS_DIR}/${role}.der"
 done
@@ -138,13 +139,34 @@ if __name__ == "__main__":
     main()
 PYEOF
 
-# db lives under EFI_IMAGE_SECURITY_DATABASE_GUID, not the global variable GUID.
-# Under the wrong GUID the firmware never finds the signature database, and the
-# symptom reads as "the payload is unsigned" rather than "the variable is
-# misplaced".
+# db and dbx both live under EFI_IMAGE_SECURITY_DATABASE_GUID, not the global
+# variable GUID. Under the wrong GUID the firmware never finds the signature
+# database, and the symptom reads as "the payload is unsigned" rather than "the
+# variable is misplaced".
+#
+# WHY dbx IS HERE, AND WHAT IT IS NOT
+#
+# dbx is the forbidden-signature database. CONFIG_EFI_VARIABLES_PRESEED makes
+# PK/KEK/db/dbx immutable at runtime, so a dbx that is ABSENT from the seed can
+# never be populated on a fielded device - there is no authenticated write path
+# left to add one. Enrolling it now is what keeps the slot open at all.
+#
+# What ships here is a PLACEHOLDER, deliberately: the dbx certificate that
+# gen-sbkeys.sh mints alongside the others, which nothing is ever signed with.
+# So it revokes nothing today. It exists so the variable is present, well
+# formed, and carrying content we chose rather than absent - and so replacing it
+# with a real revocation list is a change to ONE input file rather than a change
+# to the store format at a point when a device is already fielded.
+#
+# To deploy a real one: replace ${SBKEYS_DIR}/dbx.der with the DER of the
+# certificate or hash to be revoked (or extend this to pack a multi-entry ESL),
+# rebuild, and reflash the bootloader. Note the reflash - that is the honest
+# cost of an immutable store, and it is the reason the placeholder is worth
+# shipping rather than deferring.
 python3 "${workdir}/pack.py" "${SEED_OUT}" "${SEED_EPOCH}" \
   "PK=${EFI_GLOBAL_VARIABLE_GUID}=${workdir}/PK.esl" \
   "KEK=${EFI_GLOBAL_VARIABLE_GUID}=${workdir}/KEK.esl" \
-  "db=${EFI_IMAGE_SECURITY_DATABASE_GUID}=${workdir}/db.esl"
+  "db=${EFI_IMAGE_SECURITY_DATABASE_GUID}=${workdir}/db.esl" \
+  "dbx=${EFI_IMAGE_SECURITY_DATABASE_GUID}=${workdir}/dbx.esl"
 
-echo "gen-efi-seed: wrote ${SEED_OUT} (PK, KEK, db enrolled)"
+echo "gen-efi-seed: wrote ${SEED_OUT} (PK, KEK, db enrolled; dbx placeholder)"
