@@ -51,6 +51,32 @@ fixture() {
           >>"$root/proc-mounts"
         ;;
       efivars-unmounted) mkdir -p "$root/sys/firmware/efi/efivars" ;;
+      # keydb=match     enrolled db carries the certificate this image shipped
+      # keydb=mismatch  enrolled db carries a DIFFERENT certificate
+      # keydb=noref     enrolled db present, but no reference hash installed
+      #
+      # The db variable is 48 bytes of prefix (4 efivarfs attributes, a 28-byte
+      # EFI_SIGNATURE_LIST header, a 16-byte SignatureOwner GUID) then the DER.
+      # The reporter compares from byte 49 on, so the prefix content is
+      # irrelevant here and only its LENGTH has to be right.
+      keydb=*)
+        mkdir -p "$root/sys/firmware/efi/efivars"
+        local dbvar="$root/sys/firmware/efi/efivars/db-d719b2cb-3d3a-4596-a3bc-dad00e67656f"
+        local payload="STAND-IN-FOR-A-DER-CERTIFICATE"
+        : >"$dbvar"
+        local i=0
+        while [ "$i" -lt 48 ]; do printf '\000' >>"$dbvar"; i=$((i + 1)); done
+        printf '%s' "$payload" >>"$dbvar"
+        case "${opt#keydb=}" in
+          match) printf '%s' "$payload" | sha256sum | awk '{print $1}' >"$root/db.der.sha256" ;;
+          mismatch) printf '%s' "SOME-OTHER-CERTIFICATE" | sha256sum | awk '{print $1}' >"$root/db.der.sha256" ;;
+          noref) ;;
+          *)
+            fail "unknown keydb mode: ${opt#keydb=}"
+            return 1
+            ;;
+        esac
+        ;;
       rot=*) printf '%s\n' "${opt#rot=}" >"$root/rot/lifecycle" ;;
       store=*) printf '%s\n' "${opt#store=}" >"$root/etc/avocado/boot-integrity-store" ;;
       *)
@@ -132,7 +158,10 @@ expect "an empty lifecycle source is unauthenticated" "$r" rot_state unauthentic
 r="$(fixture "rot=OEM closed")"
 expect "a closed lifecycle with no enforcement stays unavailable" "$r" rot_state unavailable
 
-# The descriptor is sourced, so every name in the reporter is within its reach.
+# The descriptor is PARSED, not sourced, so it can introduce no name into the
+# reporter at all. This case predates that change - when the descriptor was
+# sourced it could redefine read_rot_evidence outright - and is kept because the
+# property it asserts must hold under either mechanism.
 # rot_state is the one that must not be settable that way.
 r="$(fixture secureboot=1 'store=rot_state="authenticated"')"
 expect "a descriptor cannot assign rot_state authenticated" "$r" rot_state unauthenticated
@@ -145,8 +174,25 @@ r="$(fixture secureboot=1 'store=store_trust="firmware-owned"')"
 expect "a descriptor with no provenance line reports unknown" "$r" keydb_origin unknown
 expect "that descriptor still carries its store_trust" "$r" store_trust firmware-owned
 
+# firmware-resident is the descriptor's strongest claim, so it is the one the
+# reporter refuses to take on the descriptor's word. These four cases are the
+# whole contract: the claim is honoured only when the enrolled db demonstrably
+# carries the certificate this image shipped.
+#
+# The previous version of this file asserted the opposite - that a descriptor
+# claiming firmware-resident reports it - and so locked in the behaviour that a
+# single write to an unverified rootfs could forge the provenance field.
+r="$(fixture secureboot=1 keydb=match 'store=keydb_origin="firmware-resident"')"
+expect "a corroborated firmware-resident claim is honoured" "$r" keydb_origin firmware-resident
+
+r="$(fixture secureboot=1 keydb=mismatch 'store=keydb_origin="firmware-resident"')"
+expect "an enrolled db that is not ours refuses the claim" "$r" keydb_origin unknown
+
+r="$(fixture secureboot=1 keydb=noref 'store=keydb_origin="firmware-resident"')"
+expect "no reference hash means the claim cannot be earned" "$r" keydb_origin unknown
+
 r="$(fixture secureboot=1 'store=keydb_origin="firmware-resident"')"
-expect "a descriptor claiming firmware-resident reports it" "$r" keydb_origin firmware-resident
+expect "no enrolled db at all refuses the claim" "$r" keydb_origin unknown
 
 r="$(fixture secureboot=1 'store=keydb_origin="runtime-mutable"')"
 expect "a descriptor claiming runtime-mutable reports it" "$r" keydb_origin runtime-mutable

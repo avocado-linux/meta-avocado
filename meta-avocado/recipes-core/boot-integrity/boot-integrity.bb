@@ -56,6 +56,11 @@ AVOCADO_BOOT_INTEGRITY_POC = "${@bb.utils.contains('DISTRO_FEATURES', 'boot-inte
 
 AVOCADO_BOOT_INTEGRITY_DB_FINGERPRINT = "${DEPLOY_DIR_IMAGE}/sb-keys/db.fingerprint"
 
+# The DER, not the .crt the fingerprint above hashes. What the firmware enrols
+# is DER inside an EFI_SIGNATURE_LIST, so a DER hash is the one the on-device
+# reporter can compare against the db efivar; a PEM hash would never match.
+AVOCADO_BOOT_INTEGRITY_DB_DER = "${DEPLOY_DIR_IMAGE}/sb-keys/db.der"
+
 # Read the marker rather than race it: without this edge the U-Boot deploy may
 # not have run when do_install looks, and an absent marker would be
 # indistinguishable from a preseed that never happened. Gated on the token so a
@@ -103,6 +108,29 @@ store_trust=unauthenticated
 keydb_origin=$keydb_origin
 EOF
         chmod 0644 ${D}${sysconfdir}/avocado/boot-integrity-store
+
+        # The corroboration reference, installed BESIDE the reporter rather than
+        # into the descriptor. The descriptor is the file the reporter is not
+        # allowed to trust, so an expected value written into it would let one
+        # edit change both the claim and the evidence for it - which is no
+        # evidence. Keeping them in separate files means a forgery has to alter
+        # two things consistently instead of one.
+        #
+        # Be honest about the ceiling: on this PoC image the rootfs has no
+        # verity, so a determined attacker CAN alter both. This does not make
+        # keydb_origin unforgeable; it removes the single-file forgery and
+        # becomes real protection once the rootfs is verity-backed, which is
+        # what the dm-verity work is for. Until then it is defence in depth and
+        # is documented as such rather than counted as a control.
+        #
+        # A hash, not the certificate: the reporter only has to answer "is the
+        # enrolled db the one this image shipped", and 64 hex characters answer
+        # it without putting a cert on the device or growing the image.
+        if [ -f "${AVOCADO_BOOT_INTEGRITY_DB_DER}" ]; then
+            sha256sum "${AVOCADO_BOOT_INTEGRITY_DB_DER}" | awk '{print $1}' \
+                > ${D}${libexecdir}/boot-integrity/db.der.sha256
+            chmod 0644 ${D}${libexecdir}/boot-integrity/db.der.sha256
+        fi
     fi
 }
 

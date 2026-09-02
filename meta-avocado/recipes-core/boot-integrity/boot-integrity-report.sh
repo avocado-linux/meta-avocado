@@ -203,6 +203,22 @@ if [ -r "$STORE_DESC" ]; then
 
   store_trust="${_sd_store:-unknown}"
   keydb_origin="${_sd_keydb:-unknown}"
+
+  # Closed set, like keydb_origin below. An earlier version passed store_trust
+  # through as the descriptor's own word, on the reasoning that sourcing did the
+  # same - but sourcing's behaviour is not the standard to hold this to. The
+  # descriptor lives on a rootfs this file's own threat model treats as
+  # attacker-writable, and a value outside this set is either an attacker's
+  # choice or a recipe typo; neither should reach a consumer as a trust claim.
+  # `unknown` is where both belong.
+  #
+  # Widen this set when a recipe legitimately needs a third word, and expect the
+  # narrowing to bite first: a new value degrades to `unknown` until it is added
+  # here. That is the safe direction, and it is loud enough to notice.
+  case "$store_trust" in
+    unauthenticated | firmware-owned) ;;
+    *) store_trust="unknown" ;;
+  esac
 fi
 
 # --- key database provenance: where the trusted keys came from --------------
@@ -212,8 +228,58 @@ fi
 # answer is `unknown` - which is correct and must stay distinct from
 # `firmware-resident`. An unknown provenance is not a trusted one; the same
 # discipline `store_trust` follows, for the same reason.
+# Reference hash of the db certificate this image shipped, installed beside this
+# script by boot-integrity.bb - deliberately NOT in the descriptor, which is the
+# file this corroboration exists to distrust.
+KEYDB_REF="$(dirname "$0")/db.der.sha256"
+
+# The db variable, in the image-security namespace rather than the global one.
+EFI_IMAGE_SECURITY_GUID="d719b2cb-3d3a-4596-a3bc-dad00e67656f"
+
+# Echoes `yes` when the enrolled db demonstrably contains the certificate this
+# image shipped, `no` when it demonstrably does not, and `unknown` when the
+# question could not be asked. Only `yes` is corroboration; the other two are
+# both absence of evidence and are treated alike by the caller.
+#
+# The comparison is over the certificate bytes, which sit at a fixed offset in
+# the variable: 4 bytes of efivarfs attribute prefix, then a 28-byte
+# EFI_SIGNATURE_LIST header, then a 16-byte SignatureOwner GUID. Verified
+# against the board: db reads 889 bytes, the shipped DER is 841, and 889 - 48
+# is exactly 841.
+corroborate_keydb() {
+  [ -r "$KEYDB_REF" ] || { echo unknown; return 0; }
+
+  _kd_var="${EFIVARS}/db-${EFI_IMAGE_SECURITY_GUID}"
+  [ -r "$_kd_var" ] || { echo unknown; return 0; }
+
+  _kd_want=$(cat "$KEYDB_REF" 2>/dev/null) || { echo unknown; return 0; }
+  case "$_kd_want" in *[!0-9a-f]* | "") echo unknown; return 0 ;; esac
+
+  # tail -c +49 skips the 48-byte prefix. A short or malformed variable yields a
+  # digest that simply does not match, which is `no` rather than a crash.
+  _kd_have=$(tail -c +49 "$_kd_var" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}')
+  [ -n "$_kd_have" ] || { echo unknown; return 0; }
+
+  if [ "$_kd_have" = "$_kd_want" ]; then echo yes; else echo no; fi
+}
+
 case "$keydb_origin" in
-  firmware-resident) ;;
+  firmware-resident)
+    # The descriptor's strongest claim, so it is the one that must be earned.
+    # Anything short of positive corroboration lands on `unknown`: a device
+    # whose enrolled db is NOT the one this image shipped has a provenance we
+    # cannot describe, and saying `firmware-resident` there would vouch for the
+    # attacker's key database using our own build's word.
+    _kd=$(corroborate_keydb)
+    if [ "$_kd" != "yes" ]; then
+      keydb_origin="unknown"
+      if [ "$_kd" = "no" ]; then
+        detail="descriptor claims a firmware-resident key database, but the enrolled db does not contain the certificate this image shipped"
+      else
+        detail="descriptor claims a firmware-resident key database and it could not be corroborated against the enrolled db"
+      fi
+    fi
+    ;;
   runtime-mutable) ;;
   # Absent, unreadable, no provenance line, or a value this script does not
   # recognise. All of them mean the same thing: nobody told us.
