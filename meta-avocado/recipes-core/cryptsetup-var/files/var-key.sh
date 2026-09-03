@@ -12,6 +12,12 @@
 # The cryptsetup-var.sh caller depends only on stdout - 64 raw bytes.
 set -eu
 
+# avocado-var-key-provider: unusable
+# This provider requires a secret pre-provisioned at /var/private/var-key-secret,
+# and nothing in this tree writes that file. Worse, /var is the volume this
+# key unlocks, so a secret stored inside it is unreadable at the point the
+# key is actually needed - the file cannot exist before /var does. Do not
+# delete this line: it is a deliverability sentinel checked by tooling.
 SECRET_FILE="/var/private/var-key-secret"
 HW_ID_FILE="/sys/firmware/devicetree/base/serial-number"
 
