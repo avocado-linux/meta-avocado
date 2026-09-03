@@ -23,9 +23,24 @@ trap 'rm -rf "$WORK"' EXIT
 
 failures=0
 pass() { printf '  PASS  %s\n' "$1"; }
+
+# Both write to STDERR, not stdout. `fixture()` returns its value on stdout and
+# is only ever called as `r="$(fixture ...)"`, so a message printed on stdout
+# from inside it is captured into the variable instead of shown - and the
+# `failures` increment happens in the command-substitution subshell and is
+# discarded. A mistyped fixture option therefore aborted the whole suite under
+# `set -e` having printed nothing at all about why.
 fail() {
-  printf '  FAIL  %s\n' "$1"
+  printf '  FAIL  %s\n' "$1" >&2
   failures=$((failures + 1))
+}
+
+# For the fixture path specifically: a bad option is a BUG IN THE SUITE, not a
+# failing assertion, and it cannot be counted from a subshell anyway. Abort
+# loudly and immediately rather than returning into an assignment.
+die() {
+  printf '  ERROR %s\n' "$1" >&2
+  exit 2
 }
 
 # Build a fixture root and a reporter copy bound to it. Options, in any order:
@@ -75,16 +90,14 @@ fixture() {
           mismatch) printf '%s' "SOME-OTHER-CERTIFICATE" | sha256sum | awk '{print $1}' >"$root/db.der.sha256" ;;
           noref) ;;
           *)
-            fail "unknown keydb mode: ${opt#keydb=}"
-            return 1
+            die "unknown keydb mode: ${opt#keydb=}"
             ;;
         esac
         ;;
       rot=*) printf '%s\n' "${opt#rot=}" >"$root/rot/lifecycle" ;;
       store=*) printf '%s\n' "${opt#store=}" >"$root/etc/avocado/boot-integrity-store" ;;
       *)
-        fail "unknown fixture option: $opt"
-        return 1
+        die "unknown fixture option: $opt"
         ;;
     esac
   done
@@ -147,7 +160,12 @@ expect_has() {
 }
 
 printf '\n== single emission ==\n'
-n="$(grep -cE '^[[:space:]]*printf ' "$SCRIPT")"
+# `|| true` because grep -c EXITS 1 when the count is zero, and this suite runs
+# under `set -euo pipefail`. Without it the assignment aborts the whole run at
+# exactly the moment the guarded regression occurs - the reporter losing its
+# single printf - so the `fail` branch below could never report the thing it
+# exists to report, and every later check silently never ran.
+n="$(grep -cE '^[[:space:]]*printf ' "$SCRIPT" || true)"
 if [ "$n" -eq 1 ]; then
   pass "exactly one printf at statement position"
 else
@@ -193,9 +211,17 @@ printf '\n== keydb_origin ==\n'
 r="$(fixture secureboot=1)"
 expect "no store descriptor reports unknown" "$r" keydb_origin unknown
 
+# `firmware-owned` is the descriptor's strongest claim and nothing on the device
+# can corroborate it, so it is refused rather than passed through. A rootfs with
+# no verity must not be able to promote the record's weakest field to its
+# strongest claim by editing one line. This block previously asserted the
+# opposite, locking that forgery in.
 r="$(fixture secureboot=1 'store=store_trust="firmware-owned"')"
 expect "a descriptor with no provenance line reports unknown" "$r" keydb_origin unknown
-expect "that descriptor still carries its store_trust" "$r" store_trust firmware-owned
+expect "an uncorroborated firmware-owned claim is refused" "$r" store_trust unknown
+
+r="$(fixture secureboot=1 'store=store_trust="unauthenticated"')"
+expect "the one value a recipe actually writes is honoured" "$r" store_trust unauthenticated
 
 # firmware-resident is the descriptor's strongest claim, so it is the one the
 # reporter refuses to take on the descriptor's word. These four cases are the
@@ -243,8 +269,13 @@ expect_has "and the root-of-trust message is still there beside it" "$r" \
 # One key per line is the record's whole format, so a joined detail must not
 # introduce a newline - a consumer splitting on it would read the second half as
 # a malformed field rather than as part of this one.
-n="$(sh "$r/report.sh" 2>/dev/null | grep -c '^detail=')"
-m="$(sh "$r/report.sh" 2>/dev/null | wc -l)"
+# Run the reporter ONCE and derive both facts from the captured output. Two
+# separate runs cost a second execution for nothing, and each carried the same
+# `grep -c` errexit trap as the single-emission check above - here compounded by
+# `pipefail`, which also propagates a non-zero reporter exit.
+_rec="$(sh "$r/report.sh" 2>/dev/null || true)"
+n="$(printf '%s\n' "$_rec" | grep -c '^detail=' || true)"
+m="$(printf '%s\n' "$_rec" | wc -l)"
 if [ "$n" -eq 1 ] && [ "$m" -eq 5 ]; then
   pass "a joined detail stays on one line"
 else

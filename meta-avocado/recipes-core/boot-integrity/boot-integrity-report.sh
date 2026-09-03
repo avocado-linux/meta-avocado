@@ -215,13 +215,10 @@ if [ -r "$STORE_DESC" ]; then
   _sd_store=$(_sd_read store_trust)
   _sd_keydb=$(_sd_read keydb_origin)
 
-  # A value carrying anything outside this set is malformed, not hostile - we
+  # A value carrying a character outside this set is malformed, not hostile - we
   # never execute it either way - so it lands on the same "unknown" a missing
-  # line would. Deliberately NOT an allow-list of known values: store_trust is
-  # passed through as the descriptor's own word (firmware-owned is one the
-  # recipe does not write but the contract allows), and keydb_origin is
-  # normalised against its known set further down, which is the one place that
-  # mapping should live.
+  # line would. This is a CHARACTER filter only; both fields are then normalised
+  # against their own closed value sets below.
   case "$_sd_store" in *[!A-Za-z0-9._-]*) _sd_store="" ;; esac
   case "$_sd_keydb" in *[!A-Za-z0-9._-]*) _sd_keydb="" ;; esac
 
@@ -236,11 +233,21 @@ if [ -r "$STORE_DESC" ]; then
   # choice or a recipe typo; neither should reach a consumer as a trust claim.
   # `unknown` is where both belong.
   #
-  # Widen this set when a recipe legitimately needs a third word, and expect the
-  # narrowing to bite first: a new value degrades to `unknown` until it is added
-  # here. That is the safe direction, and it is loud enough to notice.
+  # ONE accepted value, not two. `firmware-owned` used to be admitted here on
+  # the reasoning that the contract allowed it even though no recipe wrote it -
+  # which made it a word reachable ONLY by forgery. It is the descriptor's
+  # strongest claim (the variable store is tamper-resistant), the descriptor
+  # lives on a rootfs with no verity, and unlike `keydb_origin=firmware-resident`
+  # there is nothing on the device to corroborate it against. So a single write
+  # to /etc/avocado/boot-integrity-store turned the record's weakest field into
+  # its strongest claim, with no evidence anywhere.
+  #
+  # The rule to keep: a value only belongs in this set once some recipe writes
+  # it AND the device can check it. Adding `firmware-owned` back needs a
+  # corroborator of its own, the way corroborate_keydb() earns
+  # `firmware-resident` below - not a widened case arm.
   case "$store_trust" in
-    unauthenticated | firmware-owned) ;;
+    unauthenticated) ;;
     *) store_trust="unknown" ;;
   esac
 fi
