@@ -47,7 +47,11 @@ PACKAGE_ARCH = "all_avocadosdk"
 python do_compile() {
     import os
     import bb
-    import avocado_sdk_metadata.repoconf as repoconf
+    # Imported and called fully qualified, not aliased. BitBake records the
+    # literal call spelling and matches it against the registered name
+    # avocado_sdk_metadata.repoconf.<func>; an alias never matches, so the
+    # renderer's source would drop out of this task's hash.
+    import avocado_sdk_metadata.repoconf
 
     deploy_dir_rpm = d.getVar('DEPLOY_DIR_RPM')
     machine = d.getVar('MACHINE')
@@ -84,7 +88,7 @@ python do_compile() {
                 # section or bump priority, but the arch is tracked above.
                 return False
             written_sections.add(repo_section_name)
-            repo_f.write(repoconf.render_repo_section(
+            repo_f.write(avocado_sdk_metadata.repoconf.render_repo_section(
                 section=repo_section_name,
                 name=repo_name,
                 baseurl_path=repo_url_path,
@@ -159,7 +163,7 @@ python do_compile() {
 
     def _write_additional_target_repo(repo_f, priority):
         """Write the target-ext repo entry at the end."""
-        repo_f.write(repoconf.render_repo_section(
+        repo_f.write(avocado_sdk_metadata.repoconf.render_repo_section(
             section=f"{machine_short_name}-target-ext",
             name=f"{machine_short_name}-target-ext",
             baseurl_path=f"$releasever/target/{machine_short_name}-ext",
