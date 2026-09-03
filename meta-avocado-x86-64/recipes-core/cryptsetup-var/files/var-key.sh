@@ -1,7 +1,8 @@
 #!/bin/sh
 # avocado-var-key-provider: usable
-# x86-64 provider. cryptsetup-var.bb refuses a machine whose resolved provider
-# does not declare this line, so it is load-bearing, not a note.
+# Load-bearing, not a note: cryptsetup-var.bb refuses any machine whose
+# resolved provider does not declare exactly one such status line. What
+# this provider derives its identity from is described below.
 # /var LUKS key provider for avocado-x86-64 (Intel) -- phase-1: hw-id derived
 # (DMI), no provisioned secret. Phase-2 re-enrolls to the TPM2-sealed path
 # (PCR 7, discrete TPM) on first boot via cryptsetup-var.sh.

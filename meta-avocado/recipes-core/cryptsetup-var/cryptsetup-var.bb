@@ -81,15 +81,34 @@ python __anonymous() {
     except OSError as exc:
         bb.fatal(lead + "its var-key.sh at %s could not be read: %s." % (provider, exc) + remedy)
 
-    status = None
+    # Collect EVERY declaration rather than stopping at the first. First-match
+    # wins turned the realistic migration - copy the shared provider, prepend a
+    # usable line, forget to delete its unusable one - into a silent pass on a
+    # provider that still cannot derive a key.
+    #
+    # Exactly one leading '#' is stripped, not all of them: lstrip("#") also
+    # matched an indented documentation example like '#   # <marker>: usable',
+    # so a provider that merely SHOWS the contract in prose was read as
+    # declaring it. The spec requires the line be matched as a declaration, not
+    # as prose, and stripping one hash is what distinguishes them.
+    declarations = []
     for line in contents.splitlines():
         stripped = line.strip()
         if not stripped.startswith("#"):
             continue
-        body = stripped.lstrip("#").strip()
+        body = stripped[1:].strip()
         if body.startswith(marker):
-            status = body[len(marker):].strip()
-            break
+            declarations.append(body[len(marker):].strip())
+
+    if len(declarations) > 1:
+        bb.fatal(
+            lead + "the var-key.sh that resolves for it (%s) carries %d "
+            "'%s' status lines (%s); exactly one is required, so which one "
+            "governs cannot be decided." % (provider, len(declarations), marker, ", ".join(declarations))
+            + remedy
+        )
+
+    status = declarations[0] if declarations else None
 
     if status is None:
         bb.fatal(

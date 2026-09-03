@@ -1,7 +1,8 @@
 #!/bin/sh
 # avocado-var-key-provider: usable
-# Jetson, TPM2-sealed via OP-TEE fTPM. cryptsetup-var.bb refuses a machine whose resolved provider
-# does not declare this line, so it is load-bearing, not a note.
+# Load-bearing, not a note: cryptsetup-var.bb refuses any machine whose
+# resolved provider does not declare exactly one such status line. What
+# this provider derives its identity from is described below.
 # /var LUKS key provider for NVIDIA Jetson -- phase-1: SoC-serial derived, no
 # provisioned secret. Same shape as the i.MX9 and x86 providers: this is the
 # Argon2id RECOVERY keyslot (slot 0); the fTPM-sealed keyslot cryptsetup-var.sh
