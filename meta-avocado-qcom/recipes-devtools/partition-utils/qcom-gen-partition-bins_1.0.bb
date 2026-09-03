@@ -6,7 +6,10 @@ tool is meta-qcom's qcom-ptool-native (CLI: qcom-ptool <subcommand>)."
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-COMPATIBLE_MACHINE = "rubikpi3"
+# Every board on this SoC: the recipe is a wrapper around qcom-ptool over
+# whatever partition.xml virtual/partconf deploys, and knows nothing about the
+# board that produced it.
+COMPATIBLE_MACHINE = "qcm6490"
 DEPENDS += "qcom-ptool-native"
 INHIBIT_DEFAULT_DEPS = "1"
 

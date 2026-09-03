@@ -63,3 +63,22 @@ QCOM_SDK_UKI_TOOLS = "\
     nativesdk-mtools \
     nativesdk-systemd-boot \
 "
+
+# The shared hook bodies. The base recipe installs exactly the three per-machine
+# files it names in SRC_URI, so the QCS6490 logic that both boards run -- the
+# ESP/boot-entry rebuild and the stone provision invocation -- has to be added
+# here. avocado-{build,provision}-<machine> are wrappers that exec these.
+SRC_URI += " \
+    file://avocado-build-qcom \
+    file://avocado-provision-qcom \
+"
+
+do_install:append() {
+    install -m 0755 ${UNPACKDIR}/avocado-build-qcom ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/avocado-provision-qcom ${D}${SDKPATHNATIVE}${bindir}
+}
+
+FILES:${PN} += " \
+    ${SDKPATHNATIVE}${bindir}/avocado-build-qcom \
+    ${SDKPATHNATIVE}${bindir}/avocado-provision-qcom \
+"
