@@ -264,6 +264,23 @@ do_deploy:append:avocado-imx93-frdm() {
         #
         # A whole-file compare rather than a db-only one: the seed now carries
         # four variables, and a stale PK or dbx is just as wrong as a stale db.
+        # BOTH staged copies, not just the srctree-root one. do_configure:prepend
+        # installs the seed twice on purpose (see its comment): ${S}/ubootefi.var
+        # satisfies make's prerequisite, and ${S}/lib/efi_loader/ubootefi.var is
+        # what gas actually embeds, because efi_var_seed.S carries a bare
+        # `.incbin "ubootefi.var"` resolved against its own -I list.
+        #
+        # Checking only the root copy checked the file that is NOT linked in. A
+        # hand edit, a partial source-tree clean, or any path refreshing one and
+        # not the other publishes db.fingerprint describing the root copy while
+        # the bootloader carries the other - which is verbatim the failure the
+        # message below names, passing the check that exists to catch it.
+        if [ ! -f ${S}/lib/efi_loader/ubootefi.var ]; then
+            bbfatal "boot-integrity-poc: ${S}/lib/efi_loader/ubootefi.var is absent at do_deploy. That is the copy efi_var_seed.S actually includes, so this U-Boot cannot have compiled the seed in. Refusing to write db.fingerprint."
+        fi
+        if ! cmp -s ${S}/lib/efi_loader/ubootefi.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
+            bbfatal "boot-integrity-poc: the seed at ${S}/lib/efi_loader/ubootefi.var - the copy gas embeds - differs from the one sb-keys deployed. Run 'bitbake -c cleansstate u-boot-imx' (or -c configure) so the current seed is staged, rather than publishing a marker for keys this binary does not carry."
+        fi
         if ! cmp -s ${S}/ubootefi.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
             bbfatal "boot-integrity-poc: the seed staged at ${S}/ubootefi.var differs from the one sb-keys deployed. do_configure staged an older seed and its stamp is still valid, so this U-Boot compiles a key database that is not the current one. Run 'bitbake -c cleansstate u-boot-imx' (or -c configure) so the current seed is staged, rather than publishing a marker for keys this binary does not carry."
         fi
