@@ -153,6 +153,23 @@ if not latched_saw("Image not authenticated") then
        "failure, and NOT evidence that enforcement was exercised")
 end
 
+-- The refusal is already proven at this point; boot the REAL slot so the
+-- record can name the image, rather than recording `none`. `reset` reloads
+-- U-Boot's persisted env, so the unsaved image_addr override above does not
+-- survive it - this is the board's ordinary boot path, not a repeat of the
+-- fixture.
+--
+-- Consistent with every other identified record being a rootfs digest rather
+-- than a new bootloader-binary identity, and it needs no change to
+-- check-result.sh's staleness comparison.
+cmd("reset", 500)
+if not await_login(240) then
+  fail("the refusal was already proven, but the board did not reach a login " ..
+       "prompt on the follow-up boot, so this record cannot name its image - " ..
+       "re-run")
+end
+login_root()
+
 pass("bootefi refused a payload not signed against the enrolled db and the " ..
      "board never reached a login prompt - enforcement is performed, not " ..
      "merely reported")

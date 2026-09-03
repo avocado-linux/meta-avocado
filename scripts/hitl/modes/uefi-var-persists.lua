@@ -52,6 +52,23 @@ if not saw("HITLPROBEVALUE") then
   fail("the variable did not survive the reset - even the PoC store is not persisting")
 end
 
+-- Continue to a real boot so the record can name the image, rather than
+-- recording `none`. This mode's own assertion is already decided by this
+-- point; everything below is evidence collection, not part of the test.
+--
+-- Every other identified record is a rootfs digest, so this stays consistent
+-- with that rather than inventing a bootloader-binary identity nothing else
+-- tracks - and check-result.sh's staleness comparison needs no changes to
+-- read it. Booting the slot the board already has selected is what the write
+-- above actually exercised, so the identity describes the same run.
+cmd("reset", 500)
+if not await_login(240) then
+  fail("the persistence assertion already passed, but the board did not " ..
+       "reach a login prompt on the follow-up boot, so this record cannot " ..
+       "name its image - re-run")
+end
+login_root()
+
 pass("UEFI variable written, survived a reset, and read back. " ..
      "NOTE: this proves PERSISTENCE only. The PoC store is a file on a FAT " ..
      "partition and is not tamper-resistant.")

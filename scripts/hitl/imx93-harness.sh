@@ -194,9 +194,29 @@ valid_image() {
 #
 # In practice a healthy run finishes in about five minutes, so this bound is
 # what the mode is ALLOWED to take, not what it takes.
+#
+# uefi_var_persists and signed_payload_refused moved off the 300 default for
+# the same reason: both now continue past their own verdict into a real boot
+# and a login, purely so the record can name the image instead of `none` -
+# see the mode files. That added a deadline neither had before, and it did
+# not come with a check that the old flat budget still covered it.
+#
+#   uefi_var_persists: reach_prompt(180) x2 + await_login(240) = 600, plus
+#   ~9s of explicit settle_ms and ~4s inside the new login_root() call - floor
+#   ~613. 700 rounds that up with slack for a slow post-reflash boot, the
+#   documented risk case for every mode here.
+#
+#   signed_payload_refused: reach_prompt(180) + the verdict loop's worst case
+#   (120s deadline, or up to 140s on the refusal branch's extra 20s settle) +
+#   await_login(240) = 560, plus ~28s of explicit settle_ms across its six
+#   `cmd()` calls and ~4s inside login_root() - floor ~592. 700 covers it with
+#   the same slack as the other mode above, rather than picking a second
+#   number for a difference of about 20 seconds.
 mode_timeout() {
   case "$1" in
     keydb_immutable) printf '1800' ;;
+    uefi_var_persists) printf '700' ;;
+    signed_payload_refused) printf '700' ;;
     *) printf '300' ;;
   esac
 }
