@@ -1,0 +1,23 @@
+
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/qcom.yml
+    - repo: meta-avocado
+      file: kas/feature/multi-kernel-qcom.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-qcom:
+
+local_conf_header:
+  machine-avocado-rb3gen2: |
+
+machine: avocado-rb3gen2

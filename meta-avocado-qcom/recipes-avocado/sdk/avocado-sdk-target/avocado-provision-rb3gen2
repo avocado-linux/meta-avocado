@@ -2,4 +2,4 @@
 # Thin wrapper: the work lives in avocado-provision-qcom, shared by every QCS6490
 # board in this layer. The SDK installs one of these per machine because
 # avocado-cli invokes the hook by target name.
-exec "$(dirname "$(readlink -f "$0")")/avocado-provision-qcom" rubikpi3 "$@"
+exec "$(dirname "$(readlink -f "$0")")/avocado-provision-qcom" rb3gen2 "$@"

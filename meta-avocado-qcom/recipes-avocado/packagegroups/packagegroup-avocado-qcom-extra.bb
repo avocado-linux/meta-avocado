@@ -34,16 +34,14 @@ RDEPENDS:${PN} = " \
 # -- but nothing in the feed could open it. Feed-only like everything else here;
 # the BSP extension or a user extension installs it. Trimmed to one target arch
 # and a headless PACKAGECONFIG in kas/vendor/qcom.yml.
-# systemd-rubikpi3-masks is here, not only in MACHINE_ESSENTIAL_EXTRA_RDEPENDS:
-# that variable feeds packagegroup-core-boot, which is a *Yocto image* concept.
-# Avocado's runtime rootfs is assembled by avocado-cli from its own package
-# list, so nothing ever pulled the recipe -- it was neither built into the feed
-# nor installed, and the board booted degraded with getty@getty.service failing
-# (OE's 90-systemd.preset enables the getty@ template; the masks package's
-# 89- preset is what disables it). Listing it here builds it into the feed;
-# the BSP extension installs it.
+# avocado-bls is feed-only like everything else here; it is what clears
+# systemd-boot's boot-assessment counter after a good boot, from the stone
+# manifest's update.commit actions, and every board on this SoC boots the same
+# way. Named here rather than in MACHINE_ESSENTIAL_EXTRA_RDEPENDS because that
+# variable feeds packagegroup-core-boot, a *Yocto image* concept: avocado's
+# runtime rootfs is assembled by avocado-cli from its own package list, so a
+# recipe named only there is never built into the feed and never installed.
 RDEPENDS:${PN}:append:qcm6490 = " \
-    systemd-rubikpi3-masks \
     avocado-bls \
     linux-firmware-qcom-adreno-a660 \
     linux-firmware-qcom-qcm6490-adreno \
@@ -71,7 +69,13 @@ RDEPENDS:${PN}:append:qcm6490 = " \
 # `ext install` fails with "No match for argument: wireless-regdb-static" even
 # though a local avocado-complete build produces it. brcmfmac needs the
 # regulatory database; see the note in firmware-rubikpi3_1.0.bb.
+# systemd-rubikpi3-masks masks units that do not apply on this board
+# (boot.mount/boot.automount, systemd-boot-*, proc-fs-nfsd.mount) and disables
+# OE's getty@ preset, without which the board boots degraded on
+# getty@getty.service. It was in the qcm6490 block, which is wrong now that a
+# second qcm6490 board exists: the name is rubikpi3's and so are the masks.
 RDEPENDS:${PN}:append:rubikpi3 = " \
+    systemd-rubikpi3-masks \
     firmware-rubikpi3 \
     linux-firmware-qcom-qcs6490-thundercomm-rubikpi3-audio \
     rubikpi-bt-staticdev \
@@ -83,4 +87,34 @@ RDEPENDS:${PN}:append:rubikpi3 = " \
     wiringrp \
     wiringrp-gpio \
     wiringrp-python \
+"
+
+# RB3 Gen 2 peripherals that are not SoC-level.
+#
+# qps615-dlkm is the board's ETHERNET. The RB3 Gen 2 puts its NIC behind a
+# QPS615 PCIe switch, driven by an out-of-tree module (a Qualcomm fork of
+# Toshiba's TC956x driver) plus a firmware blob the bridge loads at probe. Both
+# are public. Named here because a board that boots without a NIC is the exact
+# failure this layer already paid for once on rubikpi3: with the module absent
+# nothing about the build fails, and the device simply comes up with no network.
+#
+# The module inherits `module`, so it builds against virtual/kernel and is
+# produced once per multiconfig -- one build for the stock kernel and one for
+# PREEMPT_RT, renamed per KERNEL_VERSION by avocado-multikernel.bbclass, the
+# same way kernel-modules already are.
+#
+# Wifi and Bluetooth are WCN6750 on this board, not the part the qcm6490 block's
+# firmware covers.
+#
+# Deliberately NOT here: the Hexagon DSP binaries, the QAIRT SDK and
+# camxfirmware-kodiak. Those are the compute and camera stacks, they are large,
+# and the camera path on an upstream kernel needs CamX -- which is the harder
+# half of Vision Kit support and is not attempted by naming a firmware package.
+RDEPENDS:${PN}:append:rb3gen2 = " \
+    qps615-dlkm \
+    qps615-firmware \
+    linux-firmware-ath11k-wcn6750 \
+    linux-firmware-qca-wcn6750 \
+    linux-firmware-lt9611uxc \
+    linux-firmware-qcom-qcs6490-modem \
 "
