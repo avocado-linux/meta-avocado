@@ -10,8 +10,15 @@ SRC_URI = " \
     file://avocado-posture-publish.sh \
     file://avocado-posture-publish.service \
 "
-# Refuse a build that requests encrypted-var but resolves to a var-key.sh
-# that cannot actually derive a key on this machine.
+# Refuse a build whose machine declares encrypted-var but resolves to a
+# var-key.sh that cannot actually derive a key on this machine.
+#
+# The gate reads AVOCADO_SECURITY_CAPABILITIES, not DISTRO_FEATURES.
+# Declaring the capability is what pulls this tooling into the image, so the
+# declaration IS the build-time request; DISTRO_FEATURES no longer carries an
+# encrypted-var token at all, and avocado-security-capabilities.bbclass warns
+# when a leftover one appears. Gating on that token would make this check
+# dormant on every machine in the tree.
 #
 # This lives here rather than in avocado-security-capabilities.bbclass's own
 # ConfigParsed handler because the fact it tests - which var-key.sh a
@@ -23,7 +30,9 @@ SRC_URI = " \
 # resolved FILESPATH at all. Checking it here, in the one recipe that ships
 # and installs var-key.sh, is the earliest point the fact is available.
 python __anonymous() {
-    if not bb.utils.contains("DISTRO_FEATURES", "encrypted-var", True, False, d):
+    if not bb.utils.contains(
+        "AVOCADO_SECURITY_CAPABILITIES", "encrypted-var", True, False, d
+    ):
         return
 
     provider = bb.utils.which(d.getVar("FILESPATH"), "var-key.sh")
