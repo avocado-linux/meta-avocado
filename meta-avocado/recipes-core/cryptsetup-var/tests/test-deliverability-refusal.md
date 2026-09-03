@@ -1,78 +1,94 @@
 # Task 4.1: deliverability refusal, observed live
 
 Confirms the scenario the whole change exists for: a machine that declares
-`encrypted-var` but has no var-key provider of its own is REFUSED by
-`cryptsetup-var.bb`'s new deliverability check (task 2.2), not silently built.
+`encrypted-var` but resolves to a var-key provider that cannot derive a key is
+REFUSED at build time by `cryptsetup-var.bb`'s check, not silently built.
 
-## Why Raspberry Pi could not be used
+## Why a scratch machine is required
 
-Raspberry Pi's `AVOCADO_SECURITY_CAPABILITIES` already reads `""`
-(`avocado-raspberrypi.inc:21`). No existing machine in the tree satisfies
-both "declares `encrypted-var`" AND "has no `var-key.sh` override" - the
-four machines with a `FILESEXTRAPATHS:prepend:<machine>` override on
-`cryptsetup-var.bb` (`avocado-imx93-frdm`, `avocado-imx8mp-evk` via the
-`avocado-imx` family override, `avocado-qemuarm64`, `avocado-qemux86-64`,
-`avocado-x86-64`) all supply their own provider, so none of them would
-trigger this check. A construction was required instead.
+No real machine in the tree satisfies both halves. Every machine that declares
+`encrypted-var` also supplies its own provider:
+
+| Machine | Declares `encrypted-var` | Provider override |
+|---|---|---|
+| `avocado-imx93-frdm`, `avocado-imx8mp-evk` | yes | `meta-avocado-nxp` (`:avocado-imx`) |
+| `avocado-qemuarm64`, `avocado-qemux86-64` | yes | `meta-avocado-qemu` (exact names) |
+| Jetson (`avocado-jetson.inc`) | yes | `meta-avocado-nvidia` (`:tegra`) |
+| `avocado-raspberrypi*` | no (`""`) | none |
+| `avocado-intel-x86-64-v*` | no (`tpm2` only) | `meta-avocado-x86-64` |
+
+So the combination has to be constructed. That is the point of the check: it
+guards a state the tree is currently free of, and which a new target - Jetson
+was the trigger, ENG-2158 - would otherwise reach by inheriting the shared
+provider.
 
 ## Construction
 
-A scratch machine, `avocado-qemux86-64-scratch-deliverability`, was created
-by copying `meta-avocado-qemu/conf/machine/avocado-qemux86-64.conf` byte-for-
-byte in structure under a new machine name (so the qemu layer's
-`FILESEXTRAPATHS:prepend:avocado-qemux86-64` override - keyed on the exact
-machine name - does not match, and `cryptsetup-var.bb`'s `FILESPATH` lookup
-falls through to the shared, sentinel-carrying
-`meta-avocado/recipes-core/cryptsetup-var/files/var-key.sh`), keeping the
-inherited `AVOCADO_SECURITY_CAPABILITIES = "encrypted-var tpm2"` declaration,
-and adding one line: `DISTRO_FEATURES:append = " encrypted-var"` - the
-condition `cryptsetup-var.bb`'s anonymous python actually gates on (real
-machines no longer set this; `kas/feature/encrypted-var.yml` was removed by
-commit `0f20494c`, and the bbclass itself now only warns on a leftover
-token). A matching scratch kas machine file,
-`kas/machine/qemux86-64-scratch-deliverability.yml`, pointed `machine:` at
-it and reused `kas/base.yml` plus the same feature includes as
-`kas/machine/qemux86-64.yml`.
+Two temporary files, both deleted after the run:
 
-Both files were temporary. They have been deleted; `git status --short` in
-`meta-avocado/` is clean except for this test file. The sibling build
-directory `build-qemux86-64-scratch-deliverability/` that `bakar` created
-outside the git repo (a sibling of `meta-avocado/`, alongside the
-pre-existing `build-imx93-frdm/`, `build-qemux86-64/`,
-`build-raspberrypi5/` from earlier tasks) was also removed.
+- `meta-avocado-qemu/conf/machine/avocado-qemux86-64-nodeliv.conf` - a single
+  `require conf/machine/avocado-qemux86-64.conf`. It inherits that machine's
+  `AVOCADO_SECURITY_CAPABILITIES = "encrypted-var tpm2"` verbatim, but because
+  the MACHINE name differs, `meta-avocado-qemu`'s
+  `FILESEXTRAPATHS:prepend:avocado-qemux86-64` (keyed on the exact name) does
+  not apply, so `cryptsetup-var`'s `FILESPATH` lookup falls through to the
+  shared, sentinel-carrying `var-key.sh`.
+- `kas/machine/qemux86-64-nodeliv.yml` - the qemux86-64 kas machine file with
+  `machine:` repointed.
+
+Nothing else was changed. Note what is NOT here: the first, void attempt at
+this task also had to append `encrypted-var` to `DISTRO_FEATURES` by hand,
+because the check then gated on a token no machine sets. After `e49c8670`
+re-gated it on `AVOCADO_SECURITY_CAPABILITIES`, the declaration alone arms it -
+which is the whole point, since that is what real machines actually set.
 
 ## Command
 
 ```
-bakar bitbake cryptsetup-var kas/machine/qemux86-64-scratch-deliverability.yml
+bakar build --on pc2 --yes --target cryptsetup-var meta-avocado/kas/machine/qemux86-64-nodeliv.yml
 ```
 
-Run from `/home/tiamarin/repos/work/peridio/meta-avocado/`. This is a bare
-recipe parse/build, not a full image build - the same pattern task 1.2 used
-to confirm `bb.fatal` aborts rather than skips.
+Run from `/home/tiamarin/repos/work/peridio`; dispatched to pc2, both nodes on
+`bakar 0.29.2 (b2948127b778)`.
 
-## Result
+## Result: REFUSED
 
-Exit code: `1`. `bakar` reported `bitbake cryptsetup-var failed (exit 1).`
-
-The exact refusal message, unwrapped from bitbake's line-wrapped output:
+Exit 2, `kas_build: exit_code=2`, parsing halted, no image produced. The exact
+message, from the run log at
+`build-qemux86-64-nodeliv/build/runs/20260903-161900/kas.log`:
 
 ```
-ERROR: /home/tiamarin/repos/work/peridio/build-qemux86-64-scratch-deliverability/build/../../meta-avocado/meta-avocado/recipes-core/cryptsetup-var/cryptsetup-var.bb: machine avocado-qemux86-64-scratch-deliverability declares encrypted-var but supplies no var-key provider of its own: the var-key.sh that resolves for this machine is the placeholder that cannot actually derive a key. Add a machine- or vendor-specific var-key.sh (or var-hwkey.sh) ahead of it on FILESPATH before shipping encrypted-var here.
+ERROR: .../meta-avocado/recipes-core/cryptsetup-var/cryptsetup-var.bb: machine
+avocado-qemux86-64-nodeliv declares encrypted-var but supplies no var-key
+provider of its own: the var-key.sh that resolves for this machine is the
+placeholder that cannot actually derive a key. Add a machine- or
+vendor-specific var-key.sh (or var-hwkey.sh) ahead of it on FILESPATH before
+shipping encrypted-var here.
+ERROR: Parsing halted due to errors, see error messages above
 ```
 
-## Confirmation this is the NEW check, not the bbclass's
+## Confirmation this is the NEW check
 
-- **Names the machine**: `avocado-qemux86-64-scratch-deliverability`, present verbatim in the message.
-- **Names `encrypted-var`**: present verbatim ("declares encrypted-var but supplies no var-key provider").
-- **Distinct wording from `avocado-security-capabilities.bbclass`'s two diagnostics**:
-  - Absent-declaration: `"machine %s requested security feature(s) %s but declares no AVOCADO_SECURITY_CAPABILITIES at all. Unmet prerequisite: add AVOCADO_SECURITY_CAPABILITIES..."` - not present in the run's output at all (this machine's declaration is non-empty, so that branch cannot fire).
-  - Feature-not-declared: `"machine %s requested security feature(s) %s not present in its AVOCADO_SECURITY_CAPABILITIES declaration..."` - also not present; `encrypted-var` is not even in `AVOCADO_SECURITY_FEATURES` (`ahab ftpm tpm2 verified-boot`), so the bbclass's `ConfigParsed` handler treats it as nothing-requested and returns without firing (confirmed by the bbclass source at `avocado-security-capabilities.bbclass:66-76`).
-  - The message that DID fire is the recipe-level one added in task 2.2: it talks about a "var-key provider", "the placeholder that cannot actually derive a key", and "FILESPATH" - vocabulary that exists only in `cryptsetup-var.bb`'s anonymous python, not in the bbclass.
-  - The run's log also shows the bbclass's separate, unrelated `bb.warn` ("DISTRO_FEATURES contains encrypted-var, which no longer selects anything... Drop the token") - this is a warning, not the fatal refusal, and confirms the two checks are visibly different code paths firing side by side in the same run: the bbclass only warns, the recipe check fatals.
+- **Attributed to the recipe**: the ERROR is prefixed with the path to
+  `cryptsetup-var.bb`, where the anonymous python lives.
+- **Names the machine**: `avocado-qemux86-64-nodeliv`, verbatim.
+- **Names the feature**: `encrypted-var`.
+- **The bbclass diagnostics are absent.** Grepping the run log for the three
+  strings `avocado-security-capabilities.bbclass` emits - `requested security
+  feature`, `declares no AVOCADO_SECURITY_CAPABILITIES`, `not present in its
+  AVOCADO_SECURITY_CAPABILITIES` - returns **0** matches. The refusal cannot be
+  attributed to the older declaration check.
 
-## Build completed without success?
+## Unrelated secondary error, recorded for honesty
 
-No. The run exited 1 and bitbake's parse halted on the `bb.fatal` above
-("ERROR: Parsing halted due to errors, see error messages above"). The build
-was REFUSED, not completed.
+The same run also produced
+`avocado-slot-root-generator_1.0.bb: Unable to get checksum for ... SRC_URI
+entry stone-qemux86-64-nodeliv.json: file could not be found`. That is
+collateral of the scratch MACHINE name having no corresponding `stone` config,
+not a product of this change. It is independent of the deliverability ERROR,
+which is attributed to a different recipe and is what halted parsing.
+
+## Cleanup
+
+Both scratch files were deleted after the run; `git status --short` in
+`meta-avocado/` is clean apart from this test file.
