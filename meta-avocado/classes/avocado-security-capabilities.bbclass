@@ -136,6 +136,18 @@ def avocado_security_capabilities_check(d):
         )
     )
 
+# This handler checks REQUEST versus DECLARATION only: did the machine say it
+# can deliver a feature that DISTRO_FEATURES asked for. It cannot check
+# DELIVERABILITY - whether a declared capability's tooling can actually reach
+# a booted device (e.g. a key provider for encrypted-var) - because that
+# question depends on FILESEXTRAPATHS, which is recipe-level data that does
+# not exist yet when bb.event.ConfigParsed fires here; DISTRO_FEATURES and
+# MACHINE are parsed by then, but no recipe has been parsed at all.
+# cryptsetup-var.bb carries the second half of this enforcement: a
+# recipe-parse-time check that a var-key provider script is actually
+# resolvable via FILESEXTRAPATHS for encrypted-var before the recipe builds.
+# Read the two together - this class covers request-vs-declaration, that
+# recipe covers declaration-vs-deliverability.
 addhandler avocado_security_capabilities_eventhandler
 avocado_security_capabilities_eventhandler[eventmask] = "bb.event.ConfigParsed"
 python avocado_security_capabilities_eventhandler() {
