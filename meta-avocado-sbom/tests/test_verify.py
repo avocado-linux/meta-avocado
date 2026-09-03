@@ -26,6 +26,20 @@ def load():
     with open(FIXTURE) as f:
         return json.load(f)
 
+def load_patched():
+    """The fixture as the Patched half of the same build. The fixture is the
+    Unpatched one, so nothing else here sees a Patched status or an evidence.
+    """
+    doc = load()
+    doc["status"] = "Patched"
+    counts = doc["counts"]
+    counts["unpatched_cves"], counts["patched_cves"] = (
+        counts["patched_cves"], counts["unpatched_cves"])
+    for recipe in doc["recipes"].values():
+        for cve in recipe["cves"]:
+            cve["evidence"] = "patch-file"
+    return doc
+
 class FixtureTests(unittest.TestCase):
     def setUp(self):
         self.report = load()
@@ -45,6 +59,11 @@ class FixtureTests(unittest.TestCase):
     def test_fixture_passes(self):
         self.assertClean()
         self.assertEqual(verify.additions(self.report), [])
+
+    def test_the_patched_half_passes(self):
+        patched = load_patched()
+        self.assertEqual(verify.check_report(patched), [])
+        self.assertEqual(verify.additions(patched), [])
 
     # Packages disappear, the counter does not notice.
 
@@ -302,6 +321,80 @@ class FixtureTests(unittest.TestCase):
         )
         self.assertEqual(verify.check_report(report), [])
 
+class AltVersionsTests(unittest.TestCase):
+    """A recipe the build produced at more than one version.
+
+    An alt_versions record is held to the same standard as the entry: a record
+    missing a scope is as broken as an entry missing one.
+    """
+
+    def setUp(self):
+        self.report = load()
+        self.entry = self.report["recipes"]["libpng"]
+        self.entry["alt_versions"] = [{
+            "version": "1.6.44",
+            "packaged": True,
+            "scope": "feed",
+            "cves": [{"id": "CVE-2026-9999"}],
+        }]
+        self.report["counts"]["alt_recipes"] = 1
+        self.report["counts"]["alt_cves"] = 1
+
+    def assertCaught(self, substring):
+        failures = verify.check_report(self.report)
+        self.assertTrue(failures, "mutation was not caught")
+        self.assertTrue(
+            any(substring in f for f in failures),
+            "no failure mentioned %r: %s" % (substring, failures),
+        )
+
+    def test_a_second_version_passes(self):
+        self.assertEqual(verify.check_report(self.report), [])
+        self.assertEqual(verify.additions(self.report), [])
+
+    def test_the_alt_cves_are_not_counted_as_the_recipes_own(self):
+        # Adding a version must not move "cves".
+        self.assertEqual(
+            self.report["counts"]["cves"],
+            sum(len(e["cves"]) for e in self.report["recipes"].values()),
+        )
+
+    def test_alt_cves_dropped_silently(self):
+        self.entry["alt_versions"][0]["cves"] = [{"id": "CVE-1"}, {"id": "CVE-2"}]
+        self.assertCaught("counts.alt_cves")
+
+    def test_a_recipe_gaining_a_version_without_the_counter(self):
+        self.report["counts"]["alt_recipes"] = 0
+        self.assertCaught("counts.alt_recipes")
+
+    def test_a_record_with_no_scope_is_malformed(self):
+        del self.entry["alt_versions"][0]["scope"]
+        self.assertCaught("alt_versions[0].scope")
+
+    def test_a_record_with_an_empty_cve_list_is_malformed(self):
+        # Same rule as an entry: nothing to report means no record.
+        self.entry["alt_versions"][0]["cves"] = []
+        self.report["counts"]["alt_cves"] = 0
+        self.assertCaught("alt_versions[0] has an empty cves list")
+
+    def test_an_empty_alt_versions_list_is_malformed(self):
+        self.entry["alt_versions"] = []
+        self.report["counts"]["alt_recipes"] = 0
+        self.report["counts"]["alt_cves"] = 0
+        self.assertCaught("expected a non-empty list")
+
+    def test_a_record_repeating_the_entrys_own_version_is_malformed(self):
+        # Two records at one version would count its CVEs twice.
+        self.entry["alt_versions"][0]["version"] = self.entry["version"]
+        self.assertCaught("repeats version")
+
+    def test_a_record_repeating_another_records_version_is_malformed(self):
+        self.entry["alt_versions"].append(
+            dict(self.entry["alt_versions"][0], cves=[{"id": "CVE-2026-8888"}])
+        )
+        self.report["counts"]["alt_cves"] = 2
+        self.assertCaught("repeats version")
+
 SCHEMA = os.path.join(
     HERE, "..", "schema", "avocado-cve-report-v1.schema.json"
 )
@@ -326,6 +419,20 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(
             sorted(self.schema["properties"]["status"]["enum"]),
             sorted(verify.CVE_STATUSES),
+        )
+
+    def test_schema_evidence_matches_the_generator(self):
+        # Same drift risk as the status enum: _evidence() picks from a tuple
+        # the schema repeats by hand.
+        from avocado_sbom.report import CVE_EVIDENCE
+
+        self.assertEqual(
+            sorted(
+                self.schema["properties"]["recipes"]["additionalProperties"][
+                    "properties"
+                ]["cves"]["items"]["properties"]["evidence"]["enum"]
+            ),
+            sorted(CVE_EVIDENCE),
         )
 
     def test_schema_scopes_match_the_generator_and_the_checker(self):
@@ -392,6 +499,13 @@ class SchemaTests(unittest.TestCase):
             self.skipTest("jsonschema not installed")
         jsonschema.validate(load(), self.schema)
 
+    def test_the_patched_half_validates(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        jsonschema.validate(load_patched(), self.schema)
+
     def test_schema_rejects_a_report_missing_a_counter(self):
         try:
             import jsonschema
@@ -399,6 +513,37 @@ class SchemaTests(unittest.TestCase):
             self.skipTest("jsonschema not installed")
         report = load()
         del report["counts"]["package_collisions"]
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(report, self.schema)
+
+    def alt_report(self):
+        report = load()
+        report["recipes"]["libpng"]["alt_versions"] = [{
+            "version": "1.6.44",
+            "packaged": True,
+            "scope": "feed",
+            "cves": [{"id": "CVE-2026-9999"}],
+        }]
+        report["counts"]["alt_recipes"] = 1
+        report["counts"]["alt_cves"] = 1
+        return report
+
+    def test_schema_accepts_a_second_version(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        jsonschema.validate(self.alt_report(), self.schema)
+
+    def test_schema_holds_a_second_version_to_the_entrys_own_shape(self):
+        # alt_versions items refer to the entry schema rather than repeating
+        # it. If that reference stops resolving, everything validates.
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        report = self.alt_report()
+        del report["recipes"]["libpng"]["alt_versions"][0]["scope"]
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(report, self.schema)
 

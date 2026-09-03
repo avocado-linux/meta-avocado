@@ -35,6 +35,8 @@ REPORT_COUNTERS = (
     "patched_cves",
     "unknown_status_cves",
     "manifests_read",
+    "alt_recipes",
+    "alt_cves",
 )
 
 # The surfaces a finding can occupy. Kept in step with report.SCOPES, but
@@ -136,6 +138,29 @@ def _check_counts(report, fail):
         elif counts[name] < 0:
             fail("counts.%s is %d, expected a count" % (name, counts[name]))
 
+def _check_record(label, entry, fail):
+    """One recipe-at-a-version: a recipes entry, or an alt_versions record on
+    one. Both carry the same four fields, so a consumer reads a version the
+    same way wherever it found it.
+    """
+    if not isinstance(entry.get("version"), str):
+        fail("%s has no string version" % label)
+    if not isinstance(entry.get("packaged"), bool):
+        fail("%s.packaged is not a boolean" % label)
+    if entry.get("scope") not in SCOPES:
+        fail("%s.scope is %r, expected one of %s"
+             % (label, entry.get("scope"), ", ".join(SCOPES)))
+    cves = entry.get("cves")
+    if not isinstance(cves, list):
+        fail("%s.cves is not a list" % label)
+        return
+    if not cves:
+        fail("%s has an empty cves list; it should be absent" % label)
+    for cve in cves:
+        if not isinstance(cve, dict):
+            fail("%s has a CVE record that is not an object" % label)
+        elif not isinstance(cve.get("id"), str) or not cve["id"]:
+            fail("%s has a CVE record with no id" % label)
 
 def _check_entries(report, fail):
     recipes = report.get("recipes")
@@ -145,26 +170,31 @@ def _check_entries(report, fail):
                 fail("recipes[%r] is %s, expected an object"
                      % (name, type(entry).__name__))
                 continue
-            if not isinstance(entry.get("version"), str):
-                fail("recipes[%r] has no string version" % name)
-            if not isinstance(entry.get("packaged"), bool):
-                fail("recipes[%r].packaged is not a boolean" % name)
-            if entry.get("scope") not in SCOPES:
-                fail("recipes[%r].scope is %r, expected one of %s"
-                     % (name, entry.get("scope"), ", ".join(SCOPES)))
-            cves = entry.get("cves")
-            if not isinstance(cves, list):
-                fail("recipes[%r].cves is not a list" % name)
+            _check_record("recipes[%r]" % name, entry, fail)
+
+            alt_versions = entry.get("alt_versions")
+            if alt_versions is None:
                 continue
-            if not cves:
-                fail("recipes[%r] has an empty cves list; it should be absent"
-                     % name)
-            for cve in cves:
-                if not isinstance(cve, dict):
-                    fail("recipes[%r] has a CVE record that is not an object"
-                         % name)
-                elif not isinstance(cve.get("id"), str) or not cve["id"]:
-                    fail("recipes[%r] has a CVE record with no id" % name)
+            if not isinstance(alt_versions, list) or not alt_versions:
+                fail("recipes[%r].alt_versions is %r, expected a non-empty "
+                     "list; a recipe built at one version has no key"
+                     % (name, alt_versions))
+                continue
+            # One record per version, the entry's own included: two at one
+            # version would double-count its CVEs in alt_cves.
+            seen = {entry.get("version")}
+            for i, alt in enumerate(alt_versions):
+                label = "recipes[%r].alt_versions[%d]" % (name, i)
+                if not isinstance(alt, dict):
+                    fail("%s is %s, expected an object"
+                         % (label, type(alt).__name__))
+                    continue
+                _check_record(label, alt, fail)
+                version = alt.get("version")
+                if version in seen:
+                    fail("%s repeats version %r, which the report already "
+                         "carries for this recipe" % (label, version))
+                seen.add(version)
 
     packages = report.get("packages")
     if isinstance(packages, dict):
@@ -209,6 +239,15 @@ def _check_derived(report, fail):
     def cve_count(items):
         return sum(len(e["cves"]) for e in items if isinstance(e.get("cves"), list))
 
+    # Kept out of "recipes", "cves" and "packaged_cves", so a consumer that
+    # ignores alt_versions reads counters describing what it read.
+    alt_records = [
+        alt
+        for e in entries
+        for alt in (e.get("alt_versions") or ())
+        if isinstance(alt, dict)
+    ]
+
     derived = {
         "recipes": len(recipes),
         "packages": len(packages),
@@ -217,6 +256,8 @@ def _check_derived(report, fail):
         "packaged_cves": cve_count(packaged),
         "unscanned_recipes": len(unscanned),
         "no_cve_record_recipes": len(no_record),
+        "alt_recipes": sum(1 for e in entries if e.get("alt_versions")),
+        "alt_cves": cve_count(alt_records),
     }
 
     for name, want in derived.items():

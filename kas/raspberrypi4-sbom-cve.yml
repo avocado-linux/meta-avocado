@@ -1,0 +1,22 @@
+# raspberrypi4 with SPDX 3.0 SBOM and cve-check both inherited from the start.
+#
+# The RPi counterpart of qemuarm64-sbom-cve.yml, and it exists for the same
+# reason: the build directory is derived from the first YAML's stem, so
+# composing machine/raspberrypi4.yml:feature/sbom.yml on the command line would
+# land in build-raspberrypi4 alongside unrelated runs.
+#
+# cve-check must be inherited while the packages build - added to an existing
+# build afterwards, avocado-cve-report has no *_cve.json to read and produces an
+# empty report rather than failing.
+#
+# machine/raspberrypi4.yml stacks feature/multi-kernel-raspberrypi.yml, so this
+# builds two kernels and the report covers both: the 6.12 one the image
+# installs as the recipe's own entry, the 6.6 one the feed carries as an
+# alt_versions record on it.
+
+header:
+  version: 16
+  includes:
+    - machine/raspberrypi4.yml
+    - feature/sbom.yml
+    - feature/cve-check.yml

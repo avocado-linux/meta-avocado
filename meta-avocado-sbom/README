@@ -52,6 +52,8 @@ ${DEPLOY_DIR}/cve, not the SPDX documents.
 Outside kas, the equivalent in local.conf, with this layer in bblayers.conf:
 
   INHERIT += "cve-check"
+  INHERIT += "avocado-cve-optout"
+  INHERIT += "avocado-cve-backports"
   CVE_CHECK_DIR = "${DEPLOY_DIR}/cve/${MACHINE}"
 
 Both have to be in place before the build that produces the packages, not just
@@ -63,7 +65,18 @@ Usage
   bitbake world
   bitbake avocado-cve-report
 
-Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json.
+Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json and
+-patched.json: one document per status in AVOCADO_CVE_REPORT_STATUS, which
+defaults to both. The first status keeps the unsuffixed name, so the file
+existing consumers fetch keeps holding what it always held; each further status
+adds a suffixed document beside it.
+
+The two are one build's evidence, split by what a consumer does with each half.
+Unpatched is what a user can act upon. Patched is what our patches and
+CVE_STATUS declarations already fix - the half no server can reconstruct from
+an SBOM, because "openssl 3.0.12" plus an advisory feed cannot know this recipe
+carries a backport. Both carry the same packages_digest, which is what proves
+they describe the same build.
 
 The same code can run standalone against a build tree, if needed:
 
@@ -74,8 +87,11 @@ Variables
 ---------
 
   AVOCADO_CVE_REPORT_FILE      output path
-  AVOCADO_CVE_REPORT_STATUS    cve-check status to report, default "Unpatched".
-                               Set to "Ignored" to audit what
+  AVOCADO_CVE_REPORT_STATUS    cve-check statuses to report, one document
+                               each, default "Unpatched Patched". The first
+                               keeps AVOCADO_CVE_REPORT_FILE verbatim; each
+                               further one is suffixed with its status.
+                               Add "Ignored" to audit what
                                cve-extra-exclusions.inc and any local
                                CVE_STATUS declaration suppress; each issue then
                                carries "detail" (the CVE_STATUS keyword -
@@ -106,6 +122,50 @@ Variables
                                trusted-firmware-a optee-os". Override per
                                machine: a board with a different
                                secure-firmware stack has a different list
+
+Evidence
+--------
+
+An issue carries an "evidence" when something decided its status. The
+distinction is the point of the patched half.
+
+  cve-status   A recipe declared it. "detail" names the CVE_STATUS keyword and
+               "description" carries the maintainer's rationale. A claim
+               inherited from layer metadata - true of the version, not of what
+               this build compiled.
+
+  patch-file   A patch this recipe applies names the CVE, so the fix is one we
+               carry. This is the fact a consumer holding the same SBOM and the
+               same advisory feed cannot reconstruct, and the set a correlation
+               service subtracts.
+
+  cve-check    cve-check decided a Patched issue itself and neither of the
+               above applies, which normally means the shipped version falls
+               outside every affected range in the CVE database.
+
+Absent only on an Unpatched issue with no detail: nothing decided it, it is
+what the scan found.
+
+cve-check's own output cannot express the middle value. It marks a CVE patched
+by three routes and only the first leaves a trace: a CVE_STATUS declaration
+sets "detail", while an applied patch and a version that predates the CVE both
+arrive with no detail at all. The two are the majority of the patched set, and
+conflating them would hand a consumer a subtraction set built on a guess.
+
+The split is not derivable after the build but is trivial during one, which is
+what avocado-cve-backports.bbclass exists for. get_patched_cves() is exactly
+patch-file CVEs plus CVE_STATUS ones, so subtracting the CVE_STATUS varflags
+leaves the backports. It rescans on every call, so the class is unaffected by
+check_cves() adding its version-comparison verdicts to cve-check's own copy.
+The class writes them per recipe as <PN>_backports.json beside the cve-check
+results, and read_backports() joins them here.
+
+Without the class inherited no issue reports "patch-file" and those issues
+report "cve-check" instead - a build that says less rather than one that
+guesses. do_cve_report notes it rather than failing: unlike a missing opt-out
+marker, a missing backport marker is indistinguishable from a recipe that
+patches no CVE, so there is no residual to assert against.
+
 
 Scope
 -----
@@ -192,6 +252,75 @@ manifests inside it are avocado-image-rootfs-qemuarm64.manifest. Anchoring on
 ${MACHINE} matches no shipping image on any machine. The directory already
 scopes the machine, so the glob costs nothing. Override the whole default for
 a board whose runtime image is named differently.
+
+More than one version of a recipe
+--------------------------------
+
+Raspberry Pi and Jetson build two kernels, in two multiconfigs, and both ship
+in the same feed. The second multiconfig has its own TMPDIR, so its cve-check
+results are not the ones this report reads until avocado-multikernel.bbclass
+merges that kernel recipe's own results into ${CVE_CHECK_DIR}/<mc>.
+
+Where that leaves a recipe built at two versions - linux-raspberrypi at 6.12
+and 6.6 - the entry stays the version the image installs, and the other one is
+an "alt_versions" record on it:
+
+  "linux-raspberrypi": {
+    "version": "6.12.25+git",
+    "packaged": true,
+    "scope": "base-runtime",
+    "cves": [ ... ],
+    "alt_versions": [
+      { "version": "6.6.63+git", "packaged": true, "scope": "feed",
+        "cves": [ ... ] }
+    ]
+  }
+
+A record carries the same four fields as the entry and is read the same way.
+Its scope is its own: one kernel is in the rootfs manifest and the other is
+only in the feed, which is exactly the distinction scope exists to make.
+
+The entry's own "cves", and the "cves" and "packaged_cves" counters, exclude
+them. A consumer that ignores the key reads counters describing exactly what
+it read, and "alt_recipes" and "alt_cves" say what it skipped. Both are zero on
+every single-kernel machine, where no key is emitted at all.
+
+A zero there means one kernel, never a merge that did not run: a machine that
+declares a second multiconfig and finds neither its merged results nor its
+pkgdata fails the task rather than writing the same zero from half the
+evidence.
+
+Two versions in CVE_CHECK_DIR itself are still merged into one entry by CVE id.
+That directory is never pruned, so a result left behind by an earlier build at
+an older PV is indistinguishable from a current one; only a multiconfig
+subdirectory says a second version was built in this build.
+
+The alt multiconfig's pkgdata is read in place, from
+${TOPDIR}/tmp-<mc>/pkgdata/${MACHINE}, and cannot be merged - it is the default
+multiconfig's own sstate-managed directory. Without it nothing declares the
+second kernel's version and every entry is dropped as stale, so the two are
+found together or neither is used. Its packages come last, because a name both
+kernels package - kernel, kernel-dbg, kernel-dev - goes to the first pkgdata
+directory, and that has to be the kernel the image installs. Scope leans on
+the same order: a manifest names a package without a version, so an installed
+name counts for the version that won it, and the feed-only kernel reads "feed"
+rather than base-runtime on a name it shares.
+
+Standalone, the same shape needs both directories named:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --cve-dir build/tmp/deploy/cve/$MACHINE \
+      --alt-cve-dir build/tmp/deploy/cve/$MACHINE/raspberrypi-6_6 \
+      --pkgdata-dir build/tmp/pkgdata/$MACHINE \
+      --pkgdata-dir build/tmp-raspberrypi-6_6/pkgdata/$MACHINE \
+      --machine $MACHINE -o avocado-cve-report.json
+
+Known ceiling: the opt-out and backport markers merged into that subdirectory
+are keyed by recipe name, and read_optouts/read_backports glob the top level
+only. So a backport carried by the second kernel alone reports "cve-check"
+evidence rather than "patch-file" - understating what the build patched, never
+overstating it. Neither kernel emits a backport marker today; key them by
+(name, version) when either one does.
 
 The frozen contract
 -------------------

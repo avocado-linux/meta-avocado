@@ -13,6 +13,7 @@ which is the opposite of the truth.
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -22,13 +23,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
 from avocado_sbom.report import (  # noqa: E402
+    DEFAULT_STATUSES,
     SCOPES,
     Stats,
     build_report,
     default_manifests,
     read_cve_data,
     read_manifests,
+    filtered_counts,
+    obsolete_paths,
+    parse_statuses,
+    read_backports,
     read_optouts,
+    status_paths,
 )
 
 def entry(name, version="1.0", in_record="Yes", issues=(), products=None):
@@ -473,6 +480,469 @@ class ScopeTests(unittest.TestCase):
         )
         self.assertEqual(stats.manifests_read, 1)
 
+class AltVersionsTests(unittest.TestCase):
+    """One recipe, two versions, both shipping.
+
+    The defect this prevents: read_cve_data merges two entries of one recipe
+    name by CVE id under the first version seen, so a second kernel's CVEs
+    would be reported against the shipped kernel's version.
+    """
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+        self.alt_cve_dir = os.path.join(self.cve_dir, "raspberrypi-6_6")
+        os.makedirs(self.alt_cve_dir)
+        self.pkgdata = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.pkgdata)
+        self.alt_pkgdata = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.alt_pkgdata)
+        for root in (self.pkgdata, self.alt_pkgdata):
+            os.makedirs(os.path.join(root, "runtime-reverse"))
+        self.images = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.images)
+
+    def package(self, name, recipe, version, root=None):
+        path = os.path.join(root or self.pkgdata, "runtime-reverse", name)
+        with open(path, "w") as f:
+            f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n"
+                    % (recipe, version, version))
+
+    def write(self, recipe, *entries, alt=False):
+        root = self.alt_cve_dir if alt else self.cve_dir
+        with open(os.path.join(root, "%s_cve.json" % recipe), "w") as f:
+            json.dump({"package": list(entries)}, f)
+
+    def manifest(self, *packages):
+        path = os.path.join(self.images, "rootfs.manifest")
+        with open(path, "w") as f:
+            for pkg in packages:
+                f.write("%s cortexa72 1.0-r0\n" % pkg)
+        return path
+
+    def populate(self):
+        """The raspberrypi4 shape: 6.12 in the rootfs, 6.6 in the feed."""
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+
+    def build(self, **kw):
+        # Not setdefault: manifest() writes the file, and its argument is
+        # evaluated even when the caller passed its own manifest.
+        if "manifest_paths" not in kw:
+            kw["manifest_paths"] = [self.manifest("kernel-6.12.25")]
+        return build_report(
+            self.cve_dir,
+            [self.pkgdata, self.alt_pkgdata],
+            alt_cve_dirs=[self.alt_cve_dir],
+            **kw
+        )
+
+    def test_the_second_version_is_carried_beside_the_first(self):
+        self.populate()
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+
+        self.assertEqual(entry_["version"], "6.12.25")
+        self.assertEqual([c["id"] for c in entry_["cves"]], ["CVE-2026-1"])
+        self.assertEqual(len(entry_["alt_versions"]), 1)
+        alt = entry_["alt_versions"][0]
+        self.assertEqual(alt["version"], "6.6.63")
+        self.assertEqual([c["id"] for c in alt["cves"]], ["CVE-2026-2"])
+
+    def test_each_version_is_scoped_on_its_own_packages(self):
+        # The whole reason the versions are kept apart.
+        self.populate()
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual(entry_["scope"], "base-runtime")
+        self.assertEqual(entry_["alt_versions"][0]["scope"], "feed")
+
+    def test_a_name_both_kernels_package_scopes_only_the_shipped_one(self):
+        # The real shape: kernel, kernel-dbg and kernel-dev are packaged by
+        # both multiconfigs under one unversioned name, and the manifest names
+        # it without a version. Scored on the bare name, both versions read
+        # base-runtime and the feed-only kernel overstates device exposure.
+        self.package("kernel", "linux-raspberrypi", "6.12.25")
+        self.package("kernel", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build(manifest_paths=[self.manifest("kernel")])
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual(entry_["scope"], "base-runtime")
+        self.assertEqual(entry_["alt_versions"][0]["scope"], "feed")
+
+    def test_the_alt_cves_are_counted_apart_from_the_entries(self):
+        # A consumer that ignores alt_versions must still read counters that
+        # describe what it read.
+        self.populate()
+        doc, _ = self.build()
+        counts = doc["counts"]
+        self.assertEqual(counts["cves"], 1)
+        self.assertEqual(counts["packaged_cves"], 1)
+        self.assertEqual(counts["recipes"], 1)
+        self.assertEqual(counts["alt_recipes"], 1)
+        self.assertEqual(counts["alt_cves"], 1)
+
+    def test_the_alt_never_becomes_the_entry_when_the_first_has_no_issues(self):
+        # The shipped kernel carries nothing at this status, so no entry
+        # records it. The alt must not take its place and name the version the
+        # image does not install as the shipped one.
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Patched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual(entry_["version"], "6.12.25")
+        self.assertEqual(entry_["cves"], [])
+        self.assertEqual([c["id"] for c in entry_["alt_versions"][0]["cves"]],
+                         ["CVE-2026-2"])
+        self.assertEqual(doc["counts"]["cves"], 0)
+        self.assertEqual(doc["counts"]["alt_cves"], 1)
+
+    def test_a_recipe_only_the_second_multiconfig_built_is_an_ordinary_entry(self):
+        # Jetson: the two kernels are different recipes, so there is no second
+        # version of anything and nothing needs alt_versions.
+        self.package("kernel-6.6.63", "linux-jammy-nvidia-tegra", "5.15.0",
+                     root=self.alt_pkgdata)
+        self.write("linux-jammy-nvidia-tegra", entry(
+            "linux-jammy-nvidia-tegra", version="5.15.0",
+            issues=[{"id": "CVE-2026-3", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-jammy-nvidia-tegra"]
+        self.assertEqual(entry_["version"], "5.15.0")
+        self.assertNotIn("alt_versions", entry_)
+        self.assertEqual(doc["counts"]["alt_recipes"], 0)
+        self.assertEqual(doc["counts"]["cves"], 1)
+
+    def test_the_same_version_in_both_multiconfigs_is_one_version(self):
+        # A shared build dependency the alt multiconfig also scanned, at the
+        # same version. It must not fork the entry.
+        self.package("libssl3", "openssl", "3.0.12")
+        self.write("openssl", entry(
+            "openssl", version="3.0.12",
+            issues=[{"id": "CVE-2026-4", "status": "Unpatched"}]))
+        self.write("openssl", entry(
+            "openssl", version="3.0.12",
+            issues=[{"id": "CVE-2026-5", "status": "Unpatched"}]), alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["openssl"]
+        self.assertNotIn("alt_versions", entry_)
+        self.assertEqual(sorted(c["id"] for c in entry_["cves"]),
+                         ["CVE-2026-4", "CVE-2026-5"])
+        self.assertEqual(doc["counts"]["alt_cves"], 0)
+
+    def test_two_versions_in_the_main_directory_are_still_merged(self):
+        # CVE_CHECK_DIR is never pruned, so a result left by an earlier build
+        # at an older PV sits beside the current one indistinguishably. Only a
+        # multiconfig subdirectory says a second version was built now.
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        with open(os.path.join(self.cve_dir, "stale_cve.json"), "w") as f:
+            json.dump({"package": [entry(
+                "linux-raspberrypi", version="6.11.0",
+                issues=[{"id": "CVE-2026-9", "status": "Unpatched"}])]}, f)
+
+        doc, stats = self.build()
+        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
+        self.assertEqual(stats.stale_dropped, 1)
+
+    def test_an_alt_version_with_no_pkgdata_is_dropped_as_stale(self):
+        # What the recipe's warning exists to pre-empt: nothing declares that
+        # version, so the entry goes to stale_dropped - a health counter.
+        self.populate()
+        doc, stats = build_report(
+            self.cve_dir, [self.pkgdata], alt_cve_dirs=[self.alt_cve_dir],
+            manifest_paths=[self.manifest("kernel-6.12.25")],
+        )
+        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
+        self.assertEqual(stats.stale_dropped, 1)
+
+    def test_the_second_version_counts_as_a_scanned_recipe_once(self):
+        # scanned is a set of names, and both versions are the same name.
+        self.populate()
+        doc, _ = self.build()
+        self.assertEqual(doc["counts"]["recipes"], 1)
+        self.assertNotIn("linux-raspberrypi", doc["unscanned_recipes"])
+
+    def test_one_cve_reported_at_both_versions_is_kept_at_both(self):
+        # The opposite of the id-merge inside one version: the CVE really is
+        # unpatched in both kernels.
+        issue = {"id": "CVE-2026-1", "status": "Unpatched"}
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25", issues=[issue]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63", issues=[dict(issue)]),
+            alt=True)
+
+        doc, _ = self.build()
+        entry_ = doc["recipes"]["linux-raspberrypi"]
+        self.assertEqual([c["id"] for c in entry_["cves"]], ["CVE-2026-1"])
+        self.assertEqual(
+            [c["id"] for c in entry_["alt_versions"][0]["cves"]],
+            ["CVE-2026-1"],
+        )
+
+    def test_an_id_repeated_across_two_alt_files_is_one_cve(self):
+        # Two files in one subdirectory naming the same recipe.
+        issue = {"id": "CVE-2026-1", "status": "Unpatched"}
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-0", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63", issues=[issue]), alt=True)
+        with open(os.path.join(self.alt_cve_dir, "again_cve.json"), "w") as f:
+            json.dump({"package": [entry(
+                "linux-raspberrypi", version="6.6.63",
+                issues=[dict(issue)])]}, f)
+
+        doc, _ = self.build()
+        alts = doc["recipes"]["linux-raspberrypi"]["alt_versions"]
+        self.assertEqual(len(alts), 1)
+        self.assertEqual(len(alts[0]["cves"]), 1)
+        self.assertEqual(doc["counts"]["alt_cves"], 1)
+
+class EvidenceTests(unittest.TestCase):
+    """Who decided a status, and the one thing this field must never claim.
+
+    The defect this file exists to prevent: labelling every detail-less Patched
+    issue a backport of ours. Three routes reach Patched and only one of them
+    is a patch we carry - cve-check.bbclass adds a CVE to patched_cves whenever
+    the shipped version falls outside every affected range, which on qemuarm64
+    is the majority. A report that called those "our patch" would hand the
+    correlation service a subtraction set built on a guess.
+    """
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+        self.stats = Stats()
+
+    def write(self, recipe, *entries):
+        path = os.path.join(self.cve_dir, "%s_cve.json" % recipe)
+        with open(path, "w") as f:
+            json.dump({"package": list(entries)}, f)
+
+    def cves(self, recipe, status, backports=None):
+        recipes, _, _ = read_cve_data(
+            self.cve_dir, {recipe: {"1.0"}}, self.stats, status=status,
+            backports=backports,
+        )
+        return {c["id"]: c for c in recipes[recipe]["cves"]}
+
+    def test_a_declared_status_is_attributed_to_the_declaration(self):
+        self.write("openssl", entry("openssl", issues=[
+            {"id": "CVE-1", "status": "Patched", "detail": "backported-patch"},
+        ]))
+        self.assertEqual(self.cves("openssl", "Patched")["CVE-1"]["evidence"],
+                         "cve-status")
+
+    def test_an_undeclared_patched_issue_is_not_attributed_to_our_patches(self):
+        # The whole point. cve-check supplies no detail for either an applied
+        # patch or a version comparison, so with nothing else to go on neither
+        # may be named. acl CVE-2009-4411 is the real case: Patched, no detail,
+        # and no patch in the recipe - cve-check decided it on version alone.
+        self.write("acl", entry("acl", issues=[
+            {"id": "CVE-2", "status": "Patched"},
+        ]))
+        self.assertEqual(self.cves("acl", "Patched")["CVE-2"]["evidence"],
+                         "cve-check")
+
+    def test_a_marker_promotes_only_the_cves_it_names(self):
+        self.write("openssl", entry("openssl", issues=[
+            {"id": "CVE-6", "status": "Patched"},
+            {"id": "CVE-7", "status": "Patched"},
+        ]))
+        got = self.cves("openssl", "Patched",
+                        backports={"openssl": {"CVE-6"}})
+        self.assertEqual(got["CVE-6"]["evidence"], "patch-file")
+        self.assertEqual(got["CVE-7"]["evidence"], "cve-check")
+
+    def test_a_declaration_outranks_a_marker(self):
+        # A patch can name a CVE the recipe also declares. cve-check's own
+        # output puts the detail first, and so does this.
+        self.write("glibc", entry("glibc", issues=[
+            {"id": "CVE-8", "status": "Patched", "detail": "backported-patch"},
+        ]))
+        got = self.cves("glibc", "Patched", backports={"glibc": {"CVE-8"}})
+        self.assertEqual(got["CVE-8"]["evidence"], "cve-status")
+
+    def test_another_recipes_marker_does_not_leak(self):
+        self.write("zlib", entry("zlib", issues=[
+            {"id": "CVE-9", "status": "Patched"},
+        ]))
+        got = self.cves("zlib", "Patched", backports={"openssl": {"CVE-9"}})
+        self.assertEqual(got["CVE-9"]["evidence"], "cve-check")
+
+    def test_nothing_is_claimed_for_an_undeclared_unpatched_issue(self):
+        self.write("zlib", entry("zlib", issues=[
+            {"id": "CVE-3", "status": "Unpatched"},
+        ]))
+        self.assertNotIn("evidence", self.cves("zlib", "Unpatched")["CVE-3"])
+
+    def test_a_declared_unpatched_issue_still_names_its_declaration(self):
+        self.write("glibc", entry("glibc", issues=[
+            {"id": "CVE-4", "status": "Unpatched", "detail": "upstream-wontfix"},
+        ]))
+        self.assertEqual(self.cves("glibc", "Unpatched")["CVE-4"]["evidence"],
+                         "cve-status")
+
+    def test_dropping_the_prose_does_not_drop_the_attribution(self):
+        # --no-summary drops free text, never what decided a status.
+        self.write("curl", entry("curl", issues=[
+            {"id": "CVE-5", "status": "Patched", "detail": "fixed-version",
+             "summary": "s", "description": "d"},
+        ]))
+        recipes, _, _ = read_cve_data(
+            self.cve_dir, {"curl": {"1.0"}}, self.stats, status="Patched",
+            summary=False,
+        )
+        cve = recipes["curl"]["cves"][0]
+        self.assertEqual(cve["evidence"], "cve-status")
+        self.assertNotIn("summary", cve)
+
+class ParseStatusesTests(unittest.TestCase):
+    def test_the_order_given_is_kept(self):
+        self.assertEqual(parse_statuses("Patched Unpatched"),
+                         ["Patched", "Unpatched"])
+
+    def test_a_repeat_asks_for_one_document(self):
+        # Otherwise status_paths hands back one path for two passes and the
+        # second overwrites the first.
+        self.assertEqual(parse_statuses("Unpatched Unpatched"), ["Unpatched"])
+
+    def test_empty_is_rejected(self):
+        for value in ("", "   ", None):
+            with self.assertRaises(ValueError):
+                parse_statuses(value)
+
+    def test_every_unknown_status_is_named_at_once(self):
+        with self.assertRaises(ValueError) as caught:
+            parse_statuses("Unpatched Fixed Bogus")
+        message = str(caught.exception)
+        self.assertIn("'Fixed'", message)
+        self.assertIn("'Bogus'", message)
+
+class FilteredCountsTests(unittest.TestCase):
+    def test_only_non_zero_counters_are_named(self):
+        self.assertEqual(
+            filtered_counts({"unpatched_cves": 3, "patched_cves": 0,
+                             "ignored_cves": 1}),
+            "3 unpatched, 1 ignored",
+        )
+
+    def test_the_underscore_is_spelled_out(self):
+        # The recipe and the standalone run print the same phrase; they drifted
+        # here once already.
+        self.assertEqual(filtered_counts({"unknown_status_cves": 2}),
+                         "2 unknown status")
+
+    def test_nothing_filtered_is_the_empty_string(self):
+        self.assertEqual(filtered_counts({"unpatched_cves": 0}), "")
+
+class ObsoletePathsTests(unittest.TestCase):
+    """Switching which statuses are asked for changes which suffixed documents
+    exist, and nothing prunes DEPLOY_DIR. The leftover is what a consumer reads
+    as current.
+    """
+
+    def paths(self, out_path, statuses):
+        return obsolete_paths(out_path, status_paths(out_path, statuses))
+
+    def test_the_first_status_document_is_never_dropped(self):
+        for statuses in (["Unpatched"], ["Unpatched", "Patched"],
+                         ["Unpatched", "Patched", "Ignored"]):
+            self.assertNotIn("/d/r.json", self.paths("/d/r.json", statuses))
+
+    def test_the_suffix_the_first_status_no_longer_uses_is_dropped(self):
+        # Earlier runs suffixed every document, this one names the first
+        # r.json, so r-unpatched.json is left describing the same half.
+        self.assertEqual(self.paths("/d/r.json", ["Unpatched", "Patched"]),
+                         ["/d/r-ignored.json", "/d/r-unpatched.json"])
+
+    def test_going_single_drops_the_suffixed_names(self):
+        self.assertEqual(
+            self.paths("/d/r.json", ["Unpatched"]),
+            ["/d/r-ignored.json", "/d/r-patched.json", "/d/r-unpatched.json"],
+        )
+
+    def test_nothing_written_is_ever_listed_for_removal(self):
+        for statuses in (["Unpatched"], ["Unpatched", "Patched"],
+                         ["Unpatched", "Patched", "Ignored"]):
+            written = set(status_paths("/d/r.json", statuses).values())
+            self.assertFalse(written & set(self.paths("/d/r.json", statuses)))
+
+class DefaultStatusesTest(unittest.TestCase):
+    def test_the_cli_and_the_recipe_default_to_the_same_statuses(self):
+        # They did not, and a bare standalone run deleted both documents the
+        # build had written.
+        recipe = os.path.join(
+            HERE, "..", "recipes-avocado", "avocado-cve-report",
+            "avocado-cve-report.bb",
+        )
+        with open(recipe) as f:
+            declared = re.search(
+                r'^AVOCADO_CVE_REPORT_STATUS \?= "([^"]*)"', f.read(), re.M
+            )
+        self.assertTrue(declared, "the recipe no longer declares a default")
+        self.assertEqual(declared.group(1).split(), list(DEFAULT_STATUSES))
+
+class StatusPathsTests(unittest.TestCase):
+    """The first status keeps the historical filename, so asking for a second
+    adds a document rather than renaming the one consumers fetch.
+    """
+
+    def test_a_single_status_keeps_the_path_verbatim(self):
+        self.assertEqual(status_paths("/d/report.json", ["Unpatched"]),
+                         {"Unpatched": "/d/report.json"})
+
+    def test_only_the_statuses_after_the_first_are_suffixed(self):
+        self.assertEqual(
+            status_paths("/d/report.json", ["Unpatched", "Patched"]),
+            {"Unpatched": "/d/report.json",
+             "Patched": "/d/report-patched.json"},
+        )
+
+    def test_every_path_is_distinct(self):
+        paths = status_paths("/d/r.json", ["Unpatched", "Patched", "Ignored"])
+        self.assertEqual(len(set(paths.values())), 3)
+
+    def test_a_path_without_an_extension_still_separates(self):
+        self.assertEqual(
+            status_paths("/d/report", ["Unpatched", "Patched"]),
+            {"Unpatched": "/d/report",
+             "Patched": "/d/report-patched"},
+        )
+
 class ReadOptoutsTests(unittest.TestCase):
     """The markers avocado-cve-optout.bbclass leaves beside the cve-check
     results. They are what replaced a declared count, so a marker that reads
@@ -544,6 +1014,65 @@ class ReadOptoutsTests(unittest.TestCase):
         self.write("bad", "not json at all")
         declared, unreadable = read_optouts(self.cve_dir)
         self.assertEqual(list(declared), ["good"])
+        self.assertEqual(unreadable, 1)
+
+class ReadBackportsTests(unittest.TestCase):
+    """The markers avocado-cve-backports.bbclass leaves beside the cve-check
+    results. An empty map is a legitimate answer, so nothing here may raise.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def write(self, name, payload):
+        with open(os.path.join(self.dir, "%s_backports.json" % name), "w") as f:
+            json.dump(payload, f)
+
+    def test_a_marker_is_read(self):
+        self.write("openssl", {"version": "1", "name": "openssl",
+                               "cves": ["CVE-1", "CVE-2"]})
+        backports, unreadable = read_backports(self.dir)
+        self.assertEqual(backports, {"openssl": {"CVE-1", "CVE-2"}})
+        self.assertEqual(unreadable, 0)
+
+    def test_the_name_inside_wins_over_the_filename(self):
+        self.write("wrong", {"version": "1", "name": "right",
+                             "cves": ["CVE-1"]})
+        backports, _ = read_backports(self.dir)
+        self.assertEqual(sorted(backports), ["right"])
+
+    def test_cve_results_are_not_mistaken_for_markers(self):
+        with open(os.path.join(self.dir, "openssl_cve.json"), "w") as f:
+            json.dump({"package": []}, f)
+        self.assertEqual(read_backports(self.dir), ({}, 0))
+
+    def test_optout_markers_are_not_mistaken_for_backports(self):
+        with open(os.path.join(self.dir, "x_optout.json"), "w") as f:
+            json.dump({"version": "1", "name": "x", "reason": "r"}, f)
+        self.assertEqual(read_backports(self.dir), ({}, 0))
+
+    def test_a_missing_directory_does_not_raise(self):
+        self.assertEqual(read_backports(os.path.join(self.dir, "nope")), ({}, 0))
+
+    def test_an_empty_directory_names_nothing(self):
+        self.assertEqual(read_backports(self.dir), ({}, 0))
+
+    def test_truncated_json_is_counted_not_dropped(self):
+        with open(os.path.join(self.dir, "bad_backports.json"), "w") as f:
+            f.write('{"name": "bad", "cves": [')
+        self.assertEqual(read_backports(self.dir), ({}, 1))
+
+    def test_a_marker_whose_cves_are_not_strings_is_counted(self):
+        self.write("bad", {"version": "1", "name": "bad", "cves": [1, 2]})
+        self.assertEqual(read_backports(self.dir), ({}, 1))
+
+    def test_a_bad_marker_does_not_hide_a_good_one(self):
+        self.write("good", {"version": "1", "name": "good", "cves": ["CVE-1"]})
+        with open(os.path.join(self.dir, "bad_backports.json"), "w") as f:
+            f.write("[]")
+        backports, unreadable = read_backports(self.dir)
+        self.assertEqual(backports, {"good": {"CVE-1"}})
         self.assertEqual(unreadable, 1)
 
 class DefaultManifestsTest(unittest.TestCase):
