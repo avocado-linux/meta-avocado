@@ -100,6 +100,25 @@ end
 
 local function saw(p) return string.match(tail, p) ~= nil end
 
+-- Match a filename in a `fatls` listing as a WHOLE entry.
+--
+-- `ubootefi.var` is a prefix of `ubootefi.var.bak`, the backup the precedence
+-- leg writes, so a plain substring match is satisfied by the backup and reports
+-- the real store as present when it is gone. That is measured, not feared: on
+-- the first run after the backup was introduced it turned a working offline
+-- delete into a FAIL reading "the delete did not happen", and the ESP listing
+-- in the same log showed three files with ubootefi.var plainly absent. The
+-- message blamed the board for a defect in the check.
+--
+-- fatls prints `<size>   <name>\r\n`, so requiring a line terminator directly
+-- after the name is what makes the entry whole. The dots are escaped here so
+-- callers pass a filename rather than a Lua pattern - the raw-pattern form is
+-- what let the prefix bug in unnoticed.
+local function esp_has(name)
+  local escaped = name:gsub("%.", "%%.")
+  return string.match(tail, escaped .. "[\r\n]") ~= nil
+end
+
 -- Sleep `ms` of REAL time, draining whatever arrives. The short read timeout is
 -- only so a quiet line does not stall; the msleep is what costs the time.
 local function settle(ms)
@@ -939,11 +958,15 @@ if MODE == "keydb_immutable" then
   if not saw("file%(s%)") then
     fail("could not list the ESP (partition " .. esppart .. ") - part two cannot run")
   end
-  if not saw("ubootefi%.var") then
+  -- Whole-entry, not substring. This is the same prefix trap as the delete
+  -- check below and it fails the other way round: a leftover ubootefi.var.bak
+  -- from an interrupted run would satisfy a substring match and let the leg
+  -- proceed believing it had a real store to back up and substitute.
+  if not esp_has("ubootefi.var") then
     fail("no ubootefi.var on the ESP (partition " .. esppart .. "), so there " ..
          "is no store to substitute or delete and part two cannot run")
   end
-  if not saw("advstore%.var") then
+  if not esp_has("advstore.var") then
     fail("no advstore.var on the ESP (partition " .. esppart .. ") - the rival " ..
          "variable store is staged there by avocado-stone under " ..
          "boot-integrity-poc, so this card predates that change or was flashed " ..
@@ -1022,8 +1045,41 @@ if MODE == "keydb_immutable" then
   -- performs; a copy in RAM does not.
   cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var", 8000)
   if not saw("bytes read") then
-    fail("the real ubootefi.var did not load from the ESP, so it cannot be " ..
-         "backed up and this leg would have no way to put it back")
+    -- Recover from an earlier run of THIS leg rather than dead-ending.
+    --
+    -- The leg deletes the real store and restores it at the very end, so any
+    -- failure between those two points leaves the ESP with no ubootefi.var and
+    -- a ubootefi.var.bak holding it. Refusing to start in that state makes the
+    -- mode unrunnable until someone reflashes the board - a full build-flash
+    -- cycle to undo a file rename - when the recovery is two commands this
+    -- function already knows how to issue. That state is not hypothetical: the
+    -- prefix bug fixed above put the bench in exactly it.
+    --
+    -- Recovery is only ever FROM this leg's own backup. It never fabricates a
+    -- store, so a board that genuinely has none still fails, and says so.
+    cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var.bak", 8000)
+    if not saw("bytes read") then
+      fail("the real ubootefi.var did not load from the ESP, and there is no " ..
+           "ubootefi.var.bak to recover it from - the board needs reflashing " ..
+           "before this mode can run")
+    end
+    cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
+        " ubootefi.var ${filesize}", 8000)
+    if not saw("bytes written") then
+      fail("found a ubootefi.var.bak from an interrupted run but could not " ..
+           "write it back to ubootefi.var, so the real variable store cannot " ..
+           "be recovered - reflash the board")
+    end
+    tio.echo("\r\n>>> recovered ubootefi.var from an earlier run's backup <<<\r\n")
+
+    -- Re-read rather than assume. The restore is the whole precondition of
+    -- this leg, and proceeding on the strength of `bytes written` alone would
+    -- carry a truncated or unreadable store into the substitution test.
+    cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var", 8000)
+    if not saw("bytes read") then
+      fail("ubootefi.var still does not load after recovering it from " ..
+           "ubootefi.var.bak, so the store on the ESP is not usable")
+    end
   end
   cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
       " ubootefi.var.bak ${filesize}", 8000)
@@ -1135,7 +1191,7 @@ if MODE == "keydb_immutable" then
     fail("could not re-list the ESP, so the delete is unconfirmed - " ..
          "the absent-store leg did not run")
   end
-  if saw("ubootefi%.var") then
+  if esp_has("ubootefi.var") then
     fail("ubootefi.var is still on the boot partition after fatrm - the delete " ..
          "did not happen, so the offline half was never exercised")
   end
