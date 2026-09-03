@@ -29,32 +29,82 @@ SRC_URI = " \
 # parsed, so a check placed there could not call bb.utils.which against a
 # resolved FILESPATH at all. Checking it here, in the one recipe that ships
 # and installs var-key.sh, is the earliest point the fact is available.
+# Every provider declares its own status on an anchored comment line:
+#
+#     # avocado-var-key-provider: usable
+#     # avocado-var-key-provider: unusable
+#
+# The check FAILS CLOSED on anything it cannot affirmatively verify - a missing
+# line, an unrecognised status, a provider that does not resolve, a file it
+# cannot read. This is the direction design.md already chose ("a usable
+# provider wrongly refused, loudly, rather than an unusable one wrongly
+# accepted"); an earlier form treated absence-of-sentinel as "usable", so an
+# empty or always-failing var-key.sh dropped into a layer passed silently and
+# shipped the first-boot failure this check exists to prevent.
+#
+# Anchored to a comment line rather than searched as a substring: a usable
+# provider whose prose happens to mention the marker - a migration note, a
+# comment explaining this contract - must not be refused for talking about it.
+AVOCADO_VAR_KEY_MARKER = "avocado-var-key-provider:"
+
 python __anonymous() {
     if not bb.utils.contains(
         "AVOCADO_SECURITY_CAPABILITIES", "encrypted-var", True, False, d
     ):
         return
 
-    provider = bb.utils.which(d.getVar("FILESPATH"), "var-key.sh")
+    machine = d.getVar("MACHINE") or "<unknown>"
+    marker = d.getVar("AVOCADO_VAR_KEY_MARKER")
+    lead = "machine %s declares encrypted-var but " % machine
+    remedy = (
+        " Ship a var-key.sh for this machine carrying the comment line "
+        "'# %s usable' and able to derive a device-unique key. A var-hwkey.sh "
+        "does not satisfy this on its own: per cryptsetup-var.sh it supplies "
+        "the passphrase of a SECOND keyslot and leaves the var-key.sh keyslot "
+        "as the recovery path, so a machine with only a hwkey backend still "
+        "cannot derive that recovery key." % marker
+    )
+
+    # An empty FILESPATH would send bb.utils.which to the host PATH, where a
+    # stray var-key.sh would be inspected as though it were the shipped one.
+    filespath = d.getVar("FILESPATH")
+    if not filespath:
+        bb.fatal(lead + "FILESPATH is empty at parse time, so which var-key.sh ships cannot be determined." + remedy)
+
+    provider = bb.utils.which(filespath, "var-key.sh")
     if not provider:
-        return
+        bb.fatal(lead + "no var-key.sh resolves on FILESPATH at all." + remedy)
 
-    with open(provider) as f:
-        contents = f.read()
+    try:
+        with open(provider, encoding="utf-8", errors="replace") as f:
+            contents = f.read()
+    except OSError as exc:
+        bb.fatal(lead + "its var-key.sh at %s could not be read: %s." % (provider, exc) + remedy)
 
-    if "avocado-var-key-provider: unusable" in contents:
-        machine = d.getVar("MACHINE") or "<unknown>"
+    status = None
+    for line in contents.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#"):
+            continue
+        body = stripped.lstrip("#").strip()
+        if body.startswith(marker):
+            status = body[len(marker):].strip()
+            break
+
+    if status is None:
         bb.fatal(
-            "machine %s declares encrypted-var but supplies no var-key "
-            "provider of its own: the var-key.sh that resolves for this "
-            "machine is the placeholder that cannot actually derive a key. "
-            "Add a machine- or vendor-specific var-key.sh ahead of it on "
-            "FILESPATH before shipping encrypted-var here. A var-hwkey.sh "
-            "does not satisfy this on its own: per cryptsetup-var.sh it "
-            "supplies the passphrase of a SECOND keyslot and leaves the "
-            "var-key.sh keyslot as the recovery path, so a machine with only "
-            "a hwkey backend still cannot derive that recovery key."
-            % machine
+            lead + "the var-key.sh that resolves for it (%s) declares no "
+            "'%s' status line, so it cannot be shown to derive a key." % (provider, marker) + remedy
+        )
+    if status == "unusable":
+        bb.fatal(
+            lead + "the var-key.sh that resolves for it (%s) declares itself "
+            "unusable: it is the placeholder that cannot actually derive a key." % provider + remedy
+        )
+    if status != "usable":
+        bb.fatal(
+            lead + "the var-key.sh that resolves for it (%s) declares an "
+            "unrecognised status '%s'; expected 'usable' or 'unusable'." % (provider, status) + remedy
         )
 }
 

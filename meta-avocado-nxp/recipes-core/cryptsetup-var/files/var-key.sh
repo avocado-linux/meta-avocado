@@ -1,4 +1,7 @@
 #!/bin/sh
+# avocado-var-key-provider: usable
+# SoC-UID derived (i.MX8M / i.MX9). cryptsetup-var.bb refuses a machine whose resolved provider
+# does not declare this line, so it is load-bearing, not a note.
 # /var LUKS key provider for NXP i.MX8M / i.MX9 boards -- phase-1: SoC-UID
 # derived, no provisioned secret.
 #
