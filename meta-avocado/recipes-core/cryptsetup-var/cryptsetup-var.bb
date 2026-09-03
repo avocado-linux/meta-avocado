@@ -10,6 +10,40 @@ SRC_URI = " \
     file://avocado-posture-publish.sh \
     file://avocado-posture-publish.service \
 "
+# Refuse a build that requests encrypted-var but resolves to a var-key.sh
+# that cannot actually derive a key on this machine.
+#
+# This lives here rather than in avocado-security-capabilities.bbclass's own
+# ConfigParsed handler because the fact it tests - which var-key.sh a
+# FILESEXTRAPATHS-aware lookup resolves to for THIS machine - does not exist
+# yet at ConfigParsed time. FILESEXTRAPATHS is a per-recipe BBPATH/FILESPATH
+# construction that only settles once this recipe is being parsed; the
+# ConfigParsed event fires before any recipe, including this one, has been
+# parsed, so a check placed there could not call bb.utils.which against a
+# resolved FILESPATH at all. Checking it here, in the one recipe that ships
+# and installs var-key.sh, is the earliest point the fact is available.
+python __anonymous() {
+    if not bb.utils.contains("DISTRO_FEATURES", "encrypted-var", True, False, d):
+        return
+
+    provider = bb.utils.which(d.getVar("FILESPATH"), "var-key.sh")
+    if not provider:
+        return
+
+    with open(provider) as f:
+        contents = f.read()
+
+    if "avocado-var-key-provider: unusable" in contents:
+        machine = d.getVar("MACHINE") or "<unknown>"
+        bb.fatal(
+            "machine %s declares encrypted-var but supplies no var-key "
+            "provider of its own: the var-key.sh that resolves for this "
+            "machine is the placeholder that cannot actually derive a key. "
+            "Add a machine- or vendor-specific var-key.sh (or var-hwkey.sh) "
+            "ahead of it on FILESPATH before shipping encrypted-var here."
+            % machine
+        )
+}
 
 # Tools cryptsetup-var.sh + var-key.sh invoke in the (minimal) initramfs:
 #   cryptsetup    - luksFormat / open / resize
