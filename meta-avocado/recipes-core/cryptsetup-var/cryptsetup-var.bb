@@ -48,8 +48,12 @@ python __anonymous() {
             "machine %s declares encrypted-var but supplies no var-key "
             "provider of its own: the var-key.sh that resolves for this "
             "machine is the placeholder that cannot actually derive a key. "
-            "Add a machine- or vendor-specific var-key.sh (or var-hwkey.sh) "
-            "ahead of it on FILESPATH before shipping encrypted-var here."
+            "Add a machine- or vendor-specific var-key.sh ahead of it on "
+            "FILESPATH before shipping encrypted-var here. A var-hwkey.sh "
+            "does not satisfy this on its own: per cryptsetup-var.sh it "
+            "supplies the passphrase of a SECOND keyslot and leaves the "
+            "var-key.sh keyslot as the recovery path, so a machine with only "
+            "a hwkey backend still cannot derive that recovery key."
             % machine
         )
 }
