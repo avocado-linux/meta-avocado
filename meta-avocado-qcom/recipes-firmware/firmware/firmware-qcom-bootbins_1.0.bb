@@ -18,6 +18,15 @@ BB_GIT_SHALLOW_DEPTH = "1"
 BB_GENERATE_SHALLOW_TARBALLS = "1"
 
 BOOTBINARIES = "QCM6490_bootbinaries"
+
+# Which of Thundercomm's XBL configs to flash as xbl_config.elf. The prebuilt
+# zip carries three: xbl_config.elf (byte-identical to xbl_config_gunyah.elf),
+# xbl_config_gunyah.elf and xbl_config_kvm.elf. Under the gunyah config the
+# Gunyah hypervisor (hyp_a / hypvm.mbn) owns EL2 and Linux is booted at EL1,
+# so KVM cannot initialise no matter how CONFIG_KVM is set. The kvm config
+# leaves EL2 to Linux. rawprogram1/2.xml only ever flash the file named
+# xbl_config.elf, so the choice has to be made here.
+QCOM_XBL_CONFIG_VARIANT ?= "gunyah"
 S = "${UNPACKDIR}/${BP}"
 B = "${WORKDIR}/build"
 
@@ -44,6 +53,11 @@ do_install() {
             *) if [ -d "$f" ]; then cp -a --no-preserve=ownership "$f" ${D}/; else install -m 0644 "$f" ${D}/; fi ;;
         esac
     done
+
+    # Overwrite the generic name with the selected variant (see
+    # QCOM_XBL_CONFIG_VARIANT above). Fails the build if the zip ever stops
+    # shipping the variant, rather than silently flashing the stock config.
+    install -m 0644 "xbl_config_${QCOM_XBL_CONFIG_VARIANT}.elf" ${D}/xbl_config.elf
 }
 
 inherit deploy
