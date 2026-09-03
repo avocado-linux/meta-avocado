@@ -1,0 +1,67 @@
+name: CodeQL Upload
+
+# codeql-analyze.yml never uploads results for pull_request events -- forks
+# get a read-only GITHUB_TOKEN with no security-events:write, and same-repo
+# PRs are routed through the identical path so both cases are exercised the
+# same way. workflow_run always runs against this file's version on the
+# default branch with the base repo's real permissions, which is what lets
+# this job do the upload the PR-triggered run couldn't.
+#
+# github.event.workflow_run.pull_requests is empty for PRs from forks, so the
+# PR number/head sha are read back from the artifact the analyze job saved
+# instead of trusting that field.
+
+on:
+  workflow_run:
+    workflows: ["CodeQL Analyze"]
+    types: [completed]
+
+permissions:
+  security-events: write
+  actions: read
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    # push/schedule runs of CodeQL Analyze already uploaded directly and
+    # never produced a pr-metadata artifact -- only act on PR-triggered runs.
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    strategy:
+      matrix:
+        language: [python, actions]
+    steps:
+      - name: Download PR metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-metadata
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Read PR metadata
+        id: pr
+        run: |
+          echo "sha=$(cat sha)" >> "$GITHUB_OUTPUT"
+          echo "number=$(cat number)" >> "$GITHUB_OUTPUT"
+
+      - name: Download SARIF results
+        uses: actions/download-artifact@v4
+        with:
+          name: sarif-${{ matrix.language }}
+          path: sarif-results
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      # This is the step that actually needs the base repo's real
+      # permissions - forks never get security-events: write, which is
+      # why the analyze workflow above only ever produces the SARIF and
+      # never uploads it itself for pull_request events.
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif-results
+          category: "/language:${{ matrix.language }}"
+          ref: refs/pull/${{ steps.pr.outputs.number }}/merge
+          sha: ${{ steps.pr.outputs.sha }}
