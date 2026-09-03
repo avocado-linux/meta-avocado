@@ -5,16 +5,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 PV = "${SDK_VERSION}"
 
 SRC_URI = " \
-    file://avocado-sdk.repo \
     file://dnf.conf \
 "
 
 S = "${WORKDIR}"
-
-REPO_BASE = "${AVOCADO_REPO_BASE}"
-
-# Monitor AVOCADO_REPO_BASE for changes
-vardeps += "AVOCADO_REPO_BASE"
 
 FILES:${PN} += "${sysconfdir}/yum.repos.d/avocado-sdk.repo"
 
@@ -27,11 +21,38 @@ ALTERNATIVE_LINK_NAME[dnf_conf] = "${sysconfdir}/dnf/dnf.conf"
 ALTERNATIVE_LINK_NAME[rpm_platform] = "${sysconfdir}/rpm/platform"
 ALTERNATIVE_LINK_NAME[rpmrc] = "${sysconfdir}/rpmrc"
 
+# The [avocado-sdk] section is generated rather than shipped as a static file
+# so that the verification switches reach it. A hardcoded gpgcheck=0 would stay
+# unverified while every generated section switched over, and the repository
+# left out is the one every SDK container reads.
+python do_compile() {
+    import os
+    # Imported and called fully qualified, not aliased. BitBake records the
+    # literal call spelling and matches it against the registered name
+    # avocado_sdk_metadata.repoconf.<func>; an alias never matches, so the
+    # renderer's source would drop out of this task's hash.
+    import avocado_sdk_metadata.repoconf
+
+    # Package signatures. Distinct from AVOCADO_REPO_METADATA_GPGCHECK, which
+    # is the one a signed repomd.xml needs. See
+    # meta-avocado/lib/avocado_sdk_metadata/repoconf.py for why they differ.
+    gpg_check = d.getVar('AVOCADO_REPO_GPGCHECK') or '0'
+    repo_metadata_gpg_check = d.getVar('AVOCADO_REPO_METADATA_GPGCHECK') or '0'
+
+    out_dir = os.path.join(d.getVar('WORKDIR'), 'generated-files')
+    os.makedirs(out_dir, exist_ok=True)
+
+    with open(os.path.join(out_dir, 'avocado-sdk.repo'), 'w') as repo_f:
+        repo_f.write(avocado_sdk_metadata.repoconf.render_sdk_repo_section(
+            gpgcheck=gpg_check,
+            repo_gpgcheck=repo_metadata_gpg_check,
+        ))
+}
+
 do_install() {
     # Add Avocado SDK repo
     install -d ${D}${sysconfdir}/yum.repos.d
-    install -m 0644 ${WORKDIR}/avocado-sdk.repo ${D}${sysconfdir}/yum.repos.d/avocado-sdk.repo
-    sed -i "s|{REPO_BASE}|${REPO_BASE}|g" ${D}${sysconfdir}/yum.repos.d/avocado-sdk.repo
+    install -m 0644 ${WORKDIR}/generated-files/avocado-sdk.repo ${D}${sysconfdir}/yum.repos.d/avocado-sdk.repo
 
     install -d ${D}${sysconfdir}/dnf
     install -m 644 ${WORKDIR}/dnf.conf ${D}${sysconfdir}/dnf/dnf.conf.${PN}
