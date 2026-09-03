@@ -2,17 +2,12 @@
 
 set -e
 
-hook="avocado-build"
-target="jetson-orin-nano-devkit"
+hook="avocado-provision"
+target="jetson-agx-orin"
 
 RUNTIME_NAME="$1"
 
-output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
-
-mkdir -p "$output_dir"
-
-input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
-output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
 manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
@@ -60,37 +55,19 @@ build_include_display() {
     echo -e "$display"
 }
 
-# Extract image names from manifest
-rootfs_image=$(jq -r '.storage_devices.rootdisk.images.rootfs // empty' "$manifest")
-var_image=$(jq -r '.storage_devices.rootdisk.images.var // empty' "$manifest")
-initramfs_image=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
-esp_image=$(jq -r '.storage_devices.rootdisk.images.esp // empty' "$manifest")
-tos_image=$(jq -r '.storage_devices.rootdisk.images.tos // empty' "$manifest")
-dtb_image=$(jq -r '.storage_devices.rootdisk.images.dtb // empty' "$manifest")
-bpmp_dtb_image=$(jq -r '.storage_devices.rootdisk.images.bpmp_dtb // empty' "$manifest")
-
-echo -e "\033[94m[INFO]\033[0m Extracted image names from manifest:
-  Rootfs:    ${rootfs_image}
-  Var:       ${var_image}
-  Initramfs: ${initramfs_image}
-  ESP:       ${esp_image}
-  TOS:       ${tos_image}
-  DTB:       ${dtb_image}
-  BPMP DTB:  ${bpmp_dtb_image}"
-
-echo -e "\033[94m[INFO]\033[0m Running stone validate.
-  Manifest:          ${manifest}
+echo -e "\033[94m[INFO]\033[0m Running stone provision.
   Input directories:$(build_include_display "$input_dir")"
 
 include_flags=$(build_include_flags "$input_dir")
-eval stone validate -m \"${manifest}\" $include_flags
+# stone manifests omit the `size` field on the last `expand: "true"` partition
+# (var). avocado-cli builds the btrfs into $AVOCADO_PREFIX/runtimes/<runtime>/
+# during `avocado build`, so stat it here and forward the bytes to stone via
+# --partition-size. Stone rounds up to size_alignment (default 4 MiB).
+var_image="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/avocado-image-var-${target}.btrfs"
+var_image_bytes=$(stat -c%s "$var_image")
 
-echo -e "\033[94m[INFO]\033[0m Running stone create.
-  Manifest:          ${manifest}
-  Input directories:$(build_include_display "$input_dir")
-  Output directory:  ${output_dir}"
+eval stone provision $include_flags --partition-size \"var=$var_image_bytes\"
 
-eval stone create --os-release \"${AVOCADO_PREFIX}/rootfs/usr/lib/os-release\" -m \"$manifest\" $include_flags -o \"$output_dir\"
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
