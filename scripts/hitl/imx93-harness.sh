@@ -30,6 +30,22 @@ die() {
 command -v tio >/dev/null 2>&1 || die "tio not on PATH"
 command -v kasa >/dev/null 2>&1 || die "kasa not on PATH"
 
+# Every mode body is checked HERE, before anything touches the board.
+#
+# The Lua side dofile()s the selected mode, and a missing file there aborts the
+# chunk after the power cycle has already been scheduled - so the board gets
+# cycled, tio exits non-zero, and run_mode records a FAIL for an assertion that
+# never ran, on a board that was just rebooted for nothing. Checking the whole
+# set up front turns that into a refusal that costs nothing, and it catches the
+# case a single-mode check would miss: a half-applied checkout where the mode
+# you are not running today is the one that vanished.
+for _mode_file in env-lockdown slot-boots uefi-var-persists ums-hold ums-stop \
+  boot-integrity-report signed-payload-refused keydb-immutable; do
+  [ -r "${HERE}/modes/${_mode_file}.lua" ] ||
+    die "missing ${HERE}/modes/${_mode_file}.lua - the harness is a split checkout and this mode body is absent"
+done
+unset _mode_file
+
 # Seconds to hold the outlet OFF. Four is enough to reboot the board and is the
 # default because every assertion mode pays it on every run.
 #
@@ -196,6 +212,7 @@ run_mode() {
 
   schedule_power_cycle
   HARNESS_MODE="$mode" HARNESS_ARG="$arg" HARNESS_ID_FILE="$idfile" \
+    HARNESS_LIB_DIR="$HERE" \
     timeout "$(mode_timeout "$mode")" tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" || rc=$?
 
   # Read what the run wrote; do not default to anything friendlier. An empty or
@@ -235,7 +252,7 @@ run_mode() {
 # Ctrl-C and on SIGTERM - but NOT on SIGKILL. `pkill -9` on this harness still
 # leaves the board exporting. Use plain kill.
 ums_stop() {
-  HARNESS_MODE="ums_stop" HARNESS_ARG="" \
+  HARNESS_MODE="ums_stop" HARNESS_ARG="" HARNESS_LIB_DIR="$HERE" \
     timeout 90 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" \
     >/dev/null 2>&1 || true
 }
@@ -243,7 +260,7 @@ ums_stop() {
 run_ums_hold() {
   trap ums_stop EXIT INT TERM
   schedule_power_cycle
-  HARNESS_MODE="ums_hold" HARNESS_ARG="" \
+  HARNESS_MODE="ums_hold" HARNESS_ARG="" HARNESS_LIB_DIR="$HERE" \
     timeout 2700 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE"
 }
 
