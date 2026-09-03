@@ -194,7 +194,7 @@ DEFAULT_STATUSES = ("Unpatched", "Patched")
 # The whole vocabulary of the "evidence" field. Mirrored by the schema's enum,
 # which test_verify pins to this tuple - the two drifting apart is how a
 # consumer ends up filtering on a value nothing emits.
-CVE_EVIDENCE = ("cve-status", "cve-check")
+CVE_EVIDENCE = ("cve-status", "patch-file", "cve-check")
 
 _FILTERED_COUNTER = {
     "Unpatched": "unpatched_cves",
@@ -202,44 +202,54 @@ _FILTERED_COUNTER = {
     "Ignored": "ignored_cves",
 }
 
-def _evidence(issue, status):
-    """Who decided this issue's status, which the fields cve-check supplies do
-    not say outright.
+def _evidence(issue, status, backported):
+    """Who decided this issue's status. See the README's "Evidence" section for
+    why the distinction is the point of the patched half.
 
-    "cve-status" - a recipe declared it. A "detail" is the CVE_STATUS keyword
-    decode_cve_status() read off the recipe (oe/cve_check.py), so its presence
-    means someone wrote this verdict down; "detail" itself says which keyword.
-    A claim inherited from layer metadata, true of the version rather than of
-    this build.
-
-    "cve-check" - cve-check decided it, and its output does not say how. Two
-    routes reach a Patched issue with no detail, and they are not separable
-    here:
-
-      - an applied patch in SRC_URI whose filename or "CVE:" line names the
-        CVE (oe.cve_check.get_patched_cves)
-      - the shipped version falling outside every affected range in the CVE
-        database, so check_cves() adds it to patched_cves at the bottom of its
-        version comparison (cve-check.bbclass)
-
-    Only the first is a backport of ours, and it is the set ENG-2281 exists to
-    publish. Splitting them needs a source this report does not read: the SPDX
-    3.0 recipe documents carry it, since oe.spdx30_tasks._get_cves_info()
-    labels the patch-derived remainder "backported-patch" after discarding
-    every CVE_STATUS entry. Until that join exists, claiming the patch half
-    here would be a conclusion drawn from an absent field, and wrong for the
-    version-comparison majority.
-
-    Both values are emitted, never one plus an absence: a consumer filtering
-    on "cve-status" would otherwise silently match nothing. Nothing is claimed
-    for an Unpatched issue with no detail - nothing decided it, it is what
-    cve-check found.
+    backported is the recipe's set of CVEs fixed by a patch it applies, from
+    avocado-cve-backports.bbclass. Empty when the class is not inherited, and
+    the patch-file half then folds back into "cve-check" - a build that says
+    less rather than one that guesses.
     """
     if issue.get("detail"):
         return CVE_EVIDENCE[0]
-    if status == "Patched":
-        return CVE_EVIDENCE[1]
-    return None
+    if status != "Patched":
+        return None
+    return CVE_EVIDENCE[1] if issue.get("id") in backported else CVE_EVIDENCE[2]
+
+def filtered_counts(counts):
+    """The counters naming what a document left out, as "N status" phrases.
+
+    Shared so the recipe's build log and the standalone run cannot drift into
+    describing the same numbers differently.
+    """
+    return ", ".join(
+        "%d %s" % (counts[k], k[:-len("_cves")].replace("_", " "))
+        for k in ("unpatched_cves", "patched_cves", "ignored_cves",
+                  "unknown_status_cves")
+        if counts.get(k)
+    )
+
+def parse_statuses(value):
+    """The requested statuses, in the order given and deduplicated.
+
+    "Unpatched Unpatched" asks for one document; without this it would write
+    the same path twice. Raises ValueError naming every status cve-check never
+    emits, so a caller can report them all at once.
+    """
+    statuses = list(dict.fromkeys((value or "").split()))
+    if not statuses:
+        raise ValueError(
+            "no status given; expected one or more of %s"
+            % ", ".join(CVE_STATUSES)
+        )
+    unknown = [st for st in statuses if st not in CVE_STATUSES]
+    if unknown:
+        raise ValueError(
+            "%s: not a status cve-check emits; expected one or more of %s"
+            % (", ".join(repr(u) for u in unknown), ", ".join(CVE_STATUSES))
+        )
+    return statuses
 
 def _strip_pe(version):
     """Drop the EXTENDPE prefix cve-check puts in front of PV, as in
@@ -264,7 +274,8 @@ def _has_cve_record(entry):
         not isinstance(p, dict) or p.get("cvesInRecord") != "No" for p in products
     )
 
-def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=True):
+def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
+                  summary=True, backports=None):
     fields = (
         CVE_FIELDS
         if summary
@@ -273,6 +284,7 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
     recipes = {}
     scanned = set()
     with_record = set()
+    backports = backports or {}
 
     paths = sorted(glob.glob(os.path.join(cve_dir, "*_cve.json")))
     stats.cve_files = len(paths)
@@ -339,7 +351,7 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched", summary=T
                     kept = {k: issue[k] for k in fields if k in issue}
                     # Read off the raw issue, not off kept: --no-summary drops
                     # prose, never what decided a status.
-                    evidence = _evidence(issue, status)
+                    evidence = _evidence(issue, status, backports.get(name, ()))
                     if evidence:
                         kept["evidence"] = evidence
                     issues.append(kept)
@@ -439,6 +451,46 @@ def read_optouts(optout_dir):
 
     return declared, unreadable
 
+def read_backports(backports_dir):
+    """Read the backport markers avocado-cve-backports.bbclass writes beside
+    the cve-check results.
+
+    Returns (backports, unreadable): a recipe name -> set of CVE ids fixed by a
+    patch that recipe applies, and the number of markers that would not parse.
+
+    An empty map is not an error, and is what a tree built before the class was
+    inherited looks like: every patched issue then reports the "cve-check"
+    evidence it would have had anyway. Absence of a marker never means a recipe
+    has no backports, only that nothing recorded them - which is why this
+    cannot be turned into a coverage check the way read_optouts() is.
+    """
+    backports = {}
+    unreadable = 0
+
+    for path in sorted(glob.glob(os.path.join(backports_dir, "*_backports.json"))):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            unreadable += 1
+            continue
+
+        if not isinstance(data, dict):
+            unreadable += 1
+            continue
+
+        name = data.get("name")
+        cves = data.get("cves")
+        if (not isinstance(name, str) or not name
+                or not isinstance(cves, list)
+                or not all(isinstance(c, str) and c for c in cves)):
+            unreadable += 1
+            continue
+
+        backports[name] = set(cves)
+
+    return backports, unreadable
+
 def packages_digest(packages):
     """Fingerprint of the package set. Consumers re-derive it, so the input
     format is part of the frozen contract.
@@ -461,6 +513,7 @@ def build_report(
     summary=True,
     manifest_paths=(),
     boot_chain=(),
+    backports=None,
 ):
     if status not in CVE_STATUSES:
         raise ValueError(
@@ -471,7 +524,8 @@ def build_report(
     stats = Stats()
     packages, recipe_versions = read_pkgdata(pkgdata_dirs, stats)
     recipes, scanned, no_record = read_cve_data(
-        cve_dir, recipe_versions, stats, status=status, summary=summary
+        cve_dir, recipe_versions, stats, status=status, summary=summary,
+        backports=backports,
     )
 
     installed = read_manifests(manifest_paths, stats)
@@ -722,6 +776,12 @@ def main():
              % ", ".join(CVE_STATUSES),
     )
     parser.add_argument(
+        "--backports-dir",
+        help="directory of <recipe>_backports.json naming the CVEs each "
+        "recipe's own patches fix, from avocado-cve-backports.bbclass; "
+        "defaults to --cve-dir, which is where the class writes them",
+    )
+    parser.add_argument(
         "--no-summary", action="store_true", help="drop CVE description text"
     )
     parser.add_argument(
@@ -756,10 +816,15 @@ def main():
     if not cve_dir or not pkgdata_dirs:
         parser.error("need --tmpdir, or both --cve-dir and --pkgdata-dir")
 
-    # Deduplicated in the order given: --status Patched Patched asks for one
-    # document, and would otherwise write the same path twice.
-    statuses = list(dict.fromkeys(args.status))
+    try:
+        statuses = parse_statuses(" ".join(args.status))
+    except ValueError as e:
+        parser.error(str(e))
     out_paths = status_paths(args.output, statuses)
+
+    backports_dir = args.backports_dir or cve_dir
+    # Missing globs to nothing, the same as not inheriting the class.
+    backports, backports_unreadable = read_backports(backports_dir)
 
     for path in out_paths.values():
         if os.path.isdir(path):
@@ -776,7 +841,6 @@ def main():
     # which is a few seconds against a task whose cost is the world build
     # before it; sharing them would mean threading a prepared state through
     # build_report for no gain a build would notice.
-    reports = {}
     for status in statuses:
         report, stats = build_report(
             cve_dir,
@@ -786,8 +850,8 @@ def main():
             summary=not args.no_summary,
             manifest_paths=manifests,
             boot_chain=args.boot_chain.split(),
+            backports=backports,
         )
-        reports[status] = report
 
         if not stats.cve_files:
             print(
@@ -843,12 +907,7 @@ def main():
         )
         # In the loop, unlike the counters below: what a document filtered out
         # is the complement of what it kept, so these three move with status.
-        filtered = ", ".join(
-            "%d %s" % (counts[k], k[: -len("_cves")])
-            for k in ("unpatched_cves", "patched_cves", "ignored_cves",
-                      "unknown_status_cves")
-            if counts.get(k)
-        )
+        filtered = filtered_counts(counts)
         if filtered:
             print("  filtered out: %s" % filtered, file=sys.stderr)
         # In the loop for the same reason: a recipe whose every record
@@ -881,6 +940,14 @@ def main():
     ):
         if stats.get(key):
             print("  %s: %d" % (key, stats[key]), file=sys.stderr)
+
+    if backports_unreadable:
+        print(
+            "  %d backport marker(s) in %s would not parse; the CVEs they name "
+            "report 'cve-check' evidence rather than 'patch-file'"
+            % (backports_unreadable, backports_dir),
+            file=sys.stderr,
+        )
 
     return 0
 

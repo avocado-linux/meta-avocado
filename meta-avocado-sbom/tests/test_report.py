@@ -30,6 +30,9 @@ from avocado_sbom.report import (  # noqa: E402
     default_manifests,
     read_cve_data,
     read_manifests,
+    filtered_counts,
+    parse_statuses,
+    read_backports,
     read_optouts,
     status_paths,
 )
@@ -497,9 +500,10 @@ class EvidenceTests(unittest.TestCase):
         with open(path, "w") as f:
             json.dump({"package": list(entries)}, f)
 
-    def cves(self, recipe, status):
+    def cves(self, recipe, status, backports=None):
         recipes, _, _ = read_cve_data(
-            self.cve_dir, {recipe: {"1.0"}}, self.stats, status=status
+            self.cve_dir, {recipe: {"1.0"}}, self.stats, status=status,
+            backports=backports,
         )
         return {c["id"]: c for c in recipes[recipe]["cves"]}
 
@@ -512,12 +516,40 @@ class EvidenceTests(unittest.TestCase):
 
     def test_an_undeclared_patched_issue_is_not_attributed_to_our_patches(self):
         # The whole point. cve-check supplies no detail for either an applied
-        # patch or a version comparison, so neither may be named.
+        # patch or a version comparison, so with nothing else to go on neither
+        # may be named. acl CVE-2009-4411 is the real case: Patched, no detail,
+        # and no patch in the recipe - cve-check decided it on version alone.
         self.write("acl", entry("acl", issues=[
             {"id": "CVE-2", "status": "Patched"},
         ]))
         self.assertEqual(self.cves("acl", "Patched")["CVE-2"]["evidence"],
                          "cve-check")
+
+    def test_a_marker_promotes_only_the_cves_it_names(self):
+        self.write("openssl", entry("openssl", issues=[
+            {"id": "CVE-6", "status": "Patched"},
+            {"id": "CVE-7", "status": "Patched"},
+        ]))
+        got = self.cves("openssl", "Patched",
+                        backports={"openssl": {"CVE-6"}})
+        self.assertEqual(got["CVE-6"]["evidence"], "patch-file")
+        self.assertEqual(got["CVE-7"]["evidence"], "cve-check")
+
+    def test_a_declaration_outranks_a_marker(self):
+        # A patch can name a CVE the recipe also declares. cve-check's own
+        # output puts the detail first, and so does this.
+        self.write("glibc", entry("glibc", issues=[
+            {"id": "CVE-8", "status": "Patched", "detail": "backported-patch"},
+        ]))
+        got = self.cves("glibc", "Patched", backports={"glibc": {"CVE-8"}})
+        self.assertEqual(got["CVE-8"]["evidence"], "cve-status")
+
+    def test_another_recipes_marker_does_not_leak(self):
+        self.write("zlib", entry("zlib", issues=[
+            {"id": "CVE-9", "status": "Patched"},
+        ]))
+        got = self.cves("zlib", "Patched", backports={"openssl": {"CVE-9"}})
+        self.assertEqual(got["CVE-9"]["evidence"], "cve-check")
 
     def test_nothing_is_claimed_for_an_undeclared_unpatched_issue(self):
         self.write("zlib", entry("zlib", issues=[
@@ -545,6 +577,45 @@ class EvidenceTests(unittest.TestCase):
         cve = recipes["curl"]["cves"][0]
         self.assertEqual(cve["evidence"], "cve-status")
         self.assertNotIn("summary", cve)
+
+class ParseStatusesTests(unittest.TestCase):
+    def test_the_order_given_is_kept(self):
+        self.assertEqual(parse_statuses("Patched Unpatched"),
+                         ["Patched", "Unpatched"])
+
+    def test_a_repeat_asks_for_one_document(self):
+        # Otherwise status_paths hands back one path for two passes and the
+        # second overwrites the first.
+        self.assertEqual(parse_statuses("Unpatched Unpatched"), ["Unpatched"])
+
+    def test_empty_is_rejected(self):
+        for value in ("", "   ", None):
+            with self.assertRaises(ValueError):
+                parse_statuses(value)
+
+    def test_every_unknown_status_is_named_at_once(self):
+        with self.assertRaises(ValueError) as caught:
+            parse_statuses("Unpatched Fixed Bogus")
+        message = str(caught.exception)
+        self.assertIn("'Fixed'", message)
+        self.assertIn("'Bogus'", message)
+
+class FilteredCountsTests(unittest.TestCase):
+    def test_only_non_zero_counters_are_named(self):
+        self.assertEqual(
+            filtered_counts({"unpatched_cves": 3, "patched_cves": 0,
+                             "ignored_cves": 1}),
+            "3 unpatched, 1 ignored",
+        )
+
+    def test_the_underscore_is_spelled_out(self):
+        # The recipe and the standalone run print the same phrase; they drifted
+        # here once already.
+        self.assertEqual(filtered_counts({"unknown_status_cves": 2}),
+                         "2 unknown status")
+
+    def test_nothing_filtered_is_the_empty_string(self):
+        self.assertEqual(filtered_counts({"unpatched_cves": 0}), "")
 
 class DefaultStatusesTest(unittest.TestCase):
     def test_the_cli_and_the_recipe_default_to_the_same_statuses(self):
@@ -659,6 +730,65 @@ class ReadOptoutsTests(unittest.TestCase):
         self.write("bad", "not json at all")
         declared, unreadable = read_optouts(self.cve_dir)
         self.assertEqual(list(declared), ["good"])
+        self.assertEqual(unreadable, 1)
+
+class ReadBackportsTests(unittest.TestCase):
+    """The markers avocado-cve-backports.bbclass leaves beside the cve-check
+    results. An empty map is a legitimate answer, so nothing here may raise.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def write(self, name, payload):
+        with open(os.path.join(self.dir, "%s_backports.json" % name), "w") as f:
+            json.dump(payload, f)
+
+    def test_a_marker_is_read(self):
+        self.write("openssl", {"version": "1", "name": "openssl",
+                               "cves": ["CVE-1", "CVE-2"]})
+        backports, unreadable = read_backports(self.dir)
+        self.assertEqual(backports, {"openssl": {"CVE-1", "CVE-2"}})
+        self.assertEqual(unreadable, 0)
+
+    def test_the_name_inside_wins_over_the_filename(self):
+        self.write("wrong", {"version": "1", "name": "right",
+                             "cves": ["CVE-1"]})
+        backports, _ = read_backports(self.dir)
+        self.assertEqual(sorted(backports), ["right"])
+
+    def test_cve_results_are_not_mistaken_for_markers(self):
+        with open(os.path.join(self.dir, "openssl_cve.json"), "w") as f:
+            json.dump({"package": []}, f)
+        self.assertEqual(read_backports(self.dir), ({}, 0))
+
+    def test_optout_markers_are_not_mistaken_for_backports(self):
+        with open(os.path.join(self.dir, "x_optout.json"), "w") as f:
+            json.dump({"version": "1", "name": "x", "reason": "r"}, f)
+        self.assertEqual(read_backports(self.dir), ({}, 0))
+
+    def test_a_missing_directory_does_not_raise(self):
+        self.assertEqual(read_backports(os.path.join(self.dir, "nope")), ({}, 0))
+
+    def test_an_empty_directory_names_nothing(self):
+        self.assertEqual(read_backports(self.dir), ({}, 0))
+
+    def test_truncated_json_is_counted_not_dropped(self):
+        with open(os.path.join(self.dir, "bad_backports.json"), "w") as f:
+            f.write('{"name": "bad", "cves": [')
+        self.assertEqual(read_backports(self.dir), ({}, 1))
+
+    def test_a_marker_whose_cves_are_not_strings_is_counted(self):
+        self.write("bad", {"version": "1", "name": "bad", "cves": [1, 2]})
+        self.assertEqual(read_backports(self.dir), ({}, 1))
+
+    def test_a_bad_marker_does_not_hide_a_good_one(self):
+        self.write("good", {"version": "1", "name": "good", "cves": ["CVE-1"]})
+        with open(os.path.join(self.dir, "bad_backports.json"), "w") as f:
+            f.write("[]")
+        backports, unreadable = read_backports(self.dir)
+        self.assertEqual(backports, {"good": {"CVE-1"}})
         self.assertEqual(unreadable, 1)
 
 class DefaultManifestsTest(unittest.TestCase):
