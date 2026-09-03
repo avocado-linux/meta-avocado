@@ -77,7 +77,7 @@ result_file() {
 }
 
 record_result() {
-  local mode="$1" verdict="$2" arg="${3:-}" commit tree
+  local mode="$1" verdict="$2" arg="${3:-}" commit tree porcelain
   # -C "$HERE", not a bare git. meta-avocado is a sub-repo inside the peridio
   # workspace, which is ITSELF a git repo, so a bare `git rev-parse` records
   # whichever repo the caller's cwd happened to land in. Invoked from the
@@ -105,9 +105,21 @@ record_result() {
   # `unknown` is a THIRD state, not a synonym for clean: it means the question
   # could not be asked. check-result.sh rejects it for the same reason it
   # rejects dirty - failing to look is not evidence that nothing was there.
+  # The STATUS of `git status` is read, not just its output. Capturing only the
+  # output collapsed "git could not answer" into `clean`: a corrupt .git/index,
+  # a held index.lock or an unreadable tree makes `git status --porcelain` exit
+  # non-zero with EMPTY stdout, and the empty-string test then fell through to
+  # clean. Reproduced on a scratch repo with a corrupt index and an untracked
+  # file present - stamped `clean`, and check-result.sh accepted it.
+  #
+  # That is the same hole this whole field was added to close, one level down:
+  # failing to ask is not a clean answer, so an unanswerable query lands on
+  # `unknown`, which the reader rejects.
   if ! git -C "$HERE" rev-parse --git-dir >/dev/null 2>&1; then
     tree=unknown
-  elif [ -n "$(git -C "$HERE" status --porcelain 2>/dev/null)" ]; then
+  elif ! porcelain=$(git -C "$HERE" status --porcelain 2>/dev/null); then
+    tree=unknown
+  elif [ -n "$porcelain" ]; then
     tree=dirty
   else
     tree=clean
@@ -118,11 +130,32 @@ record_result() {
     "$tree" >"$(result_file "$mode" "$arg")"
 }
 
+# Wall-clock budget per mode, in seconds. Most modes are one power cycle and one
+# boot, which 300 covers with room. keydb_immutable is not: it performs three
+# full boots to a login prompt and three U-Boot prompt acquisitions, so its
+# internal deadlines alone (await_login(240) x3, reach_prompt x3) exceed 300
+# before any of the ~25 settle() budgets are counted.
+#
+# Under the old flat 300 a slow boot - the first after a reflash, or a build
+# carrying the full module set - killed tio mid-run and recorded FAIL with
+# rc 124, indistinguishable from a real immutability failure and invisible
+# because tio runs --mute. Worse, a kill landing inside part two-a leaves the
+# ADVERSARIAL store installed as the board's live ubootefi.var.
+#
+# This file already knew 300 was not universal: --ums-hold was deliberately
+# routed around run_mode for exactly this reason. The new mode was not.
+mode_timeout() {
+  case "$1" in
+    keydb_immutable) printf '900' ;;
+    *) printf '300' ;;
+  esac
+}
+
 run_mode() {
   local mode="$1" arg="${2:-}" rc=0
   schedule_power_cycle
   HARNESS_MODE="$mode" HARNESS_ARG="$arg" \
-    timeout 300 tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" || rc=$?
+    timeout "$(mode_timeout "$mode")" tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" || rc=$?
   if [ "$rc" -eq 0 ]; then
     record_result "$mode" PASS "$arg"
   else

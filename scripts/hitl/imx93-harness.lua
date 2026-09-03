@@ -878,25 +878,72 @@ if MODE == "keydb_immutable" then
   end
   tio.echo("\r\n>>> staging the rival store at " .. scratch .. " <<<\r\n")
 
-  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " advstore.var", 8000)
+  -- BACK THE REAL STORE UP FIRST, before anything overwrites it.
+  --
+  -- This leg replaces the board's live variable store with an adversarial one,
+  -- and nothing used to put the real one back - not on the success path, not on
+  -- any of the fail() paths between here and the delete leg. So a run that
+  -- failed midway left the board with a rival PLATFORM KEY installed as its
+  -- live store, and even a clean run left the card with no store at all. That
+  -- matters most on precisely the firmware this leg exists to catch a
+  -- regression on: one where the file store is no longer filtered, i.e. where
+  -- the rival PK would actually take.
+  --
+  -- The backup lives on the ESP because it has to survive the resets this leg
+  -- performs; a copy in RAM does not.
+  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var", 8000)
   if not saw("bytes read") then
-    fail("advstore.var did not load from the ESP, so nothing was staged to " ..
-         "substitute and the override leg would test nothing")
+    fail("the real ubootefi.var did not load from the ESP, so it cannot be " ..
+         "backed up and this leg would have no way to put it back")
   end
-
-  -- ${filesize} is set by the load above, so the write length is the file's own
-  -- rather than a number spelled here that could drift from it.
   cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
-      " ubootefi.var ${filesize}", 8000)
+      " ubootefi.var.bak ${filesize}", 8000)
   if saw("Unknown command") then
     fail("fatwrite is unavailable on this firmware (CONFIG_FAT_WRITE), so the " ..
          "override leg cannot run - do not record a pass from the delete leg alone")
   end
   if not saw("bytes written") then
+    fail("could not back up the real ubootefi.var, so this leg will not be able " ..
+         "to restore it and must not proceed to overwrite it")
+  end
+
+  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " advstore.var", 8000)
+  if not saw("bytes read") then
+    fail("advstore.var did not load from the ESP, so nothing was staged to " ..
+         "substitute and the override leg would test nothing")
+  end
+  -- Capture the rival's own length, so the write can be checked against it
+  -- rather than against the word "written".
+  local adv_bytes = string.match(tail, "(%d+)%s+bytes read")
+
+  -- ${filesize} is set by the load above, so the write length is the file's own
+  -- rather than a number spelled here that could drift from it.
+  cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
+      " ubootefi.var ${filesize}", 8000)
+  if not saw("bytes written") then
     fail("the rival store was not written over ubootefi.var, so the real store " ..
          "is still in place and the override leg would test nothing")
   end
-  tio.echo("\r\n>>> rival PK store written over ubootefi.var on the ESP <<<\r\n")
+
+  -- A SHORT write is the dangerous success. U-Boot rejects a store whose length
+  -- or CRC does not check out, so a truncated rival is discarded at init and the
+  -- compiled-in seed stays authoritative - PK is unchanged, and this leg records
+  -- a precedence PASS having actually only re-run the absent-store case it was
+  -- written to escape. Compare the byte count the board reports against the
+  -- rival's own size rather than accepting the word "written".
+  local written = string.match(tail, "(%d+)%s+bytes written")
+  if not written then
+    fail("fatwrite reported no byte count, so the rival store's persistence " ..
+         "cannot be confirmed and a truncated write would read as a pass")
+  end
+  if adv_bytes and written ~= adv_bytes then
+    fail("fatwrite wrote " .. written .. " bytes but advstore.var is " ..
+         adv_bytes .. " - a short write leaves a store U-Boot discards for bad " ..
+         "length or CRC, which would silently reduce this leg to the " ..
+         "absent-store case while reporting a precedence pass")
+  end
+  tio.echo("\r\n>>> rival PK store written over ubootefi.var on the ESP (" ..
+           written .. " bytes) <<<\r\n")
 
   cmd("reset", 500)
   if not await_login(240) then
@@ -984,6 +1031,47 @@ if MODE == "keydb_immutable" then
          size0 .. "/" .. hash0 .. ", now " .. size2 .. "/" .. hash2 ..
          " - the file store can override the compiled-in seed")
   end
+
+  ------------------------------------------------------------- restore -------
+  --
+  -- Put the board back the way it was found. Both legs above are destructive to
+  -- the ESP - two-a overwrites ubootefi.var with the rival, two-b deletes it -
+  -- and neither used to undo itself, so a passing run left the card with no
+  -- variable store and the rival still sitting beside it. The next run then
+  -- failed at its own precondition ("no ubootefi.var on the ESP"), and the
+  -- recovery was documented nowhere.
+  --
+  -- This runs after the verdict-deciding comparison, so a restore failure
+  -- cannot manufacture a pass; it can only report that cleanup did not finish.
+  cmd("reboot", 3000)
+  if not reach_prompt(240) then
+    fail("board did not return to the U-Boot prompt for the restore - the " ..
+         "assertions held, but the ESP is left with no ubootefi.var and the " ..
+         "backup still at ubootefi.var.bak; restore it before the next run")
+  end
+  cmd("part number ${devtype} ${devnum} esp espp; echo 'ESPPART''='${espp}", 4000)
+  if not string.match(tail, "ESPPART=(%S+)") then
+    fail("could not re-resolve the esp partition for the restore - the ESP is " ..
+         "left with no ubootefi.var and the backup still at ubootefi.var.bak")
+  end
+  -- Re-run the board's boot init before reusing the scratch address. When
+  -- `scratch` resolved to ${image_addr} it was set by avocado_boot_init, and the
+  -- two reboots since then reloaded the environment - so the variable can be
+  -- empty here, which would make the load address expand to nothing. Harmless
+  -- when scratch is ${loadaddr}, which U-Boot's own default environment carries.
+  cmd("run avocado_boot_init", 1500)
+  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var.bak", 8000)
+  if not saw("bytes read") then
+    fail("the backup ubootefi.var.bak did not load, so the real variable store " ..
+         "cannot be restored; the card is left without one")
+  end
+  cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
+      " ubootefi.var ${filesize}", 8000)
+  if not saw("bytes written") then
+    fail("could not restore ubootefi.var from the backup; the card is left " ..
+         "without a variable store")
+  end
+  tio.echo("\r\n>>> real variable store restored from ubootefi.var.bak <<<\r\n")
 
   -- The verdict names which runtime outcome actually occurred. A single wording
   -- covering both would report a refusal that never happened on a platform with
