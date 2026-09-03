@@ -61,6 +61,13 @@ the feed decide for the user.
 | `cryptsetup-var-udev`, `cryptsetup-var-posture`, `cryptsetup` | rootfs (`packagegroup-avocado-rootfs`) | capability |
 | a key backend (`var-key.sh`) | `recipes-core/cryptsetup-var/` bbappend in the vendor layer | machine override |
 
+A `var-key.sh` must declare itself `usable`, declare each identity path it
+reads, and prefix those reads with its optional first argument; `do_install`
+then runs it against two synthetic identities and requires two different
+64-byte keys. See
+`meta-avocado/recipes-core/cryptsetup-var/README-deliverability.md`,
+"The var-key provider contract".
+
 **The runtime decides.** `avocado-cli` writes `/etc/avocado/var-encrypt` into a
 runtime's initramfs when its `avocado.yaml` says:
 

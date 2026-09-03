@@ -19,8 +19,19 @@
 # visible symptom.
 set -eu
 
-DT_SERIAL_FILE="/sys/firmware/devicetree/base/serial-number"
-SOC_UID_FILE="/sys/devices/soc0/serial_number"
+# Optional path prefix for the identity reads below, and nothing else. The
+# build-time deliverability check in cryptsetup-var.bb passes a fixture root
+# here; the only runtime caller, cryptsetup-var.sh, passes no arguments, so on a
+# device ROOT is empty and every path resolves to the real absolute one.
+ROOT="${1:-}"
+
+# Identity sources, declared so that check knows which paths to populate. Every
+# read below is prefixed with ROOT so none can fall through to the build host's
+# own /sys and pass the check without the fixture having been read.
+# avocado-var-key-identity: /sys/firmware/devicetree/base/serial-number
+# avocado-var-key-identity: /sys/devices/soc0/serial_number
+DT_SERIAL_FILE="$ROOT/sys/firmware/devicetree/base/serial-number"
+SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
 
 HW_ID=""
 if [ -r "$DT_SERIAL_FILE" ]; then

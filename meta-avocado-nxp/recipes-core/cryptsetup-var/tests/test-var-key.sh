@@ -2,10 +2,13 @@
 
 # Standalone test for the i.MX9 /var LUKS key provider.
 #
-# Runs on any host with openssl 3.x (the same KDF the initramfs uses). The
-# provider reads two absolute sysfs paths, so the harness copies it and rewrites
-# those two constants to a fixture directory - the logic under test (source
-# precedence, the refusal, the KDF invocation) is otherwise untouched.
+# Runs on any host with openssl 3.x (the same KDF the initramfs uses). Cases 1
+# to 6 copy the provider and rewrite its two sysfs paths to a fixture directory,
+# leaving the logic under test (source precedence, the refusal, the KDF
+# invocation) untouched. Case 7 instead runs the provider UNMODIFIED and passes
+# the fixture root as its first argument, which is the path the build-time check
+# in cryptsetup-var.bb uses; the rewrite cases cannot cover that, because they
+# pass with the argument handling removed entirely.
 #
 # What matters most here is case 4: the provider must REFUSE rather than fall
 # back to a constant, because a constant would give every board in the fleet the
@@ -103,6 +106,41 @@ if cmp -s "$work/key1.bin" "$work/key5.bin"; then
     ok "soc0 takes precedence over the DT serial-number"
 else
     bad "DT value won over soc0, or precedence changed"
+fi
+
+# --- Case 7: the optional first argument prefixes every identity read ---
+# Runs the provider UNMODIFIED - no sed - which is what the build-time check in
+# cryptsetup-var.bb does. Two different identities must give two different keys:
+# a read that lost its "$ROOT" prefix resolves against this host's own /sys
+# instead of the fixture and returns the same key both times, which is exactly
+# the false pass the recipe's two-identity assertion exists to catch. Without
+# this case the suite is green whether or not the prefixing works.
+root_a="$work/root-a"
+root_b="$work/root-b"
+mkdir -p "$root_a/sys/devices/soc0" "$root_b/sys/devices/soc0"
+printf '1111111111111111aaaaaaaaaaaaaaaa' > "$root_a/sys/devices/soc0/serial_number"
+printf '2222222222222222bbbbbbbbbbbbbbbb' > "$root_b/sys/devices/soc0/serial_number"
+if sh "$provider" "$root_a" > "$work/root_a.bin" 2>"$work/root_a.err" &&
+    sh "$provider" "$root_b" > "$work/root_b.bin" 2>"$work/root_b.err"; then
+    n=$(wc -c < "$work/root_a.bin")
+    if [[ "$n" -ne 64 ]]; then
+        bad "prefixed run produced $n bytes, expected 64"
+    elif cmp -s "$work/root_a.bin" "$work/root_b.bin"; then
+        bad "two different identities produced the same key - a read is not prefixed with \$ROOT"
+    else
+        ok "the first-argument prefix is honoured by every identity read"
+    fi
+else
+    bad "provider refused under a first-argument fixture root: $(cat "$work/root_a.err" "$work/root_b.err")"
+fi
+
+# --- Case 8: the provider declares the identity paths the build check populates ---
+# The build-time check builds its fixture from these lines; a read whose path is
+# undeclared is never populated, so the branch is never exercised.
+if grep -q '^# avocado-var-key-identity: /sys/devices/soc0/serial_number$' "$provider"; then
+    ok "declares its primary identity source for the build-time check"
+else
+    bad "missing the avocado-var-key-identity declaration for soc0"
 fi
 
 echo

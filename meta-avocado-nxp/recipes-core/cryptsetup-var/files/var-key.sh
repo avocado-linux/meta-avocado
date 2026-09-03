@@ -35,17 +35,29 @@
 # The cryptsetup-var.sh caller depends only on stdout - 64 raw bytes.
 set -eu
 
-SOC_UID_FILE="/sys/devices/soc0/serial_number"
+# Optional path prefix for the identity reads below, and nothing else. The
+# build-time deliverability check in cryptsetup-var.bb passes a fixture root
+# here; the only runtime caller, cryptsetup-var.sh, passes no arguments, so on a
+# device ROOT is empty and every path resolves to the real absolute one.
+ROOT="${1:-}"
+
+# Identity sources, declared so that check knows which paths to populate. Every
+# read below is prefixed with ROOT so none can fall through to the build host's
+# own /sys and pass the check without the fixture having been read.
+# avocado-var-key-identity: /sys/devices/soc0/serial_number
+# avocado-var-key-identity: /sys/firmware/devicetree/base/serial-number
+SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
+DT_SERIAL_FILE="$ROOT/sys/firmware/devicetree/base/serial-number"
 
 HW_ID=""
 if [ -r "$SOC_UID_FILE" ]; then
     HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
 fi
-if [ -z "$HW_ID" ] && [ -r /sys/firmware/devicetree/base/serial-number ]; then
+if [ -z "$HW_ID" ] && [ -r "$DT_SERIAL_FILE" ]; then
     # Some u-boot configurations publish the same UID into the DT. Secondary
     # only: it is set by the bootloader rather than read from the SoC, so it is
     # the less authoritative of the two.
-    HW_ID=$(tr -d '\0\n' < /sys/firmware/devicetree/base/serial-number)
+    HW_ID=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
 fi
 
 # Fail rather than fall back to a constant. The qemu provider substitutes a

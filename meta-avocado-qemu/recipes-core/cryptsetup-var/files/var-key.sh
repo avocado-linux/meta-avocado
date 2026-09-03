@@ -17,10 +17,34 @@
 # systemd, so cryptsetup-var RDEPENDS just adds openssl-bin.
 set -eu
 
-if [ -r /sys/firmware/devicetree/base/serial-number ]; then
-    HW_ID=$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number)
+# Optional path prefix for the identity reads below, and nothing else. The
+# build-time deliverability check in cryptsetup-var.bb passes a fixture root
+# here; the only runtime caller, cryptsetup-var.sh, passes no arguments, so on a
+# device ROOT is empty and every path resolves to the real absolute one.
+ROOT="${1:-}"
+
+# Identity sources, declared so that check knows which paths to populate. Every
+# read below is prefixed with ROOT so none can fall through to the build host's
+# own /sys and pass the check without the fixture having been read.
+# avocado-var-key-identity: /sys/firmware/devicetree/base/serial-number
+#
+# The /proc/cpuinfo leg below is deliberately NOT declared, and that is a
+# limitation rather than an oversight. The fixture writes a bare identity string
+# to each declared path, which cannot satisfy a reader that greps for a
+# `Serial` field; and on avocado-qemux86-64 - where this leg is the live one,
+# since x86 QEMU has no device tree - it ends in the constant `qemu-no-serial`,
+# so every VM derives the same key. Declaring the path would make the check
+# populate a file the awk cannot parse and prove nothing.
+#
+# Consequence, stated plainly: the build-time check exercises the DT branch on
+# both qemu machines, so the branch avocado-qemux86-64 actually takes at boot is
+# unverified. Whether a provider that falls back to a constant should carry a
+# distinct status rather than `usable` is an open question recorded in
+# design.md; until it is answered this comment is the only thing marking it.
+if [ -r "$ROOT/sys/firmware/devicetree/base/serial-number" ]; then
+    HW_ID=$(tr -d '\0' < "$ROOT/sys/firmware/devicetree/base/serial-number")
 else
-    HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || echo "qemu-no-serial")
+    HW_ID=$(awk '/^Serial/ {print $3}' "$ROOT/proc/cpuinfo" 2>/dev/null || echo "qemu-no-serial")
     [ -n "$HW_ID" ] || HW_ID="qemu-no-serial"
 fi
 

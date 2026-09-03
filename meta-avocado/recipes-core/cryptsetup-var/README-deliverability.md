@@ -164,3 +164,75 @@ git show origin/wrynose:meta-avocado-raspberrypi/conf/machine/include/avocado-ra
   the capability rather than injecting a feature token. `encrypted-var` is a
   retired `DISTRO_FEATURES` token that no machine sets and that
   `avocado-security-capabilities.bbclass` warns about when it appears.
+
+## The var-key provider contract
+
+A machine that declares `encrypted-var` must resolve to a `var-key.sh` that can
+actually derive a key. Two tiers enforce that, and a provider has to satisfy
+both.
+
+### What a provider must carry
+
+```sh
+# avocado-var-key-provider: usable
+# avocado-var-key-identity: /sys/devices/soc0/serial_number
+ROOT="${1:-}"
+SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
+```
+
+- Exactly one `avocado-var-key-provider:` line, `usable` or `unusable`.
+- One `avocado-var-key-identity:` line per file the provider reads its hardware
+  identity from, each an absolute path.
+- Every one of those reads prefixed with the script's optional first argument.
+  `cryptsetup-var.sh` invokes the provider with no arguments, so on a device the
+  prefix is empty and each path resolves to the real absolute one.
+
+Both marker lines are matched as declarations, not as prose: exactly one leading
+`#` is stripped, so an indented documentation example showing the contract is
+not itself read as declaring it.
+
+### Tier 1, parse time (`python __anonymous`)
+
+Resolves the winning provider on `FILESPATH` and reads its status line. Refuses
+before anything is fetched or compiled. This is the only tier that reads the
+`FILESPATH` source rather than the installed artifact, and the only one that
+names the deliberate `unusable` placeholder distinctly instead of reporting a
+generic failure.
+
+### Tier 2, install time (`do_install[postfuncs]`)
+
+Runs the INSTALLED provider under `${D}` against two synthetic identity
+fixtures built from its declared paths, and requires each run to exit 0 with 64
+bytes and the two keys to DIFFER.
+
+The two-identity part is the load-bearing half. A length check alone passes a
+provider that emits a hardcoded constant, and passes one whose identity read is
+missing its `ROOT` prefix and so resolves against the build host's own `/sys`
+instead of the fixture. Both return the same key twice; neither is visible from
+a single run. Both are the fleet-wide-identical-key failure the providers'
+own comments say they exist to prevent.
+
+### What the check does not establish
+
+- **That the identity is readable on the device at initramfs time.** That is a
+  property of the target's kernel config and boot path. No build-time check
+  reaches it; only a boot does.
+- **That the device's openssl matches the build host's.** The check derives with
+  `openssl-native`; the device uses target `openssl-bin`, and
+  `openssl kdf ARGON2ID` requires OpenSSL 3.2 or newer. A layer pinning the
+  target older than the native passes here and fails at first boot.
+- **That any branch other than the declared one works.** Only declared paths are
+  populated, so a fallback leg is never walked. The qemu provider is the live
+  example: on `avocado-qemux86-64` the branch the device actually takes is the
+  `/proc/cpuinfo` one, which ends in the constant `qemu-no-serial`, and the
+  check exercises the device-tree branch instead.
+- **That the provider is still the one checked.** Tier 2 reads `${D}`, which
+  closes the `do_install:append` window. It does not close the postfunc window:
+  a bbappend appending its own `do_install` postfunc runs after this one.
+
+### Adding a machine
+
+Copy the nearest existing provider rather than the shared one under
+`meta-avocado/` - that one is marked `unusable` deliberately, because it reads a
+secret from `/var/private/`, which is inside the very volume being unlocked and
+which nothing in this tree provisions.

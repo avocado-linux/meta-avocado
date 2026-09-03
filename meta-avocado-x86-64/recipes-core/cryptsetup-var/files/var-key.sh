@@ -17,10 +17,24 @@
 # Emits exactly 64 raw bytes on stdout. Exit non-zero on any failure.
 set -eu
 
+# Optional path prefix for the identity reads below, and nothing else. The
+# build-time deliverability check in cryptsetup-var.bb passes a fixture root
+# here; the only runtime caller, cryptsetup-var.sh, passes no arguments, so on a
+# device ROOT is empty and every path resolves to the real absolute one.
+#
+# The prefix matters more here than on the other providers: an x86 build host
+# has its own readable /sys/class/dmi/id, so an unprefixed read would be
+# satisfied by the BUILD MACHINE's DMI and the check would pass without ever
+# consulting the fixture.
+ROOT="${1:-}"
+
+# Identity sources, declared so that check knows which paths to populate.
+# avocado-var-key-identity: /sys/class/dmi/id/product_uuid
+# avocado-var-key-identity: /sys/class/dmi/id/product_serial
 # DMI identifiers are populated by the kernel early and are readable in the
 # initramfs. product_uuid is per-board unique; fall back to product_serial.
 HW_ID=""
-for f in /sys/class/dmi/id/product_uuid /sys/class/dmi/id/product_serial; do
+for f in "$ROOT/sys/class/dmi/id/product_uuid" "$ROOT/sys/class/dmi/id/product_serial"; do
     if [ -r "$f" ]; then
         HW_ID=$(tr -d '\0\n' < "$f")
         [ -n "$HW_ID" ] && break

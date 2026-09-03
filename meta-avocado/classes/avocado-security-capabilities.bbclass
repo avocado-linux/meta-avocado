@@ -143,11 +143,18 @@ def avocado_security_capabilities_check(d):
 # question depends on FILESEXTRAPATHS, which is recipe-level data that does
 # not exist yet when bb.event.ConfigParsed fires here; DISTRO_FEATURES and
 # MACHINE are parsed by then, but no recipe has been parsed at all.
-# cryptsetup-var.bb carries the second half of this enforcement: a
-# recipe-parse-time check that a var-key provider script is actually
-# resolvable via FILESEXTRAPATHS for encrypted-var before the recipe builds.
-# Read the two together - this class covers request-vs-declaration, that
-# recipe covers declaration-vs-deliverability.
+# cryptsetup-var.bb carries the second half of this enforcement, in TWO tiers,
+# and which one refuses decides where to look:
+#   - at recipe parse, that a var-key provider resolves via FILESEXTRAPATHS and
+#     declares itself usable;
+#   - at do_install, that the INSTALLED provider actually derives - it is run
+#     against two synthetic identity fixtures and must return two different
+#     64-byte keys.
+# A build that gets past parse and fails at do_install failed the second tier,
+# not this class and not the first. See README-deliverability.md beside that
+# recipe, "The var-key provider contract".
+# Read them together - this class covers request-vs-declaration, that recipe
+# covers declaration-vs-deliverability.
 addhandler avocado_security_capabilities_eventhandler
 avocado_security_capabilities_eventhandler[eventmask] = "bb.event.ConfigParsed"
 python avocado_security_capabilities_eventhandler() {
