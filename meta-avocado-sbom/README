@@ -285,6 +285,11 @@ them. A consumer that ignores the key reads counters describing exactly what
 it read, and "alt_recipes" and "alt_cves" say what it skipped. Both are zero on
 every single-kernel machine, where no key is emitted at all.
 
+A zero there means one kernel, never a merge that did not run: a machine that
+declares a second multiconfig and finds neither its merged results nor its
+pkgdata fails the task rather than writing the same zero from half the
+evidence.
+
 Two versions in CVE_CHECK_DIR itself are still merged into one entry by CVE id.
 That directory is never pruned, so a result left behind by an earlier build at
 an older PV is indistinguishable from a current one; only a multiconfig
@@ -314,7 +319,8 @@ Known ceiling: the opt-out and backport markers merged into that subdirectory
 are keyed by recipe name, and read_optouts/read_backports glob the top level
 only. So a backport carried by the second kernel alone reports "cve-check"
 evidence rather than "patch-file" - understating what the build patched, never
-overstating it. Neither kernel emits a backport marker today.
+overstating it. Neither kernel emits a backport marker today; key them by
+(name, version) when either one does.
 
 The frozen contract
 -------------------

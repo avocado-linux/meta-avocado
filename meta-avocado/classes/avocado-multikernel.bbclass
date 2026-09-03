@@ -31,8 +31,9 @@
 #      ponytail: the opt-out and backport markers land there too, and
 #      read_optouts/read_backports glob the top level only, so an alt-mc
 #      backport reports "cve-check" evidence instead of "patch-file" —
-#      understating what we patched. Neither kernel emits one today. The fix is
-#      a (name, version) key, which reaches check_unscanned_declared too.
+#      understating what we patched. Neither kernel emits one today; fix it
+#      when either one gains a backport or opt-out marker. The fix is a
+#      (name, version) key, which reaches check_unscanned_declared too.
 
 python () {
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()
