@@ -188,9 +188,16 @@ do_deploy:append:avocado-imx93-frdm() {
     # whose ESP is not the ESP anyone declared. Assert the target exists first.
     # This is the same silent-success shape as the files_append note above, and
     # this file has now been bitten by that shape twice.
-    if [ "$(jq -r '.storage_devices.rootdisk.images.esp.build_args.files | type' "$manifest")" != "array" ]; then
-        bbfatal "boot-integrity-poc: $manifest declares no esp image with a build_args.files array, so the unsigned negative-test fixture has nowhere declared to go and jq would invent one. Add the esp image to the manifest, or drop the fixture entry from this block."
-    fi
+    # BOTH arrays, not just esp. The jq expression below mutates
+    # images.boot.build_args.files and images.esp.build_args.files, and `+=`
+    # fabricates every missing level on either of them - so guarding one and not
+    # the other left the boot partition open to exactly the silent-success shape
+    # the esp guard was added to prevent.
+    for _arr in boot esp; do
+        if [ "$(jq -r --arg a "$_arr" '.storage_devices.rootdisk.images[$a].build_args.files | type' "$manifest")" != "array" ]; then
+            bbfatal "boot-integrity-poc: $manifest declares no $_arr image with a build_args.files array, so the staged entries have nowhere declared to go and jq would invent one. Add the $_arr image to the manifest, or drop its entries from this block."
+        fi
+    done
     # Image.unsigned goes on the ESP, NOT on the boot partition, and the reason
     # is measured rather than estimated. boot is 128 MiB carrying fitImage
     # (60,907,572), BOOTAA64.EFI (35,582,048) and the dtb (61,248); mdir reports
@@ -386,12 +393,26 @@ do_deploy:append:avocado-imx93-frdm() {
     fi
     install -m 0644 "$_adv" ${DEPLOYDIR}/advstore.var
 
-    # It must not be the real seed. If these ever match, the substitution test
-    # would write the genuine store over itself and pass while proving nothing.
-    # gen-efi-seed.sh checks this too; checked again here because this is the
-    # copy that actually reaches the medium.
-    if cmp -s ${DEPLOYDIR}/advstore.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
-        bbfatal "boot-integrity-poc: advstore.var is byte-identical to the real ubootefi.var, so substituting one for the other tests nothing. The rival store must carry a different PK."
+    # The seed must EXIST before it can be compared. cmp exits 2 when it cannot
+    # open an operand, and `if` reads any non-zero as "they differ" - so without
+    # this check the guard below silently did not run on exactly the build where
+    # it was needed: sb-keys' install of the seed is itself `-f`-guarded, so a
+    # rotated key directory with a still-valid do_compile stamp deploys the rival
+    # and not the seed. Every other input this block reads is existence-checked;
+    # this one was not.
+    _seed="${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var"
+    if [ ! -f "$_seed" ]; then
+        bbfatal "boot-integrity-poc: $_seed is absent, so the rival store staged onto the medium cannot be checked against the seed it is supposed to differ from. sb-keys' do_deploy installs it; this recipe's do_deploy depends on sb-keys:do_deploy."
+    fi
+
+    # A byte-compare of the two STORES is weak on its own - the real seed packs
+    # four variables and the rival packs one, so they differ in length whatever
+    # keys they carry. The authoritative check that the rival names a DIFFERENT
+    # PK is gen-efi-seed.sh's `cmp ADV.der PK.der`, made at pack time against the
+    # certificates themselves. This one catches the coarser accident the staging
+    # path can still produce: the same file installed under both names.
+    if cmp -s ${DEPLOYDIR}/advstore.var "$_seed"; then
+        bbfatal "boot-integrity-poc: advstore.var is byte-identical to the real ubootefi.var, so the staging step copied the seed under the rival's name and substituting one for the other tests nothing."
     fi
 
     if cmp -s ${DEPLOYDIR}/Image.unsigned ${DEPLOYDIR}/Image.signed; then

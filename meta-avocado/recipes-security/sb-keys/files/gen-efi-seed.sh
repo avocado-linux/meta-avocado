@@ -118,6 +118,28 @@ fi
 openssl x509 -in "${SBKEYS_DIR}/ADV.crt" \
   -out "${SBKEYS_DIR}/ADV.der" -outform DER
 
+# Refuse to build a rival that is accidentally the real thing. Checked HERE,
+# before anything is packed, so a bad pairing fails fast rather than leaving a
+# written-then-rejected store on disk.
+#
+# Compare the CERTIFICATES, not the packed stores. An earlier version compared
+# ${SEED_OUT} against ${SEED_ADV_OUT}, which is unreachable by construction: the
+# real seed packs four variables and the rival packs one, so they always differ
+# in length and `cmp` was unconditionally non-zero - 3728 vs 984 bytes measured
+# on a real build. That guard could never fire, which is worse than no guard,
+# because it reads as covering the case.
+#
+# The property that matters is that the rival's PK is a DIFFERENT KEY. ADV is
+# retained once generated, like every other role, so a restore, a backup, or a
+# hand-fix copying PK.crt over ADV.crt is preserved forever by that retain rule -
+# and the rival store then carries the genuine PK. The harness would write the
+# real PK over ubootefi.var, observe PK unchanged, and record a precedence PASS
+# having tested nothing at all.
+if cmp -s "${SBKEYS_DIR}/ADV.der" "${SBKEYS_DIR}/PK.der"; then
+  echo "gen-efi-seed: ADV.der is identical to PK.der, so the rival store would carry the REAL platform key and the HITL precedence test would pass while proving nothing. Delete ${SBKEYS_DIR}/ADV.crt and ADV.key so a distinct adversarial key is regenerated." >&2
+  exit 1
+fi
+
 workdir="$(mktemp -d)"
 trap 'rm -rf "${workdir}"' EXIT
 
@@ -258,16 +280,6 @@ done
 # the same variable.
 python3 "${workdir}/pack.py" "${SEED_ADV_OUT}" "${SEED_EPOCH}" \
   "PK=${EFI_GLOBAL_VARIABLE_GUID}=${workdir}/ADV.esl"
-
-# Refuse to ship a rival that is accidentally the real thing. If these two ever
-# compare equal, the substitution test would "pass" while proving nothing at all,
-# because the store it wrote and the seed it is testing against would carry the
-# same key. Cheap to check, and the failure it guards is invisible from the
-# harness end.
-if cmp -s "${SEED_OUT}" "${SEED_ADV_OUT}"; then
-  echo "gen-efi-seed: the adversarial store is byte-identical to the real seed; the substitution test would prove nothing" >&2
-  exit 1
-fi
 
 echo "gen-efi-seed: wrote ${SEED_OUT} (PK, KEK, db enrolled; dbx placeholder)"
 echo "gen-efi-seed: wrote ${SEED_MANIFEST} (per-role DER digests as packed)"
