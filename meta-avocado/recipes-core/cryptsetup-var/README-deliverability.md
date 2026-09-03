@@ -18,7 +18,7 @@ Branch enumerated: `boot-integrity-poc`, at the tree state of this commit.
 A5 holds. No consumer expects Raspberry Pi to carry `encrypted-var`.
 
 It holds in a stronger form than the design anticipated: **the Pi already
-declares nothing.** `meta-avocado-raspberrypi/conf/machine/include/avocado-raspberrypi.inc:21`
+declares nothing.** `meta-avocado-raspberrypi/conf/machine/include/avocado-raspberrypi.inc:27`
 reads `AVOCADO_SECURITY_CAPABILITIES = ""`, with a comment naming the two
 missing pieces (no dm-crypt fragment in `linux-raspberrypi`, no `var` PARTLABEL
 in the MBR layout). Commit `0f20494c` ("security: build declared capabilities
@@ -34,7 +34,7 @@ task 3.1 of this change is already satisfied on this branch.
 | Location | What it does with the declaration |
 |---|---|
 | `meta-avocado/classes/avocado-security-capabilities.bbclass:79` | `bb.event.ConfigParsed` check: refuses a build whose requested feature is absent from the declaration. Distinguishes unset from empty. |
-| `meta-avocado/classes/avocado-security-capabilities.bbclass:167` | `avocado_security_capabilities_write_artifact`, which writes `${IMAGE_ROOTFS}${sysconfdir}/avocado-security-capabilities`. Returns early when the variable is unset, so an unmigrated machine gets no file. |
+| `meta-avocado/classes/avocado-security-capabilities.bbclass:178` | `avocado_security_capabilities_write_artifact`, which writes `${IMAGE_ROOTFS}${sysconfdir}/avocado-security-capabilities`. Returns early when the variable is unset, so an unmigrated machine gets no file. |
 | `meta-avocado/conf/distro/include/avocado-security.inc:32` | `INHERIT += "avocado-security-capabilities"`, making the class global. |
 
 ### Build-time: the two images that hook the artifact writer
@@ -84,7 +84,7 @@ so they are unaffected by any machine's declaration changing.
 `meta-avocado-qemu/conf/machine/avocado-qemux86-64.conf:63`,
 `meta-avocado-x86-64/conf/machine/avocado-intel-x86-64-v2.conf:30`,
 `-v3.conf:31`, `-v4.conf:36`,
-`meta-avocado-raspberrypi/conf/machine/include/avocado-raspberrypi.inc:21` (empty).
+`meta-avocado-raspberrypi/conf/machine/include/avocado-raspberrypi.inc:27` (empty).
 
 ### Documentation
 
