@@ -22,9 +22,16 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "boot-integrity-report.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-# od(1), for the 5-byte SecureBoot blob. coreutils on a normal image, but busybox
-# also provides it, so this is RDEPENDS on the command rather than the package.
-RDEPENDS:${PN} = "coreutils"
+# od(1), for the 5-byte SecureBoot blob, plus sed(1), which the descriptor
+# parser needs. Busybox provides both, so on a busybox image these resolve
+# either way - but the reporter runs under `set -eu`, so an image WITHOUT them
+# does not degrade to `unknown`, it exits before emit() and publishes no record
+# at all. That defeats the single-emission invariant the script is built around,
+# and the HITL failure ("the reporter did not run") names no cause.
+#
+# sed became load-bearing when the descriptor moved from being SOURCED to being
+# PARSED; the dependency was not updated with it.
+RDEPENDS:${PN} = "coreutils sed"
 
 # The store descriptor records how much the variable store itself is worth,
 # which the script cannot determine at runtime: nothing in efivarfs says whether
@@ -70,6 +77,18 @@ AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST = "${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var
 # virtual/bootloader rather than a hardcoded u-boot-imx - this recipe is
 # machine-agnostic and each BSP picks its own provider.
 do_install[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', 'virtual/bootloader:do_deploy', '', d)}"
+
+# sb-keys:do_deploy as well, because the two halves of the provenance claim come
+# from two different recipes and only one of them was ordered. db.fingerprint
+# (from virtual/bootloader above) is what makes this recipe write
+# `keydb_origin=firmware-resident`; ubootefi.var.manifest (from sb-keys) is what
+# supplies db.der.sha256, the ONLY thing the device can corroborate that claim
+# against. Order one and not the other and a build where the bootloader's deploy
+# comes from sstate - so its own do_configure -> sb-keys:do_deploy edge is never
+# traversed - ships the claim with no evidence: the device reports
+# `keydb_origin=unknown` and the HITL assertion blames the key database rather
+# than a build-ordering race.
+do_install[depends] += "${@bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', ' sb-keys:do_deploy', '', d)}"
 
 do_install() {
     install -d ${D}${libexecdir}/boot-integrity
@@ -135,11 +154,28 @@ EOF
         # divergence the manifest exists to remove, and it would do it in the
         # reference the on-device check compares against, so a rotation would
         # make the device report a mismatch it has no way to explain.
-        if [ -f "${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST}" ]; then
-            awk '$1 == "db" { print $2 }' "${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST}" \
-                > ${D}${libexecdir}/boot-integrity/db.der.sha256
-            chmod 0644 ${D}${libexecdir}/boot-integrity/db.der.sha256
+        # Fatal on absence, and on a digest that is not usable. Both were silent
+        # here while the two OTHER consumers of this same manifest field
+        # (u-boot-imx_%.bbappend and avocado-stone.bbappend) bbfatal on exactly
+        # these conditions - so one manifest had three readers and only this one
+        # would ship a shortfall green.
+        #
+        # It matters more here than there, because this is the reference the
+        # DEVICE compares against: an empty or malformed db.der.sha256 makes
+        # corroborate_keydb() return `unknown`, which downgrades keydb_origin and
+        # fails the hardware assertion with a message pointing at the key
+        # database rather than at this file.
+        if [ ! -f "${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST}" ]; then
+            bbfatal "boot-integrity: ${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST} is absent, so the on-device corroboration reference cannot be installed while this recipe is about to write keydb_origin=firmware-resident. sb-keys' gen-efi-seed.sh writes it beside the seed; this recipe's do_install depends on sb-keys:do_deploy."
         fi
+        _bi_digest=$(awk '$1 == "db" { print $2 }' "${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST}")
+        case "$_bi_digest" in
+            "" | *[!0-9a-f]*)
+                bbfatal "boot-integrity: ${AVOCADO_BOOT_INTEGRITY_SEED_MANIFEST} carries no usable db digest (got '$_bi_digest'), so the reference the device corroborates keydb_origin against would be empty or malformed. Refusing to install it."
+                ;;
+        esac
+        printf '%s\n' "$_bi_digest" > ${D}${libexecdir}/boot-integrity/db.der.sha256
+        chmod 0644 ${D}${libexecdir}/boot-integrity/db.der.sha256
     fi
 }
 
