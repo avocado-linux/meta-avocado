@@ -62,8 +62,11 @@ ERROR: .../meta-avocado/recipes-core/cryptsetup-var/cryptsetup-var.bb: machine
 avocado-qemux86-64-nodeliv declares encrypted-var but supplies no var-key
 provider of its own: the var-key.sh that resolves for this machine is the
 placeholder that cannot actually derive a key. Add a machine- or
-vendor-specific var-key.sh (or var-hwkey.sh) ahead of it on FILESPATH before
-shipping encrypted-var here.
+vendor-specific var-key.sh ahead of it on FILESPATH before shipping
+encrypted-var here. A var-hwkey.sh does not satisfy this on its own: per
+cryptsetup-var.sh it supplies the passphrase of a SECOND keyslot and leaves
+the var-key.sh keyslot as the recovery path, so a machine with only a hwkey
+backend still cannot derive that recovery key.
 ERROR: Parsing halted due to errors, see error messages above
 ```
 
@@ -78,6 +81,15 @@ ERROR: Parsing halted due to errors, see error messages above
   feature`, `declares no AVOCADO_SECURITY_CAPABILITIES`, `not present in its
   AVOCADO_SECURITY_CAPABILITIES` - returns **0** matches. The refusal cannot be
   attributed to the older declaration check.
+
+## Note on the quoted message
+
+The refusal text above is re-quoted from commit `87e81b3a`, which removed an
+earlier remedy clause offering `var-hwkey.sh` as an alternative. That advice
+did not clear the check - a hwkey backend supplies a second keyslot and leaves
+the var-key.sh keyslot as the recovery path - so an operator following it would
+have been refused again with the same message. The run recorded here predates
+that commit; only the remedy sentence changed, not the refusal or its cause.
 
 ## Unrelated secondary error, recorded for honesty
 

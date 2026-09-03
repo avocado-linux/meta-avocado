@@ -158,6 +158,9 @@ git show origin/wrynose:meta-avocado-raspberrypi/conf/machine/include/avocado-ra
   `encrypted-var` and resolves to the shared provider has to be constructed
   separately to exercise the new check.
 - There is no `kas/feature/encrypted-var.yml` in this tree, though the handoff's
-  E2E invocations name one. The feature fragments present are listed by
-  `ls kas/feature/`. Whoever runs tasks 4.1 to 4.3 needs another way to put
-  `encrypted-var` into `DISTRO_FEATURES`.
+  E2E invocations name one. It does not need replacing: since commit `e49c8670`
+  the check gates on the machine's `AVOCADO_SECURITY_CAPABILITIES` declaration,
+  not on `DISTRO_FEATURES`, so arming it means selecting a machine that DECLARES
+  the capability rather than injecting a feature token. `encrypted-var` is a
+  retired `DISTRO_FEATURES` token that no machine sets and that
+  `avocado-security-capabilities.bbclass` warns about when it appears.
