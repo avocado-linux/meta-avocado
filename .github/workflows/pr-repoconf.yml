@@ -1,0 +1,46 @@
+name: PR-Repoconf
+
+# What a generated .repo section tells dnf to verify is a security decision, and
+# it is only observable by building an SDK and reading the file out of it. These
+# tests are the substitute for that build, so they have to run somewhere.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'meta-avocado/lib/**'
+      - 'meta-avocado/tests/**'
+      - 'meta-avocado/recipes-avocado/sdk/**'
+      - '.github/workflows/pr-repoconf.yml'
+  push:
+    branches: [scarthgap]
+    paths:
+      - 'meta-avocado/lib/**'
+      - 'meta-avocado/tests/**'
+      - 'meta-avocado/recipes-avocado/sdk/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: repoconf-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repoconf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Standard library only - no install step, so a dependency failure cannot
+      # silently shrink the suite.
+      - name: Run the repo-config renderer tests
+        run: |
+          python -m unittest discover -v \
+            -s meta-avocado/tests -p 'test_*.py'
