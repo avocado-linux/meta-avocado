@@ -294,6 +294,21 @@ fi
 for c in efivars-unmounted secureboot=0; do
   r="$(fixture $c)"
   out="$(sh "$r/report.sh" 2>/dev/null | sed -n 's/^detail=//p')"
+  # Assert a detail line EXISTS before asking what is in it. Without this the
+  # check passes vacuously on the outcome it most needs to catch: a reporter
+  # that crashed, or emitted no detail= line at all, yields an empty `out`,
+  # which matches the `*)` arm and calls pass. The reporter runs under `set -eu`
+  # and can exit before emit(), so "no output" is a reachable state and not a
+  # hypothetical - and it would be reported here as "the sentinel does not
+  # survive", a sentence about a message nobody produced.
+  # `continue`, not a bare fail(), because fail() records and returns. Falling
+  # through would run the case below on the empty string, match `*)`, and print
+  # a PASS saying the sentinel did not survive - a pass about a message nobody
+  # produced, printed directly beneath the FAIL that says so.
+  if [ -z "$out" ]; then
+    fail "the reporter emitted no detail= line at all ($c), so the sentinel check had nothing to inspect"
+    continue
+  fi
   case "$out" in
     "no probe ran"*) fail "the sentinel leaked into a real detail ($c): $out" ;;
     *) pass "the sentinel does not survive into a real detail ($c)" ;;

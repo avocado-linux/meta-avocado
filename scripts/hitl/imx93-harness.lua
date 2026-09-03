@@ -246,12 +246,40 @@ end
 -- equal across every image missing the payload. No marker at all is the
 -- correct output for that case, and it lands on `unknown`.
 local function capture_image_id()
-  cmd("test -r /usr/libexec/boot-integrity/boot-integrity-report.sh && " ..
-      "test -r /usr/libexec/boot-integrity/db.der.sha256 && " ..
-      "test -r /etc/avocado/boot-integrity-store && " ..
-      "echo PAYLOAD-ID:$(cat /usr/libexec/boot-integrity/boot-integrity-report.sh " ..
-      "/usr/libexec/boot-integrity/db.der.sha256 " ..
-      "/etc/avocado/boot-integrity-store | sha256sum | cut -c1-16)", 4000)
+  -- Only the reporter is installed on every build. boot-integrity.bb gates
+  -- db.der.sha256 and the descriptor behind AVOCADO_BOOT_INTEGRITY_POC, so
+  -- REQUIRING all three made a token-absent image unidentifiable - the digest
+  -- came back empty, IMAGE_ID landed on `unknown`, and check-result.sh rejected
+  -- it. That is not a corner: task 8.5 verifies the default path with
+  -- `check-result.sh slot_boots a`, and slot_boots reaches a shell, so demanding
+  -- the PoC-only files made that task's verify unsatisfiable on the very build
+  -- flavour it exists to check.
+  --
+  -- So hash the files that ARE there, and keep requiring the one that is always
+  -- there. That last requirement is what preserves the empty-input guard: with
+  -- no readable file at all, `cat` hashes an empty stream and returns a
+  -- well-formed digest meaning "nothing found", which would compare equal
+  -- across every image missing the payload.
+  --
+  -- The two flavours land in different digest namespaces rather than colliding,
+  -- because the hashed BYTES differ - one stream is the reporter alone, the
+  -- other is the reporter followed by two more files. A token-absent record and
+  -- a PoC record therefore read as different images, which is what they are.
+  --
+  -- Argument order is preserved exactly, so a PoC image hashes the same three
+  -- files in the same sequence as before this branch existed and records made
+  -- either side of it stay comparable.
+  --
+  -- Be honest about what the fallback buys: on a token-absent image the digest
+  -- covers one script, so two default builds differing anywhere else compare
+  -- equal. It identifies the payload under assertion, not the image.
+  local A = "/usr/libexec/boot-integrity/boot-integrity-report.sh"
+  local B = "/usr/libexec/boot-integrity/db.der.sha256"
+  local C = "/etc/avocado/boot-integrity-store"
+  cmd("test -r " .. A .. " && { set -- " .. A .. "; " ..
+      "test -r " .. B .. " && set -- \"$@\" " .. B .. "; " ..
+      "test -r " .. C .. " && set -- \"$@\" " .. C .. "; " ..
+      "echo PAYLOAD-ID:$(cat \"$@\" | sha256sum | cut -c1-16); }", 4000)
 
   -- Anchored to EXACTLY 16 hex characters, which is what makes the shell's own
   -- echo of the command line unable to satisfy it: there, `PAYLOAD-ID:` is
@@ -1043,53 +1071,69 @@ if MODE == "keydb_immutable" then
   --
   -- The backup lives on the ESP because it has to survive the resets this leg
   -- performs; a copy in RAM does not.
-  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var", 8000)
-  if not saw("bytes read") then
-    -- Recover from an earlier run of THIS leg rather than dead-ending.
-    --
-    -- The leg deletes the real store and restores it at the very end, so any
-    -- failure between those two points leaves the ESP with no ubootefi.var and
-    -- a ubootefi.var.bak holding it. Refusing to start in that state makes the
-    -- mode unrunnable until someone reflashes the board - a full build-flash
-    -- cycle to undo a file rename - when the recovery is two commands this
-    -- function already knows how to issue. That state is not hypothetical: the
-    -- prefix bug fixed above put the bench in exactly it.
-    --
-    -- Recovery is only ever FROM this leg's own backup. It never fabricates a
-    -- store, so a board that genuinely has none still fails, and says so.
+  --
+  -- The backup-or-recover decision is made from WHAT IS ON THE ESP, never from
+  -- whether ubootefi.var happens to load, and that distinction is the whole
+  -- safety property. A run interrupted between the substitution and the final
+  -- restore leaves ubootefi.var holding the RIVAL while the genuine store
+  -- survives only in ubootefi.var.bak. Keying off "does ubootefi.var load"
+  -- would read that rival as the real store, copy it over the only genuine
+  -- copy, and then "restore" the rival at the end - turning one interrupted
+  -- run into permanent loss of the board's variable store, recoverable only by
+  -- reflashing. An existing backup is therefore always restored FROM and never
+  -- written to.
+  cmd("fatls ${devtype} ${devnum}:${espp}", 4000)
+  if not saw("file%(s%)") then
+    fail("could not list the ESP before deciding whether to back up or recover " ..
+         "the variable store, so this leg cannot start safely")
+  end
+
+  if esp_has("ubootefi.var.bak") then
+    tio.echo("\r\n>>> backup from an earlier run present: recovering from it, " ..
+             "not overwriting it <<<\r\n")
     cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var.bak", 8000)
     if not saw("bytes read") then
-      fail("the real ubootefi.var did not load from the ESP, and there is no " ..
-           "ubootefi.var.bak to recover it from - the board needs reflashing " ..
-           "before this mode can run")
+      fail("ubootefi.var.bak is listed on the ESP but does not load, so the " ..
+           "genuine variable store can be neither recovered nor safely " ..
+           "replaced - reflash the board")
     end
     cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
         " ubootefi.var ${filesize}", 8000)
-    if not saw("bytes written") then
-      fail("found a ubootefi.var.bak from an interrupted run but could not " ..
-           "write it back to ubootefi.var, so the real variable store cannot " ..
-           "be recovered - reflash the board")
+    if saw("Unknown command") then
+      fail("fatwrite is unavailable on this firmware (CONFIG_FAT_WRITE), so the " ..
+           "override leg cannot run - do not record a pass from the delete leg alone")
     end
-    tio.echo("\r\n>>> recovered ubootefi.var from an earlier run's backup <<<\r\n")
-
-    -- Re-read rather than assume. The restore is the whole precondition of
-    -- this leg, and proceeding on the strength of `bytes written` alone would
-    -- carry a truncated or unreadable store into the substitution test.
+    if not saw("bytes written") then
+      fail("could not write the recovered store back to ubootefi.var - reflash " ..
+           "the board")
+    end
+  else
     cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var", 8000)
     if not saw("bytes read") then
-      fail("ubootefi.var still does not load after recovering it from " ..
-           "ubootefi.var.bak, so the store on the ESP is not usable")
+      fail("the real ubootefi.var did not load from the ESP and there is no " ..
+           "ubootefi.var.bak to recover it from, so this leg has nothing to " ..
+           "back up and no way to put anything back")
+    end
+    cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
+        " ubootefi.var.bak ${filesize}", 8000)
+    if saw("Unknown command") then
+      fail("fatwrite is unavailable on this firmware (CONFIG_FAT_WRITE), so the " ..
+           "override leg cannot run - do not record a pass from the delete leg alone")
+    end
+    if not saw("bytes written") then
+      fail("could not back up the real ubootefi.var, so this leg will not be able " ..
+           "to restore it and must not proceed to overwrite it")
     end
   end
-  cmd("fatwrite ${devtype} ${devnum}:${espp} " .. scratch ..
-      " ubootefi.var.bak ${filesize}", 8000)
-  if saw("Unknown command") then
-    fail("fatwrite is unavailable on this firmware (CONFIG_FAT_WRITE), so the " ..
-         "override leg cannot run - do not record a pass from the delete leg alone")
-  end
-  if not saw("bytes written") then
-    fail("could not back up the real ubootefi.var, so this leg will not be able " ..
-         "to restore it and must not proceed to overwrite it")
+
+  -- Re-read whatever now sits at ubootefi.var, so the substitution starts from
+  -- a store known to be readable rather than one assumed to be. Both branches
+  -- above end with a write, and `bytes written` says a write was accepted, not
+  -- that what landed can be read back.
+  cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " ubootefi.var", 8000)
+  if not saw("bytes read") then
+    fail("ubootefi.var does not load after the backup/recovery step, so the " ..
+         "store on the ESP is not usable and part two-a cannot run")
   end
 
   cmd("load ${devtype} ${devnum}:${espp} " .. scratch .. " advstore.var", 8000)
@@ -1257,6 +1301,29 @@ if MODE == "keydb_immutable" then
          "without a variable store")
   end
   tio.echo("\r\n>>> real variable store restored from ubootefi.var.bak <<<\r\n")
+
+  -- Retire the backup now that it has served its purpose, so the ESP is left
+  -- as this leg found it.
+  --
+  -- Leaving it behind would make every later run take the recover-from-backup
+  -- branch above instead of the ordinary backup branch, and that branch writes
+  -- the backup OVER ubootefi.var. The copy would then get staler on every run
+  -- while remaining authoritative, so any UEFI variable legitimately written
+  -- between runs - by uefi_var_persists, or by the firmware itself - would be
+  -- silently reverted by the next keydb_immutable. A transient file that
+  -- outlives its transaction stops being a backup and becomes a rollback.
+  --
+  -- Deliberately NOT fatal. The store is already restored by this point, which
+  -- is the property that matters; a leftover backup costs a stale-revert on the
+  -- next run, not a broken board, and failing here would convert a successful
+  -- security assertion into a FAIL over cleanup.
+  cmd("fatrm ${devtype} ${devnum}:${espp} ubootefi.var.bak", 4000)
+  cmd("fatls ${devtype} ${devnum}:${espp}", 4000)
+  if esp_has("ubootefi.var.bak") then
+    tio.echo("\r\n>>> WARNING: ubootefi.var.bak could not be removed. The store " ..
+             "is restored, but the next run will recover from this copy rather " ..
+             "than take a fresh backup <<<\r\n")
+  end
 
   -- The verdict names which runtime outcome actually occurred. A single wording
   -- covering both would report a refusal that never happened on a platform with

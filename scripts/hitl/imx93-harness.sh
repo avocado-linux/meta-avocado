@@ -153,9 +153,7 @@ valid_image() {
 
 # Wall-clock budget per mode, in seconds. Most modes are one power cycle and one
 # boot, which 300 covers with room. keydb_immutable is not: it performs three
-# full boots to a login prompt and three U-Boot prompt acquisitions, so its
-# internal deadlines alone (await_login(240) x3, reach_prompt x3) exceed 300
-# before any of the ~25 settle() budgets are counted.
+# full boots to a login prompt and four U-Boot prompt acquisitions.
 #
 # Under the old flat 300 a slow boot - the first after a reflash, or a build
 # carrying the full module set - killed tio mid-run and recorded FAIL with
@@ -165,9 +163,24 @@ valid_image() {
 #
 # This file already knew 300 was not universal: --ums-hold was deliberately
 # routed around run_mode for exactly this reason. The new mode was not.
+#
+# keydb_immutable's number is DERIVED, not chosen, because the first attempt at
+# it was chosen and was still too small: 900 was picked as "comfortably more
+# than 300" without adding the mode's own deadlines up, and they sum to 1620 -
+# reach_prompt(180) once, then await_login(240) three times and reach_prompt(240)
+# three times. A budget under that can be exhausted by waits the mode is
+# entitled to take, so the timeout would fire on a slow-but-correct run and
+# record a FAIL that reads like a security failure.
+#
+# 1800 = 1620 of deadlines + 180 for the ~25 settle() budgets and command
+# round-trips between them. Re-derive it if a deadline changes; a number nobody
+# can reconstruct is one that drifts.
+#
+# In practice a healthy run finishes in about five minutes, so this bound is
+# what the mode is ALLOWED to take, not what it takes.
 mode_timeout() {
   case "$1" in
-    keydb_immutable) printf '900' ;;
+    keydb_immutable) printf '1800' ;;
     *) printf '300' ;;
   esac
 }

@@ -142,7 +142,7 @@ do_configure:prepend:avocado-imx93-frdm () {
         if [ -z "${FIT_CONF_DEFAULT_DTB}" ]; then
             bbfatal "boot-integrity-poc: FIT_CONF_DEFAULT_DTB is empty, so the EFI boot path has no device tree to load. It is set in the machine conf; this build has lost it."
         fi
-        bbwarn "boot-integrity-poc: replacing this board's FIT boot path with an EFI hand-off (bootefi on an EFI-stub kernel staged in the ESP). Slot selection is unchanged. The staged kernel is unauthenticated."
+        bbwarn "boot-integrity-poc: replacing this board's FIT boot path with an EFI hand-off (bootefi on an EFI-stub kernel staged in the ESP). Slot selection is unchanged. The staged kernel is signed against the enrolled db, so the firmware refuses a replacement it cannot verify - but the bootloader performing that verification is itself unauthenticated, because AHAB is open on this part and cannot be closed. A boot-medium writer can replace U-Boot, seed and all."
         printf '\n' >> ${S}/board/nxp/imx93_frdm/avocado.env
         sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
             ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
