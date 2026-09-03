@@ -12,9 +12,71 @@
 
 local MODE = os.getenv("HARNESS_MODE") or ""
 local ARG = os.getenv("HARNESS_ARG") or ""
+local ID_FILE = os.getenv("HARNESS_ID_FILE") or ""
 local TAIL_MAX = 24000
 
 local tail = ""
+
+-- Board-reported identity of the software this run actually exercised, written
+-- to HARNESS_ID_FILE for imx93-harness.sh to stamp into the record.
+--
+-- The record already names a COMMIT, and under this project's reproducible
+-- builds a commit pins the build content exactly. What it could not say is
+-- whether the BOARD is carrying that build. Every guard downstream - tree
+-- state, ancestor-of-HEAD, --since - reads host-side git, and none of them can
+-- see a reflash. That is not a hypothetical gap: seven records were carried
+-- across two reflashes during this work and every one went on validating, and
+-- an env_lockdown FAIL was chased as a code defect when the board was simply
+-- running a different image.
+--
+-- Three states, and they are not interchangeable:
+--   <16 hex>  a digest the board computed and reported
+--   none      the run never reached a Linux shell, so there was nothing to ask
+--   unknown   a shell was reached and no digest came back
+-- check-result.sh accepts the first two and rejects the third, on the same
+-- principle as the tree field: failing to ask is not an answer.
+--
+-- Four of the six assert modes report a digest. env_lockdown and slot_boots
+-- take a login they do not otherwise need, purely so their records can be
+-- checked; boot_integrity_report and keydb_immutable already had one.
+--
+-- The remaining two are `none` BY CONSTRUCTION and the gap they leave is OPEN:
+-- uefi_var_persists never leaves U-Boot, and signed_payload_refused asserts
+-- that the board does not boot at all, so neither can be asked what it is
+-- running from a shell. Their records are therefore invisible to the staleness
+-- check in check-result.sh and will keep validating across a reflash.
+--
+-- What blocks closing it is NOT capability. The board can hash from the U-Boot
+-- prompt - imx93_11x11_frdm_defconfig-sd/.config carries CONFIG_CMD_HASH=y, so
+-- `hash sha256` is available, and an earlier version of this comment claimed
+-- otherwise. It is that a U-Boot-side digest would measure a DIFFERENT quantity
+-- from the Linux-side one below: the boot payload rather than the rootfs
+-- payload. Recording both under one field would make every U-Boot record
+-- compare unequal to every Linux record, so the staleness check would reject
+-- every mode against every other - a guard that fires on everything is a guard
+-- that gets disabled. Closing this properly means a two-part identity compared
+-- component-wise, which is a design change and not a line of Lua.
+--
+-- The other reason not to reach for the obvious file: `ubootefi.var` is the
+-- MUTABLE store, and uefi_var_persists writes to it as its whole assertion, so
+-- hashing it would produce an identity that changes because the test ran.
+local IMAGE_ID = "none"
+
+-- Written from pass() and fail() so it lands on BOTH verdicts. A FAIL is the
+-- case that most needs it - the wrong-image run above recorded FAIL, and the
+-- identity is what would have named the cause in one line.
+--
+-- Every failure here is silent by design. This is evidence about the run, not
+-- part of the assertion, so a missing file must not turn a genuine PASS into a
+-- FAIL; the empty value it leaves behind is read as `unknown` by the caller
+-- and rejected there, which is where the reader can act on it.
+local function write_image_id()
+  if ID_FILE == "" then return end
+  local f = io.open(ID_FILE, "w")
+  if not f then return end
+  f:write(IMAGE_ID .. "\n")
+  f:close()
+end
 
 -- Markers are LATCHED as they stream past, not looked for in the tail at the
 -- end. A full boot is roughly 100 KB and the tail is bounded, so an early marker
@@ -51,13 +113,16 @@ local function settle(ms)
 end
 
 local function fail(msg)
+  write_image_id()
   tio.echo("\r\nRESULT: FAIL - " .. msg .. "\r\n")
+  tio.echo("---- image ---- " .. IMAGE_ID .. "\r\n")
   tio.echo("---- tail ----\r\n" .. tail .. "\r\n--------------\r\n")
   os.exit(1)
 end
 
 local function pass(msg)
-  tio.echo("\r\nRESULT: PASS - " .. msg .. "\r\n")
+  write_image_id()
+  tio.echo("\r\nRESULT: PASS - " .. msg .. " [image " .. IMAGE_ID .. "]\r\n")
   os.exit(0)
 end
 
@@ -136,9 +201,53 @@ end
 -- "did not reach a root shell", reads as a wedged or broken board. It cost a
 -- full build-flash-assert cycle to work out that the image was simply built
 -- without the overlay, so the message now says so.
+-- Ask the board what it is running. Called from the shared login path below so
+-- every mode that reaches a shell stamps an identity without opting in - a mode
+-- that had to remember to call this is a mode that will eventually forget.
+--
+-- Scoped to the rootfs payload these assertions are ABOUT - the reporter, the
+-- corroboration reference it compares against, and the descriptor it is not
+-- allowed to trust - and NOT to the whole image. State the limit rather than
+-- imply otherwise: a reflash changing only the bootloader leaves this digest
+-- identical, so agreement across records does not prove the bootloader is
+-- unchanged. Two things it does close, both of which have already cost a cycle
+-- here: a rootfs fix committed and flashed while older records went on
+-- validating, and a verdict whose image nobody could name after the fact.
+--
+-- The U-Boot version banner is the obvious alternative and it does not work.
+-- SOURCE_DATE_EPOCH pins its build timestamp, so two bootloaders built from
+-- different trees print the same banner, byte for byte - measured here as
+-- `(Jun 02 2026 - 15:03:39 +0000)` across every build in this branch. A
+-- content digest is the only thing that moves when the content does.
+--
+-- Every file is tested readable BEFORE the digest is taken, and that is the
+-- load-bearing half. `sha256sum a b c 2>/dev/null | sha256sum` over three
+-- absent files hashes an EMPTY stream and returns a perfectly well-formed
+-- digest that means "nothing was found" - a false identity that would compare
+-- equal across every image missing the payload. No marker at all is the
+-- correct output for that case, and it lands on `unknown`.
+local function capture_image_id()
+  cmd("test -r /usr/libexec/boot-integrity/boot-integrity-report.sh && " ..
+      "test -r /usr/libexec/boot-integrity/db.der.sha256 && " ..
+      "test -r /etc/avocado/boot-integrity-store && " ..
+      "echo PAYLOAD-ID:$(cat /usr/libexec/boot-integrity/boot-integrity-report.sh " ..
+      "/usr/libexec/boot-integrity/db.der.sha256 " ..
+      "/etc/avocado/boot-integrity-store | sha256sum | cut -c1-16)", 4000)
+
+  -- Anchored to EXACTLY 16 hex characters, which is what makes the shell's own
+  -- echo of the command line unable to satisfy it: there, `PAYLOAD-ID:` is
+  -- followed by `$`, so the pattern cannot match the echo and go on to report
+  -- an identity for a command that never ran.
+  local id = string.match(tail, "PAYLOAD%-ID:(%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x)")
+  IMAGE_ID = id or "unknown"
+end
+
 local function login_root()
   cmd("root", 4000)
-  if saw("avocado%-imx93%-frdm:~#") then return end
+  if saw("avocado%-imx93%-frdm:~#") then
+    capture_image_id()
+    return
+  end
 
   -- Checked before the generic failure because it is the specific, actionable
   -- cause. "Password:" comes from the getty, not from the string sent, so the
@@ -193,6 +302,19 @@ if MODE == "env_lockdown" then
   if not latched_saw("Booting B") then
     fail("avocado_boot_slot=b did not take effect - OTA slot switching is broken")
   end
+
+  -- Nothing in this assertion needs a shell. The login is here purely so the
+  -- record can name the image the board was running, and this mode is the one
+  -- that most needs it: its only observed failure was a FAIL recorded against
+  -- an image built without CONFIG_ENV_WRITEABLE_LIST, and it was chased as a
+  -- code defect for a full cycle because the record could not say which image
+  -- had produced it.
+  --
+  -- It is a hard login, not a best-effort one. An image without passwordless
+  -- root cannot be identified, and login_root names that cause precisely; a
+  -- silent skip would hand back the unattributable PASS this exists to end.
+  login_root()
+
   pass("saved bootcmd rejected, saved avocado_boot_slot honoured, board booted")
 end
 
@@ -206,6 +328,13 @@ if MODE == "slot_boots" then
   cmd("reset", 500)
   if not await_login(240) then fail("slot " .. ARG .. " did not reach a login prompt") end
   if not latched_saw(want) then fail("expected '" .. want .. "' and did not see it") end
+
+  -- As in env_lockdown: the login exists to stamp the record with the image,
+  -- not because the assertion needs a shell. A slot_boots record that cannot
+  -- name its image is the easiest of all of these to carry across a reflash,
+  -- since "the slot boots" stays true of images that differ in every other way.
+  login_root()
+
   pass("slot " .. ARG .. " booted to a login prompt")
 end
 

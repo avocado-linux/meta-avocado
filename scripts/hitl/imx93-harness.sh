@@ -77,7 +77,7 @@ result_file() {
 }
 
 record_result() {
-  local mode="$1" verdict="$2" arg="${3:-}" commit tree porcelain
+  local mode="$1" verdict="$2" arg="${3:-}" image="${4:-unknown}" commit tree porcelain
   # -C "$HERE", not a bare git. meta-avocado is a sub-repo inside the peridio
   # workspace, which is ITSELF a git repo, so a bare `git rev-parse` records
   # whichever repo the caller's cwd happened to land in. Invoked from the
@@ -125,9 +125,30 @@ record_result() {
     tree=clean
   fi
 
+  # The image the BOARD reported, which is the one thing here the host cannot
+  # infer. Commit and tree together describe the code that was checked out;
+  # neither can see a reflash, so both stay green while the board runs something
+  # else entirely. See the Lua side for what the digest covers and what it does
+  # not.
   mkdir -p "$RESULT_DIR"
-  printf '%s %s %s %s\n' "$verdict" "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    "$tree" >"$(result_file "$mode" "$arg")"
+  printf '%s %s %s %s %s\n' "$verdict" "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$tree" "$image" >"$(result_file "$mode" "$arg")"
+}
+
+# Accept only what the Lua side is defined to produce: `none` for a mode that
+# never reaches a Linux shell, or exactly 16 lowercase hex characters.
+#
+# The width is checked, not just the character class, because a TRUNCATED digest
+# is the dangerous shape. A short read - the console dropping bytes mid-line,
+# which this link does under load - yields a prefix that is still all-hex, still
+# compares equal to itself, and would silently define a shorter namespace in
+# which unrelated images collide.
+valid_image() {
+  case "$1" in
+    none) return 0 ;;
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Wall-clock budget per mode, in seconds. Most modes are one power cycle and one
@@ -152,14 +173,31 @@ mode_timeout() {
 }
 
 run_mode() {
-  local mode="$1" arg="${2:-}" rc=0
+  local mode="$1" arg="${2:-}" rc=0 idfile image
+
+  # A file rather than the console, deliberately. Scraping the identity out of
+  # tio's stdout would mean piping it, which costs the live view of a run that
+  # can take fifteen minutes, and makes the exit status a PIPESTATUS question
+  # right where a misread means recording PASS for a failed run.
+  idfile="$(mktemp)"
+
   schedule_power_cycle
-  HARNESS_MODE="$mode" HARNESS_ARG="$arg" \
+  HARNESS_MODE="$mode" HARNESS_ARG="$arg" HARNESS_ID_FILE="$idfile" \
     timeout "$(mode_timeout "$mode")" tio --script-file "$LUA" --script-run once --mute "$TIO_PROFILE" || rc=$?
+
+  # Read what the run wrote; do not default to anything friendlier. An empty or
+  # absent file means the script never funnelled through pass()/fail() - it was
+  # killed by the mode timeout, or died on an error - so it never reported what
+  # the board was running. `unknown` is the honest value for that, and
+  # check-result.sh rejects it rather than treating silence as agreement.
+  image="$(head -n1 "$idfile" 2>/dev/null || true)"
+  rm -f "$idfile"
+  valid_image "$image" || image=unknown
+
   if [ "$rc" -eq 0 ]; then
-    record_result "$mode" PASS "$arg"
+    record_result "$mode" PASS "$arg" "$image"
   else
-    record_result "$mode" FAIL "$arg"
+    record_result "$mode" FAIL "$arg" "$image"
   fi
   return "$rc"
 }
