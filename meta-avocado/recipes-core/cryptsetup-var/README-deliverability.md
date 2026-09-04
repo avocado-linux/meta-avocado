@@ -289,20 +289,118 @@ that consumes it first.
 **A status line is not an identity.** Before trusting any declaration, tier 3
 requires the provider to match the attestation tier 2 writes beside it -
 `var-key.sh.sha256`, the digest of the exact bytes that passed every tier-2
-assertion, written last so its presence means "these bytes passed" rather than
-"these bytes were seen". Without that, a bbappend registering its own
+assertion, so its presence means "these bytes passed" rather than "these bytes
+were seen". Without that, a bbappend registering its own
 `do_install` postfunc after `avocado_var_key_check_deliverability` could replace
 the validated script with an `exit 1` or a constant-key body carrying the same
 `usable` line, and every remaining check would pass it.
 
-A MISSING attestation is the louder case, not the quieter one. Tier 2 writes it
-last, so its absence means tier 2 did not finish - and the way it does not
-finish is by returning early on a capability this image still declares. The
-recipe-datastore bypass is therefore caught twice, by two independent signals.
+**The provider is not the whole unlock path, and it is the smaller half.**
+`var-key.sh` derives 64 bytes and returns them; `cryptsetup-var.sh` reads the
+capability declaration, decides whether the provider is called at all, decides
+what happens to the key, and decides whether to refuse. A constant key file
+substituted there ships a fleet-wide `/var` key with `var-key.sh.sha256` still
+matching perfectly. So every script on that path is attested, listed by
+`avocado_var_key_attested_components()` in the class:
+
+| Component | Required | Notes |
+|---|---|---|
+| `${libexecdir}/cryptsetup-var/cryptsetup-var.sh` | yes | the unlock logic |
+| `${libexecdir}/cryptsetup-var/var-key.sh` | yes | the provider; derives the phase-1 key |
+| `${libexecdir}/cryptsetup-var/var-hwkey.sh` | no | optional key-wrapping backend, added by a vendor bbappend |
+| `${systemd_system_unitdir}/cryptsetup-var.service` | yes | decides whether any of the above runs |
+
+Two directories, because the boundary is the unlock PATH and not one
+directory. `cryptsetup-var.service` earns its place on two of its own lines:
+`ExecStart=` names which script performs the unlock, so repointing it
+substitutes the whole path at once, and `ConditionPathExists=` gates the unit,
+so a path that never exists skips it silently and fstab mounts a plaintext
+`/var` - the failure the unit's own comment says it was written to prevent.
+Neither edit changes a script digest. Binding the scripts and not the unit was
+the same mistake one level up as binding `var-key.sh` and not
+`cryptsetup-var.sh`.
+
+The unit's digest is named explicitly in `FILES:${PN}`. The directory glob that
+picks up the three script digests for free does not reach
+`${systemd_system_unitdir}`, so without that line the attestation is packaged
+nowhere and every build fails at tier 3.
+
+**Attesting the unit is not enough on its own.** The same edit that repoints
+`ExecStart` can instead delete the `initrd-root-fs.target.wants` symlink that
+pulls the unit into the initrd - every digest still matches and the unit is
+simply never started. `do_install` stages that link by hand, because the preset
+does not create one for a `WantedBy=initrd-root-fs.target` unit, so its absence
+is never legitimate. Tier 3 and the avocado-cli check both require it.
+
+**The three digests do not all mean the same thing, and the difference matters
+more than the coverage does.** Tier 2 executes `var-key.sh` against synthetic
+identities, so its digest means "these bytes derived a device-unique key".
+Nothing executes or parses `cryptsetup-var.sh` or `var-hwkey.sh`, so theirs mean
+only "these bytes were in `${D}` when `do_install` finished".
+
+The weaker binding is still worth having - it catches a postfunc that replaces a
+script after the check runs, and any edit between packaging and the image. It
+does not catch a `do_install:append` landing BEFORE the postfunc, which for the
+two unexecuted components means a substituted unlock script is attested rather
+than refused. Closing that needs a behavioural check for `cryptsetup-var.sh`,
+which does not exist yet; the recipe carries a debt marker naming that as the
+upgrade trigger. Do not read "every script on the unlock path is attested" as
+"every script on the unlock path was validated".
+
+`var-hwkey.sh` is optional in ONE direction. A machine with no key-wrapping
+engine ships no such file and that is correct; a machine that ships one must
+attest it. Skipping an unattested optional component is the obvious
+implementation and it reopens the hole for exactly the file a vendor bbappend
+adds.
+
+`/etc/avocado/var-hardware` is absent for a different reason, and it is a limit
+rather than a decision. It selects unlock POLICY - which engine must hold a
+keyslot, and whether to refuse the derived-key fallback - and avocado-cli writes
+it at a different lifecycle stage. Nothing here can attest a file this recipe
+does not produce. Read "the unlock path is bound" as covering the mechanism,
+not the policy.
+
+`avocado-posture-publish.sh` is deliberately not on the list. It ships in
+`${PN}-posture`, which lands in the rootfs and never in the initramfs, while
+every script above ships in `${PN}` - so attesting it would put its digest in a
+different package from the script (`FILES:${PN}` globs the directory and would
+claim the `.sha256`, while `FILES:${PN}-posture` names only the script). It also
+runs after unlock and gates nothing. Adding it needs its digest named in
+`FILES:${PN}-posture` and a per-image-role expectation in tier 3.
+
+**Tier 3 decides on the SET, not on the provider.** The first version of the
+loop ran only after `var-key.sh` was found, and the early return for a
+non-initramfs image fires before it - so deleting the provider from a rootfs
+disarmed the `cryptsetup-var.sh` check entirely. Measured: a rootfs carrying a
+substituted unlock script, a stale digest and no provider passed with no
+diagnostic. The gate now resolves every component first. An image shipping none
+of them is the rootfs case and returns; an image shipping some but not all has
+had the directory edited after packaging, because they install from one
+`do_install` into one package, and is refused.
+
+**A symlink is refused even when it points back inside the image.** The escape
+check asks where a path lands, and a link into the image answers that correctly
+while still being two files: the same postfunc that wrote the link can retarget
+it after the gate has read through it. A DANGLING in-image link is worse -
+`isfile()` is False, so an optional component is skipped as merely absent and
+nothing is attested. The refusal lives in
+`avocado_var_key_resolve_shipped()`, the one function all three tiers resolve
+through, so it cannot be added to one caller and missed on the others.
+
+A MISSING attestation is the louder case, not the quieter one. Tier 2 writes one
+per component, so an absence means tier 2 did not reach that file - and the way
+it does not reach it is by returning early on a capability this image still
+declares. The recipe-datastore bypass is therefore caught twice, by two
+independent signals.
+
+Not "written last", which was true while `var-key.sh` was the only attestation.
+`cryptsetup-var.sh` is attested first now, so a resolver refusal on IT also
+leaves `var-key.sh.sha256` absent, for a different reason than the bypass. The
+absence stays conclusive; the inference about which cause produced it does not.
 
 What the attestation does NOT stop: an edit that updates the digest alongside
-the provider. Both live in `${D}` and are equally writable, so this binds
-against a postfunc that replaces the provider without knowing the attestation
+the script. Both live in `${D}` and are equally writable, so this binds
+against a postfunc that replaces a script without knowing the attestation
 exists - the accidental and the expedient case, which is the same threat the
 image tier was added for. It is not a signature, and one more line defeats it.
 

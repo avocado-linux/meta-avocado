@@ -334,6 +334,59 @@ python avocado_security_capabilities_write_artifact() {
 # authoritative tier. This one answers the question that tier cannot ask about
 # itself - "did it run at all, and over the provider that shipped?" - which a
 # status read is enough for.
+def avocado_var_key_attested_components():
+    """Everything on the /var unlock path the attestation binds.
+
+    Each entry is (directory variable, path under it, required). Two
+    directories, not one: the list started as scripts under
+    ${libexecdir}/cryptsetup-var/ and that was the wrong boundary. Binding the
+    scripts while leaving the unit that RUNS them unbound is the same mistake
+    one level up as binding var-key.sh while leaving cryptsetup-var.sh unbound
+    - the provider derives 64 bytes, cryptsetup-var.sh decides whether it is
+    called, and cryptsetup-var.service decides whether ANY of it happens.
+
+    cryptsetup-var.service earns its place on the strength of two lines it
+    carries. `ExecStart=` names which script performs the unlock, so repointing
+    it substitutes the whole path at once. `ConditionPathExists=` gates the
+    unit, so a path that never exists skips it silently and fstab mounts a
+    plaintext /var - which the unit's own comment identifies as the failure it
+    was written to prevent. Neither edit changes a single script digest.
+
+    avocado-posture-publish.sh is deliberately absent. It ships in
+    ${PN}-posture, which lands in the rootfs and never in the initramfs, while
+    everything here ships in ${PN}; attesting it would put its digest in a
+    different package from the script - FILES:${PN} globs the libexec directory
+    and would claim the .sha256 while FILES:${PN}-posture names only the
+    script. It also runs after unlock and gates nothing.
+
+    Also absent, and for a reason that is a limit rather than a decision:
+    /etc/avocado/var-hardware selects unlock POLICY (which engine must hold a
+    keyslot) and is written by avocado-cli at a different lifecycle stage, not
+    by this recipe. Nothing here can attest a file it does not produce. Read
+    "the unlock path is bound" as covering the mechanism, not the policy.
+
+    var-hwkey.sh is optional in ONE direction: a machine without a key-wrapping
+    engine ships no such file and that is correct, but a machine that does ship
+    one must attest it. Skipping an unattested optional component is the
+    obvious implementation and it reopens the hole for the exact file a vendor
+    bbappend adds.
+    """
+    return (
+        ("libexecdir", "cryptsetup-var/cryptsetup-var.sh", True),
+        ("libexecdir", "cryptsetup-var/var-key.sh", True),
+        ("libexecdir", "cryptsetup-var/var-hwkey.sh", False),
+        ("systemd_system_unitdir", "cryptsetup-var.service", True),
+    )
+
+
+def avocado_var_key_digest(path):
+    """SHA-256 of PATH's bytes, as the hex string the .sha256 files carry."""
+    import hashlib
+
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
 def avocado_var_key_resolve_shipped(root, subpath, lead, flat, fatal):
     """Resolve SUBPATH under ROOT, refusing anything that escapes it.
 
@@ -352,6 +405,29 @@ def avocado_var_key_resolve_shipped(root, subpath, lead, flat, fatal):
     import os
 
     candidate = os.path.join(root, subpath.lstrip("/"))
+
+    # The escape check below asks WHERE the path lands, and a link pointing
+    # back inside ROOT answers that correctly while still being two files: the
+    # same postfunc that wrote the link can retarget it after this gate has
+    # read through it, so what was attested and what boots are decided
+    # separately. Worse when the link DANGLES - os.path.isfile is then False,
+    # so a caller's not-required branch skips the component as merely absent
+    # and nothing is attested at all.
+    #
+    # Checked here rather than at each call site: this is the one function all
+    # three tiers resolve through, and the leaf-versus-parent split above is
+    # already the lesson that a guard added to one caller is a guard missing
+    # from the others. Found by executing the avocado-cli half of this check,
+    # not by reading either half.
+    if os.path.islink(candidate):
+        fatal(
+            lead + "ships %s as a symlink. This gate reads the link's target "
+            "on the build host and the device reads whatever the same path "
+            "resolves to at boot, so a check here says nothing about what "
+            "runs there. Ship it as a regular file."
+            % flat(candidate)
+        )
+
     resolved = os.path.realpath(candidate)
     root_resolved = os.path.realpath(root)
     if resolved != root_resolved and not resolved.startswith(
@@ -382,7 +458,6 @@ def avocado_var_key_resolve_shipped(root, subpath, lead, flat, fatal):
 ROOTFS_POSTPROCESS_COMMAND:append = " avocado_security_capabilities_check_provider;"
 
 python avocado_security_capabilities_check_provider() {
-    import hashlib
     import os
 
     capabilities = d.getVar("AVOCADO_SECURITY_CAPABILITIES")
@@ -403,15 +478,61 @@ python avocado_security_capabilities_check_provider() {
     lead = ("machine %s declares encrypted-var and this image "
             % flat(machine))
 
-    provider = avocado_var_key_resolve_shipped(
-        rootfs, libexecdir + "/cryptsetup-var/var-key.sh", lead, flat, bb.fatal
-    )
+    components = avocado_var_key_attested_components()
 
-    # An ABSENT provider means different things in different images, so the
-    # answer is not universal: this class is inherited globally and registers
-    # this check on EVERY image, while only the initramfs is required to carry
-    # the provider. The rootfs legitimately ships the udev and posture packages
-    # without it - though on Jetson it ships the provider too, via
+    # A bbclass helper is a plain `def` in BitBake's process-global method pool,
+    # and bb/methodpool.py's insert_method adds it with, in its own words, "no
+    # checking will be done" - so a later `def` of the same name in an image
+    # bbappend silently wins. Returning a one-element tuple there would leave
+    # this loop iterating nothing while the gate still ran and still reported
+    # success, which is quieter than the ROOTFS_POSTPROCESS_COMMAND:remove
+    # escape already named below because that one is at least greppable.
+    #
+    # Asserting the two required names is the cheapest closure. Kept despite
+    # "delete-and-test" - nothing fails without it, because the failure it
+    # catches is a redefinition no test can introduce.
+    required_names = {os.path.basename(sub) for _dv, sub, req in components if req}
+    if not {"cryptsetup-var.sh", "var-key.sh",
+            "cryptsetup-var.service"} <= required_names:
+        bb.fatal(
+            lead + "resolved a component list missing a required script (got "
+            "%s). avocado_var_key_attested_components() is a bbclass def and a "
+            "bbappend can redefine it, so this gate refuses a list it does not "
+            "recognise rather than checking whatever it was handed."
+            % flat(", ".join(sorted(required_names)) or "<empty>")
+        )
+
+    # Which components this image actually ships, resolved BEFORE any decision
+    # about an absent provider.
+    #
+    # Gating the component checks on var-key.sh is what the first version of
+    # this loop did, and it made the higher-value target checkable only when the
+    # smaller one was present: the early return below fires for a rootfs, so
+    # deleting the provider disarmed the cryptsetup-var.sh check entirely.
+    # Measured - a rootfs sysroot carrying a substituted unlock script, a stale
+    # digest and no provider passed with no diagnostic. The provider derives 64
+    # bytes; cryptsetup-var.sh decides whether it is ever asked to, so the set
+    # cannot hang off the member it exists to stop being the only one checked.
+    shipped = {}
+    for dirvar, subpath, _required in components:
+        root_dir = d.getVar(dirvar)
+        if not root_dir:
+            bb.fatal(
+                lead + "cannot resolve %s, so it cannot say where %s should "
+                "be. That variable is set by bitbake.conf for every image."
+                % (flat(dirvar), flat(subpath))
+            )
+        candidate = avocado_var_key_resolve_shipped(
+            rootfs, root_dir + "/" + subpath, lead, flat, bb.fatal,
+        )
+        if os.path.isfile(candidate):
+            shipped[os.path.basename(subpath)] = candidate
+
+    # NOTHING from cryptsetup-var reached this image, which means different
+    # things in different images: this class is inherited globally and registers
+    # the check on EVERY image, while only the initramfs is required to carry
+    # the unlock path. The rootfs legitimately ships the udev and posture
+    # packages without it - though on Jetson it ships the full set too, via
     # packagegroup-avocado-tegra-extra, and that copy is validated here rather
     # than waved through.
     #
@@ -422,7 +543,7 @@ python avocado_security_capabilities_check_provider() {
     # avocado-grinn-astra-1680-sbc.conf already does that, and the bypass tier
     # 3 exists to catch would have reopened in full the moment it declared the
     # capability.
-    if not os.path.isfile(provider):
+    if not shipped:
         if d.getVar("PN") != d.getVar("INITRAMFS_IMAGE"):
             return
         bb.fatal(
@@ -431,8 +552,53 @@ python avocado_security_capabilities_check_provider() {
             "encrypted-var, and has nothing to derive a key with, so /var "
             "never unlocks. Either the capability does not belong on this "
             "machine, or packagegroup-avocado-initramfs is not installing "
-            "cryptsetup-var." % flat(provider)
+            "cryptsetup-var."
+            % flat(os.path.join(rootfs.rstrip("/"),
+                                (libexecdir + "/cryptsetup-var/var-key.sh")
+                                .lstrip("/")))
         )
+
+    # Something from the package is here, so the whole required set has to be.
+    # One script without the others means the directory was edited after
+    # packaging: they install from a single do_install into a single package,
+    # so packaging cannot produce a partial set.
+    for _dirvar, subpath, required in components:
+        component = os.path.basename(subpath)
+        if component in shipped:
+            continue
+        if not required:
+            continue
+        bb.fatal(
+            lead + "ships no %s, but does ship %s beside it. They install from "
+            "one package, so an image carrying one and not the other has had "
+            "its cryptsetup-var directory edited after packaging. Nothing "
+            "calls the provider without cryptsetup-var.sh, and cryptsetup-var.sh "
+            "has nothing to call without var-key.sh, so /var never unlocks."
+            % (component, flat(", ".join(sorted(shipped))))
+        )
+
+    # Attesting the unit is not enough on its own: the same edit that repoints
+    # ExecStart can instead delete the symlink that pulls the unit into the
+    # initrd, which leaves every digest matching and the unit simply never
+    # started. do_install stages that link by hand precisely because the preset
+    # does not create it, so its absence is never legitimate here.
+    enable_link = os.path.join(
+        rootfs.rstrip("/"),
+        (d.getVar("systemd_system_unitdir") + "/initrd-root-fs.target.wants/"
+         "cryptsetup-var.service").lstrip("/"),
+    )
+    if not os.path.lexists(enable_link):
+        bb.fatal(
+            lead + "ships cryptsetup-var.service but not the %s symlink that "
+            "pulls it into the initrd. cryptsetup-var.bb stages that link in "
+            "do_install because the preset does not create it for a "
+            "WantedBy=initrd-root-fs.target unit, so an image missing it has "
+            "had the unit disabled after packaging - every digest still "
+            "matches and /var is simply never unlocked."
+            % flat(enable_link)
+        )
+
+    provider = shipped["var-key.sh"]
 
     try:
         with open(provider, encoding="utf-8", errors="replace") as f:
@@ -454,10 +620,17 @@ python avocado_security_capabilities_check_provider() {
     # what was tested to what ships.
     #
     # A MISSING attestation is the louder case, not the quieter one: tier 2
-    # writes it last, so its absence means tier 2 did not finish - and the way
-    # it does not finish is by returning early on a capability this image still
-    # declares. That is the recipe-datastore bypass, caught here a second time
-    # and by a different signal than the status read below.
+    # writes one per component only after the deliverability checks it CAN run
+    # have run, so an absence means tier 2 did not reach this file - and the way
+    # it does not reach it is by returning early on a capability this image
+    # still declares. That is the recipe-datastore bypass, caught here a second
+    # time and by a different signal than the status read below.
+    #
+    # Not "written last" - that was true while var-key.sh was the only
+    # attestation, and it is not any more. cryptsetup-var.sh is attested first,
+    # so a resolve_shipped fatal on IT also leaves this file absent, for a
+    # different reason than the bypass. The absence is still conclusive; the
+    # inference about which cause produced it is not.
     attestation = provider + ".sha256"
     if not os.path.isfile(attestation):
         bb.fatal(
@@ -472,8 +645,7 @@ python avocado_security_capabilities_check_provider() {
     try:
         with open(attestation, encoding="utf-8", errors="replace") as f:
             recorded = f.read().strip()
-        with open(provider, "rb") as f:
-            actual = hashlib.sha256(f.read()).hexdigest()
+        actual = avocado_var_key_digest(provider)
     except OSError as exc:
         bb.fatal(
             lead + "could not read the var-key.sh it ships (%s) or its "
@@ -490,6 +662,64 @@ python avocado_security_capabilities_check_provider() {
             "has not been shown to derive a device-unique key."
             % (flat(provider), flat(recorded or "<empty>"), flat(actual))
         )
+
+    # The rest of the unlock path, bound the same way. Checked here rather than
+    # left to the provider's own digest because the provider is the smaller
+    # target: cryptsetup-var.sh reads the capability declaration, decides
+    # whether to call the provider, and decides what to do when it refuses. A
+    # constant key file substituted there ships a fleet-wide /var key with
+    # var-key.sh.sha256 still matching perfectly.
+    #
+    # Runs BEFORE the status read below. A status line is a claim by a file
+    # this image has not yet been shown to have validated; asking whether the
+    # bytes were validated has to come first for the claim to mean anything.
+    for _dirvar, subpath, _required in components:
+        component = os.path.basename(subpath)
+        if component == "var-key.sh":
+            continue
+        if component not in shipped:
+            # Absent optional component. The required ones were refused above,
+            # before the provider's own attestation was read.
+            continue
+        component_path = shipped[component]
+        if not os.path.isfile(component_path + ".sha256"):
+            bb.fatal(
+                lead + "ships no attestation for %s (%s). cryptsetup-var.bb "
+                "writes one for every script on the unlock path, so a missing "
+                "one means tier 2 did not reach this file - or that it was "
+                "added to the image afterwards."
+                % (component, flat(component_path))
+            )
+        # Reset per iteration. These are function-scoped, not loop-scoped, so
+        # a future edit that made the OSError branch non-terminating would
+        # compare component N against component N-1's digests - which match
+        # each other, so a tampered file would read as clean. Cheaper to make
+        # the stale read impossible than to rely on the fatal staying fatal.
+        recorded_component = None
+        actual_component = None
+        try:
+            with open(component_path + ".sha256", encoding="utf-8",
+                      errors="replace") as f:
+                recorded_component = f.read().strip()
+            actual_component = avocado_var_key_digest(component_path)
+        except OSError as exc:
+            bb.fatal(
+                lead + "could not read the %s it ships (%s) or its "
+                "attestation: %s." % (component, flat(component_path),
+                                      flat(exc))
+            )
+        if recorded_component != actual_component:
+            bb.fatal(
+                lead + "ships a %s (%s) whose bytes do not match the "
+                "attestation beside it. The attestation records %s and the "
+                "shipped file hashes to %s, so the script this image will run "
+                "was replaced after it was checked. var-key.sh matching says "
+                "nothing about this: the provider derives the key, this script "
+                "decides whether it is ever asked to."
+                % (component, flat(component_path),
+                   flat(recorded_component or "<empty>"),
+                   flat(actual_component))
+            )
 
     statuses, _prose = avocado_var_key_declarations(contents, marker)
     if len(statuses) != 1:

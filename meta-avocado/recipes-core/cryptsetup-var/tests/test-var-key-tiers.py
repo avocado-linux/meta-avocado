@@ -518,18 +518,149 @@ SYMLINK = "<symlink>"
 # resolve into a directory somebody else chose.
 SYMLINK_DIR = "<symlink-dir>"
 
+# A leaf symlink whose target resolves INSIDE the root, which the escape check
+# passes by construction - it only asks where the path lands, and this one
+# lands where it should. It is still two files: what the gate reads is chosen
+# by a link the same do_install postfunc that wrote the link can retarget, and
+# a dangling one of this shape is worse still, because `isfile` is False and an
+# OPTIONAL component is then skipped as merely absent. Found by running the
+# avocado-cli half of this check rather than by reading either.
+SYMLINK_INSIDE = "<symlink-inside>"
+
 # What attestation the image fixture ships beside the provider. "match" is
 # what a real build produces; the other two are the states tier 3 refuses.
 ATTEST_MATCH = "match"
 ATTEST_STALE = "stale"
 ATTEST_ABSENT = "absent"
 
+# A .sha256 that isfile() accepts and open() refuses, which is the only shape
+# that reaches the OSError branch: a directory fails isfile() and lands on the
+# missing-attestation fatal instead, one branch earlier. Mode 0000 is therefore
+# the fixture, and the case carrying it skips under root, who can read it.
+ATTEST_UNREADABLE = "unreadable"
+
+# Do not install this component at all. Distinct from ATTEST_ABSENT, which
+# installs the file and withholds only its digest - the two produce different
+# refusals and collapsing them would let either branch cover for the other.
+NOT_INSTALLED = "not-installed"
+NOT_ROOT = os.geteuid() != 0
+
+# Every script the attestation binds, scraped from the class rather than
+# restated here. A second literal list is exactly how a component gets added to
+# one tier and not the other - the defect this suite already caught once when
+# tier 3 lived in an image recipe. Reading the helper means a component added
+# there with no gate behind it shows up as a failing case here.
+COMPONENTS = NAMESPACE["avocado_var_key_attested_components"]()
+
+
+def attest_state(path):
+    """How a component's `.sha256` stands against the component itself.
+
+    Four answers, not two: `no-file` and `absent` look alike in a report and
+    mean opposite things - the script was never installed, versus the script
+    shipped and the build never attested it. Collapsing them is what let the
+    earlier single-component report claim `absent` for a provider that was not
+    there to attest.
+    """
+    if not os.path.isfile(path):
+        return "no-file"
+    if not os.path.isfile(path + ".sha256"):
+        return "absent"
+    with open(path + ".sha256", encoding="utf-8") as handle:
+        recorded = handle.read().strip()
+    with open(path, "rb") as handle:
+        actual = hashlib.sha256(handle.read()).hexdigest()
+    return "match" if recorded == actual else "mismatch"
+
+
+UNITDIR = "/usr/lib/systemd/system"
+
+# Where each component lives, keyed by the directory variable the class names.
+# Two directories now: the unit that runs the unlock path is attested too, and
+# it does not live under ${libexecdir}.
+DIRVARS = {"libexecdir": LIBEXECDIR, "systemd_system_unitdir": UNITDIR}
+
+
+def component_rel(dirvar, subpath):
+    """Path of a component relative to an image root or to ${D}."""
+    return os.path.join(DIRVARS[dirvar].lstrip("/"), subpath)
+
+
+def companion_names(companions):
+    """Which non-provider components a fixture installs, as (relpath, name).
+
+    `default` is what do_install produces on a machine with no hardware key
+    backend; `both` adds the optional var-hwkey.sh; `none` models a do_install
+    that shipped the provider and nothing else.
+    """
+    if companions == "none":
+        return []
+    out = []
+    for dirvar, subpath, required in COMPONENTS:
+        name = os.path.basename(subpath)
+        if name == "var-key.sh":
+            continue
+        if not required and companions != "both":
+            continue
+        out.append((component_rel(dirvar, subpath), name))
+    return out
+
+
+def write_companions(root, companions, attest=None, attested=True,
+                     enable_link=True):
+    """Install the companion scripts, each with the attestation state asked for.
+
+    `attested` is False for the tier-2 fixture, where writing the digests is
+    the behaviour under test rather than part of the setup. Passing an
+    already-attested tree there would make the tier's own write unobservable.
+    """
+    attest = attest or {}
+    for rel, name in companion_names(companions):
+        path = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if name == "cryptsetup-var.service":
+            # do_install stages this by hand because the preset does not create
+            # it for a WantedBy=initrd-root-fs.target unit, and tier 3 refuses
+            # an image that ships the unit without it.
+            wants = os.path.join(os.path.dirname(path),
+                                 "initrd-root-fs.target.wants")
+            os.makedirs(wants, exist_ok=True)
+            link = os.path.join(wants, "cryptsetup-var.service")
+            if enable_link and not os.path.lexists(link):
+                os.symlink("../cryptsetup-var.service", link)
+        state = attest.get(name, ATTEST_MATCH if attested else ATTEST_ABSENT)
+        if state == NOT_INSTALLED:
+            continue
+        if state is SYMLINK_INSIDE:
+            # Dangling, and pointed at a path that stays inside the root, so
+            # the escape check has nothing to object to and isfile() is False.
+            os.symlink(
+                os.path.join(os.path.dirname(path), "nothing-here.sh"), path)
+            continue
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\n# %s, fixture body\nexit 0\n" % name)
+        if state == ATTEST_ABSENT:
+            continue
+        if state == ATTEST_UNREADABLE:
+            with open(path + ".sha256", "w", encoding="utf-8") as handle:
+                handle.write("unreadable\n")
+            os.chmod(path + ".sha256", 0o000)
+            continue
+        if state == ATTEST_STALE:
+            digest = hashlib.sha256(b"a different script").hexdigest()
+        else:
+            with open(path, "rb") as handle:
+                digest = hashlib.sha256(handle.read()).hexdigest()
+        with open(path + ".sha256", "w", encoding="utf-8") as handle:
+            handle.write(digest + "\n")
+
 # The image-scope gate reads the provider out of ${IMAGE_ROOTFS}, not ${D}, so
 # it needs its own fixture shape. Kept separate from invoke() rather than folded
 # into it: sharing one builder would have to fake both layouts at once, and the
 # whole point of this tier is that it looks somewhere the other two do not.
 def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH,
-                 image="avocado-image-initramfs"):
+                 image="avocado-image-initramfs", companions="default",
+                 companion_attest=None, enable_link=True):
     """Run the initramfs-scope gate over a synthetic IMAGE_ROOTFS."""
     root = tempfile.mkdtemp(prefix="var-key-image-")
     try:
@@ -552,6 +683,11 @@ def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH,
                 handle.write(PROVIDERS["good"])
             os.rmdir(os.path.dirname(provider))
             os.symlink(outside, os.path.dirname(provider))
+        elif installed_text is SYMLINK_INSIDE:
+            target = os.path.join(os.path.dirname(provider), "real-provider.sh")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(PROVIDERS["good"])
+            os.symlink(target, provider)
         elif installed_text is not None:
             with open(provider, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
@@ -567,6 +703,15 @@ def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH,
                     digest = hashlib.sha256(handle.read()).hexdigest()
             with open(provider + ".sha256", "w", encoding="utf-8") as handle:
                 handle.write(digest + "\n")
+
+        # The provider is one of several scripts the image ships and the
+        # smaller of the two targets: cryptsetup-var.sh is what decides whether
+        # the provider is consulted at all and what happens to the 64 bytes it
+        # returns. A SYMLINK_DIR fixture has no real directory to write into -
+        # its parent resolves outside the image, which is the thing under test.
+        if installed_text is not SYMLINK_DIR:
+            write_companions(rootfs, companions, companion_attest,
+                             enable_link=enable_link)
 
         bb = BB()
         NAMESPACE["bb"] = bb
@@ -586,6 +731,7 @@ def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH,
                 "PN": image,
                 "INITRAMFS_IMAGE": "avocado-image-initramfs",
                 "libexecdir": LIBEXECDIR,
+                "systemd_system_unitdir": UNITDIR,
                 "sysconfdir": "/etc",
             }
         )
@@ -598,7 +744,8 @@ def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH,
         shutil.rmtree(root, ignore_errors=True)
 
 
-def invoke(tier, installed_text, source_text, machine, capabilities):
+def invoke(tier, installed_text, source_text, machine, capabilities,
+           companions="default", companion_attest=None):
     """Run one tier against a synthetic ${D} and FILESPATH -> (verdict, detail).
 
     `installed_text` is what lands in ${D} (what ships). `source_text` is what
@@ -631,6 +778,11 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
                 handle.write(PROVIDERS["good"])
             os.rmdir(os.path.dirname(installed))
             os.symlink(outside, os.path.dirname(installed))
+        elif installed_text is SYMLINK_INSIDE:
+            target = os.path.join(os.path.dirname(installed), "real-provider.sh")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(PROVIDERS["good"])
+            os.symlink(target, installed)
         elif installed_text is not None:
             with open(installed, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
@@ -638,6 +790,13 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
             path = os.path.join(files, "var-key.sh")
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(source_text)
+
+        # Unattested on purpose: writing the digests is what tier 2 does, so a
+        # pre-attested fixture would report `match` whether or not the tier
+        # wrote anything.
+        if installed_text is not SYMLINK_DIR:
+            write_companions(image, companions, companion_attest,
+                             attested=False)
 
         bb = BB()
         NAMESPACE["bb"] = bb
@@ -649,6 +808,7 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
                 "MACHINE": machine,
                 "D": image,
                 "libexecdir": LIBEXECDIR,
+                "systemd_system_unitdir": UNITDIR,
                 "FILESPATH": files,
                 "WORKDIR": workdir,
             }
@@ -664,14 +824,17 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
         # its own. Report the state so a case can assert on it.
         detail = "; ".join(bb.warnings) or "(no warnings)"
         if tier == TIER2 and installed_text is not None:
-            state = "absent"
-            if os.path.isfile(installed + ".sha256"):
-                with open(installed + ".sha256", encoding="utf-8") as handle:
-                    recorded = handle.read().strip()
-                with open(installed, "rb") as handle:
-                    actual = hashlib.sha256(handle.read()).hexdigest()
-                state = "match" if recorded == actual else "mismatch"
-            detail = "attestation=%s; %s" % (state, detail)
+            # Every component, not just the provider. Reporting the provider
+            # alone is what let the unlock script go unattested for a whole
+            # review round: `attestation=match` read as "the pair is bound"
+            # while cryptsetup-var.sh - the script that decides whether the
+            # provider is called at all - carried no digest.
+            states = ["%s:%s" % (os.path.basename(subpath), attest_state(
+                os.path.join(image, component_rel(dirvar, subpath))))
+                for dirvar, subpath, _required in COMPONENTS]
+            detail = "attestation=%s; components=%s; %s" % (
+                attest_state(installed), ",".join(states), detail
+            )
         return "pass", detail
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -684,7 +847,8 @@ ARMED = "encrypted-var"
 def case(tier, description, installed=None, source=None, machine=HARDWARE,
          caps=ARMED, expect="fatal", match=None, gap=None,
          skip_unless=True, skip_why="", attest=ATTEST_MATCH,
-         image="avocado-image-initramfs"):
+         image="avocado-image-initramfs", companions="default",
+         companion_attest=None, enable_link=True):
     return {
         "tier": tier,
         "description": description,
@@ -699,6 +863,9 @@ def case(tier, description, installed=None, source=None, machine=HARDWARE,
         "skip_why": skip_why,
         "attest": attest,
         "image": image,
+        "companions": companions,
+        "companion_attest": companion_attest,
+        "enable_link": enable_link,
     }
 
 
@@ -749,6 +916,34 @@ CASES = [
     case(TIER2, "exec: a passing provider is attested for the image tier",
          installed="good", source="good", expect="pass",
          match="attestation=match"),
+    # The provider is not the whole unlock path, and it is not the valuable
+    # half. cryptsetup-var.sh decides whether the provider is consulted, what
+    # is done with the 64 bytes it returns, and whether to refuse - so a
+    # constant key file or a dropped capability check substituted THERE passes
+    # a gate that binds only var-key.sh.
+    case(TIER2, "exec: the unlock script is attested alongside the provider",
+         installed="good", source="good", expect="pass",
+         match="cryptsetup-var.sh:match"),
+    case(TIER2, "exec: an optional hardware backend is attested when shipped",
+         installed="good", source="good", expect="pass",
+         companions="both", match="var-hwkey.sh:match"),
+    case(TIER2, "exec: a missing unlock script is refused",
+         installed="good", source="good", companions="none",
+         match="installs no cryptsetup-var.sh"),
+    # The escape check answers "where does this land", which a link pointing
+    # back inside the image answers correctly. It is still a link, and the same
+    # postfunc that wrote it can retarget it after this gate has read through
+    # it - so what was attested and what boots are decided separately.
+    case(TIER2, "exec: a provider symlinked to a path INSIDE the image is refused",
+         installed=SYMLINK_INSIDE, source="good",
+         match="as a symlink"),
+    # Dangling AND optional is the pair that hurts: isfile() is False, so the
+    # not-required branch skips it as merely absent and nothing is attested,
+    # while the file the boot path resolves is chosen by a link.
+    case(TIER2, "exec: an optional component installed as a link is refused",
+         installed="good", source="good", companions="both",
+         companion_attest={"var-hwkey.sh": SYMLINK_INSIDE},
+         match="var-hwkey.sh as a symlink"),
     case(TIER2, "exec: a correct two-path provider passes",
          installed="good_two_path", source="good_two_path", expect="pass"),
     case(TIER2, "exec: a constant key is refused",
@@ -784,7 +979,7 @@ CASES = [
          installed="always_fails", source="always_fails",
          match="cannot derive a key from its own declared"),
     case(TIER2, "exec: a symlinked provider is refused",
-         installed=SYMLINK, source="good", match="resolves outside the image"),
+         installed=SYMLINK, source="good", match="as a symlink"),
     case(TIER2, "exec: a symlinked parent DIRECTORY is refused",
          installed=SYMLINK_DIR, source="good",
          match="resolves outside the image"),
@@ -876,18 +1071,88 @@ CASES = [
     case(TIER3, "image: a provider with no attestation is refused",
          installed="good", attest=ATTEST_ABSENT,
          match="no attestation beside it"),
+    case(TIER3, "image: an unlock script swapped after validation is refused",
+         installed="good", companion_attest={"cryptsetup-var.sh": ATTEST_STALE},
+         match="do not match the attestation"),
+    case(TIER3, "image: an unlock script with no attestation is refused",
+         installed="good", companion_attest={"cryptsetup-var.sh": ATTEST_ABSENT},
+         match="ships no attestation for cryptsetup-var.sh"),
+    # The unit is on the list because it decides whether ANY of the attested
+    # scripts runs: ExecStart names which one performs the unlock, and
+    # ConditionPathExists gates the whole thing. Neither edit changes a script
+    # digest, which is why binding only the scripts was binding the wrong layer.
+    case(TIER3, "image: a tampered unit file is refused",
+         installed="good",
+         companion_attest={"cryptsetup-var.service": ATTEST_STALE},
+         match="cryptsetup-var.service (" ),
+    case(TIER3, "image: an unattested unit file is refused",
+         installed="good",
+         companion_attest={"cryptsetup-var.service": ATTEST_ABSENT},
+         match="ships no attestation for cryptsetup-var.service"),
+    case(TIER3, "image: a missing unit file is refused",
+         installed="good",
+         companion_attest={"cryptsetup-var.service": NOT_INSTALLED},
+         match="ships no cryptsetup-var.service"),
+    # Attesting the unit is not enough on its own - deleting the symlink that
+    # pulls it into the initrd leaves every digest matching and the unit simply
+    # never started, which is the same outcome for one fewer edit.
+    case(TIER3, "image: a disabled unit is refused even when attested",
+         installed="good", enable_link=False,
+         match="pulls it into the initrd"),
+    case(TIER3, "image: an unreadable attestation is refused, not skipped",
+         installed="good",
+         companion_attest={"cryptsetup-var.sh": ATTEST_UNREADABLE},
+         match="or its attestation",
+         skip_unless=NOT_ROOT,
+         skip_why="root can read a 0000 file, so the branch cannot be reached"),
+    case(TIER3, "image: a shipped hardware backend is validated",
+         installed="good", companions="both", expect="pass"),
+    case(TIER3, "image: a shipped hardware backend with no attestation is refused",
+         installed="good", companions="both",
+         companion_attest={"var-hwkey.sh": ATTEST_ABSENT},
+         match="ships no attestation for var-hwkey.sh"),
+    # The optional component is optional in one direction only: absent is fine,
+    # present-and-unattested is not. Written as its own case because the
+    # obvious implementation - skip anything not required - passes the case
+    # above by skipping var-hwkey.sh entirely.
+    case(TIER3, "image: an absent hardware backend is not required",
+         installed="good", companions="default", expect="pass"),
+    case(TIER3, "image: a missing unlock script is refused",
+         installed="good", companions="none",
+         match="ships no cryptsetup-var.sh"),
     case(TIER3, "image: the disarmed tier leaves no attestation",
          installed="real_shared", attest=ATTEST_ABSENT,
          match="those checks did not run",
          skip_unless="real_shared" in PROVIDERS,
          skip_why="layer not checked out"),
     case(TIER3, "image: a symlinked provider is refused",
-         installed=SYMLINK, match="resolves outside the image"),
+         installed=SYMLINK, match="as a symlink"),
     case(TIER3, "image: a symlinked parent DIRECTORY is refused",
          installed=SYMLINK_DIR, match="resolves outside the image"),
-    case(TIER3, "image: a NON-initramfs image with no provider passes",
-         installed=None, expect="pass",
+    case(TIER3, "image: a provider symlinked INSIDE the image is refused",
+         installed=SYMLINK_INSIDE, match="as a symlink"),
+    case(TIER3, "image: an optional component installed as a link is refused",
+         installed="good", companions="both",
+         companion_attest={"var-hwkey.sh": SYMLINK_INSIDE},
+         match="var-hwkey.sh as a symlink"),
+    # "No provider" here means no cryptsetup-var AT ALL - the rootfs shipping
+    # only the udev and posture packages. The fixture used to ship
+    # cryptsetup-var.sh while claiming to ship nothing, which is what let the
+    # provider-gated version of the loop look covered: the case passed both
+    # because tier 3 returned early AND because the script it did ship was
+    # attested, and no assertion could tell those apart.
+    case(TIER3, "image: a NON-initramfs image with no cryptsetup-var passes",
+         installed=None, companions="none", expect="pass",
          image="avocado-image-rootfs"),
+    # The shape the early return used to wave through. A rootfs is the only
+    # image where a present unlock script and an absent provider can arise
+    # without the initramfs failing first, which is why the gap lived here and
+    # nowhere else. Refusing the partial set outright is stronger than checking
+    # the survivor's digest, so there is no second case for a stale attestation
+    # on it - the set check fires before any attestation is read.
+    case(TIER3, "image: a rootfs unlock script with no provider is refused",
+         installed=None, image="avocado-image-rootfs",
+         match="ships no var-key.sh, but does ship"),
     case(TIER3, "image: a non-initramfs image that DOES ship one is still checked",
          installed="unusable", image="avocado-image-rootfs",
          match="declares itself unusable"),
@@ -948,12 +1213,13 @@ def main():
             skipped += 1
             continue
         installed = spec["installed"]
-        if installed not in (None, SYMLINK, SYMLINK_DIR):
+        if installed not in (None, SYMLINK, SYMLINK_DIR, SYMLINK_INSIDE):
             installed = PROVIDERS[installed]
         if spec["tier"] == TIER3:
             verdict, detail = invoke_image(
                 installed, spec["machine"], spec["caps"], spec["attest"],
-                spec["image"],
+                spec["image"], spec["companions"], spec["companion_attest"],
+                spec["enable_link"],
             )
         else:
             verdict, detail = invoke(
@@ -962,6 +1228,8 @@ def main():
                 PROVIDERS[spec["source"]] if spec["source"] else None,
                 spec["machine"],
                 spec["caps"],
+                spec["companions"],
+                spec["companion_attest"],
             )
         first = detail.splitlines()[0] if detail else ""
         if verdict != expect:

@@ -306,7 +306,6 @@ python avocado_var_key_check_deliverability() {
     ):
         return
 
-    import hashlib
     import os
     import re
     import shutil
@@ -850,21 +849,97 @@ python avocado_var_key_check_deliverability() {
     # the image tier was added for. It is not a signature and a determined
     # author defeats it in one more line.
     #
-    # Written LAST, after every check, so its presence means "these bytes passed
-    # every tier-2 assertion" rather than "these bytes were seen".
-    try:
-        with open(installed, "rb") as f:
-            digest = hashlib.sha256(f.read()).hexdigest()
-        with open(installed + ".sha256", "w", encoding="utf-8") as f:
-            f.write(digest + "\n")
-    except OSError as exc:
-        bb.fatal(
-            lead + "its installed var-key.sh (%s) passed every check but the "
-            "attestation beside it could not be written: %s. The image tier "
-            "requires that file, so shipping without it would refuse the build "
-            "later with a less useful diagnostic."
-            % (flat(installed), flat(exc))
+    # WHAT THE ATTESTATION MEANS DIFFERS PER COMPONENT, and saying otherwise
+    # was the sharpest thing a review caught here. Everything above executes
+    # var-key.sh against synthetic identities, so ITS digest means "these bytes
+    # derived a device-unique key". Nothing in this recipe executes or parses
+    # cryptsetup-var.sh or var-hwkey.sh, so THEIR digests mean only "these bytes
+    # were in ${D} when do_install finished".
+    #
+    # That weaker binding is still worth having: it catches a postfunc that
+    # replaces a script after this one runs, and any edit between packaging and
+    # the image. It does not catch a do_install:append that lands BEFORE this
+    # postfunc, which for the two unexecuted components means a substituted
+    # unlock script is attested rather than refused. Closing that needs a
+    # behavioural check for cryptsetup-var.sh, which does not exist yet.
+    #
+    # devtool-debt: the companions are attested without being validated.
+    # Ceiling: catches post-do_install substitution only.
+    # Upgrade trigger: a behavioural check for cryptsetup-var.sh exists - at
+    # minimum, one that runs it against a fixture and requires it to refuse
+    # when the capability is undeclared.
+    #
+    # Every script on the unlock path, not just the provider. var-key.sh is the
+    # smaller target: it derives 64 bytes and returns them, while
+    # cryptsetup-var.sh decides whether to call it at all, what to do with the
+    # result, and whether to refuse. Substituting a constant key file there, or
+    # deleting the capability check, left the provider's own digest matching and
+    # passed all three tiers. avocado_var_key_attested_components() carries the
+    # list and the reason avocado-posture-publish.sh is not on it.
+    for dirvar, subpath, required in avocado_var_key_attested_components():
+        component = os.path.basename(subpath)
+        root_dir = d.getVar(dirvar)
+        if not root_dir:
+            bb.fatal(
+                lead + "cannot resolve %s, so it cannot say where %s should be "
+                "installed. That variable is set by bitbake.conf."
+                % (flat(dirvar), flat(subpath))
+            )
+        # Resolved the same way the provider is, and for the same reason: a
+        # symlink at any component makes this write and the device's read land
+        # in different files, so an attestation written through one attests
+        # bytes the image will not run.
+        target = avocado_var_key_resolve_shipped(
+            d.getVar("D"), root_dir + "/" + subpath, lead, flat, bb.fatal,
         )
+        if not os.path.isfile(target):
+            if not required:
+                # A machine with no key-wrapping engine ships no var-hwkey.sh,
+                # which is correct. The image tier still refuses one that ships
+                # unattested, so absence here cannot be used to smuggle one in.
+                continue
+            why = {
+                "cryptsetup-var.sh":
+                    "cryptsetup-var.sh is what reads the capability "
+                    "declaration at boot and calls the provider; an image "
+                    "without it never unlocks /var whatever the provider does.",
+                "var-key.sh":
+                    "var-key.sh is what derives the phase-1 key; without it "
+                    "cryptsetup-var.sh has nothing to call.",
+                "cryptsetup-var.service":
+                    "cryptsetup-var.service is what starts the unlock at all; "
+                    "its ExecStart names the script and its "
+                    "ConditionPathExists gates the whole unit, so without it "
+                    "fstab mounts a plaintext /var.",
+            }.get(component, "It is declared required by "
+                             "avocado_var_key_attested_components().")
+            bb.fatal(
+                lead + "installs no %s at %s. %s"
+                % (component, flat(target), why)
+            )
+        # Digest FIRST, then open for write. Computing it inside the "w"
+        # context reported an unreadable source as a failed write, sending the
+        # author to check permissions on a directory that was writable, and
+        # truncated the .sha256 before the failure - leaving a zero-byte
+        # attestation that tier 3 already has a branch for.
+        try:
+            digest = avocado_var_key_digest(target)
+        except OSError as exc:
+            bb.fatal(
+                lead + "could not read its installed %s (%s) to attest it: %s."
+                % (component, flat(target), flat(exc))
+            )
+        try:
+            with open(target + ".sha256", "w", encoding="utf-8") as f:
+                f.write(digest + "\n")
+        except OSError as exc:
+            bb.fatal(
+                lead + "its installed %s (%s) passed every check but the "
+                "attestation beside it could not be written: %s. The image tier "
+                "requires that file, so shipping without it would refuse the "
+                "build later with a less useful diagnostic."
+                % (component, flat(target), flat(exc))
+            )
 }
 do_install[postfuncs] += "avocado_var_key_check_deliverability"
 
@@ -1016,4 +1091,10 @@ SYSTEMD_AUTO_ENABLE:${PN}-posture = "enable"
 
 FILES:${PN} += "${libexecdir}/cryptsetup-var/"
 FILES:${PN} += "${systemd_system_unitdir}/cryptsetup-var.service"
+# Named explicitly: FILES:${PN} globs ${libexecdir}/cryptsetup-var/ and so
+# picks up the three script digests for free, but nothing globs the unit
+# directory. Without this line the unit's attestation is packaged nowhere, the
+# image ships without it, and tier 3 refuses every build with "ships no
+# attestation for cryptsetup-var.service".
+FILES:${PN} += "${systemd_system_unitdir}/cryptsetup-var.service.sha256"
 FILES:${PN} += "${systemd_system_unitdir}/initrd-root-fs.target.wants/cryptsetup-var.service"
