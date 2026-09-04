@@ -32,6 +32,7 @@ SRC_URI = " \
 # Every provider declares its own status on an anchored comment line:
 #
 #     # avocado-var-key-provider: usable
+#     # avocado-var-key-provider: test-only
 #     # avocado-var-key-provider: unusable
 #
 # The check FAILS CLOSED on anything it cannot affirmatively verify - a missing
@@ -55,6 +56,13 @@ SRC_URI = " \
 # out. This tier stays because it is the cheap one: it refuses at parse time,
 # before anything is fetched or compiled.
 AVOCADO_VAR_KEY_MARKER = "avocado-var-key-provider:"
+
+# Machines permitted to resolve to a provider declared test-only, which waives
+# the requirement to refuse when no hardware identity is readable. Kept here,
+# in meta-avocado, rather than being inferred from the provider: the layer
+# shipping a provider must not be able to grant itself the waiver. Only virtual
+# targets belong on this list, because only they have no identity to read.
+AVOCADO_VAR_KEY_TEST_ONLY_MACHINES ?= "avocado-qemux86-64 avocado-qemuarm64"
 
 # Identity sources a usable provider reads, one absolute path per line, read by
 # the execution tier to decide which paths its fixture must populate.
@@ -155,11 +163,40 @@ python __anonymous() {
             lead + "the var-key.sh that resolves for it (%s) declares itself "
             "unusable: it is the placeholder that cannot actually derive a key." % provider + remedy
         )
-    if status != "usable":
+    if status not in ("usable", "test-only"):
         bb.fatal(
             lead + "the var-key.sh that resolves for it (%s) declares an "
-            "unrecognised status '%s'; expected 'usable' or 'unusable'." % (provider, status) + remedy
+            "unrecognised status '%s'; expected 'usable', 'test-only' or "
+            "'unusable'." % (provider, status) + remedy
         )
+
+    # test-only exempts a provider from the execution tier's refusal check, so
+    # it is the one fail-open path in a system whose every other tier fails
+    # closed. It is therefore NOT self-asserted: the provider asks for the
+    # exemption, and this list, which lives in meta-avocado rather than in the
+    # vendor layer shipping the provider, decides whether the machine may have
+    # it.
+    #
+    # Without that split the exemption is unlocked by editing one comment line
+    # in a file the vendor already owns. A provider whose identity read falls
+    # back to a constant fails the refusal check, and the one-word edit turns
+    # that failure into a warning among the thousands an image build emits -
+    # shipping a fleet whose every board opens with the same /var key while the
+    # capability declaration still says encrypted-var.
+    if status == "test-only":
+        allowed = (d.getVar("AVOCADO_VAR_KEY_TEST_ONLY_MACHINES") or "").split()
+        if machine not in allowed:
+            bb.fatal(
+                lead + "the var-key.sh that resolves for it (%s) declares "
+                "itself test-only, which waives the requirement to refuse when "
+                "no hardware identity is readable - meaning every device built "
+                "from this image derives the SAME /var key. That is permitted "
+                "only for machines listed in AVOCADO_VAR_KEY_TEST_ONLY_MACHINES "
+                "(currently: %s), which is set in meta-avocado and is not for a "
+                "vendor layer to extend in order to pass this check. A machine "
+                "that ships to hardware needs a provider that refuses."
+                % (provider, ", ".join(allowed) or "none")
+            )
 }
 
 # Second tier: run the installed provider against two synthetic hardware
@@ -274,6 +311,68 @@ python avocado_var_key_check_deliverability() {
             % (flat(installed), marker, marker)
         )
 
+    # The status decides whether the negative control below applies. Read from
+    # the INSTALLED file rather than carried over from the parse tier, which
+    # judged the FILESPATH source: the two can differ, and this tier exists
+    # precisely because they can.
+    statuses = avocado_var_key_declarations(
+        contents, d.getVar("AVOCADO_VAR_KEY_MARKER")
+    )
+    status = statuses[0] if len(statuses) == 1 else None
+    if status is None:
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) carries %d status lines; "
+            "exactly one is required, and the parse-time check passed, so the "
+            "installed copy differs from the one on FILESPATH."
+            % (flat(installed), len(statuses))
+        )
+    # Membership, not just cardinality. Without this an installed copy declaring
+    # `unusable` - the status the parse tier refuses outright - reaches the
+    # negative control below and can pass it, so the two tiers would disagree
+    # about what `unusable` means.
+    if status not in ("usable", "test-only"):
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) declares the status '%s', "
+            "which the parse-time check would have refused. The installed copy "
+            "differs from the one on FILESPATH."
+            % (flat(installed), flat(status))
+        )
+
+    # The EXEMPTION is not taken from the installed copy alone. Every behavioural
+    # check below deliberately judges ${D}, because that is what ships and a
+    # do_install:append can replace it after parse. For a waiver the same
+    # property runs the other way: the installed copy is the LESS trustworthy
+    # artifact, so letting it declare itself test-only would hand a bbappend the
+    # one fail-open path in this system. A `sed -i` over ${D} in a
+    # do_install:append body runs before this postfunc, keeps the count at one,
+    # and would otherwise skip the refusal check on a provider that passed parse
+    # as `usable`. Both copies have to agree.
+    source_status = None
+    filespath = d.getVar("FILESPATH")
+    source = bb.utils.which(filespath, "var-key.sh") if filespath else None
+    if source:
+        try:
+            with open(source, encoding="utf-8", errors="replace") as f:
+                source_statuses = avocado_var_key_declarations(
+                    f.read(), d.getVar("AVOCADO_VAR_KEY_MARKER")
+                )
+            if len(source_statuses) == 1:
+                source_status = source_statuses[0]
+        except OSError:
+            source_status = None
+
+    if status == "test-only" and source_status != "test-only":
+        bb.fatal(
+            lead + "its INSTALLED var-key.sh (%s) declares itself test-only "
+            "while the provider on FILESPATH (%s) declares '%s'. The test-only "
+            "waiver skips the requirement to refuse when no identity is "
+            "readable, so it is honoured only when both copies agree; a "
+            "do_install:append that rewrites the status in ${D} is exactly what "
+            "this refuses."
+            % (flat(installed), flat(source or "<unresolved>"),
+               flat(source_status or "<none>"))
+        )
+
     relative = []
     for declared in identities:
         if not declared.startswith("/") or "\0" in declared:
@@ -315,7 +414,7 @@ python avocado_var_key_check_deliverability() {
                     % (flat(installed), flat(declared), flat(exc))
                 )
 
-    def derive(root):
+    def run(root):
         try:
             proc = subprocess.run(
                 ["sh", installed, root],
@@ -329,6 +428,10 @@ python avocado_var_key_check_deliverability() {
                 "the synthetic identity fixture: %s."
                 % (flat(installed), flat(exc))
             )
+        return proc
+
+    def derive(root):
+        proc = run(root)
         stderr = flat(proc.stderr.decode("utf-8", "replace").strip()) or "(none)"
         if proc.returncode != 0:
             bb.fatal(
@@ -380,6 +483,61 @@ python avocado_var_key_check_deliverability() {
             "and resolved against the build host instead of the fixture. Every "
             "device in the fleet would unlock with one key."
             % (flat(installed), flat(", ".join(identities)))
+        )
+
+    # NEGATIVE CONTROL: with no identity present at all, a provider must REFUSE
+    # rather than substitute a constant.
+    #
+    # The differential above proves the provider reads its declared sources. It
+    # says nothing about what the provider does when those sources are missing
+    # on a real device, which is the case that produces a fleet-wide key: a
+    # fallback to a fixed string derives a perfectly good-looking 64 bytes that
+    # every board in the fleet shares. Only running against an empty root
+    # separates "derives from the identity" from "derives something regardless".
+    #
+    # This is the check `test-only` exists to be exempt from. A provider carrying
+    # that status is declaring that it CANNOT refuse - the qemu one substitutes
+    # `qemu-no-serial` because a virtual machine has no unique identity to read -
+    # which is correct for a disposable target and disqualifying for anything
+    # that ships to hardware.
+    empty = os.path.join(base, "var-key-deliverability-fixture-empty")
+    # Same symlink guard populate() carries, and for the same reason: rmtree
+    # refuses a symlink and ignore_errors hides the refusal, so a symlink left
+    # here would leave the "empty" root pointing at a populated tree and the
+    # refusal check would judge a fixture that is not empty.
+    if os.path.islink(empty) or os.path.isfile(empty):
+        os.unlink(empty)
+    else:
+        shutil.rmtree(empty, ignore_errors=True)
+    bb.utils.mkdirhier(empty)
+    negative = run(empty)
+
+    if status == "test-only":
+        bb.warn(
+            "machine %s resolves to a var-key.sh (%s) declared test-only: with "
+            "no identity readable it emitted %d bytes instead of refusing, so "
+            "every device built from this image derives the SAME /var key. That "
+            "is intended for disposable virtual targets only, and this machine "
+            "is on AVOCADO_VAR_KEY_TEST_ONLY_MACHINES for that reason. A machine "
+            "that ships to hardware must resolve to a provider declared usable, "
+            "which is required to refuse instead."
+            % (machine, flat(installed), len(negative.stdout))
+        )
+    elif negative.returncode == 0:
+        # The remedy names the fix and NOT the waiver, deliberately. The only
+        # reader of this message is someone whose provider just failed, and
+        # test-only is gated on a machine list they cannot reach from here
+        # anyway; offering it as an alternative would be handing out the bypass
+        # in the same paragraph as the diagnosis.
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) derived a key from an EMPTY "
+            "identity fixture, emitting %d bytes rather than refusing. A "
+            "provider that substitutes a constant when no identity is readable "
+            "gives every device in the fleet the same /var key, with no symptom "
+            "until one device's disk opens on another. Make it exit non-zero "
+            "when it finds no identity, the way the i.MX, Jetson and x86-64 "
+            "providers do."
+            % (flat(installed), len(negative.stdout))
         )
 }
 do_install[postfuncs] += "avocado_var_key_check_deliverability"

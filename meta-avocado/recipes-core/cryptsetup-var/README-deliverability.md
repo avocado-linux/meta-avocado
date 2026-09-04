@@ -180,7 +180,8 @@ ROOT="${1:-}"
 SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
 ```
 
-- Exactly one `avocado-var-key-provider:` line, `usable` or `unusable`.
+- Exactly one `avocado-var-key-provider:` line, `usable`, `test-only` or
+  `unusable`.
 - One `avocado-var-key-identity:` line per file the provider reads its hardware
   identity from, each an absolute path.
 - Every one of those reads prefixed with the script's optional first argument.
@@ -203,7 +204,8 @@ generic failure.
 
 Runs the INSTALLED provider under `${D}` against two synthetic identity
 fixtures built from its declared paths, and requires each run to exit 0 with 64
-bytes and the two keys to DIFFER.
+bytes and the two keys to DIFFER. It then runs it a third time against an EMPTY
+fixture and requires it to REFUSE.
 
 The two-identity part is the load-bearing half. A length check alone passes a
 provider that emits a hardcoded constant, and passes one whose identity read is
@@ -211,6 +213,42 @@ missing its `ROOT` prefix and so resolves against the build host's own `/sys`
 instead of the fixture. Both return the same key twice; neither is visible from
 a single run. Both are the fleet-wide-identical-key failure the providers'
 own comments say they exist to prevent.
+
+The empty-fixture run answers a different question: not "does it read its
+declared sources" but "what does it do when they are missing on a real device".
+A provider that substitutes a constant there derives a perfectly good-looking
+64 bytes that every board in the fleet shares, which the differential cannot
+see because the constant is reached identically both times.
+
+### The three statuses
+
+| Status | Meaning | Build outcome |
+|---|---|---|
+| `usable` | Derives a device-unique key, and refuses when no identity is readable | Runs both the differential and the empty-fixture refusal |
+| `test-only` | Cannot refuse: it substitutes a constant when no identity is readable | Runs the differential, skips the refusal, and WARNS naming the machine. Only for machines listed in `AVOCADO_VAR_KEY_TEST_ONLY_MACHINES`; refused for any other |
+| `unusable` | Placeholder that cannot derive a key at all | Refused at parse time |
+
+`test-only` exists for one situation and should not spread beyond it. A virtual
+machine has no unique board identifier, so the qemu provider falls back to
+`qemu-no-serial` and every VM built from one image derives the same `/var` key.
+That is correct for a disposable evaluation target and disqualifying for
+anything shipping to hardware. A machine that ships must resolve to a provider
+declared `usable`, which has to earn it by refusing.
+
+It is deliberately not self-service, because it is the one fail-open path here
+and everything else fails closed. A provider only ASKS for the waiver; whether a
+machine may have it is decided by `AVOCADO_VAR_KEY_TEST_ONLY_MACHINES`, which is
+set in `meta-avocado` rather than in the layer shipping the provider. Otherwise
+the waiver would be unlocked by editing one comment line in a file the vendor
+already owns, turning a refusal into a warning among the thousands an image
+build emits. For the same reason the waiver requires the FILESPATH source and
+the installed copy to agree: the behavioural checks judge `${D}` because that is
+what ships, but a waiver read from `${D}` alone could be granted by a
+`do_install:append` that rewrote the status after the parse tier passed.
+
+Do not read a clean build log as proof that no machine is on a `test-only`
+provider. The warning is emitted by a `do_install` postfunc, so an sstate hit
+skips it, and machines sharing a provider share that sstate object.
 
 ### What the check does not establish
 

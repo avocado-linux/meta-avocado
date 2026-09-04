@@ -176,8 +176,20 @@ options, initramfs tooling, rootfs helpers — and never turns them on by itself
    script's optional first argument. At `do_install` the recipe runs the
    installed provider against two synthetic identities and requires two
    *different* 64-byte keys, which is what catches a provider that emits a
-   constant or that reads past the fixture into the build host. On a device
-   the provider is invoked with no arguments, so the prefix is empty.
+   constant or that reads past the fixture into the build host. It then runs
+   it against an empty fixture and requires it to REFUSE, which is what
+   catches a provider that substitutes a constant when it finds no identity.
+   On a device the provider is invoked with no arguments, so the prefix is
+   empty.
+
+   Your provider must refuse rather than fall back to a constant. A machine
+   that cannot do that - a virtual target with no unique board identifier -
+   declares `test-only` instead of `usable`, which skips the refusal check and
+   warns when the check runs. It is not self-service: the waiver is honoured
+   only for machines meta-avocado lists in
+   `AVOCADO_VAR_KEY_TEST_ONLY_MACHINES`, so declaring it in a vendor layer does
+   not grant it. Do not reach for it on real hardware: it means every
+   board in the fleet derives the same `/var` key.
 
    Full statement in
    `meta-avocado/recipes-core/cryptsetup-var/README-deliverability.md`,

@@ -1,8 +1,18 @@
 #!/bin/sh
-# avocado-var-key-provider: usable
+# avocado-var-key-provider: test-only
 # Load-bearing, not a note: cryptsetup-var.bb refuses any machine whose
-# resolved provider does not declare exactly one such status line. What
-# this provider derives its identity from is described below.
+# resolved provider does not declare exactly one such status line.
+#
+# test-only rather than usable, and the distinction is the point. A `usable`
+# provider has to REFUSE when no hardware identity is readable, and the build
+# proves it by running the provider against an empty fixture and requiring a
+# non-zero exit. This one cannot pass that: a virtual machine has no unique
+# identity to read, so it substitutes the constant `qemu-no-serial` and every VM
+# built from one image derives the same /var key. That is the right behaviour
+# for a disposable evaluation target and disqualifying for anything shipping to
+# hardware, so it is declared rather than hidden, and the build warns whenever a
+# machine resolves to it. Do not copy this provider as the basis for a real
+# board: start from a vendor one that refuses.
 # /var LUKS key provider for qemu (x86-64 + arm64) -- phase-1: hw-id derived,
 # no provisioned secret.
 #
@@ -38,9 +48,10 @@ ROOT="${1:-}"
 #
 # Consequence, stated plainly: the build-time check exercises the DT branch on
 # both qemu machines, so the branch avocado-qemux86-64 actually takes at boot is
-# unverified. Whether a provider that falls back to a constant should carry a
-# distinct status rather than `usable` is an open question recorded in
-# design.md; until it is answered this comment is the only thing marking it.
+# unverified by the differential. The constant fallback it ends in is what the
+# `test-only` status above marks, and what the build's refusal check would
+# otherwise reject; that status is honoured only for machines listed in
+# AVOCADO_VAR_KEY_TEST_ONLY_MACHINES.
 if [ -r "$ROOT/sys/firmware/devicetree/base/serial-number" ]; then
     HW_ID=$(tr -d '\0' < "$ROOT/sys/firmware/devicetree/base/serial-number")
 else

@@ -146,10 +146,14 @@ def avocado_security_capabilities_check(d):
 # cryptsetup-var.bb carries the second half of this enforcement, in TWO tiers,
 # and which one refuses decides where to look:
 #   - at recipe parse, that a var-key provider resolves via FILESEXTRAPATHS and
-#     declares itself usable;
+#     declares itself usable, or test-only for a machine meta-avocado has
+#     listed as permitted to waive the refusal check;
 #   - at do_install, that the INSTALLED provider actually derives - it is run
 #     against two synthetic identity fixtures and must return two different
-#     64-byte keys.
+#     64-byte keys, then against an empty one and must refuse. A provider
+#     that cannot refuse has to declare itself test-only, which is accepted
+#     for a disposable virtual target, gated on a meta-avocado machine list,
+#     and warns when the check runs (sstate can skip it).
 # A build that gets past parse and fails at do_install failed the second tier,
 # not this class and not the first. See README-deliverability.md beside that
 # recipe, "The var-key provider contract".

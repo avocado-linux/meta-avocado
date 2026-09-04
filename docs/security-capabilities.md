@@ -64,7 +64,11 @@ the feed decide for the user.
 A `var-key.sh` must declare itself `usable`, declare each identity path it
 reads, and prefix those reads with its optional first argument; `do_install`
 then runs it against two synthetic identities and requires two different
-64-byte keys. See
+64-byte keys, then against an empty one and requires it to refuse. A provider
+that cannot refuse declares `test-only` instead, which is for disposable
+virtual targets, is honoured only for machines meta-avocado lists in
+`AVOCADO_VAR_KEY_TEST_ONLY_MACHINES`, and warns when the check runs (an sstate
+hit skips it, so a clean log is not proof no machine is on one). See
 `meta-avocado/recipes-core/cryptsetup-var/README-deliverability.md`,
 "The var-key provider contract".
 
