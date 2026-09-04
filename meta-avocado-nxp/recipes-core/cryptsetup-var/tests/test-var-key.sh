@@ -44,6 +44,26 @@ sed -e "s|/sys/devices/soc0/serial_number|$fixture/soc0/serial_number|g" \
     "$provider" > "$under_test"
 chmod +x "$under_test"
 
+# Every case below compares one derived key against another. A bare
+# `> key.bin || true` makes a REFUSAL indistinguishable from a different key:
+# the file is empty, cmp reports "differs", and the suite records a passing
+# device-uniqueness assertion over a provider that refused a valid identity.
+# derive_or_fail keeps the comparison but requires the run to have produced a
+# key first, so the two outcomes stay separable.
+derive_or_fail() {
+    # $1 = output path, $2 = what the run represents (for the diagnostic)
+    if ! "$under_test" > "$1" 2>"$work/derive.err"; then
+        bad "provider refused $2: $(cat "$work/derive.err")"
+        return 1
+    fi
+    _n=$(wc -c < "$1")
+    if [[ "$_n" -ne 64 ]]; then
+        bad "$2 produced $_n bytes, expected 64"
+        return 1
+    fi
+    return 0
+}
+
 # --- Case 1: a SoC UID yields exactly 64 raw bytes ---
 printf '0123456789abcdeffedcba9876543210' > "$fixture/soc0/serial_number"
 if "$under_test" > "$work/key1.bin" 2>"$work/key1.err"; then
@@ -58,7 +78,7 @@ else
 fi
 
 # --- Case 2: derivation is deterministic (the same board unlocks every boot) ---
-"$under_test" > "$work/key1b.bin" 2>/dev/null || true
+derive_or_fail "$work/key1b.bin" "the same identity a second time" || true
 if cmp -s "$work/key1.bin" "$work/key1b.bin"; then
     ok "the same SoC UID derives the same key on every run"
 else
@@ -67,7 +87,7 @@ fi
 
 # --- Case 3: a different board derives a different key (binding is real) ---
 printf 'ffffffffffffffff0000000000000000' > "$fixture/soc0/serial_number"
-"$under_test" > "$work/key2.bin" 2>/dev/null || true
+derive_or_fail "$work/key2.bin" "a second, different identity" || true
 if cmp -s "$work/key1.bin" "$work/key2.bin"; then
     bad "two different SoC UIDs derived the same key (no device binding)"
 else
@@ -101,7 +121,7 @@ fi
 
 # --- Case 6: soc0 wins over the DT when both are present ---
 printf '0123456789abcdeffedcba9876543210' > "$fixture/soc0/serial_number"
-"$under_test" > "$work/key5.bin" 2>/dev/null || true
+derive_or_fail "$work/key5.bin" "the precedence fixture" || true
 if cmp -s "$work/key1.bin" "$work/key5.bin"; then
     ok "soc0 takes precedence over the DT serial-number"
 else

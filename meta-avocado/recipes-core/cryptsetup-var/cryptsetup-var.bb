@@ -602,6 +602,59 @@ python avocado_var_key_check_deliverability() {
     # keys, so a cross-path differential passes while the broken read never
     # touched the fixture. Changing one path's own value and requiring the key
     # to follow is what proves the provider read THAT path from THIS root.
+    # Comment lines are excluded when looking for the path, and are still
+    # rewritten. Searching the whole file made this check dead code: every
+    # declared path appears in its own '# <identity marker>: <path>' line by
+    # construction, so the membership test could never fail and a provider
+    # assembling its path at run time passed straight through. Measured on the
+    # four shipping providers, each declared path occurs at least once outside
+    # a comment, so requiring that costs none of them.
+    code_only = "\n".join(
+        line for line in contents.splitlines()
+        if not line.strip().startswith("#")
+    )
+    def require_literal_paths():
+        for declared in identities:
+            if declared not in code_only:
+                bb.fatal(
+                    lead + "its installed var-key.sh (%s) declares the identity "
+                    "path '%s', which does not appear literally in the script. "
+                    "The check rewrites every declared path into a copy and runs "
+                    "it with no argument, the way a device does; a path assembled "
+                    "at run time cannot be rewritten, so such a read cannot be "
+                    "shown to reach the fixture rather than the build host. Write "
+                    "the path as a literal."
+                    % (flat(installed), flat(declared))
+                )
+
+    def no_argv_copy(root, index):
+        """A copy with every declared path rewritten into ROOT, runnable bare.
+
+        THE DEVICE PASSES NO ARGUMENT. Every argv run hands the provider a
+        fixture root, which cryptsetup-var.sh never does, so the artifact under
+        test can see that it is under test: one written to derive properly
+        whenever $1 is set and to emit a constant when it is empty satisfied
+        every other assertion here and shipped a fleet-wide key. Rewriting the
+        paths removes the signal instead of trusting its absence.
+        """
+        text = contents
+        for other, _declared in enumerate(identities):
+            text = text.replace(identities[other], fixture_path(root, other))
+        # Not chmodded. run() invokes it as `sh <path>`, which needs no execute
+        # bit, so setting one would only widen the mode of a file in WORKDIR
+        # for no reader.
+        path = os.path.join(base, "var-key-no-argv-%d.sh" % index)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as exc:
+            bb.fatal(
+                lead + "a path-rewritten copy of its installed var-key.sh (%s) "
+                "could not be written to %s: %s."
+                % (flat(installed), flat(path), flat(exc))
+            )
+        return path
+
     first_root = None
     first_key = None
     for index, declared in enumerate(identities):
@@ -611,6 +664,31 @@ python avocado_var_key_check_deliverability() {
 
         populate(root_a, index, _VALUE_A)
         key_a = derive(installed, [root_a], context)
+
+        # The SAME identity must yield the SAME key, settled BEFORE the
+        # no-argument comparison below. That comparison asks whether two
+        # invocations agree, which is meaningless for a provider whose two
+        # invocations never agree - a provider mixing in a timestamp, $RANDOM or
+        # an openssl-generated salt would otherwise be reported as an argv
+        # evader, naming the wrong defect entirely. On a device this is worse
+        # than a constant key: first boot formats /var with one key and every
+        # later boot derives another, so the volume never opens again. Once, on
+        # the first path: reproducibility is a property of the provider, not of
+        # a path.
+        if index == 0:
+            again = derive(installed, [root_a], context + ", a second time")
+            if key_a != again:
+                bb.fatal(
+                    lead + "its installed var-key.sh (%s) derived two DIFFERENT "
+                    "keys from the same synthetic identity, so its derivation is "
+                    "not reproducible. A device would format /var with one key on "
+                    "first boot and fail to unlock with another on the next. "
+                    "Remove whatever varies between runs - a timestamp, a random "
+                    "salt, an unseeded value - and derive only from the declared "
+                    "identity sources (%s)."
+                    % (flat(installed), flat(", ".join(identities)))
+                )
+
         populate(root_b, index, _VALUE_B)
         key_b = derive(installed, [root_b], context)
 
@@ -625,98 +703,36 @@ python avocado_var_key_check_deliverability() {
                 % (flat(installed), flat(declared))
             )
 
+        # The no-argument run happens PER PATH, not once for the first.
+        #
+        # Running it only against the first path proved the property for the
+        # primary and nothing else: the primary resolves, short-circuits, and
+        # every fallback branch stays unwalked in the one no-argv run. A
+        # provider that handles its secondary source correctly with $1 set and
+        # emits a constant without it passed every per-path argv check and the
+        # single no-argv check, and then gave one key to every device whose
+        # primary identity is missing - which is the population that depends on
+        # the fallback in the first place.
+        require_literal_paths()
+        unargued = derive(
+            no_argv_copy(root_a, index),
+            [],
+            "%s, through a path-rewritten copy invoked with no argument" % context,
+        )
+        if unargued != key_a:
+            bb.fatal(
+                lead + "its installed var-key.sh (%s) derived a DIFFERENT key "
+                "when invoked with no argument against the identity at '%s', "
+                "reached through its declared paths rewritten into the fixture. "
+                "The device invokes it with no argument, so the key this check "
+                "verified is not the key the device would derive. A provider "
+                "must behave the same whether its optional first argument is "
+                "present or absent - branch on nothing but the identity it "
+                "reads." % (flat(installed), flat(declared))
+            )
+
         if first_root is None:
             first_root, first_key = root_a, key_a
-
-    # The SAME identity must yield the SAME key. A provider that mixes in
-    # anything non-reproducible - a timestamp, $RANDOM, an openssl-generated
-    # salt - passes the difference assertion above trivially, because two runs
-    # differ for the wrong reason. On a device that is worse than a constant
-    # key: first boot formats the volume with one key and every later boot
-    # derives another, so /var never opens again. Re-deriving costs one
-    # Argon2id run and is the only thing here that can see it. Once, not per
-    # path: reproducibility is a property of the provider, not of a path.
-    again = derive(
-        installed, [first_root], "the first synthetic identity a second time"
-    )
-    if first_key != again:
-        bb.fatal(
-            lead + "its installed var-key.sh (%s) derived two DIFFERENT keys "
-            "from the same synthetic identity, so its derivation is not "
-            "reproducible. A device would format /var with one key on first "
-            "boot and fail to unlock with another on the next. Remove whatever "
-            "varies between runs - a timestamp, a random salt, an unseeded "
-            "value - and derive only from the declared identity sources (%s)."
-            % (flat(installed), flat(", ".join(identities)))
-        )
-
-    # THE DEVICE PASSES NO ARGUMENT. Every run above hands the provider a
-    # fixture root as argv, which cryptsetup-var.sh never does, so the artifact
-    # under test can see that it is under test: a provider written to derive
-    # properly whenever $1 is set and to emit a constant when it is empty
-    # satisfied every assertion above and shipped a fleet-wide key.
-    #
-    # Removing the signal rather than trusting its absence: rewrite each
-    # declared path in a COPY to point into the fixture, then run that copy the
-    # way a device does, with no argument. The key must match the argv run over
-    # the same fixture. This is the technique the vendor test suites already
-    # use; it belongs here too, because those suites are not what gates a
-    # build.
-    # Comment lines are excluded when looking for the path, and are still
-    # rewritten. Searching the whole file made this check dead code: every
-    # declared path appears in its own '# <identity marker>: <path>' line by
-    # construction, so the membership test could never fail and a provider
-    # assembling its path at run time passed straight through. Measured on the
-    # four shipping providers, each declared path occurs at least once outside
-    # a comment, so requiring that costs none of them.
-    code_only = "\n".join(
-        line for line in contents.splitlines()
-        if not line.strip().startswith("#")
-    )
-    text = contents
-    for index, declared in enumerate(identities):
-        if declared not in code_only:
-            bb.fatal(
-                lead + "its installed var-key.sh (%s) declares the identity "
-                "path '%s', which does not appear literally in the script. The "
-                "check rewrites every declared path into a copy and runs it "
-                "with no argument, the way a device does; a path assembled at "
-                "run time cannot be rewritten, so such a read cannot be shown "
-                "to reach the fixture rather than the build host. Write the "
-                "path as a literal."
-                % (flat(installed), flat(declared))
-            )
-        text = text.replace(declared, fixture_path(first_root, index))
-
-    # Not chmodded. run() invokes it as `sh <path>`, which needs no execute
-    # bit, so setting one would only widen the mode of a file in WORKDIR for
-    # no reader. Three equivalent chmods in the test harnesses were removed for
-    # the same reason after opengrep flagged them.
-    no_argv = os.path.join(base, "var-key-no-argv.sh")
-    try:
-        with open(no_argv, "w", encoding="utf-8") as f:
-            f.write(text)
-    except OSError as exc:
-        bb.fatal(
-            lead + "a path-rewritten copy of its installed var-key.sh (%s) "
-            "could not be written to %s: %s."
-            % (flat(installed), flat(no_argv), flat(exc))
-        )
-
-    unargued = derive(
-        no_argv, [], "a path-rewritten copy invoked with no argument"
-    )
-    if unargued != first_key:
-        bb.fatal(
-            lead + "its installed var-key.sh (%s) derived a DIFFERENT key when "
-            "invoked with no argument against the same identity, reached "
-            "through its declared paths rewritten into the fixture. The device "
-            "invokes it with no argument, so the key this check verified is not "
-            "the key the device would derive. A provider must behave the same "
-            "whether its optional first argument is present or absent - branch "
-            "on nothing but the identity it reads."
-            % flat(installed)
-        )
 
     # NEGATIVE CONTROL: with no identity present at all, a provider must REFUSE
     # rather than substitute a constant.

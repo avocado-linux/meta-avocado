@@ -330,6 +330,23 @@ PROVIDERS = {
         + REFUSE
         + DERIVE,
     ),
+    # Derives correctly from BOTH paths when handed a root, and correctly from
+    # the PRIMARY without one - but emits a constant when it falls through to
+    # the secondary with no argument. That is the exact population that depends
+    # on the fallback, and a no-argv check run only against the first declared
+    # path never reaches this branch: the primary resolves and short-circuits.
+    "argv_evader_secondary": provider(
+        "usable",
+        [PRIMARY, SECONDARY],
+        read_primary()
+        + 'if [ -z "$ID" ] && [ -r "$ROOT%s" ]; then\n' % SECONDARY
+        + '    if [ -z "$ROOT" ]; then\n'
+        + CONSTANT
+        + "        exit 0\n    fi\n"
+        + '    ID=$(cat "$ROOT%s")\nfi\n' % SECONDARY
+        + REFUSE
+        + DERIVE,
+    ),
     # Mixes in a fresh salt, so two runs of the SAME identity differ. Satisfies
     # the differential for the wrong reason; on a device /var never reopens.
     "nonreproducible": provider(
@@ -767,6 +784,9 @@ CASES = [
          skip_unless=HOST_PATH_USABLE,
          skip_why="%s is not readable on this host" % HOST_PATH),
     # Q1.
+    case(TIER2, "exec: a secondary branch that misbehaves without argv is refused",
+         installed="argv_evader_secondary", source="argv_evader_secondary",
+         match="invoked with no argument against the identity at"),
     case(TIER2, "exec: a provider that derives only when handed a root is refused",
          installed="argv_evader", source="argv_evader",
          match="invoked with no argument"),
