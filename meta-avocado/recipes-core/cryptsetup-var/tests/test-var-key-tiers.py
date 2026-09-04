@@ -30,9 +30,18 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RECIPE = os.path.normpath(os.path.join(HERE, "..", "cryptsetup-var.bb"))
+# The shared parser, the flattener and the test-only allow-list live in the
+# globally-inherited class, because the image-scope gate is a second reader of
+# the same declarations. Sliced from there for the same reason the tier bodies
+# are sliced from the recipe: a copy would drift.
+BBCLASS = os.path.normpath(
+    os.path.join(HERE, "..", "..", "..", "classes",
+                 "avocado-security-capabilities.bbclass")
+)
 
 TIER1 = "__anonymous"
 TIER2 = "avocado_var_key_check_deliverability"
+TIER3 = "avocado_security_capabilities_check_provider"
 
 
 # --------------------------------------------------------------------------
@@ -44,36 +53,47 @@ TIER2 = "avocado_var_key_check_deliverability"
 # never loaded.
 
 
-def read_recipe():
+def read_file(path):
     try:
-        with open(RECIPE, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return handle.read()
     except OSError as exc:
-        raise SystemExit("FAIL - cannot read %s: %s" % (RECIPE, exc))
+        raise SystemExit("FAIL - cannot read %s: %s" % (path, exc))
 
 
-def slice_helpers(source):
-    """The module-level `def avocado_var_key_*` block, as plain Python."""
+def slice_helpers(source, path):
+    """Every top-level `def avocado_var_key_*` block, as plain Python.
+
+    Collected individually rather than as one contiguous run: they sit among
+    other top-level defs and `python ...() { }` blocks in the class, so a
+    first-to-last span would swallow whatever happens to lie between them.
+    """
     lines = source.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        if line.startswith("def avocado_var_key_"):
+    blocks = []
+    index = 0
+    while index < len(lines):
+        if lines[index].startswith("def avocado_var_key_"):
             start = index
-            break
-    if start is None:
+            index += 1
+            while index < len(lines):
+                line = lines[index]
+                # A top-level def ends at the next line in column 0 that is not
+                # part of it. Blank lines inside the body are kept.
+                if line and not line[0].isspace():
+                    break
+                index += 1
+            blocks.append("\n".join(lines[start:index]))
+        else:
+            index += 1
+    if not blocks:
         raise SystemExit(
             "FAIL - no top-level `def avocado_var_key_*` in %s. The helpers "
-            "moved; update this anchor." % RECIPE
+            "moved; update this anchor." % path
         )
-    for index in range(start, len(lines)):
-        if lines[index].startswith("python "):
-            return "\n".join(lines[start:index]) + "\n"
-    raise SystemExit(
-        "FAIL - no `python ...() {` block after the helpers in %s." % RECIPE
-    )
+    return "\n\n".join(blocks) + "\n"
 
 
-def slice_task(source, name):
+def slice_task(source, name, path):
     """A `python NAME() { ... }` block, rewritten as a real `def NAME():`."""
     lines = source.splitlines()
     opener = "python %s() {" % name
@@ -83,7 +103,7 @@ def slice_task(source, name):
             start = index
             break
     if start is None:
-        raise SystemExit("FAIL - no `%s` in %s" % (opener, RECIPE))
+        raise SystemExit("FAIL - no `%s` in %s" % (opener, path))
     body = None
     for index in range(start + 1, len(lines)):
         if lines[index] == "}":
@@ -92,19 +112,19 @@ def slice_task(source, name):
     if body is None:
         raise SystemExit(
             "FAIL - `%s` is not closed by a `}` at column 0 in %s"
-            % (opener, RECIPE)
+            % (opener, path)
         )
     if not any(line.strip() for line in body):
         raise SystemExit("FAIL - `%s` sliced to an empty body" % opener)
     return "def %s():\n" % name + "\n".join(body) + "\n"
 
 
-def marker_value(source, name):
+def marker_value(source, name, path):
     """A `NAME = "value"` assignment at column 0, so markers are not hardcoded."""
     for line in source.splitlines():
         if line.startswith(name + " = "):
             return line.split("=", 1)[1].strip().strip('"')
-    raise SystemExit("FAIL - no `%s = ...` in %s" % (name, RECIPE))
+    raise SystemExit("FAIL - no `%s = ...` in %s" % (name, path))
 
 
 # --------------------------------------------------------------------------
@@ -410,6 +430,14 @@ PROVIDERS["two_statuses"] = PROVIDERS["good"].replace(
 PROVIDERS["no_status"] = PROVIDERS["good"].replace(
     "# avocado-var-key-provider: usable\n", ""
 )
+# Exactly one status line, spelled as nothing the contract recognises. Distinct
+# from two_statuses (a cardinality fault) and from unusable (a recognised status
+# that is refused), and it is the only input that reaches the membership branch
+# in either tier.
+PROVIDERS["unknown_status"] = PROVIDERS["good"].replace(
+    "# avocado-var-key-provider: usable\n",
+    "# avocado-var-key-provider: probably-fine\n",
+)
 PROVIDERS["no_identity"] = PROVIDERS["good"].replace(
     "# avocado-var-key-identity: %s\n" % PRIMARY, ""
 )
@@ -429,15 +457,55 @@ PROVIDERS["bracketed_statuses"] = PROVIDERS["good"].replace(
 # Harness
 # --------------------------------------------------------------------------
 
-SOURCE = read_recipe()
+SOURCE = read_file(RECIPE)
+CLASS_SOURCE = read_file(BBCLASS)
 NAMESPACE = {}
-exec(slice_helpers(SOURCE), NAMESPACE)
-exec(slice_task(SOURCE, TIER1), NAMESPACE)
-exec(slice_task(SOURCE, TIER2), NAMESPACE)
+exec(slice_helpers(CLASS_SOURCE, BBCLASS), NAMESPACE)
+exec(slice_task(SOURCE, TIER1, RECIPE), NAMESPACE)
+exec(slice_task(SOURCE, TIER2, RECIPE), NAMESPACE)
+exec(slice_task(CLASS_SOURCE, TIER3, BBCLASS), NAMESPACE)
 
-STATUS_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_MARKER")
-IDENTITY_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_IDENTITY_MARKER")
+STATUS_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_MARKER", RECIPE)
+IDENTITY_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_IDENTITY_MARKER", RECIPE)
 LIBEXECDIR = "/usr/libexec"
+
+# The image-scope gate reads the provider out of ${IMAGE_ROOTFS}, not ${D}, so
+# it needs its own fixture shape. Kept separate from invoke() rather than folded
+# into it: sharing one builder would have to fake both layouts at once, and the
+# whole point of this tier is that it looks somewhere the other two do not.
+def invoke_image(installed_text, machine, capabilities):
+    """Run the initramfs-scope gate over a synthetic IMAGE_ROOTFS."""
+    root = tempfile.mkdtemp(prefix="var-key-image-")
+    try:
+        rootfs = os.path.join(root, "rootfs")
+        provider = os.path.join(
+            rootfs + LIBEXECDIR, "cryptsetup-var", "var-key.sh"
+        )
+        os.makedirs(os.path.dirname(provider))
+        if installed_text is not None:
+            with open(provider, "w", encoding="utf-8") as handle:
+                handle.write(installed_text)
+            os.chmod(provider, 0o755)
+
+        bb = BB()
+        NAMESPACE["bb"] = bb
+        NAMESPACE["d"] = Datastore(
+            {
+                "AVOCADO_SECURITY_CAPABILITIES": capabilities,
+                "AVOCADO_VAR_KEY_MARKER": STATUS_MARKER,
+                "MACHINE": machine,
+                "IMAGE_ROOTFS": rootfs,
+                "libexecdir": LIBEXECDIR,
+                "sysconfdir": "/etc",
+            }
+        )
+        try:
+            NAMESPACE[TIER3]()
+        except Fatal as exc:
+            return "fatal", str(exc)
+        return "pass", "; ".join(bb.warnings) or "(no warnings)"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def invoke(tier, installed_text, source_text, machine, capabilities):
@@ -547,6 +615,9 @@ CASES = [
     case(TIER1, "parse: no status line is refused",
          installed="no_status", source="no_status",
          match="cannot be shown to derive a key"),
+    case(TIER1, "parse: an unrecognised status is refused",
+         installed="unknown_status", source="unknown_status",
+         match="declares an unrecognised status"),
     case(TIER1, "parse: no provider on FILESPATH is refused",
          installed="good", source=None,
          match="no var-key.sh resolves on FILESPATH at all"),
@@ -603,21 +674,14 @@ CASES = [
          installed="constant", source="test_only", machine=PERMITTED,
          match="derived the SAME key"),
 
-    # C5, recorded as a case rather than prose. Both tiers read the capability
-    # from cryptsetup-var.bb's own datastore, while the artifact the device
-    # reads is written from the image recipe - so a one-line bbappend clearing
-    # it here disarms both tiers and still ships `encrypted-var` on the device.
+    # C5. A cryptsetup-var.bbappend clearing the capability still silences both
+    # of that recipe's tiers - it always will, because they read its own
+    # datastore. These two stay `pass` and are the reason the image-scope gate
+    # below exists; they are the bypass, not the defence.
     case(TIER1, "parse: a cleared capability skips the tier",
-         installed="unusable", source="unusable", caps="", expect="pass",
-         gap='C5: `AVOCADO_SECURITY_CAPABILITIES = ""` in a '
-             "cryptsetup-var.bbappend disarms this tier while the image still "
-             "ships encrypted-var. Expect `fatal` once the gate reads the "
-             "image-level declaration instead."),
+         installed="unusable", source="unusable", caps="", expect="pass"),
     case(TIER2, "exec: a cleared capability skips the tier",
-         installed="unusable", source="unusable", caps="", expect="pass",
-         gap="C5: same bypass on the execution tier - the UNUSABLE provider "
-             "this whole check exists to stop reaches a device on a green "
-             "build."),
+         installed="unusable", source="unusable", caps="", expect="pass"),
 
     # C4. Both halves, because they are caught by different branches and only
     # the second one shows why the fixture compares two values at ONE path
@@ -661,6 +725,43 @@ CASES = [
          match="declares itself unusable",
          skip_unless="real_shared" in PROVIDERS,
          skip_why="layer not checked out"),
+
+    # The image-scope gate. Its whole job is the case directly above it in this
+    # list: the two tiers went quiet under a cleared capability, and this one
+    # still refuses, because it reads the IMAGE's declaration alongside the
+    # provider that image actually contains.
+    case(TIER3, "image: the disarmed-tier bypass is refused",
+         installed="real_shared", machine=HARDWARE,
+         match="was disarmed",
+         skip_unless="real_shared" in PROVIDERS,
+         skip_why="layer not checked out"),
+    case(TIER3, "image: a usable provider passes",
+         installed="good", expect="pass"),
+    case(TIER3, "image: no provider shipped is refused",
+         installed=None, match="ships no var-key.sh"),
+    case(TIER3, "image: a synthetic unusable provider is refused",
+         installed="unusable", match="declares itself unusable"),
+    case(TIER3, "image: two status lines are refused",
+         installed="two_statuses", match="exactly one is required"),
+    case(TIER3, "image: no status line is refused",
+         installed="no_status", match="exactly one is required"),
+    case(TIER3, "image: an unrecognised status is refused",
+         installed="unknown_status", match="unrecognised status"),
+    case(TIER3, "image: test-only on a hardware machine is refused",
+         installed="test_only", match="waives the requirement to refuse"),
+    case(TIER3, "image: test-only on a permitted qemu machine warns",
+         installed="test_only", machine=PERMITTED, expect="pass",
+         match="may derive the same /var key"),
+    case(TIER3, "image: an undeclared capability skips the gate",
+         installed="unusable", caps="", expect="pass"),
+    case(TIER3, "image: the real qemu provider passes on a permitted machine",
+         installed="real_qemu", machine=PERMITTED, expect="pass",
+         skip_unless="real_qemu" in PROVIDERS,
+         skip_why="layer not checked out"),
+    case(TIER3, "image: the real nxp provider passes",
+         installed="real_nxp", expect="pass",
+         skip_unless="real_nxp" in PROVIDERS,
+         skip_why="layer not checked out"),
 ]
 
 
@@ -692,13 +793,19 @@ def main():
             print("         %s" % spec["skip_why"])
             skipped += 1
             continue
-        verdict, detail = invoke(
-            spec["tier"],
-            PROVIDERS[spec["installed"]] if spec["installed"] else None,
-            PROVIDERS[spec["source"]] if spec["source"] else None,
-            spec["machine"],
-            spec["caps"],
-        )
+        installed = PROVIDERS[spec["installed"]] if spec["installed"] else None
+        if spec["tier"] == TIER3:
+            verdict, detail = invoke_image(
+                installed, spec["machine"], spec["caps"]
+            )
+        else:
+            verdict, detail = invoke(
+                spec["tier"],
+                installed,
+                PROVIDERS[spec["source"]] if spec["source"] else None,
+                spec["machine"],
+                spec["caps"],
+            )
         first = detail.splitlines()[0] if detail else ""
         if verdict != expect:
             print("  FAIL - %s" % description)

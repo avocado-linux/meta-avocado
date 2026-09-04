@@ -250,6 +250,50 @@ A provider that substitutes a constant there derives a perfectly good-looking
 64 bytes that every board in the fleet shares, which the differential cannot
 see because the constant is reached identically every time.
 
+### Tier 3, image time (`avocado_security_capabilities_check_provider`)
+
+Lives in `avocado-security-capabilities.bbclass` and runs from the initramfs
+image's `ROOTFS_POSTPROCESS_COMMAND`, right after the artifact writer. It reads
+the capability the IMAGE is about to declare and inspects the `var-key.sh` that
+image actually contains, refusing an absent provider, a status count other than
+one, `unusable`, an unrecognised status, and `test-only` on a machine outside
+the allow-list.
+
+It exists because tiers 1 and 2 cannot check whether they ran. Both read
+`AVOCADO_SECURITY_CAPABILITIES` from `cryptsetup-var.bb`'s datastore while
+`/etc/avocado-security-capabilities` is written from the image recipe's, so
+
+```bitbake
+# cryptsetup-var.bbappend
+AVOCADO_SECURITY_CAPABILITIES = ""
+```
+
+silenced both tiers while the image went on declaring `encrypted-var` and
+installing the provider - and `cryptsetup-var.sh` reads that artifact on the
+device, passes, and derives with whatever shipped. Reproduced end to end: with
+that bbappend, `do_install` completes with no warning and no fixtures written,
+the `unusable` placeholder lands in `${D}`, and the initramfs `do_rootfs` now
+fails instead of shipping it.
+
+**Fixed by altitude, not by another variable.** A canonical copy in a second
+variable moves the problem rather than removing it, because whoever overrode
+the first can override the second. Here the declaration and the shipped
+provider are visible in one datastore at one point, so they cannot disagree.
+
+The initramfs and not the rootfs: `packagegroup-avocado-initramfs.bb` installs
+`cryptsetup cryptsetup-var` when the capability is declared, while the rootfs
+gets only the udev and posture packages, so the initramfs is the image that
+carries the provider - and, `cryptsetup-var.sh` being an initrd unit, the one
+that consumes it first.
+
+It is deliberately NOT a second copy of the derivation check. Tier 2 runs the
+provider against synthetic identities and stays the expensive, authoritative
+tier; tier 3 answers only the question tier 2 cannot ask about itself - did it
+run, and over the provider that shipped - for which a status read suffices. The
+parser, the flattener and the `test-only` allow-list live in the class so both
+readers share one implementation; a mutation widening that allow-list turns both
+tier 1 and tier 3 red, which is how the sharing is verified rather than assumed.
+
 ### The three statuses
 
 | Status | Meaning | Build outcome |
@@ -377,14 +421,11 @@ keyslot - and re-pin the vector after.
 - **That the provider is still the one checked.** Tier 2 reads `${D}`, which
   closes the `do_install:append` window. It does not close the postfunc window:
   a bbappend appending its own `do_install` postfunc runs after this one.
-- **That the capability the DEVICE sees is the one checked.** Both tiers read
-  `AVOCADO_SECURITY_CAPABILITIES` from this recipe's own datastore, while
-  `/etc/avocado-security-capabilities` is written by
-  `avocado_security_capabilities_write_artifact` from the image recipe's. A
-  one-line `cryptsetup-var.bbappend` clearing it disarms both tiers while the
-  image still ships `encrypted-var`, so the `unusable` placeholder reaches a
-  device on a green build. Confirmed on a real build, and the only fail-open
-  path left here.
+- **That either tier ran at all.** Both read `AVOCADO_SECURITY_CAPABILITIES`
+  from this recipe's own datastore, so a one-line `cryptsetup-var.bbappend`
+  clearing it silences both - and always will, because that is the datastore
+  they are parsed in. That is now caught one level up rather than here; see the
+  third tier below.
 
 ### The tier regression test
 
@@ -418,13 +459,16 @@ reach the differential the unprefixed path has to exist on the host, which is
 why one case declares `/proc/sys/kernel/ostype` rather than a synthetic `/sys`
 path - and why the two are separate cases.
 
-Two cases are recorded as GAPs rather than passes, both the capability-datastore
-bypass above, on each tier. Each names the change that would close it, and its
-expectation flips to a refusal when that change lands, so the file is also the
-regression test for the fix still outstanding. Two further gaps - a secondary
-read shadowed by the primary, and a provider that derived only when handed a
-fixture root - were recorded the same way and are now closed; their cases assert
-a refusal.
+It covers all three tiers, slicing the two recipe bodies from
+`cryptsetup-var.bb` and the image-scope one from the class, with the shared
+helpers sliced from the class too.
+
+No gaps are open. Four were recorded this way and all four are closed - a
+secondary read shadowed by the primary, a provider that derived only when
+handed a fixture root, and the capability bypass on each of the two recipe
+tiers. The mechanism stays: a hole gets a case that asserts today's wrong
+answer and names the change that would fix it, and the expectation flips when
+that change lands.
 
 Five cases run the tier against the REAL shipped providers rather than a
 synthetic one. They cover the direction that breaks a build rather than the one

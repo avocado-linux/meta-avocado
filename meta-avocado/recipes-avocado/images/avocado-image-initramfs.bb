@@ -63,6 +63,15 @@ ROOTFS_POSTPROCESS_COMMAND += "cleanup_root_files;"
 # and /var never unlocks - var.mount then times out into the emergency shell.
 ROOTFS_POSTPROCESS_COMMAND += "avocado_security_capabilities_write_artifact;"
 
+# Checked here and not only in cryptsetup-var.bb because this is the one place
+# the declaration and the provider that ships with it are visible in the same
+# datastore. Both of that recipe's tiers read the capability from its OWN
+# datastore, so a cryptsetup-var.bbappend clearing the variable silences them
+# while this image still writes encrypted-var into the artifact above and still
+# installs the provider. Ordered after the writer so the file it validates
+# against is the one just written.
+ROOTFS_POSTPROCESS_COMMAND += "avocado_security_capabilities_check_provider;"
+
 # Same reason as in avocado-image-rootfs.bb: the declaration is the artifact's
 # content, so do_rootfs must depend on it or a changed declaration never
 # invalidates the cached rootfs and the image ships a stale capability set.

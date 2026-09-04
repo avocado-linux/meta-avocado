@@ -159,6 +159,89 @@ def avocado_security_capabilities_check(d):
 # recipe, "The var-key provider contract".
 # Read them together - this class covers request-vs-declaration, that recipe
 # covers declaration-vs-deliverability.
+# --- var-key provider declaration parsing -------------------------------------
+#
+# These live here rather than in cryptsetup-var.bb because that recipe is no
+# longer the only reader. The image-scope gate below parses the SAME
+# declarations out of the provider that was actually installed into the
+# initramfs, and a second copy of this parser is precisely the drift this whole
+# check exists to prevent: the two readers would disagree about what a
+# declaration means and the disagreement would be invisible.
+#
+# The class is inherited globally (conf/distro/include/avocado-security.inc),
+# so cryptsetup-var.bb reaches them without an explicit inherit.
+
+def avocado_var_key_flat(text):
+    """Flatten square brackets so bakar's Rich log handler cannot eat a value.
+
+    bakar streams bitbake's log through a Rich handler with markup enabled,
+    which parses a bracketed span as a style tag and drops it. Module level, so
+    BOTH tiers reach it: the parse tier interpolates provider-file content -
+    a status token is whatever the file says, and `[usable]` parses as a valid
+    single token - and rendering that message lost the exact string an author
+    needs to fix.
+    """
+    return str(text).replace("[", "(").replace("]", ")")
+
+
+def avocado_var_key_declarations(contents, marker):
+    """Every comment line in CONTENTS declaring MARKER, as a list of values.
+
+    Exactly one leading '#' is stripped, not all of them: lstrip("#") also
+    matched an indented documentation example like '#   # <marker>: usable', so
+    a provider that merely SHOWS the contract in prose was read as declaring it.
+    Both tiers match a declaration rather than prose, and stripping one hash is
+    what distinguishes them.
+    """
+    found = []
+    prose = []
+    for line in contents.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#"):
+            continue
+        body = stripped[1:].strip()
+        if not body.startswith(marker):
+            continue
+        value = body[len(marker):].strip()
+        # A declaration's value is a single bare token. Stripping one '#'
+        # separates a declaration from an indented example of one, but not from
+        # prose that opens with the marker and runs on into a sentence - a
+        # migration note reading '<marker>: usable was previously required ...'
+        # was collected as a declaration whose status was the whole remaining
+        # sentence, and refused the build for an unrecognised status.
+        #
+        # A multi-token line is returned SEPARATELY rather than dropped, and the
+        # distinction is load-bearing rather than tidy. Dropping is safe for the
+        # status marker, where losing every match still ends in a fatal, and
+        # unsafe for the identity marker, where losing ONE of several is
+        # invisible: the fixture is built one path short, the provider falls
+        # through to a path that is populated, two different keys still come
+        # out, and the build passes while the dropped read resolves against the
+        # build host - the exact case the two-identity assertion exists to
+        # catch. Each caller decides which of the two it can afford.
+        if value and len(value.split()) == 1:
+            found.append(value)
+        else:
+            prose.append(body)
+    return found, prose
+
+
+def avocado_var_key_test_only_machines():
+    """Machines permitted to ship a `test-only` var-key provider.
+
+    A literal, not a d.getVar. AVOCADO_VAR_KEY_TEST_ONLY_MACHINES is published
+    for readers only: conf files parse before recipes, so a machine conf or a
+    local.conf setting it wins over any assignment in a recipe, and a vendor
+    could name its own machine into the waiver. An allow-list the constrained
+    party can edit constrains nobody.
+
+    Here rather than in cryptsetup-var.bb because both the parse tier and the
+    image-scope gate below decide the same waiver, and an allow-list that
+    disagrees with itself across two readers is worse than either copy.
+    """
+    return ("avocado-qemux86-64", "avocado-qemuarm64")
+
+
 addhandler avocado_security_capabilities_eventhandler
 avocado_security_capabilities_eventhandler[eventmask] = "bb.event.ConfigParsed"
 python avocado_security_capabilities_eventhandler() {
@@ -200,6 +283,123 @@ python avocado_security_capabilities_write_artifact() {
     path = os.path.join(destdir, "avocado-security-capabilities")
     with open(path, "w") as f:
         f.write(capabilities + "\n")
+}
+
+# The gate that cannot be disarmed from cryptsetup-var.bbappend.
+#
+# cryptsetup-var.bb's two tiers both read AVOCADO_SECURITY_CAPABILITIES from
+# THAT RECIPE'S datastore, while the artifact above is written from the IMAGE
+# recipe's. The two are different datastores, so a one-line
+#
+#     AVOCADO_SECURITY_CAPABILITIES = ""
+#
+# in a cryptsetup-var.bbappend silenced both tiers while the image went on
+# shipping /etc/avocado-security-capabilities containing encrypted-var. The
+# device's own check (cryptsetup-var.sh) reads that file, passes, and derives
+# with whatever var-key.sh shipped - including the `unusable` placeholder the
+# whole check exists to stop. Confirmed on a real build: the refusal count went
+# from 1 to 0 with that bbappend in place.
+#
+# Fixed by altitude rather than by another variable. Every variable is
+# overridable by whoever is doing the overriding, so a canonical copy in a
+# second variable moves the problem rather than removing it. Here the
+# declaration and the shipped provider are visible in ONE datastore at ONE
+# point, so they cannot disagree: this runs from the initramfs image's
+# ROOTFS_POSTPROCESS_COMMAND, reads the capability the image is about to write,
+# and inspects the provider that image actually contains.
+#
+# The initramfs and not the rootfs, because that is where the provider ships:
+# packagegroup-avocado-initramfs.bb installs `cryptsetup cryptsetup-var` when
+# the capability is declared, while the rootfs gets only the udev and posture
+# packages. It is also where the provider is consumed first, cryptsetup-var.sh
+# being an initrd unit.
+#
+# Deliberately NOT a second copy of the derivation check. cryptsetup-var.bb
+# runs the provider against synthetic identities and that stays the expensive,
+# authoritative tier. This one answers the question that tier cannot ask about
+# itself - "did it run at all, and over the provider that shipped?" - which a
+# status read is enough for.
+python avocado_security_capabilities_check_provider() {
+    import os
+
+    capabilities = d.getVar("AVOCADO_SECURITY_CAPABILITIES")
+    if capabilities is None or "encrypted-var" not in capabilities.split():
+        return
+
+    flat = avocado_var_key_flat
+    machine = d.getVar("MACHINE") or "<unknown>"
+    marker = d.getVar("AVOCADO_VAR_KEY_MARKER") or "avocado-var-key-provider:"
+    rootfs = d.getVar("IMAGE_ROOTFS")
+    libexecdir = d.getVar("libexecdir")
+    provider = os.path.join(
+        rootfs + libexecdir, "cryptsetup-var", "var-key.sh"
+    )
+    lead = ("machine %s declares encrypted-var and this image "
+            % flat(machine))
+
+    if not os.path.isfile(provider):
+        bb.fatal(
+            lead + "ships no var-key.sh at %s. cryptsetup-var.sh reads "
+            "/etc/avocado-security-capabilities from this initramfs, sees "
+            "encrypted-var, and has nothing to derive a key with, so /var "
+            "never unlocks. Either the capability does not belong on this "
+            "machine, or packagegroup-avocado-initramfs is not installing "
+            "cryptsetup-var." % flat(provider)
+        )
+
+    try:
+        with open(provider, encoding="utf-8", errors="replace") as f:
+            contents = f.read()
+    except OSError as exc:
+        bb.fatal(
+            lead + "could not read the var-key.sh it ships at %s: %s."
+            % (flat(provider), flat(exc))
+        )
+
+    statuses, _prose = avocado_var_key_declarations(contents, marker)
+    if len(statuses) != 1:
+        bb.fatal(
+            lead + "ships a var-key.sh (%s) carrying %d '%s' status lines; "
+            "exactly one is required. cryptsetup-var.bb refuses this at parse "
+            "time, so reaching it here means that check did not run over this "
+            "provider."
+            % (flat(provider), len(statuses), marker)
+        )
+
+    status = statuses[0]
+    if status == "unusable":
+        bb.fatal(
+            lead + "ships the placeholder var-key.sh (%s), which declares "
+            "itself unusable and cannot derive a key at all. cryptsetup-var.bb "
+            "refuses this at parse time, so reaching it here means that check "
+            "was disarmed - most likely by a cryptsetup-var.bbappend clearing "
+            "AVOCADO_SECURITY_CAPABILITIES, which does not reach this image's "
+            "declaration." % flat(provider)
+        )
+
+    if status not in ("usable", "test-only"):
+        bb.fatal(
+            lead + "ships a var-key.sh (%s) declaring the unrecognised status "
+            "'%s'; expected 'usable', 'test-only' or 'unusable'."
+            % (flat(provider), flat(status))
+        )
+
+    if status == "test-only":
+        allowed = avocado_var_key_test_only_machines()
+        if machine not in allowed:
+            bb.fatal(
+                lead + "ships a var-key.sh (%s) declared test-only, which "
+                "waives the requirement to refuse when no hardware identity is "
+                "readable - so every device built from this image derives the "
+                "SAME /var key. Permitted only for %s."
+                % (flat(provider), ", ".join(allowed))
+            )
+        bb.warn(
+            "machine %s ships a test-only var-key.sh (%s) in its initramfs: "
+            "every device built from this image may derive the same /var key. "
+            "Intended for disposable virtual targets only."
+            % (machine, flat(provider))
+        )
 }
 
 # devtool-debt: kas/feature/ftpm.yml (imx93-ahab-secure-boot branch only, not

@@ -79,59 +79,11 @@ AVOCADO_VAR_KEY_TEST_ONLY_MACHINES = "avocado-qemux86-64 avocado-qemuarm64"
 # the execution tier to decide which paths its fixture must populate.
 AVOCADO_VAR_KEY_IDENTITY_MARKER = "avocado-var-key-identity:"
 
-def avocado_var_key_flat(text):
-    """Flatten square brackets so bakar's Rich log handler cannot eat a value.
-
-    bakar streams bitbake's log through a Rich handler with markup enabled,
-    which parses a bracketed span as a style tag and drops it. Module level, so
-    BOTH tiers reach it: the parse tier interpolates provider-file content -
-    a status token is whatever the file says, and `[usable]` parses as a valid
-    single token - and rendering that message lost the exact string an author
-    needs to fix.
-    """
-    return str(text).replace("[", "(").replace("]", ")")
-
-
-def avocado_var_key_declarations(contents, marker):
-    """Every comment line in CONTENTS declaring MARKER, as a list of values.
-
-    Exactly one leading '#' is stripped, not all of them: lstrip("#") also
-    matched an indented documentation example like '#   # <marker>: usable', so
-    a provider that merely SHOWS the contract in prose was read as declaring it.
-    Both tiers match a declaration rather than prose, and stripping one hash is
-    what distinguishes them.
-    """
-    found = []
-    prose = []
-    for line in contents.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("#"):
-            continue
-        body = stripped[1:].strip()
-        if not body.startswith(marker):
-            continue
-        value = body[len(marker):].strip()
-        # A declaration's value is a single bare token. Stripping one '#'
-        # separates a declaration from an indented example of one, but not from
-        # prose that opens with the marker and runs on into a sentence - a
-        # migration note reading '<marker>: usable was previously required ...'
-        # was collected as a declaration whose status was the whole remaining
-        # sentence, and refused the build for an unrecognised status.
-        #
-        # A multi-token line is returned SEPARATELY rather than dropped, and the
-        # distinction is load-bearing rather than tidy. Dropping is safe for the
-        # status marker, where losing every match still ends in a fatal, and
-        # unsafe for the identity marker, where losing ONE of several is
-        # invisible: the fixture is built one path short, the provider falls
-        # through to a path that is populated, two different keys still come
-        # out, and the build passes while the dropped read resolves against the
-        # build host - the exact case the two-identity assertion exists to
-        # catch. Each caller decides which of the two it can afford.
-        if value and len(value.split()) == 1:
-            found.append(value)
-        else:
-            prose.append(body)
-    return found, prose
+# avocado_var_key_flat() and avocado_var_key_declarations() are defined in
+# avocado-security-capabilities.bbclass, which is inherited globally by
+# conf/distro/include/avocado-security.inc. They moved there when the
+# image-scope gate became a second reader of the same declarations - one
+# parser, so the two readers cannot disagree about what a declaration means.
 
 python __anonymous() {
     if not bb.utils.contains(
@@ -241,13 +193,11 @@ python __anonymous() {
     # shipping a fleet whose every board opens with the same /var key while the
     # capability declaration still says encrypted-var.
     if status == "test-only":
-        # A literal, not d.getVar. The variable of the same name above is
-        # published for readers only: conf files parse before recipes, so a
-        # machine conf or local.conf setting it wins over any assignment here
-        # and a vendor could name its own machine into the waiver. An
-        # allow-list that the party being constrained can edit constrains
-        # nobody.
-        allowed = ("avocado-qemux86-64", "avocado-qemuarm64")
+        # Shared with the image-scope gate in
+        # avocado-security-capabilities.bbclass, which decides the same waiver
+        # over the provider that actually shipped. Two copies that disagree
+        # would be worse than either.
+        allowed = avocado_var_key_test_only_machines()
         if machine not in allowed:
             bb.fatal(
                 lead + "the var-key.sh that resolves for it (%s) declares "
