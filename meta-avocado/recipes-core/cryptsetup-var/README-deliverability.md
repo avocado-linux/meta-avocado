@@ -203,9 +203,18 @@ generic failure.
 ### Tier 2, install time (`do_install[postfuncs]`)
 
 Runs the INSTALLED provider under `${D}` against two synthetic identity
-fixtures built from its declared paths, and requires each run to exit 0 with 64
-bytes and the two keys to DIFFER. It then runs it a third time against an EMPTY
-fixture and requires it to REFUSE.
+fixtures built from its declared paths, and requires:
+
+1. each run to exit 0 with exactly 64 bytes;
+2. the same identity to yield the SAME key, re-derived from the first fixture;
+3. the two different identities to yield DIFFERENT keys;
+4. an EMPTY fixture to be REFUSED.
+
+Check 2 is the one that looks redundant and is not. A provider mixing in a
+timestamp or a random salt satisfies check 3 trivially, because its two runs
+differ for the wrong reason - and on a device that is worse than a constant
+key: first boot formats `/var` with one key and every later boot derives
+another, so the volume never opens again.
 
 The two-identity part is the load-bearing half. A length check alone passes a
 provider that emits a hardcoded constant, and passes one whose identity read is
@@ -267,6 +276,26 @@ skips it, and machines sharing a provider share that sstate object.
 - **That the provider is still the one checked.** Tier 2 reads `${D}`, which
   closes the `do_install:append` window. It does not close the postfunc window:
   a bbappend appending its own `do_install` postfunc runs after this one.
+- **That a provider behaves the same when it is not being tested.** The check
+  passes the fixture root as an argument, while the device invokes the provider
+  with none, so the artifact under test can see that it is under test. A
+  provider written to derive properly whenever `$1` is set and to emit a
+  constant when it is empty passes everything here. This bounds the whole tier:
+  it catches mistakes and careless providers, not one written to evade it. It
+  is also why the `test-only` waiver is gated on a list this recipe owns rather
+  than on anything a provider declares about itself.
+
+### Not covered by an executable test
+
+The three `test-deliverability-*.md` files beside this one are records of
+builds that were run, not tests a runner re-executes. The provider suites under
+each vendor layer's `tests/` ARE executable and do cover provider behaviour, but
+nothing re-runs the recipe's own tier-2 rejection branches - a constant key, a
+wrong length, a non-reproducible derivation, an undeclared identity, an
+unauthorised `test-only`. Those were each verified once by mutating a provider
+and observing the refusal, and a regression in them would merge without a
+signal. An oe-selftest that builds temporary provider fixtures is the missing
+piece.
 
 ### Adding a machine
 

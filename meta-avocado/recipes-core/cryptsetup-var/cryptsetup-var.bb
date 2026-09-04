@@ -51,7 +51,7 @@ SRC_URI = " \
 # line cannot show that a provider derives anything: a script that exits 1 on
 # every path, that emits hex rather than raw bytes, or that a bad bbappend
 # truncated, declares itself usable exactly as convincingly as a working one.
-# check_var_key_deliverability below is the check of that claim - it runs the
+# avocado_var_key_check_deliverability below is the check of that claim - it runs the
 # installed provider against a synthetic identity and requires 64 key bytes
 # out. This tier stays because it is the cheap one: it refuses at parse time,
 # before anything is fetched or compiled.
@@ -292,6 +292,34 @@ python __anonymous() {
 #     older than the native passes here and fails at first boot.
 #   - That any provider branch other than the declared one works. Only the
 #     declared identity paths are populated, so a fallback leg is not exercised.
+#   - That a provider behaves the same when it is NOT being tested. The check
+#     runs it as `sh var-key.sh <fixture-root>` while the device runs it with no
+#     argument, so the artifact under test can see it is under test. A provider
+#     written to derive properly whenever argv 1 is set, and to emit a constant
+#     when it is empty, passes every assertion here and ships a fleet-wide key.
+#     This bounds the whole tier: it catches mistakes and careless providers,
+#     not a provider written to evade it. That is a real gap and not a
+#     theoretical one, and it is the reason the waiver above is gated on a list
+#     this recipe owns rather than on anything a provider says about itself.
+#
+# devtool-debt: the fixture is delivered as an argument, so the provider can
+# detect the test. Ceiling: providers written in good faith, where the argument
+# is a convenience rather than a signal to behave differently. Upgrade trigger:
+# a provider is found branching on argv 1 for anything other than path
+# prefixing, or a third party outside this tree starts supplying providers. The
+# fix is to run the provider through its real no-argument interface with the
+# synthetic identities mounted at their true absolute paths - the tree already
+# has that shape in scripts/test-security-capability-guards.sh's `in_ns`, which
+# runs a shipped script unmodified under `unshare -rm`; it was not used here
+# because a nested user namespace under do_install's pseudo is fragile and
+# cannot see ${D}.
+#
+# devtool-debt: provider output is bounded on READ, not on WRITE. Ceiling: a
+# provider that terminates and does not deliberately flood; the 30s timeout
+# plus the read caps hold there. Upgrade trigger: a build is seen filling its
+# temporary filesystem from this check, or a provider is found backgrounding a
+# writer that outlives the timeout. The fix is an RLIMIT_FSIZE on the child and
+# killing the whole process group rather than the direct child.
 # See README-deliverability.md, "The var-key provider contract", for the full
 # statement of both tiers.
 #
@@ -530,17 +558,26 @@ python avocado_var_key_check_deliverability() {
             )
         return proc
 
+    # Both paths, not just the installed one. The spec requires the diagnostic
+    # to name the RESOLVED provider, and an operator who has only the ${D} path
+    # cannot tell which layer or bbappend to correct - least of all in the case
+    # this tier exists for, where the installed copy is not what FILESPATH
+    # resolved.
+    where = "installed %s, resolved from %s" % (
+        flat(installed), flat(source or "<unresolved on FILESPATH>")
+    )
+
     def derive(root):
         proc = run(root)
         stderr = flat(proc.stderr.decode("utf-8", "replace").strip()) or "(none)"
         if proc.returncode != 0:
             bb.fatal(
-                lead + "its installed var-key.sh (%s) exited %d when run against "
+                lead + "its var-key.sh (%s) exited %d when run against "
                 "a synthetic identity at the paths it declares (%s). A provider "
                 "that cannot derive a key from its own declared identity sources "
                 "cannot derive one on the device either. Provider stderr: %s"
                 % (
-                    flat(installed),
+                    where,
                     proc.returncode,
                     flat(", ".join(identities)),
                     stderr,
@@ -548,10 +585,10 @@ python avocado_var_key_check_deliverability() {
             )
         if len(proc.stdout) != 64:
             bb.fatal(
-                lead + "its installed var-key.sh (%s) emitted %d bytes, not the "
+                lead + "its var-key.sh (%s) emitted %d bytes, not the "
                 "64 raw key bytes cryptsetup-var.sh reads from its stdout. "
                 "Provider stderr: %s"
-                % (flat(installed), len(proc.stdout), stderr)
+                % (where, len(proc.stdout), stderr)
             )
         return proc.stdout
 
@@ -582,6 +619,25 @@ python avocado_var_key_check_deliverability() {
     # the rule beside them beat a variable nothing consults.
     populate(first, "avocado-synthetic-identity-aaaa00000000000000000001")
     key_a = derive(first)
+    # The SAME identity must yield the SAME key. A provider that mixes in
+    # anything non-reproducible - a timestamp, $RANDOM, an openssl-generated
+    # salt - passes the difference assertion below trivially, because two runs
+    # differ for the wrong reason. On a device that is worse than a constant
+    # key: first boot formats the volume with one key and every later boot
+    # derives another, so /var never opens again. Re-deriving from the first
+    # fixture costs one Argon2id run and is the only thing here that can see it.
+    key_a_again = derive(first)
+    if key_a != key_a_again:
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) derived two DIFFERENT keys "
+            "from the same synthetic identity, so its derivation is not "
+            "reproducible. A device would format /var with one key on first "
+            "boot and fail to unlock with another on the next. Remove whatever "
+            "varies between runs - a timestamp, a random salt, an unseeded "
+            "value - and derive only from the declared identity sources (%s)."
+            % (flat(installed), flat(", ".join(identities)))
+        )
+
     populate(second, "avocado-synthetic-identity-bbbb00000000000000000002")
     key_b = derive(second)
 
