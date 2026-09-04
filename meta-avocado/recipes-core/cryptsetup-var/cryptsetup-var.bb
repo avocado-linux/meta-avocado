@@ -62,7 +62,17 @@ AVOCADO_VAR_KEY_MARKER = "avocado-var-key-provider:"
 # in meta-avocado, rather than being inferred from the provider: the layer
 # shipping a provider must not be able to grant itself the waiver. Only virtual
 # targets belong on this list, because only they have no identity to read.
-AVOCADO_VAR_KEY_TEST_ONLY_MACHINES ?= "avocado-qemux86-64 avocado-qemuarm64"
+#
+# Published for readers, and NOT read by the check. The permitted set is a
+# literal inside avocado_var_key_check_deliverability's parse tier, because a
+# BitBake variable is the wrong container for a security allow-list: conf files
+# parse before recipes, so `?=` here would be a no-op against any machine conf
+# or local.conf that set the variable first, and even `=` is reachable from a
+# bbappend. Either way the vendor decides which machines may waive the refusal
+# check, which is exactly what the split exists to prevent. Keep this in step
+# with the literal; the check refuses on the literal regardless of what this
+# says.
+AVOCADO_VAR_KEY_TEST_ONLY_MACHINES = "avocado-qemux86-64 avocado-qemuarm64"
 
 # Identity sources a usable provider reads, one absolute path per line, read by
 # the execution tier to decide which paths its fixture must populate.
@@ -89,8 +99,20 @@ def avocado_var_key_declarations(contents, marker):
         if not stripped.startswith("#"):
             continue
         body = stripped[1:].strip()
-        if body.startswith(marker):
-            found.append(body[len(marker):].strip())
+        if not body.startswith(marker):
+            continue
+        value = body[len(marker):].strip()
+        # The value must be a single bare token. Stripping one '#' separates a
+        # declaration from an indented example of one, but not from prose that
+        # opens with the marker and continues in a sentence - a migration note
+        # reading '<marker>: usable was previously required ...' was collected
+        # as a declaration whose status is the whole remaining sentence, and
+        # refused the build for an unrecognised status. Requiring one token
+        # reads that line as the prose it is, while still catching a genuine
+        # typo like 'usabel', which is a token and is still refused.
+        if not value or len(value.split()) != 1:
+            continue
+        found.append(value)
     return found
 
 python __anonymous() {
@@ -184,7 +206,13 @@ python __anonymous() {
     # shipping a fleet whose every board opens with the same /var key while the
     # capability declaration still says encrypted-var.
     if status == "test-only":
-        allowed = (d.getVar("AVOCADO_VAR_KEY_TEST_ONLY_MACHINES") or "").split()
+        # A literal, not d.getVar. The variable of the same name above is
+        # published for readers only: conf files parse before recipes, so a
+        # machine conf or local.conf setting it wins over any assignment here
+        # and a vendor could name its own machine into the waiver. An
+        # allow-list that the party being constrained can edit constrains
+        # nobody.
+        allowed = ("avocado-qemux86-64", "avocado-qemuarm64")
         if machine not in allowed:
             bb.fatal(
                 lead + "the var-key.sh that resolves for it (%s) declares "
