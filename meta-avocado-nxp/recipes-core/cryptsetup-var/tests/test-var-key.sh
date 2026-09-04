@@ -143,6 +143,39 @@ else
     bad "missing the avocado-var-key-identity declaration for soc0"
 fi
 
+# --- Case 9: a whitespace-only primary must not suppress a valid secondary ---
+# `tr -d '\0\n'` strips NULs and newlines but leaves spaces and tabs, so a
+# firmware field holding only blanks used to pass the -z test, be accepted as
+# this board's identity, and stop the good DT serial from ever being read.
+# Every board shipping that same blank field would derive one shared /var key.
+ws_a="$work/ws-blank-primary"
+ws_b="$work/ws-dt-only"
+mkdir -p "$ws_a/sys/devices/soc0" "$ws_a/sys/firmware/devicetree/base"
+mkdir -p "$ws_b/sys/firmware/devicetree/base"
+printf '   \t  ' > "$ws_a/sys/devices/soc0/serial_number"
+printf 'REAL-UNIQUE-SERIAL-42' > "$ws_a/sys/firmware/devicetree/base/serial-number"
+printf 'REAL-UNIQUE-SERIAL-42' > "$ws_b/sys/firmware/devicetree/base/serial-number"
+if sh "$provider" "$ws_a" > "$work/ws_a.bin" 2>"$work/ws_a.err" &&
+    sh "$provider" "$ws_b" > "$work/ws_b.bin" 2>/dev/null; then
+    if cmp -s "$work/ws_a.bin" "$work/ws_b.bin"; then
+        ok "a whitespace-only soc0 falls through to the DT serial"
+    else
+        bad "a blank soc0 value still contributed to the derived key"
+    fi
+else
+    bad "provider failed with a blank primary and a valid secondary: $(cat "$work/ws_a.err")"
+fi
+
+# --- Case 10: an all-whitespace identity everywhere is refused, not derived ---
+ws_c="$work/ws-all-blank"
+mkdir -p "$ws_c/sys/devices/soc0"
+printf '  \t ' > "$ws_c/sys/devices/soc0/serial_number"
+if sh "$provider" "$ws_c" > /dev/null 2>"$work/ws_c.err"; then
+    bad "derived a key from an all-whitespace identity instead of refusing"
+else
+    ok "an all-whitespace identity is refused rather than substituted"
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]

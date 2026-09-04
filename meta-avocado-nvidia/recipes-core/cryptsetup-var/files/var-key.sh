@@ -33,12 +33,25 @@ ROOT="${1:-}"
 DT_SERIAL_FILE="$ROOT/sys/firmware/devicetree/base/serial-number"
 SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
 
+# A candidate that is blank once whitespace is discounted is NOT an identity.
+# `tr -d '\0\n'` removes NULs and newlines but leaves spaces and tabs, so a DT
+# serial holding only blanks passed the -z test below, was accepted as this
+# board's identity, and suppressed the perfectly good soc0 source. Every board
+# shipping that same blank property would then derive the same /var key. Only
+# the emptiness TEST is normalised - HW_ID keeps the value exactly as read, so
+# a key that derives correctly today keeps deriving the same key.
+identity_is_blank() {
+    [ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]
+}
+
 HW_ID=""
 if [ -r "$DT_SERIAL_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+    _candidate=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+    identity_is_blank "$_candidate" || HW_ID="$_candidate"
 fi
 if [ -z "$HW_ID" ] && [ -r "$SOC_UID_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
+    _candidate=$(tr -d '\0\n' < "$SOC_UID_FILE")
+    identity_is_blank "$_candidate" || HW_ID="$_candidate"
 fi
 if [ -z "$HW_ID" ]; then
     echo "var-key: no SoC serial at $DT_SERIAL_FILE or $SOC_UID_FILE" >&2

@@ -49,15 +49,28 @@ ROOT="${1:-}"
 SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
 DT_SERIAL_FILE="$ROOT/sys/firmware/devicetree/base/serial-number"
 
+# A candidate that is blank once whitespace is discounted is NOT an identity.
+# `tr -d '\0\n'` removes NULs and newlines but leaves spaces and tabs, so a
+# firmware field holding only blanks passed the -z test below, was accepted as
+# this board's identity, and suppressed the perfectly good secondary source.
+# Every board shipping that same blank field would then derive the same /var
+# key. Only the emptiness TEST is normalised - HW_ID keeps the value exactly as
+# read, so a key that derives correctly today keeps deriving the same key.
+identity_is_blank() {
+    [ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]
+}
+
 HW_ID=""
 if [ -r "$SOC_UID_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
+    _candidate=$(tr -d '\0\n' < "$SOC_UID_FILE")
+    identity_is_blank "$_candidate" || HW_ID="$_candidate"
 fi
 if [ -z "$HW_ID" ] && [ -r "$DT_SERIAL_FILE" ]; then
     # Some u-boot configurations publish the same UID into the DT. Secondary
     # only: it is set by the bootloader rather than read from the SoC, so it is
     # the less authoritative of the two.
-    HW_ID=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+    _candidate=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+    identity_is_blank "$_candidate" || HW_ID="$_candidate"
 fi
 
 # Fail rather than fall back to a constant. The qemu provider substitutes a

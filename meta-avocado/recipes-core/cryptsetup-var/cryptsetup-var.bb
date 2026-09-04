@@ -78,11 +78,18 @@ AVOCADO_VAR_KEY_TEST_ONLY_MACHINES = "avocado-qemux86-64 avocado-qemuarm64"
 # the execution tier to decide which paths its fixture must populate.
 AVOCADO_VAR_KEY_IDENTITY_MARKER = "avocado-var-key-identity:"
 
-# The synthetic hardware identity written into every declared path. Chosen to
-# collide with none of the DMI placeholder strings the x86-64 provider refuses,
-# so a provider that rejects it is rejecting the fixture itself rather than
-# recognising a known-bad value.
-AVOCADO_VAR_KEY_FIXTURE_ID = "avocado-build-time-synthetic-identity-0000000000000001"
+def avocado_var_key_flat(text):
+    """Flatten square brackets so bakar's Rich log handler cannot eat a value.
+
+    bakar streams bitbake's log through a Rich handler with markup enabled,
+    which parses a bracketed span as a style tag and drops it. Module level, so
+    BOTH tiers reach it: the parse tier interpolates provider-file content -
+    a status token is whatever the file says, and `[usable]` parses as a valid
+    single token - and rendering that message lost the exact string an author
+    needs to fix.
+    """
+    return str(text).replace("[", "(").replace("]", ")")
+
 
 def avocado_var_key_declarations(contents, marker):
     """Every comment line in CONTENTS declaring MARKER, as a list of values.
@@ -94,6 +101,7 @@ def avocado_var_key_declarations(contents, marker):
     what distinguishes them.
     """
     found = []
+    prose = []
     for line in contents.splitlines():
         stripped = line.strip()
         if not stripped.startswith("#"):
@@ -102,18 +110,27 @@ def avocado_var_key_declarations(contents, marker):
         if not body.startswith(marker):
             continue
         value = body[len(marker):].strip()
-        # The value must be a single bare token. Stripping one '#' separates a
-        # declaration from an indented example of one, but not from prose that
-        # opens with the marker and continues in a sentence - a migration note
-        # reading '<marker>: usable was previously required ...' was collected
-        # as a declaration whose status is the whole remaining sentence, and
-        # refused the build for an unrecognised status. Requiring one token
-        # reads that line as the prose it is, while still catching a genuine
-        # typo like 'usabel', which is a token and is still refused.
-        if not value or len(value.split()) != 1:
-            continue
-        found.append(value)
-    return found
+        # A declaration's value is a single bare token. Stripping one '#'
+        # separates a declaration from an indented example of one, but not from
+        # prose that opens with the marker and runs on into a sentence - a
+        # migration note reading '<marker>: usable was previously required ...'
+        # was collected as a declaration whose status was the whole remaining
+        # sentence, and refused the build for an unrecognised status.
+        #
+        # A multi-token line is returned SEPARATELY rather than dropped, and the
+        # distinction is load-bearing rather than tidy. Dropping is safe for the
+        # status marker, where losing every match still ends in a fatal, and
+        # unsafe for the identity marker, where losing ONE of several is
+        # invisible: the fixture is built one path short, the provider falls
+        # through to a path that is populated, two different keys still come
+        # out, and the build passes while the dropped read resolves against the
+        # build host - the exact case the two-identity assertion exists to
+        # catch. Each caller decides which of the two it can afford.
+        if value and len(value.split()) == 1:
+            found.append(value)
+        else:
+            prose.append(body)
+    return found, prose
 
 python __anonymous() {
     if not bb.utils.contains(
@@ -121,9 +138,16 @@ python __anonymous() {
     ):
         return
 
+    flat = avocado_var_key_flat
     machine = d.getVar("MACHINE") or "<unknown>"
     marker = d.getVar("AVOCADO_VAR_KEY_MARKER")
-    lead = "machine %s declares encrypted-var but " % machine
+    if not marker:
+        bb.fatal(
+            "AVOCADO_VAR_KEY_MARKER is empty or unset, so every comment line in "
+            "a provider would match as a status declaration. It is set by "
+            "cryptsetup-var.bb and is not an opt-out switch."
+        )
+    lead = "machine %s declares encrypted-var but " % flat(machine)
     # The remedy states the WHOLE contract, both tiers, deliberately. Naming
     # only this tier's requirement sends an author who follows it exactly into
     # a second, differently-worded refusal one full parse-and-fetch later - the
@@ -143,8 +167,9 @@ python __anonymous() {
         % (marker, d.getVar("AVOCADO_VAR_KEY_IDENTITY_MARKER"))
     )
 
-    # An empty FILESPATH would send bb.utils.which to the host PATH, where a
-    # stray var-key.sh would be inspected as though it were the shipped one.
+    # An empty FILESPATH splits into [""], so bb.utils.which would stat
+    # var-key.sh relative to the task's working directory - a file that is not
+    # the shipped provider, inspected as though it were.
     filespath = d.getVar("FILESPATH")
     if not filespath:
         bb.fatal(lead + "FILESPATH is empty at parse time, so which var-key.sh ships cannot be determined." + remedy)
@@ -163,7 +188,7 @@ python __anonymous() {
     # wins turned the realistic migration - copy the shared provider, prepend a
     # usable line, forget to delete its unusable one - into a silent pass on a
     # provider that still cannot derive a key.
-    declarations = avocado_var_key_declarations(contents, marker)
+    declarations, _prose = avocado_var_key_declarations(contents, marker)
 
     if len(declarations) > 1:
         bb.fatal(
@@ -178,18 +203,18 @@ python __anonymous() {
     if status is None:
         bb.fatal(
             lead + "the var-key.sh that resolves for it (%s) declares no "
-            "'%s' status line, so it cannot be shown to derive a key." % (provider, marker) + remedy
+            "'%s' status line, so it cannot be shown to derive a key." % (flat(provider), marker) + remedy
         )
     if status == "unusable":
         bb.fatal(
             lead + "the var-key.sh that resolves for it (%s) declares itself "
-            "unusable: it is the placeholder that cannot actually derive a key." % provider + remedy
+            "unusable: it is the placeholder that cannot actually derive a key." % flat(provider) + remedy
         )
     if status not in ("usable", "test-only"):
         bb.fatal(
             lead + "the var-key.sh that resolves for it (%s) declares an "
             "unrecognised status '%s'; expected 'usable', 'test-only' or "
-            "'unusable'." % (provider, status) + remedy
+            "'unusable'." % (flat(provider), flat(status)) + remedy
         )
 
     # test-only exempts a provider from the execution tier's refusal check, so
@@ -223,7 +248,7 @@ python __anonymous() {
                 "(currently: %s), which is set in meta-avocado and is not for a "
                 "vendor layer to extend in order to pass this check. A machine "
                 "that ships to hardware needs a provider that refuses."
-                % (provider, ", ".join(allowed) or "none")
+                % (flat(provider), ", ".join(allowed))
             )
 }
 
@@ -292,28 +317,30 @@ python avocado_var_key_check_deliverability() {
     import os
     import shutil
     import subprocess
+    import tempfile
+    import types
 
     machine = d.getVar("MACHINE") or "<unknown>"
     marker = d.getVar("AVOCADO_VAR_KEY_IDENTITY_MARKER")
     installed = os.path.join(
         d.getVar("D") + d.getVar("libexecdir"), "cryptsetup-var", "var-key.sh"
     )
-    lead = "machine %s declares encrypted-var but " % machine
+    lead = "machine %s declares encrypted-var but " % avocado_var_key_flat(machine)
 
-    # bakar streams bitbake's log through a Rich handler with markup enabled,
-    # which parses a bracketed span as a style tag and silently drops it. EVERY
-    # value interpolated below is flattened, not just the provider's stderr: a
-    # WORKDIR or a declared path carrying a bracket would otherwise reach the
-    # terminal blank, which is the same failure the stderr flattening was added
-    # for.
-    def flat(text):
-        return str(text).replace("[", "(").replace("]", ")")
+    # Every provider-derived value interpolated below is flattened - paths,
+    # statuses, declared identity paths and the provider's own stderr - because
+    # bakar's Rich log handler parses a bracketed span as a style tag and drops
+    # it, so a bracket in any of them would reach the terminal blank. `machine`
+    # is flattened at `lead` where it enters.
+    flat = avocado_var_key_flat
 
-    if not marker:
+    status_marker = d.getVar("AVOCADO_VAR_KEY_MARKER")
+    if not marker or not status_marker:
         bb.fatal(
-            "AVOCADO_VAR_KEY_IDENTITY_MARKER is empty or unset, so every comment "
-            "line in a provider would match as an identity declaration. It is set "
-            "by cryptsetup-var.bb and is not an opt-out switch."
+            "AVOCADO_VAR_KEY_IDENTITY_MARKER or AVOCADO_VAR_KEY_MARKER is empty "
+            "or unset, so every comment line in a provider would match as a "
+            "declaration. Both are set by cryptsetup-var.bb and neither is an "
+            "opt-out switch."
         )
 
     if not os.path.isfile(installed):
@@ -328,7 +355,26 @@ python avocado_var_key_check_deliverability() {
             % (flat(installed), flat(exc))
         )
 
-    identities = avocado_var_key_declarations(contents, marker)
+    identities, identity_prose = avocado_var_key_declarations(contents, marker)
+
+    # An identity line the parser could not read as a declaration is FATAL here,
+    # where the same shape is merely dropped for the status marker. Losing one
+    # of several identity paths is silent and dangerous: the fixture is built a
+    # path short, the provider falls through to one that IS populated, two
+    # different keys still come out, and the build passes while the unreadable
+    # path's read went to the build host. Refusing costs an author one comment
+    # edit; accepting costs a fleet its /var key.
+    if identity_prose:
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) carries %d '%s' line(s) whose "
+            "value is not a single path: %s. An identity declaration names one "
+            "absolute path and nothing else - move any annotation to its own "
+            "comment line, because a line this check cannot read is a path its "
+            "fixture would not populate."
+            % (flat(installed), len(identity_prose), marker,
+               flat("; ".join(identity_prose)))
+        )
+
     if not identities:
         bb.fatal(
             lead + "its installed var-key.sh (%s) declares no '%s' line, so the "
@@ -343,8 +389,8 @@ python avocado_var_key_check_deliverability() {
     # the INSTALLED file rather than carried over from the parse tier, which
     # judged the FILESPATH source: the two can differ, and this tier exists
     # precisely because they can.
-    statuses = avocado_var_key_declarations(
-        contents, d.getVar("AVOCADO_VAR_KEY_MARKER")
+    statuses, _status_prose = avocado_var_key_declarations(
+        contents, status_marker
     )
     status = statuses[0] if len(statuses) == 1 else None
     if status is None:
@@ -381,8 +427,8 @@ python avocado_var_key_check_deliverability() {
     if source:
         try:
             with open(source, encoding="utf-8", errors="replace") as f:
-                source_statuses = avocado_var_key_declarations(
-                    f.read(), d.getVar("AVOCADO_VAR_KEY_MARKER")
+                source_statuses, _ = avocado_var_key_declarations(
+                    f.read(), status_marker
                 )
             if len(source_statuses) == 1:
                 source_status = source_statuses[0]
@@ -416,7 +462,14 @@ python avocado_var_key_check_deliverability() {
         # a symlink left at this path would survive and every write below would
         # land wherever it points - while the lexical guard further down still
         # reported the target as inside the fixture.
-        if os.path.islink(root) or os.path.isfile(root):
+        # Not just isfile: a FIFO, socket or device node left here is neither a
+        # symlink nor a regular file, so it took the rmtree branch, where
+        # ignore_errors swallowed the NotADirectoryError and the node survived -
+        # surfacing later as a parent-directory diagnosis unrelated to the real
+        # state.
+        if os.path.islink(root) or (
+            os.path.exists(root) and not os.path.isdir(root)
+        ):
             os.unlink(root)
         else:
             shutil.rmtree(root, ignore_errors=True)
@@ -442,14 +495,33 @@ python avocado_var_key_check_deliverability() {
                     % (flat(installed), flat(declared), flat(exc))
                 )
 
+    # Output is captured through bounded temporary files rather than pipes.
+    # `timeout` caps elapsed time, not volume, so a provider looping on `yes`
+    # or dumping a large file writes as much as it can inside the window while
+    # subprocess accumulates all of it in the worker's memory - and the 64-byte
+    # check that would have rejected it only runs after that read completes.
+    # The validator could be taken down by the artifact it is validating. The
+    # caps are far above any legitimate output (64 key bytes, a few lines of
+    # diagnostics) and exist only to bound the pathological case.
+    _STDOUT_CAP = 4096
+    _STDERR_CAP = 16384
+
     def run(root):
         try:
-            proc = subprocess.run(
-                ["sh", installed, root],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=30,
-            )
+            with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                rc = subprocess.call(
+                    ["sh", installed, root],
+                    stdout=out,
+                    stderr=err,
+                    timeout=30,
+                )
+                out.seek(0)
+                err.seek(0)
+                proc = types.SimpleNamespace(
+                    returncode=rc,
+                    stdout=out.read(_STDOUT_CAP),
+                    stderr=err.read(_STDERR_CAP),
+                )
         except (OSError, subprocess.TimeoutExpired) as exc:
             bb.fatal(
                 lead + "its installed var-key.sh (%s) could not be run against "
@@ -497,6 +569,17 @@ python avocado_var_key_check_deliverability() {
     first = os.path.join(base, "var-key-deliverability-fixture-a")
     second = os.path.join(base, "var-key-deliverability-fixture-b")
 
+    # Both values must collide with NO placeholder string any provider
+    # refuses, or a good provider is rejected for a property of this check
+    # rather than of itself. The x86-64 provider's is_placeholder() is the
+    # strictest today: a named lowercase list, plus a degenerate rule matching
+    # anything made only of zeros, dashes and spaces. Check both literals
+    # against it before editing either, or before widening that rule.
+    #
+    # A recipe variable used to hold this and was read by nothing after the
+    # two-identity assertion replaced the single fixture, so the invariant
+    # above was documented in one place and enforced in neither. Literals with
+    # the rule beside them beat a variable nothing consults.
     populate(first, "avocado-synthetic-identity-aaaa00000000000000000001")
     key_a = derive(first)
     populate(second, "avocado-synthetic-identity-bbbb00000000000000000002")
@@ -533,23 +616,38 @@ python avocado_var_key_check_deliverability() {
     # refuses a symlink and ignore_errors hides the refusal, so a symlink left
     # here would leave the "empty" root pointing at a populated tree and the
     # refusal check would judge a fixture that is not empty.
-    if os.path.islink(empty) or os.path.isfile(empty):
+    if os.path.islink(empty) or (
+        os.path.exists(empty) and not os.path.isdir(empty)
+    ):
         os.unlink(empty)
     else:
         shutil.rmtree(empty, ignore_errors=True)
     bb.utils.mkdirhier(empty)
     negative = run(empty)
 
-    if status == "test-only":
+    if status == "test-only" and negative.returncode == 0:
         bb.warn(
             "machine %s resolves to a var-key.sh (%s) declared test-only: with "
             "no identity readable it emitted %d bytes instead of refusing, so "
             "every device built from this image derives the SAME /var key. That "
             "is intended for disposable virtual targets only, and this machine "
-            "is on AVOCADO_VAR_KEY_TEST_ONLY_MACHINES for that reason. A machine "
+            "is permitted to waive the refusal check for that reason. A machine "
             "that ships to hardware must resolve to a provider declared usable, "
             "which is required to refuse instead."
             % (machine, flat(installed), len(negative.stdout))
+        )
+    elif status == "test-only":
+        # The waiver is declared but no longer needed: this provider DID refuse.
+        # Reported rather than passed over silently, because the previous form
+        # branched on the status alone and would have gone on announcing a
+        # fleet-wide key over a provider that had grown a real refusal path -
+        # asserting an outcome it never looked at.
+        bb.warn(
+            "machine %s resolves to a var-key.sh (%s) declared test-only, but it "
+            "refused the empty identity fixture (exit %d) rather than emitting a "
+            "key. The waiver is no longer doing anything: declare this provider "
+            "usable and drop the machine from the permitted list."
+            % (machine, flat(installed), negative.returncode)
         )
     elif negative.returncode == 0:
         # The remedy names the fix and NOT the waiver, deliberately. The only
@@ -573,7 +671,7 @@ do_install[postfuncs] += "avocado_var_key_check_deliverability"
 # MACHINE is read only to name the machine in a diagnostic, but a getVar inside
 # a postfunc enters do_install's signature. Left in, it would split do_install
 # sstate across every machine that shares one provider and installs byte
-# identical content - the six Jetson machines on meta-avocado-nvidia's.
+# identical content - the seven Jetson-family machines on meta-avocado-nvidia's.
 do_install[vardepsexclude] += "MACHINE"
 
 # Tools cryptsetup-var.sh + var-key.sh invoke in the (minimal) initramfs:
