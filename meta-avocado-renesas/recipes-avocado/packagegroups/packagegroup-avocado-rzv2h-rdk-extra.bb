@@ -10,7 +10,16 @@ PACKAGES = "${PN}"
 # extension's `kernel-modules: '*'` request resolves against. This is the
 # load-bearing entry (see docs/adding-a-machine-target.md section 9); without it
 # `avocado ext install` for the board cannot resolve its modules.
-RDEPENDS:${PN} = "kernel-modules"
+# MACHINE_EXTRA_RRECOMMENDS carries the board's debug/probe toolset from
+# avocado-rzv2h-rdk.conf. Expanding it here is what makes it reachable: nothing
+# else in an avocado build reads it, since packagegroup-base is an oe-core
+# packagegroup this distro does not install (packagegroup-avocado-rootfs.bb
+# documents dropping core-boot). meta-avocado-qcom, -raspberrypi and -rockchip
+# wire it the same way.
+RDEPENDS:${PN} = " \
+    kernel-modules \
+    ${MACHINE_EXTRA_RRECOMMENDS} \
+"
 
 # TODO(after first boot): mirror packagegroup-avocado-solidrun-extra and add the
 # RZ/V2H multimedia (mmngr/vspm), Wayland/display, DRP-AI3 userspace
