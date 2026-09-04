@@ -304,6 +304,60 @@ nothing behind it. Land the migration first - derive the old key, `luksAddKey`
 the new one, `luksKillSlot` the old - and re-pin the vector after. Re-pinning
 to make the suite green is how a fleet loses its data with every test passing.
 
+### Whether a derivation change locks a device out
+
+The golden vectors make a changed derivation LOUD. They do not say which inputs
+moved, or whether any device can produce one. `tests/compare-derivations.py`
+answers that: it runs each provider at two git refs over a table of identity
+values and reports every row whose key changed, or whose key became a refusal.
+Both sides are driven by rewriting the declared paths and running with no
+argument, because a provider from before this check existed takes no first
+argument and cannot be pointed at a fixture at all.
+
+```bash
+python3 tests/compare-derivations.py <ref-before-the-change> [--provider LAYER]
+```
+
+The base ref is required and has no default on purpose. A merge-base against
+the remote's default branch does not resolve on a branch with an unrelated
+history - `boot-integrity-poc` shares no ancestor with `origin/scarthgap` - and
+a wrongly chosen base produces a full table of meaningless rows rather than an
+error.
+
+Run it before re-pinning a vector, and read the result with one qualifier: a
+row matters only if a device can BOTH produce that input AND already hold a
+`/var` formatted under the older ref. Neither half is visible from the table.
+
+Measured for this change (`2830879f` to HEAD), 18 of 32 rows are lockouts:
+
+| Provider | Lockout rows | Precondition | Reaches a machine declaring `encrypted-var`? |
+| --- | --- | --- | --- |
+| x86-64 | 11 of 17 | a placeholder in `product_uuid` | **No** - all three Intel machines declare `tpm2` only |
+| nxp | 4 of 8 | a whitespace-only `soc0/serial_number` | **Yes** - `avocado-imx93-frdm`, `avocado-imx8mp-evk` |
+| nvidia | 3 of 7 | a whitespace-only DT `serial-number` | **No** - none of the 7 machine confs declares any capability |
+
+The intersection of reachable and plausible is empty, which is why no migration
+ships with this change. The x86-64 rows are by far the most plausible inputs -
+whitebox boards really do ship those placeholder strings - and that provider
+reaches no machine with the capability enabled. The nxp rows are the ones that
+reach shipping hardware, and every one of them needs a primary identity holding
+only blanks; the i.MX and Tegra SoC drivers format the UID as hex, so that is
+not a value they emit.
+
+Worth noting where the review pressure landed, because it is a trap for the
+next reader: this was raised against x86-64, the provider with the largest
+key-change surface and no reachability, and it did not mention nxp, the only
+one that ships. Surface size and exposure are independent, and the table above
+is arranged to keep them apart.
+
+**No migration is a conclusion about this change, not a standing property.** A
+future provider edit can land in the reachable-and-plausible cell, and by then
+a device may hold a volume. The sequence is: golden vector goes red, run this
+tool, and if any lockout row is reachable and plausible, land the migration in
+`cryptsetup-var.sh` first - derive the old key, `luksAddKey` the new one,
+`luksKillSlot` the old, reusing the machinery already there for the TPM
+keyslot - and re-pin the vector after.
+
 ### What the check does not establish
 
 - **That the identity is readable on the device at initramfs time.** That is a
