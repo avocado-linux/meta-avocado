@@ -1,0 +1,80 @@
+name: CodeQL Analyze
+
+# Replaces code scanning's "default setup", which never analyzes pull_request
+# events from forks (no repo secrets/write token for untrusted head branches),
+# so a PR's head commit could never satisfy the code_scanning branch ruleset
+# and merging stayed BLOCKED forever waiting on results that would never come.
+#
+# On push/schedule (trusted, same-repo) we upload directly. On pull_request
+# (fork or same-repo alike) we only ever produce a local SARIF artifact, since
+# GitHub caps the token to read-only for fork PRs regardless of what's
+# requested below -- codeql-upload.yml, running with the base repo's real
+# permissions, does the actual upload. It derives the commit to attribute
+# results to from the workflow_run event itself (GitHub-verified) rather than
+# from anything this job writes, since this job's steps run on the fork
+# author's own branch content and are not a trustworthy source for that.
+#
+# Checked out explicitly at the PR's head commit (not the default merge
+# commit) so the tree CodeQL analyzes is the exact commit codeql-upload.yml
+# attributes results to -- see that file for the ref/sha pairing.
+
+on:
+  pull_request:
+    branches: [scarthgap, wrynose]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [scarthgap, wrynose]
+  schedule:
+    # Catches drift push/PR triggers structurally can't: newly published
+    # CodeQL queries matching code that hasn't changed, and any PR analysis
+    # that silently failed or never ran.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  # Only takes effect for push/schedule -- GitHub caps the token to read-only
+  # for pull_request events from forks regardless of what's requested here.
+  security-events: write
+
+concurrency:
+  group: codeql-analyze-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # Only supersede in-flight PR runs. push and schedule share no group key
+  # with each other or with pull_request runs, so a weekly cron tick can't
+  # cancel a just-landed push's baseline scan (or vice versa) and silently
+  # leave scarthgap's default-branch coverage skipping a commit.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          # push/schedule: upload straight away, same as default setup did.
+          # pull_request: never upload here -- codeql-upload.yml does it.
+          upload: ${{ github.event_name != 'pull_request' }}
+          output: sarif-results
+
+      - name: Upload SARIF as an artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-${{ matrix.language }}
+          path: sarif-results
+          retention-days: 1

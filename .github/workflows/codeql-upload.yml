@@ -1,0 +1,86 @@
+name: CodeQL Upload
+
+# codeql-analyze.yml never uploads results for pull_request events -- forks
+# get a read-only GITHUB_TOKEN with no security-events:write, and same-repo
+# PRs are routed through the identical path so both cases are exercised the
+# same way. workflow_run always runs against this file's version on the
+# default branch with the base repo's real permissions, which is what lets
+# this job do the upload the PR-triggered run couldn't.
+#
+# The commit/PR results get attributed to comes only from data GitHub itself
+# reports about this run -- never from anything the analyze job wrote, since
+# that job ran on the fork author's own branch content: they control every
+# byte of it, including a SARIF artifact and, in an earlier version of this
+# workflow, a PR-number/sha file read back verbatim. That let a fork PR
+# attribute a fabricated result to any commit it chose (github/codeql-action
+# applies no server-side ref/sha consistency check on this trigger path), so
+# `head_sha` comes from the workflow_run event payload (GitHub-verified, not
+# author-controlled) and the PR number is resolved server-side from it via
+# the API rather than trusted from the artifact.
+#
+# ref/sha are paired as refs/pull/<n>/head + the head sha, matching that
+# codeql-analyze.yml now checks out and analyzes the head commit explicitly
+# (not the default merge commit) -- a mismatched pairing is a documented
+# cause of silent misattribution or ingestion failure in codeql-action.
+
+on:
+  workflow_run:
+    workflows: ["CodeQL Analyze"]
+    types: [completed]
+
+permissions:
+  security-events: write
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    # push/schedule runs of CodeQL Analyze already uploaded directly and
+    # produced no SARIF artifact for this job to pick up -- only act on
+    # PR-triggered runs. Deliberately not gated on `conclusion == 'success'`:
+    # that's run-level, not per-matrix-leg, so one language failing analysis
+    # would otherwise skip uploading the language that succeeded too, leaving
+    # the PR permanently stuck on the branch ruleset for no reason. A fully
+    # cancelled run is skipped since it's unlikely to have produced anything.
+    if: |
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      github.event.workflow_run.event == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - name: Resolve PR number from head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          number=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '.[0].number // empty')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Download SARIF results
+        id: download_sarif
+        if: steps.pr.outputs.number != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sarif-${{ matrix.language }}
+          path: sarif-results
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      # This is the step that actually needs the base repo's real
+      # permissions - forks never get security-events: write, which is
+      # why the analyze workflow above only ever produces the SARIF and
+      # never uploads it itself for pull_request events.
+      - name: Upload SARIF
+        if: steps.pr.outputs.number != '' && steps.download_sarif.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif-results
+          category: "/language:${{ matrix.language }}"
+          ref: refs/pull/${{ steps.pr.outputs.number }}/head
+          sha: ${{ github.event.workflow_run.head_sha }}
