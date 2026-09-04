@@ -679,7 +679,7 @@ To add a new machine called `acme-widget`:
 | Machine | Layer | Bootloader | Provisioning | Notes |
 |---------|-------|-----------|-------------|-------|
 | `raspberrypi5` | `meta-avocado-raspberrypi` | U-Boot | img, sd, usb | Reference ARM target |
-| `jetson-orin-nano-devkit` | `meta-avocado-nvidia` | U-Boot (CBoot) | tegraflash | NVIDIA Jetson, uses swupdate |
+| `jetson-orin-nano` | `meta-avocado-nvidia` | U-Boot (CBoot) | tegraflash | NVIDIA Jetson, uses swupdate |
 | `intel-x86-64-v2` | `meta-avocado-x86-64` | systemd-boot | img, usb | x86-64-v2 EFI target (SSE4.2, Atom-class) |
 | `intel-x86-64-v3` | `meta-avocado-x86-64` | systemd-boot | img, usb | x86-64-v3 EFI target (AVX2, Core-class) |
 | `intel-x86-64-v4` | `meta-avocado-x86-64` | systemd-boot | img, usb | x86-64-v4 EFI target (AVX-512) |

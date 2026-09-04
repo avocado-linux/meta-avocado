@@ -100,7 +100,7 @@ make_staging() {
 write_stone() {
     cat > "$1" <<EOF
 {
-  "runtime": {"platform": "avocado-jetson-orin-nano-devkit"},
+  "runtime": {"platform": "avocado-jetson-orin-nano"},
   "storage_devices": {
     "rootdisk": {
       "images": {
@@ -143,7 +143,7 @@ if run_hook "$work/s1" "$work/stone.json" "$work/f1.json" >/dev/null 2>"$work/e1
     fi
 
     claimed="$(jq -r '.overlays[0].claimed_by' "$work/s1/overlays.manifest.json")"
-    if [[ "$claimed" == "avocado-jetson-orin-nano-devkit" ]]; then
+    if [[ "$claimed" == "avocado-jetson-orin-nano" ]]; then
         ok "overlay is marked claimed_by the platform"
     else
         bad "claimed_by not set (got '$claimed')"
