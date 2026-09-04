@@ -124,7 +124,6 @@ def derive(text, paths, values):
     script = os.path.join(root, "provider.sh")
     with open(script, "w", encoding="utf-8") as handle:
         handle.write(body)
-    os.chmod(script, 0o755)
     try:
         result = subprocess.run(["sh", script], capture_output=True, timeout=60)
     except subprocess.TimeoutExpired:

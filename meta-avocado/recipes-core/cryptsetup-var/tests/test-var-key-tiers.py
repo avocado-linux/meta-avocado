@@ -460,9 +460,28 @@ PROVIDERS["bracketed_statuses"] = PROVIDERS["good"].replace(
 SOURCE = read_file(RECIPE)
 CLASS_SOURCE = read_file(BBCLASS)
 NAMESPACE = {}
+
+# The four exec() calls below are the point of this file, and they are suppressed
+# rather than avoided. opengrep's exec-detected rule is about evaluating content
+# that "can be input from outside the program"; here the content is two files in
+# this repository, read at test time. Anyone able to edit cryptsetup-var.bb or
+# avocado-security-capabilities.bbclass can already run arbitrary code, because
+# BitBake executes both - so exec'ing them in a test adds no attack surface the
+# build did not already have.
+#
+# The alternative is worse in both available directions. Copying the tier bodies
+# in here instead of exec'ing them is the drift this file exists to catch: the
+# copy would be edited alongside the recipe and stay green. And a project
+# .semgrep.yml to allowlist the rule would REPLACE the shared devtool ruleset for
+# the whole repository (devspec's config detection is most-specific-first), so
+# four scoped suppressions cost less than silently dropping every other rule.
+# nosemgrep: python.lang.security.audit.exec-detected.exec-detected
 exec(slice_helpers(CLASS_SOURCE, BBCLASS), NAMESPACE)
+# nosemgrep: python.lang.security.audit.exec-detected.exec-detected
 exec(slice_task(SOURCE, TIER1, RECIPE), NAMESPACE)
+# nosemgrep: python.lang.security.audit.exec-detected.exec-detected
 exec(slice_task(SOURCE, TIER2, RECIPE), NAMESPACE)
+# nosemgrep: python.lang.security.audit.exec-detected.exec-detected
 exec(slice_task(CLASS_SOURCE, TIER3, BBCLASS), NAMESPACE)
 
 STATUS_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_MARKER", RECIPE)
@@ -485,7 +504,6 @@ def invoke_image(installed_text, machine, capabilities):
         if installed_text is not None:
             with open(provider, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
-            os.chmod(provider, 0o755)
 
         bb = BB()
         NAMESPACE["bb"] = bb
@@ -529,7 +547,6 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
         if installed_text is not None:
             with open(installed, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
-            os.chmod(installed, 0o755)
         if source_text is not None:
             path = os.path.join(files, "var-key.sh")
             with open(path, "w", encoding="utf-8") as handle:

@@ -673,11 +673,14 @@ python avocado_var_key_check_deliverability() {
             )
         text = text.replace(declared, fixture_path(first_root, index))
 
+    # Not chmodded. run() invokes it as `sh <path>`, which needs no execute
+    # bit, so setting one would only widen the mode of a file in WORKDIR for
+    # no reader. Three equivalent chmods in the test harnesses were removed for
+    # the same reason after opengrep flagged them.
     no_argv = os.path.join(base, "var-key-no-argv.sh")
     try:
         with open(no_argv, "w", encoding="utf-8") as f:
             f.write(text)
-        os.chmod(no_argv, 0o755)
     except OSError as exc:
         bb.fatal(
             lead + "a path-rewritten copy of its installed var-key.sh (%s) "
