@@ -1,4 +1,8 @@
 #!/bin/sh
+# avocado-var-key-provider: usable
+# Load-bearing, not a note: cryptsetup-var.bb refuses any machine whose
+# resolved provider does not declare exactly one such status line. What
+# this provider derives its identity from is described below.
 # /var LUKS key provider for NXP i.MX8M / i.MX9 boards -- phase-1: SoC-UID
 # derived, no provisioned secret.
 #
@@ -31,17 +35,55 @@
 # The cryptsetup-var.sh caller depends only on stdout - 64 raw bytes.
 set -eu
 
-SOC_UID_FILE="/sys/devices/soc0/serial_number"
+# Optional path prefix for the identity reads below, and nothing else. The
+# build-time deliverability check in cryptsetup-var.bb passes a fixture root
+# here; the only runtime caller, cryptsetup-var.sh, passes no arguments, so on a
+# device ROOT is empty and every path resolves to the real absolute one.
+ROOT="${1:-}"
+
+# Identity sources, declared so that check knows which paths to populate. Every
+# read below is prefixed with ROOT so none can fall through to the build host's
+# own /sys and pass the check without the fixture having been read.
+# avocado-var-key-identity: /sys/devices/soc0/serial_number
+# avocado-var-key-identity: /sys/firmware/devicetree/base/serial-number
+SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
+DT_SERIAL_FILE="$ROOT/sys/firmware/devicetree/base/serial-number"
+
+# A candidate that is blank once whitespace is discounted is NOT an identity.
+# `tr -d '\0\n'` removes NULs and newlines but leaves spaces and tabs, so a
+# firmware field holding only blanks passed the -z test below, was accepted as
+# this board's identity, and suppressed the perfectly good secondary source.
+# Every board shipping that same blank field would then derive the same /var
+# key. Only the emptiness TEST is normalised - HW_ID keeps the value exactly as
+# read, so a key that derives correctly today keeps deriving the same key.
+identity_is_blank() {
+    # Blank, all-zero, or all-ones. Unprovisioned UID fuses read as
+    # 0000000000000000 and ERASED ones read as ffffffffffffffff; neither is
+    # whitespace, so both were accepted as this board's identity, giving every
+    # board in that state the same /var key - the exact failure this provider
+    # exists to prevent.
+    #
+    # Two exact tests rather than one character-class strip. Stripping '0' and
+    # 'f' together would also reject 0f0f0f0f, which is a perfectly good serial,
+    # so the degenerate cases are matched individually.
+    _c=$(printf '%s' "$1" | tr -d '[:space:]' | tr -d '-')
+    [ -z "$_c" ] && return 0
+    [ -z "$(printf '%s' "$_c" | tr -d '0')" ] && return 0
+    [ -z "$(printf '%s' "$_c" | tr -d 'fF')" ] && return 0
+    return 1
+}
 
 HW_ID=""
 if [ -r "$SOC_UID_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
+    _candidate=$(tr -d '\0\n' < "$SOC_UID_FILE")
+    identity_is_blank "$_candidate" || HW_ID="$_candidate"
 fi
-if [ -z "$HW_ID" ] && [ -r /sys/firmware/devicetree/base/serial-number ]; then
+if [ -z "$HW_ID" ] && [ -r "$DT_SERIAL_FILE" ]; then
     # Some u-boot configurations publish the same UID into the DT. Secondary
     # only: it is set by the bootloader rather than read from the SoC, so it is
     # the less authoritative of the two.
-    HW_ID=$(tr -d '\0\n' < /sys/firmware/devicetree/base/serial-number)
+    _candidate=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+    identity_is_blank "$_candidate" || HW_ID="$_candidate"
 fi
 
 # Fail rather than fall back to a constant. The qemu provider substitutes a

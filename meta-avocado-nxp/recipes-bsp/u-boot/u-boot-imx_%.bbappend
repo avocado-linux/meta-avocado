@@ -1,6 +1,12 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}/env:"
 
+# Set by the boot-integrity-poc block below when this machine gets the EFI boot
+# path. Defaulted here so do_configure's test reads a defined value on every
+# other build rather than depending on how bitbake expands an unset variable
+# inside a shell function.
+AVOCADO_EFI_BOOT_ENV ?= "0"
+
 # The UUU tag goes on the boot partition. For 8+, the boot partition image
 # is imx-boot, so disable UUU-tagging here
 UUU_BOOTLOADER:mx8-generic-bsp = ""
@@ -115,6 +121,196 @@ do_configure:prepend:avocado-imx93-frdm () {
     fi
     install -m 0644 ${UNPACKDIR}/avocado-imx93-frdm.env \
         ${S}/board/nxp/imx93_frdm/avocado.env
+
+    # boot-integrity-poc: append the EFI boot path so its redefinitions of
+    # image_file, avocado_boot and bootcmd win over the base environment's.
+    # env2string.awk keys an awk array by variable name and emits each key once,
+    # so last definition wins and no duplicate reaches U-Boot - but only if this
+    # lands after the base file, which is why it is a concatenation and not a
+    # second install.
+    #
+    # sed rather than a literal DTB name in the .env: FIT_CONF_DEFAULT_DTB is
+    # what the FIT path already pins, and spelling the name twice is how the two
+    # boot paths would come to disagree about which device tree is the default.
+    # The U-Boot ${...} references in that file are invisible to bitbake because
+    # they live in a file rather than in this recipe body - inlining the block
+    # here would let bitbake expand ${bootpart} and friends to nothing.
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        # An empty FIT_CONF_DEFAULT_DTB would substitute to `fdt_file=`, and the
+        # board would then fail to load a device tree at boot with nothing in the
+        # build log pointing back here. Fail the build instead.
+        if [ -z "${FIT_CONF_DEFAULT_DTB}" ]; then
+            bbfatal "boot-integrity-poc: FIT_CONF_DEFAULT_DTB is empty, so the EFI boot path has no device tree to load. It is set in the machine conf; this build has lost it."
+        fi
+        bbwarn "boot-integrity-poc: replacing this board's FIT boot path with an EFI hand-off (bootefi on an EFI-stub kernel staged in the ESP). Slot selection is unchanged. The staged kernel is signed against the enrolled db, so the firmware refuses a replacement it cannot verify - but the bootloader performing that verification is itself unauthenticated, because AHAB is open on this part and cannot be closed. A boot-medium writer can replace U-Boot, seed and all."
+        printf '\n' >> ${S}/board/nxp/imx93_frdm/avocado.env
+        sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
+            ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
+            >> ${S}/board/nxp/imx93_frdm/avocado.env
+    fi
+
+    # Stage the UEFI variable seed where U-Boot's own build can find it.
+    # lib/efi_loader/Makefile resolves CONFIG_EFI_VAR_SEED_FILE as
+    # $(srctree)/$(EFI_VAR_SEED_FILE) - a path relative to the SOURCE tree, not
+    # to the deploy directory - so a seed left where sb-keys deployed it is a
+    # seed U-Boot never reads. It would still build, with an empty variable
+    # store, and the board would come up in setup mode while the build log
+    # claimed enrolment.
+    #
+    # Same `if` wrapper, same reason as the block above and the do_compile
+    # prepend below: a bare `return` at statement position ends the WHOLE
+    # concatenated do_configure, not just this fragment of it.
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        if [ ! -f ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ]; then
+            bbfatal "boot-integrity-poc: ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var is absent, so U-Boot would compile with an empty preseed and the board would come up in setup mode while this build reported enrolment. sb-keys' do_deploy produces it; this recipe DEPENDS on sb-keys under the same gate."
+        fi
+        # TWO copies, deliberately, because two different consumers resolve the
+        # seed two different ways and satisfying one does not satisfy the other:
+        #
+        #   ${S}/ubootefi.var
+        #     The MAKE PREREQUISITE. lib/efi_loader/Makefile declares
+        #     $(obj)/efi_var_seed.o: $(srctree)/$(EFI_VAR_SEED_FILE), so make
+        #     refuses to build the object unless the file exists at exactly this
+        #     path. It is also what the do_deploy:append below tests before it
+        #     will write db.fingerprint - removing this copy silently disables
+        #     that integrity check as well as breaking the build.
+        #
+        #   ${S}/lib/efi_loader/ubootefi.var
+        #     The ASSEMBLER INCLUDE PATH. efi_var_seed.S carries a bare
+        #     .incbin "ubootefi.var", which gas resolves against its own -I list.
+        #     That list does NOT contain the srctree root, so the prerequisite
+        #     above being satisfied is not enough: on an out-of-tree build
+        #     (O=${B}, which is how this recipe builds) the assembler fails with
+        #     "Error: file not found: ubootefi.var". The -I list DOES already
+        #     contain $(srctree)/lib/efi_loader, so a copy here makes the bare
+        #     filename resolve with no U-Boot patch and no absolute path in
+        #     CONFIG_EFI_VAR_SEED_FILE (which would break the prerequisite, since
+        #     make would expand it to $(srctree)//abs/path).
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ${S}/ubootefi.var
+        install -m 0644 ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var ${S}/lib/efi_loader/ubootefi.var
+    fi
+}
+
+# The fingerprint of the db certificate that went into the seed, written only on
+# the path that actually staged it. Task 4.1 compares the payload it signs
+# against this value before signing, and refuses to sign when the marker is
+# absent - the two halves of one token, each enforcing the half it can observe,
+# since neither recipe can see the other's task outcome.
+#
+# do_deploy rather than the do_configure:prepend that stages the seed, even
+# though that is where the staging is decided: deploy.bbclass sets
+# do_deploy[cleandirs] = "${DEPLOYDIR}", so anything written there earlier in
+# the task graph is erased before do_deploy runs, and the marker would vanish
+# without a trace. The `${S}/ubootefi.var` test below is what keeps the claim
+# honest across the move - the marker is written because the seed IS in the
+# source tree, not because the gate was on.
+do_deploy:append:avocado-imx93-frdm() {
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        if [ ! -f ${S}/ubootefi.var ]; then
+            bbfatal "boot-integrity-poc: ${S}/ubootefi.var is absent at do_deploy, so the seed never reached \$(srctree) and this U-Boot enrols nothing. Refusing to write the db.fingerprint marker that task 4.1 reads as proof it did."
+        fi
+
+        # The seed file existing proves it was STAGED, not that it was COMPILED
+        # IN. Those come apart quietly: merge_config.sh warns rather than fails
+        # when a requested symbol loses to a dependency, so a defconfig bump
+        # that turns EFI_MM_COMM_TEE back on (PRESEED depends on !that) drops
+        # PRESEED, `obj-$(CONFIG_EFI_VARIABLES_PRESEED) += efi_var_seed.o`
+        # simply never builds, and the staged file sits in $(srctree) unread.
+        # Every downstream gate then passes on a bootloader that enrols nothing.
+        #
+        # EFI_SECURE_BOOT is checked for the same reason and is the worse loss:
+        # without it efi_image_authenticate() is not compiled, so the firmware
+        # admits any payload while still reporting a key database.
+        #
+        # Read the PRODUCED config, not the fragment: the fragment is the
+        # request, the .config is the answer. This layer's own convention
+        # elsewhere is the same, because linux-imx applies fragments with a raw
+        # cat that can lose a symbol without saying so.
+        # This recipe builds one directory PER UBOOT_CONFIG - the observed layout
+        # is ${B}/imx93_11x11_frdm_defconfig-sd/.config, not ${B}/.config - and
+        # every variant it produces has to enforce, so check them all rather
+        # than reconstructing one name from UBOOT_CONFIG. Both layouts are
+        # globbed so a single-config recipe still works.
+        #
+        # Finding NO config is a failure, not a pass: it means this check could
+        # not run, and a check that silently does not run is worse than none.
+        # A string flag, not a counter. BitBake's build_dependencies shell
+        # parser raises NotImplementedError('$((') on arithmetic expansion in a
+        # task body, and it does so at PARSE time for every u-boot-imx recipe in
+        # the tree - including versions this machine never builds - so the whole
+        # parse halts rather than the one task failing.
+        _cfg_seen=no
+        for _cfg in ${B}/.config ${B}/*/.config; do
+            [ -f "$_cfg" ] || continue
+            _cfg_seen=yes
+            for _sym in CONFIG_EFI_VARIABLES_PRESEED CONFIG_EFI_SECURE_BOOT; do
+                if ! grep -q "^${_sym}=y\$" "$_cfg"; then
+                    bbfatal "boot-integrity-poc: ${_sym} is not set in the produced $_cfg, so this U-Boot does not do what the enrolment claims. The fragment requests it; Kconfig did not grant it, which means an unmet dependency rather than a missing request. Check those first: EFI_SECURE_BOOT needs EFI_LOADER and FIT_SIGNATURE (fit-verify.cfg supplies the latter), and EFI_VARIABLES_PRESEED needs EFI_MM_COMM_TEE off. Refusing to write db.fingerprint."
+                fi
+            done
+        done
+        if [ "$_cfg_seen" != yes ]; then
+            bbfatal "boot-integrity-poc: no .config found under ${B} at do_deploy, so it cannot be confirmed that the seed was compiled in rather than merely staged. Refusing to write db.fingerprint on an unverifiable build."
+        fi
+        # LEG 2: is the seed in $(srctree) the seed sb-keys just produced?
+        #
+        # The staging install lives in do_configure:prepend, so a valid
+        # do_configure stamp means it does not re-run. Rotate the keys and
+        # rebuild without invalidating that stamp - the key directory sits
+        # outside tmp/ and is excluded from task hashing, so this is easy to do
+        # accidentally - and $(srctree) keeps the OLD seed while the deploy
+        # directory holds the new one. This task would then publish a marker
+        # describing the new keys for a bootloader compiling the old ones.
+        #
+        # A whole-file compare rather than a db-only one: the seed now carries
+        # four variables, and a stale PK or dbx is just as wrong as a stale db.
+        # BOTH staged copies, not just the srctree-root one. do_configure:prepend
+        # installs the seed twice on purpose (see its comment): ${S}/ubootefi.var
+        # satisfies make's prerequisite, and ${S}/lib/efi_loader/ubootefi.var is
+        # what gas actually embeds, because efi_var_seed.S carries a bare
+        # `.incbin "ubootefi.var"` resolved against its own -I list.
+        #
+        # Checking only the root copy checked the file that is NOT linked in. A
+        # hand edit, a partial source-tree clean, or any path refreshing one and
+        # not the other publishes db.fingerprint describing the root copy while
+        # the bootloader carries the other - which is verbatim the failure the
+        # message below names, passing the check that exists to catch it.
+        if [ ! -f ${S}/lib/efi_loader/ubootefi.var ]; then
+            bbfatal "boot-integrity-poc: ${S}/lib/efi_loader/ubootefi.var is absent at do_deploy. That is the copy efi_var_seed.S actually includes, so this U-Boot cannot have compiled the seed in. Refusing to write db.fingerprint."
+        fi
+        if ! cmp -s ${S}/lib/efi_loader/ubootefi.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
+            bbfatal "boot-integrity-poc: the seed at ${S}/lib/efi_loader/ubootefi.var - the copy gas embeds - differs from the one sb-keys deployed. Run 'bitbake -c cleansstate u-boot-imx' (or -c configure) so the current seed is staged, rather than publishing a marker for keys this binary does not carry."
+        fi
+        if ! cmp -s ${S}/ubootefi.var ${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var; then
+            bbfatal "boot-integrity-poc: the seed staged at ${S}/ubootefi.var differs from the one sb-keys deployed. do_configure staged an older seed and its stamp is still valid, so this U-Boot compiles a key database that is not the current one. Run 'bitbake -c cleansstate u-boot-imx' (or -c configure) so the current seed is staged, rather than publishing a marker for keys this binary does not carry."
+        fi
+
+        # LEG 1: fingerprint what was PACKED, not what is in the key directory.
+        #
+        # This used to be sha256(${AVOCADO_SB_KEYS_DIR}/db.crt), read fresh at
+        # this task - a different artifact, at a later time, than the DER
+        # gen-efi-seed.sh actually packed. The manifest records that digest in
+        # the same run as the pack, so there is no window between the two.
+        #
+        # Note it is the DER's digest, not the .crt's: the firmware enrols DER,
+        # so the DER hash is what the on-device reporter can compare against the
+        # db efivar. avocado-stone compares against db.der for the same reason.
+        _mf="${DEPLOY_DIR_IMAGE}/sb-keys/ubootefi.var.manifest"
+        if [ ! -f "$_mf" ]; then
+            bbfatal "boot-integrity-poc: $_mf is absent, so the digest of the db certificate actually packed into the seed is unavailable. Re-hashing the key directory here is what this marker was changed to stop doing. sb-keys' gen-efi-seed.sh writes it beside the seed."
+        fi
+        _db_digest=$(awk '$1 == "db" { print $2 }' "$_mf")
+        case "$_db_digest" in
+            "" | *[!0-9a-f]*)
+                bbfatal "boot-integrity-poc: $_mf carries no usable db digest (got '$_db_digest'). Refusing to write db.fingerprint from a manifest this task cannot read."
+                ;;
+        esac
+        install -d ${DEPLOYDIR}/sb-keys
+        # Bare hex, no filename column: the consumer compares a value, and
+        # sha256sum's second field is a build-tree path that would differ
+        # between two builds of the identical certificate.
+        printf '%s\n' "$_db_digest" > ${DEPLOYDIR}/sb-keys/db.fingerprint
+    fi
 }
 
 # fit-verify.cfg enables U-Boot FIT signature verification. It is NOT
@@ -155,6 +351,200 @@ python () {
         d.setVar('UBOOT_SIGN_ENABLE', '1')
         d.setVar('UBOOT_SIGN_KEYDIR', d.getVar('AVOCADO_SB_KEYS_DIR'))
         d.setVar('UBOOT_SIGN_KEYNAME', 'FIT')
+}
+
+# efi-vars-poc.cfg gives this board a UEFI variable store so that efivarfs
+# exists and userspace can read a SecureBoot value. It is PoC scaffolding with
+# a known replacement, not a step toward the real capability, and the two
+# differ in the one property that matters: the PoC store is a file on the ESP
+# that anyone who can write the boot medium can edit.
+#
+# Gated on 'boot-integrity-poc' and deliberately NOT on
+# 'boot-integrity-reporting'. That second name belongs to the authenticated
+# capability, and letting scaffolding answer to it is exactly what would make a
+# PoC read as delivered to anything inspecting the tree.
+#
+# Gated on the token ALONE rather than on token-and-machine, unlike fit-verify
+# above. The variable store is not machine-specific, so restricting it to one
+# machine would leave any other board that opted in with the token set and no
+# store - a silent no-op. The warning below covers the converse case: a board
+# that gets the store but has no EFI boot path to reach it.
+python () {
+    if not bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-poc', True, False, d):
+        return
+
+    # Refuse the PoC and the real capability together. They are not additive:
+    # EFI_VARIABLE_FILE_STORE and EFI_MM_COMM_TEE are alternatives in one
+    # Kconfig `choice`, so two fragments setting different members do not
+    # produce two stores - merge_config.sh applies them in order and the LAST
+    # one wins, with nothing printed. When that is the PoC fragment the image
+    # gets an UNAUTHENTICATED store while its own feature tokens claim an
+    # authenticated one, which is the worst available outcome and is invisible
+    # in a build log.
+    #
+    # Fatal rather than a warning, and rather than picking a winner here. A
+    # build asking for both has an incoherent intent, and guessing which one
+    # was meant is how the unauthenticated store ends up shipping under the
+    # authenticated name.
+    if bb.utils.contains('DISTRO_FEATURES', 'boot-integrity-reporting', True, False, d):
+        bb.fatal("boot-integrity-poc and boot-integrity-reporting are mutually "
+                 "exclusive: they select different members of U-Boot's UEFI "
+                 "variable-store Kconfig choice, so enabling both lets fragment "
+                 "order decide silently which store the image gets. Pick one.")
+
+    d.appendVar('SRC_URI', ' file://efi-vars-poc.cfg')
+
+    # The spec permits an unauthenticated store ONLY when the build announces
+    # the substitution; a silent one is the failure it forbids. So this warning
+    # is a required output of the build, not commentary on it - if it ever
+    # becomes conditional or gets downgraded, the build stops satisfying the
+    # requirement that licensed the PoC in the first place.
+    bb.warn("boot-integrity-poc: UEFI variables will be stored UNAUTHENTICATED "
+            "in /ubootefi.var on the EFI system partition. They persist across "
+            "reboot, which is NOT the same as being protected - anyone who can "
+            "write the boot medium can change them. Do not read a value from "
+            "this store as evidence about how the device booted.")
+
+    # A store with no EFI boot path to consume it produces no efivarfs, and now
+    # that the same token also enrols a key database, that is no longer the
+    # harmless no-op it was when this only warned. Enrolment takes the firmware
+    # out of setup mode, so the board reports SecureBoot=1 on a machine that
+    # will never run bootefi - a device claiming enforcement on a path it does
+    # not take, which is exactly the false claim this change exists to remove.
+    #
+    # Escalated in place rather than added as a second check. A distinct block
+    # would test the identical condition and leave this warning's "nothing will
+    # reach it" reading standing next to a fatal that says the opposite; one
+    # test with one verdict is what a reader can act on.
+    if d.getVar('MACHINE') != 'avocado-imx93-frdm':
+        bb.fatal("boot-integrity-poc: the EFI boot path is wired for "
+                 "avocado-imx93-frdm only, so on %s this would enrol a UEFI "
+                 "key database and take the firmware out of setup mode on a "
+                 "board that never runs bootefi - the device would report "
+                 "enforcement on a boot path it does not take, and efivarfs "
+                 "would be absent besides. Drop the token for this machine, or "
+                 "wire the EFI boot path for it here first."
+                 % d.getVar('MACHINE'))
+
+    # CONFIG_EFI_SECURE_BOOT is `depends on EFI_LOADER && FIT_SIGNATURE`, and
+    # FIT_SIGNATURE is carried by fit-verify.cfg under the SEPARATE verified-boot
+    # token - which kas/feature/boot-integrity-poc.yml does not set. So the
+    # documented PoC build (that feature file on top of the machine file) selects
+    # EFI_SECURE_BOOT only because the pinned vendor defconfig happens to set
+    # FIT_SIGNATURE itself, at configs/imx93_11x11_frdm_defconfig:37.
+    #
+    # Requesting the fragment here removes that dependency on a vendor default
+    # rather than documenting it. It is a NO-OP against today's defconfig - both
+    # symbols are already =y - and becomes load-bearing the moment a u-boot-imx
+    # bump drops either one, which is the case the do_deploy assertion below can
+    # detect but not prevent.
+    #
+    # Only the FRAGMENT, not the signing wiring. UBOOT_SIGN_ENABLE and the
+    # UBOOT_SIGN_KEYDIR/KEYNAME pair stay in the verified-boot block above, so a
+    # PoC-only build gets the Kconfig symbols and runs no signing step - exactly
+    # what it does today via the defconfig. Skipped when verified-boot is also
+    # set, because that block has already appended the same file and unpacking
+    # one SRC_URI entry twice is not something to rely on.
+    if not bb.utils.contains('DISTRO_FEATURES', 'verified-boot', True, False, d):
+        d.appendVar('SRC_URI', ' file://fit-verify.cfg')
+
+    # The preseed fragment. CONFIG_EFI_VARIABLES_PRESEED compiles the seed into
+    # the U-Boot binary, which is what leaves no interval in which the board is
+    # powered on and still accepting any key database, and which also makes
+    # PK/KEK/db/dbx immutable at runtime (see the fragment's own header).
+    #
+    # SRC_URI is the whole mechanism - cml1.bbclass's merge_config.sh over the
+    # file://*.cfg entries is what puts these symbols in .config. Do NOT add a
+    # cat line into do_configure:append for it; see the UBOOT_DEFCONFIG note
+    # below for why every such line writes to a path named ['sd'].
+    d.appendVar('SRC_URI', ' file://efi-secureboot.cfg')
+
+    # sb-keys' do_deploy writes the seed this build consumes, and its do_compile
+    # writes the db.crt the fingerprint below is taken from. Without the
+    # dependency do_configure races the recipe that produces its input.
+    d.appendVar('DEPENDS', ' sb-keys')
+
+    # DEPENDS alone is not enough here and the gap is silent. It orders this
+    # recipe's do_configure after sb-keys:do_populate_sysroot, but the seed is
+    # DEPLOYED, not installed - sb-keys' own `addtask deploy after do_install
+    # before do_build` leaves do_deploy outside that chain entirely. Without
+    # this flag the seed copy races its producer and loses on a clean build,
+    # which surfaces as the bbfatal in do_configure:prepend rather than as a
+    # missing dependency, so the cause would be read as a broken sb-keys.
+    d.appendVarFlag('do_configure', 'depends', ' sb-keys:do_deploy')
+
+    # The EFI boot path itself. Machine-gated where the store above is not:
+    # the store is board-independent, but this block hardcodes this board's
+    # boot flow, so shipping it anywhere else would break booting rather than
+    # be a no-op. do_configure:prepend concatenates it onto the compiled-in
+    # environment; see that function and the .env file's own header for why
+    # appending (rather than replacing) is what makes the override take.
+    d.appendVar('SRC_URI', ' file://avocado-imx93-frdm-efi-boot.env')
+    d.setVar('AVOCADO_EFI_BOOT_ENV', '1')
+}
+
+# The PoC has to reach the SAVED environment as well as the compiled-in one,
+# and this is not belt-and-braces. CONFIG_ENV_WRITEABLE_LIST rides the
+# 'verified-boot' gate, and its permit list (env-writeable-list.patch) admits
+# only avocado_boot_slot, the device identity vars, devnum and mmcblk - no
+# boot-path variable - so with that feature ON the saved copies of bootcmd and
+# image_file are rejected on import and the compiled-in EFI override above wins
+# unopposed. With it OFF nothing rejects them: the saved environment is imported
+# whole and wins, so the board would boot the FIT path while the build log
+# claimed the PoC was enabled. That is the silent-substitution failure this
+# change exists to avoid, arrived at from the opposite direction.
+#
+# The override text comes from the same .env file rather than a second copy in
+# mkenvimage's flat format. grep pulls out its bare assignments; the C comment
+# block does not survive, which is required, since mkenvimage has no notion of
+# one. Two spellings of one boot path is how they come to disagree.
+#
+# Superseded keys are FILTERED OUT rather than shadowed by a later duplicate.
+# The compiled-in path could rely on last-definition-wins because env2string.awk
+# keys an awk array and emits each name once; mkenvimage has no such step - it
+# rewrites line separators and checksums the result - so an appended duplicate
+# would put two image_file entries into one environment blob and leave which one
+# survives to U-Boot's import order. Filtering keeps the blob single-valued.
+#
+# The filter list is derived from the override file itself, so a variable added
+# there is superseded automatically. Hardcoding the three names that collide
+# today would leave the next addition shadowed-but-duplicated. It also makes the
+# step idempotent across a do_compile rerun on a UNPACKDIR that was not
+# re-unpacked, since a previous run's lines are filtered before the re-append.
+#
+# The body is wrapped in an `if` rather than guarded by an early `return`.
+# bitbake concatenates a :prepend and the recipe's own do_compile into ONE
+# shell function, so a `return` here does not end the prepend - it ends
+# do_compile, before u-boot.inc's uboot_compile/uboot_compile_config ever run.
+# That shipped: every avocado-imx93-frdm build WITHOUT boot-integrity-poc
+# compiled no u-boot at all, and it stayed invisible because those builds always
+# restored u-boot-imx from sstate. It surfaced only on a forced rebuild, as
+# do_install failing on a missing u-boot-sd.bin - a message that points at
+# u-boot.inc and names nothing here.
+do_compile:prepend:avocado-imx93-frdm() {
+    if [ "${AVOCADO_EFI_BOOT_ENV}" = "1" ]; then
+        override="${WORKDIR}/avocado-efi-boot-flat.txt"
+        # `|| true` so an empty extraction reaches the bbfatal below. bitbake
+        # runs shell tasks under `set -e`, and without it a grep that matches
+        # nothing aborts the task with grep's bare exit 1 - naming no file and
+        # no cause.
+        sed -e 's|@FDT_FILE@|${FIT_CONF_DEFAULT_DTB}|' \
+            ${UNPACKDIR}/avocado-imx93-frdm-efi-boot.env \
+            | grep -E '^[a-z_]+=' > "$override" || true
+
+        # awk, not `cut | paste`: bitbake runs tasks under a restricted
+        # HOSTTOOLS PATH that carries awk and sed but NOT paste, so the pipeline
+        # died with `paste: command not found` (exit 127) at do_compile rather
+        # than at parse.
+        keys=$(awk -F= '{printf "%s%s", sep, $1; sep="|"} END {print ""}' "$override")
+        if [ -z "$keys" ]; then
+            bbfatal "boot-integrity-poc: extracted no assignments from avocado-imx93-frdm-efi-boot.env, so the saved environment would keep the FIT boot path while the build reported the PoC enabled."
+        fi
+
+        grep -vE "^($keys)=" ${UNPACKDIR}/${MACHINE}.txt > "$override.merged"
+        cat "$override" >> "$override.merged"
+        mv "$override.merged" ${UNPACKDIR}/${MACHINE}.txt
+    fi
 }
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
@@ -238,7 +628,8 @@ do_compile:prepend:bootvars-ubootenv() {
             bbfatal "AHAB bootcmd still loads a separate device tree; the container carries that address itself"
         fi
 
-        # The whole point of ENG-2418. A separate initramfs load reintroduces an
+        # The whole point of bundling the initramfs into the signed container in
+        # the first place. A separate initramfs load reintroduces an
         # unauthenticated argv[1], and it fails open rather than loudly: the
         # board boots, /var unlocks, and nothing reports that the initrd that
         # derived the key was never checked.

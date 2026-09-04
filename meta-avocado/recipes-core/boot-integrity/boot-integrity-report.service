@@ -1,0 +1,23 @@
+[Unit]
+Description=Publish boot-integrity state (enforcement and root of trust)
+# Ordering only. systemd mounts efivarfs itself from PID 1, before it loads any
+# unit, so there is nothing here to pull in - the unit systemctl shows for that
+# mount is synthesized from /proc/self/mountinfo rather than shipped as a file.
+# That holds because 'efi' is in DISTRO_FEATURES (avocado.conf); without it
+# is_efi_boot() is compiled out, the mount never happens, and the report
+# correctly says so rather than failing.
+#
+# Requires= would be wrong: on a target with no efivarfs this service must still
+# run and report that. "No efivarfs" is a fact the record exists to carry, so a
+# dependency that suppressed the run would hide the case worth reporting.
+After=sys-firmware-efi-efivars.mount local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/boot-integrity/boot-integrity-report.sh
+# The record lives in /run and is rebuilt every boot, so it must not be
+# forgotten the moment the unit exits.
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

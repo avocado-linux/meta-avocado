@@ -18,6 +18,12 @@ CMDLINE:append = " audit=0"
 # (stone/rpi/rootdisk.conf) has no `var` PARTLABEL for cryptsetup-var.service
 # to key on. Declaring it anyway would ship a unit that waits on a device this
 # machine never produces. Declare it once both are wired.
+#
+# A third gap sits behind those two even once fixed: no var-key provider
+# exists for this machine that can derive a device-unique key without
+# reading a secret from inside /var. See
+# recipes-core/cryptsetup-var/README-deliverability.md for the full
+# enumeration of what deliverability requires per machine.
 AVOCADO_SECURITY_CAPABILITIES = ""
 
 # The plaintext var partition; /var mounts /dev/disk/by-avocado/var, which

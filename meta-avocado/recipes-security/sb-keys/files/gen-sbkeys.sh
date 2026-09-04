@@ -57,6 +57,26 @@ gen_key() {
 
   if [ -f "${SBKEYS_DIR}/${role}.crt" ]; then
     echo "gen-sbkeys: ${role}.crt present, keeping it."
+
+    # Keep the CRT, but ALWAYS re-derive the DER from it. The two are consumed
+    # by different halves of the chain - the seed and its manifest carry the
+    # DER, while payload signing uses the CRT and KEY - so a DER that disagrees
+    # with its CRT splits the build in a way every existing check passes.
+    #
+    # Concretely: replace a role's .crt and .key by hand and leave the old .der
+    # behind. gen-efi-seed packs the OLD certificate and records its digest;
+    # db.fingerprint carries that same digest; avocado-stone compares the old
+    # DER against the old digest and matches; then it signs with the NEW key and
+    # sbverify passes against the NEW crt. Green build, and every device flashed
+    # with the pair refuses its own kernel. The seed-manifest work does not close
+    # this, because both of its inputs are the stale DER.
+    #
+    # Re-deriving is safe where regenerating is not: this reads the retained
+    # certificate and rewrites only its encoding, so the identity is unchanged
+    # and nothing already signed is orphaned. That is why the early return
+    # protects the KEY and not the DER.
+    openssl x509 -in "${SBKEYS_DIR}/${role}.crt" \
+      -out "${SBKEYS_DIR}/${role}.der" -outform DER
     return 0
   fi
 
@@ -69,16 +89,20 @@ gen_key() {
     -out "${SBKEYS_DIR}/${role}.der" -outform DER
 }
 
-# UEFI Secure Boot chain.
+# UEFI Secure Boot chain. The db cert generated here is the one the UEFI
+# variable seed is built from, so its .crt is consumed downstream rather than
+# only being an artifact of this script.
 gen_key PK "Platform Key"
 gen_key KEK "Key Exchange Key"
 gen_key db "Signature Database"
 gen_key dbx "Signature Database Exclude"
 
 # FIT Image Signing Key - separate PKI chain used by mkimage -k to sign FIT
-# images for verified boot. NOT part of the UEFI SB PK/KEK/db/dbx chain: this
-# SoC does not do UEFI Secure Boot, so reusing one of those roles would
-# conflate two unrelated PKI chains under one name.
+# images for verified boot. Deliberately NOT one of the PK/KEK/db/dbx roles
+# above, because the two chains root different things: the FIT key is embedded
+# in U-Boot's own control DTB and verifies a FIT payload, while db is enrolled
+# in the firmware's signature database and verifies an EFI payload. One key
+# serving both would give a single compromise two blast radii instead of one.
 gen_key FIT "FIT Image Signing Key"
 
 echo "gen-sbkeys: key chain complete."

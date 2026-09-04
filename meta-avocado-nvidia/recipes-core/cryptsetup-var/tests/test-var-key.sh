@@ -2,10 +2,13 @@
 
 # Standalone test for the Jetson /var LUKS key provider.
 #
-# Runs on any host with openssl 3.x (the same KDF the initramfs uses). The
-# provider reads two absolute sysfs paths, so the harness copies it and rewrites
-# those two constants to a fixture directory - the logic under test (source
-# precedence, the refusal, the KDF invocation) is otherwise untouched.
+# Runs on any host with openssl 3.x (the same KDF the initramfs uses). Cases 1
+# to 6 copy the provider and rewrite its two sysfs paths to a fixture directory,
+# leaving the logic under test (source precedence, the refusal, the KDF
+# invocation) untouched. Case 7 instead runs the provider UNMODIFIED and passes
+# the fixture root as its first argument, which is the path the build-time check
+# in cryptsetup-var.bb uses; the rewrite cases cannot cover that, because they
+# pass with the argument handling removed entirely.
 #
 # What matters most here is case 4: the provider must REFUSE rather than fall
 # back to a constant, because a constant would give every board in the fleet the
@@ -41,6 +44,28 @@ sed -e "s|/sys/devices/soc0/serial_number|$fixture/soc0/serial_number|g" \
     "$provider" > "$under_test"
 chmod +x "$under_test"
 
+# Every case below compares one derived key against another. A bare
+# `> key.bin || true` makes a REFUSAL indistinguishable from a different key:
+# the file is empty, cmp reports "differs", and the suite records a passing
+# device-uniqueness assertion over a provider that refused a valid identity.
+# derive_or_fail requires the run to have produced a key first, and every
+# caller GUARDS its comparison on that - `|| true` followed by an unguarded cmp
+# would re-open the same hole one line down, since cmp over a truncated file
+# reports "differs" and prints the very ok() this exists to prevent.
+derive_or_fail() {
+    # $1 = output path, $2 = what the run represents (for the diagnostic)
+    if ! "$under_test" > "$1" 2>"$work/derive.err"; then
+        bad "provider refused $2: $(cat "$work/derive.err")"
+        return 1
+    fi
+    _n=$(wc -c < "$1")
+    if [[ "$_n" -ne 64 ]]; then
+        bad "$2 produced $_n bytes, expected 64"
+        return 1
+    fi
+    return 0
+}
+
 # --- Case 1: a DT serial-number yields exactly 64 raw bytes ---
 printf '0123456789abcdeffedcba9876543210' > "$fixture/dt/serial-number"
 if "$under_test" > "$work/key1.bin" 2>"$work/key1.err"; then
@@ -55,8 +80,9 @@ else
 fi
 
 # --- Case 2: derivation is deterministic (the same board unlocks every boot) ---
-"$under_test" > "$work/key1b.bin" 2>/dev/null || true
-if cmp -s "$work/key1.bin" "$work/key1b.bin"; then
+if ! derive_or_fail "$work/key1b.bin" "the same identity a second time"; then
+    : # already reported; no comparison is meaningful over a key that was never produced
+elif cmp -s "$work/key1.bin" "$work/key1b.bin"; then
     ok "the same serial derives the same key on every run"
 else
     bad "derivation is not deterministic - the volume would not reopen"
@@ -64,8 +90,9 @@ fi
 
 # --- Case 3: a different board derives a different key (binding is real) ---
 printf 'ffffffffffffffff0000000000000000' > "$fixture/dt/serial-number"
-"$under_test" > "$work/key2.bin" 2>/dev/null || true
-if cmp -s "$work/key1.bin" "$work/key2.bin"; then
+if ! derive_or_fail "$work/key2.bin" "a second, different identity"; then
+    : # already reported
+elif cmp -s "$work/key1.bin" "$work/key2.bin"; then
     bad "two different serials derived the same key (no device binding)"
 else
     ok "a different serial derives a different key"
@@ -98,12 +125,174 @@ fi
 
 # --- Case 6: the DT property wins over soc0 when both are present ---
 printf '0123456789abcdeffedcba9876543210' > "$fixture/dt/serial-number"
-"$under_test" > "$work/key5.bin" 2>/dev/null || true
-if cmp -s "$work/key1.bin" "$work/key5.bin"; then
+if ! derive_or_fail "$work/key5.bin" "the precedence fixture"; then
+    : # already reported
+elif cmp -s "$work/key1.bin" "$work/key5.bin"; then
     ok "the DT serial-number takes precedence over soc0"
 else
     bad "soc0 won over the DT property, or precedence changed"
 fi
+
+# --- Case 7: the optional first argument prefixes every identity read ---
+# Runs the provider UNMODIFIED - no sed - which is what the build-time check in
+# cryptsetup-var.bb does. Two different identities must give two different keys:
+# a read that lost its "$ROOT" prefix resolves against this host's own /sys
+# instead of the fixture and returns the same key both times, which is exactly
+# the false pass the recipe's two-identity assertion exists to catch. Without
+# this case the suite is green whether or not the prefixing works.
+root_a="$work/root-a"
+root_b="$work/root-b"
+mkdir -p "$root_a/sys/firmware/devicetree/base" "$root_b/sys/firmware/devicetree/base"
+printf '1111111111111111aaaaaaaaaaaaaaaa' > "$root_a/sys/firmware/devicetree/base/serial-number"
+printf '2222222222222222bbbbbbbbbbbbbbbb' > "$root_b/sys/firmware/devicetree/base/serial-number"
+if sh "$provider" "$root_a" > "$work/root_a.bin" 2>"$work/root_a.err" &&
+    sh "$provider" "$root_b" > "$work/root_b.bin" 2>"$work/root_b.err"; then
+    n=$(wc -c < "$work/root_a.bin")
+    if [[ "$n" -ne 64 ]]; then
+        bad "prefixed run produced $n bytes, expected 64"
+    elif cmp -s "$work/root_a.bin" "$work/root_b.bin"; then
+        bad "two different identities produced the same key - a read is not prefixed with \$ROOT"
+    else
+        ok "the first-argument prefix is honoured by every identity read"
+    fi
+else
+    bad "provider refused under a first-argument fixture root: $(cat "$work/root_a.err" "$work/root_b.err")"
+fi
+
+# --- Case 8: the provider declares the identity paths the build check populates ---
+# The build-time check builds its fixture from these lines; a read whose path is
+# undeclared is never populated, so the branch is never exercised.
+if grep -q '^# avocado-var-key-identity: /sys/firmware/devicetree/base/serial-number$' "$provider"; then
+    ok "declares its primary identity source for the build-time check"
+else
+    bad "missing the avocado-var-key-identity declaration for the DT serial-number"
+fi
+
+# --- Case 9: a whitespace-only primary must not suppress a valid secondary ---
+# `tr -d '\0\n'` strips NULs and newlines but leaves spaces and tabs, so a DT
+# serial holding only blanks used to pass the -z test, be accepted as this
+# board's identity, and stop the good soc0 serial from ever being read. Every
+# board shipping that same blank property would derive one shared /var key.
+ws_a="$work/ws-blank-primary"
+ws_b="$work/ws-soc0-only"
+mkdir -p "$ws_a/sys/firmware/devicetree/base" "$ws_a/sys/devices/soc0"
+mkdir -p "$ws_b/sys/devices/soc0"
+printf '   \t  ' > "$ws_a/sys/firmware/devicetree/base/serial-number"
+printf 'REAL-UNIQUE-SERIAL-42' > "$ws_a/sys/devices/soc0/serial_number"
+printf 'REAL-UNIQUE-SERIAL-42' > "$ws_b/sys/devices/soc0/serial_number"
+if sh "$provider" "$ws_a" > "$work/ws_a.bin" 2>"$work/ws_a.err" &&
+    sh "$provider" "$ws_b" > "$work/ws_b.bin" 2>/dev/null; then
+    if cmp -s "$work/ws_a.bin" "$work/ws_b.bin"; then
+        ok "a whitespace-only DT serial falls through to soc0"
+    else
+        bad "a blank DT value still contributed to the derived key"
+    fi
+else
+    bad "provider failed with a blank primary and a valid secondary: $(cat "$work/ws_a.err")"
+fi
+
+# --- Case 10: an all-whitespace identity everywhere is refused, not derived ---
+ws_c="$work/ws-all-blank"
+mkdir -p "$ws_c/sys/firmware/devicetree/base"
+printf '  \t ' > "$ws_c/sys/firmware/devicetree/base/serial-number"
+if sh "$provider" "$ws_c" > /dev/null 2>"$work/ws_c.err"; then
+    bad "derived a key from an all-whitespace identity instead of refusing"
+else
+    ok "an all-whitespace identity is refused rather than substituted"
+fi
+
+# --- Case 11: one pinned identity derives one pinned key ---
+# Every case above is a RELATIVE assertion: 64 bytes out, two identities
+# differing, one identity repeating. All of them still hold after the KDF
+# parameters change, because they change for both sides of the comparison. So
+# an edit to iter, memcost, lanes, keylen or the salt derivation passes this
+# suite while changing the /var key of every board already in the field.
+#
+# This vector is the suite's only absolute assertion, and it is what makes such
+# an edit loud. It runs the provider UNMODIFIED through the argv fixture root,
+# so it is pinned to the real derivation path rather than to a copy of the
+# openssl invocation.
+#
+# If it fails after a deliberate provider change, the vector is NOT the thing
+# to update first. A changed key means a board with an encrypted /var can no
+# longer unlock it, so a migration has to land alongside: derive the old key,
+# `luksAddKey` the new one, `luksKillSlot` the old. Re-pin only after that.
+golden_id='AVOCADO-JETSON-GOLDEN-VECTOR-0001'
+golden_key='32005a7d76f536c1f819167bb3101b41b76da80d13bbbf73965c6a14869e0746239286507b22753c8d7abb5a5fb66e267aff279ff019a08b629b8480186893d8'
+gv="$work/golden"
+mkdir -p "$gv/sys/firmware/devicetree/base"
+printf '%s' "$golden_id" > "$gv/sys/firmware/devicetree/base/serial-number"
+if sh "$provider" "$gv" > "$work/golden.bin" 2>"$work/golden.err"; then
+    got="$(od -An -tx1 -v < "$work/golden.bin" | tr -d ' \n')"
+    if [[ "$got" == "$golden_key" ]]; then
+        ok "the pinned identity derives the pinned key"
+    else
+        bad "golden vector mismatch - the derivation changed, so every deployed board's /var key changed
+         identity: $golden_id
+         expected: $golden_key
+         got:      $got"
+    fi
+else
+    bad "provider refused the golden-vector identity: $(cat "$work/golden.err")"
+fi
+
+# --- Case 12: a degenerate identity is not an identity ---
+# Unprovisioned UID fuses read as 0000000000000000 and ERASED ones read as
+# ffffffffffffffff. Neither is whitespace, so
+# a whitespace-only blank test accepted it as this board's identity and every
+# unprovisioned board of that model derived one shared /var key. Both
+# directions matter: a degenerate primary must fall THROUGH to a usable
+# secondary rather than refuse, and a degenerate value everywhere must refuse
+# rather than derive.
+n_deg=0
+for degenerate in "0000000000000000" "ffffffffffffffff" "FFFFFFFFFFFFFFFF"; do
+    n_deg=$((n_deg + 1))
+    zero_a="$work/degenerate-$n_deg-a"
+    zero_b="$work/degenerate-$n_deg-b"
+    # The control: the SAME secondary value with no primary present at all.
+    # Asserting only "64 bytes came out" of zero_a passes whether the key came
+    # from the secondary or from the degenerate primary the case exists to
+    # reject - move the blank test below the fall-through chain and both halves
+    # stay green while every board with that fuse default shares one key.
+    # Comparing against this fixture is what pins WHICH source was used.
+    zero_c="$work/degenerate-$n_deg-c"
+    mkdir -p "$zero_a/sys/firmware/devicetree/base" "$zero_a/sys/devices/soc0"
+    mkdir -p "$zero_b/sys/firmware/devicetree/base" "$zero_b/sys/devices/soc0"
+    mkdir -p "$zero_c/sys/devices/soc0"
+    printf '%s' "$degenerate" > "$zero_a/sys/firmware/devicetree/base/serial-number"
+    printf 'REAL-UNIQUE-SERIAL-99' > "$zero_a/sys/devices/soc0/serial_number"
+    printf '%s' "$degenerate" > "$zero_b/sys/firmware/devicetree/base/serial-number"
+    printf '%s' "$degenerate" > "$zero_b/sys/devices/soc0/serial_number"
+    printf 'REAL-UNIQUE-SERIAL-99' > "$zero_c/sys/devices/soc0/serial_number"
+
+    if sh "$provider" "$zero_a" > "$work/zero_a.bin" 2>"$work/zero_a.err"; then
+        # Per-iteration filename, and no `|| true`. A fixed name reused across
+        # the three degenerate values let a refusal in iteration 2 or 3 leave
+        # iteration 1's byte-identical key in place, so cmp passed over a run
+        # that never happened - and `|| true` then reported that refusal as
+        # "still changed the key", blaming a branch that was never reached.
+        # Both are the shape derive_or_fail's header rejects; this call site
+        # was added after that sweep and missed it.
+        n=$(wc -c < "$work/zero_a.bin")
+        if ! sh "$provider" "$zero_c" > "$work/zero_c-$n_deg.bin" 2>"$work/zero_c.err"; then
+            bad "control fixture (soc0-only, $degenerate) was refused: $(cat "$work/zero_c.err")"
+        elif [[ "$n" -ne 64 ]]; then
+            bad "degenerate fall-through ($degenerate) produced $n bytes, expected 64"
+        elif ! cmp -s "$work/zero_a.bin" "$work/zero_c-$n_deg.bin"; then
+            bad "a degenerate dt ($degenerate) still changed the key - it was mixed in rather than rejected"
+        else
+            ok "a degenerate dt ($degenerate) falls through to a usable soc0"
+        fi
+    else
+        bad "refused despite a usable soc0: $(cat "$work/zero_a.err")"
+    fi
+
+    if sh "$provider" "$zero_b" > /dev/null 2>&1; then
+        bad "derived a key from $degenerate - every board in that state would share it"
+    else
+        ok "a degenerate identity everywhere ($degenerate) is refused rather than derived"
+    fi
+done
 
 echo
 echo "passed: $pass  failed: $fail"

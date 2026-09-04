@@ -223,16 +223,62 @@ def find_native_sysroot(deploy: Path, tool: str) -> Path | None:
     return None
 
 
+def sudo_cmd() -> list[str]:
+    """How to invoke sudo, decided once.
+
+    sudo(1) reads the password from a terminal, and there is not always one:
+    this tool gets run from editors, CI and agent shells with no tty, where
+    plain sudo fails with "no tty present and no askpass program specified".
+    It fails at the least useful moment too - after the archive, the backend
+    and the target device have all been resolved and the guards have passed -
+    so the run looks like it was about to work and then died on plumbing.
+
+    -A routes the prompt to $SUDO_ASKPASS, which needs no tty. Used ONLY when
+    there is no tty AND a helper is configured, so a person at a terminal keeps
+    the ordinary prompt and a host without a helper behaves exactly as before.
+
+    A passwordless sudoers rule also silences this, and is OPTIONAL rather than
+    required - nothing here depends on one, and a host without it behaves as
+    described above. Where one exists it should be scoped to a bench that
+    flashes boards unattended, because it is a real and permanent grant: raw
+    block-device write as root, to any process running as that user.
+
+    Such a rule must name a root-owned binary - see native_tool_cmd, which
+    prefers a packaged tool on PATH for exactly this reason. A NOPASSWD entry
+    pointing into a build tree grants root to anyone who can write that tree,
+    which is the invoking user, so it grants unprompted root outright.
+    """
+    if os.environ.get("SUDO_ASKPASS") and not sys.stdin.isatty():
+        return ["sudo", "-A"]
+    return ["sudo"]
+
+
 def native_tool_cmd(deploy: Path, tool: str, args: list[str]) -> list[str]:
+    """Prefer a packaged tool on PATH; fall back to the build's native sysroot.
+
+    The order matters for more than convenience. The sysroot copy lives under
+    the build tree, which the invoking user can write - so running it under sudo
+    authorises whatever that path holds at the moment sudo runs, not what was
+    inspected. A distribution package sits at a root-owned path and does not
+    have that property. It is also the only form a sudoers rule can name safely:
+    a NOPASSWD entry for a user-writable path is a root escalation, and one for
+    `env` is worse, since env runs anything.
+
+    The cost of preferring PATH is a tool older than the archive requires. That
+    fails loudly rather than silently - a stone archive declares
+    require-fwup-version and fwup refuses outright - so it is the safe direction
+    to be wrong in. Hosts with no package keep exactly the previous behaviour.
+    """
+    system = shutil.which(tool)
+    if system:
+        return [*sudo_cmd(), system, *args]
     sysroot = find_native_sysroot(deploy, tool)
     if sysroot:
         # sudo drops LD_LIBRARY_PATH, so it is passed through env rather than
         # exported.
-        return ["sudo", "env", f"LD_LIBRARY_PATH={sysroot}/usr/lib",
+        return [*sudo_cmd(), "env", f"LD_LIBRARY_PATH={sysroot}/usr/lib",
                 str(sysroot / "usr/bin" / tool), *args]
-    if shutil.which(tool):
-        return ["sudo", tool, *args]
-    raise Fatal(f"{tool} not found in the build sysroot or on PATH (run a build first)")
+    raise Fatal(f"{tool} not found on PATH or in the build sysroot (run a build first)")
 
 
 # ------------------------------------------------------------------- safety
@@ -370,12 +416,12 @@ def flash_bmaptool(deploy: Path, dev: str, image: Path, dry_run: bool) -> None:
     info(f"image: {image}")
     if bmap.is_file():
         info(f"bmap:  {bmap} (per-region checksums verified)")
-        cmd = ["sudo", "bmaptool", "copy", "--bmap", str(bmap), str(image), dev]
+        cmd = [*sudo_cmd(), "bmaptool", "copy", "--bmap", str(bmap), str(image), dev]
     else:
         # No --nobmap: let bmaptool look for itself, so a bmap this function did
         # not predict still gets used.
         info("no bmap beside the image - full copy, and no per-region verification")
-        cmd = ["sudo", "bmaptool", "copy", str(image), dev]
+        cmd = [*sudo_cmd(), "bmaptool", "copy", str(image), dev]
     execute(cmd, dry_run)
 
 
@@ -422,7 +468,7 @@ def flash_uuu(deploy: Path, machine: str, dry_run: bool, assume_yes: bool) -> No
     # it is omitted, so `uuu -b emmc <boot>` wrote imx-boot into the eMMC boot
     # partition and nothing else - the board came back running whatever OS was
     # already on it, under a new bootloader, which looks like a successful flash.
-    execute(["sudo", "uuu", "-m", usb_path, "-b", "emmc_all", str(boot), str(image)], dry_run)
+    execute([*sudo_cmd(), "uuu", "-m", usb_path, "-b", "emmc_all", str(boot), str(image)], dry_run)
 
 
 # ------------------------------------------------------- reaching U-Boot
@@ -1034,7 +1080,13 @@ def main() -> int:
     # caller asked to keep, and the write looks successful either way.
     if args.task != "complete" and args.backend not in (None, "fwup"):
         raise Fatal(f"--task applies to the fwup backend only (got backend '{args.backend}')")
-    if args.task != "complete" and args.medium != "sd":
+    # 'ums' belongs here with 'sd': it resolves the same fwup archive and calls
+    # flash_fwup unconditionally, passing --task straight through, so a task
+    # other than complete is as meaningful there as on a card in a reader.
+    # Excluding it refused the A/B upgrade this tool otherwise supports, which is
+    # the only way to populate the inactive slot on a board whose card never
+    # moves - `complete` memsets that slot rather than writing it.
+    if args.task != "complete" and args.medium not in ("sd", "ums"):
         raise Fatal(f"--task applies to the fwup backend only (medium '{args.medium}')")
 
     if args.medium == "sd":

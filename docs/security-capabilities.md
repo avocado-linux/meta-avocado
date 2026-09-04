@@ -61,6 +61,47 @@ the feed decide for the user.
 | `cryptsetup-var-udev`, `cryptsetup-var-posture`, `cryptsetup` | rootfs (`packagegroup-avocado-rootfs`) | capability |
 | a key backend (`var-key.sh`) | `recipes-core/cryptsetup-var/` bbappend in the vendor layer | machine override |
 
+A `var-key.sh` must declare itself `usable`, declare each identity path it
+reads, and prefix those reads with its optional first argument; `do_install`
+then runs it against two synthetic identities and requires two different
+64-byte keys, then against an empty one and requires it to refuse. A provider
+that cannot refuse declares `test-only` instead, which is for disposable
+virtual targets, is honoured only for machines meta-avocado lists in
+`AVOCADO_VAR_KEY_TEST_ONLY_MACHINES`, and warns when the check runs (an sstate
+hit skips it, so a clean log is not proof no machine is on one). See
+`meta-avocado/recipes-core/cryptsetup-var/README-deliverability.md`,
+"The var-key provider contract".
+
+**What the gate proves, and what it does not.** It proves the key is derived
+from a device-unique identity rather than a constant. It does not prove the key
+is a secret, and on today's providers it is not one:
+
+- **The identity is readable, so the key is re-derivable.** Every provider
+  derives from a hardware identifier and salts with a digest of that same
+  identifier, so both KDF inputs come from one value that is not secret. On the
+  ARM providers that value is world-readable on the running device
+  (`/sys/firmware/devicetree/base/serial-number` and
+  `/sys/devices/soc0/serial_number` are `0444`, unlike the x86 DMI sources the
+  kernel restricts to `0400`). Any local process can re-derive the `/var` key
+  with four `openssl` calls, and anyone holding fleet metadata can derive a
+  given board's key off-device. Argon2id's cost parameters buy nothing when the
+  password is known rather than guessed. The nxp provider says this in its own
+  header, calling itself "device-binding, not a secret"; it is repeated here
+  because that header is not where anyone reads the capability's meaning from.
+- **On Jetson the identity is bootloader-supplied, so it is writable.** The DT
+  `serial-number` is the primary source there and U-Boot fixes it up from its
+  `serial#` environment variable. `fw_setenv` ships in the rootfs
+  (`cryptsetup-var-posture` RDEPENDS on `libubootenv`), so root on the device,
+  or anyone at the U-Boot console, can choose it. Before first enrolment that
+  means `luksFormat` runs under a chosen key; after enrolment it is a one
+  command lockout. Enforced verified boot is what closes this, not the
+  build-time gate.
+
+Read `encrypted-var` as "the media is encrypted and the key is per-device",
+which is what it defends: a disk removed from the board. It is not "the key is
+unavailable to software on the board". TPM sealing is the mechanism that would
+change that, and is tracked separately.
+
 **The runtime decides.** `avocado-cli` writes `/etc/avocado/var-encrypt` into a
 runtime's initramfs when its `avocado.yaml` says:
 
