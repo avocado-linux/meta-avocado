@@ -226,6 +226,21 @@ def avocado_var_key_declarations(contents, marker):
     return found, prose
 
 
+def avocado_var_key_marker():
+    """The status-declaration token, owned here because both tiers read it.
+
+    It used to be a recipe-scope `=` in cryptsetup-var.bb with a hardcoded
+    copy in the image tier's `getVar(...) or "..."` fallback. An image recipe's
+    datastore never carries a recipe-scope variable, so the fallback was not a
+    fallback - it was the only branch that tier ever took, and a second source
+    of truth for the string. Renaming the token in the recipe would have left
+    the image tier scanning for the old one and reporting "0 status lines;
+    exactly one is required", accusing a bbappend of a bypass that never
+    happened.
+    """
+    return "avocado-var-key-provider:"
+
+
 def avocado_var_key_test_only_machines():
     """Machines permitted to ship a `test-only` var-key provider.
 
@@ -319,6 +334,53 @@ python avocado_security_capabilities_write_artifact() {
 # authoritative tier. This one answers the question that tier cannot ask about
 # itself - "did it run at all, and over the provider that shipped?" - which a
 # status read is enough for.
+def avocado_var_key_resolve_shipped(root, subpath, lead, flat, fatal):
+    """Resolve SUBPATH under ROOT, refusing anything that escapes it.
+
+    `os.path.islink` on the leaf alone is not enough, and that was the first
+    version of this guard. A symlink at ANY component redirects the read: a
+    postfunc that replaces the `cryptsetup-var` DIRECTORY with a link leaves
+    the leaf a regular file, so `islink(leaf)` is False and `isfile(leaf)` is
+    True while both this gate and the attestation beside it resolve into a
+    directory the author chose. Resolving the whole path and requiring it to
+    stay under ROOT covers every component at once.
+
+    Returns the resolved path. Calls FATAL and does not return when the path
+    escapes; the caller decides what an ABSENT file means, because that answer
+    differs per image.
+    """
+    import os
+
+    candidate = os.path.join(root, subpath.lstrip("/"))
+    resolved = os.path.realpath(candidate)
+    root_resolved = os.path.realpath(root)
+    if resolved != root_resolved and not resolved.startswith(
+        root_resolved + os.sep
+    ):
+        fatal(
+            lead + "ships %s as a path that resolves outside the image, to %s. "
+            "A symlink at any component - the file or a parent directory - "
+            "makes this gate and the device read different files, so a "
+            "declaration read here says nothing about what the device runs. "
+            "Ship it as a regular file inside the image."
+            % (flat(candidate), flat(resolved))
+        )
+    return candidate
+
+
+# Registered HERE and not in a named image recipe. It lived in
+# avocado-image-initramfs.bb alone, so a machine setting its own
+# INITRAMFS_IMAGE - avocado-grinn-astra-1680-sbc.conf:26 already does - got no
+# image-scope gate, and the recipe-datastore bypass this tier exists to catch
+# would have reopened in full for it. An image bbappend could also drop the
+# line with ROOTFS_POSTPROCESS_COMMAND:remove and leave no trace.
+#
+# Ordered after the artifact writer so the capability file it validates against
+# is the one just written. The check returns early on any image that neither
+# declares the capability nor ships a provider, so inheriting it everywhere
+# costs a non-participating image one getVar.
+ROOTFS_POSTPROCESS_COMMAND:append = " avocado_security_capabilities_check_provider;"
+
 python avocado_security_capabilities_check_provider() {
     import hashlib
     import os
@@ -329,29 +391,40 @@ python avocado_security_capabilities_check_provider() {
 
     flat = avocado_var_key_flat
     machine = d.getVar("MACHINE") or "<unknown>"
-    marker = d.getVar("AVOCADO_VAR_KEY_MARKER") or "avocado-var-key-provider:"
+    # The marker is recipe-scope in cryptsetup-var.bb, so it is never set in an
+    # IMAGE recipe's datastore and the getVar below always returns None. That
+    # made the fallback the only live branch and a second source of truth for
+    # the token - in the file whose own header argues the parser moved here so
+    # the two readers could not disagree. The class owns the default now, and
+    # the recipe reads it from here, so there is one string again.
+    marker = d.getVar("AVOCADO_VAR_KEY_MARKER") or avocado_var_key_marker()
     rootfs = d.getVar("IMAGE_ROOTFS")
     libexecdir = d.getVar("libexecdir")
-    provider = os.path.join(
-        rootfs + libexecdir, "cryptsetup-var", "var-key.sh"
-    )
     lead = ("machine %s declares encrypted-var and this image "
             % flat(machine))
 
-    # A symlink is not the artifact, and here the mismatch is worse than in the
-    # recipe tier: os.path.isfile() and open() follow the link, so an ABSOLUTE
-    # symlink in the image resolves against the build host now and against the
-    # image's own root at boot. A link to a host file declaring `usable` would
-    # pass this gate while the device finds something else, or nothing.
-    if os.path.islink(provider):
-        bb.fatal(
-            lead + "ships its var-key.sh at %s as a symlink. This gate and the "
-            "device resolve it in different namespaces, so a declaration read "
-            "here says nothing about what the device runs. Ship the provider "
-            "as a regular file." % flat(provider)
-        )
+    provider = avocado_var_key_resolve_shipped(
+        rootfs, libexecdir + "/cryptsetup-var/var-key.sh", lead, flat, bb.fatal
+    )
 
+    # An ABSENT provider means different things in different images, so the
+    # answer is not universal: this class is inherited globally and registers
+    # this check on EVERY image, while only the initramfs is required to carry
+    # the provider. The rootfs legitimately ships the udev and posture packages
+    # without it - though on Jetson it ships the provider too, via
+    # packagegroup-avocado-tegra-extra, and that copy is validated here rather
+    # than waved through.
+    #
+    # Registering per-image in the class rather than in one named image recipe
+    # is what closes the hole this replaced: tier 3 lived in
+    # avocado-image-initramfs.bb alone, so a machine setting its own
+    # INITRAMFS_IMAGE got no image-scope gate at all.
+    # avocado-grinn-astra-1680-sbc.conf already does that, and the bypass tier
+    # 3 exists to catch would have reopened in full the moment it declared the
+    # capability.
     if not os.path.isfile(provider):
+        if d.getVar("PN") != d.getVar("INITRAMFS_IMAGE"):
+            return
         bb.fatal(
             lead + "ships no var-key.sh at %s. cryptsetup-var.sh reads "
             "/etc/avocado-security-capabilities from this initramfs, sees "

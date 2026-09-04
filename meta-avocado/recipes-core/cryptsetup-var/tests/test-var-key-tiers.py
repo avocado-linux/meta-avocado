@@ -502,12 +502,21 @@ exec(slice_task(SOURCE, TIER2, RECIPE), NAMESPACE)
 # nosemgrep: python.lang.security.audit.exec-detected.exec-detected
 exec(slice_task(CLASS_SOURCE, TIER3, BBCLASS), NAMESPACE)
 
-STATUS_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_MARKER", RECIPE)
+# The recipe now assigns this from the class helper, so its literal is no
+# longer in the .bb to scrape. Call the sliced helper instead - which is
+# also what proves the two tiers share one token.
+STATUS_MARKER = NAMESPACE["avocado_var_key_marker"]()
 IDENTITY_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_IDENTITY_MARKER", RECIPE)
 LIBEXECDIR = "/usr/libexec"
 
 # Sentinel: install the provider as a symlink rather than a regular file.
 SYMLINK = "<symlink>"
+
+# A symlinked PARENT DIRECTORY, which the leaf-only islink() guard missed
+# entirely: the leaf stays a regular file, so islink(leaf) is False and
+# isfile(leaf) is True, while the gate and the attestation beside it both
+# resolve into a directory somebody else chose.
+SYMLINK_DIR = "<symlink-dir>"
 
 # What attestation the image fixture ships beside the provider. "match" is
 # what a real build produces; the other two are the states tier 3 refuses.
@@ -533,13 +542,23 @@ def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH):
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write(PROVIDERS["good"])
             os.symlink(target, provider)
+        elif installed_text is SYMLINK_DIR:
+            # Leaf is a regular file; its PARENT is the link.
+            outside = os.path.join(root, "host-side-dir")
+            os.makedirs(outside)
+            with open(os.path.join(outside, "var-key.sh"), "w",
+                      encoding="utf-8") as handle:
+                handle.write(PROVIDERS["good"])
+            os.rmdir(os.path.dirname(provider))
+            os.symlink(outside, os.path.dirname(provider))
         elif installed_text is not None:
             with open(provider, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
 
         # Tier 2 writes this beside the provider after its checks pass, so a
         # fixture without it is the shape of a build where tier 2 never ran.
-        if installed_text is not None and attest != ATTEST_ABSENT:
+        if (installed_text is not None and installed_text is not SYMLINK_DIR
+                and attest != ATTEST_ABSENT):
             if attest == ATTEST_STALE:
                 digest = hashlib.sha256(b"a different provider").hexdigest()
             else:
@@ -594,6 +613,14 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write(PROVIDERS["good"])
             os.symlink(target, installed)
+        elif installed_text is SYMLINK_DIR:
+            outside = os.path.join(root, "host-side-dir")
+            os.makedirs(outside)
+            with open(os.path.join(outside, "var-key.sh"), "w",
+                      encoding="utf-8") as handle:
+                handle.write(PROVIDERS["good"])
+            os.rmdir(os.path.dirname(installed))
+            os.symlink(outside, os.path.dirname(installed))
         elif installed_text is not None:
             with open(installed, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
@@ -745,7 +772,10 @@ CASES = [
          installed="always_fails", source="always_fails",
          match="cannot derive a key from its own declared"),
     case(TIER2, "exec: a symlinked provider is refused",
-         installed=SYMLINK, source="good", match="is a symlink"),
+         installed=SYMLINK, source="good", match="resolves outside the image"),
+    case(TIER2, "exec: a symlinked parent DIRECTORY is refused",
+         installed=SYMLINK_DIR, source="good",
+         match="resolves outside the image"),
     case(TIER2, "exec: no provider installed is refused",
          installed=None, source="good",
          match="no var-key.sh was installed at"),
@@ -840,7 +870,9 @@ CASES = [
          skip_unless="real_shared" in PROVIDERS,
          skip_why="layer not checked out"),
     case(TIER3, "image: a symlinked provider is refused",
-         installed=SYMLINK, match="as a symlink"),
+         installed=SYMLINK, match="resolves outside the image"),
+    case(TIER3, "image: a symlinked parent DIRECTORY is refused",
+         installed=SYMLINK_DIR, match="resolves outside the image"),
     case(TIER3, "image: no provider shipped is refused",
          installed=None, match="ships no var-key.sh"),
     case(TIER3, "image: a synthetic unusable provider is refused",
@@ -898,7 +930,7 @@ def main():
             skipped += 1
             continue
         installed = spec["installed"]
-        if installed is not None and installed is not SYMLINK:
+        if installed not in (None, SYMLINK, SYMLINK_DIR):
             installed = PROVIDERS[installed]
         if spec["tier"] == TIER3:
             verdict, detail = invoke_image(

@@ -55,7 +55,11 @@ SRC_URI = " \
 # installed provider against a synthetic identity and requires 64 key bytes
 # out. This tier stays because it is the cheap one: it refuses at parse time,
 # before anything is fetched or compiled.
-AVOCADO_VAR_KEY_MARKER = "avocado-var-key-provider:"
+# The token itself lives in avocado-security-capabilities.bbclass, which
+# both this recipe and the image tier read. Published as a variable here
+# for readers and for anything that greps for it; the checks call the
+# function, so the two tiers cannot scan for different strings.
+AVOCADO_VAR_KEY_MARKER = "${@avocado_var_key_marker()}"
 
 # Machines permitted to resolve to a provider declared test-only, which waives
 # the requirement to refuse when no hardware identity is readable. Kept here,
@@ -334,18 +338,20 @@ python avocado_var_key_check_deliverability() {
         )
 
     # A symlink is not the artifact. os.path.isfile() and open() both FOLLOW
-    # one, so an absolute symlink installed here resolves against the BUILD
-    # HOST while the same link resolves inside the image at boot - the check
-    # reads one file and the device runs another. populate() below already
-    # refuses a symlinked fixture root for the same reason; the provider itself
-    # was the one path where the guard was missing.
-    if os.path.islink(installed):
-        bb.fatal(
-            lead + "its installed var-key.sh at %s is a symlink. The check and "
-            "the device would resolve it in different namespaces, so what is "
-            "validated here is not what runs there. Install the provider as a "
-            "regular file." % flat(installed)
-        )
+    # one, so a link installed here resolves against the BUILD HOST while the
+    # same link resolves inside the image at boot - the check reads one file
+    # and the device runs another.
+    #
+    # Resolved and bounded, not islink() on the leaf: a do_install:append that
+    # replaces the cryptsetup-var DIRECTORY with a link leaves the leaf a
+    # regular file, so a leaf-only guard reads straight through it and the
+    # attestation written beside it lands in the same redirected directory.
+    # Shared with the image tier, which had the identical gap - one helper, so
+    # a future component check cannot be added to only one of them.
+    avocado_var_key_resolve_shipped(
+        d.getVar("D"), d.getVar("libexecdir") + "/cryptsetup-var/var-key.sh",
+        lead, flat, bb.fatal,
+    )
 
     if not os.path.isfile(installed):
         bb.fatal(lead + "no var-key.sh was installed at %s." % flat(installed))
