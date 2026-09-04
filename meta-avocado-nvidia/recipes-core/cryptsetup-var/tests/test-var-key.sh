@@ -266,11 +266,19 @@ for degenerate in "0000000000000000" "ffffffffffffffff" "FFFFFFFFFFFFFFFF"; do
     printf 'REAL-UNIQUE-SERIAL-99' > "$zero_c/sys/devices/soc0/serial_number"
 
     if sh "$provider" "$zero_a" > "$work/zero_a.bin" 2>"$work/zero_a.err"; then
-        sh "$provider" "$zero_c" > "$work/zero_c.bin" 2>/dev/null || true
+        # Per-iteration filename, and no `|| true`. A fixed name reused across
+        # the three degenerate values let a refusal in iteration 2 or 3 leave
+        # iteration 1's byte-identical key in place, so cmp passed over a run
+        # that never happened - and `|| true` then reported that refusal as
+        # "still changed the key", blaming a branch that was never reached.
+        # Both are the shape derive_or_fail's header rejects; this call site
+        # was added after that sweep and missed it.
         n=$(wc -c < "$work/zero_a.bin")
-        if [[ "$n" -ne 64 ]]; then
+        if ! sh "$provider" "$zero_c" > "$work/zero_c-$n_deg.bin" 2>"$work/zero_c.err"; then
+            bad "control fixture (soc0-only, $degenerate) was refused: $(cat "$work/zero_c.err")"
+        elif [[ "$n" -ne 64 ]]; then
             bad "degenerate fall-through ($degenerate) produced $n bytes, expected 64"
-        elif ! cmp -s "$work/zero_a.bin" "$work/zero_c.bin"; then
+        elif ! cmp -s "$work/zero_a.bin" "$work/zero_c-$n_deg.bin"; then
             bad "a degenerate dt ($degenerate) still changed the key - it was mixed in rather than rejected"
         else
             ok "a degenerate dt ($degenerate) falls through to a usable soc0"

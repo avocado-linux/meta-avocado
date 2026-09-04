@@ -528,7 +528,8 @@ ATTEST_ABSENT = "absent"
 # it needs its own fixture shape. Kept separate from invoke() rather than folded
 # into it: sharing one builder would have to fake both layouts at once, and the
 # whole point of this tier is that it looks somewhere the other two do not.
-def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH):
+def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH,
+                 image="avocado-image-initramfs"):
     """Run the initramfs-scope gate over a synthetic IMAGE_ROOTFS."""
     root = tempfile.mkdtemp(prefix="var-key-image-")
     try:
@@ -575,6 +576,15 @@ def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH):
                 "AVOCADO_VAR_KEY_MARKER": STATUS_MARKER,
                 "MACHINE": machine,
                 "IMAGE_ROOTFS": rootfs,
+                # Both must be set, and they decide a real branch: an absent
+                # provider is fatal only for the image named by
+                # INITRAMFS_IMAGE. Leaving them unset made the comparison
+                # None != None, so every case reached the fatal because both
+                # keys were missing rather than because the image was the
+                # initramfs - and deleting the guard entirely kept the suite
+                # green at 58/58.
+                "PN": image,
+                "INITRAMFS_IMAGE": "avocado-image-initramfs",
                 "libexecdir": LIBEXECDIR,
                 "sysconfdir": "/etc",
             }
@@ -673,7 +683,8 @@ ARMED = "encrypted-var"
 
 def case(tier, description, installed=None, source=None, machine=HARDWARE,
          caps=ARMED, expect="fatal", match=None, gap=None,
-         skip_unless=True, skip_why="", attest=ATTEST_MATCH):
+         skip_unless=True, skip_why="", attest=ATTEST_MATCH,
+         image="avocado-image-initramfs"):
     return {
         "tier": tier,
         "description": description,
@@ -687,6 +698,7 @@ def case(tier, description, installed=None, source=None, machine=HARDWARE,
         "skip_unless": skip_unless,
         "skip_why": skip_why,
         "attest": attest,
+        "image": image,
     }
 
 
@@ -873,6 +885,12 @@ CASES = [
          installed=SYMLINK, match="resolves outside the image"),
     case(TIER3, "image: a symlinked parent DIRECTORY is refused",
          installed=SYMLINK_DIR, match="resolves outside the image"),
+    case(TIER3, "image: a NON-initramfs image with no provider passes",
+         installed=None, expect="pass",
+         image="avocado-image-rootfs"),
+    case(TIER3, "image: a non-initramfs image that DOES ship one is still checked",
+         installed="unusable", image="avocado-image-rootfs",
+         match="declares itself unusable"),
     case(TIER3, "image: no provider shipped is refused",
          installed=None, match="ships no var-key.sh"),
     case(TIER3, "image: a synthetic unusable provider is refused",
@@ -934,7 +952,8 @@ def main():
             installed = PROVIDERS[installed]
         if spec["tier"] == TIER3:
             verdict, detail = invoke_image(
-                installed, spec["machine"], spec["caps"], spec["attest"]
+                installed, spec["machine"], spec["caps"], spec["attest"],
+                spec["image"],
             )
         else:
             verdict, detail = invoke(

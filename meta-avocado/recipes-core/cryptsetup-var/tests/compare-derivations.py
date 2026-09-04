@@ -38,6 +38,7 @@ a re-pin.
 import argparse
 import binascii
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -156,16 +157,33 @@ def at_ref(ref, path):
 
 
 def derive(text, paths, values):
-    """Rewrite PATHS into a fresh fixture, run with no argument, return a key."""
+    """Rewrite PATHS into a fresh fixture, run with no argument, return a key.
+
+    ONE pass over the original text, not a str.replace per path. Sequential
+    replacement re-scans text it has already rewritten, so a declared path that
+    is a prefix of another gets the fixture root spliced in twice and the copy
+    reads a path that does not exist. Both refs then hit the same broken
+    rewrite, both REFUSE, `before == after`, and the row reports `same` - a
+    false clean in the tool gating a golden-vector re-pin.
+    
+    Ordering longest-first does NOT fix it, because the rewritten target still
+    contains the shorter path as a substring; only a single alternation pass
+    does. The recipe's no_argv_copy carries the same fix for the same reason.
+    Latent while the path list came from a hardcoded 2-tuple, and reachable the
+    moment that list started coming from the provider's own declarations.
+    """
     root = tempfile.mkdtemp(prefix="var-key-compare-")
-    body = text
     for path in paths:
         target = os.path.join(root, path.lstrip("/"))
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if values.get(path) is not None:
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write(values[path])
-        body = body.replace(path, target)
+    order = sorted(paths, key=len, reverse=True)
+    target_of = {q: os.path.join(root, q.lstrip("/")) for q in paths}
+    body = re.compile("|".join(re.escape(q) for q in order)).sub(
+        lambda m: target_of[m.group(0)], text
+    )
     script = os.path.join(root, "provider.sh")
     with open(script, "w", encoding="utf-8") as handle:
         handle.write(body)
@@ -173,6 +191,11 @@ def derive(text, paths, values):
         result = subprocess.run(["sh", script], capture_output=True, timeout=60)
     except subprocess.TimeoutExpired:
         return "TIMEOUT"
+    finally:
+        # Every other suite here cleans up after itself. This one left roughly
+        # two fixture directories per row behind - about 114 on a full run -
+        # and TMPDIR is tmpfs on the machines it runs on.
+        shutil.rmtree(root, ignore_errors=True)
     if result.returncode != 0:
         return "REFUSE"
     if len(result.stdout) != 64:
