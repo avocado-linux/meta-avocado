@@ -48,8 +48,10 @@ chmod +x "$under_test"
 # `> key.bin || true` makes a REFUSAL indistinguishable from a different key:
 # the file is empty, cmp reports "differs", and the suite records a passing
 # device-uniqueness assertion over a provider that refused a valid identity.
-# derive_or_fail keeps the comparison but requires the run to have produced a
-# key first, so the two outcomes stay separable.
+# derive_or_fail requires the run to have produced a key first, and every
+# caller GUARDS its comparison on that - `|| true` followed by an unguarded cmp
+# would re-open the same hole one line down, since cmp over a truncated file
+# reports "differs" and prints the very ok() this exists to prevent.
 derive_or_fail() {
     # $1 = output path, $2 = what the run represents (for the diagnostic)
     if ! "$under_test" > "$1" 2>"$work/derive.err"; then
@@ -78,8 +80,9 @@ else
 fi
 
 # --- Case 2: derivation is deterministic (the same board unlocks every boot) ---
-derive_or_fail "$work/key1b.bin" "the same identity a second time" || true
-if cmp -s "$work/key1.bin" "$work/key1b.bin"; then
+if ! derive_or_fail "$work/key1b.bin" "the same identity a second time"; then
+    : # already reported; no comparison is meaningful over a key that was never produced
+elif cmp -s "$work/key1.bin" "$work/key1b.bin"; then
     ok "the same SoC UID derives the same key on every run"
 else
     bad "derivation is not deterministic - the volume would not reopen"
@@ -87,8 +90,9 @@ fi
 
 # --- Case 3: a different board derives a different key (binding is real) ---
 printf 'ffffffffffffffff0000000000000000' > "$fixture/soc0/serial_number"
-derive_or_fail "$work/key2.bin" "a second, different identity" || true
-if cmp -s "$work/key1.bin" "$work/key2.bin"; then
+if ! derive_or_fail "$work/key2.bin" "a second, different identity"; then
+    : # already reported
+elif cmp -s "$work/key1.bin" "$work/key2.bin"; then
     bad "two different SoC UIDs derived the same key (no device binding)"
 else
     ok "a different SoC UID derives a different key"
@@ -121,8 +125,9 @@ fi
 
 # --- Case 6: soc0 wins over the DT when both are present ---
 printf '0123456789abcdeffedcba9876543210' > "$fixture/soc0/serial_number"
-derive_or_fail "$work/key5.bin" "the precedence fixture" || true
-if cmp -s "$work/key1.bin" "$work/key5.bin"; then
+if ! derive_or_fail "$work/key5.bin" "the precedence fixture"; then
+    : # already reported
+elif cmp -s "$work/key1.bin" "$work/key5.bin"; then
     ok "soc0 takes precedence over the DT serial-number"
 else
     bad "DT value won over soc0, or precedence changed"
@@ -244,19 +249,31 @@ for degenerate in "0000000000000000" "ffffffffffffffff" "FFFFFFFFFFFFFFFF"; do
     n_deg=$((n_deg + 1))
     zero_a="$work/degenerate-$n_deg-a"
     zero_b="$work/degenerate-$n_deg-b"
+    # The control: the SAME secondary value with no primary present at all.
+    # Asserting only "64 bytes came out" of zero_a passes whether the key came
+    # from the secondary or from the degenerate primary the case exists to
+    # reject - move the blank test below the fall-through chain and both halves
+    # stay green while every board with that fuse default shares one key.
+    # Comparing against this fixture is what pins WHICH source was used.
+    zero_c="$work/degenerate-$n_deg-c"
     mkdir -p "$zero_a/sys/devices/soc0" "$zero_a/sys/firmware/devicetree/base"
     mkdir -p "$zero_b/sys/devices/soc0" "$zero_b/sys/firmware/devicetree/base"
+    mkdir -p "$zero_c/sys/firmware/devicetree/base"
     printf '%s' "$degenerate" > "$zero_a/sys/devices/soc0/serial_number"
     printf 'REAL-UNIQUE-SERIAL-99' > "$zero_a/sys/firmware/devicetree/base/serial-number"
     printf '%s' "$degenerate" > "$zero_b/sys/devices/soc0/serial_number"
     printf '%s' "$degenerate" > "$zero_b/sys/firmware/devicetree/base/serial-number"
+    printf 'REAL-UNIQUE-SERIAL-99' > "$zero_c/sys/firmware/devicetree/base/serial-number"
 
     if sh "$provider" "$zero_a" > "$work/zero_a.bin" 2>"$work/zero_a.err"; then
+        sh "$provider" "$zero_c" > "$work/zero_c.bin" 2>/dev/null || true
         n=$(wc -c < "$work/zero_a.bin")
-        if [[ "$n" -eq 64 ]]; then
-            ok "a degenerate soc0 ($degenerate) falls through to a usable dt"
-        else
+        if [[ "$n" -ne 64 ]]; then
             bad "degenerate fall-through ($degenerate) produced $n bytes, expected 64"
+        elif ! cmp -s "$work/zero_a.bin" "$work/zero_c.bin"; then
+            bad "a degenerate soc0 ($degenerate) still changed the key - it was mixed in rather than rejected"
+        else
+            ok "a degenerate soc0 ($degenerate) falls through to a usable dt"
         fi
     else
         bad "refused despite a usable dt: $(cat "$work/zero_a.err")"
