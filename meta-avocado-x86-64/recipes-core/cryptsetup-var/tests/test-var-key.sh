@@ -182,7 +182,85 @@ for path in /sys/class/dmi/id/product_uuid /sys/class/dmi/id/product_serial; do
     fi
 done
 
-# --- Case 10: one pinned identity derives one pinned key ---
+# --- Case 10: EVERY named placeholder token is refused ---
+# Before this, two of the seventeen tokens were covered and the other fifteen
+# could be deleted with the suite still green - and deleting one is not a
+# refused board, it is every board on that OEM reference design deriving the
+# same /var key, with no symptom until one device's disk opens on another.
+#
+# The list is PINNED HERE and NOT read out of the provider. Reading it from the
+# provider was the first attempt and it is a circular test: deleting a token
+# deletes it from the expectations too, so all five deletions tried stayed
+# green. A test whose expectations come from the thing under test cannot
+# observe a deletion.
+#
+# Pinning alone drifts the other way - a token ADDED to the provider would
+# never be exercised - so case 10b below cross-checks the two lists as sets.
+# Together: a deletion turns 10 and 10b red, an addition turns 10b red.
+expected_placeholders=(
+    "default string"
+    "to be filled by o.e.m."
+    "system serial number"
+    "not specified"
+    "none"
+    "n/a"
+    "na"
+    "unknown"
+    "default"
+    "null"
+    "0123456789"
+    "123456789"
+    "serial number"
+    "product name"
+    "to be filled by oem"
+    "filled by o.e.m."
+    "chassis serial number"
+)
+
+# Three forms per token, because normalising before the compare is the whole
+# point: DMI fields carry pad spaces and vendors disagree on capitalisation, so
+# an exact compare written for "To Be Filled By O.E.M." lets the lowercase
+# spelling and the padded one straight through.
+n_leaked=0
+n_index=0
+for token in "${expected_placeholders[@]}"; do
+    n_index=$((n_index + 1))
+    upper=$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')
+    n_variant=0
+    for variant in "$token" "$upper" "  $token  "; do
+        n_variant=$((n_variant + 1))
+        root="$work/ph-$n_index-$n_variant"
+        mkdir -p "$root/sys/class/dmi/id"
+        printf '%s' "$variant" > "$root/sys/class/dmi/id/product_uuid"
+        if sh "$provider" "$root" > /dev/null 2>&1; then
+            bad "derived a key from the placeholder '$variant' instead of refusing"
+            n_leaked=$((n_leaked + 1))
+        fi
+    done
+done
+
+if [[ "$n_leaked" -eq 0 ]]; then
+    ok "all ${#expected_placeholders[@]} named placeholders refused, in three case/padding forms each"
+fi
+
+# --- Case 10b: the pinned list and the provider's own list agree ---
+# What keeps the pinned list above from going stale. A token added to the
+# provider and not added here would never be exercised by case 10.
+provider_placeholders=$(awk '/case "\$_v" in/{f=1;next} f&&/return 0/{exit} f' \
+    "$provider" | grep -o '"[^"]*"' | tr -d '"' | grep . | sort)
+pinned_placeholders=$(printf '%s\n' "${expected_placeholders[@]}" | sort)
+
+if [[ -z "$provider_placeholders" ]]; then
+    bad "could not read the placeholder case block out of the provider; it moved, so nothing cross-checks the pinned list"
+elif [[ "$provider_placeholders" == "$pinned_placeholders" ]]; then
+    ok "the pinned placeholder list matches the provider's own"
+else
+    bad "the pinned placeholder list and the provider's have diverged
+         only in the provider: $(comm -23 <(printf '%s\n' "$provider_placeholders") <(printf '%s\n' "$pinned_placeholders") | tr '\n' ' ')
+         only pinned here:     $(comm -13 <(printf '%s\n' "$provider_placeholders") <(printf '%s\n' "$pinned_placeholders") | tr '\n' ' ')"
+fi
+
+# --- Case 11: one pinned identity derives one pinned key ---
 # Every case above is a RELATIVE assertion: 64 bytes out, two identities
 # differing, a placeholder refused. All of them still hold after the KDF
 # parameters change, because they change for both sides of the comparison. So
