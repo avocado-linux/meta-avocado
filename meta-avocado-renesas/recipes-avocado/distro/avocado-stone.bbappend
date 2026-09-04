@@ -3,15 +3,16 @@
 do_compile[depends] += "firmware-pack:do_deploy"
 do_compile[depends] += "flash-writer:do_deploy"
 do_compile[depends] += "u-boot:do_deploy"
-# Per-machine extlinux provider (board id != ${MACHINE}); gate on MACHINEOVERRIDES.
-EXTLINUX_PROVIDER ?= ""
-EXTLINUX_PROVIDER:rzv2n-sr-som = "extlinux-rzv2n-sr-som"
-EXTLINUX_PROVIDER:rzv2h-rdk = "extlinux-rzv2h-rdk"
-do_compile[depends] += "${EXTLINUX_PROVIDER}:do_deploy"
+# The extlinux recipe is named after the board, which is ${MACHINE} without the
+# avocado- prefix - exactly MACHINE_SHORT_NAME (avocado.inc). Deriving the name
+# means a new Renesas board needs no edit here, and a board that forgets to add
+# its recipe fails naming the recipe it is missing.
+do_compile[depends] += "extlinux-${MACHINE_SHORT_NAME}:do_deploy"
 
 DEPENDS += " jq-native"
 
-# Shared GPT-image-build helper used by both the sd and emmc profiles. The
+# Shared GPT-image-build helper, used by whichever of the sd and emmc profiles a
+# board declares in STONE_PROVISIONING (the RDK declares serial and sd only). The
 # base avocado-stone.bb only auto-stages files for stone-img/sd/usb
 # overrides, so we wire stone-serial and stone-emmc here, plus the helper
 # that both profile scripts source.
