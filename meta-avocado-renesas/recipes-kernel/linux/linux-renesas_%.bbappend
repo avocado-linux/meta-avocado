@@ -10,30 +10,28 @@ SRC_URI:append = " file://avocado-core.cfg \
 SRC_URI:append:rzv2n-sr-som = " file://0001-dts-renesas-enable-mali-gpu.patch \
         file://0002-dts-renesas-add-fixed-gpu-regulator.patch"
 
-# TODO(gap-1/2): RZ/V2H RDK device tree. The vendor board dts exists -
-# rzv2h-rdk-ver1.dts in Renesas-SST/linux-rz (branch ubuntu/rz-v2h-rdk, kernel
-# 6.10) - so it is NOT authored from scratch; it is forward-ported onto
-# linux-renesas 6.12 (rz-6.12-cip7) and wired into
-# arch/arm64/boot/dts/renesas/Makefile so r9a09g057h44-rzv2h-rdk.dtb builds.
+# RZ/V2H Robot RDK device tree. Forward-ported onto linux-renesas 6.12
+# (rz-6.12-cip7) from rzv2h-rdk-ver1.dts in Renesas-SST/linux-rz (branch
+# ubuntu/rz-v2h-rdk, kernel 6.10); the SST-only includes it carried were replaced
+# with their cip equivalents, so the shipped dts includes only r9a09g057.dtsi,
+# rzg2l-pinctrl.h and gpio.h, all present in this kernel.
 #
-# Verified against rz-6.12-cip7: of the RDK dts's 5 #includes, r9a09g057.dtsi
-# and gpio.h are present, but THREE are SST-downstream-only and missing:
-#   - r9a09g057h4-evk-multi-os.dtsi   (cip has r9a09g057h44-rzv2h-evk.dts instead)
-#   - dt-bindings/pinctrl/rzv2h-pinctrl.h
-#   - dt-bindings/soc/renesas,rsci.h  (SST uses the RSCI serial driver; cip 6.12
-#                                      uses SCIF/ttySC0 - serial nodes need rework)
-# Path 1: adapt the vendor dts onto cip 6.12 (RSCI->SCIF serial, mainline rzv2h
-# pinctrl), then add: SRC_URI:append:rzv2h-rdk = " file://<rdk-dts+makefile>.patch".
-# Path 2 (fallback): vendor the SST Styhead BSP, where the dts builds as-is.
-# Either path requires a build to verify.
-
-# RZ/V2H Robot RDK device tree (first cut; see TODO above). The .dts ships as a
-# plain readable file; the patch only registers its Makefile dtb entry. Copy the
-# dts into the kernel tree before configure so the dtb target resolves.
+# The .dts ships as a plain readable file rather than inside a patch, so it stays
+# reviewable and diffable against the vendor source; the patch beside it only
+# registers the Makefile dtb entry. See docs/adding-a-machine-target.md section
+# 10 for when to pick this shape over a single patch.
 SRC_URI:append:rzv2h-rdk = " file://r9a09g057h44-rzv2h-rdk.dts \
         file://0001-arm64-dts-renesas-add-rzv2h-rdk-to-makefile.patch"
 
+# Copy the dts into the kernel tree before configure so the dtb target resolves.
+# Refuse to clobber a vendor-shipped file of the same name: once the BSP carries
+# its own r9a09g057h44-rzv2h-rdk.dts, silently overwriting it would hide DT
+# divergence, and the Makefile patch would then fail to apply for an unrelated
+# reason (duplicate entry) pointing nowhere near the cause.
 do_configure:prepend:rzv2h-rdk() {
+    if [ -e ${S}/arch/arm64/boot/dts/renesas/r9a09g057h44-rzv2h-rdk.dts ]; then
+        bbfatal "linux-renesas now ships arch/arm64/boot/dts/renesas/r9a09g057h44-rzv2h-rdk.dts. Drop the rzv2h-rdk dts and Makefile patch from this bbappend and use the vendor copy."
+    fi
     install -m 0644 ${WORKDIR}/r9a09g057h44-rzv2h-rdk.dts \
         ${S}/arch/arm64/boot/dts/renesas/r9a09g057h44-rzv2h-rdk.dts
 }
