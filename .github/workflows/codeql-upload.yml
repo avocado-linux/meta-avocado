@@ -64,8 +64,19 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A fork PR author fully controls their fork's owner name and
+          # branch name -- interpolating them directly into this run block
+          # via ${{ }} would splice attacker-chosen text into the script
+          # itself (classic Actions script injection), running with this
+          # job's real security-events: write token. Passed as env vars
+          # instead, so they're only ever consumed as inert data by `gh`,
+          # never re-parsed as shell syntax.
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          number=$(gh api "repos/${{ github.repository }}/pulls?head=${{ github.event.workflow_run.head_repository.owner.login }}:${{ github.event.workflow_run.head_branch }}&state=open" \
+          number=$(gh api "repos/${{ github.repository }}/pulls" \
+            -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+            -f state=open \
             --jq '.[0].number // empty')
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
