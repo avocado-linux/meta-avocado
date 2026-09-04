@@ -501,7 +501,12 @@ def invoke_image(installed_text, machine, capabilities):
             rootfs + LIBEXECDIR, "cryptsetup-var", "var-key.sh"
         )
         os.makedirs(os.path.dirname(provider))
-        if installed_text is not None:
+        if installed_text is SYMLINK:
+            target = os.path.join(root, "host-side-provider.sh")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(PROVIDERS["good"])
+            os.symlink(target, provider)
+        elif installed_text is not None:
             with open(provider, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
 
@@ -544,7 +549,14 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
         os.makedirs(files)
         os.makedirs(workdir)
 
-        if installed_text is not None:
+        if installed_text is SYMLINK:
+            # An ABSOLUTE symlink, which is the shape that matters: it resolves
+            # against the build host here and against the image root at boot.
+            target = os.path.join(root, "host-side-provider.sh")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(PROVIDERS["good"])
+            os.symlink(target, installed)
+        elif installed_text is not None:
             with open(installed, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
         if source_text is not None:
@@ -574,6 +586,9 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
+
+# Sentinel: install the provider as a symlink rather than a regular file.
+SYMLINK = "<symlink>"
 
 HARDWARE = "avocado-imx93-frdm"
 PERMITTED = "avocado-qemux86-64"
@@ -675,6 +690,8 @@ CASES = [
     case(TIER2, "exec: a provider that exits non-zero is refused",
          installed="always_fails", source="always_fails",
          match="cannot derive a key from its own declared"),
+    case(TIER2, "exec: a symlinked provider is refused",
+         installed=SYMLINK, source="good", match="is a symlink"),
     case(TIER2, "exec: no provider installed is refused",
          installed=None, source="good",
          match="no var-key.sh was installed at"),
@@ -754,6 +771,8 @@ CASES = [
          skip_why="layer not checked out"),
     case(TIER3, "image: a usable provider passes",
          installed="good", expect="pass"),
+    case(TIER3, "image: a symlinked provider is refused",
+         installed=SYMLINK, match="as a symlink"),
     case(TIER3, "image: no provider shipped is refused",
          installed=None, match="ships no var-key.sh"),
     case(TIER3, "image: a synthetic unusable provider is refused",
@@ -810,7 +829,9 @@ def main():
             print("         %s" % spec["skip_why"])
             skipped += 1
             continue
-        installed = PROVIDERS[spec["installed"]] if spec["installed"] else None
+        installed = spec["installed"]
+        if installed is not None and installed is not SYMLINK:
+            installed = PROVIDERS[installed]
         if spec["tier"] == TIER3:
             verdict, detail = invoke_image(
                 installed, spec["machine"], spec["caps"]

@@ -337,6 +337,19 @@ python avocado_security_capabilities_check_provider() {
     lead = ("machine %s declares encrypted-var and this image "
             % flat(machine))
 
+    # A symlink is not the artifact, and here the mismatch is worse than in the
+    # recipe tier: os.path.isfile() and open() follow the link, so an ABSOLUTE
+    # symlink in the image resolves against the build host now and against the
+    # image's own root at boot. A link to a host file declaring `usable` would
+    # pass this gate while the device finds something else, or nothing.
+    if os.path.islink(provider):
+        bb.fatal(
+            lead + "ships its var-key.sh at %s as a symlink. This gate and the "
+            "device resolve it in different namespaces, so a declaration read "
+            "here says nothing about what the device runs. Ship the provider "
+            "as a regular file." % flat(provider)
+        )
+
     if not os.path.isfile(provider):
         bb.fatal(
             lead + "ships no var-key.sh at %s. cryptsetup-var.sh reads "

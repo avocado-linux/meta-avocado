@@ -331,6 +331,20 @@ python avocado_var_key_check_deliverability() {
             "opt-out switch."
         )
 
+    # A symlink is not the artifact. os.path.isfile() and open() both FOLLOW
+    # one, so an absolute symlink installed here resolves against the BUILD
+    # HOST while the same link resolves inside the image at boot - the check
+    # reads one file and the device runs another. populate() below already
+    # refuses a symlinked fixture root for the same reason; the provider itself
+    # was the one path where the guard was missing.
+    if os.path.islink(installed):
+        bb.fatal(
+            lead + "its installed var-key.sh at %s is a symlink. The check and "
+            "the device would resolve it in different namespaces, so what is "
+            "validated here is not what runs there. Install the provider as a "
+            "regular file." % flat(installed)
+        )
+
     if not os.path.isfile(installed):
         bb.fatal(lead + "no var-key.sh was installed at %s." % flat(installed))
 
