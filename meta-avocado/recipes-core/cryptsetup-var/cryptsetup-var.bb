@@ -183,7 +183,10 @@ python __anonymous() {
         with open(provider, encoding="utf-8", errors="replace") as f:
             contents = f.read()
     except OSError as exc:
-        bb.fatal(lead + "its var-key.sh at %s could not be read: %s." % (provider, exc) + remedy)
+        bb.fatal(
+            lead + "its var-key.sh at %s could not be read: %s."
+            % (flat(provider), flat(exc)) + remedy
+        )
 
     # Collect EVERY declaration rather than stopping at the first. First-match
     # wins turned the realistic migration - copy the shared provider, prepend a
@@ -195,7 +198,13 @@ python __anonymous() {
         bb.fatal(
             lead + "the var-key.sh that resolves for it (%s) carries %d "
             "'%s' status lines (%s); exactly one is required, so which one "
-            "governs cannot be decided." % (provider, len(declarations), marker, ", ".join(declarations))
+            "governs cannot be decided."
+            % (
+                flat(provider),
+                len(declarations),
+                marker,
+                flat(", ".join(declarations)),
+            )
             + remedy
         )
 

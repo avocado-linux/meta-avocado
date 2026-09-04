@@ -413,6 +413,16 @@ PROVIDERS["no_status"] = PROVIDERS["good"].replace(
 PROVIDERS["no_identity"] = PROVIDERS["good"].replace(
     "# avocado-var-key-identity: %s\n" % PRIMARY, ""
 )
+# A second status carrying square brackets. `[unusable]` is a single bare token,
+# so the parser accepts it as a declaration - and bakar streams bitbake's log
+# through a Rich handler that reads a bracketed span as a style tag and drops
+# it, so an unflattened interpolation reaches the terminal with the offending
+# value missing. The one value an author needs in order to fix the file.
+PROVIDERS["bracketed_statuses"] = PROVIDERS["good"].replace(
+    "# avocado-var-key-provider: usable\n",
+    "# avocado-var-key-provider: usable\n"
+    "# avocado-var-key-provider: [unusable]\n",
+)
 
 
 # --------------------------------------------------------------------------
@@ -527,6 +537,13 @@ CASES = [
     case(TIER1, "parse: two status lines are refused",
          installed="two_statuses", source="two_statuses",
          match="cannot be decided"),
+    # Matching on the FLATTENED spelling is the assertion. Drop the flat() call
+    # around the joined declarations and the message carries `[unusable]`
+    # instead, so this match fails - which is the only way to notice, since the
+    # value goes missing in the log rather than looking wrong.
+    case(TIER1, "parse: a bracketed status is reported flattened",
+         installed="bracketed_statuses", source="bracketed_statuses",
+         match="usable, (unusable)"),
     case(TIER1, "parse: no status line is refused",
          installed="no_status", source="no_status",
          match="cannot be shown to derive a key"),
