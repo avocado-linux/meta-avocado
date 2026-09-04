@@ -49,5 +49,5 @@ See [docs/local-package-feed.md](docs/local-package-feed.md) for the full guide.
 
 See [support/sdk-test/README.md](support/sdk-test/README.md) for testing instructions.
 
-<!-- ENG-2578 fork-PR CodeQL test: no-op, safe to close without merging -->
+<!-- ENG-2578 fork-PR CodeQL test: no-op, safe to close without merging (retest after #369) -->
 
