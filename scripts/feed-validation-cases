@@ -2,40 +2,47 @@
 #
 # One case per line, pipe-separated:
 #
-#   name | packages | expected-libs | boot
+#   name | packages | expected-libs | boot | assertions
 #
 #   name           short case id (used for the per-case project dir)
-#   packages       space-separated feed package names to install
+#   packages       space-separated feed package names to install (empty for boot-only)
 #   expected-libs  space-separated shared-lib basenames to assert (optional)
 #   boot           "yes" to also run the boot e2e (heavy: one image cycle), else "no"
+#   assertions     named assertion set for the boot tier (default: ext+libs check)
+#                  "luks-var"     -> fvl_assert_luks_var (checks dm-crypt /var active)
+#                  "luks-var-tpm" -> fvl_assert_luks_var_tpm (luks-var + TPM2 token)
+#                  "dm-verity"    -> fvl_assert_dm_verity (checks vroot verity active)
 #
 # Adding a test = adding a line. Names are the real feed package names
 # (e.g. zeromq, not libzmq - debian renaming is not active here).
 #
-# name       | packages             | expected-libs   | boot
-zeromq       | zeromq               | libzmq.so.5     | yes
+# name       | packages             | expected-libs   | boot | assertions
+zeromq       | zeromq               | libzmq.so.5     | yes  |
 # executorch ships only static libs + headers (-staticdev), so the SDK tier
 # asserts libexecutorch.a lands in the ext sysroot; there is no runtime .so to
 # load on a booted device, so boot is no.
-executorch   | executorch-staticdev | libexecutorch.a | no
-iperf3       | iperf3               | libiperf.so.0   | no
-smartcard    | pcsc-lite pcsc-lite-lib ccid yubico-piv-tool libykpiv ykcs11 | libpcsclite.so.1 libykpiv.so.2 | no
-printing     | cups cups-filters ghostscript ipp-usb poppler qpdf |         | no
+executorch   | executorch-staticdev | libexecutorch.a | no   |
+iperf3       | iperf3               | libiperf.so.0   | no   |
+smartcard    | pcsc-lite pcsc-lite-lib ccid yubico-piv-tool libykpiv ykcs11 | libpcsclite.so.1 libykpiv.so.2 | no   |
+printing     | cups cups-filters ghostscript ipp-usb poppler qpdf |         | no   |
+# Boot-only cases: no feed package to install, the assertion set is the test.
+luks-var     |                      |                 | yes  | luks-var
+luks-var-tpm |                      |                 | yes  | luks-var-tpm
+dm-verity    |                      |                 | yes  | dm-verity
 # One representative package per feature group. The always-on groups
 # (system-base, networking, multimedia, python) use packages that land on
 # every arch; the opengl-gated visual groups (graphics, qt, browsers) also run
 # the boot e2e. The remaining groups are arch/distro/machine-feature gated, so
 # they only assert feed presence (boot=no).
-# name              | packages               | expected-libs | boot
-system-base         | vim                    |               | no
-networking          | networkmanager         |               | no
-multimedia          | gstreamer1.0           |               | no
-python              | python3-pip            |               | no
-graphics            | weston                 |               | yes
-qt                  | qtbase                 |               | yes
-browsers            | chromium-ozone-wayland |               | yes
-cameras             | pylon                  |               | no
-ai                  | dx-driver              |               | no
-cloud-aws           | greengrass-bin         |               | no
-java                | openjdk-17-jre         |               | no
-containers          | podman                 |               | no
+system-base         | vim                    |               | no   |
+networking          | networkmanager         |               | no   |
+multimedia          | gstreamer1.0           |               | no   |
+python              | python3-pip            |               | no   |
+graphics            | weston                 |               | yes  |
+qt                  | qtbase                 |               | yes  |
+browsers            | chromium-ozone-wayland |               | yes  |
+cameras             | pylon                  |               | no   |
+ai                  | dx-driver              |               | no   |
+cloud-aws           | greengrass-bin         |               | no   |
+java                | openjdk-17-jre         |               | no   |
+containers          | podman                 |               | no   |

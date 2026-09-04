@@ -52,6 +52,7 @@ SANITY_TESTED_DISTROS ?= " \
 require conf/distro/include/no-static-libs.inc
 require conf/distro/include/yocto-uninative.inc
 require conf/distro/include/security_flags.inc
+require conf/distro/include/avocado-security.inc
 INHERIT += "uninative"
 
 # DISABLED 2026-06-11 (backport of wrynose's 2026-05-31 change): the inline

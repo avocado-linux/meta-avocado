@@ -1,42 +1,41 @@
 #!/usr/bin/env bash
-# Simplified TPM start script for use with kas
-# Usage: ./start-tpm
-# Assumes pwd is the build directory
+# Start a software TPM 2.0 (swtpm) for use with the kas QEMU runners.
+# Usage: ./start-swtpm
+# Assumes pwd is the build directory (sources/build-<machine>).
+#
+# Runs swtpm in the foreground and publishes its control-socket path to
+# tmp/tpm-state/socket-path so a separate QEMU runner can attach to it.
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+set -euo pipefail
+
 BUILD_DIR="$(pwd)/build"
+[ -d "$BUILD_DIR/tmp" ] || { echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"; exit 1; }
 SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
-# Create a TPM state directory under the build
+SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
+[ -x "$SWTPM_BIN" ] || { echo "Error: swtpm-native not staged at $SWTPM_BIN"; exit 1; }
+
 TPM_DIR="$BUILD_DIR/tmp/tpm-state"
-mkdir -p "$TPM_DIR"
 TPM_SOCK="$TPM_DIR/swtpm-sock"
 
-# Save socket location for other scripts
+mkdir -p "$TPM_DIR"
+# Publish the socket path for the QEMU runner to read.
 echo "$TPM_SOCK" > "$TPM_DIR/socket-path"
+[ -S "$TPM_SOCK" ] && rm -f "$TPM_SOCK"
 
-# Remove existing socket if it exists
-if [ -S "$TPM_SOCK" ]; then
-    rm -f "$TPM_SOCK"
-fi
+# Bitbake native binaries use the uninative glibc loader as their ELF interpreter.
+# Invoke them via that loader with --library-path covering all native sysroot lib dirs.
+UNINATIVE_LOADER="$SYSROOT_UNINATIVE_DIR/x86_64-linux/lib/ld-linux-x86-64.so.2"
+LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev/null | tr '\n' ':')
+LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
 
-# Set the paths based on our successful debug run - using hardcoded paths
-# that are known to work in your environment
-SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
-if [ -z "$SWTPM_BIN" ]; then
-    echo "Error: Could not find swtpm binary"
-    return -1
-fi
-
-LIBPCREDIR="$SYSROOT_COMPONENTS_DIR/libpcre-native/usr/lib"
-ln -sf "$LIBPCREDIR/libpcre.so.1.2.13" "$LIBPCREDIR/libpcre.so.3"
-ln -sf "$LIBPCREDIR/libpcre.so.1.2.13" "$LIBPCREDIR/libpcre.so.3.0.0"
-
-LIB_PATH=$("$SCRIPT_DIR/find-library-path" $SWTPM_BIN $SYSROOT_COMPONENTS_DIR $SYSROOT_UNINATIVE_DIR)
+run_native() {
+    "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
+}
 
 echo "Starting swtpm with socket at $TPM_SOCK"
-LD_LIBRARY_PATH="$LIB_PATH" "$SWTPM_BIN" socket \
+run_native "$SWTPM_BIN" socket \
     --tpmstate dir="$TPM_DIR" \
     --ctrl type=unixio,path="$TPM_SOCK" \
     --log level=20 \
