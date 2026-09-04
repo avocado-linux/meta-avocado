@@ -97,12 +97,15 @@ def trim(full):
     alt_records = [
         alt for e in recipes.values() for alt in e.get("alt_versions", ())
     ]
+    on_device = [e for e in recipes.values() if e["scope"] != "build-only"]
     counts = {
         "recipes": len(recipes),
         "packages": len(packages),
         "packaged_recipes": len(packaged),
+        "device_recipes": len(on_device),
         "cves": sum(len(e["cves"]) for e in recipes.values()),
         "packaged_cves": sum(len(e["cves"]) for e in packaged),
+        "device_cves": sum(len(e["cves"]) for e in on_device),
         "unscanned_recipes": len(unscanned),
         "no_cve_record_recipes": len(no_record),
         "alt_recipes": sum(1 for e in recipes.values() if e.get("alt_versions")),

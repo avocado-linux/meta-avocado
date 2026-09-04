@@ -37,6 +37,7 @@ from avocado_sbom.report import (  # noqa: E402
     read_optouts,
     status_paths,
 )
+from avocado_sbom import verify  # noqa: E402
 
 def entry(name, version="1.0", in_record="Yes", issues=(), products=None):
     if products is None:
@@ -384,6 +385,20 @@ class ScopeTests(unittest.TestCase):
                        "gcc-source-13.4.0", "libgcc-initial", "glibc-initial"):
             self.assertEqual(scopes[recipe], "build-only", recipe)
 
+    def test_an_installed_recipe_in_the_boot_chain_stays_base_runtime(self):
+        # firmware-imx and tegra-firmware are boot chain and also ship packages
+        # the rootfs installs. base-runtime is what a consumer filters on to
+        # ask what is in the rootfs, so naming them must not move them out.
+        cve = [{"id": "CVE-2026-1", "status": "Unpatched"}]
+        self.package("firmware-imx-sdma-imx7d", "firmware-imx")
+        self.write("firmware-imx", entry("firmware-imx", issues=cve))
+
+        doc, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "firmware-imx-sdma-imx7d")],
+            boot_chain=["firmware-imx"],
+        )
+        self.assertEqual(doc["recipes"]["firmware-imx"]["scope"], "base-runtime")
+
     def test_a_packaged_nativesdk_recipe_is_still_build_only(self):
         # do_cve_report reads PKGDATA_DIR_SDK alongside PKGDATA_DIR, so a
         # nativesdk recipe is packaged and would otherwise read "feed" -
@@ -399,8 +414,11 @@ class ScopeTests(unittest.TestCase):
         self.assertTrue(doc["recipes"]["nativesdk-cmake"]["packaged"])
 
     def test_scope_totals_are_derivable_from_the_entries(self):
-        # Deliberately not counters. Every entry carries its own scope, so an
-        # aggregate is one pass and cannot drift from what it summarises.
+        # Per-scope totals are deliberately not counters. Every entry carries
+        # its own scope, so an aggregate is one pass and cannot drift from what
+        # it summarises. device_* is not one of those: it is the
+        # on-device/not partition the report exists to answer, and the counters
+        # below are what keeps every consumer from re-implementing this pass.
         self.populate()
         doc, _ = self.build(
             manifest_paths=[self.manifest("rootfs", "libssl3")],
@@ -415,6 +433,54 @@ class ScopeTests(unittest.TestCase):
             "base-runtime": 1, "feed": 1, "boot-chain": 1, "build-only": 1,
         })
         self.assertEqual(sum(by_scope.values()), doc["counts"]["recipes"])
+
+    def test_the_device_count_is_everything_but_build_only(self):
+        self.populate()
+        doc, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "libssl3")],
+            boot_chain=["u-boot"],
+        )
+        counts = doc["counts"]
+        self.assertEqual(counts["recipes"], 4)
+        self.assertEqual(counts["cves"], 4)
+        self.assertEqual(counts["device_recipes"], 3)
+        self.assertEqual(counts["device_cves"], 3)
+
+    def test_a_freshly_built_report_passes_the_checker(self):
+        # The counts block the producer writes is the one file of the four
+        # that nothing else binds: a counter can reach the schema, the checker
+        # and Stats and still be missing here, and every other test asserts on
+        # the counters it happens to name. Running the checker over a built
+        # report is what makes the compatibility policy's claim true.
+        self.populate()
+        doc, _ = self.build(
+            manifest_paths=[self.manifest("rootfs", "libssl3")],
+            boot_chain=["u-boot"],
+        )
+        self.assertEqual(verify.check_report(doc), [])
+        self.assertEqual(verify.additions(doc), [])
+
+    def test_a_deploy_only_recipe_is_on_the_device_and_not_packaged(self):
+        # ENG-2346: the bootloader ships and packages nothing, so packaged_cves
+        # drops it. It is the whole reason the headline is not that counter.
+        cve = [{"id": "CVE-2026-1", "status": "Unpatched"}]
+        self.write("imx-atf", entry("imx-atf", issues=cve))
+
+        doc, _ = self.build(boot_chain=["u-boot"])
+        self.assertFalse(doc["recipes"]["imx-atf"]["packaged"])
+        self.assertEqual(doc["recipes"]["imx-atf"]["scope"], "boot-chain")
+        self.assertEqual(doc["counts"]["packaged_cves"], 0)
+        self.assertEqual(doc["counts"]["device_cves"], 1)
+
+    def test_a_packaged_nativesdk_recipe_is_packaged_and_not_on_the_device(self):
+        cve = [{"id": "CVE-2026-1", "status": "Unpatched"}]
+        self.package("nativesdk-cmake", "nativesdk-cmake")
+        self.write("nativesdk-cmake", entry("nativesdk-cmake", issues=cve))
+
+        doc, _ = self.build(manifest_paths=[self.manifest("rootfs", "libssl3")])
+        self.assertEqual(doc["counts"]["packaged_cves"], 1)
+        self.assertEqual(doc["counts"]["device_cves"], 0)
+        self.assertEqual(doc["counts"]["device_recipes"], 0)
 
     def test_a_manifest_that_names_nothing_is_not_counted_as_read(self):
         # A truncated manifest would otherwise report the image as scoped

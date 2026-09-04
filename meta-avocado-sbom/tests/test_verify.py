@@ -120,8 +120,20 @@ class FixtureTests(unittest.TestCase):
         # Must not read as a broken join.
         self.report["recipes"] = {}
         self.report["counts"].update(
-            recipes=0, packaged_recipes=0, cves=0, packaged_cves=0
+            recipes=0, packaged_recipes=0, cves=0, packaged_cves=0,
+            device_recipes=0, device_cves=0,
         )
+        self.assertClean()
+
+    def test_device_counts_follow_scope_and_not_packaged(self):
+        # The two sets differ, so a checker deriving device_* from "packaged"
+        # would pass every fixture and catch nothing. A packaged build-only
+        # recipe is the direction that separates them.
+        entry = next(e for e in self.report["recipes"].values()
+                     if e["packaged"] and e["scope"] != "build-only")
+        entry["scope"] = "build-only"
+        self.report["counts"]["device_recipes"] -= 1
+        self.report["counts"]["device_cves"] -= len(entry["cves"])
         self.assertClean()
 
     def test_no_packages_at_all(self):
@@ -280,6 +292,7 @@ class FixtureTests(unittest.TestCase):
         )
         self.report["counts"]["cves"] += 1
         self.report["counts"]["packaged_cves"] += 1
+        self.report["counts"]["device_cves"] += 1
         self.assertClean()
 
     def test_a_mapping_correction_still_passes(self):
@@ -317,6 +330,7 @@ class FixtureTests(unittest.TestCase):
         }
         report["counts"].update(
             recipes=1, packages=3, packaged_recipes=1, cves=1, packaged_cves=1,
+            device_recipes=1, device_cves=1,
             unscanned_recipes=1, no_cve_record_recipes=1, cve_files=1,
         )
         self.assertEqual(verify.check_report(report), [])
@@ -469,6 +483,16 @@ class SchemaTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(counts["properties"]), sorted(verify.REPORT_COUNTERS)
+        )
+
+    def test_the_generator_emits_every_counter_the_checker_requires(self):
+        # Adding a counter touches four files. This binds the third of them -
+        # the schema and the checker are bound above, and make-fixture.py is
+        # the one the README says nothing catches. Without it a counter added
+        # to the schema and the checker but not to Stats fails only at
+        # runtime, on a report the producer could not have written.
+        self.assertEqual(
+            sorted(report.Stats._NAMES), sorted(verify.REPORT_COUNTERS)
         )
 
     def test_health_counters_are_documented_as_such(self):

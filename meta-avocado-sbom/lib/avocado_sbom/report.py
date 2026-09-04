@@ -13,6 +13,8 @@ class Stats(dict):
         "cves",
         "packaged_recipes",
         "packaged_cves",
+        "device_recipes",
+        "device_cves",
         "cve_files",
         "cve_files_unreadable",
         "pkgdata_unreadable",
@@ -159,17 +161,20 @@ def _is_host_tooling(recipe):
 def _scope(recipe, package_names, installed, boot_chain):
     """Which surface a recipe occupies.
 
-    Boot chain is checked first and by name, not package membership: u-boot and
+    Boot chain is matched by name, not package membership: u-boot and
     trusted-firmware-a reach the device through avocado-img-bootfiles, which
     scrapes DEPLOY_DIR_IMAGE, so no manifest names them.
+
+    An installed package beats that name. firmware-imx and tegra-firmware are
+    boot chain and also ship packages the rootfs installs; matching the name
+    first would move them out of base-runtime, the set a consumer filters on to
+    ask what is in the rootfs.
 
     "build-only" is the only value asserting a recipe is NOT on the device, so
     it is earned rather than defaulted to. Read no manifest and everything
     packaged reads "feed" - over-reporting the device, which is the safe way to
     be wrong.
     """
-    if recipe in boot_chain:
-        return "boot-chain"
     # Before package membership, unlike the rest of host tooling: PKGDATA_DIR_SDK
     # packages nativesdk recipes, so they are packaged and would read "feed" -
     # installable on a device, which is what the prefix rules out.
@@ -177,6 +182,8 @@ def _scope(recipe, package_names, installed, boot_chain):
         return "build-only"
     if any(name in installed for name in package_names):
         return "base-runtime"
+    if recipe in boot_chain:
+        return "boot-chain"
     if package_names:
         return "feed"
     if _is_host_tooling(recipe):
@@ -618,8 +625,8 @@ def build_report(
     for name, pkg in packages.items():
         recipe_packages.setdefault(pkg["recipe"], []).append(name)
 
-    # Scope totals are deliberately not counters: every entry carries its own,
-    # so an aggregate cannot drift from what the entries say.
+    # Per-scope totals are deliberately not counters: every entry carries its
+    # own, so an aggregate cannot drift from what the entries say.
     for name, entry in recipes.items():
         # Per version: a multi-kernel machine ships one kernel in the rootfs
         # and the other in the feed. The fallback covers a version pkgdata
@@ -639,6 +646,13 @@ def build_report(
                 if record["version"] in package_versions.get(n, ())
             )
             record["scope"] = _scope(name, names, mine, declared_boot_chain)
+
+    # Not a per-scope total but the on-device partition, and keyed on scope
+    # rather than pkgdata - the README's "packaged" section has why that is
+    # not the same question, and why packaged_* is kept beside it.
+    on_device = [e for e in recipes.values() if e["scope"] != "build-only"]
+    stats.device_recipes = len(on_device)
+    stats.device_cves = sum(len(e["cves"]) for e in on_device)
 
     # Scope is a field, not a filter, so this denominator does not move: both
     # lists stay derived from pkgdata, and reading a manifest leaves them
@@ -666,6 +680,8 @@ def build_report(
             "cves": stats.cves,
             "packaged_recipes": stats.packaged_recipes,
             "packaged_cves": stats.packaged_cves,
+            "device_recipes": stats.device_recipes,
+            "device_cves": stats.device_cves,
             "packages": len(packages),
             "cve_files": stats.cve_files,
             "stale_dropped": stats.stale_dropped,
@@ -1031,16 +1047,18 @@ def main():
         counts = report["counts"]
 
         print(
-            "%s: %d packages, %d recipes, %d %s CVEs (%d recipes, %d CVEs "
-            "packaged)"
+            "%s: %d recipes, %d %s CVEs on the device "
+            "(%d recipes, %d CVEs scanned; %d, %d packaged; %d packages)"
             % (
                 out_paths[status],
-                counts["packages"],
+                counts["device_recipes"],
+                counts["device_cves"],
+                status.lower(),
                 counts["recipes"],
                 counts["cves"],
-                status.lower(),
                 counts["packaged_recipes"],
                 counts["packaged_cves"],
+                counts["packages"],
             ),
             file=sys.stderr,
         )
