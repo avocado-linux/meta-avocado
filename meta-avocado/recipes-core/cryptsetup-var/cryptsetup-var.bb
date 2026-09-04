@@ -486,7 +486,7 @@ python avocado_var_key_check_deliverability() {
             )
         relative.append(declared.lstrip("/"))
 
-    def populate(root, value):
+    def reset(root):
         # rmtree REFUSES a symlink and ignore_errors=True hides the refusal, so
         # a symlink left at this path would survive and every write below would
         # land wherever it points - while the lexical guard further down still
@@ -502,27 +502,42 @@ python avocado_var_key_check_deliverability() {
             os.unlink(root)
         else:
             shutil.rmtree(root, ignore_errors=True)
-        for declared, rel in zip(identities, relative):
-            target = os.path.normpath(os.path.join(root, rel))
-            # A declaration containing .. would otherwise be written outside
-            # WORKDIR, into whatever the traversal resolves to.
-            if not target.startswith(root + os.sep):
-                bb.fatal(
-                    lead + "its installed var-key.sh (%s) declares an identity "
-                    "path '%s' that escapes the fixture root."
-                    % (flat(installed), flat(declared))
-                )
-            try:
-                bb.utils.mkdirhier(os.path.dirname(target))
-                with open(target, "w", encoding="utf-8") as f:
-                    f.write(value)
-            except OSError as exc:
-                bb.fatal(
-                    lead + "its installed var-key.sh (%s) declares an identity "
-                    "path '%s' the fixture could not create: %s. Two declared "
-                    "paths where one is a parent directory of the other do this."
-                    % (flat(installed), flat(declared), flat(exc))
-                )
+        bb.utils.mkdirhier(root)
+
+    def fixture_path(root, index):
+        target = os.path.normpath(os.path.join(root, relative[index]))
+        # A declaration containing .. would otherwise be written outside
+        # WORKDIR, into whatever the traversal resolves to.
+        if not target.startswith(root + os.sep):
+            bb.fatal(
+                lead + "its installed var-key.sh (%s) declares an identity "
+                "path '%s' that escapes the fixture root."
+                % (flat(installed), flat(identities[index]))
+            )
+        return target
+
+    def populate(root, index, value):
+        """Reset ROOT and write VALUE at the single declared path INDEX.
+
+        One path at a time, not all of them at once. Populating every declared
+        path together was the hole: a provider whose SECONDARY read is missing
+        its ROOT prefix is shadowed by a primary that resolves, so the broken
+        read is never walked and the differential is satisfied entirely by the
+        good path. Leaving one declared path as the only source of an identity
+        forces each read to be exercised on its own.
+        """
+        reset(root)
+        target = fixture_path(root, index)
+        try:
+            bb.utils.mkdirhier(os.path.dirname(target))
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(value)
+        except OSError as exc:
+            bb.fatal(
+                lead + "its installed var-key.sh (%s) declares an identity "
+                "path '%s' the fixture could not create: %s."
+                % (flat(installed), flat(identities[index]), flat(exc))
+            )
 
     # Output is captured through bounded temporary files rather than pipes.
     # `timeout` caps elapsed time, not volume, so a provider looping on `yes`
@@ -535,11 +550,11 @@ python avocado_var_key_check_deliverability() {
     _STDOUT_CAP = 4096
     _STDERR_CAP = 16384
 
-    def run(root):
+    def run(script, argv):
         try:
             with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
                 rc = subprocess.call(
-                    ["sh", installed, root],
+                    ["sh", script] + list(argv),
                     stdout=out,
                     stderr=err,
                     timeout=30,
@@ -568,44 +583,25 @@ python avocado_var_key_check_deliverability() {
         flat(installed), flat(source or "<unresolved on FILESPATH>")
     )
 
-    def derive(root):
-        proc = run(root)
+    def derive(script, argv, context):
+        proc = run(script, argv)
         stderr = flat(proc.stderr.decode("utf-8", "replace").strip()) or "(none)"
         if proc.returncode != 0:
             bb.fatal(
                 lead + "its var-key.sh (%s) exited %d when run against "
-                "a synthetic identity at the paths it declares (%s). A provider "
-                "that cannot derive a key from its own declared identity sources "
-                "cannot derive one on the device either. Provider stderr: %s"
-                % (
-                    where,
-                    proc.returncode,
-                    flat(", ".join(identities)),
-                    stderr,
-                )
+                "%s. A provider that cannot derive a key from its own declared "
+                "identity sources cannot derive one on the device either. "
+                "Provider stderr: %s"
+                % (where, proc.returncode, context, stderr)
             )
         if len(proc.stdout) != 64:
             bb.fatal(
                 lead + "its var-key.sh (%s) emitted %d bytes, not the "
-                "64 raw key bytes cryptsetup-var.sh reads from its stdout. "
-                "Provider stderr: %s"
-                % (where, len(proc.stdout), stderr)
+                "64 raw key bytes cryptsetup-var.sh reads from its stdout, when "
+                "run against %s. Provider stderr: %s"
+                % (where, len(proc.stdout), context, stderr)
             )
         return proc.stdout
-
-    # TWO derivations from two DIFFERENT synthetic identities, because a length
-    # check alone cannot tell a device-unique derivation from a constant.
-    #
-    # This is the assertion that makes the tier worth its cost. A provider that
-    # emits a hardcoded 64 bytes passes a size check; so does one whose identity
-    # read is missing its ROOT prefix and therefore resolves against the build
-    # host's own /sys, never reading the fixture at all. Both produce the SAME
-    # key twice, and both are the fleet-wide-identical-key failure every
-    # provider's comment says it exists to prevent. Neither is detectable from
-    # one run.
-    base = d.getVar("WORKDIR")
-    first = os.path.join(base, "var-key-deliverability-fixture-a")
-    second = os.path.join(base, "var-key-deliverability-fixture-b")
 
     # Both values must collide with NO placeholder string any provider
     # refuses, or a good provider is rejected for a property of this check
@@ -618,17 +614,58 @@ python avocado_var_key_check_deliverability() {
     # two-identity assertion replaced the single fixture, so the invariant
     # above was documented in one place and enforced in neither. Literals with
     # the rule beside them beat a variable nothing consults.
-    populate(first, "avocado-synthetic-identity-aaaa00000000000000000001")
-    key_a = derive(first)
+    _VALUE_A = "avocado-synthetic-identity-aaaa00000000000000000001"
+    _VALUE_B = "avocado-synthetic-identity-bbbb00000000000000000002"
+
+    base = d.getVar("WORKDIR")
+
+    # PER DECLARED PATH: populate it alone under two different values and
+    # require the derived key to change.
+    #
+    # Comparing keys ACROSS paths is the weaker form and does not close this.
+    # An unprefixed read that RESOLVES on the build host yields key(fixture)
+    # for the prefixed path and key(host) for the broken one - two different
+    # keys, so a cross-path differential passes while the broken read never
+    # touched the fixture. Changing one path's own value and requiring the key
+    # to follow is what proves the provider read THAT path from THIS root.
+    first_root = None
+    first_key = None
+    for index, declared in enumerate(identities):
+        context = "a synthetic identity at %s alone" % flat(declared)
+        root_a = os.path.join(base, "var-key-fixture-%d-a" % index)
+        root_b = os.path.join(base, "var-key-fixture-%d-b" % index)
+
+        populate(root_a, index, _VALUE_A)
+        key_a = derive(installed, [root_a], context)
+        populate(root_b, index, _VALUE_B)
+        key_b = derive(installed, [root_b], context)
+
+        if key_a == key_b:
+            bb.fatal(
+                lead + "its installed var-key.sh (%s) derived the SAME key from "
+                "two DIFFERENT identities at its declared path '%s', so that "
+                "read is not reaching the fixture. Either the provider emits a "
+                "constant, or that read is not prefixed with the script's "
+                "optional first argument and resolved against the build host "
+                "instead. Every device in the fleet would unlock with one key."
+                % (flat(installed), flat(declared))
+            )
+
+        if first_root is None:
+            first_root, first_key = root_a, key_a
+
     # The SAME identity must yield the SAME key. A provider that mixes in
     # anything non-reproducible - a timestamp, $RANDOM, an openssl-generated
-    # salt - passes the difference assertion below trivially, because two runs
+    # salt - passes the difference assertion above trivially, because two runs
     # differ for the wrong reason. On a device that is worse than a constant
     # key: first boot formats the volume with one key and every later boot
-    # derives another, so /var never opens again. Re-deriving from the first
-    # fixture costs one Argon2id run and is the only thing here that can see it.
-    key_a_again = derive(first)
-    if key_a != key_a_again:
+    # derives another, so /var never opens again. Re-deriving costs one
+    # Argon2id run and is the only thing here that can see it. Once, not per
+    # path: reproducibility is a property of the provider, not of a path.
+    again = derive(
+        installed, [first_root], "the first synthetic identity a second time"
+    )
+    if first_key != again:
         bb.fatal(
             lead + "its installed var-key.sh (%s) derived two DIFFERENT keys "
             "from the same synthetic identity, so its derivation is not "
@@ -639,18 +676,69 @@ python avocado_var_key_check_deliverability() {
             % (flat(installed), flat(", ".join(identities)))
         )
 
-    populate(second, "avocado-synthetic-identity-bbbb00000000000000000002")
-    key_b = derive(second)
+    # THE DEVICE PASSES NO ARGUMENT. Every run above hands the provider a
+    # fixture root as argv, which cryptsetup-var.sh never does, so the artifact
+    # under test can see that it is under test: a provider written to derive
+    # properly whenever $1 is set and to emit a constant when it is empty
+    # satisfied every assertion above and shipped a fleet-wide key.
+    #
+    # Removing the signal rather than trusting its absence: rewrite each
+    # declared path in a COPY to point into the fixture, then run that copy the
+    # way a device does, with no argument. The key must match the argv run over
+    # the same fixture. This is the technique the vendor test suites already
+    # use; it belongs here too, because those suites are not what gates a
+    # build.
+    # Comment lines are excluded when looking for the path, and are still
+    # rewritten. Searching the whole file made this check dead code: every
+    # declared path appears in its own '# <identity marker>: <path>' line by
+    # construction, so the membership test could never fail and a provider
+    # assembling its path at run time passed straight through. Measured on the
+    # four shipping providers, each declared path occurs at least once outside
+    # a comment, so requiring that costs none of them.
+    code_only = "\n".join(
+        line for line in contents.splitlines()
+        if not line.strip().startswith("#")
+    )
+    text = contents
+    for index, declared in enumerate(identities):
+        if declared not in code_only:
+            bb.fatal(
+                lead + "its installed var-key.sh (%s) declares the identity "
+                "path '%s', which does not appear literally in the script. The "
+                "check rewrites every declared path into a copy and runs it "
+                "with no argument, the way a device does; a path assembled at "
+                "run time cannot be rewritten, so such a read cannot be shown "
+                "to reach the fixture rather than the build host. Write the "
+                "path as a literal."
+                % (flat(installed), flat(declared))
+            )
+        text = text.replace(declared, fixture_path(first_root, index))
 
-    if key_a == key_b:
+    no_argv = os.path.join(base, "var-key-no-argv.sh")
+    try:
+        with open(no_argv, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(no_argv, 0o755)
+    except OSError as exc:
         bb.fatal(
-            lead + "its installed var-key.sh (%s) derived the SAME key from two "
-            "different synthetic identities, so it is not deriving from the "
-            "identity sources it declares (%s). Either it emits a constant, or "
-            "one of those reads is not prefixed with the script's first argument "
-            "and resolved against the build host instead of the fixture. Every "
-            "device in the fleet would unlock with one key."
-            % (flat(installed), flat(", ".join(identities)))
+            lead + "a path-rewritten copy of its installed var-key.sh (%s) "
+            "could not be written to %s: %s."
+            % (flat(installed), flat(no_argv), flat(exc))
+        )
+
+    unargued = derive(
+        no_argv, [], "a path-rewritten copy invoked with no argument"
+    )
+    if unargued != first_key:
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) derived a DIFFERENT key when "
+            "invoked with no argument against the same identity, reached "
+            "through its declared paths rewritten into the fixture. The device "
+            "invokes it with no argument, so the key this check verified is not "
+            "the key the device would derive. A provider must behave the same "
+            "whether its optional first argument is present or absent - branch "
+            "on nothing but the identity it reads."
+            % flat(installed)
         )
 
     # NEGATIVE CONTROL: with no identity present at all, a provider must REFUSE
@@ -669,18 +757,8 @@ python avocado_var_key_check_deliverability() {
     # which is correct for a disposable target and disqualifying for anything
     # that ships to hardware.
     empty = os.path.join(base, "var-key-deliverability-fixture-empty")
-    # Same symlink guard populate() carries, and for the same reason: rmtree
-    # refuses a symlink and ignore_errors hides the refusal, so a symlink left
-    # here would leave the "empty" root pointing at a populated tree and the
-    # refusal check would judge a fixture that is not empty.
-    if os.path.islink(empty) or (
-        os.path.exists(empty) and not os.path.isdir(empty)
-    ):
-        os.unlink(empty)
-    else:
-        shutil.rmtree(empty, ignore_errors=True)
-    bb.utils.mkdirhier(empty)
-    negative = run(empty)
+    reset(empty)
+    negative = run(installed, [empty])
 
     if status == "test-only" and negative.returncode == 0:
         bb.warn(

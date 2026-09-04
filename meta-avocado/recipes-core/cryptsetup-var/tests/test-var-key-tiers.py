@@ -269,6 +269,33 @@ PROVIDERS = {
         [PRIMARY, SECONDARY],
         read_primary() + read_secondary(prefixed=False) + REFUSE + DERIVE,
     ),
+    # The same unprefixed-secondary mistake on a path that DOES resolve on the
+    # build host. Caught by the per-path differential rather than by a refusal,
+    # and it is the case that rules out the weaker cross-path form: with one
+    # value per path, primary-only yields key(fixture) and secondary-only
+    # yields key(host), which differ - so a cross-path comparison passes while
+    # the broken read never touched the fixture.
+    "unprefixed_secondary_host": provider(
+        "usable",
+        [PRIMARY, HOST_PATH],
+        read_primary()
+        + 'if [ -z "$ID" ] && [ -r "%s" ]; then\n    ID=$(cat "%s")\nfi\n'
+        % (HOST_PATH, HOST_PATH)
+        + REFUSE
+        + DERIVE,
+    ),
+    # Declares a path it assembles at run time rather than writing literally,
+    # so the no-argument copy cannot rewrite it and the read cannot be shown to
+    # reach the fixture instead of the host.
+    "computed_path": provider(
+        "usable",
+        [PRIMARY],
+        'BASE="/sys/fixture"\n'
+        + 'if [ -r "$ROOT$BASE/primary" ]; then\n'
+        + '    ID=$(cat "$ROOT$BASE/primary")\nfi\n'
+        + REFUSE
+        + DERIVE,
+    ),
     # Derives properly whenever it is handed a fixture root, and emits a
     # constant when it is not - which is the device's own invocation. Every
     # tier-2 run passes a root, so the constant branch is never measured.
@@ -339,6 +366,35 @@ PROVIDERS = {
         read_primary() + 'if [ -z "$ID" ]; then\n    ID=no-serial\nfi\n' + DERIVE,
     ),
 }
+
+# The REAL shipped providers, loaded from their vendor layers.
+#
+# The synthetic providers above cover the tier's rejection branches; these cover
+# the other direction, which is the one that breaks a build. Every time this
+# tier gets stricter it can start refusing an artifact that was fine - the
+# per-path fixture requires each declared read to work on its own, and the
+# no-argument run requires each declared path to appear as a literal - and
+# neither requirement is visible from reading a provider.
+LAYERS = os.path.normpath(os.path.join(HERE, "..", "..", "..", ".."))
+
+for _layer, _key in (
+    ("meta-avocado-nxp", "real_nxp"),
+    ("meta-avocado-nvidia", "real_nvidia"),
+    ("meta-avocado-x86-64", "real_x86_64"),
+    ("meta-avocado-qemu", "real_qemu"),
+    ("meta-avocado", "real_shared"),
+):
+    _path = os.path.join(
+        LAYERS, _layer, "recipes-core", "cryptsetup-var", "files", "var-key.sh"
+    )
+    try:
+        with open(_path, encoding="utf-8") as _handle:
+            PROVIDERS[_key] = _handle.read()
+    except OSError:
+        # Absent rather than fatal: a layer can legitimately not be checked out.
+        # The cases naming it skip themselves.
+        pass
+
 
 # Declaration-shape variants, built by rewriting a correct provider's comment
 # header so the body stays identical and only the declaration under test moves.
@@ -487,7 +543,7 @@ CASES = [
          match="derived the SAME key"),
     case(TIER2, "exec: an unprefixed read of an absent path is refused",
          installed="unprefixed_absent", source="unprefixed_absent",
-         match="when run against"),
+         match="cannot derive a key from its own declared"),
     case(TIER2, "exec: an unprefixed read resolving on the build host is refused",
          installed="unprefixed_host", source="unprefixed_host",
          match="derived the SAME key",
@@ -513,7 +569,7 @@ CASES = [
          match="64 raw key bytes"),
     case(TIER2, "exec: a provider that exits non-zero is refused",
          installed="always_fails", source="always_fails",
-         match="when run against"),
+         match="cannot derive a key from its own declared"),
     case(TIER2, "exec: no provider installed is refused",
          installed=None, source="good",
          match="no var-key.sh was installed at"),
@@ -546,19 +602,48 @@ CASES = [
              "this whole check exists to stop reaches a device on a green "
              "build."),
 
-    case(TIER2, "exec: an unprefixed SECONDARY read",
+    # C4. Both halves, because they are caught by different branches and only
+    # the second one shows why the fixture compares two values at ONE path
+    # rather than one value across two paths.
+    case(TIER2, "exec: an unprefixed secondary read of an absent path is refused",
          installed="unprefixed_secondary", source="unprefixed_secondary",
+         match="cannot derive a key from its own declared"),
+    case(TIER2, "exec: an unprefixed secondary resolving on the build host is refused",
+         installed="unprefixed_secondary_host",
+         source="unprefixed_secondary_host",
+         match="at its declared path",
+         skip_unless=HOST_PATH_USABLE,
+         skip_why="%s is not readable on this host" % HOST_PATH),
+    # Q1.
+    case(TIER2, "exec: a provider that derives only when handed a root is refused",
+         installed="argv_evader", source="argv_evader",
+         match="invoked with no argument"),
+    case(TIER2, "exec: a declared path absent as a literal is refused",
+         installed="computed_path", source="computed_path",
+         match="does not appear literally"),
+
+    # The real shipped providers must still pass.
+    case(TIER2, "exec: the real nxp provider passes",
+         installed="real_nxp", source="real_nxp", expect="pass",
+         skip_unless="real_nxp" in PROVIDERS, skip_why="layer not checked out"),
+    case(TIER2, "exec: the real nvidia provider passes",
+         installed="real_nvidia", source="real_nvidia", expect="pass",
+         skip_unless="real_nvidia" in PROVIDERS,
+         skip_why="layer not checked out"),
+    case(TIER2, "exec: the real x86-64 provider passes",
+         installed="real_x86_64", source="real_x86_64", expect="pass",
+         skip_unless="real_x86_64" in PROVIDERS,
+         skip_why="layer not checked out"),
+    case(TIER2, "exec: the real qemu provider passes on a permitted machine",
+         installed="real_qemu", source="real_qemu", machine=PERMITTED,
          expect="pass",
-         gap="C4: the fixture populates every declared path at once, so the "
-             "primary short-circuits and the broken secondary read is never "
-             "walked. Expect `fatal` once the fixture populates one declared "
-             "path at a time."),
-    case(TIER2, "exec: a provider that derives only when handed a fixture root",
-         installed="argv_evader", source="argv_evader", expect="pass",
-         gap="Q1: every tier-2 run passes a root as argv, so the constant "
-             "branch the device takes is never measured. Expect `fatal` once "
-             "the tier also runs the provider with no argument against a "
-             "path-rewritten copy."),
+         skip_unless="real_qemu" in PROVIDERS,
+         skip_why="layer not checked out"),
+    case(TIER1, "parse: the real shared placeholder provider is refused",
+         installed="real_shared", source="real_shared",
+         match="declares itself unusable",
+         skip_unless="real_shared" in PROVIDERS,
+         skip_why="layer not checked out"),
 ]
 
 

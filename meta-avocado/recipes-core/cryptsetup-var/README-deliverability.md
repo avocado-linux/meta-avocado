@@ -202,32 +202,53 @@ generic failure.
 
 ### Tier 2, install time (`do_install[postfuncs]`)
 
-Runs the INSTALLED provider under `${D}` against two synthetic identity
-fixtures built from its declared paths, and requires:
+Runs the INSTALLED provider under `${D}` against synthetic identity fixtures
+built from its declared paths. For a provider declaring N paths it performs
+`2N + 3` runs and requires:
 
-1. each run to exit 0 with exactly 64 bytes;
-2. the same identity to yield the SAME key, re-derived from the first fixture;
-3. the two different identities to yield DIFFERENT keys;
-4. an EMPTY fixture to be REFUSED.
+1. every run to exit 0 with exactly 64 bytes;
+2. for EACH declared path, populated ALONE under two different values, the
+   derived key to CHANGE;
+3. the same identity to yield the SAME key, re-derived once;
+4. a path-rewritten copy invoked with NO argument to yield the same key as the
+   argv run over the same fixture;
+5. an EMPTY fixture to be REFUSED.
 
-Check 2 is the one that looks redundant and is not. A provider mixing in a
-timestamp or a random salt satisfies check 3 trivially, because its two runs
-differ for the wrong reason - and on a device that is worse than a constant
-key: first boot formats `/var` with one key and every later boot derives
-another, so the volume never opens again.
+Check 2 is the load-bearing one and its shape matters twice over. Populating
+every declared path at once was the original form, and it let a provider whose
+SECONDARY read is missing its `ROOT` prefix through: the primary resolves,
+short-circuits, and the broken read is never walked, so the differential is
+satisfied entirely by the good path. Populating one path at a time makes each
+declared read the only source of a key.
 
-The two-identity part is the load-bearing half. A length check alone passes a
-provider that emits a hardcoded constant, and passes one whose identity read is
-missing its `ROOT` prefix and so resolves against the build host's own `/sys`
-instead of the fixture. Both return the same key twice; neither is visible from
-a single run. Both are the fleet-wide-identical-key failure the providers'
-own comments say they exist to prevent.
+Comparing keys ACROSS paths - one value per path - is the weaker version and
+does not finish the job. An unprefixed read that RESOLVES on the build host
+yields `key(fixture)` for the prefixed path and `key(host)` for the broken one:
+two different keys, so a cross-path comparison passes while the broken read
+never touched the fixture. Changing one path's OWN value and requiring the key
+to follow is what proves the provider read that path from that root.
+
+Check 3 looks redundant and is not. A provider mixing in a timestamp or a
+random salt satisfies check 2 trivially, because its two runs differ for the
+wrong reason - and on a device that is worse than a constant key: first boot
+formats `/var` with one key and every later boot derives another, so the volume
+never opens again.
+
+Check 4 exists because the device passes no argument. Every other run hands the
+provider a fixture root as argv, which `cryptsetup-var.sh` never does, so the
+artifact under test could see that it was under test: a provider deriving
+properly whenever `$1` was set and emitting a constant when it was empty
+satisfied every other check here. Rewriting each declared path into a copy and
+running that copy with no argument removes the signal rather than trusting its
+absence. It is why a declared path must appear literally in the script - a path
+assembled at run time cannot be rewritten, so such a read cannot be shown to
+reach the fixture rather than the host.
 
 The empty-fixture run answers a different question: not "does it read its
 declared sources" but "what does it do when they are missing on a real device".
 A provider that substitutes a constant there derives a perfectly good-looking
 64 bytes that every board in the fleet shares, which the differential cannot
-see because the constant is reached identically both times.
+see because the constant is reached identically every time.
 
 ### The three statuses
 
@@ -292,22 +313,24 @@ to make the suite green is how a fleet loses its data with every test passing.
   `openssl-native`; the device uses target `openssl-bin`, and
   `openssl kdf ARGON2ID` requires OpenSSL 3.2 or newer. A layer pinning the
   target older than the native passes here and fails at first boot.
-- **That any branch other than the declared one works.** Only declared paths are
-  populated, so a fallback leg is never walked. The qemu provider is the live
+- **That an UNDECLARED branch works.** Every declared path is now exercised on
+  its own, so a declared fallback leg is walked rather than shadowed. A branch
+  the provider never declares is still unreached. The qemu provider is the live
   example: on `avocado-qemux86-64` the branch the device actually takes is the
-  `/proc/cpuinfo` one, which ends in the constant `qemu-no-serial`, and the
-  check exercises the device-tree branch instead.
+  `/proc/cpuinfo` one, which ends in the constant `qemu-no-serial`, and it
+  declares only the device-tree path. The remedy is to declare every path read,
+  not to widen the check.
 - **That the provider is still the one checked.** Tier 2 reads `${D}`, which
   closes the `do_install:append` window. It does not close the postfunc window:
   a bbappend appending its own `do_install` postfunc runs after this one.
-- **That a provider behaves the same when it is not being tested.** The check
-  passes the fixture root as an argument, while the device invokes the provider
-  with none, so the artifact under test can see that it is under test. A
-  provider written to derive properly whenever `$1` is set and to emit a
-  constant when it is empty passes everything here. This bounds the whole tier:
-  it catches mistakes and careless providers, not one written to evade it. It
-  is also why the `test-only` waiver is gated on a list this recipe owns rather
-  than on anything a provider declares about itself.
+- **That the capability the DEVICE sees is the one checked.** Both tiers read
+  `AVOCADO_SECURITY_CAPABILITIES` from this recipe's own datastore, while
+  `/etc/avocado-security-capabilities` is written by
+  `avocado_security_capabilities_write_artifact` from the image recipe's. A
+  one-line `cryptsetup-var.bbappend` clearing it disarms both tiers while the
+  image still ships `encrypted-var`, so the `unusable` placeholder reaches a
+  device on a green build. Confirmed on a real build, and the only fail-open
+  path left here.
 
 ### The tier regression test
 
@@ -326,7 +349,13 @@ recipe mutations survived exactly that way before the message assertions went
 in: tier 1's `unusable` fatal fell through to its unrecognised-status check, the
 two-identity differential fell through to the negative control, and both the
 escape guard and the returncode check fell through to the 64-byte check. With
-the assertions, 16 of 16 mutations turn the file red.
+the assertions, 18 of 18 mutations turn the file red.
+
+The trap recurs whenever a message is edited. Adding "when run against %s" to
+the 64-byte diagnostic made it share a substring with the returncode
+diagnostic, and the returncode mutation went green again until three cases were
+repointed at a fragment only that branch carries. When editing a tier's message,
+re-run the mutation battery rather than only the suite.
 
 The same effect caught a wrong assumption in one of its own cases. An unprefixed
 read of a declared path that resolves NOWHERE on the build host refuses, so it
@@ -335,10 +364,19 @@ reach the differential the unprefixed path has to exist on the host, which is
 why one case declares `/proc/sys/kernel/ostype` rather than a synthetic `/sys`
 path - and why the two are separate cases.
 
-Four cases are recorded as GAPs rather than passes: the two C5 bypasses, C4's
-unwalked secondary read, and the argv evader. Each names the change that closes
-it and its expectation flips to a refusal when that change lands, so the file is
-also the regression test for the fixes still outstanding.
+Two cases are recorded as GAPs rather than passes, both the capability-datastore
+bypass above, on each tier. Each names the change that would close it, and its
+expectation flips to a refusal when that change lands, so the file is also the
+regression test for the fix still outstanding. Two further gaps - a secondary
+read shadowed by the primary, and a provider that derived only when handed a
+fixture root - were recorded the same way and are now closed; their cases assert
+a refusal.
+
+Five cases run the tier against the REAL shipped providers rather than a
+synthetic one. They cover the direction that breaks a build rather than the one
+that lets a bad provider through: every time this tier gets stricter it can
+start refusing an artifact that was fine, and neither the per-path fixture nor
+the literal-path requirement is visible from reading a provider.
 
 ### Not covered by an executable test
 
