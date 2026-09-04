@@ -30,6 +30,14 @@ name: CodeQL Upload
 # codeql-analyze.yml now checks out and analyzes the head commit explicitly
 # (not the default merge commit) -- a mismatched pairing is a documented
 # cause of silent misattribution or ingestion failure in codeql-action.
+#
+# The PR-number lookup is filtered to the one whose head.sha matches
+# head_sha, not just the first head=<owner>:<branch> match: the same fork
+# branch can back two open PRs at once (one per base branch this workflow
+# watches), and a fork can push again while this job is still in flight,
+# moving the PR's head past what was actually analyzed. Either way, "first
+# result" can silently attribute this SARIF to the wrong commit -- filtering
+# on the exact sha declines to attribute rather than guessing.
 
 on:
   workflow_run:
@@ -73,11 +81,12 @@ jobs:
           # never re-parsed as shell syntax.
           HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          number=$(gh api "repos/${{ github.repository }}/pulls" \
+          number=$(gh api --method GET "repos/${{ github.repository }}/pulls" \
             -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
             -f state=open \
-            --jq '.[0].number // empty')
+            --jq '[.[] | select(.head.sha == env.HEAD_SHA)] | .[0].number // empty')
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
       - name: Download SARIF results
