@@ -259,6 +259,30 @@ Do not read a clean build log as proof that no machine is on a `test-only`
 provider. The warning is emitted by a `do_install` postfunc, so an sstate hit
 skips it, and machines sharing a provider share that sstate object.
 
+### The golden vectors, and why a red one is not re-pinned
+
+Every assertion above is RELATIVE - 64 bytes out, two identities differing, one
+identity repeating. All of them survive a change to the KDF parameters, because
+the change applies to both sides of each comparison. Measured across the three
+vendor suites, six such edits (`iter`, `memcost`, `lanes`, the salt's `cut`
+width, its digest, and `ARGON2ID` to `ARGON2I`) left all three suites green,
+and so did substituting a constant for either KDF channel: replacing
+`pass:"$HW_ID"` still leaves the salt varying per identity, and pinning the
+salt still leaves the password varying, so the differential passes both times.
+Only `keylen` was already caught, by the 64-byte assertion.
+
+Each suite therefore pins one identity to one key - its last case, run against
+the UNMODIFIED provider through the argv fixture root so the vector is wired to
+the real derivation rather than to a copy of the openssl invocation. With the
+vectors in place all eight of those edits turn their suite red.
+
+**A failing vector is a migration signal, not a stale expectation.** The key
+changing means a board whose `/var` was formatted under the old derivation can
+no longer unlock it, and the Argon2id keyslot is the recovery path, so there is
+nothing behind it. Land the migration first - derive the old key, `luksAddKey`
+the new one, `luksKillSlot` the old - and re-pin the vector after. Re-pinning
+to make the suite green is how a fleet loses its data with every test passing.
+
 ### What the check does not establish
 
 - **That the identity is readable on the device at initramfs time.** That is a

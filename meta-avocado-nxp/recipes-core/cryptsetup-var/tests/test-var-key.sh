@@ -176,6 +176,41 @@ else
     ok "an all-whitespace identity is refused rather than substituted"
 fi
 
+# --- Case 11: one pinned identity derives one pinned key ---
+# Every case above is a RELATIVE assertion: 64 bytes out, two identities
+# differing, one identity repeating. All of them still hold after the KDF
+# parameters change, because they change for both sides of the comparison. So
+# an edit to iter, memcost, lanes, keylen or the salt derivation passes this
+# suite while changing the /var key of every board already in the field.
+#
+# This vector is the suite's only absolute assertion, and it is what makes such
+# an edit loud. It runs the provider UNMODIFIED through the argv fixture root,
+# so it is pinned to the real derivation path rather than to a copy of the
+# openssl invocation.
+#
+# If it fails after a deliberate provider change, the vector is NOT the thing
+# to update first. A changed key means a board with an encrypted /var can no
+# longer unlock it, so a migration has to land alongside: derive the old key,
+# `luksAddKey` the new one, `luksKillSlot` the old. Re-pin only after that.
+golden_id='AVOCADO-NXP-GOLDEN-VECTOR-0001'
+golden_key='7f13ae56b31ee18afbd489e06f5f6c82fdc40299c7318b08defdd90ab648d394c588f6524e57266f0ec7bf136fb41bb4466c52e284c683a1845a22e7e97213d8'
+gv="$work/golden"
+mkdir -p "$gv/sys/devices/soc0"
+printf '%s' "$golden_id" > "$gv/sys/devices/soc0/serial_number"
+if sh "$provider" "$gv" > "$work/golden.bin" 2>"$work/golden.err"; then
+    got="$(od -An -tx1 -v < "$work/golden.bin" | tr -d ' \n')"
+    if [[ "$got" == "$golden_key" ]]; then
+        ok "the pinned identity derives the pinned key"
+    else
+        bad "golden vector mismatch - the derivation changed, so every deployed board's /var key changed
+         identity: $golden_id
+         expected: $golden_key
+         got:      $got"
+    fi
+else
+    bad "provider refused the golden-vector identity: $(cat "$work/golden.err")"
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]
