@@ -53,10 +53,41 @@ DT = "/sys/firmware/devicetree/base/serial-number"
 UUID = "/sys/class/dmi/id/product_uuid"
 SERIAL = "/sys/class/dmi/id/product_serial"
 
-# One table per provider: the values worth comparing. A real value, an absent
-# one, and every degenerate form the provider's own refusal logic mentions -
-# those are where a derivation change hides, because a value that was accepted
-# for the wrong reason before is the one that now resolves differently.
+IDENTITY_MARKER = "# avocado-var-key-identity:"
+
+
+def declared_paths(text):
+    """The identity paths a provider declares, in declaration order.
+
+    Read from the provider rather than from a table beside it. The hardcoded
+    2-tuple this replaces was the third instance of one failure shape in this
+    file: a path the provider reads but the table does not name is never
+    rewritten, so BOTH refs read the host's real /sys, both refuse or both
+    agree, and the row reports `same`. Reproduced before this change - adding a
+    third declared path to the x86-64 provider produced 19 of 19 rows `same`
+    and exit 0 over a derivation change that really did move the key.
+
+    Per-ref, not once: a ref whose declared set differs from HEAD's is exactly
+    the change most worth seeing, and reading one ref's declarations for both
+    would hide it.
+    """
+    found = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(IDENTITY_MARKER):
+            continue
+        value = stripped[len(IDENTITY_MARKER):].strip()
+        if value and len(value.split()) == 1:
+            found.append(value)
+    return found
+
+
+# One table per provider: the values worth comparing, keyed by the ROLE a path
+# plays rather than by its literal path - primary is the first declared, and so
+# on. A real value, an absent one, and every degenerate form the provider's own
+# refusal logic mentions - those are where a derivation change hides, because a
+# value that was accepted for the wrong reason before is the one that now
+# resolves differently.
 TABLES = {
     "meta-avocado-nxp": (
         (SOC, DT),
@@ -220,7 +251,7 @@ def main():
     for layer in wanted:
         if layer not in TABLES:
             sys.exit("FAIL - no table for %s" % layer)
-        paths, rows = TABLES[layer]
+        _table_paths, rows = TABLES[layer]
         path = os.path.join(layer, REL)
         old = at_ref(base, path)
         new = at_ref("HEAD", path)
@@ -232,6 +263,58 @@ def main():
             print("  provider did not exist at the base ref - nothing to "
                   "compare, so no device can hold an older key\n")
             continue
+
+        # Each ref's OWN declarations, so a path added or removed between the
+        # two is visible rather than silently unrewritten on one side.
+        old_paths = declared_paths(old)
+        new_paths = declared_paths(new)
+        if not new_paths:
+            sys.exit(
+                "FAIL - %s declares no identity path at HEAD; every read would "
+                "resolve against this host and every row would report `same`"
+                % layer
+            )
+        if not old_paths:
+            # The base predates the identity-declaration contract, which this
+            # change introduced - so "declares nothing" is not "reads nothing".
+            # Use HEAD's paths for both sides, but only after confirming the
+            # base provider contains each one LITERALLY: that is the same
+            # property tier 2's require_literal_paths enforces, and it is what
+            # makes the rewrite reach the base provider's reads too. Without
+            # the check this branch would reintroduce the exact false `same`
+            # the declaration reader exists to remove.
+            missing = [q for q in new_paths if q not in old]
+            if missing:
+                sys.exit(
+                    "FAIL - %s at the base ref declares no identity path and "
+                    "does not contain %s literally, so the rewrite cannot "
+                    "reach its reads and every row would report `same`."
+                    % (layer, ", ".join(missing))
+                )
+            print("  base predates the identity declarations; it contains "
+                  "each of HEAD's paths literally, so both sides are "
+                  "rewritten on HEAD's set")
+            old_paths = new_paths
+
+        if old_paths != new_paths:
+            print("  DECLARED PATHS CHANGED - the two refs do not read the "
+                  "same sources, so a row comparing them compares two "
+                  "different questions:")
+            print("    base: %s" % (", ".join(old_paths) or "<none>"))
+            print("    head: %s" % ", ".join(new_paths))
+            print("  Re-run per ref, or migrate the key, before re-pinning.\n")
+            changed_total += 1
+            continue
+        if len(new_paths) != len(_table_paths):
+            sys.exit(
+                "FAIL - %s declares %d identity path(s) (%s) but its value "
+                "table supplies %d per row. Update TABLES so every declared "
+                "path is populated; an unpopulated one is read from this host "
+                "and reports `same`."
+                % (layer, len(new_paths), ", ".join(new_paths),
+                   len(_table_paths))
+            )
+        paths = new_paths
 
         print("  %-38s %-16s %-18s %-18s %s"
               % (paths[0].rsplit("/", 1)[-1], paths[1].rsplit("/", 1)[-1],
