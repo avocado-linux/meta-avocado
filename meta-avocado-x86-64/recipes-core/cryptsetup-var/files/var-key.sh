@@ -69,8 +69,18 @@ is_placeholder() {
     # Degenerate rather than named: values made only of zeros, dashes and
     # spaces. Catches "0", "0000000000" and the all-zero UUID in one test
     # instead of relying on the list carrying every width a vendor might ship.
-    _stripped=$(printf '%s' "$_v" | tr -d '0' | tr -d '-' | tr -d '[:space:]')
+    _stripped=$(printf '%s' "$_v" | tr -d '-' | tr -d '[:space:]')
     if [ -z "$_stripped" ]; then
+        return 0
+    fi
+    # All zeros, or all ones. Erased fuses and unset DMI fields read
+    # ffffffff-ffff-ffff-ffff-ffffffffffff as readily as the all-zero UUID.
+    # Matched separately so a real serial like 0f0f0f0f is not caught by a
+    # combined strip.
+    if [ -z "$(printf '%s' "$_stripped" | tr -d '0')" ]; then
+        return 0
+    fi
+    if [ -z "$(printf '%s' "$_stripped" | tr -d 'f')" ]; then
         return 0
     fi
 

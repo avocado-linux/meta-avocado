@@ -211,38 +211,43 @@ else
     bad "provider refused the golden-vector identity: $(cat "$work/golden.err")"
 fi
 
-# --- Case 12: an all-zero identity is not an identity ---
-# Unprovisioned UID fuses read as 0000000000000000, which is not whitespace, so
+# --- Case 12: a degenerate identity is not an identity ---
+# Unprovisioned UID fuses read as 0000000000000000 and ERASED ones read as
+# ffffffffffffffff. Neither is whitespace, so
 # a whitespace-only blank test accepted it as this board's identity and every
 # unprovisioned board of that model derived one shared /var key. Both
 # directions matter: a degenerate primary must fall THROUGH to a usable
 # secondary rather than refuse, and a degenerate value everywhere must refuse
 # rather than derive.
-zero_a="$work/zero-falls-through"
-zero_b="$work/zero-everywhere"
-mkdir -p "$zero_a/sys/firmware/devicetree/base" "$zero_a/sys/devices/soc0"
-mkdir -p "$zero_b/sys/firmware/devicetree/base" "$zero_b/sys/devices/soc0"
-printf '0000000000000000' > "$zero_a/sys/firmware/devicetree/base/serial-number"
-printf 'REAL-UNIQUE-SERIAL-99' > "$zero_a/sys/devices/soc0/serial_number"
-printf '0000000000000000' > "$zero_b/sys/firmware/devicetree/base/serial-number"
-printf '0000-0000-0000' > "$zero_b/sys/devices/soc0/serial_number"
+n_deg=0
+for degenerate in "0000000000000000" "ffffffffffffffff" "FFFFFFFFFFFFFFFF"; do
+    n_deg=$((n_deg + 1))
+    zero_a="$work/degenerate-$n_deg-a"
+    zero_b="$work/degenerate-$n_deg-b"
+    mkdir -p "$zero_a/sys/firmware/devicetree/base" "$zero_a/sys/devices/soc0"
+    mkdir -p "$zero_b/sys/firmware/devicetree/base" "$zero_b/sys/devices/soc0"
+    printf '%s' "$degenerate" > "$zero_a/sys/firmware/devicetree/base/serial-number"
+    printf 'REAL-UNIQUE-SERIAL-99' > "$zero_a/sys/devices/soc0/serial_number"
+    printf '%s' "$degenerate" > "$zero_b/sys/firmware/devicetree/base/serial-number"
+    printf '%s' "$degenerate" > "$zero_b/sys/devices/soc0/serial_number"
 
-if sh "$provider" "$zero_a" > "$work/zero_a.bin" 2>"$work/zero_a.err"; then
-    n=$(wc -c < "$work/zero_a.bin")
-    if [[ "$n" -eq 64 ]]; then
-        ok "an all-zero dt falls through to a usable soc0"
+    if sh "$provider" "$zero_a" > "$work/zero_a.bin" 2>"$work/zero_a.err"; then
+        n=$(wc -c < "$work/zero_a.bin")
+        if [[ "$n" -eq 64 ]]; then
+            ok "a degenerate dt ($degenerate) falls through to a usable soc0"
+        else
+            bad "degenerate fall-through ($degenerate) produced $n bytes, expected 64"
+        fi
     else
-        bad "all-zero fall-through produced $n bytes, expected 64"
+        bad "refused despite a usable soc0: $(cat "$work/zero_a.err")"
     fi
-else
-    bad "refused despite a usable soc0: $(cat "$work/zero_a.err")"
-fi
 
-if sh "$provider" "$zero_b" > /dev/null 2>&1; then
-    bad "derived a key from an all-zero identity - every unprovisioned board would share it"
-else
-    ok "an all-zero identity everywhere is refused rather than derived"
-fi
+    if sh "$provider" "$zero_b" > /dev/null 2>&1; then
+        bad "derived a key from $degenerate - every board in that state would share it"
+    else
+        ok "a degenerate identity everywhere ($degenerate) is refused rather than derived"
+    fi
+done
 
 echo
 echo "passed: $pass  failed: $fail"

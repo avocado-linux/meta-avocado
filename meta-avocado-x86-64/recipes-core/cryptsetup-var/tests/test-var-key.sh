@@ -264,6 +264,53 @@ else
          only pinned here:     $(comm -13 <(printf '%s\n' "$provider_placeholders") <(printf '%s\n' "$pinned_placeholders") | tr '\n' ' ')"
 fi
 
+# --- Case 10c: degenerate identifiers, named by shape rather than by token ---
+# The denylist above is a list of strings vendors ship; this is the other half,
+# matching values by shape. Unprovisioned DMI reads all zeros and ERASED DMI
+# reads all ones, in any width and with any separator, so no list can carry
+# every form. The two are matched separately rather than by one combined strip,
+# because stripping '0' and 'f' together would also reject 0f0f0f0f - a
+# perfectly good serial - and refusing a usable board is its own failure.
+degenerate_ids=(
+    "0"
+    "0000000000000000"
+    "00000000-0000-0000-0000-000000000000"
+    "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    "FFFFFFFFFFFFFFFF"
+    "----------"
+)
+n_deg=0
+n_deg_leaked=0
+for degenerate in "${degenerate_ids[@]}"; do
+    n_deg=$((n_deg + 1))
+    root="$work/degenerate-$n_deg"
+    mkdir -p "$root/sys/class/dmi/id"
+    printf '%s' "$degenerate" > "$root/sys/class/dmi/id/product_uuid"
+    if sh "$provider" "$root" > /dev/null 2>&1; then
+        bad "derived a key from the degenerate identifier '$degenerate'"
+        n_deg_leaked=$((n_deg_leaked + 1))
+    fi
+done
+if [[ "$n_deg_leaked" -eq 0 ]]; then
+    ok "all $n_deg degenerate identifier shapes refused"
+fi
+
+# A real serial that merely LOOKS degenerate must still work, or the rule above
+# has traded a fleet-wide key for a fleet that cannot boot.
+usable_lookalike="$work/lookalike"
+mkdir -p "$usable_lookalike/sys/class/dmi/id"
+printf '0f0f0f0f-0f0f-0f0f-0f0f-0f0f0f0f0f0f' > "$usable_lookalike/sys/class/dmi/id/product_uuid"
+if sh "$provider" "$usable_lookalike" > "$work/lookalike.bin" 2>/dev/null; then
+    n=$(wc -c < "$work/lookalike.bin")
+    if [[ "$n" -eq 64 ]]; then
+        ok "a hex serial made only of 0 and f is still a usable identity"
+    else
+        bad "lookalike serial produced $n bytes, expected 64"
+    fi
+else
+    bad "refused 0f0f0f0f... - the degenerate rule is over-matching real serials"
+fi
+
 # --- Case 11: one pinned identity derives one pinned key ---
 # Every case above is a RELATIVE assertion: 64 bytes out, two identities
 # differing, a placeholder refused. All of them still hold after the KDF

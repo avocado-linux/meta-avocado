@@ -145,7 +145,16 @@ def derive(text, paths, values):
         return "REFUSE"
     if len(result.stdout) != 64:
         return "WRONG-LENGTH(%d)" % len(result.stdout)
-    return binascii.hexlify(result.stdout).decode()[:16]
+    # The WHOLE key. Returning a truncated prefix made this tool report `same`
+    # for any change that preserved the first eight bytes and altered the other
+    # 56 - a false clean in the one tool whose job is to catch a changed
+    # derivation. Truncation is a display concern and happens at the print.
+    return binascii.hexlify(result.stdout).decode()
+
+
+def shown(value):
+    """A key abbreviated for the table; a status word left intact."""
+    return value[:16] if len(value) == 128 else value
 
 
 def main():
@@ -210,7 +219,8 @@ def main():
                 verdict = "LOCKOUT: key changed"
                 changed += 1
             print("  %-38s %-16s %-18s %-18s %s"
-                  % (repr(first), repr(second), before, after, verdict))
+                  % (repr(first), repr(second),
+                     shown(before), shown(after), verdict))
         print("  lockout rows: %d of %d\n" % (changed, len(rows)))
         changed_total += changed
 

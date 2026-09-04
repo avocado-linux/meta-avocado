@@ -41,14 +41,20 @@ SOC_UID_FILE="$ROOT/sys/devices/soc0/serial_number"
 # the emptiness TEST is normalised - HW_ID keeps the value exactly as read, so
 # a key that derives correctly today keeps deriving the same key.
 identity_is_blank() {
-    # Zeros and dashes count as blank, not just whitespace. A SoC whose UID
-    # fuses were never provisioned reads as 0000000000000000, which is not
-    # whitespace and so was accepted as this board's identity - giving every
-    # unprovisioned board of that model the same /var key, which is the exact
-    # failure this provider exists to prevent. The x86-64 provider already
-    # rejected the degenerate form; the rule is copied from there rather than
-    # invented, so the three providers agree on what is not an identity.
-    [ -z "$(printf '%s' "$1" | tr -d '0' | tr -d '-' | tr -d '[:space:]')" ]
+    # Blank, all-zero, or all-ones. Unprovisioned UID fuses read as
+    # 0000000000000000 and ERASED ones read as ffffffffffffffff; neither is
+    # whitespace, so both were accepted as this board's identity, giving every
+    # board in that state the same /var key - the exact failure this provider
+    # exists to prevent.
+    #
+    # Two exact tests rather than one character-class strip. Stripping '0' and
+    # 'f' together would also reject 0f0f0f0f, which is a perfectly good serial,
+    # so the degenerate cases are matched individually.
+    _c=$(printf '%s' "$1" | tr -d '[:space:]' | tr -d '-')
+    [ -z "$_c" ] && return 0
+    [ -z "$(printf '%s' "$_c" | tr -d '0')" ] && return 0
+    [ -z "$(printf '%s' "$_c" | tr -d 'fF')" ] && return 0
+    return 1
 }
 
 HW_ID=""
