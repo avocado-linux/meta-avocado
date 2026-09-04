@@ -372,21 +372,29 @@ Run it before re-pinning a vector, and read the result with one qualifier: a
 row matters only if a device can BOTH produce that input AND already hold a
 `/var` formatted under the older ref. Neither half is visible from the table.
 
-Measured for this change (`2830879f` to HEAD), 18 of 32 rows are lockouts:
+Measured for this change (`2830879f` to HEAD), 25 of 39 rows are lockouts:
 
-| Provider | Lockout rows | Precondition | Reaches a machine declaring `encrypted-var`? |
+| Provider | Lockout rows | Preconditions | Reaches a machine declaring `encrypted-var`? |
 | --- | --- | --- | --- |
-| x86-64 | 11 of 17 | a placeholder in `product_uuid` | **No** - all three Intel machines declare `tpm2` only |
-| nxp | 4 of 8 | a whitespace-only `soc0/serial_number` | **Yes** - `avocado-imx93-frdm`, `avocado-imx8mp-evk` |
-| nvidia | 3 of 7 | a whitespace-only DT `serial-number` | **No** - none of the 7 machine confs declares any capability |
+| x86-64 | 13 of 19 | a placeholder in `product_uuid`, including a spacing variant | **No** - all three Intel machines declare `tpm2` only |
+| nxp | 7 of 11 | a whitespace-only OR all-zero `soc0/serial_number` | **Yes** - `avocado-imx93-frdm`, `avocado-imx8mp-evk` |
+| nvidia | 5 of 9 | a whitespace-only OR all-zero DT `serial-number` | **No** - none of the 7 machine confs declares any capability |
 
-The intersection of reachable and plausible is empty, which is why no migration
-ships with this change. The x86-64 rows are by far the most plausible inputs -
-whitebox boards really do ship those placeholder strings - and that provider
-reaches no machine with the capability enabled. The nxp rows are the ones that
-reach shipping hardware, and every one of them needs a primary identity holding
-only blanks; the i.MX and Tegra SoC drivers format the UID as hex, so that is
-not a value they emit.
+**One row is both reachable and plausible, and it is deliberate.** The nxp
+provider ships, and an i.MX whose UID fuses were never provisioned reads
+`0000000000000000` - not a value the driver refuses to emit, unlike the
+whitespace-only case. Such a board previously derived a key from that constant,
+which means every unprovisioned board of that model shared it. Refusing is the
+correct outcome and locking the volume is the cost of removing a fleet-wide
+key; the alternative is keeping it. Exposure is nil today only because no
+device is fielded with `encrypted-var` at all - no machine that declares it has
+a runtime enabling `var.encrypt`.
+
+The remaining rows do not intersect. The x86-64 rows are the most plausible
+inputs - whitebox boards really do ship those placeholder strings - and that
+provider reaches no machine with the capability enabled. The whitespace-only
+rows reach shipping hardware but need a primary identity holding only blanks,
+which the i.MX and Tegra SoC drivers do not emit.
 
 Worth noting where the review pressure landed, because it is a trap for the
 next reader: this was raised against x86-64, the provider with the largest
