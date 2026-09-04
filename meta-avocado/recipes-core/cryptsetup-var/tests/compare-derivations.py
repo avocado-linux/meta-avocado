@@ -38,6 +38,7 @@ a re-pin.
 import argparse
 import binascii
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -157,7 +158,39 @@ def shown(value):
     return value[:16] if len(value) == 128 else value
 
 
+def require_argon2id():
+    """Refuse to run without the KDF, rather than reporting every row `same`.
+
+    derive() collapses any non-zero exit to "REFUSE", and main() checks
+    `before == after` first - so on a host with no openssl, or one older than
+    3.2, BOTH refs refuse, every row reads `same`, and the tool exits 0. That
+    is a false clean in the one tool whose stated job is to catch a changed
+    derivation before a golden vector is re-pinned.
+
+    The three bash suites and the tier harness all probe for this and print
+    SKIP. This tool must not SKIP: a skipped lockout check reads like a passed
+    one to whoever is deciding whether to re-pin.
+    """
+    if not shutil.which("openssl"):
+        sys.exit("FAIL - openssl not on PATH; every row would report `same`")
+    probe = subprocess.run(
+        [
+            "openssl", "kdf", "-binary", "-keylen", "8",
+            "-kdfopt", "pass:x", "-kdfopt", "salt:0123456789abcdef",
+            "-kdfopt", "iter:3", "-kdfopt", "memcost:65536",
+            "-kdfopt", "lanes:1", "ARGON2ID",
+        ],
+        capture_output=True,
+    )
+    if probe.returncode != 0:
+        sys.exit(
+            "FAIL - this openssl has no ARGON2ID (needs 3.2+); every row "
+            "would report `same`"
+        )
+
+
 def main():
+    require_argon2id()
     parser = argparse.ArgumentParser(
         description="Compare what each var-key provider derives at two refs.",
         epilog="BASE_REF is required and deliberately has no default. There is "

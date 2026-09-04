@@ -18,9 +18,9 @@ No real machine in the tree satisfies both halves. Every machine that declares
 | `avocado-intel-x86-64-v*` | no (`tpm2` only) | `meta-avocado-x86-64` |
 
 So the combination has to be constructed. That is the point of the check: it
-guards a state the tree is currently free of, and which a new target - Jetson
-was the trigger, ENG-2158 - would otherwise reach by inheriting the shared
-provider.
+guards a state the tree is currently free of, and which any new machine would
+reach by declaring `encrypted-var` without shipping a provider of its own -
+Jetson was the target that prompted the work.
 
 ## Construction
 

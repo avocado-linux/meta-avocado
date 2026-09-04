@@ -304,6 +304,7 @@ python avocado_var_key_check_deliverability() {
 
     import hashlib
     import os
+    import re
     import shutil
     import subprocess
     import tempfile
@@ -448,6 +449,20 @@ python avocado_var_key_check_deliverability() {
             "this refuses."
             % (flat(installed), flat(source or "<unresolved>"),
                flat(source_status or "<none>"))
+        )
+
+    # Duplicates are refused, not deduped. A repeated identity line is the
+    # copy-a-provider-and-forget-to-delete-a-line migration the status tier is
+    # already hardened against, and silently collapsing it would hide that the
+    # provider was edited carelessly. It also breaks the rewrite below.
+    if len(set(identities)) != len(identities):
+        seen = set()
+        dupes = sorted({i for i in identities if i in seen or seen.add(i)})
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) declares the same identity "
+            "path more than once (%s). Each file the provider reads gets "
+            "exactly one declaration."
+            % (flat(installed), flat(", ".join(dupes)))
         )
 
     relative = []
@@ -638,9 +653,22 @@ python avocado_var_key_check_deliverability() {
         every other assertion here and shipped a fleet-wide key. Rewriting the
         paths removes the signal instead of trusting its absence.
         """
-        text = contents
-        for other, _declared in enumerate(identities):
-            text = text.replace(identities[other], fixture_path(root, other))
+        # ONE pass over the original text, longest path first.
+        #
+        # Sequential str.replace re-scans text it has already rewritten, so a
+        # declared path that is a PREFIX of another gets the fixture root
+        # spliced in twice: rewriting /sys/.../serial_number first turns the
+        # /sys/.../serial_number_raw literal into <root>/sys/.../serial_number_raw,
+        # and the next pass rewrites the <root> part again. The copy then reads
+        # a path that does not exist, and the build is refused with a message
+        # blaming the provider for a defect in this rewrite. Measured on a
+        # prefix pair and on a duplicated declaration; both doubled the root.
+        order = sorted(range(len(identities)), key=lambda i: -len(identities[i]))
+        pattern = re.compile(
+            "|".join(re.escape(identities[i]) for i in order)
+        )
+        target = {identities[i]: fixture_path(root, i) for i in range(len(identities))}
+        text = pattern.sub(lambda m: target[m.group(0)], contents)
         # Not chmodded. run() invokes it as `sh <path>`, which needs no execute
         # bit, so setting one would only widen the mode of a file in WORKDIR
         # for no reader.

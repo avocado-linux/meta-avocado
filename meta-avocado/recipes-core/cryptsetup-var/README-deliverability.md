@@ -397,25 +397,46 @@ Measured for this change (`2830879f` to HEAD), 25 of 39 rows are lockouts:
 
 | Provider | Lockout rows | Preconditions | Reaches a machine declaring `encrypted-var`? |
 | --- | --- | --- | --- |
-| x86-64 | 13 of 19 | a placeholder in `product_uuid`, including a spacing variant | **No** - all three Intel machines declare `tpm2` only |
-| nxp | 7 of 11 | a whitespace-only OR all-zero `soc0/serial_number` | **Yes** - `avocado-imx93-frdm`, `avocado-imx8mp-evk` |
-| nvidia | 5 of 9 | a whitespace-only OR all-zero DT `serial-number` | **No** - none of the 7 machine confs declares any capability |
+| x86-64 | 13 of 19 | a placeholder in `product_uuid`, including a spacing variant | **No** - all three Intel machines declare `tpm2` only, and the layer has no machine include |
+| nxp | 7 of 11 | a whitespace-only, all-zero or all-ones `soc0/serial_number` | **Yes** - `avocado-imx93-frdm`, `avocado-imx8mp-evk` |
+| nvidia | 5 of 9 | a whitespace-only, all-zero or all-ones DT `serial-number` | **Yes** - all seven Jetson machines, via `avocado-jetson.inc:17` |
 
-**One row is both reachable and plausible, and it is deliberate.** The nxp
-provider ships, and an i.MX whose UID fuses were never provisioned reads
-`0000000000000000` - not a value the driver refuses to emit, unlike the
+**Enumerate declarations with a search that reaches includes.** An earlier
+version of this table said nvidia reached no declaring machine, on the strength
+of `grep AVOCADO_SECURITY_CAPABILITIES meta-avocado-nvidia/conf/machine/*.conf`.
+That glob does not match `conf/machine/include/`, which is where the Jetson
+declaration lives and which all seven machine confs `require`. A second pass
+that filtered out lines containing `bb.utils.contains` then dropped
+`avocado-imx93-frdm`, whose declaration appends `ftpm tpm2` conditionally. Both
+searches returned a clean-looking answer that was wrong in the permissive
+direction. The search that works is `git grep AVOCADO_SECURITY_CAPABILITIES`
+with no path glob and no filter, reading the assignments out of the result:
+
+```bash
+git grep -n 'AVOCADO_SECURITY_CAPABILITIES' | grep 'encrypted-var'
+```
+
+Ten machines declare it: seven Jetson, two i.MX, and the two QEMU targets
+(which resolve to the `test-only` provider). No x86-64 machine does.
+
+**Two rows are both reachable and plausible, and both are deliberate.** The nxp
+and nvidia providers each ship to declaring hardware, and a SoC whose UID fuses
+were never provisioned reads `0000000000000000` while an erased one reads
+`ffffffffffffffff` - neither is a value the driver refuses to emit, unlike the
 whitespace-only case. Such a board previously derived a key from that constant,
-which means every unprovisioned board of that model shared it. Refusing is the
-correct outcome and locking the volume is the cost of removing a fleet-wide
+which means every board of that model in the same state shared it. Refusing is
+the correct outcome and locking the volume is the cost of removing a fleet-wide
 key; the alternative is keeping it. Exposure is nil today only because no
 device is fielded with `encrypted-var` at all - no machine that declares it has
-a runtime enabling `var.encrypt`.
+a runtime enabling `var.encrypt`. That is a fact about the fleet, not a
+property of the code, and it is the only thing standing between this change and
+a migration requirement.
 
-The remaining rows do not intersect. The x86-64 rows are the most plausible
-inputs - whitebox boards really do ship those placeholder strings - and that
-provider reaches no machine with the capability enabled. The whitespace-only
-rows reach shipping hardware but need a primary identity holding only blanks,
-which the i.MX and Tegra SoC drivers do not emit.
+The x86-64 rows do not intersect: they are the most plausible inputs, since
+whitebox boards really do ship those placeholder strings, but that provider
+reaches no machine with the capability enabled. The whitespace-only rows reach
+shipping hardware and need a primary identity holding only blanks, which the
+i.MX and Tegra SoC drivers do not emit.
 
 Worth noting where the review pressure landed, because it is a trap for the
 next reader: this was raised against x86-64, the provider with the largest
