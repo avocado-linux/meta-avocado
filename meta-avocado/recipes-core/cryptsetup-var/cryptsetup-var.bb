@@ -581,7 +581,8 @@ python avocado_var_key_check_deliverability() {
     # refuses, or a good provider is rejected for a property of this check
     # rather than of itself. The x86-64 provider's is_placeholder() is the
     # strictest today: a named lowercase list, plus a degenerate rule matching
-    # anything made only of zeros, dashes and spaces. Check both literals
+    # anything made only of zeros, or only of ones, once dashes and whitespace
+    # are discounted. Check both literals
     # against it before editing either, or before widening that rule.
     #
     # A recipe variable used to hold this and was read by nothing after the
@@ -655,8 +656,6 @@ python avocado_var_key_check_deliverability() {
             )
         return path
 
-    first_root = None
-    first_key = None
     for index, declared in enumerate(identities):
         context = "a synthetic identity at %s alone" % flat(declared)
         root_a = os.path.join(base, "var-key-fixture-%d-a" % index)
@@ -713,6 +712,13 @@ python avocado_var_key_check_deliverability() {
         # single no-argv check, and then gave one key to every device whose
         # primary identity is missing - which is the population that depends on
         # the fallback in the first place.
+        # Called HERE and not hoisted above the loop, though it reads only
+        # loop-invariant data. Hoisting makes it pre-empt the per-path
+        # differential, so a provider that emits a constant - and therefore
+        # never mentions its declared path in code - is refused for not
+        # writing the path literally rather than for emitting a constant.
+        # Both refuse; only one names the defect. Measured: hoisting turns
+        # four tier-test cases red on the wrong branch.
         require_literal_paths()
         unargued = derive(
             no_argv_copy(root_a, index),
@@ -730,9 +736,6 @@ python avocado_var_key_check_deliverability() {
                 "present or absent - branch on nothing but the identity it "
                 "reads." % (flat(installed), flat(declared))
             )
-
-        if first_root is None:
-            first_root, first_key = root_a, key_a
 
     # NEGATIVE CONTROL: with no identity present at all, a provider must REFUSE
     # rather than substitute a constant.
