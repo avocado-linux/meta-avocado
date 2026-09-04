@@ -15,13 +15,29 @@ name: CodeQL Upload
 # attribute a fabricated result to any commit it chose (github/codeql-action
 # applies no server-side ref/sha consistency check on this trigger path), so
 # `head_sha` comes from the workflow_run event payload (GitHub-verified, not
-# author-controlled) and the PR number is resolved server-side from it via
-# the API rather than trusted from the artifact.
+# author-controlled).
+#
+# The PR number is resolved the same way, from workflow_run's
+# head_repository/head_branch -- NOT from GET .../commits/{sha}/pulls (an
+# earlier version of this file used that, on review feedback, and it looked
+# right but doesn't actually work: that endpoint, and its GraphQL equivalent,
+# come back empty for a commit that only exists in a fork, confirmed against
+# a real fork PR. head_repository/head_branch are run-level metadata like
+# head_sha -- not attacker-controlled -- and `pulls?head=<owner>:<branch>`
+# reliably finds the PR from them.
 #
 # ref/sha are paired as refs/pull/<n>/head + the head sha, matching that
 # codeql-analyze.yml now checks out and analyzes the head commit explicitly
 # (not the default merge commit) -- a mismatched pairing is a documented
 # cause of silent misattribution or ingestion failure in codeql-action.
+#
+# The PR-number lookup is filtered to the one whose head.sha matches
+# head_sha, not just the first head=<owner>:<branch> match: the same fork
+# branch can back two open PRs at once (one per base branch this workflow
+# watches), and a fork can push again while this job is still in flight,
+# moving the PR's head past what was actually analyzed. Either way, "first
+# result" can silently attribute this SARIF to the wrong commit -- filtering
+# on the exact sha declines to attribute rather than guessing.
 
 on:
   workflow_run:
@@ -52,13 +68,25 @@ jobs:
       matrix:
         language: [python, actions]
     steps:
-      - name: Resolve PR number from head SHA
+      - name: Resolve PR number from head repo/branch
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A fork PR author fully controls their fork's owner name and
+          # branch name -- interpolating them directly into this run block
+          # via ${{ }} would splice attacker-chosen text into the script
+          # itself (classic Actions script injection), running with this
+          # job's real security-events: write token. Passed as env vars
+          # instead, so they're only ever consumed as inert data by `gh`,
+          # never re-parsed as shell syntax.
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          number=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
-            --jq '.[0].number // empty')
+          number=$(gh api --method GET "repos/${{ github.repository }}/pulls" \
+            -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+            -f state=open \
+            --jq '[.[] | select(.head.sha == env.HEAD_SHA)] | .[0].number // empty')
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
       - name: Download SARIF results
