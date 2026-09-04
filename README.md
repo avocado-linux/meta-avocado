@@ -48,3 +48,6 @@ See [docs/local-package-feed.md](docs/local-package-feed.md) for the full guide.
 ## Testing
 
 See [support/sdk-test/README.md](support/sdk-test/README.md) for testing instructions.
+
+<!-- ENG-2578 post-cutover fork-PR CodeQL test: no-op, safe to close without merging -->
+
