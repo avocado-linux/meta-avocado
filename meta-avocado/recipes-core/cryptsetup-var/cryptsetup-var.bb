@@ -302,6 +302,7 @@ python avocado_var_key_check_deliverability() {
     ):
         return
 
+    import hashlib
     import os
     import shutil
     import subprocess
@@ -775,6 +776,41 @@ python avocado_var_key_check_deliverability() {
             "when it finds no identity, the way the i.MX, Jetson and x86-64 "
             "providers do."
             % (flat(installed), len(negative.stdout))
+        )
+
+    # ATTESTATION: bind the bytes that just passed to the bytes that ship.
+    #
+    # Everything above validates ${D} at the moment this postfunc runs. A
+    # bbappend registering its OWN do_install postfunc runs after this one and
+    # can replace the provider with anything carrying `# ...: usable` - an
+    # `exit 1`, or a constant key - and the image tier, which reads only the
+    # status declaration, accepts it. The check has already passed by then and
+    # never looks again.
+    #
+    # Record the digest of what was actually exercised, next to it, so the image
+    # tier can require the copy it ships to be that same file.
+    #
+    # What this does NOT stop: an edit that updates the digest alongside the
+    # provider. Both are in ${D} and equally writable, so this binds against a
+    # postfunc that replaces the provider without knowing the attestation
+    # exists - the accidental and the expedient case, which is the same threat
+    # the image tier was added for. It is not a signature and a determined
+    # author defeats it in one more line.
+    #
+    # Written LAST, after every check, so its presence means "these bytes passed
+    # every tier-2 assertion" rather than "these bytes were seen".
+    try:
+        with open(installed, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        with open(installed + ".sha256", "w", encoding="utf-8") as f:
+            f.write(digest + "\n")
+    except OSError as exc:
+        bb.fatal(
+            lead + "its installed var-key.sh (%s) passed every check but the "
+            "attestation beside it could not be written: %s. The image tier "
+            "requires that file, so shipping without it would refuse the build "
+            "later with a less useful diagnostic."
+            % (flat(installed), flat(exc))
         )
 }
 do_install[postfuncs] += "avocado_var_key_check_deliverability"

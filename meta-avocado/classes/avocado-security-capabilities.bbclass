@@ -320,6 +320,7 @@ python avocado_security_capabilities_write_artifact() {
 # itself - "did it run at all, and over the provider that shipped?" - which a
 # status read is enough for.
 python avocado_security_capabilities_check_provider() {
+    import hashlib
     import os
 
     capabilities = d.getVar("AVOCADO_SECURITY_CAPABILITIES")
@@ -367,6 +368,54 @@ python avocado_security_capabilities_check_provider() {
         bb.fatal(
             lead + "could not read the var-key.sh it ships at %s: %s."
             % (flat(provider), flat(exc))
+        )
+
+    # THE ATTESTATION, before the status declaration is trusted at all.
+    #
+    # A status line says what a provider claims; it says nothing about whether
+    # THIS file is the one tier 2 executed. A bbappend postfunc registered after
+    # avocado_var_key_check_deliverability can replace the validated script with
+    # an `exit 1` or a constant-key body carrying the same `usable` line, and
+    # every check below would pass it. Tier 2 writes the digest of the bytes it
+    # actually exercised beside the provider; requiring a match is what binds
+    # what was tested to what ships.
+    #
+    # A MISSING attestation is the louder case, not the quieter one: tier 2
+    # writes it last, so its absence means tier 2 did not finish - and the way
+    # it does not finish is by returning early on a capability this image still
+    # declares. That is the recipe-datastore bypass, caught here a second time
+    # and by a different signal than the status read below.
+    attestation = provider + ".sha256"
+    if not os.path.isfile(attestation):
+        bb.fatal(
+            lead + "ships a var-key.sh (%s) with no attestation beside it. "
+            "cryptsetup-var.bb writes that file last, after every deliverability "
+            "check passes, so its absence means those checks did not run over "
+            "this provider - most likely a cryptsetup-var.bbappend clearing "
+            "AVOCADO_SECURITY_CAPABILITIES, which does not reach this image's "
+            "declaration." % flat(provider)
+        )
+
+    try:
+        with open(attestation, encoding="utf-8", errors="replace") as f:
+            recorded = f.read().strip()
+        with open(provider, "rb") as f:
+            actual = hashlib.sha256(f.read()).hexdigest()
+    except OSError as exc:
+        bb.fatal(
+            lead + "could not read the var-key.sh it ships (%s) or its "
+            "attestation: %s." % (flat(provider), flat(exc))
+        )
+
+    if recorded != actual:
+        bb.fatal(
+            lead + "ships a var-key.sh (%s) that is NOT the file cryptsetup-var "
+            "validated. The attestation records %s and the shipped provider "
+            "hashes to %s, so the script this image will run was replaced after "
+            "it was checked - a do_install postfunc in a bbappend is the way "
+            "that happens. Whatever the replacement declares about itself, it "
+            "has not been shown to derive a device-unique key."
+            % (flat(provider), flat(recorded or "<empty>"), flat(actual))
         )
 
     statuses, _prose = avocado_var_key_declarations(contents, marker)

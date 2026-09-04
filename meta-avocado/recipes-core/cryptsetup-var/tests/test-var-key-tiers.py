@@ -22,6 +22,7 @@ lands.
 Run: python3 test-var-key-tiers.py
 """
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -488,11 +489,20 @@ STATUS_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_MARKER", RECIPE)
 IDENTITY_MARKER = marker_value(SOURCE, "AVOCADO_VAR_KEY_IDENTITY_MARKER", RECIPE)
 LIBEXECDIR = "/usr/libexec"
 
+# Sentinel: install the provider as a symlink rather than a regular file.
+SYMLINK = "<symlink>"
+
+# What attestation the image fixture ships beside the provider. "match" is
+# what a real build produces; the other two are the states tier 3 refuses.
+ATTEST_MATCH = "match"
+ATTEST_STALE = "stale"
+ATTEST_ABSENT = "absent"
+
 # The image-scope gate reads the provider out of ${IMAGE_ROOTFS}, not ${D}, so
 # it needs its own fixture shape. Kept separate from invoke() rather than folded
 # into it: sharing one builder would have to fake both layouts at once, and the
 # whole point of this tier is that it looks somewhere the other two do not.
-def invoke_image(installed_text, machine, capabilities):
+def invoke_image(installed_text, machine, capabilities, attest=ATTEST_MATCH):
     """Run the initramfs-scope gate over a synthetic IMAGE_ROOTFS."""
     root = tempfile.mkdtemp(prefix="var-key-image-")
     try:
@@ -509,6 +519,17 @@ def invoke_image(installed_text, machine, capabilities):
         elif installed_text is not None:
             with open(provider, "w", encoding="utf-8") as handle:
                 handle.write(installed_text)
+
+        # Tier 2 writes this beside the provider after its checks pass, so a
+        # fixture without it is the shape of a build where tier 2 never ran.
+        if installed_text is not None and attest != ATTEST_ABSENT:
+            if attest == ATTEST_STALE:
+                digest = hashlib.sha256(b"a different provider").hexdigest()
+            else:
+                with open(provider, "rb") as handle:
+                    digest = hashlib.sha256(handle.read()).hexdigest()
+            with open(provider + ".sha256", "w", encoding="utf-8") as handle:
+                handle.write(digest + "\n")
 
         bb = BB()
         NAMESPACE["bb"] = bb
@@ -582,13 +603,25 @@ def invoke(tier, installed_text, source_text, machine, capabilities):
             NAMESPACE[tier]()
         except Fatal as exc:
             return "fatal", str(exc)
-        return "pass", "; ".join(bb.warnings) or "(no warnings)"
+
+        # Tier 2's last act is to attest the bytes it exercised. The image tier
+        # REQUIRES that file, so a tier 2 that stopped writing it would break
+        # the pair - and no case could see that while the image fixture wrote
+        # its own. Report the state so a case can assert on it.
+        detail = "; ".join(bb.warnings) or "(no warnings)"
+        if tier == TIER2 and installed_text is not None:
+            state = "absent"
+            if os.path.isfile(installed + ".sha256"):
+                with open(installed + ".sha256", encoding="utf-8") as handle:
+                    recorded = handle.read().strip()
+                with open(installed, "rb") as handle:
+                    actual = hashlib.sha256(handle.read()).hexdigest()
+                state = "match" if recorded == actual else "mismatch"
+            detail = "attestation=%s; %s" % (state, detail)
+        return "pass", detail
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
-
-# Sentinel: install the provider as a symlink rather than a regular file.
-SYMLINK = "<symlink>"
 
 HARDWARE = "avocado-imx93-frdm"
 PERMITTED = "avocado-qemux86-64"
@@ -596,7 +629,7 @@ ARMED = "encrypted-var"
 
 def case(tier, description, installed=None, source=None, machine=HARDWARE,
          caps=ARMED, expect="fatal", match=None, gap=None,
-         skip_unless=True, skip_why=""):
+         skip_unless=True, skip_why="", attest=ATTEST_MATCH):
     return {
         "tier": tier,
         "description": description,
@@ -609,6 +642,7 @@ def case(tier, description, installed=None, source=None, machine=HARDWARE,
         "gap": gap,
         "skip_unless": skip_unless,
         "skip_why": skip_why,
+        "attest": attest,
     }
 
 
@@ -656,6 +690,9 @@ CASES = [
 
     case(TIER2, "exec: a correct single-path provider passes",
          installed="good", source="good", expect="pass"),
+    case(TIER2, "exec: a passing provider is attested for the image tier",
+         installed="good", source="good", expect="pass",
+         match="attestation=match"),
     case(TIER2, "exec: a correct two-path provider passes",
          installed="good_two_path", source="good_two_path", expect="pass"),
     case(TIER2, "exec: a constant key is refused",
@@ -771,6 +808,17 @@ CASES = [
          skip_why="layer not checked out"),
     case(TIER3, "image: a usable provider passes",
          installed="good", expect="pass"),
+    case(TIER3, "image: a provider swapped after validation is refused",
+         installed="good", attest=ATTEST_STALE,
+         match="is NOT the file cryptsetup-var validated"),
+    case(TIER3, "image: a provider with no attestation is refused",
+         installed="good", attest=ATTEST_ABSENT,
+         match="no attestation beside it"),
+    case(TIER3, "image: the disarmed tier leaves no attestation",
+         installed="real_shared", attest=ATTEST_ABSENT,
+         match="those checks did not run",
+         skip_unless="real_shared" in PROVIDERS,
+         skip_why="layer not checked out"),
     case(TIER3, "image: a symlinked provider is refused",
          installed=SYMLINK, match="as a symlink"),
     case(TIER3, "image: no provider shipped is refused",
@@ -834,7 +882,7 @@ def main():
             installed = PROVIDERS[installed]
         if spec["tier"] == TIER3:
             verdict, detail = invoke_image(
-                installed, spec["machine"], spec["caps"]
+                installed, spec["machine"], spec["caps"], spec["attest"]
             )
         else:
             verdict, detail = invoke(

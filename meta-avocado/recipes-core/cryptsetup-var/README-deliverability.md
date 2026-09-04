@@ -286,10 +286,31 @@ gets only the udev and posture packages, so the initramfs is the image that
 carries the provider - and, `cryptsetup-var.sh` being an initrd unit, the one
 that consumes it first.
 
+**A status line is not an identity.** Before trusting any declaration, tier 3
+requires the provider to match the attestation tier 2 writes beside it -
+`var-key.sh.sha256`, the digest of the exact bytes that passed every tier-2
+assertion, written last so its presence means "these bytes passed" rather than
+"these bytes were seen". Without that, a bbappend registering its own
+`do_install` postfunc after `avocado_var_key_check_deliverability` could replace
+the validated script with an `exit 1` or a constant-key body carrying the same
+`usable` line, and every remaining check would pass it.
+
+A MISSING attestation is the louder case, not the quieter one. Tier 2 writes it
+last, so its absence means tier 2 did not finish - and the way it does not
+finish is by returning early on a capability this image still declares. The
+recipe-datastore bypass is therefore caught twice, by two independent signals.
+
+What the attestation does NOT stop: an edit that updates the digest alongside
+the provider. Both live in `${D}` and are equally writable, so this binds
+against a postfunc that replaces the provider without knowing the attestation
+exists - the accidental and the expedient case, which is the same threat the
+image tier was added for. It is not a signature, and one more line defeats it.
+
 It is deliberately NOT a second copy of the derivation check. Tier 2 runs the
 provider against synthetic identities and stays the expensive, authoritative
 tier; tier 3 answers only the question tier 2 cannot ask about itself - did it
-run, and over the provider that shipped - for which a status read suffices. The
+run, and over the provider that shipped - for which the attestation plus a
+status read suffices. The
 parser, the flattener and the `test-only` allow-list live in the class so both
 readers share one implementation; a mutation widening that allow-list turns both
 tier 1 and tier 3 red, which is how the sharing is verified rather than assumed.
