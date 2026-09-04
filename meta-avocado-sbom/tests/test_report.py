@@ -26,8 +26,10 @@ from avocado_sbom.report import (  # noqa: E402
     DEFAULT_STATUSES,
     SCOPES,
     Stats,
+    OVERLAY_DIRNAME,
     build_report,
     default_manifests,
+    default_paths,
     read_cve_data,
     read_manifests,
     filtered_counts,
@@ -195,6 +197,68 @@ class ReadCveDataTests(unittest.TestCase):
             ["CVE-2026-0001", "CVE-2026-0002"],
         )
         self.assertEqual(self.stats.cves, 2)
+
+class OverlayTests(unittest.TestCase):
+    """do_kernel_cve_improve rewrites one recipe and leaves the raw scan beside it."""
+
+    def setUp(self):
+        self.cve_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cve_dir)
+        self.overlay_dir = os.path.join(self.cve_dir, "kernel-improved")
+        os.makedirs(self.overlay_dir)
+        self.stats = Stats()
+
+    def write(self, directory, recipe, *entries):
+        path = os.path.join(directory, "%s_cve.json" % recipe)
+        with open(path, "w") as f:
+            json.dump({"package": list(entries)}, f)
+
+    def read(self, recipe_versions, overlay=True):
+        return read_cve_data(
+            self.cve_dir, recipe_versions, self.stats,
+            overlay_dir=self.overlay_dir if overlay else None,
+        )
+
+    def test_overlay_replaces_the_recipe_it_names(self):
+        # The config filter clears one and the CNA contributes another, so the
+        # overlay is not a subset of what cve-check found.
+        self.write(self.cve_dir, "linux-yocto", entry(
+            "linux-yocto", products=[{"product": "linux_kernel", "cvesInRecord": "Yes"}],
+            issues=[{"id": "CVE-2026-1111", "status": "Unpatched"},
+                    {"id": "CVE-2026-2222", "status": "Unpatched"}]))
+        self.write(self.overlay_dir, "linux-yocto", entry(
+            "linux-yocto", products=[{"product": "linux_kernel", "cvesInRecord": "Yes"}],
+            issues=[{"id": "CVE-2026-1111", "status": "Ignored",
+                     "detail": "not-applicable-config"},
+                    {"id": "CVE-2026-2222", "status": "Unpatched"},
+                    {"id": "CVE-2026-3333", "status": "Unpatched",
+                     "detail": "version-in-range"}]))
+        recipes, _, _ = self.read({"linux-yocto": {"1.0"}})
+        self.assertEqual(
+            sorted(c["id"] for c in recipes["linux-yocto"]["cves"]),
+            ["CVE-2026-2222", "CVE-2026-3333"],
+        )
+        # Read once, not merged with the raw file: one file per recipe either way.
+        self.assertEqual(self.stats.cve_files, 1)
+
+    def test_a_recipe_the_overlay_does_not_name_is_untouched(self):
+        self.write(self.cve_dir, "openssl", entry(
+            "openssl", issues=[{"id": "CVE-2026-4444", "status": "Unpatched"}]))
+        self.write(self.overlay_dir, "linux-yocto", entry(
+            "linux-yocto", issues=[{"id": "CVE-2026-3333", "status": "Unpatched"}]))
+        recipes, _, _ = self.read({"openssl": {"1.0"}, "linux-yocto": {"1.0"}})
+        self.assertEqual(
+            [c["id"] for c in recipes["openssl"]["cves"]], ["CVE-2026-4444"])
+        self.assertEqual(self.stats.cve_files, 2)
+
+    def test_without_an_overlay_dir_nothing_changes(self):
+        self.write(self.cve_dir, "linux-yocto", entry(
+            "linux-yocto", issues=[{"id": "CVE-2026-1111", "status": "Unpatched"}]))
+        self.write(self.overlay_dir, "linux-yocto", entry(
+            "linux-yocto", issues=[{"id": "CVE-2026-9999", "status": "Unpatched"}]))
+        recipes, _, _ = self.read({"linux-yocto": {"1.0"}}, overlay=False)
+        self.assertEqual(
+            [c["id"] for c in recipes["linux-yocto"]["cves"]], ["CVE-2026-1111"])
 
 class BuildReportTests(unittest.TestCase):
     """The two lists partition the shipped recipes with the clean ones."""
@@ -1178,6 +1242,27 @@ class DefaultManifestsTest(unittest.TestCase):
         found = default_manifests(self.tmp)
         self.assertIn(rootfs, found)
         self.assertEqual(len(found), 2)
+
+class DefaultPathsOverlayTest(unittest.TestCase):
+    """The overlay directory is not a machine.
+
+    It sits inside CVE_CHECK_DIR, so on a flat layout it looks exactly like the
+    machine-scoped subdirectory default_paths detects, and misreading it turns
+    a working build into a hard parser.error.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.cve = os.path.join(self.tmp, "deploy", "cve")
+        overlay = os.path.join(self.cve, OVERLAY_DIRNAME)
+        os.makedirs(overlay)
+        os.makedirs(os.path.join(self.tmp, "pkgdata", "qemuarm64"))
+        open(os.path.join(self.cve, "linux-yocto_cve.json"), "w").close()
+        open(os.path.join(overlay, "linux-yocto_cve.json"), "w").close()
+
+    def test_flat_layout_stays_flat(self):
+        self.assertEqual(default_paths(self.tmp)[0], self.cve)
 
 if __name__ == "__main__":
     unittest.main()
