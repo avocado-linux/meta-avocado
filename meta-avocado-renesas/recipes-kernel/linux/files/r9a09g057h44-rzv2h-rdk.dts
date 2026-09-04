@@ -11,13 +11,28 @@
  * section 1.3.5) cross-referenced with the cip 6.12 EVK dts: SoC port PA maps to
  * mainline rzg2l port 10 (ports P0..P9 == 0..9, PA == 10, PB == 11), so the
  * vendor's RZV2H_*(A, n) values become RZG2L_*(10, n) with pin and function
- * indices unchanged. Confirmed against the SoC manual R01UH1032EJ Table 1.2-3:
- * PA5 Func15 = SD0CD, PA1 Func1 = SD0PWEN (vmmc), PA0 Func1 = SD0IOVS (vccq).
- * Only actual card detection remains to verify on a board.
+ * indices unchanged. The port/pin/function numbering is confirmed on paper
+ * against the SoC manual R01UH1032EJ Table 1.2-3: PA5 Func15 = SD0CD,
+ * PA1 Func1 = SD0PWEN (vmmc), PA0 Func1 = SD0IOVS (vccq).
+ *
+ * Paper-confirmed is not measured, and three SD facts are still open on a board:
+ * that card detect asserts at all, that SD0PWEN is active-high with a settle
+ * time short enough to need no startup-delay-us, and that SD0IOVS drives 3.3 V
+ * at logic 0 as the vccq states table below assumes. An inverted SD0IOVS costs
+ * nothing while the card runs at 3.3 V and puts the bus out of spec the moment a
+ * 1.8 V high-speed mode is selected, which is why no sd-uhs-* mode is declared
+ * here yet. Scope the rail before adding them back.
  *
  * TODO(port from vendor dts): CAN-FD x2, 40-pin RasPi GPIO header, PCIe 3.0 RC,
  * USB3.2 x2, GbE eth0 (RGMII PHY 0022.1640) are not yet ported. Translate their
  * pins with the same mapping (PA->10, PB->11; ports 0-9 unchanged).
+ *
+ * TODO(confirm against the RDK BOM): both memory nodes below, and the TF-A
+ * TFA_BOARD variant the machine conf selects, are carried over from the EVK
+ * unchanged. If the RDK's LPDDR differs in size, rank layout or part, BL2 runs
+ * the wrong DDR init and the board does not reach a console, or the kernel maps
+ * absent memory and corrupts under load. Nothing here has been checked against
+ * RDK hardware.
  *
  * Copyright (C) 2024 Renesas Electronics Corp.
  */
@@ -42,6 +57,10 @@
 		stdout-path = "serial0:115200n8";
 	};
 
+	/*
+	 * Both banks are the EVK's, unverified on RDK hardware. See the
+	 * TODO(confirm against the RDK BOM) note in the header.
+	 */
 	memory@48000000 {
 		device_type = "memory";
 		/* first 128MB is reserved for secure area. */
@@ -132,8 +151,7 @@
 	vmmc-supply = <&vmmc_sdhi0>;
 	vqmmc-supply = <&vccq_sdhi0>;
 	bus-width = <4>;
-	sd-uhs-sdr50;
-	sd-uhs-sdr104;
+	/* No sd-uhs-* until the SD0IOVS polarity is measured; see the header. */
 	status = "okay";
 };
 
