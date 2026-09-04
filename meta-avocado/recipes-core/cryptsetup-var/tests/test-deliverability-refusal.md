@@ -45,28 +45,33 @@ which is the whole point, since that is what real machines actually set.
 ## Command
 
 ```
-bakar build --on pc2 --yes --target cryptsetup-var meta-avocado/kas/machine/qemux86-64-nodeliv.yml
+bakar bitbake -c install cryptsetup-var meta-avocado/kas/machine/qemux86-64-nodeliv.yml
 ```
 
-Run from `/home/tiamarin/repos/work/peridio`; dispatched to pc2, both nodes on
-`bakar 0.29.2 (b2948127b778)`.
+Run from `/home/tiamarin/repos/work/peridio` on `bakar 0.29.2 (cd4619e8eae7)`.
+Run locally rather than dispatched, and scoped to `-c install`, because the
+refusal is a parse-time one: it fires before any task runs, so nothing is
+gained by building the recipe's full runtime closure on the remote builder.
 
 ## Result: REFUSED
 
-Exit 2, `kas_build: exit_code=2`, parsing halted, no image produced. The exact
-message, from the run log at
-`build-qemux86-64-nodeliv/build/runs/20260903-161900/kas.log`:
+Parsing halted, no image produced. The exact message, from the run log at
+`build-qemux86-64-nodeliv/build/runs/20260903-181908/kas.log`:
 
 ```
 ERROR: .../meta-avocado/recipes-core/cryptsetup-var/cryptsetup-var.bb: machine
-avocado-qemux86-64-nodeliv declares encrypted-var but supplies no var-key
-provider of its own: the var-key.sh that resolves for this machine is the
-placeholder that cannot actually derive a key. Add a machine- or
-vendor-specific var-key.sh ahead of it on FILESPATH before shipping
-encrypted-var here. A var-hwkey.sh does not satisfy this on its own: per
-cryptsetup-var.sh it supplies the passphrase of a SECOND keyslot and leaves
-the var-key.sh keyslot as the recovery path, so a machine with only a hwkey
-backend still cannot derive that recovery key.
+avocado-qemux86-64-nodeliv declares encrypted-var but the var-key.sh that
+resolves for it (.../meta-avocado/recipes-core/cryptsetup-var/files/var-key.sh)
+declares itself unusable: it is the placeholder that cannot actually derive a
+key. Ship a var-key.sh for this machine carrying the comment line '#
+avocado-var-key-provider: usable' and able to derive a device-unique key. It
+must also carry one '# avocado-var-key-identity: <absolute path>' line per file
+it reads its hardware identity from, and prefix every one of those reads with
+the script's optional first argument, so the build-time check can derive against
+a synthetic identity - see README-deliverability.md. A var-hwkey.sh does not
+satisfy any of this on its own: per cryptsetup-var.sh it supplies the passphrase
+of a SECOND keyslot and leaves the var-key.sh keyslot as the recovery path, so a
+machine with only a hwkey backend still cannot derive that recovery key.
 ERROR: Parsing halted due to errors, see error messages above
 ```
 
@@ -76,20 +81,28 @@ ERROR: Parsing halted due to errors, see error messages above
   `cryptsetup-var.bb`, where the anonymous python lives.
 - **Names the machine**: `avocado-qemux86-64-nodeliv`, verbatim.
 - **Names the feature**: `encrypted-var`.
+- **Names the resolved provider**, so which file was judged is not left to
+  inference: the shared `meta-avocado/.../files/var-key.sh`.
 - **The bbclass diagnostics are absent.** Grepping the run log for the three
   strings `avocado-security-capabilities.bbclass` emits - `requested security
   feature`, `declares no AVOCADO_SECURITY_CAPABILITIES`, `not present in its
   AVOCADO_SECURITY_CAPABILITIES` - returns **0** matches. The refusal cannot be
   attributed to the older declaration check.
 
-## Note on the quoted message
+## Which tier refused, and why it is still this one
 
-The refusal text above is re-quoted from commit `87e81b3a`, which removed an
-earlier remedy clause offering `var-hwkey.sh` as an alternative. That advice
-did not clear the check - a hwkey backend supplies a second keyslot and leaves
-the var-key.sh keyslot as the recovery path - so an operator following it would
-have been refused again with the same message. The run recorded here predates
-that commit; only the remedy sentence changed, not the refusal or its cause.
+The check now has two tiers: this parse-time declaration check, and a
+`do_install` tier that executes the installed provider against two synthetic
+identities. This machine is refused by the FIRST, and that is the correct
+outcome rather than a gap in the second. A provider that declares itself
+`unusable` should never reach the point of being run, and refusing at parse
+costs nothing - no fetch, no unpack, no task.
+
+The message quoted above is re-recorded from a run made after the execution
+tier landed. It changed since the previous recording: the remedy now states the
+whole contract, including the identity declarations and the argument prefix the
+second tier needs, because naming only the status line sent an author past
+parse and into a differently worded refusal one build later.
 
 ## Unrelated secondary error, recorded for honesty
 

@@ -55,15 +55,40 @@ remote run-id: 20260903-165000
 Exit 0. No `bb.fatal`, no deliverability diagnostic, no parse abort. The check
 returned at its first gate without resolving a provider.
 
+Since this was recorded the check gained a second tier, which runs the installed
+provider under `do_install`. Both tiers open with the same
+`bb.utils.contains("AVOCADO_SECURITY_CAPABILITIES", "encrypted-var", ...)` gate,
+so a machine that does not declare the capability should reach neither the
+provider resolution nor the execution. That was re-checked rather than reasoned
+about, because only the execution tier creates a fixture directory and its
+absence is directly observable:
+
+```
+$ bakar bitbake -c cleansstate cryptsetup-var meta-avocado/kas/machine/raspberrypi5.yml
+$ bakar bitbake -c install     cryptsetup-var meta-avocado/kas/machine/raspberrypi5.yml
+99% sstate (205 cached, 2 will build)
+$ find build-raspberrypi5/build/tmp/work -type d -name 'var-key-deliverability-fixture-*' | wc -l
+0
+```
+
+The `cleansstate` is not incidental and is worth copying if this is ever
+re-run. Without it the second command reports `100% sstate (207 cached, 0 will
+build)`, `do_install` is restored from cache and never executes, and the
+resulting absence of a fixture says only that the task did not run. The first
+attempt at this re-check made exactly that mistake: the work directory's mtime
+still predated the commit that added the tier, so the empty result proved
+nothing. After the cleansstate the mtime moves and the task genuinely runs,
+which is what makes the zero above evidence.
+
 ## The three cases together
 
 | Task | Machine | Declares `encrypted-var` | Provider | Outcome |
 |---|---|---|---|---|
-| 4.1 | scratch (`avocado-qemux86-64-nodeliv`) | yes | none (falls to shared sentinel) | **REFUSED** |
-| 4.2 | `avocado-imx93-frdm` | yes | own (nxp) | builds; refuses when the nxp provider is poisoned |
-| 4.3 | `avocado-raspberrypi5` | no | none (falls to shared sentinel) | builds |
+| 4.1 | scratch (`avocado-qemux86-64-nodeliv`) | yes | none (falls to shared placeholder) | **REFUSED at parse** |
+| 4.2 | `avocado-imx93-frdm` | yes | own (nxp) | builds; execution tier runs and derives two distinct keys |
+| 4.3 | `avocado-raspberrypi5` | no | none (falls to shared placeholder) | builds; neither tier runs |
 
 4.1 and 4.3 differ in exactly one variable - the declaration - and resolve to
-the same provider, which is what isolates the first gate. 4.2 and 4.1 differ in
-exactly one variable - the provider - and both declare, which is what isolates
-the second.
+the same provider, which is what isolates the capability gate. 4.2 and 4.1
+differ in exactly one variable - the provider - and both declare, which is what
+isolates the deliverability judgement itself.
