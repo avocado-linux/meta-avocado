@@ -64,7 +64,8 @@ AVOCADO_VAR_KEY_MARKER = "avocado-var-key-provider:"
 # targets belong on this list, because only they have no identity to read.
 #
 # Published for readers, and NOT read by the check. The permitted set is a
-# literal inside avocado_var_key_check_deliverability's parse tier, because a
+# literal inside the parse tier below - the `python __anonymous` block, not the
+# do_install postfunc - because a
 # BitBake variable is the wrong container for a security allow-list: conf files
 # parse before recipes, so `?=` here would be a no-op against any machine conf
 # or local.conf that set the variable first, and even `=` is reachable from a
