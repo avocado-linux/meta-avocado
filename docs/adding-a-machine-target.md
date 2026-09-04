@@ -362,10 +362,17 @@ For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
 When sd / emmc / serial all need the same GPT image, factor the partition-
 table walk into a `build-disk-image.sh` helper alongside the per-profile
 scripts and ship it via `avocado-stone.bbappend` (see Section 8a).
-[meta-avocado-renesas/stone/rzv2n-sr-som/build-disk-image.sh](../meta-avocado-renesas/stone/rzv2n-sr-som/build-disk-image.sh)
-and
 [meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh](../meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh)
-are the reference implementations.
+is the reference implementation.
+
+`stone.bbclass` puts both `<layer>/stone/<board>/` and `<layer>/stone/` on
+`FILESEXTRAPATHS`, the per-board directory first. A helper that reads every
+value it needs from the manifest can therefore sit at the shared level and
+serve every board in the layer, with a per-board copy still able to shadow it.
+[meta-avocado-renesas/stone/build-disk-image.sh](../meta-avocado-renesas/stone/build-disk-image.sh)
+is shared that way between rzv2n-sr-som and rzv2h-rdk. Put the helper in the
+per-board directory when it encodes anything board-specific, as
+meta-avocado-rockchip's does.
 
 ---
 
@@ -692,7 +699,7 @@ To add a new machine called `acme-widget`:
 2. **Create the machine config**: `meta-avocado-acme/conf/machine/avocado-acme-widget.conf` (set `STONE_PROVISIONING ?= "..."`, `MACHINEOVERRIDES`, then `require conf/machine/include/avocado.inc`)
 3. **Create the KAS config**: `kas/machine/acme-widget.yml`
 4. **Create the stone manifest**: `meta-avocado-acme/stone/stone-acme-widget.json`
-5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-*.sh` and (if shared) `build-disk-image.sh`
+5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-*.sh`, plus `build-disk-image.sh` in the same directory if it encodes anything board-specific, or in `meta-avocado-acme/stone/` if it is manifest-driven and other boards in the layer will reuse it
 6. **Create distro `avocado-stone.bbappend`** (only if you declared profiles outside the base set): `meta-avocado-acme/recipes-avocado/distro/avocado-stone.bbappend`
 7. **Create SDK target append**: `meta-avocado-acme/recipes-avocado/sdk/avocado-sdk-target.bbappend` plus the two SDK lifecycle scripts (`avocado-build-acme-widget`, `avocado-provision-acme-widget`) under `${PN}/`
 8. **Create extra packagegroup**: `meta-avocado-acme/recipes-avocado/packagegroups/packagegroup-avocado-acme-extra.bb`
