@@ -893,9 +893,37 @@ do_install[vardepsexclude] += "MACHINE"
 #                   `device-mapper` is what other distros call it and nothing
 #                   in this layer set RPROVIDES that name, so asking for it
 #                   fails dependency resolution rather than pulling in dmsetup.
-# (blockdev, blkid, systemd-cryptenroll, mktemp, dirname, tr, cut are already
-#  in the avocado initramfs.)
-RDEPENDS:${PN} = "cryptsetup openssl-bin btrfs-tools gawk sed libdevmapper"
+#   coreutils     - tr, cut and printf, which EVERY var-key provider uses to
+#                   normalise its identity and derive the salt. Declared rather
+#                   than assumed: the line below used to say these were "already
+#                   in the avocado initramfs", which was true and is not a
+#                   dependency. sed was declared for stripping the `openssl
+#                   dgst` prefix while cut - one pipe further along that same
+#                   line - was not, so the recipe already disagreed with itself
+#                   about what counts as needing a declaration.
+#
+#                   The failure this prevents is invisible to all three tiers.
+#                   They run the provider on the BUILD HOST, where GNU coreutils
+#                   is always present, so a provider that would find no `tr` in
+#                   the initramfs derives a key perfectly at build time and
+#                   fails at first boot with /var never unlocking. Free today:
+#                   coreutils 9.10 is already in the initramfs manifest, so this
+#                   changes nothing about what ships, only about what is
+#                   guaranteed to.
+#
+#                   Not sufficient on its own for a busybox initramfs. Nothing
+#                   in this layer installs busybox and `tr` resolves to
+#                   tr.coreutils today (verified on the built qemux86-64
+#                   initramfs), but busybox `tr` gates POSIX character classes
+#                   behind CONFIG_FEATURE_TR_CLASSES, and without it
+#                   `tr '[:upper:]' '[:lower:]'` treats the argument as a
+#                   literal character set - the placeholder normalisation then
+#                   silently stops matching and an OEM default is accepted as a
+#                   device identity. An RDEPENDS cannot express "and not the
+#                   busybox applet", so that stays a property of the image.
+# (blockdev, blkid, systemd-cryptenroll, mktemp and dirname come in via
+#  util-linux and systemd, which packagegroup-avocado-initramfs installs.)
+RDEPENDS:${PN} = "cryptsetup openssl-bin btrfs-tools gawk sed coreutils libdevmapper"
 
 # openssl-native puts the openssl CLI the providers derive with on the task
 # PATH. HOSTTOOLS does not whitelist openssl, so without this the build-time
