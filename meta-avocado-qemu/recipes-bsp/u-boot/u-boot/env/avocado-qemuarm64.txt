@@ -54,6 +54,41 @@ avocado_boot_init=\
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
 load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}
 
+overlay_addr=0x48000000
+overlay_env_addr=0x49000000
+
+# Merge each declared device-tree overlay into the DTB QEMU generated. The
+# delivery hook writes avocado-overlays.txt next to the kernel, holding one
+# avocado_fdt_overlays=<names> line; absent it (no overlays declared) the first
+# load fails and the whole block is skipped, which is the common case.
+#
+# fdt_addr is where QEMU places that DTB - the base of RAM on the virt machine -
+# so it is a real tree to apply onto rather than an address nothing wrote.
+# resize first: applying into an unpadded tree fails once the fragment does not
+# fit. A failure to apply one overlay is reported and does not stop the boot;
+# the overlay is additive, and refusing to boot the machine over it would be a
+# worse outcome than booting without it.
+avocado_apply_overlays=\
+  if load ${devtype} ${devnum}:${bootpart} ${overlay_env_addr} avocado-overlays.txt; then\
+    env import -t ${overlay_env_addr} ${filesize};\
+    fdt addr ${fdt_addr};\
+    fdt resize 8192;\
+    for ov in ${avocado_fdt_overlays}; do\
+      if load ${devtype} ${devnum}:${bootpart} ${overlay_addr} overlays/${ov}.dtbo; then\
+        if fdt apply ${overlay_addr}; then\
+          echo "overlay applied: ${ov}";\
+        else\
+          echo "overlay FAILED to apply: ${ov}";\
+        fi;\
+      else\
+        echo "overlay missing on the boot partition: ${ov}.dtbo";\
+      fi;\
+    done;\
+  fi;
+
 avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
 
-bootcmd=run avocado_boot_init load_image load_initramfs avocado_boot
+# avocado_apply_overlays runs before load_initramfs, not after: every load
+# overwrites ${filesize}, and avocado_boot passes ${filesize} as the initramfs
+# length. Applying overlays last would hand booti the size of the last .dtbo.
+bootcmd=run avocado_boot_init load_image avocado_apply_overlays load_initramfs avocado_boot
