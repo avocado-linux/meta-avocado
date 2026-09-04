@@ -211,6 +211,39 @@ else
     bad "provider refused the golden-vector identity: $(cat "$work/golden.err")"
 fi
 
+# --- Case 12: an all-zero identity is not an identity ---
+# Unprovisioned UID fuses read as 0000000000000000, which is not whitespace, so
+# a whitespace-only blank test accepted it as this board's identity and every
+# unprovisioned board of that model derived one shared /var key. Both
+# directions matter: a degenerate primary must fall THROUGH to a usable
+# secondary rather than refuse, and a degenerate value everywhere must refuse
+# rather than derive.
+zero_a="$work/zero-falls-through"
+zero_b="$work/zero-everywhere"
+mkdir -p "$zero_a/sys/devices/soc0" "$zero_a/sys/firmware/devicetree/base"
+mkdir -p "$zero_b/sys/devices/soc0" "$zero_b/sys/firmware/devicetree/base"
+printf '0000000000000000' > "$zero_a/sys/devices/soc0/serial_number"
+printf 'REAL-UNIQUE-SERIAL-99' > "$zero_a/sys/firmware/devicetree/base/serial-number"
+printf '0000000000000000' > "$zero_b/sys/devices/soc0/serial_number"
+printf '0000-0000-0000' > "$zero_b/sys/firmware/devicetree/base/serial-number"
+
+if sh "$provider" "$zero_a" > "$work/zero_a.bin" 2>"$work/zero_a.err"; then
+    n=$(wc -c < "$work/zero_a.bin")
+    if [[ "$n" -eq 64 ]]; then
+        ok "an all-zero soc0 falls through to a usable dt"
+    else
+        bad "all-zero fall-through produced $n bytes, expected 64"
+    fi
+else
+    bad "refused despite a usable dt: $(cat "$work/zero_a.err")"
+fi
+
+if sh "$provider" "$zero_b" > /dev/null 2>&1; then
+    bad "derived a key from an all-zero identity - every unprovisioned board would share it"
+else
+    ok "an all-zero identity everywhere is refused rather than derived"
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]

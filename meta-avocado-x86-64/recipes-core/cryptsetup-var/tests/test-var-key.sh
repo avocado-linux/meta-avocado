@@ -226,8 +226,12 @@ n_index=0
 for token in "${expected_placeholders[@]}"; do
     n_index=$((n_index + 1))
     upper=$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')
+    # Internal runs of whitespace, not just leading/trailing. DMI fields carry
+    # "Default  string" with two spaces, which a trim-only compare left one
+    # character off the list and therefore accepted as a device identity.
+    doubled=$(printf '%s' "$token" | sed 's/ /  /g')
     n_variant=0
-    for variant in "$token" "$upper" "  $token  "; do
+    for variant in "$token" "$upper" "  $token  " "$doubled"; do
         n_variant=$((n_variant + 1))
         root="$work/ph-$n_index-$n_variant"
         mkdir -p "$root/sys/class/dmi/id"
@@ -240,7 +244,7 @@ for token in "${expected_placeholders[@]}"; do
 done
 
 if [[ "$n_leaked" -eq 0 ]]; then
-    ok "all ${#expected_placeholders[@]} named placeholders refused, in three case/padding forms each"
+    ok "all ${#expected_placeholders[@]} named placeholders refused, in four case/padding/spacing forms each"
 fi
 
 # --- Case 10b: the pinned list and the provider's own list agree ---

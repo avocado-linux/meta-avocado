@@ -47,7 +47,14 @@ ROOT="${1:-}"
 # The list has to be right for BOTH sources now that each is validated in turn,
 # so a gap in it is a fleet-wide key rather than one refused board.
 is_placeholder() {
+    # Runs of whitespace are collapsed as well as trimmed. Trimming alone left
+    # "Default  string" - two spaces, which DMI fields really do carry - one
+    # character away from the list entry and therefore accepted as a device
+    # identity, so every board on that OEM reference design would have derived
+    # one key. Collapsing normalises the compare only; HW_ID keeps the value
+    # exactly as read, so no identity that already worked derives differently.
     _v=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+        | tr -s '[:space:]' ' ' \
         | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
     case "$_v" in

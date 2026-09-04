@@ -22,6 +22,12 @@ Method, and why it is not simply "run both providers":
   two different inputs deriving one key. Read a "same key from different
   inputs" result as a bug in the harness first.
 
+Both sides are read with `git show <ref>:<path>`, so this compares COMMITTED
+refs and an uncommitted working-tree change is invisible to it. A fix made but
+not yet committed shows as `same` on every row, because both sides are then the
+same pre-fix file - which reads exactly like "this change is safe". Commit
+first, then measure.
+
 Usage:
     python3 compare-derivations.py BASE_REF [--provider LAYER]
 
@@ -61,6 +67,9 @@ TABLES = {
             ("\t", "DT-UNIQUE-1"),
             ("   ", None),
             ("   ", "   "),
+            ("0000000000000000", "DT-UNIQUE-1"),
+            ("0000000000000000", None),
+            ("0000000000000000", "0000-0000"),
             (None, None),
         ],
     ),
@@ -73,6 +82,8 @@ TABLES = {
             ("   ", "0a1b2c3d"),
             ("\t", "0a1b2c3d"),
             ("   ", None),
+            ("0000000000000000", "0a1b2c3d"),
+            ("0000000000000000", None),
             (None, None),
         ],
     ),
@@ -84,6 +95,8 @@ TABLES = {
             ("default string", "SN-UNIQUE-1"),
             ("DEFAULT STRING", "SN-UNIQUE-1"),
             ("Default string ", "SN-UNIQUE-1"),
+            ("Default  string", "SN-UNIQUE-1"),
+            ("To  be  filled  by O.E.M.", "SN-UNIQUE-1"),
             ("To be filled by O.E.M.", "SN-UNIQUE-1"),
             ("Unknown", "SN-UNIQUE-1"),
             ("null", "SN-UNIQUE-1"),
