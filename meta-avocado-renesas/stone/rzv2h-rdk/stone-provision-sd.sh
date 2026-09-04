@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Phase 2b provisioning for rzv2n-sr-som: write the GPT OS image to an SD card
-# via the host's USB SD reader. The SoM boots from SPI per Phase 1; this only
-# populates the SD card with the Avocado kernel + rootfs + var.
+# Phase 2 provisioning for avocado-rzv2h-rdk: write the GPT OS image to a microSD
+# card via the host's USB SD reader. The board boots from xSPI per Phase 1; this
+# only populates the card with the Avocado kernel + rootfs + var.
 #
 # The SD card must already be inserted in the host USB reader before invoking.
 # If no removable disk is detected the script exits immediately rather than
@@ -36,7 +36,7 @@ EOF
 
 USB passthrough unavailable. Disk image written to:
   $AVOCADO_PROVISION_OUT/$(basename "$DISK_IMAGE")
-Burn it to an SD card from your host OS, then insert into the SoM.
+Burn it to a microSD card from your host OS, then insert into the board.
 EOF
     exit 0
 fi
@@ -95,7 +95,7 @@ size_gib=$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / (1024*1024*1024) }")
 
 cat <<EOF
 
-RZ/V2N SoM SD provisioning
+RZ/V2H RDK microSD provisioning
   Target: $target  (${size_gib} GiB)
   Image:  $(basename "$DISK_IMAGE")
 
@@ -125,7 +125,8 @@ sync
 
 cat <<EOF
 
-SD card written. Eject, insert into the SoM, power-cycle.
-With Phase 1 done, U-Boot's distro_bootcmd will probe mmc0 (eMMC),
-then mmc1 (SD), and boot from /extlinux/extlinux.conf on boot-a.
+Card written. Eject, insert into the board, power-cycle.
+With Phase 1 done, U-Boot sysboots /extlinux/extlinux.conf from
+partition 1 (boot-a), trying mmc 1 first and then mmc 0, so it does
+not matter which controller the microSD enumerates on.
 EOF

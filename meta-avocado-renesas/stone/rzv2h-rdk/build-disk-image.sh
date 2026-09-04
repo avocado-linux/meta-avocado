@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Shared helper for the rzv2n-sr-som emmc and sd provisioning profiles.
+# Shared helper for the Renesas provisioning profiles; board-agnostic, it reads
+# everything it needs from the manifest. This copy serves avocado-rzv2h-rdk,
+# whose only image-writing profile is sd.
 # Builds a GPT-formatted disk image from the rootdisk storage_device in the
 # stone manifest. Mirrors the x86-64 pattern: read partition table from JSON,
 # build any FAT images via mtools, then write each partition's image into the
