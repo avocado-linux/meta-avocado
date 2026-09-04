@@ -309,17 +309,47 @@ to make the suite green is how a fleet loses its data with every test passing.
   is also why the `test-only` waiver is gated on a list this recipe owns rather
   than on anything a provider declares about itself.
 
+### The tier regression test
+
+`tests/test-var-key-tiers.py` beside this file runs BOTH tiers outside a build.
+It slices the two `python ...() { }` bodies out of this recipe at run time and
+execs them against stubbed `bb` and `d`, so it exercises the shipped code rather
+than a copy - a copy would be edited alongside the recipe and stay green, which
+is the regression it exists to catch. Run it with `python3`; it needs only an
+OpenSSL carrying ARGON2ID and skips itself without one.
+
+Each refusal case asserts a substring of ITS OWN branch's message, not merely
+that the tier refused, and that distinction is the file's main lesson. The
+guards are layered, so disabling one lets a downstream guard refuse the same
+synthetic provider while a verdict-only assertion stays green. Measured, 6 of 13
+recipe mutations survived exactly that way before the message assertions went
+in: tier 1's `unusable` fatal fell through to its unrecognised-status check, the
+two-identity differential fell through to the negative control, and both the
+escape guard and the returncode check fell through to the 64-byte check. With
+the assertions, 16 of 16 mutations turn the file red.
+
+The same effect caught a wrong assumption in one of its own cases. An unprefixed
+read of a declared path that resolves NOWHERE on the build host refuses, so it
+is caught by the returncode branch several guards before the differential. To
+reach the differential the unprefixed path has to exist on the host, which is
+why one case declares `/proc/sys/kernel/ostype` rather than a synthetic `/sys`
+path - and why the two are separate cases.
+
+Four cases are recorded as GAPs rather than passes: the two C5 bypasses, C4's
+unwalked secondary read, and the argv evader. Each names the change that closes
+it and its expectation flips to a refusal when that change lands, so the file is
+also the regression test for the fixes still outstanding.
+
 ### Not covered by an executable test
 
-The three `test-deliverability-*.md` files beside this one are records of
-builds that were run, not tests a runner re-executes. The provider suites under
-each vendor layer's `tests/` ARE executable and do cover provider behaviour, but
-nothing re-runs the recipe's own tier-2 rejection branches - a constant key, a
-wrong length, a non-reproducible derivation, an undeclared identity, an
-unauthorised `test-only`. Those were each verified once by mutating a provider
-and observing the refusal, and a regression in them would merge without a
-signal. An oe-selftest that builds temporary provider fixtures is the missing
-piece.
+The three `test-deliverability-*.md` files beside this one are records of builds
+that were run, not tests a runner re-executes.
+
+What the tier test above cannot reach is BitBake itself. It stubs
+`bb.utils.contains`, so it judges the capability gate's LOGIC and not the
+datastore that gate reads - which is precisely where C5 lives. That bypass was
+confirmed on a real build rather than here, and no amount of stubbing would have
+found it. An oe-selftest remains the only way to cover the datastore boundary.
 
 ### Adding a machine
 
