@@ -533,6 +533,37 @@ initramfs (block drivers, network for early boot, etc.), append them to
 the auto-emitted packagegroup with versioned NAMEs — see
 [multi-kernel.md](multi-kernel.md) for the pattern.
 
+### Carrying a device tree the vendor BSP does not ship
+
+Nearly every target's device tree arrives inside a vendor BSP layer, and that is
+the shape to prefer. When a board's dts exists only downstream, or has to be
+forward-ported onto a newer kernel than the vendor targeted, two shapes work and
+they fail differently:
+
+| Shape | Use when | Failure mode |
+|---|---|---|
+| One patch carrying both the dts and its `Makefile` entry | The dts is close to final, or is a straight backport | `do_patch` fails loudly on any drift in either half |
+| A loose `.dts` in `SRC_URI` installed at `do_configure`, plus a patch for the `Makefile` entry only | The dts is a first cut under active revision, and reviewers need to diff it against the vendor source | Silent: the install overwrites whatever is at that path |
+
+The second shape keeps the dts reviewable as a file rather than as patch context,
+which is worth having while a board is being brought up. It also has a trap that
+the first does not: `install` will happily clobber a dts the kernel starts
+shipping later, hiding the divergence, and the `Makefile` patch then fails on a
+duplicate entry pointing nowhere near the cause. Guard it:
+
+```bitbake
+do_configure:prepend:<machine>() {
+    if [ -e ${S}/arch/arm64/boot/dts/<vendor>/<board>.dts ]; then
+        bbfatal "linux-<vendor> now ships <board>.dts. Drop the dts and Makefile patch from this bbappend and use the vendor copy."
+    fi
+    install -m 0644 ${WORKDIR}/<board>.dts \
+        ${S}/arch/arm64/boot/dts/<vendor>/<board>.dts
+}
+```
+
+`meta-avocado-renesas/recipes-kernel/linux/linux-renesas_%.bbappend` is the
+worked example. Fold the dts into the patch once the board stops moving.
+
 ### Required Kernel Options for Avocado
 
 Every Avocado target **must** include the following kernel config options in
