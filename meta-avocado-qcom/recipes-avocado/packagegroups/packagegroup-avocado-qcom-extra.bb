@@ -28,6 +28,12 @@ RDEPENDS:${PN} = " \
 # not audioreach, which is for the gpr-based SoCs). The meta-qcom-hwe packagegroups
 # this listed before (packagegroup-firmware-qcm6490, -qcom-display/-graphics/
 # -video) were the proprietary adreno/PAL stack and are gone with that layer.
+# qemu-system-aarch64 (pulls qemu-common) is the aarch64 KVM accelerator's
+# userspace. CONFIG_KVM is =y in linux-qcom's qcom.config, and the machine now
+# flashes the KVM XBL config (see avocado-rubikpi3.conf), so /dev/kvm is usable
+# -- but nothing in the feed could open it. Feed-only like everything else here;
+# the BSP extension or a user extension installs it. Trimmed to one target arch
+# and a headless PACKAGECONFIG in kas/vendor/qcom.yml.
 # systemd-rubikpi3-masks is here, not only in MACHINE_ESSENTIAL_EXTRA_RDEPENDS:
 # that variable feeds packagegroup-core-boot, which is a *Yocto image* concept.
 # Avocado's runtime rootfs is assembled by avocado-cli from its own package
@@ -38,6 +44,7 @@ RDEPENDS:${PN} = " \
 # the BSP extension installs it.
 RDEPENDS:${PN}:append:qcm6490 = " \
     systemd-rubikpi3-masks \
+    avocado-bls \
     linux-firmware-qcom-adreno-a660 \
     linux-firmware-qcom-qcm6490-adreno \
     linux-firmware-qcom-qcm6490-audio \
@@ -55,6 +62,7 @@ RDEPENDS:${PN}:append:qcm6490 = " \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-rtsp-server \
     v4l-utils \
+    qemu-system-aarch64 \
 "
 # wireless-regdb-static is here for the same reason the other machine-extra
 # packagegroups carry it (compulab, variscite, stm): it comes from

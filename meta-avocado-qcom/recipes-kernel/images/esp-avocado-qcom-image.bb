@@ -74,8 +74,22 @@ IMAGE_FSTYPES_DEBUGFS = ""
 # the way image.bbclass sets it. It is unconditional rather than per-fstype,
 # which is safe only because IMAGE_FSTYPES above is vfat and nothing else; add
 # another type and this command would be used for it too.
+# -S 4096: the UFS LUN this lands on reports 4096-byte logical blocks, and
+# mkfs.vfat defaults to 512. UEFI does not care -- it reads the FAT through its
+# own block layer and boots fine -- but Linux refuses the mismatch outright:
+#
+#   FAT-fs (sda1): logical sector size too small for device (logical sector size = 512)
+#
+# so the ESP could not be mounted on the running system at all. That blocks any
+# file-level update of the boot path: no writing a new UKI in place, no reading
+# back what is installed, and therefore no OTA of the kernel or its command
+# line -- only a full raw partition rewrite over QDL. Matching the device's
+# block size makes the partition mountable and is a prerequisite for the A/B
+# ESP work.
+ESP_SECTOR_SIZE ?= "4096"
+
 esp_mkvfatfs() {
-    mkfs.vfat ${EXTRA_IMAGECMD} -C ${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat ${ROOTFS_SIZE}
+    mkfs.vfat -S ${ESP_SECTOR_SIZE} ${EXTRA_IMAGECMD} -C ${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat ${ROOTFS_SIZE}
     # /boot/EFI only, not /boot/* -- that leaves systemd-bootconf's
     # /boot/loader (which comes in as a dependency, see above) off the
     # partition, so systemd-boot auto-discovers the UKI instead of defaulting

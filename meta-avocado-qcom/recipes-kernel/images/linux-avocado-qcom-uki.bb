@@ -114,6 +114,18 @@ inherit deploy
 
 do_deploy() {
     install ${B}${EFI_UKI_PATH}/${EFI_LINUX_IMG} ${DEPLOY_DIR_IMAGE}/${EFI_LINUX_IMG}
+    # Also under the fixed names the stone manifest declares as images.uki_a /
+    # images.uki_b, so an OS update can carry the boot entry as its own
+    # artifact. One per rootfs slot: the avocado-build hook replaces each with
+    # an entry whose root= names that slot's partition, but stone validates and
+    # bundles during the Yocto build too, long before any project exists, and
+    # an artifact the manifest references has to be present both times.
+    #
+    # These copies are the machine's own default -- the kernel from the default
+    # multiconfig, with the machine's root= -- which is the right thing for a
+    # bundle built without a project.
+    install ${B}${EFI_UKI_PATH}/${EFI_LINUX_IMG} ${DEPLOY_DIR_IMAGE}/uki_a.efi
+    install ${B}${EFI_UKI_PATH}/${EFI_LINUX_IMG} ${DEPLOY_DIR_IMAGE}/uki_b.efi
 }
 
 FILES:${PN} = "${EFI_UKI_PATH}/${EFI_LINUX_IMG}"

@@ -43,3 +43,12 @@ local_conf_header:
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-qcom-extra"
     PACKAGECONFIG:remove:pn-qtbase = " eglfs"
     PACKAGECONFIG:remove:pn-qtwayland = " xcomposite-egl"
+
+    # Target qemu is in the feed for KVM on qcs6490 (see
+    # packagegroup-avocado-qcom-extra). Only the host arch is worth building --
+    # the recipe default is 14 architectures x (softmmu + linux-user) -- and the
+    # default PACKAGECONFIG drags in sdl2, virglrenderer and libepoxy for a
+    # display we do not use. `slirp` is kept so a VM gets networking with no
+    # bridge setup on the device.
+    QEMU_TARGETS:pn-qemu = "aarch64"
+    PACKAGECONFIG:pn-qemu = "fdt kvm pie slirp seccomp"

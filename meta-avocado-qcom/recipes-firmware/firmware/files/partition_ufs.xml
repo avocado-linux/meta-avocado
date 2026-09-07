@@ -15,7 +15,8 @@
     <physical_partition>
         <partition label="efi" 			    size_in_kb="614400" 	type="C12A7328-F81F-11D2-BA4B-00A0C93EC93B" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="efi.bin"/>
 		<partition label="persist" 		    size_in_kb="30720" 		type="0FC63DAF-8483-4772-8E79-3D69D8477DE4" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>	
-		<partition label="system" 		    size_in_kb="10485760" 	type="B921B045-1DF0-41C3-AF44-4C6F280D3FAE" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="system.img"/> 
+		<partition label="system_a" 		    size_in_kb="10485760" 	type="B921B045-1DF0-41C3-AF44-4C6F280D3FAE" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="system.img"/>
+		<partition label="system_b" 		    size_in_kb="10485760" 	type="B921B045-1DF0-41C3-AF44-4C6F280D3FAE" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/> 
 		<partition label="avocado" 		    size_in_kb="2097152" 	type="A1B2C3D4-E5F6-7890-ABCD-EF1234567890" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="avocado-image-var-rubikpi3.btrfs"/>
 	</physical_partition>                   
 										    

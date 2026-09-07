@@ -16,15 +16,18 @@
 #      (no caller-side --target mc:... flags needed).
 #   2. do_multikernel_merge runs after do_configure and before do_compile
 #      (which calls avocado-repo-map's do_create_repo_map). From each alt-mc
-#      deploy dir it merges into ${DEPLOY_DIR}: from rpm/ only the alt kernel's
-#      version-tagged RPMs (the genuinely-unique ones — shared MACHINE_ARCH
-#      NEVRAs the default mc owns are skipped, else they collide with the
-#      default mc's own do_package_write_rpm), plus pulp-uploads/ additively.
-#      spdx/ is intentionally excluded: both kernels produce
-#      SPDX files with the same unversioned package names (kernel.spdx.json
-#      etc.), so merging them into the shared deploy area causes a "files
-#      already exist" collision in do_create_spdx. Each mc's spdx/ stays in
-#      its own tmp-<mc>/deploy/spdx/ and is collected separately if needed.
+#      deploy dir it merges into ${DEPLOY_DIR}: from rpm/ exactly the RPMs the
+#      named alt-mc recipes produced, plus pulp-uploads/ additively. spdx/ is
+#      intentionally excluded: both kernels produce SPDX files with the same
+#      unversioned package names (kernel.spdx.json etc.), so merging them into
+#      the shared deploy area causes a "files already exist" collision in
+#      do_create_spdx. Each mc's spdx/ stays in its own tmp-<mc>/deploy/spdx/
+#      and is collected separately if needed.
+#
+# This affects the LOCAL feed only. Production needs no merge at all:
+# avocado-pulp-upload.bbclass hooks do_package_write_rpm[postfuncs] per recipe
+# and uploads into a Pulp repo keyed on release/channel + arch, not on TMPDIR,
+# so every mc's RPMs reach the same repo on their own.
 
 python () {
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()
@@ -44,76 +47,91 @@ do_multikernel_merge[nostamp] = "1"
 do_multikernel_merge() {
     for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
         mc="${pair%%:*}"
-        base="${TOPDIR}/tmp-${mc}/deploy"
+        recipe="${pair#*:}"
+        base="${TOPDIR}/tmp-${mc}"
 
-        # The alt mc's UNIQUE contribution is everything built against its
-        # kernel version. Every other RPM it emits (base-files, systemd-conf,
+        # Only the named recipes' OWN RPMs may cross into the shared deploy/rpm.
+        # Every other RPM the alt mc emits (base-files, systemd-conf,
         # shadow-securetty, the unversioned packagegroup-avocado-* ...) is a
-        # shared MACHINE_ARCH build dep the default mc also owns as a
-        # byte-identical NEVRA. Merging those lands sstate-unmanaged files in
-        # the shared deploy/rpm and trips the "trying to install files into a
-        # shared area when those files already exist / not matched to any task"
-        # guard the next time the default mc runs do_package_write_rpm for that
-        # recipe.
+        # shared MACHINE_ARCH build dep the default mc also owns under the same
+        # NEVRA. Copying those lands sstate-unmanaged files in the shared
+        # deploy/rpm and trips the "trying to install files into a shared area
+        # when those files already exist / not matched to any task" guard the
+        # next time the default mc runs do_package_write_rpm for that recipe.
         #
-        # A skip-if-exists check is NOT sufficient: bitbake's stale-sstate prune
-        # (sstate_eventhandler_stalesstate, the "Removing N stale sstate objects"
-        # pass) routinely empties exactly these common RPMs from the default
-        # deploy/rpm on a kernel re-sign, so at merge time the destination is
-        # momentarily absent and skip-if-exists wrongly copies the alt's copy in.
+        # A skip-if-exists check is NOT sufficient on its own: bitbake's
+        # stale-sstate prune (sstate_eventhandler_stalesstate, the "Removing N
+        # stale sstate objects" pass) routinely empties exactly these common
+        # RPMs from the default deploy/rpm on a kernel re-sign, so at merge time
+        # the destination is momentarily absent and skip-if-exists wrongly
+        # copies the alt's copy in.
         #
-        # So filter rpm/ to ONLY the alt kernel's version-tagged RPMs. This
-        # depends solely on the alt mc's own output — never on the prunable
-        # default deploy state — so it is immune to prune/ordering races. The
-        # version is derived from the alt mc's kernel package
-        # (e.g. kernel-6.6.63-v8-... -> 6.6.63); it tags every kernel RPM (PV
-        # 6.6.63+git..., KERNEL_VERSION 6.6.63-v8) and none of the common NEVRAs
-        # (base-files 3.0.14, packagegroup 1.0, shadow-securetty 4.6, ...).
+        # So take the set from the alt mc's own sstate manifest for that
+        # recipe's do_package_write_rpm, which lists precisely the files that
+        # task installed into DEPLOY_DIR_RPM. It is written on both the live and
+        # the setscene path, it names nothing any other recipe owns, and it
+        # depends solely on the alt mc's state -- never on the prunable default
+        # deploy tree -- so it is immune to prune/ordering races.
         #
-        # Match kernel-<N.N.N> without requiring an ABI suffix. The glob used to
-        # be kernel-[0-9]*-v[0-9]*.rpm, which only matched the Raspberry Pi
-        # shape (kernel-6.6.63-v8-...). Jetson's L4T kernel is
-        # kernel-6.8.12-l4t-r39.2.0-1021.21-... with no -v<digit>, so the glob
-        # matched nothing, altkver came back empty, and EVERY Jetson build
-        # skipped the alt-mc merge with only a bbwarn -- leaving the L4T
-        # kernel's RPMs out of the unified feed entirely. kernel-[0-9]* still
-        # excludes kernel-module-*/kernel-image-*/kernel-devsrc-* (no digit
-        # directly after "kernel-"), and the sed below takes only N.N.N, so
-        # both naming shapes reduce to the same version key.
-        altkver="$(ls "${base}/rpm/"*/kernel-[0-9]*.rpm 2>/dev/null \
-                   | sed -nE 's#.*/kernel-([0-9]+\.[0-9]+\.[0-9]+)[-+].*#\1#p' \
-                   | sort -u | head -1)"
-        if [ -z "${altkver}" ]; then
-            bbwarn "avocado-multikernel: could not derive a kernel version for mc '${mc}' from ${base}/rpm; skipping its merge"
-            continue
+        # This replaces a heuristic that filtered rpm/ by "basename contains the
+        # alt kernel's N.N.N", derived by sed from an rpm filename. That key only
+        # separates the two kernels when they differ in upstream version, which
+        # holds for Jetson (6.18 vs 6.8) and Raspberry Pi (6.12 vs 6.6) but not
+        # for a stock/PREEMPT_RT pair built from one source tree, where both
+        # reduce to the same N.N.N and the filter stops filtering. It also
+        # dropped each alt kernel's kernel, kernel-dbg, kernel-dev and
+        # kernel-vmlinux subpackages on families where it did work, since
+        # kernel.bbclass never version-qualifies those four names.
+        #
+        # Corollary: a recipe whose NEVRA genuinely collides across mcs must not
+        # be listed in AVOCADO_MULTIKERNEL_MC_RECIPES at all. kernel-devsrc is
+        # the live example -- kernelsrc.bbclass sets its PKGV to
+        # KERNEL_VERSION.split("-")[0], so two kernels off one source tree share
+        # it -- which is why the qcom overlay lists only the kernel itself.
+        # Plain $rpmroot, not ${rpmroot}: bitbake expands any ${...} it can
+        # resolve before the shell sees the function, and a nested
+        # ${src#${rpmroot}/} is not worth relying on it leaving alone.
+        rpmroot="${base}/deploy/rpm"
+        manifest="$(ls "${base}/sstate-control/manifest-"*"-${recipe}.package_write_rpm" 2>/dev/null | head -1)"
+        if [ -z "${manifest}" ]; then
+            bbwarn "avocado-multikernel: no package_write_rpm manifest for '${recipe}' under ${base}/sstate-control; skipping its rpm merge"
+        else
+            bbnote "avocado-multikernel: merging alt-mc ${mc} recipe ${recipe} rpms into ${DEPLOY_DIR}/rpm (from ${manifest})"
+            while read -r src; do
+                # The manifest also carries the directory it created; -f drops
+                # that and any entry whose file is gone.
+                [ -f "${src}" ] || continue
+                case "${src}" in
+                    "${base}/deploy/rpm/"*) ;;
+                    *) continue ;;
+                esac
+                rel="${src#$rpmroot/}"
+                dest="${DEPLOY_DIR}/rpm/${rel}"
+                if [ -e "${dest}" ] || [ -L "${dest}" ]; then
+                    bbnote "avocado-multikernel: skip (already present) rpm/${rel}"
+                    continue
+                fi
+                mkdir -p "$(dirname "${dest}")"
+                cp -a "${src}" "${dest}"
+            done < "${manifest}"
         fi
 
-        for subdir in rpm pulp-uploads; do
-            src="${base}/${subdir}"
-            if [ -d "${src}" ]; then
-                bbnote "avocado-multikernel: merging alt-mc ${mc} kernel-${altkver} deploy/${subdir} into ${DEPLOY_DIR}/${subdir}"
-                ( cd "${src}" && find . -type f -o -type l ) | while read -r f; do
-                    # rpm/: only the alt kernel's own version-tagged RPMs are
-                    # genuinely unique; skip every shared NEVRA the default mc
-                    # owns. pulp-uploads/ is a separate, non-sstate deploy area
-                    # that does not hit the shared-area guard, so it keeps the
-                    # plain additive copy.
-                    if [ "${subdir}" = "rpm" ]; then
-                        case "$(basename "${f}")" in
-                            *"${altkver}"*) : ;;
-                            *) continue ;;
-                        esac
-                    fi
-                    dest="${DEPLOY_DIR}/${subdir}/${f}"
-                    if [ -e "${dest}" ] || [ -L "${dest}" ]; then
-                        bbnote "avocado-multikernel: skip (already present) ${subdir}/${f}"
-                        continue
-                    fi
-                    mkdir -p "$(dirname "${dest}")"
-                    cp -a "${src}/${f}" "${dest}"
-                done
-            fi
-        done
+        # pulp-uploads/ is a separate, non-sstate deploy area that does not hit
+        # the shared-area guard, so it keeps the plain additive copy of the
+        # whole tree. Merged once per pair; a second pair naming the same mc
+        # just re-walks it and skips everything.
+        src="${base}/deploy/pulp-uploads"
+        if [ -d "${src}" ]; then
+            bbnote "avocado-multikernel: merging alt-mc ${mc} deploy/pulp-uploads into ${DEPLOY_DIR}/pulp-uploads"
+            ( cd "${src}" && find . -type f -o -type l ) | while read -r f; do
+                dest="${DEPLOY_DIR}/pulp-uploads/${f}"
+                if [ -e "${dest}" ] || [ -L "${dest}" ]; then
+                    continue
+                fi
+                mkdir -p "$(dirname "${dest}")"
+                cp -a "${src}/${f}" "${dest}"
+            done
+        fi
     done
 }
 addtask multikernel_merge after do_configure before do_compile
