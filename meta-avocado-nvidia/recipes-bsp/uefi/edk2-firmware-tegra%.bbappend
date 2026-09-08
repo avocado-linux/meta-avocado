@@ -14,3 +14,14 @@ CVE_PRODUCT = "tianocore:edk2 tianocore:edk_ii"
 # Only edk2 needs this. optee-os 4.2 and arm-trusted-firmware 2.8 carry the same
 # -l4t-r36.5.2 suffix and compare correctly against NVD's semver without help.
 CVE_VERSION = "202408"
+
+# CVE_VERSION is derived from a SRCREV this append cannot see change: bump the
+# meta-tegra pin past edk2-stable202408 and a stale 202408 silently hides every
+# CVE whose range starts after it. NVD carries exact-match rows for edk2, so the
+# stale direction is not the safe one.
+python () {
+    reviewed = "c80eba3cb8aafaac243f45434f6d3a42a4145ed3"
+    if d.getVar("SRCREV_edk2") != reviewed:
+        bb.warn("edk2 SRCREV moved; re-derive CVE_VERSION (now %s) from the newest "
+                "edk2-stable tag that is an ancestor of it" % d.getVar("CVE_VERSION"))
+}
