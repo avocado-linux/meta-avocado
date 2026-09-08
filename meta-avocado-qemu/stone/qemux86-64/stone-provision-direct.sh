@@ -24,19 +24,26 @@ stage="${AVOCADO_STONE_BUILD_DIR}/direct"
 
 mkdir -p "$stage"
 
-# Pull artifact filenames from the manifest. boot.build_args.files is an array
-# containing both the kernel (Image or bzImage) and the initramfs (cpio.zst).
-kernel_name=""
-initramfs_name=""
-while IFS= read -r f; do
-    case "$f" in
-        Image|bzImage|vmlinuz*) kernel_name="$f" ;;
-        *initramfs*)            initramfs_name="$f" ;;
-    esac
-done < <(jq -r '.storage_devices.rootdisk.images.boot.build_args.files[]' "$manifest")
+# Pull artifact filenames from the manifest. Preferred source is the top-level
+# images.kernel / images.initramfs keys (UEFI machines carry them, since the ESP
+# stages the pair under bootloader-owned names). U-Boot machines have no such
+# keys and name the pair only inside the boot FAT image's file list, whose
+# entries are either plain filenames or {in,out} objects.
+kernel_name=$(jq -r    '.storage_devices.rootdisk.images.kernel    // empty' "$manifest")
+initramfs_name=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
 
 if [ -z "$kernel_name" ] || [ -z "$initramfs_name" ]; then
-    echo "manifest's boot.build_args.files must include a kernel + initramfs entry" >&2
+    while IFS= read -r f; do
+        case "$f" in
+            Image|bzImage|vmlinuz*) [ -n "$kernel_name" ]    || kernel_name="$f" ;;
+            *initramfs*)            [ -n "$initramfs_name" ] || initramfs_name="$f" ;;
+        esac
+    done < <(jq -r '.storage_devices.rootdisk.images.boot.build_args.files[]
+                    | if type == "object" then .in else . end' "$manifest")
+fi
+
+if [ -z "$kernel_name" ] || [ -z "$initramfs_name" ]; then
+    echo "manifest names no kernel + initramfs: expected images.kernel/images.initramfs or a boot.build_args.files entry for each" >&2
     exit 1
 fi
 
