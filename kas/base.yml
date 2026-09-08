@@ -6,7 +6,31 @@ header:
 
 env:
   AVOCADO_REPO_BASE: "http://package-repo"
-  DISTRO_CODENAME: "dev/local"
+
+  # The generation this tree builds, as two parts rather than one string.
+  # DISTRO_CODENAME is release/channel and it is what dnf expands $releasever
+  # to, so it decides which feed directory a build renders into and which one a
+  # client resolves against. The parts are separate because avocado.inc
+  # composes them: a bump to the next Yocto LTS then edits the series and the
+  # year here, beside the layer pins that moved with it, rather than editing a
+  # composed string that has to agree with them.
+  #
+  # The old default was a flat "dev/local" for every local build regardless of
+  # generation, which put scarthgap-era and wrynose-era packages in one channel.
+  # A feed snapshot then rendered the union and dnf could not resolve it -
+  # observed 2026-09-04 with two libdevmapper, two lvm2 and two busybox
+  # versions in a single qemux86-64 repo, against a build that produced exactly
+  # one of each.
+  AVOCADO_RELEASE_YEAR: "2026"
+  AVOCADO_YOCTO_SERIES: "wrynose"
+  DISTRO_CHANNEL: "local"
+
+  # Kept as a passthrough with an empty default rather than dropped. This key
+  # is what lets a caller set the codename at all - CI sets it here, and
+  # removing it from this list would silently stop that value reaching bitbake.
+  # Empty means "compose it from the parts above"; avocado.inc does that.
+  DISTRO_CODENAME: ""
+
   DISTRO_VERSION: "0.0.0"
   BUILD_ID: "0"
   PARALLEL_MAKE_HIGHMEM: ""
