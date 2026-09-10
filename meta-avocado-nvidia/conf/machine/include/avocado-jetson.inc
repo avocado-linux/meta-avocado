@@ -38,3 +38,10 @@ AVOCADO_CVE_BOOT_CHAIN:append = " arm-trusted-firmware edk2-firmware-tegra \
                                   edk2-firmware-tegra-rcmboot tos-optee \
                                   tegra-bootfiles tegra-firmware \
                                   standalone-mm-optee-tegra"
+
+# The two entries above that are NVIDIA redistributable binaries rather than
+# recipes we build: MB1, BootROM patches and the DA agents arrive as signed
+# images with no upstream source and no CPE, so cve-check scans them under BPN
+# and writes a zero indistinguishable from a clean scan. Declared here so
+# avocado-cve-optout leaves a marker instead.
+CVE_CHECK_SKIP_RECIPE:append = " tegra-bootfiles tegra-firmware"
