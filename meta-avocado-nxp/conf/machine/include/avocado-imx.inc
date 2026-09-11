@@ -6,7 +6,8 @@ MACHINEOVERRIDES =. "avocado-imx:"
 # imx-atf and u-boot-imx emit -dbg/-dev packages, so without this they scope
 # feed: real bootloader CVEs filed as "not in this image".
 AVOCADO_CVE_BOOT_CHAIN:append = " imx-atf imx-boot u-boot-imx imx-system-manager \
-                                  imx-oei firmware-imx imx-boot-firmware-files"
+                                  imx-oei firmware-imx imx-boot-firmware-files \
+                                  firmware-ele-imx"
 
 # The opaque half of that list: NXP binaries unpacked from a vendor tarball,
 # with no upstream source and no CPE that any spelling of the name matches, so
