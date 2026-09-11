@@ -210,6 +210,37 @@ if [ -n "$esp_image" ]; then
         "$oc" -O binary --only-section=.cmdline "$uki_dir/old.efi" "$uki_dir/cmdline" 2>/dev/null || true
         "$oc" -O binary --only-section=.osrel   "$uki_dir/old.efi" "$uki_dir/osrel"   2>/dev/null || true
 
+        # Carry the embedded device tree across too.
+        #
+        # linux-avocado-qcom-uki embeds one when AVOCADO_UKI_DTB_OVERLAYS is set:
+        # the base dtb with the machine's overlays merged in, which sd-stub
+        # installs over the firmware's. Rebuilding the UKI here without it would
+        # silently drop the device tree -- the board would boot the firmware's
+        # tree again and lose whatever the overlays described, which on the
+        # RB3 Gen 2 is its Ethernet.
+        #
+        # Lifted rather than rebuilt on purpose: the overlay list is a machine
+        # property and this hook has no business knowing it. Whatever Yocto
+        # embedded is what ships, so changing the list changes the flashed tree
+        # with no change here.
+        #
+        # Absent section = machine never opted in, and --devicetree is simply
+        # not passed. That is the pre-existing behaviour for every qcom machine
+        # that sets no overlays.
+        "$oc" -O binary --only-section=.dtb "$uki_dir/old.efi" "$uki_dir/dtb" 2>/dev/null || true
+        uki_dtb_arg=""
+        if [ -s "$uki_dir/dtb" ]; then
+            # A truncated or non-FDT blob would build a UKI that cannot boot, and
+            # the failure would land on the device rather than here.
+            magic=$(od -An -N4 -tx1 "$uki_dir/dtb" | tr -d ' \n')
+            if [ "$magic" != "d00dfeed" ]; then
+                echo "ERROR: .dtb section in $old_entry is not a device tree (magic $magic)" >&2
+                exit 1
+            fi
+            uki_dtb_arg="--devicetree=$uki_dir/dtb"
+            echo "Carrying embedded device tree across ($(stat -c %s "$uki_dir/dtb") bytes)"
+        fi
+
         # Rebuild .osrel from the rootfs this UKI actually boots, and add the two
         # fields an OS update needs. The section carried over from the previous
         # UKI describes whatever rootfs THAT one booted, which is wrong the moment
@@ -339,6 +370,7 @@ if [ -n "$esp_image" ]; then
                 --cmdline="@$uki_dir/cmdline-${slot}.txt" \
                 --os-release="@$uki_dir/osrel" \
                 --uname="$kver" \
+                ${uki_dtb_arg:+"$uki_dtb_arg"} \
                 --stub="$stub" \
                 --efi-arch=aa64 \
                 --output="$uki_dir/uki_${slot}.efi" || {
