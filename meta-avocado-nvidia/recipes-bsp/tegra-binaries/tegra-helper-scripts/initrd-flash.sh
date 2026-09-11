@@ -1041,6 +1041,61 @@ get_board_info_t264() {
     echo "Board ID($BOARDID) version($FAB) sku($BOARDSKU) revision($BOARDREV) Chip SKU($chip_sku) ramcode($RAMCODE)"
 }
 
+# Point the module-SKU-specific flash files at the module that is actually
+# plugged into the carrier, instead of the one the MACHINE happened to bake.
+#
+# P3834 (Thor) ships as -0008 (T5000) and -0000 (T4000). They need different
+# SDRAM training, PMIC and MISC BCTs, BPMP DTB and kernel DTB, and every one
+# of those files carries the SKU in its name -- so a single substitution over
+# the `3834-<sku>` token covers all of them:
+#
+#   flashvars:          BCTFILE BPFDTB_FILE BPMP_MEM_CONFIG DTB_FILE
+#                       MISC_CONFIG PMIC_CONFIG WB0SDRAM_BCT
+#   .env.initrd-flash:  DTBFILE EMC_BCT   (already sourced, so patch the vars)
+#
+# flashvars is rewritten rather than exported because tegra-flash-helper.sh
+# sources it (`. ./flashvars`), which would clobber anything we put in the
+# environment. It re-sources on every later invocation, so one rewrite here
+# covers the internal/external/rcm-boot passes.
+#
+# Deliberately NOT touched:
+#   CHIP_SKU, RAMCODE, BPF_FILE  -- tegra-flash-helper.sh already derives these
+#                                   from the detected chip (see its 0x26 case).
+#   CHECK_BOARDSKU               -- holds a bare SKU, not a `3834-<sku>` token,
+#                                   so a carrier that pins one still fails fast.
+#   PLUGIN_MANAGER_OVERLAYS and the p3834-xxxx BCTs -- SOM-SKU independent.
+#
+# This is the same trick meta-tegra's tegra-flash-helper.sh plays on Orin
+# (`sed -e "s,3701-0000,3701-$BOARDSKU,"` for the P3701 family), which is what
+# lets one jetson-agx-orin MACHINE flash a 32GB, 64GB or Industrial module. It
+# lives here rather than there so we do not carry a meta-tegra fork.
+retarget_module_sku_t264() {
+    local from to
+
+    [ "$BOARDID" = "3834" ] || return 0
+
+    case "${BOARDSKU:-}" in
+        0000|0008) ;;
+        *)
+            echo "ERR: unsupported P3834 module SKU '${BOARDSKU:-}'; expected 0000 (T4000) or 0008 (T5000)" >&2
+            exit 1
+            ;;
+    esac
+
+    to="3834-$BOARDSKU"
+    for from in 3834-0008 3834-0000; do
+        [ "$from" = "$to" ] && continue
+        if ! sed -i -e "s,$from,$to,g" flashvars; then
+            echo "ERR: could not retarget flashvars at module SKU $BOARDSKU" >&2
+            exit 1
+        fi
+        DTBFILE="${DTBFILE//$from/$to}"
+        EMC_BCT="${EMC_BCT//$from/$to}"
+    done
+
+    echo "Module SKU $BOARDSKU: flash files retargeted to p3834-$BOARDSKU"
+}
+
 prepare_binaries_t264() {
     local target="$1"
     local layout_xml="$2"
@@ -1256,6 +1311,7 @@ elif [ "$CHIPID" = "0x26" ]; then
     # T264 (Thor) flow - unified flash
     # ===================================================================
     get_board_info_t264
+    retarget_module_sku_t264
 
     rm -rf tools/kernel_flash/images
 
