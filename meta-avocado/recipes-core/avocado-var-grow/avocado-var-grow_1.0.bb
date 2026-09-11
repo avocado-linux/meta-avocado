@@ -49,4 +49,22 @@ do_install() {
     ln -sf ../avocado-var-grow.service ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants/avocado-var-grow.service
 }
 
+# do_install bakes AVOCADO_VAR_PART_DEV into both the unit and the helper via
+# sed, so the task's signature has to depend on it. Without this, changing the
+# variable leaves the signature untouched, sstate hands back the previously
+# built package, and the unit keeps pointing at the OLD partition -- while
+# base-files (which declares the same vardep) correctly picks the new one up.
+#
+# The two then disagree, and the failure is a 90 s stall on a device that will
+# never appear followed by initrd emergency:
+#
+#   [ TIME ] Timed out waiting for device /dev/disk/by-partlabel/avocado.
+#   [DEPEND] Dependency failed for Grow the var partition to its disk.
+#
+# Measured on avocado-exmp-q911 while renaming its var partition from
+# `avocado` to `var`: the composed initramfs carried cryptsetup-var pointing at
+# by-partlabel/var and avocado-var-grow still pointing at by-partlabel/avocado,
+# from the same build.
+do_install[vardeps] += "AVOCADO_VAR_PART_DEV"
+
 FILES:${PN} += "${systemd_system_unitdir}/initrd-root-fs.target.wants/avocado-var-grow.service"
