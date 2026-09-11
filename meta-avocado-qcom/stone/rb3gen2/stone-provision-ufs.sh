@@ -48,7 +48,7 @@ cp "$rootfs_file" system.img
 echo "Injecting runtime /var as $var_name"
 cp "$var_file" "$var_name"
 
-# 4. Inject the ESP that avocado-build-rubikpi3 rebuilt around the pinned
+# 4. Inject the ESP that the avocado-build hook rebuilt around the pinned
 #    kernel. The UKI is not rebuilt here any more -- it has to happen at build
 #    time, because an artifact only becomes OTA-updatable and uploadable if it
 #    exists before `stone bundle` and is named in the manifest. Rebuilding at
@@ -61,8 +61,11 @@ cp "$var_file" "$var_name"
 #    "the build already did it" is not enough: without this copy the board
 #    silently boots the stock kernel while the rootfs carries the pinned
 #    kernel's modules, /lib/modules matches nothing, and every modular driver
-#    dies (on this board: the USB NIC behind the Renesas bridge, wifi,
-#    thermal). Verified the hard way -- twice.
+#    dies. Verified the hard way -- twice, on the RUBIK Pi, where the
+#    casualties were the USB NIC behind the Renesas bridge, wifi and thermal.
+#    This file is byte-identical to rubikpi3/stone-provision-ufs.sh: nothing in
+#    it is board-specific, every name comes from the stone manifest. The same
+#    failure lands here on the QPS615 NIC instead.
 #
 #    Fail closed. Flashing the tarball's ESP instead is not a degraded mode,
 #    it is a board that boots a kernel nobody asked for.
