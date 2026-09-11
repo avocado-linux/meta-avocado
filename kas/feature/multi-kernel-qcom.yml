@@ -20,8 +20,16 @@ header:
 #     avocado-distro an mcdepends on it and tells do_multikernel_merge whose
 #     tmp-qcom-rt/deploy/ tree to merge into the default mc's ${DEPLOY_DIR}.
 #
-# Only the kernel is listed. Unlike Jetson there is no out-of-tree module shim
-# to carry, and kernel-devsrc is deliberately left out: it is a separate recipe
+# Only the kernel is listed HERE, and that is not always sufficient. This file
+# is shared by every qcom machine, so it carries no machine's out-of-tree
+# modules: an OOT module recipe is not in the alt-mc's graph just because the
+# kernel is, and the RT feed silently ends up with the stock kernel's build of
+# it only. A machine with one adds its own entry in kas/machine/<machine>.yml
+# -- see rb3gen2.yml, which carries qcom-rt:qps615-dlkm for its Ethernet, the
+# same shape as jetson-l4t:nvidia-kernel-oot. In-tree modules need nothing:
+# they come out of the kernel recipe itself.
+#
+# kernel-devsrc is deliberately left out: it is a separate recipe
 # whose PKGV is KERNEL_VERSION.split("-")[0] (kernelsrc.bbclass), i.e. plain
 # 6.18.37 for both kernels, so a second copy would be a same-NEVRA/different-
 # payload collision. Nothing in the RT mc's graph pulls it, so it is simply

@@ -110,9 +110,27 @@ RDEPENDS:${PN}:append:rubikpi3 = " \
 # camxfirmware-kodiak. Those are the compute and camera stacks, they are large,
 # and the camera path on an upstream kernel needs CamX -- which is the harder
 # half of Vision Kit support and is not attempted by naming a firmware package.
+# The RubikPi needs the same shared-memory driver as the RB3 Gen 2: `vmm` is
+# one extension shared by every target of the inter-VM reference, and it names
+# kernel-module-avocado-shm unconditionally. Without this the RubikPi fails
+# `avocado install` the same way -- "No match for argument".
+#
+# It is not a regression: the reference measured its RubikPi numbers over
+# ivshmem, before the cacheable-mapping driver existed. This is what the
+# current shape of that project needs.
+RDEPENDS:${PN}:append:rubikpi3 = " kernel-module-avocado-shm"
+
+# kernel-module-avocado-shm is the inter-VM shared-memory driver
+# (recipes-kernel/avocado-shm, ported here from meta-avocado-innodisk). The
+# demo's `vmm` extension installs it by name, and without it in the feed
+# `avocado install` fails with "No match for argument:
+# kernel-module-avocado-shm". Feed-only here, like everything else in this
+# file -- the extension decides what lands on the device. exmp-q911 gets the
+# same package through its own bbappend.
 RDEPENDS:${PN}:append:rb3gen2 = " \
     qps615-dlkm \
     qps615-firmware \
+    kernel-module-avocado-shm \
     linux-firmware-ath11k-wcn6750 \
     linux-firmware-qca-wcn6750 \
     linux-firmware-lt9611uxc \

@@ -19,5 +19,11 @@ repos:
 
 local_conf_header:
   machine-avocado-rubikpi3: |
+    # avocado-shm is out-of-tree, so the RT multiconfig does not build it just
+    # because the RT kernel is in its graph -- only in-tree modules come along
+    # with the kernel recipe. The guests run the host's RT Image and reject a
+    # module carrying stock vermagic. Same entry as rb3gen2.yml and
+    # exmp-q911.yml; see kas/feature/multi-kernel-qcom.yml.
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "qcom-rt:avocado-shm"
 
 machine: avocado-rubikpi3

@@ -19,5 +19,37 @@ repos:
 
 local_conf_header:
   machine-avocado-rb3gen2: |
+    # qps615-dlkm is this board's ETHERNET and is an OUT-OF-TREE module, so it
+    # needs the Jetson treatment: an alt-mc entry of its own. Listing only the
+    # kernel in AVOCADO_MULTIKERNEL_MC_RECIPES (what kas/feature/
+    # multi-kernel-qcom.yml does) gets the RT kernel's IN-TREE modules, because
+    # those come out of the kernel recipe itself -- but nothing pulls a separate
+    # module recipe into the RT multiconfig's graph.
+    #
+    # Without this the feed carries kernel-module-tc956x-pcie-eth for the stock
+    # kernel only, and installing the BSP extension onto the RT runtime dies:
+    #
+    #   package qps615-dlkm ... requires
+    #   kernel-module-tc956x-pcie-eth-6.18.37-02315-gbfeb0e5567c0-dirty, but
+    #   none of the providers can be installed ... filtered out by exclude
+    #   filtering
+    #
+    # i.e. the RT runtime is offered the stock kernel's module and refuses it.
+    # An RT board with no Ethernet is also a board `avocado deploy` cannot
+    # reach. Same shape as jetson-l4t:nvidia-kernel-oot in
+    # kas/feature/multi-kernel-jetson.yml.
+    #
+    # rb3gen2-only on purpose: qps615 is this board's part
+    # (RDEPENDS:${PN}:append:rb3gen2), so naming it in the shared qcom feature
+    # file would add an mcdepends on a recipe rubikpi3 never builds.
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "qcom-rt:qps615-dlkm"
+
+    # avocado-shm is the inter-VM shared-memory driver the vmm extension loads,
+    # and it is out-of-tree for the same reason, so it needs its own entry too.
+    # The guests run the host's RT Image, and a module built with stock vermagic
+    # is rejected on load -- the recipe says so itself. exmp-q911.yml carries the
+    # identical line and its feed proves the shape: both
+    # kernel-module-avocado-shm-6.18.37-... and -6.18.37-rt-... get built.
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "qcom-rt:avocado-shm"
 
 machine: avocado-rb3gen2
