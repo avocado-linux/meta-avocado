@@ -94,6 +94,12 @@ do_package[depends] += "virtual/libc:do_packagedata"
 # Ensure this is considered an SDK recipe
 inherit nativesdk
 
+# No SPDX: TOOLCHAIN_HOST_TASK pulls avocado-sdk-target and
+# nativesdk-dummy-provides, which package as ${SDKPKGARCH} - an arch
+# SSTATE_ARCHS never lists, so do_create_package_spdx cannot resolve their
+# documents. Metadata only - nothing to record.
+inherit avocado-nospdx
+
 SDK_VERSION = "${DISTRO_VERSION}"
 PV = "${SDK_VERSION}"
 
