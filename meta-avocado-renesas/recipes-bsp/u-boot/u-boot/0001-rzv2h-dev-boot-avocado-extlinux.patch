@@ -1,0 +1,69 @@
+From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
+From: Javier Tia <anthropic@jetm.me>
+Date: Fri, 12 Jun 2026 12:00:00 -0600
+Subject: [PATCH] rzv2h-dev: boot Avocado extlinux from SD, not vendor
+ ext4/booti
+
+The Avocado image (stone) provisions a FAT boot partition carrying
+extlinux.conf, the kernel Image and the RDK dtb, plus an erofs rootfs
+addressed by PARTUUID. The vendor CONFIG_BOOTCOMMAND instead runs
+`ext4load mmc 0:2 boot/Image` + booti against a single ext4 rootfs with a
+fixed EVK dtb name, so it cannot boot the Avocado layout at all.
+
+Point CONFIG_BOOTCOMMAND at sysboot (CONFIG_CMD_SYSBOOT, already enabled)
+to parse extlinux.conf on the FAT boot partition (partition 1), trying
+mmc 1 then mmc 0 so it does not depend on which controller the microSD
+enumerates on.
+
+The load addresses partition the 0x48000000-0x58000000 bootm window so
+that pxe_utils' three loads cannot overlap. label_boot() loads kernel,
+then initrd, then fdt at these addresses and checks none of them against
+each other, so every window has to be wide enough on its own:
+
+  fdt_addr_r     0x48000000 -> 0x48080000    512 KiB
+  kernel_addr_r  0x48080000 -> 0x4c000000    63.5 MiB
+  ramdisk_addr_r 0x4c000000 -> 0x57000000    176 MiB
+  scriptaddr     0x57000000 -> 0x58000000    16 MiB
+
+kernel_addr_r and fdt_addr_r keep the vendor booti values. The initrd
+window is what the vendor flow never exercised: ext4load + booti loaded
+no ramdisk, so the vendor's spacing says nothing about a layout that
+always has one. An arm64 Image from a cip vendor config runs 30-40 MiB,
+which does not fit under the 0x4a000000 this patch first used.
+
+Build-verified only: the sysboot path/prefix, mmc index and load
+addresses are board-specific and must be confirmed at the u-boot prompt
+on real hardware.
+
+Slot A only. sysboot is pinned at partition 1, which is boot-a, so the
+gpt-ab strategy the stone manifest declares cannot yet boot or roll back
+into boot-b. Reaching both slots means letting the shared Renesas
+CONFIG_BOOTCOMMAND fragment's distro_bootcmd scan the EF00 partitions
+instead of hardcoding a second command here, which is a separate change:
+it needs the vendor #define removed rather than replaced, and it needs
+the fastboot fallback token in that fragment scoped off this machine
+first, since fastboot no longer builds here.
+
+Upstream-Status: Inappropriate [Avocado board integration]
+Signed-off-by: Javier Tia <anthropic@jetm.me>
+---
+ include/configs/rzv2h-dev.h | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/include/configs/rzv2h-dev.h b/include/configs/rzv2h-dev.h
+index 1111111..2222222 100644
+--- a/include/configs/rzv2h-dev.h
++++ b/include/configs/rzv2h-dev.h
+@@ -80,7 +80,11 @@
+ 	"bootcmd_check=if mmc dev 1; then run sd1load; else run sd0load; fi \0"
+ #endif
+ 
+-#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;run bootimage"
++#define CONFIG_BOOTCOMMAND \
++	"setenv scriptaddr 0x57000000; setenv kernel_addr_r 0x48080000; " \
++	"setenv fdt_addr_r 0x48000000; setenv ramdisk_addr_r 0x4c000000; " \
++	"sysboot mmc 1:1 any ${scriptaddr} /extlinux/extlinux.conf; " \
++	"sysboot mmc 0:1 any ${scriptaddr} /extlinux/extlinux.conf"
+ 
+ /* For board */
+ /* Ethernet RAVB */
