@@ -47,12 +47,17 @@ PACKAGE_ARCH = "all_avocadosdk"
 python do_compile() {
     import os
     import bb
+    import avocado_sdk_metadata.repoconf as repoconf
 
     deploy_dir_rpm = d.getVar('DEPLOY_DIR_RPM')
     machine = d.getVar('MACHINE')
     pkg_archs = (d.getVar('PACKAGE_ARCHS') or "").split()
     sdk_pkg_archs = (d.getVar('SDK_PACKAGE_ARCHS') or "").split()
+    # Package signatures. Distinct from AVOCADO_REPO_METADATA_GPGCHECK below,
+    # which is the one a signed repomd.xml needs. See
+    # meta-avocado/lib/avocado_sdk_metadata/repoconf.py for why they differ.
     gpg_check = d.getVar('AVOCADO_REPO_GPGCHECK') or '0'
+    repo_metadata_gpg_check = d.getVar('AVOCADO_REPO_METADATA_GPGCHECK') or '0'
     sdk_repo_archs = (d.getVar('AVOCADO_SDK_REPO_ARCHS') or "").split()
     sdk_repo_archs_underscore = (d.getVar('AVOCADO_SDK_REPO_ARCHS_UNDERSCORE') or "").split()
 
@@ -79,13 +84,14 @@ python do_compile() {
                 # section or bump priority, but the arch is tracked above.
                 return False
             written_sections.add(repo_section_name)
-            repo_f.write(f"[{repo_section_name}]\n")
-            repo_f.write(f"name={repo_name}\n")
-            repo_f.write(f"baseurl=${{repo_url}}/{repo_url_path}\n")
-            repo_f.write(f"enabled=1\n")
-            repo_f.write(f"gpgcheck={gpg_check}\n")
-            repo_f.write(f"priority={priority}\n")
-            repo_f.write("\n")
+            repo_f.write(repoconf.render_repo_section(
+                section=repo_section_name,
+                name=repo_name,
+                baseurl_path=repo_url_path,
+                priority=priority,
+                gpgcheck=gpg_check,
+                repo_gpgcheck=repo_metadata_gpg_check,
+            ))
             return True
         elif arch != "all_avocadosdk":
             bb.warn(f"Repo entry details not fully determined for arch '{arch}'. Skipping repo entry.")
@@ -153,13 +159,14 @@ python do_compile() {
 
     def _write_additional_target_repo(repo_f, priority):
         """Write the target-ext repo entry at the end."""
-        repo_f.write(f"[{machine_short_name}-target-ext]\n")
-        repo_f.write(f"name={machine_short_name}-target-ext\n")
-        repo_f.write(f"baseurl=${{repo_url}}/$releasever/target/{machine_short_name}-ext\n")
-        repo_f.write(f"enabled=1\n")
-        repo_f.write(f"gpgcheck={gpg_check}\n")
-        repo_f.write(f"priority={priority}\n")
-        repo_f.write("\n")
+        repo_f.write(repoconf.render_repo_section(
+            section=f"{machine_short_name}-target-ext",
+            name=f"{machine_short_name}-target-ext",
+            baseurl_path=f"$releasever/target/{machine_short_name}-ext",
+            priority=priority,
+            gpgcheck=gpg_check,
+            repo_gpgcheck=repo_metadata_gpg_check,
+        ))
         bb.note(f"Added additional target repo '{machine_short_name}-target-ext' at priority {priority}")
 
     # Get SDKPATH for the repo file
