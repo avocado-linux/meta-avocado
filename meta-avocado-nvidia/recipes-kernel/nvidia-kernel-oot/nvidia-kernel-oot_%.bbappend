@@ -1,3 +1,12 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
+# linux-yocto 6.6.147 backported a fourth `exclude_bars` argument onto
+# pci_resize_resource(), which NVIDIA's nvdisplay OOT driver still calls with
+# three. Affects 36.5.0 and 36.5.2 alike; no fix upstream in meta-tegra
+# scarthgap or master as of 053a4e97. Probed with a conftest, not a version
+# check, because it arrived as a stable backport.
+SRC_URI += "file://0001-nvdisplay-nv-pci-handle-pci_resize_resource-exclude_bars.patch"
+
 # nvidia-kernel-oot is built in both the default mc (linux-yocto 6.6) and the
 # jetson-l4t alt mc (linux-jammy-nvidia-tegra 5.15). Both builds share a single
 # PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION

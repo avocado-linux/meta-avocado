@@ -18,4 +18,4 @@ repos:
     layers:
       meta-avocado-nvidia:
 
-machine: avocado-jetson-agx-orin-devkit
+machine: avocado-jetson-agx-orin

@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "platform": "avocado-jetson-agx-orin-devkit",
+    "platform": "avocado-jetson-orin-nano",
     "architecture": "arm64",
     "provision_default": "tegraflash",
     "update_strategy": "tegra-ab"
@@ -31,9 +31,7 @@
       "flash_options": {
         "ERASE_NVME": "${ERASE_NVME}",
         "ERASE_EMMC": "${ERASE_EMMC}",
-        "ERASE_ONLY": "${ERASE_ONLY}",
-        "BOARDCTL_TARGET": "${BOARDCTL_TARGET}",
-        "BOARDCTL_SERIAL": "${BOARDCTL_SERIAL}"
+        "ERASE_ONLY": "${ERASE_ONLY}"
       }
     },
     "fields": {
@@ -57,18 +55,6 @@
         "description": "When enabled, erase the selected storage and do not flash a new image.",
         "required": false,
         "default": false
-      },
-      "BOARDCTL_TARGET": {
-        "type": "string",
-        "label": "boardctl target",
-        "description": "Target name passed to boardctl to drive the carrier (e.g. relays/power). Leave empty to skip.",
-        "required": false
-      },
-      "BOARDCTL_SERIAL": {
-        "type": "string",
-        "label": "boardctl serial",
-        "description": "Serial number of the boardctl-managed carrier; only used when boardctl target is set.",
-        "required": false
       }
     },
     "profiles": {
@@ -99,23 +85,23 @@
   },
   "storage_devices": {
     "rootdisk": {
-      "out": "avocado-image-jetson-agx-orin-devkit",
+      "out": "avocado-image-jetson-orin-nano",
       "devpath": "/dev/nvme0n1",
       "block_size": 512,
       "partitions": [],
       "images": {
-        "rootfs": "avocado-image-rootfs-jetson-agx-orin-devkit.erofs-lz4",
-        "var": "avocado-image-var-jetson-agx-orin-devkit.btrfs",
-        "initramfs": "avocado-image-initramfs-jetson-agx-orin-devkit.cpio.gz",
-        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-agx-orin-devkit.cboot",
-        "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-orin-devkit.esp",
-        "tegraflash_tos": "tos-avocado-jetson-agx-orin-devkit.img",
+        "rootfs": "avocado-image-rootfs-jetson-orin-nano.erofs-lz4",
+        "var": "avocado-image-var-jetson-orin-nano.btrfs",
+        "initramfs": "avocado-image-initramfs-jetson-orin-nano.cpio.gz",
+        "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-orin-nano.cboot",
+        "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano.esp",
+        "tegraflash_tos": "tos-avocado-jetson-orin-nano.img",
         "tegraflash_bsp": "tegraflash-bsp",
         "tegraflash_tools": "tegraflash-tools",
         "tegraflash_carrier_bsp": "carrier-bsp"
       },
       "tegraflash": {
-        "sd_device": "mmcblk1"
+        "sd_device": "mmcblk0"
       }
     }
   }

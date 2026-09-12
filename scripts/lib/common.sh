@@ -20,8 +20,8 @@ export AVOCADO_ALL_MACHINES=(
     "qemux86-64"
     "reterminal"
     "reterminal-dm"
-    "jetson-orin-nano-devkit"
-    "jetson-agx-orin-devkit"
+    "jetson-orin-nano"
+    "jetson-agx-orin"
     "raspberrypi4"
     "raspberrypi5"
 )

@@ -1,0 +1,94 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] nvdisplay/nv-pci: handle the pci_resize_resource() exclude_bars argument
+
+The 6.6 stable series gained a fourth `exclude_bars` parameter on
+pci_resize_resource():
+
+    int __must_check pci_resize_resource(struct pci_dev *dev, int i, int size,
+                                         int exclude_bars);
+
+It is a bitmask of BAR indices the kernel must NOT release while it performs
+the resize; pci_do_resource_release_and_resize() skips any BAR whose bit is
+set and releases/reassigns the rest. The pre-existing three-argument
+behaviour is therefore exactly `exclude_bars == 0`, which is what we pass:
+nv_resize_pcie_bars() wants BAR1 (resized) and BAR3 (moved within the same
+bridge window) both released, a subset of what a zero mask releases.
+
+The arity is probed with a conftest rather than a LINUX_VERSION_CODE
+comparison, because this arrived as a stable backport -- present in 6.6.147,
+absent from earlier 6.6.y -- so a version check would be wrong on exactly the
+kernels that matter.
+
+Without this, nvidia-kernel-oot fails to build against linux-yocto 6.6.147:
+
+    nv-pci.c:219:9: error: too few arguments to function 'pci_resize_resource'
+
+Affects both 36.5.0 and 36.5.2; no fix exists in meta-tegra scarthgap or
+master as of 053a4e97.
+
+Upstream-Status: Pending
+
+--- a/nvdisplay/kernel-open/conftest.sh
++++ b/nvdisplay/kernel-open/conftest.sh
+@@ -6192,6 +6192,33 @@
+             compile_check_conftest "$CODE" "NV_PCI_REBAR_GET_POSSIBLE_SIZES_PRESENT" "" "functions"
+         ;;
+ 
++        pci_resize_resource)
++            #
++            # Check number of arguments required.
++            #
++            # The exclude_bars parameter is a bitmask of BARs the kernel must
++            # not release while resizing. It reached the 6.6 stable series as a
++            # backport, so probe for it rather than comparing kernel versions.
++            #
++            echo "$CONFTEST_PREAMBLE
++            #include <linux/pci.h>
++            int conftest_pci_resize_resource(void) {
++                return pci_resize_resource((struct pci_dev *) NULL, 0, 0);
++            }" > conftest$$.c
++
++            $CC $CFLAGS -c conftest$$.c > /dev/null 2>&1
++            rm -f conftest$$.c
++
++            if [ -f conftest$$.o ]; then
++                echo "#define NV_PCI_RESIZE_RESOURCE_ARGUMENT_COUNT 3" | append_conftest "functions"
++                rm -f conftest$$.o
++                return
++            else
++                echo "#define NV_PCI_RESIZE_RESOURCE_ARGUMENT_COUNT 4" | append_conftest "functions"
++                return
++            fi
++        ;;
++
+         wait_for_random_bytes)
+             #
+             # Determine if the wait_for_random_bytes() function is present.
+--- a/nvdisplay/kernel-open/nvidia/nv-pci.c
++++ b/nvdisplay/kernel-open/nvidia/nv-pci.c
+@@ -216,7 +216,15 @@
+ 
+ resize:
+     /* Attempt to resize BAR1 to the largest supported size */
++#if defined(NV_PCI_RESIZE_RESOURCE_ARGUMENT_COUNT) && NV_PCI_RESIZE_RESOURCE_ARGUMENT_COUNT == 4
++    /* exclude_bars is a bitmask of BARs the kernel must not release while it
++       resizes. Zero reproduces the behaviour of the three-argument form this
++       code was written against: BAR1 and BAR3 are both released and
++       reassigned, which is what nv_resize_pcie_bars() wants. */
++    r = pci_resize_resource(pci_dev, NV_GPU_BAR1, requested_size, 0);
++#else
+     r = pci_resize_resource(pci_dev, NV_GPU_BAR1, requested_size);
++#endif
+ 
+     if (r) {
+         if (r == -ENOSPC)
+--- a/nvdisplay/kernel-open/nvidia/nvidia.Kbuild
++++ b/nvdisplay/kernel-open/nvidia/nvidia.Kbuild
+@@ -139,6 +139,7 @@
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += pci_bus_address
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += pci_stop_and_remove_bus_device
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += pci_rebar_get_possible_sizes
++NV_CONFTEST_FUNCTION_COMPILE_TESTS += pci_resize_resource
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += wait_for_random_bytes
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += register_cpu_notifier
+ NV_CONFTEST_FUNCTION_COMPILE_TESTS += cpuhp_setup_state

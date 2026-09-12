@@ -10,7 +10,7 @@ generic `jetson-orin-nx` MACHINE.
 
 Historically each Jetson product got its own Yocto MACHINE — one
 per carrier-on-SOM combination (e.g. the now-retired
-`avocado-jetson-agx-orin-devkit` and `avocado-icam-540`, each with
+`avocado-jetson-agx-orin` and `avocado-icam-540`, each with
 their own kas yml, stone manifest, and SDK-target hooks). That works,
 but every new carrier required a fresh recipe set and customers
 couldn't really add their own.
@@ -376,9 +376,9 @@ cause).
 
   | Board | `sd_device` | Basis |
   |---|---|---|
-  | `jetson-orin-nano-devkit` | `mmcblk0` | Confirmed on a P3767-0005 |
+  | `jetson-orin-nano` | `mmcblk0` | Confirmed on a P3767-0005 |
   | `recomputer-j301x` | `mmcblk0` | Same Orin Nano module (its machine conf requires `orin-nano.inc`, whose upstream `TNSPEC_BOOTDEV_DEFAULT` is `mmcblk0p1`); not yet flashed |
-  | `jetson-agx-orin-devkit` | `mmcblk1` | The value the tree used before this was declarable; not yet flashed |
+  | `jetson-agx-orin` | `mmcblk1` | The value the tree used before this was declarable; not yet flashed |
   | `jetson-orin-nx` | `mmcblk1` | Same |
   | `recomputer-j401x` | `mmcblk1` | Same |
 
