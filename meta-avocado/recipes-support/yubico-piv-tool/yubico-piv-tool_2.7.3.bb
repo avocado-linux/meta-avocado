@@ -10,7 +10,11 @@ S = "${WORKDIR}/git"
 
 inherit cmake pkgconfig
 
-DEPENDS = "pcsc-lite openssl gengetopt-native"
+# libcheck: lib/CMakeLists.txt does an unconditional add_subdirectory(tests),
+# and lib/tests uses find_check() -> pkg_check_modules(LIBCHECK REQUIRED check).
+# There is no upstream option to skip it (still unconditional on master), so the
+# dependency is real rather than optional.
+DEPENDS = "pcsc-lite openssl gengetopt-native libcheck"
 
 EXTRA_OECMAKE = " \
     -DBACKEND=pcsc \

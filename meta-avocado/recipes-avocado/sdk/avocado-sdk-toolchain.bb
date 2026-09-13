@@ -91,14 +91,17 @@ python package:prepend() {
 # Make sure we have the necessary dependencies
 do_package[depends] += "virtual/libc:do_packagedata"
 
-# Ensure this is considered an SDK recipe
-inherit nativesdk
-
 # No SPDX: TOOLCHAIN_HOST_TASK pulls avocado-sdk-target and
 # nativesdk-dummy-provides, which package as ${SDKPKGARCH} - an arch
 # SSTATE_ARCHS never lists, so do_create_package_spdx cannot resolve their
 # documents. Metadata only - nothing to record.
+#
+# Inherited BEFORE nativesdk: the native-last QA check requires native/nativesdk
+# to be the last class inherited.
 inherit avocado-nospdx
+
+# Ensure this is considered an SDK recipe
+inherit nativesdk
 
 SDK_VERSION = "${DISTRO_VERSION}"
 PV = "${SDK_VERSION}"
