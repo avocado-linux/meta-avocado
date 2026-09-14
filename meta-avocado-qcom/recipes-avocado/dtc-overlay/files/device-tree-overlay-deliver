@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+#
+# Device-tree overlay delivery for the Qualcomm flow.
+#
+# Invoked by the runtime build (avocado-cli renders the call from
+# utils/device_tree_overlay.rs) once any enabled extension declares
+# `device_tree_overlays`. The CLI has already compiled each declaration into
+# $AVOCADO_DTBO_STAGING/<name>.dtbo with avocado-dtc-overlay.
+#
+# Environment, all set by the caller:
+#
+#   AVOCADO_DTBO_STAGING      directory holding the compiled <name>.dtbo files
+#   AVOCADO_OVERLAYS_MANIFEST the CLI-authored overlays.manifest.json
+#   AVOCADO_DELIVERY_FRAGMENT path to write a stone manifest fragment to
+#   AVOCADO_STONE_MANIFEST    the base stone manifest, for reference
+#
+# WHAT DELIVERY MEANS HERE
+#
+# Nothing on this platform applies an overlay at runtime, and nothing flashes a
+# standalone overlay: the device tree is embedded in the UKI, which sd-stub
+# installs over the firmware's. So "deliver" means "get these overlays into the
+# tree the UKI carries", and the component that builds that tree is
+# avocado-build-qcom, which runs AFTER this hook (the CLI injects the overlay
+# section before the build hook -- see the ordering in var_image.rs).
+#
+# This hook therefore does not merge anything itself. It validates what the CLI
+# staged, records the order the overlays must be applied in, and claims them.
+# avocado-build-qcom reads that record when it rebuilds the UKI and fdtoverlays
+# them onto the tree it lifts. Keeping the merge in one place matters: that hook
+# already owns the base tree, and a second merge site is a second chance for
+# the flashed tree and the built tree to disagree.
+#
+# NO STONE FRAGMENT IS EMITTED, deliberately.
+#
+# A fragment deep-merges onto the stone manifest to point an image at different
+# content. There is no image to repoint: the overlays change the .dtb section
+# INSIDE uki_a/uki_b, which the manifest already declares and already A/Bs as
+# `file:efi:EFI/Linux/avocado-{a,b}+3.efi`. That is also what makes this
+# OTA-updatable -- an overlay change is a UKI change, and a UKI change is an
+# ordinary OS update with boot counting and rollback.
+#
+# The caller treats the fragment as optional (`if [ -f "$DTO_FRAGMENT" ]`), so
+# writing none is a supported outcome rather than a silent omission.
+
+set -u
+set -o pipefail
+
+fail() { echo "[ERROR] device-tree-overlay-deliver: $*" >&2; exit 1; }
+
+: "${AVOCADO_DTBO_STAGING:?not set by the caller}"
+: "${AVOCADO_OVERLAYS_MANIFEST:?not set by the caller}"
+
+[ -d "$AVOCADO_DTBO_STAGING" ] || fail "staging dir $AVOCADO_DTBO_STAGING does not exist"
+[ -f "$AVOCADO_OVERLAYS_MANIFEST" ] || fail "manifest $AVOCADO_OVERLAYS_MANIFEST does not exist"
+
+command -v python3 >/dev/null 2>&1 || fail "python3 is not in the SDK"
+
+# Validate, order, and claim in one pass.
+#
+# Order is the manifest's order, which is the CLI's collection order: extension
+# declaration order, stable across builds. It has to be recorded rather than
+# rediscovered, because merging is order-sensitive -- two overlays touching the
+# same node do not commute -- and a directory glob in the build hook would
+# order by filename instead, which is not the order anyone declared.
+python3 - "$AVOCADO_OVERLAYS_MANIFEST" "$AVOCADO_DTBO_STAGING" <<'PYEOF' || exit 1
+import json, os, struct, sys
+
+manifest_path, staging = sys.argv[1], sys.argv[2]
+
+with open(manifest_path) as f:
+    doc = json.load(f)
+
+if doc.get("version") != 1:
+    sys.exit("[ERROR] device-tree-overlay-deliver: unsupported overlays.manifest.json version")
+
+overlays = doc.get("overlays", [])
+if not overlays:
+    sys.exit("[ERROR] device-tree-overlay-deliver: called with no overlays")
+
+FDT_MAGIC = 0xD00DFEED
+order = []
+
+for o in overlays:
+    name = o.get("name")
+    fname = o.get("file") or f"{name}.dtbo"
+    path = os.path.join(staging, fname)
+
+    if not os.path.isfile(path):
+        sys.exit(f"[ERROR] device-tree-overlay-deliver: {name}: {path} was not staged")
+
+    # A truncated or non-FDT blob would be merged by the build hook and produce
+    # a UKI that cannot boot, with the failure landing on the device rather
+    # than here. Cheap to check, and this is the last place that can.
+    with open(path, "rb") as f:
+        head = f.read(8)
+    if len(head) < 8:
+        sys.exit(f"[ERROR] device-tree-overlay-deliver: {name}: {fname} is truncated")
+    magic, totalsize = struct.unpack(">II", head)
+    if magic != FDT_MAGIC:
+        sys.exit(
+            f"[ERROR] device-tree-overlay-deliver: {name}: {fname} is not a device tree "
+            f"(magic 0x{magic:08x}, expected 0x{FDT_MAGIC:08x})"
+        )
+    actual = os.path.getsize(path)
+    if totalsize != actual:
+        sys.exit(
+            f"[ERROR] device-tree-overlay-deliver: {name}: {fname} header says "
+            f"{totalsize} bytes, file is {actual}"
+        )
+
+    # Claim it. The caller re-reads this file and fails on any overlay left
+    # unclaimed, so this is what distinguishes "delivered" from "staged and
+    # quietly dropped".
+    o["claimed_by"] = "qcom:uki-embedded-devicetree"
+    order.append(fname)
+
+    params = o.get("params") or {}
+    if params:
+        # Params are a boot-argument concept (config.txt `dtoverlay=name,k=v`,
+        # u-boot overlay entries). An overlay merged into a static tree has
+        # nowhere to receive them, and silently ignoring them would mean a
+        # declaration that reads as configured and does nothing.
+        keys = ", ".join(sorted(params))
+        sys.exit(
+            f"[ERROR] device-tree-overlay-deliver: {name} declares params ({keys}), "
+            "which this platform cannot apply: the overlay is merged into the tree "
+            "embedded in the UKI, and there is no runtime overlay-selection "
+            "argument to carry them."
+        )
+
+with open(manifest_path, "w") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+
+# The record avocado-build-qcom reads. One filename per line, in apply order.
+with open(os.path.join(staging, "apply-order"), "w") as f:
+    for fname in order:
+        f.write(fname + "\n")
+
+print(f"Claimed {len(order)} device-tree overlay(s) for UKI embedding: " + ", ".join(order))
+PYEOF
+
+# No fragment: see the header. Remove a stale one so a previous build's
+# fragment cannot be picked up by this one.
+if [ -n "${AVOCADO_DELIVERY_FRAGMENT:-}" ] && [ -e "$AVOCADO_DELIVERY_FRAGMENT" ]; then
+    rm -f "$AVOCADO_DELIVERY_FRAGMENT" || fail "could not remove stale fragment $AVOCADO_DELIVERY_FRAGMENT"
+fi
+
+exit 0

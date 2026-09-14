@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+#
+# Compile one device-tree overlay source into a .dtbo.
+#
+# avocado-cli calls this once per declared overlay, from the runtime build:
+#
+#   avocado-dtc-overlay --name <name> --src /opt/src/<path>.dtso --out <dir>/<name>.dtbo
+#
+# The name is authoritative downstream (it is the stone `out` basename and the
+# boot-selection argument), so this tool does not derive it from the filename.
+#
+# Two stages, because a .dtso is not plain DTS: the kernel's overlays #include
+# <dt-bindings/...> headers and use C macros, so cpp has to run before dtc.
+#
+# Those headers are NOT shipped with this tool. They are kernel ABI, and which
+# kernel is the project's choice (`kernel.version`), so they come from
+# kernel-devsrc in the target-dev sysroot -- pulled in by the extension that
+# declares the overlays, through an `sdk.compile.<name>.packages` section. A
+# tool carrying its own copy would pin one kernel's constants and compile
+# another kernel's overlay against them: clean build, wrong clocks.
+
+set -u
+set -o pipefail
+
+fail() { echo "[ERROR] avocado-dtc-overlay: $*" >&2; exit 1; }
+
+name=""; src=""; out=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --name) name="${2:?--name needs a value}"; shift 2 ;;
+        --src)  src="${2:?--src needs a value}";   shift 2 ;;
+        --out)  out="${2:?--out needs a value}";   shift 2 ;;
+        *) fail "unknown argument: $1" ;;
+    esac
+done
+
+[ -n "$name" ] || fail "--name is required"
+[ -n "$src" ]  || fail "--src is required"
+[ -n "$out" ]  || fail "--out is required"
+[ -f "$src" ]  || fail "$name: source $src does not exist"
+
+command -v dtc >/dev/null 2>&1 || fail "dtc is not in the SDK (need nativesdk-dtc)"
+
+# Locate the kernel's dt-bindings in the target-dev sysroot.
+#
+# AVOCADO_DT_BINDINGS_DIR overrides, for a caller that knows better. Otherwise
+# look where kernel-devsrc puts them. Exactly one kernel is expected; more than
+# one is ambiguous rather than harmless, because the two would define different
+# constants, so refuse instead of picking.
+bindings="${AVOCADO_DT_BINDINGS_DIR:-}"
+if [ -z "$bindings" ]; then
+    sysroot="${OECORE_TARGET_SYSROOT:-}"
+    [ -n "$sysroot" ] || fail "$name: OECORE_TARGET_SYSROOT is not set and AVOCADO_DT_BINDINGS_DIR was not given"
+
+    found=""
+    for inc in "$sysroot"/usr/lib/modules/*/build/include; do
+        [ -d "$inc/dt-bindings" ] || continue
+        found="$found $inc"
+    done
+    set -- $found
+    case $# in
+        0) fail "$name: no dt-bindings under $sysroot/usr/lib/modules/*/build/include.
+       The extension declaring this overlay must pull the kernel headers into
+       the target-dev sysroot, e.g.
+
+           sdk:
+             compile:
+               <name>:
+                 packages:
+                   kernel-devsrc: '*'
+
+       and reference that compile section from the extension." ;;
+        1) bindings="$1" ;;
+        *) fail "$name: dt-bindings found for more than one kernel under $sysroot ($*).
+       Two kernels define different constants, so which to compile against is
+       not this tool's guess to make; set AVOCADO_DT_BINDINGS_DIR." ;;
+    esac
+fi
+[ -d "$bindings/dt-bindings" ] || fail "$name: $bindings holds no dt-bindings directory"
+
+mkdir -p "$(dirname "$out")" || fail "$name: cannot create output directory"
+
+work="$(mktemp -d)" || fail "$name: cannot create a temporary directory"
+trap 'rm -rf "$work"' EXIT
+
+# Stage 1: preprocess. -nostdinc so the host's headers can never leak in;
+# the .dtso's own directory is on the path so a local #include resolves.
+#
+# Preprocessor selection, in order:
+#
+#   ${CROSS_COMPILE}cpp  the SDK's cross preprocessor, which is what the kernel
+#                        build itself uses on these sources
+#   cpp                  a plain one, if the SDK ever ships it
+#   $CPP                 the SDK environment's own setting -- LAST, because it
+#                        is a COMMAND LINE, not a path: the SDK exports
+#                        `CPP=aarch64-avocado-linux-gcc -E -march=... --sysroot=...`,
+#                        so `command -v "$CPP"` can never resolve it. An earlier
+#                        revision tested it that way and reported "no C
+#                        preprocessor in the SDK" while a perfectly good one sat
+#                        on PATH.
+cpp_cmd=""
+for cand in "${CROSS_COMPILE:-}cpp" cpp; do
+    case "$cand" in cpp|*-cpp) ;; *) continue ;; esac
+    if command -v "$cand" >/dev/null 2>&1; then
+        cpp_cmd="$cand"
+        break
+    fi
+done
+if [ -z "$cpp_cmd" ] && [ -n "${CPP:-}" ]; then
+    # Word-split deliberately: $CPP carries its own flags.
+    # shellcheck disable=SC2086
+    set -- $CPP
+    if command -v "$1" >/dev/null 2>&1; then
+        cpp_cmd="$CPP"
+    fi
+fi
+[ -n "$cpp_cmd" ] || fail "$name: no C preprocessor in the SDK (tried \${CROSS_COMPILE}cpp, cpp, \$CPP)"
+
+# shellcheck disable=SC2086
+$cpp_cmd -nostdinc -undef -D__DTS__ -x assembler-with-cpp \
+    -I "$bindings" \
+    -I "$(dirname "$src")" \
+    "$src" -o "$work/pp.dts" \
+    || fail "$name: preprocessing $src failed"
+
+# Stage 2: compile. -@ emits __symbols__, without which the overlay cannot
+# resolve the &labels it targets and fdtoverlay would reject it later -- a
+# failure that would otherwise surface at image-assembly time, far from here.
+dtc -@ -I dts -O dtb -o "$out" "$work/pp.dts" 2>"$work/dtc.err"
+rc=$?
+if [ $rc -ne 0 ]; then
+    sed 's/^/    /' "$work/dtc.err" >&2
+    fail "$name: dtc failed compiling $src"
+fi
+# dtc warns liberally on overlays; surface them without failing the build.
+if [ -s "$work/dtc.err" ]; then
+    sed 's/^/    /' "$work/dtc.err" >&2
+fi
+
+[ -s "$out" ] || fail "$name: dtc produced no output at $out"
+echo "Compiled device-tree overlay $name ($(stat -c %s "$out") bytes)"

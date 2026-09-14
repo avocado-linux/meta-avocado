@@ -12,6 +12,7 @@ RDEPENDS:${PN}:append = "\
     nativesdk-libxml2 \
     nativesdk-libusb1 \
     nativesdk-qdl \
+    nativesdk-avocado-dtc-overlay \
     ${QCOM_SDK_UKI_TOOLS}"
 
 # DEPENDS as well as RDEPENDS. RDEPENDS on its own only records the runtime
@@ -20,7 +21,16 @@ RDEPENDS:${PN}:append = "\
 # `avocado sdk install` fails with "No match for argument: <pkg>" long after
 # the Yocto build reported success. The stone-usb / nativesdk-libusb1 pair in
 # the base recipe does exactly this for the same reason.
-DEPENDS:append = " ${QCOM_SDK_UKI_TOOLS}"
+# nativesdk-avocado-dtc-overlay compiles device-tree overlays declared by
+# extensions. avocado-cli would install it on demand, but only at the moment a
+# runtime declares an overlay -- and the failure then lands mid-build as
+# "avocado-dtc-overlay: command not found" after the manifest is already
+# written. Shipping it with the SDK for every qcom target makes the capability
+# present before anything needs it.
+#
+# DEPENDS for the same reason as the line below it: RDEPENDS alone would leave
+# it unbuilt and absent from the feed.
+DEPENDS:append = " nativesdk-avocado-dtc-overlay ${QCOM_SDK_UKI_TOOLS}"
 
 # Tool stone-provision-ufs.sh needs to put the PINNED kernel into the ESP.
 #

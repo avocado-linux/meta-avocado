@@ -136,3 +136,14 @@ RDEPENDS:${PN}:append:rb3gen2 = " \
     linux-firmware-lt9611uxc \
     linux-firmware-qcom-qcs6490-modem \
 "
+
+# avocado-dtc-overlay-deliver is the per-BSP device-tree overlay hook. The CLI
+# installs it BY NAME into the target sysroot the moment a runtime declares
+# `device_tree_overlays`, so it has to exist in the feed even though no image
+# RDEPENDS on it -- otherwise that declaration fails at `avocado install` with
+# "No match for argument". Named for every qcom machine because the capability
+# is the flow's, not one board's.
+RDEPENDS:${PN} += "avocado-dtc-overlay-deliver"
+
+# The SDK half (nativesdk-avocado-dtc-overlay) is NOT here: this is a target
+# packagegroup, and it ships with the SDK via avocado-sdk-target instead.
