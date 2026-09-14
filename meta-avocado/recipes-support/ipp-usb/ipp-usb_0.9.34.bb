@@ -8,7 +8,7 @@ GO_IMPORT = "github.com/OpenPrinting/ipp-usb"
 SRC_URI = "git://github.com/OpenPrinting/ipp-usb.git;protocol=https;branch=master"
 SRCREV = "057c7ac8739e557d12796378f3c180136cb3e274"
 
-inherit go-mod systemd
+inherit go-mod systemd pkgconfig
 
 DEPENDS = "libusb1 avahi"
 
