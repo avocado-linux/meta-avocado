@@ -239,6 +239,107 @@ if [ -n "$esp_image" ]; then
             fi
             uki_dtb_arg="--devicetree=$uki_dir/dtb"
             echo "Carrying embedded device tree across ($(stat -c %s "$uki_dir/dtb") bytes)"
+
+            # Merge in the overlays any enabled extension contributed.
+            #
+            # device-tree-overlay-deliver-qcom ran before this hook, validated
+            # what avocado-cli staged, and left an apply-order record. This is
+            # what makes mezzanine support composable: the tree the UKI carries
+            # is a function of the installed extension set, so a core kit gets
+            # no camss and no sensor node, and installing the vision extension
+            # and redeploying changes the device tree through the ordinary A/B
+            # OTA path.
+            #
+            # Board-level overlays are NOT here -- kodiak-el2 and the QPS615
+            # staging overlay are true of every RB3 Gen 2 regardless of what is
+            # fitted, so the machine merges those into the tree this lifts.
+            dto_staging="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/device-tree-overlays"
+            if [ -f "$dto_staging/apply-order" ]; then
+                dto_list=""
+                while IFS= read -r dtbo; do
+                    [ -n "$dtbo" ] || continue
+                    if [ ! -f "$dto_staging/$dtbo" ]; then
+                        echo "ERROR: apply-order names $dtbo but it is not in $dto_staging" >&2
+                        exit 1
+                    fi
+                    dto_list="$dto_list $dto_staging/$dtbo"
+                done < "$dto_staging/apply-order"
+
+                if [ -n "$dto_list" ]; then
+                    command -v fdtoverlay >/dev/null 2>&1 || {
+                        echo "ERROR: extensions contributed device-tree overlays but fdtoverlay is not in the SDK" >&2
+                        exit 1; }
+                    echo "Merging extension device-tree overlays:$dto_list"
+                    # Order is the record's, not a glob's: two overlays touching
+                    # the same node do not commute.
+                    #
+                    # Fails closed. A silently unmerged overlay is a board that
+                    # boots fine and is missing the hardware the extension was
+                    # installed for, which is the failure this whole path exists
+                    # to remove.
+                    fdtoverlay -i "$uki_dir/dtb" -o "$uki_dir/dtb.merged" $dto_list || {
+                        echo "ERROR: fdtoverlay failed merging$dto_list" >&2
+                        echo "       Two overlays touching the same node, or one built against a different base tree." >&2
+                        exit 1; }
+                    mv "$uki_dir/dtb.merged" "$uki_dir/dtb" || exit 1
+                    echo "Device tree now $(stat -c %s "$uki_dir/dtb") bytes with extension overlays applied"
+                fi
+            fi
+
+            # Drop __symbols__ from the finished tree.
+            #
+            # It is build-time metadata: a label -> path map that exists so
+            # fdtoverlay can resolve the &labels an overlay targets. Every merge
+            # above has already happened, and nothing on the device reads it --
+            # the kernel needs it only to apply overlays at RUNTIME, which this
+            # platform does not do. On the RB3 Gen 2 it is 776 entries and ~49 KB
+            # of a ~208 KB tree.
+            #
+            # This is not a size optimisation, it is the fix for a firmware
+            # limit. Qualcomm's UEFI faults walking the tree sd-stub hands it
+            # once the tree grows past roughly 207.5 KB:
+            #
+            #   Data abort / Translation fault, third level
+            #   Thread UEFI DXE @ ... panic (caller ...): die
+            #
+            # and the board drops into dload (05c6:900e), which qdl cannot flash
+            # -- recovery is a physical power cycle into EDL. Bisected on
+            # hardware: 207461 bytes boots, 207799 panics, and the identical
+            # content at 168501 bytes with this node removed boots fine. The
+            # base tree alone is already 207433, so a machine that merges any
+            # mezzanine overlay is over the limit before this runs.
+            #
+            # Deliberately NOT done in linux-avocado-qcom-uki.bb: that recipe's
+            # tree is what this hook lifts and merges extension overlays onto,
+            # and stripping the symbols there would leave the &labels those
+            # overlays target unresolvable.
+            if command -v fdtput >/dev/null 2>&1; then
+                before=$(stat -c %s "$uki_dir/dtb")
+                if fdtput -r "$uki_dir/dtb" /__symbols__ 2>/dev/null; then
+                    echo "Stripped __symbols__: $before -> $(stat -c %s "$uki_dir/dtb") bytes"
+                fi
+            else
+                echo "WARNING: fdtput not in the SDK; shipping __symbols__ in the device tree." >&2
+                echo "         Trees near ${AVOCADO_UKI_DTB_MAX_BYTES:-207000} bytes fault this platform's UEFI." >&2
+            fi
+
+            # Fail the build rather than the board.
+            #
+            # Above the limit the failure lands in firmware, before systemd-boot
+            # counts a boot attempt, so A/B rollback cannot save it and the only
+            # recovery is a physical EDL power cycle. That is not a failure to
+            # discover from a deploy, so it is checked here where it costs a
+            # build error. Override for a machine whose firmware differs.
+            dtb_max="${AVOCADO_UKI_DTB_MAX_BYTES:-207000}"
+            dtb_size=$(stat -c %s "$uki_dir/dtb")
+            if [ "$dtb_size" -gt "$dtb_max" ]; then
+                echo "ERROR: embedded device tree is $dtb_size bytes, over the $dtb_max limit." >&2
+                echo "       This platform's UEFI faults walking a tree this large and the board" >&2
+                echo "       drops into dload, recoverable only by a physical EDL power cycle." >&2
+                echo "       Reduce the overlay set, or raise AVOCADO_UKI_DTB_MAX_BYTES if this" >&2
+                echo "       machine's firmware is known to tolerate more." >&2
+                exit 1
+            fi
         fi
 
         # Rebuild .osrel from the rootfs this UKI actually boots, and add the two
