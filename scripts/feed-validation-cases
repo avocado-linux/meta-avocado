@@ -42,3 +42,4 @@ browsers            | chromium-ozone-wayland |               | yes  |
 ai                  | dx-driver              |               | no   |
 java                | openjdk-17-jre         |               | no   |
 containers          | podman                 |               | no   |
+observability       | fluentbit              |               | no   |
