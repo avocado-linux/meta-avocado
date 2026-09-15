@@ -42,3 +42,5 @@ header:
     file: kas/feature/smartcard.yml
   - repo: meta-avocado
     file: kas/feature/printing.yml
+  - repo: meta-avocado
+    file: kas/feature/observability.yml
