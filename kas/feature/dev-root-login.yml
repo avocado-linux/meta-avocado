@@ -1,0 +1,55 @@
+header:
+  version: 16
+
+# Console root login with an empty password, on any machine.
+#
+#   bakar build meta-avocado/kas/machine/<board>.yml:meta-avocado/kas/feature/dev-root-login.yml
+#
+# DEV ONLY. Never compose it into anything that ships.
+#
+# A stock image sets root's password field to `*`, which no password can match,
+# so the board boots to a console prompt that cannot be satisfied. That is fine
+# for a product and blocking on a bench: /proc/device-tree, the only thing that
+# proves a device-tree overlay reached the running kernel, can only be read from
+# a shell on the board.
+#
+# Prefer this over kas/feature/ssh-dev.yml when the board is reachable over a
+# serial console. ssh-dev also sets AVOCADO_DEV_ROOT_LOGIN, but it appends
+# openssh-sshd, openssh-keygen and openssh-sftp-server to the base rootfs to
+# give those image features a config to edit. On a UART-attached board that is
+# a larger image and a network service for no gain. Reach for ssh-dev when you
+# need scp or a shell over the network; reach for this when you need a login
+# prompt and nothing else.
+local_conf_header:
+  feature/dev-root-login: |
+    # avocado-users_1.0.bb rewrites /etc/shadow's `root:*:` to `root::` only
+    # when this is 1.
+    AVOCADO_DEV_ROOT_LOGIN = "1"
+
+    # Flipping the toggle re-signs do_install, so the PR service can hand back
+    # a revision lower than one already published, and packagedata fails
+    # "version went backwards". That check exists to keep non-upgradable
+    # packages out of real feeds; a bench feed is a scratch repo rebuilt at
+    # will, so demote it to a warning rather than hand-bumping PR every
+    # iteration.
+    ERROR_QA:remove = "version-going-backwards"
+    WARN_QA:append = " version-going-backwards"
+
+    # Demoting the check is not always sufficient. If your feed ALREADY holds
+    # an avocado-users at a higher PR than this build produces, dnf resolves to
+    # that older package and the image silently keeps `root:*` - the build goes
+    # green and the board still cannot be logged into. The symptom is
+    # indistinguishable from the feature not working.
+    #
+    # The fix is to make this build win, by bumping PR past whatever the feed
+    # holds. It is commented out because the right value depends on your feed,
+    # not on this file: shipping a fixed one here would be correct for the
+    # first person to hit this and wrong for the second.
+    #
+    # devtool-debt: PR must be bumped by hand when the feed is ahead.
+    # Ceiling: a feed whose avocado-users PR is at or below this build's.
+    # Upgrade trigger: someone hits the silent `root:*` a second time - at that
+    # point make the recipe derive PR from AVOCADO_DEV_ROOT_LOGIN instead, so
+    # the toggle cannot lose to its own previous output.
+    #
+    # PR:pn-avocado-users = "r1"
