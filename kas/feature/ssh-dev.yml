@@ -1,0 +1,43 @@
+header:
+  version: 16
+
+# Bench/HITL SSH access, on any machine.
+#
+#   bakar build meta-avocado/kas/machine/<board>.yml:meta-avocado/kas/feature/ssh-dev.yml
+#
+# DEV ONLY. This puts an sshd on the image that accepts root with an empty
+# password. Never compose it into anything that ships.
+#
+# Deliberately not an AVOCADO_FEATURE_GROUPS entry. A feature group populates
+# the FEED - `networking` builds the openssh RPMs and stops there, because the
+# base image is minimal by design and gains capability through extensions. That
+# is right for a product and wrong for a bench board, where the point is to
+# have a shell before any extension has been installed.
+local_conf_header:
+  feature/ssh-dev: |
+    # Console. avocado-users_1.0.bb rewrites /etc/shadow's `root:*:` to
+    # `root::` only when this is 1; `*` means no password can ever match, so
+    # the stock 0 leaves no way in on console or over SSH.
+    AVOCADO_DEV_ROOT_LOGIN = "1"
+
+    # SSH. oe-core owns these: allow-root-login and allow-empty-password wire
+    # postprocesses that edit whatever sshd config actually ships, and
+    # allow-empty-password additionally rewrites nullok_secure to nullok
+    # across pam.d - which matters because Linux-PAM 1.7.2 dropped
+    # nullok_secure while oe-core still ships it, so without that an empty
+    # password authenticates on the console and is refused over SSH.
+    #
+    # empty-root-password suppresses zap_empty_root_password, which would
+    # otherwise re-lock the account AVOCADO_DEV_ROOT_LOGIN just unlocked. The
+    # two act at different stages - package build vs assembled rootfs - so
+    # both are needed or whichever runs last wins.
+    EXTRA_IMAGE_FEATURES += "allow-root-login allow-empty-password empty-root-password"
+
+    # sshd has to be in the base rootfs for those postprocesses to have a
+    # config to edit. ROOTFS_IMAGE_EXTRA_INSTALL is the seam
+    # avocado-image-rootfs.bb leaves for exactly this:
+    #   IMAGE_INSTALL = "packagegroup-avocado-rootfs ${ROOTFS_IMAGE_EXTRA_INSTALL}"
+    # so append there rather than overriding IMAGE_INSTALL and dropping the
+    # packagegroup. keygen is required because the host key is generated on
+    # first boot rather than shipped; sftp-server is what scp uses.
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " openssh-sshd openssh-keygen openssh-sftp-server"
