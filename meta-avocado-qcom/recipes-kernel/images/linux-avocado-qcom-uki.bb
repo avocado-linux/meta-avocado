@@ -11,7 +11,7 @@ COMPATIBLE_HOST = '(arm.*|aarch64.*)-(linux.*)'
 
 inherit python3native image-artifact-names linux-kernel-base
 
-DEPENDS = " systemd-boot-native python3-native python3-pefile-native \
+DEPENDS = " systemd-boot-native python3-native python3-pefile-native dtc-native \
             os-release systemd-boot virtual/kernel "
 
 require conf/image-uefi.conf
@@ -89,6 +89,63 @@ do_compile() {
     osrelease="${RECIPE_SYSROOT}${libdir}/os-release"
     ukify_cmd="$ukify_cmd --os-release @$osrelease"
 
+    # Device tree, embedded so the stub installs it over the firmware's.
+    #
+    # The Qualcomm flow flashes ONE dtb to dtb_a and has no overlay-application
+    # step, so a board needing an overlay -- the RB3 Gen 2 needs
+    # qcs6490-rb3gen2-staging for its QPS615 Ethernet, and a mezzanine needs its
+    # own -- could only change the device tree by reflashing. Embedding here
+    # makes the device tree part of the UKI, which os_artifacts already A/Bs as
+    # `file:efi:EFI/Linux/avocado-{a,b}+3.efi`, so it becomes OTA-updatable with
+    # no new manifest machinery.
+    #
+    # sd-stub does the install: it hands the blob to EFI_DT_FIXUP_PROTOCOL for
+    # memory-map fixups and installs the result as the DeviceTree configuration
+    # table, replacing the one UEFI loaded. Verified present in the stub that
+    # ships here -- systemd-stub 259.5, with install_embedded_devicetree,
+    # devicetree_fixup and .dtb/.dtbauto handling in src/boot/devicetree.c.
+    #
+    # Gated on AVOCADO_UKI_DTB_OVERLAYS, NOT on QCOM_DTB_DEFAULT.
+    #
+    # Every qcom machine sets QCOM_DTB_DEFAULT -- rubikpi3, rb3gen2 and
+    # exmp-q911 all do -- so keying off it would embed a device tree on all of
+    # them at once and silently move each board from the firmware's dtb to this
+    # one. That is a boot-path change, and it should be a per-machine decision
+    # taken deliberately, not a side effect of adding this feature.
+    #
+    # So: a machine opts in by naming overlays. Machines that name none keep
+    # booting the dtb UEFI loads from dtb_a, exactly as before.
+    if [ -n "${AVOCADO_UKI_DTB_OVERLAYS}" ]; then
+        if [ -z "${QCOM_DTB_DEFAULT}" ]; then
+            bbfatal "AVOCADO_UKI_DTB_OVERLAYS is set but QCOM_DTB_DEFAULT is not; there is no base dtb to merge onto."
+        fi
+        base_dtb="${DEPLOY_DIR_IMAGE}/${QCOM_DTB_DEFAULT}.dtb"
+        if [ ! -f "$base_dtb" ]; then
+            bbfatal "QCOM_DTB_DEFAULT=${QCOM_DTB_DEFAULT} but $base_dtb does not exist."
+        fi
+        uki_dtb="${B}/uki-devicetree.dtb"
+        rm -f "$uki_dtb"
+        if true; then
+            overlays=""
+            for ovl in ${AVOCADO_UKI_DTB_OVERLAYS}; do
+                ovl_path="${DEPLOY_DIR_IMAGE}/$ovl.dtbo"
+                if [ ! -f "$ovl_path" ]; then
+                    bbfatal "AVOCADO_UKI_DTB_OVERLAYS names $ovl but $ovl_path does not exist. Add it to KERNEL_DEVICETREE."
+                fi
+                overlays="$overlays $ovl_path"
+            done
+            echo "Merging device tree overlays into the UKI:$overlays"
+            # Fails closed: a silently unapplied overlay is a board that boots
+            # and is missing whatever the overlay described.
+            fdtoverlay -i "$base_dtb" -o "$uki_dtb" $overlays \
+                || bbfatal "fdtoverlay failed merging$overlays onto $base_dtb"
+        else
+            cp "$base_dtb" "$uki_dtb"
+        fi
+        echo "Creating UKI with devicetree $uki_dtb"
+        ukify_cmd="$ukify_cmd --devicetree=$uki_dtb"
+    fi
+
     # Stub
     stub="${DEPLOY_DIR_IMAGE}/linux${EFI_ARCH}.efi.stub"
     [ -f $stub ] && echo "Creating UKI with $stub" || bbfatal "$stub is not a valid stub to create UKI."
@@ -104,7 +161,7 @@ do_compile() {
     echo "ukify cmd:$ukify_cmd"
     ukify build $ukify_cmd
 }
-do_compile[vardeps] += "KERNEL_CMDLINE_EXTRA QCOM_BOOTIMG_ROOTFS"
+do_compile[vardeps] += "KERNEL_CMDLINE_EXTRA QCOM_BOOTIMG_ROOTFS AVOCADO_UKI_DTB_OVERLAYS QCOM_DTB_DEFAULT"
 
 do_install() {
     install -Dm 0755 ${B}${EFI_UKI_PATH}/${EFI_LINUX_IMG} ${D}${EFI_UKI_PATH}/${EFI_LINUX_IMG}
