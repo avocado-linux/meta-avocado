@@ -51,6 +51,7 @@ set (see §3).
 | cloud-aws    | `cloud-aws`   | greengrass-bin, aws-iot-device-client           | meta-aws                | **unavailable on wrynose** |
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
+| observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
