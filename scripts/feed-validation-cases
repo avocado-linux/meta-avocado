@@ -39,3 +39,4 @@ ai                  | dx-driver              |               | no
 cloud-aws           | greengrass-bin         |               | no
 java                | openjdk-17-jre         |               | no
 containers          | podman                 |               | no
+observability       | fluentbit              |               | no
