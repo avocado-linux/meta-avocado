@@ -89,12 +89,16 @@ static int shm_probe(struct platform_device *pdev)
 				     "region %pa+%pa is empty or not page aligned\n",
 				     &rmem->base, &rmem->size);
 
-	shm_base = rmem->base;
-	shm_size = rmem->size;
-
 	ret = misc_register(&shm_misc);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret, "misc_register failed\n");
+
+	/* Assign the globals only after misc_register succeeds: a second node with
+	 * compatible = "avocado,shm" then fails here before overwriting the first
+	 * device's window, and an mmap racing this window hits the !shm_size guard
+	 * in shm_mmap rather than a wrong region. */
+	shm_base = rmem->base;
+	shm_size = rmem->size;
 
 	dev_info(&pdev->dev, "/dev/%s -> %pa + %pa, write-back cacheable\n",
 		 DRV_NAME, &shm_base, &shm_size);
