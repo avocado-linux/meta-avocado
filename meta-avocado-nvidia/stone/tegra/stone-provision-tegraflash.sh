@@ -325,6 +325,10 @@ fi
 
 # Create temporary directory for cpp wrapper
 temp_bin_dir=$(mktemp -d)
+# Expanded at registration on purpose: the trap must remove the directory this
+# run created, even if temp_bin_dir is later reassigned. This is an rm -rf, so
+# late binding is the wrong default here.
+# shellcheck disable=SC2064
 trap "rm -rf '$temp_bin_dir'" EXIT
 
 # Tegraflash needs a host-native cpp to preprocess DTS files.
@@ -441,6 +445,8 @@ else
         [ -n "$boardctl_serial" ] && boardctl_args="$boardctl_args -s $boardctl_serial"
         # boardctl may fail if device/debugger isn't connected — catch and fall through
         set +e
+        # boardctl_args is an argument list built above; splitting it is the point.
+        # shellcheck disable=SC2086
         boardctl $boardctl_args recovery 2>&1
         boardctl_rc=$?
         set -e
@@ -458,7 +464,7 @@ else
     else
         echo "Please put device into recovery mode (hold recovery button, press reset)..."
     fi
-    for i in $(seq 1 60); do
+    for _ in $(seq 1 60); do
         check_rcm && break
         sleep 1
     done
@@ -571,6 +577,8 @@ echo "Running initrd-flash script from build directory"
 cd "$build_dir"
 
 if [ -x "./initrd-flash" ]; then
+    # flash_args is an argument list built above; splitting it is the point.
+    # shellcheck disable=SC2086
     ./initrd-flash $flash_args
 else
     echo "ERROR: initrd-flash script not found or not executable"

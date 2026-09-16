@@ -4,7 +4,13 @@ set -e
 slotsfx=""
 mayberoot=""
 foundslotsfx="no"
-for bootarg in `cat /proc/cmdline`; do
+read -r cmdline < /proc/cmdline
+# The command line is a whitespace-separated list, so splitting it is the point.
+# mayberoot, opt, wait and fstype record arguments this script recognises but
+# does not consume yet; upstream tegra-minimal-init reads them on paths we have
+# not carried over.
+# shellcheck disable=SC2086,SC2034
+for bootarg in $cmdline; do
     case "$bootarg" in
         boot.slot_suffix=*) slotsfx="${bootarg##boot.slot_suffix=}"; foundslotsfx="yes" ;;
         root=*) mayberoot="${bootarg##root=}" ;;
@@ -16,24 +22,26 @@ done
 
 if [ "$foundslotsfx" != "yes" ]; then
     # This variable file contains a type (should be 6) followed by the value (should be 0 or 1)
-    bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null))
-    if [ "$(echo "$bcdata" | cut -d' ' -f1)" = "6" ]; then
-        slotnum=$(echo "$bcdata" | cut -d' ' -f2)
+    # awk splits on runs of whitespace and ignores the leading blank hexdump
+    # emits, which is what the nested echo used to be doing.
+    bcdata=$(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null || true)
+    if [ "$(echo "$bcdata" | awk '{print $1}')" = "6" ]; then
+        slotnum=$(echo "$bcdata" | awk '{print $2}')
         [ "$slotnum" != "1" ] || slotsfx="_b"
     fi
-  
+
     message="Waiting for APP$slotsfx partition..."
-    echo -n "$message"
-    for count in $(seq 1 10); do
+    printf '%s' "$message"
+    for _ in $(seq 1 10); do
         for dev in $(lsblk -dnpo NAME); do
           blkid --probe "$dev" || true
         done
-        rootdev=$(blkid -l -t PARTLABEL=APP$slotsfx | cut -d: -f1)
+        rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
         if [ -n "$rootdev" ]; then
             echo "[OK: $rootdev]"
             break
         fi
-        echo -n "$message"
+        printf '%s' "$message"
         message="."
         sleep 0.5
     done
@@ -53,8 +61,12 @@ mount "$rootdev" /sysroot
 
 # Helper: scan a disk's partitions for DATAPART_EXPAND via sysfs uevent
 find_datapart_on_disk() {
+    # `local` is not POSIX, but busybox ash implements it and it is load-bearing
+    # here: the caller iterates its own `diskname`, which this would otherwise
+    # overwrite mid-loop.
+    # shellcheck disable=SC3043
     local diskname="$1"
-    for partdir in /sys/block/$diskname/${diskname}p*; do
+    for partdir in "/sys/block/$diskname/${diskname}"p*; do
         [ -d "$partdir" ] || continue
         if [ -f "$partdir/uevent" ]; then
             while IFS='=' read -r key val; do
