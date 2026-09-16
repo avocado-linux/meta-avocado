@@ -50,11 +50,13 @@ require_efi() {
 
 # Map a device class to the EFI device-path node that identifies it.
 #
-# Matching on the device path rather than the entry description is deliberate:
-# the description is vendor text ("UEFI Samsung SSD 960 EVO 250GB") and differs
-# per drive, while the node type is what the path is actually made of. The
-# description is only consulted as a fallback, because a Jetson labels its card
-# reader "UEFI SD Device" with an SD node that older firmware omits.
+# Matching on the device path rather than the entry description is deliberate,
+# and an Orin Nano shows why. Its NVMe entry reads "UEFI Samsung SSD 960 EVO
+# 250GB S3ESNX0JA13241W 1" - vendor text, model number and serial, with the
+# word NVMe nowhere in it. The device path is the part that is actually typed:
+# that same entry carries node 03 17 (Messaging, NVMe Namespace), which
+# efibootmgr prints as NVMe(...), and the board's SD entry carries 03 1a
+# (Messaging, SD), printed as SD(...).
 class_pattern() {
   case "$1" in
     nvme) echo 'NVMe(' ;;
@@ -65,9 +67,15 @@ class_pattern() {
   esac
 }
 
+# Fallback for firmware that omits the node above. Descriptions are vendor
+# strings, so this cannot be made reliable - it is a second guess, not a second
+# source. The storage patterns take the marketing words too ("SSD", "M.2")
+# because the drive that prompted this carries no protocol name at all; the
+# cost is that a SATA SSD would answer to `nvme` here, which the
+# more-than-one-match warning is there to make visible.
 class_description_pattern() {
   case "$1" in
-    nvme) echo 'NVMe\|NVME\|nvme' ;;
+    nvme) echo 'NVMe\|NVME\|nvme\|SSD\|M\.2' ;;
     sd) echo 'SD Device\|SD Card\|SDHC' ;;
     emmc) echo 'eMMC\|EMMC\|MMC' ;;
     usb) echo 'USB' ;;
