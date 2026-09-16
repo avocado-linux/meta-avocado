@@ -148,7 +148,6 @@ do_deploy() {
             -e"s,INT_NUM_SECTORS,${TEGRA_INTERNAL_DEVICE_SECTORS}," \
             -e"s,RECNAME,recovery," -e"s,RECSIZE,${TEGRA_RECOVERY_KERNEL_PART_SIZE}," -e"s,RECDTB-NAME,recovery-dtb," \
             -e"s,RECROOTFSSIZE,${RECROOTFSSIZE}," \
-            -e"s,APPUUID_b,," -e"s,APPUUID,," \
             -e"s,ESP_FILE,${ESP_FILE}," \
             -e"/RECFILE/d" -e"/RECDTB-FILE/d" -e"/BOOTCTRL-FILE/d" \
             -e"/IST_UCODE/d" -e"/IST_BPMPFW/d" -e"/IST_ICTBIN/d" -e"/IST_TESTIMG/d" -e"/IST_RTINFO/d" \
@@ -156,8 +155,22 @@ do_deploy() {
             "$xmlfile"
     }
     
+    # APPUUID/APPUUID_b survive process_flash_xml now: stone-provision-tegraflash.sh
+    # fills them with the rootfs PARTUUIDs it generates for the disk it is about to
+    # write, and names the same values on the kernel command line. Blanking them
+    # here would leave the flashing tool to pick GUIDs nothing downstream can
+    # predict, which is why the rootfs had to be rediscovered by PARTLABEL at boot.
+    #
+    # Only the layouts that carry a rootfs keep them. The QSPI layout below never
+    # gets a provision-time pass, so a placeholder left in it would reach the
+    # flashing tool verbatim.
+    strip_rootfs_uuids() {
+        sed -i -e"s,APPUUID_b,," -e"s,APPUUID,," "$1"
+    }
+
     if [ -f ${DEPLOYDIR}/tegraflash-bsp/internal-flash.xml ]; then
         process_flash_xml ${DEPLOYDIR}/tegraflash-bsp/internal-flash.xml
+        strip_rootfs_uuids ${DEPLOYDIR}/tegraflash-bsp/internal-flash.xml
         cp ${DEPLOYDIR}/tegraflash-bsp/internal-flash.xml ${DEPLOYDIR}/tegraflash-bsp/flash.xml.in
     fi
     if [ -f ${DEPLOYDIR}/tegraflash-bsp/external-flash.xml ]; then
