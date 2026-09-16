@@ -52,7 +52,7 @@ for i in {1..30}; do
     sleep 1 # let it settle
     break
   fi
-  if [ $i -eq 30 ]; then
+  if [ "$i" -eq 30 ]; then
     echo "ERROR: QDL device not found after 30 seconds, aborting"
     exit 1
   fi

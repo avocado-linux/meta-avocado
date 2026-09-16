@@ -26,9 +26,18 @@ if [ "$MESON_CMD" = "setup" ]; then
         --cross-file="$OECORE_NATIVE_SYSROOT/usr/share/meson/${TARGET_PREFIX}meson.cross" \
         --native-file="$OECORE_NATIVE_SYSROOT/usr/share/meson/meson.native" \
         "
+  # Left unquoted so the line-continuation padding baked into
+  # MESON_SETUP_OPTS collapses to single spaces in this message; quoting it
+  # would print the padding verbatim.
+  # shellcheck disable=SC2086
   echo meson-wrapper: Running meson with setup options: \"$MESON_SETUP_OPTS\"
 fi
 
+# MESON_SETUP_OPTS carries two --cross-file/--native-file flags in one string
+# and must word-split into separate arguments; quoting it would hand meson.real
+# a single argument it cannot parse. Empty for non-setup commands, where the
+# split correctly yields no arguments at all.
+# shellcheck disable=SC2086
 exec "$OECORE_NATIVE_SYSROOT/usr/bin/meson.real" \
   "$@" \
   $MESON_SETUP_OPTS

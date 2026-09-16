@@ -1,5 +1,19 @@
 #!/bin/bash
 # -*- mode: shell-script; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
+#
+# Derived from meta-tegra's tegra-flash-helper; this drives real board flashing,
+# so two shellcheck classes are silenced file-wide rather than rewritten:
+#
+# SC2034: the blocks setting tegraid/BCT/BINSARGS/FLASHARGS/BL_DIR and friends
+# exist only to populate the environment that "$here/odmsign.func" and
+# "$here/l4t_bup_gen.func" read once sourced further down. They look unused here
+# because the consumer is another file.
+# shellcheck disable=SC2034
+#
+# SC1091: ./flashvars, ./bsp_version, odmsign.func and l4t_bup_gen.func are
+# generated or shipped by the NVIDIA BSP at flash time and are not in this repo,
+# so they cannot be followed statically.
+# shellcheck disable=SC1091
 bup_blob=0
 bup_type=
 rcm_boot=0
@@ -53,12 +67,12 @@ get_value_from_PT_table() {
     echo "ERR: unsupported flash layout field: $field" >&2
     return 1
   fi
-  local value=$("$here/nvflashxmlparse" --get-filename "$partname" "$layoutfile" 2>/dev/null)
+  local value
+  value=$("$here/nvflashxmlparse" --get-filename "$partname" "$layoutfile" 2>/dev/null)
   eval "$varname=\"$value\""
 }
 
-ARGS=$(getopt -n $(basename "$0") -l "bup,bup-type:,hsm,no-flash,sign,sdcard,spi-only,boot-only,external-device,rcm-boot,datafile:,usb-instance:,uefi-enc:,erase-spi" -o "u:v:s:b:B:yc:" -- "$@")
-if [ $? -ne 0 ]; then
+if ! ARGS=$(getopt -n "$(basename "$0")" -l "bup,bup-type:,hsm,no-flash,sign,sdcard,spi-only,boot-only,external-device,rcm-boot,datafile:,usb-instance:,uefi-enc:,erase-spi" -o "u:v:s:b:B:yc:" -- "$@"); then
   echo "Error parsing options" >&2
   exit 1
 fi
@@ -165,7 +179,7 @@ kernfile="$5"
 imgfile="$6"
 shift 6
 
-here=$(readlink -f $(dirname "$0"))
+here=$(readlink -f "$(dirname "$0")")
 flashappname="tegraflash.py"
 custinfo_out="custinfo_out.bin"
 
@@ -199,7 +213,7 @@ elif [ -n "$OVERLAY_DTB_FILE" ]; then
 fi
 [ -z "$non_bootcontrol_overlays" ] || non_bootcontrol_overlays=",$non_bootcontrol_overlays"
 
-if [ $rcm_boot -ne 0 -a $to_sign -eq 0 ]; then
+if [ "$rcm_boot" -ne 0 ] && [ "$to_sign" -eq 0 ]; then
   overlay_dtb_files="$rcm_bootcontrol_overlay$non_bootcontrol_overlays"
   also_sign_rcmboot=0
 else
@@ -231,7 +245,9 @@ if [ -z "$CHIPREV" ]; then
   if [ "$CHIPID" = "0x23" ]; then
     chipidargs="--new_session --chip $CHIPID"
   fi
-  BR_CID=$($here/tegrarcm_v2 ${chipidargs} ${inst_args} --uid | grep BR_CID | cut -d' ' -f2)
+  # $chipidargs and $inst_args are argument lists that must word-split
+  # shellcheck disable=SC2086
+  BR_CID=$("$here/tegrarcm_v2" ${chipidargs} ${inst_args} --uid | grep BR_CID | cut -d' ' -f2)
   chipid="$BR_CID"
   if [ -z "$chipid" ]; then
     echo "ERR: could not retrieve chip ID" >&2
@@ -284,13 +300,13 @@ if [ -z "$CHIPREV" ]; then
       fi
       ;;
     SBKPKC)
-      if [ -z "$keyfile" -o -z "$sbk_keyfile" ]; then
+      if [ -z "$keyfile" ] || [ -z "$sbk_keyfile" ]; then
         echo "ERR: Target is configured for secure boot ($bootauth); use -u and -v options to specify key files" >&2
         exit 1
       fi
       ;;
     NS)
-      if [ -n "$keyfile" -o -n "$sbk_keyfile" ]; then
+      if [ -n "$keyfile" ] || [ -n "$sbk_keyfile" ]; then
         echo "WARN: Target is not secured; ignoring key files" >&2
         keyfile=
         sbk_keyfile=
@@ -301,7 +317,7 @@ elif [ "$CHIPID" = "0x23" ]; then
   skipuid="--skipuid"
 fi
 
-if [ -n "$hsm_arg" -a -z "$keyfile" ]; then
+if [ -n "$hsm_arg" ] && [ -z "$keyfile" ]; then
   echo "ERR: using --hsm requires -u <keyfile> option" >&2
   exit 1
 fi
@@ -310,12 +326,16 @@ have_boardinfo=
 keyargs=
 [ -z "$keyfile" ] || keyargs="$keyargs $hsm_arg --key $keyfile"
 [ -z "$sbk_keyfile" ] || keyargs="$keyargs --encrypt_key $sbk_keyfile"
-if [ -z "$FAB" -o -z "$BOARDID" ]; then
+if [ -z "$FAB" ] || [ -z "$BOARDID" ]; then
   if [ -n "$EMC_FUSE_DEV_PARAMS" ]; then
     sed -i "s/preprod_dev_sign = <1>/preprod_dev_sign = <0>/" "$EMC_FUSE_DEV_PARAMS"
   fi
   rm -f rcm_state
   if [ "$CHIPID" = "0x23" ]; then
+    # $inst_args, $skipuid and $keyargs are argument lists that must split;
+    # the *_CONFIG/*_PARAMS names come from the sourced ./flashvars, not from
+    # a typo, which is what SC2153 flags them as.
+    # shellcheck disable=SC2086,SC2153
     if ! python3 $flashappname ${inst_args} --chip 0x23 $skipuid $keyargs \
       --applet mb1_t234_prod.bin \
       --dev_params $EMC_FUSE_DEV_PARAMS \
@@ -330,8 +350,8 @@ if [ -z "$FAB" -o -z "$BOARDID" ]; then
       echo "ERR: chip_info.bin_bak missing after dumping boardinfo" >&2
       exit 1
     fi
-    CHIP_SKU=$($here/chkbdinfo -C chip_info.bin_bak | tr -d '[:space:]')
-    board_ramcode=$($here/chkbdinfo -R chip_info.bin_bak)
+    CHIP_SKU=$("$here/chkbdinfo" -C chip_info.bin_bak | tr -d '[:space:]')
+    board_ramcode=$("$here/chkbdinfo" -R chip_info.bin_bak)
     if [ -z "$board_ramcode" ]; then
       echo "ERR: ramcode could not be extracted from chip info" >&2
       exit 1
@@ -351,15 +371,15 @@ fi
 if [ -n "$BOARDID" ]; then
   boardid="$BOARDID"
 else
-  boardid=$($here/chkbdinfo -i ${cvm_bin} | tr -d '[:space:]')
+  boardid=$("$here/chkbdinfo" -i "${cvm_bin}" | tr -d '[:space:]')
   BOARDID="$boardid"
-  if [ -n "$CHECK_BOARDID" -a "$BOARDID" -ne "$CHECK_BOARDID" ]; then
+  if [ -n "$CHECK_BOARDID" ] && [ "$BOARDID" -ne "$CHECK_BOARDID" ]; then
     echo "ERR: actual board ID $BOARDID does not match expected board ID $CHECK_BOARDID" >&2
     exit 1
   fi
 fi
 
-if [ "$CHIPID" = "0x23" -a -z "$CHIP_SKU" ]; then
+if [ "$CHIPID" = "0x23" ] && [ -z "$CHIP_SKU" ]; then
   echo "ERR: no default chip SKU set" >&2
   exit 1
 fi
@@ -367,15 +387,17 @@ fi
 if [ -n "$FAB" ]; then
   board_version="$FAB"
 else
-  board_version=$($here/chkbdinfo -f ${cvm_bin} | tr -d '[:space:]' | tr [a-z] [A-Z])
+  # shellcheck disable=SC2018,SC2019  # chkbdinfo emits ASCII board identifiers; a-z/A-Z keeps this locale-independent
+  board_version=$("$here/chkbdinfo" -f "${cvm_bin}" | tr -d '[:space:]' | tr a-z A-Z)
   FAB="$board_version"
 fi
 if [ -n "$BOARDSKU" ]; then
   board_sku="$BOARDSKU"
 elif [ -n "$have_boardinfo" ]; then
-  board_sku=$($here/chkbdinfo -k ${cvm_bin} | tr -d '[:space:]' | tr [a-z] [A-Z])
+  # shellcheck disable=SC2018,SC2019  # chkbdinfo emits ASCII board identifiers; a-z/A-Z keeps this locale-independent
+  board_sku=$("$here/chkbdinfo" -k "${cvm_bin}" | tr -d '[:space:]' | tr a-z A-Z)
   BOARDSKU="$board_sku"
-  if [ -n "$CHECK_BOARDSKU" -a "$BOARDSKU" -ne "$CHECK_BOARDSKU" ]; then
+  if [ -n "$CHECK_BOARDSKU" ] && [ "$BOARDSKU" -ne "$CHECK_BOARDSKU" ]; then
     echo "ERR: actual board SKU $BOARDSKU does not match expected board SKU $CHECK_BOARDSKU" >&2
     exit 1
   fi
@@ -383,16 +405,17 @@ fi
 if [ -n "$BOARDREV" ]; then
   board_revision="$BOARDREV"
 elif [ -n "$have_boardinfo" ]; then
-  board_revision=$($here/chkbdinfo -r ${cvm_bin} | tr -d '[:space:]' | tr [a-z] [A-Z])
+  # shellcheck disable=SC2018,SC2019  # chkbdinfo emits ASCII board identifiers; a-z/A-Z keeps this locale-independent
+  board_revision=$("$here/chkbdinfo" -r "${cvm_bin}" | tr -d '[:space:]' | tr a-z A-Z)
   BOARDREV="$board_revision"
 fi
-if [ -z "$serial_number" -a -n "$have_boardinfo" ]; then
-  serial_number=$($here/chkbdinfo -a ${cvm_bin} | tr -d '[:space:]')
+if [ -z "$serial_number" ] && [ -n "$have_boardinfo" ]; then
+  serial_number=$("$here/chkbdinfo" -a "${cvm_bin}" | tr -d '[:space:]')
 fi
 
-[ -f ${cvm_bin} ] && rm -f ${cvm_bin}
+[ -f "${cvm_bin}" ] && rm -f "${cvm_bin}"
 
-if [ -z "$RAMCODE" -a "$BOARDID" = "3701" -a "$FAB" = "301" ]; then
+if [ -z "$RAMCODE" ] && [ "$BOARDID" = "3701" ] && [ "$FAB" = "301" ]; then
   RAMCODE=0
 fi
 
@@ -447,29 +470,29 @@ if [ "$CHIPID" = "0x23" ]; then
         exit 1
         ;;
     esac
-    if [ "$BOARDSKU" = "0004" -o "$BOARDSKU" = "0005" ]; then
+    if [ "$BOARDSKU" = "0004" ] || [ "$BOARDSKU" = "0005" ]; then
       PMICBOARDSKU="0005"
-    elif [ "$BOARDSKU" = "0000" -a "$FAB" != "QS1" ]; then
+    elif [ "$BOARDSKU" = "0000" ] && [ "$FAB" != "QS1" ]; then
       PMICBOARDSKU="0005"
     else
       PMICBOARDSKU="0000"
     fi
     if [ "$BOARDSKU" != "0005" ]; then
-      if [ "$chip_sku" = "00" -o "$chip_sku" = "D0" ] && echo "$FAB" | egrep -q '^(TS[123]|EB[123]|[012]00)$'; then
+      if { [ "$chip_sku" = "00" ] || [ "$chip_sku" = "D0" ]; } && echo "$FAB" | grep -Eq '^(TS[123]|EB[123]|[012]00)$'; then
         PINMUX_CONFIG="tegra234-mb1-bct-pinmux-p3701-0000.dtsi"
         PMC_CONFIG="tegra234-mb1-bct-padvoltage-p3701-0000.dtsi"
       fi
     fi
-    if ! [ "$BOARDSKU" = "0000" -o "$BOARDSKU" = "0001" -o "$BOARDSKU" = "0002" ]; then
+    if [ "$BOARDSKU" != "0000" ] && [ "$BOARDSKU" != "0001" ] && [ "$BOARDSKU" != "0002" ]; then
       BPFDTB_FILE=$(echo "$BPFDTB_FILE" | sed -e"s,3701-0000,3701-$BOARDSKU,")
-      if [ "$BOARDSKU" = "0005" -o "$BOARDSKU" = "0008" ]; then
+      if [ "$BOARDSKU" = "0005" ] || [ "$BOARDSKU" = "0008" ]; then
         EMMC_BCT=$(echo "$EMMC_BCT" | sed -e"s,3701-0000,3701-$BOARDSKU,")
         WB0SDRAM_BCT=$(echo "$WB0SDRAM_BCT" | sed -e"s,3701-0000,3701-$BOARDSKU,")
       else
         dtb_file=$(echo "$dtb_file" | sed -e"s,p3701-0000,p3701-$BOARDSKU,")
       fi
     fi
-    if [ "$BOARDSKU" = "0002" -o "$BOARDSKU" = "0008" ]; then
+    if [ "$BOARDSKU" = "0002" ] || [ "$BOARDSKU" = "0008" ]; then
       fsifw_binsarg="fsi_fw fsi-lk.bin;"
     else
       fsifw_binsarg=
@@ -493,15 +516,15 @@ if [ "$CHIPID" = "0x23" ]; then
     PINMUXREV="a03"
     PMCREV="a03"
     PMICREV="a02"
-    if [ "$BOARDSKU" = "0000" -o "$BOARDSKU" = "0002" ]; then
-      if [ "$FAB" = "TS1" -o "$FAB" = "EB1" ]; then
+    if [ "$BOARDSKU" = "0000" ] || [ "$BOARDSKU" = "0002" ]; then
+      if [ "$FAB" = "TS1" ] || [ "$FAB" = "EB1" ]; then
         PINMUXREV="a01"
         BPFDTB_FILE="tegra234-bpmp-3767-0000-a00-3509-a02.dtb"
         PMCREV="a01"
         PMICREV="a00"
       fi
     fi
-    if [ "$BOARDSKU" = "0001" -o "$BOARDSKU" = "0003" -o "$BOARDSKU" = "0005" ]; then
+    if [ "$BOARDSKU" = "0001" ] || [ "$BOARDSKU" = "0003" ] || [ "$BOARDSKU" = "0005" ]; then
       EMMC_BCT="tegra234-p3767-0001-sdram-l4t.dts"
       WB0SDRAM_BCT="tegra234-p3767-0001-wb0sdram-l4t.dts"
     elif [ "$BOARDSKU" = "0004" ]; then
@@ -524,17 +547,18 @@ fi
 
 echo "Board ID($BOARDID) version($FAB) sku($BOARDSKU) revision($BOARDREV)"
 
-rm -f ${MACHINE}_bootblob_ver.txt
-echo "NV4" >${MACHINE}_bootblob_ver.txt
+rm -f "${MACHINE}_bootblob_ver.txt"
+echo "NV4" >"${MACHINE}_bootblob_ver.txt"
 . bsp_version
-echo "# R$BSP_BRANCH , REVISION: $BSP_MAJOR.$BSP_MINOR" >>${MACHINE}_bootblob_ver.txt
-echo "BOARDID=$BOARDID BOARDSKU=$BOARDSKU FAB=$FAB" >>${MACHINE}_bootblob_ver.txt
-date "+%Y%m%d%H%M%S" >>${MACHINE}_bootblob_ver.txt
-printf "0x%x\n" $(((BSP_BRANCH << 16) | (BSP_MAJOR << 8) | BSP_MINOR)) >>${MACHINE}_bootblob_ver.txt
-bytes=$(wc -c ${MACHINE}_bootblob_ver.txt | cut -d' ' -f1)
+# shellcheck disable=SC2129  # kept as individual appends so each field stays greppable on its own line
+echo "# R$BSP_BRANCH , REVISION: $BSP_MAJOR.$BSP_MINOR" >>"${MACHINE}_bootblob_ver.txt"
+echo "BOARDID=$BOARDID BOARDSKU=$BOARDSKU FAB=$FAB" >>"${MACHINE}_bootblob_ver.txt"
+date "+%Y%m%d%H%M%S" >>"${MACHINE}_bootblob_ver.txt"
+printf "0x%x\n" "$(((BSP_BRANCH << 16) | (BSP_MAJOR << 8) | BSP_MINOR))" >>"${MACHINE}_bootblob_ver.txt"
+bytes=$(wc -c "${MACHINE}_bootblob_ver.txt" | cut -d' ' -f1)
 cksum=$(python3 -c "import zlib; print(\"%X\" % (zlib.crc32(open(\"${MACHINE}_bootblob_ver.txt\", \"rb\").read()) & 0xFFFFFFFF))")
-echo "BYTES:$bytes CRC32:$cksum" >>${MACHINE}_bootblob_ver.txt
-if [ -z "$sdcard" -a $external_device -eq 0 ]; then
+echo "BYTES:$bytes CRC32:$cksum" >>"${MACHINE}_bootblob_ver.txt"
+if [ -z "$sdcard" ] && [ "$external_device" -eq 0 ]; then
   appfile=$(basename "$imgfile").img
   if [ -n "$dataimg" ]; then
     datafile=$(basename "$dataimg").img
@@ -544,10 +568,10 @@ else
   datafile="$dataimg"
 fi
 appfile_sed=
-if [ $bup_blob -ne 0 -o $rcm_boot -ne 0 ]; then
+if [ "$bup_blob" -ne 0 ] || [ "$rcm_boot" -ne 0 ]; then
   kernfile="${kernfile:-boot.img}"
   appfile_sed="-e/APPFILE/d -e/DATAFILE/d"
-elif [ $no_flash -eq 0 -a -z "$sdcard" -a $external_device -eq 0 ]; then
+elif [ "$no_flash" -eq 0 ] && [ -z "$sdcard" ] && [ "$external_device" -eq 0 ]; then
   appfile_sed="-es,APPFILE_b,$appfile, -es,APPFILE,$appfile, -es,DATAFILE,$datafile,"
 elif [ $no_flash -ne 0 ]; then
   touch APPFILE APPFILE_b DATAFILE
@@ -573,17 +597,18 @@ else
   cp "$dtb_file" "$kernel_dtbfile"
 fi
 
-if [ "$spi_only" = "yes" -o $external_device -eq 1 ]; then
+if [ "$spi_only" = "yes" ] || [ "$external_device" -eq 1 ]; then
   if [ ! -e "$here/nvflashxmlparse" ]; then
     echo "ERR: missing nvflashxmlparse script" >&2
     exit 1
   fi
 fi
-if [ "$spi_only" = "yes" ] || [ $bup_blob -ne 0 -a "$bup_type" = "bl" ]; then
+if [ "$spi_only" = "yes" ] || { [ "$bup_blob" -ne 0 ] && [ "$bup_type" = "bl" ]; }; then
   "$here/nvflashxmlparse" --extract -t boot -o flash.xml.tmp "$flash_in" || exit 1
 else
   cp "$flash_in" flash.xml.tmp
 fi
+# shellcheck disable=SC2086  # $appfile_sed is a list of sed -e expressions and must split into separate arguments
 sed -e"s,VERFILE,${MACHINE}_bootblob_ver.txt," -e"s,BPFDTB_FILE,$BPFDTB_FILE," \
   -e"s, DTB_FILE,$kernel_dtbfile," -e"s,BPFFILE,$BPF_FILE," \
   $appfile_sed flash.xml.tmp >flash.xml
@@ -632,39 +657,39 @@ eks eks.img"
          --cpubl_rcm ${RCM_UEFI_IMAGE}.bin"
 fi
 
-if [ $rcm_boot -ne 0 -a $to_sign -eq 0 ]; then
+if [ "$rcm_boot" -ne 0 ] && [ "$to_sign" -eq 0 ]; then
   binsargs_params="$binsargs_params; kernel $kernfile; kernel_dtb $kernel_dtbfile"
 fi
 
-if [ $bup_blob -ne 0 -o $to_sign -ne 0 -o "$sdcard" = "yes" -o $external_device -eq 1 ]; then
+if [ "$bup_blob" -ne 0 ] || [ "$to_sign" -ne 0 ] || [ "$sdcard" = "yes" ] || [ "$external_device" -eq 1 ]; then
   tfcmd=sign
   skipuid="--skipuid"
 elif [ $rcm_boot -ne 0 ]; then
   tfcmd=rcmboot
 else
-  if [ -z "$sdcard" -a $external_device -eq 0 -a $no_flash -eq 0 -a "$spi_only" != "yes" ]; then
+  if [ -z "$sdcard" ] && [ "$external_device" -eq 0 ] && [ "$no_flash" -eq 0 ] && [ "$spi_only" != "yes" ]; then
     rm -f "$appfile"
     echo "Creating sparseimage ${appfile}..."
-    $here/mksparse -b ${blocksize} --fillpattern=0 "$imgfile" "$appfile" || exit 1
+    "$here/mksparse" -b "${blocksize}" --fillpattern=0 "$imgfile" "$appfile" || exit 1
     if [ -n "$datafile" ]; then
       rm -f "$datafile"
       echo "Creating sparseimage ${datafile}..."
-      $here/mksparse -b ${blocksize} --fillpattern=0 "$dataimg" "$datafile" || exit 1
+      "$here/mksparse" -b "${blocksize}" --fillpattern=0 "$dataimg" "$datafile" || exit 1
     fi
   fi
   tfcmd=${flash_cmd:-"flash;reboot"}
 fi
 
-if [ $no_flash -eq 0 -a "$erase_spi" != "yes" ] && echo "$tfcmd" | grep -q "flash"; then
+if [ "$no_flash" -eq 0 ] && [ "$erase_spi" != "yes" ] && echo "$tfcmd" | grep -q "flash"; then
   sparseargs="--sparseupdate"
 fi
 
 want_signing=0
-if [ -n "$keyfile" ] || [ $rcm_boot -eq 1 ] || [ $no_flash -eq 1 -a $to_sign -eq 1 ]; then
+if [ -n "$keyfile" ] || [ "$rcm_boot" -eq 1 ] || { [ "$no_flash" -eq 1 ] && [ "$to_sign" -eq 1 ]; }; then
   want_signing=1
 fi
 if [ $want_signing -eq 1 ]; then
-  if [ "$CHIPID" = "0x23" -a -n "$sbk_keyfile" ]; then
+  if [ "$CHIPID" = "0x23" ] && [ -n "$sbk_keyfile" ]; then
     rm -rf signed_bootimg_dir
     mkdir signed_bootimg_dir
     cp xusb_t234_prod.bin signed_bootimg_dir/
@@ -697,8 +722,8 @@ if [ $want_signing -eq 1 ]; then
     NV_ARGS=" "
   fi
   BL_DIR="."
-  bctfilename=$(echo $sdramcfg_files | cut -d, -f1)
-  bctfile1name=$(echo $sdramcfg_files | cut -d, -f2)
+  bctfilename=$(echo "$sdramcfg_files" | cut -d, -f1)
+  bctfile1name=$(echo "$sdramcfg_files" | cut -d, -f2)
   BCTARGS="$bctargs $overlay_dtb_arg $custinfo_args --bct_backup"
   # DTBARGS is used by odmsign_ext_flash() when it rebuilds FLASHARGS from scratch.
   # Without this, overlay_dtb_arg is lost and the generated flashcmd.txt / rcmbootcmd.txt
@@ -722,14 +747,14 @@ if [ $want_signing -eq 1 ]; then
   FBARGS="--cmd \"$tfcmd\""
   . "$here/odmsign.func"
   (odmsign_ext_sign_and_flash) || exit 1
-  if [ $bup_blob -eq 0 -a $no_flash -ne 0 ]; then
+  if [ "$bup_blob" -eq 0 ] && [ "$no_flash" -ne 0 ]; then
     mv flashcmd.txt secureflash.sh || exit 1
     chmod +x secureflash.sh
   fi
   if [ $also_sign_rcmboot -ne 0 ]; then
     outfolder="$(odmsign_get_folder)"
-    rm -rf ${outfolder}_save
-    mv ${outfolder} ${outfolder}_save
+    rm -rf "${outfolder}_save"
+    mv "${outfolder}" "${outfolder}_save"
     rm -f secureflash.xml.save
     mv secureflash.xml secureflash.xml.save
     BCTARGS="$bctargs $rcm_overlay_dtb_arg $custinfo_args --bct_backup"
@@ -747,13 +772,13 @@ if [ $want_signing -eq 1 ]; then
           $bctargs $rcm_overlay_dtb_arg $custinfo_args $ramcodeargs $extdevargs $sparseargs $BINSARGS"
     (rcm_boot=1 odmsign_ext_sign_and_flash) || exit 1
     rm -f flashcmd.txt
-    rm -rf ${outfolder}
-    mv ${outfolder}_save ${outfolder}
-    cp -f ${outfolder}/* .
+    rm -rf "${outfolder}"
+    mv "${outfolder}_save" "${outfolder}"
+    cp -f "${outfolder}"/* .
     rm -f secureflash.xml
     mv secureflash.xml.save secureflash.xml
   fi
-  if [ $bup_blob -eq 0 -a $no_flash -ne 0 ]; then
+  if [ "$bup_blob" -eq 0 ] && [ "$no_flash" -ne 0 ]; then
     cp secureflash.sh flashcmd.txt
     rm -f APPFILE APPFILE_b DATAFILE
   fi
@@ -785,34 +810,42 @@ if [ $bup_blob -ne 0 ]; then
   localbootfile="boot.img"
   . "$here/l4t_bup_gen.func"
   spec="${BOARDID}-${FAB}-${BOARDSKU}-${BOARDREV}-1-${CHIPREV}-${MACHINE}-"
-  if [ $(expr length "$spec") -ge 128 ]; then
+  # shellcheck disable=SC2308  # expr length counts bytes; ${#spec} counts locale characters, and the 128 limit TNSPEC enforces is a byte limit
+  if [ "$(expr length "$spec")" -ge 128 ]; then
     echo "ERR: TNSPEC must be shorter than 128 characters: $spec" >&2
     exit 1
   fi
-  l4t_bup_gen "$flashcmd" "$spec" "$fuselevel" generic "$keyfile" "$sbk_keyfile" $CHIPID || exit 1
+  l4t_bup_gen "$flashcmd" "$spec" "$fuselevel" generic "$keyfile" "$sbk_keyfile" "$CHIPID" || exit 1
   exit 0
 fi
 
-if [ $to_sign -ne 0 ]; then
+if [ "$to_sign" -ne 0 ]; then
+  # shellcheck disable=SC2086  # $flashcmd is a command line for eval; quoting it would run it as one word
   eval $flashcmd </dev/null || exit 1
   exit 0
 fi
 
 if [ $no_flash -ne 0 ]; then
+  # shellcheck disable=SC2001  # sed handles the repeated --skipuid removal; ${var//} would need a second pass for the surrounding spaces
   echo "$flashcmd" | sed -e 's,--skipuid,,g' >flashcmd.txt
   chmod +x flashcmd.txt
   rm -f APPFILE APPFILE_b DATAFILE
 else
+  # shellcheck disable=SC2086  # $flashcmd is a command line for eval; quoting it would run it as one word
   eval $flashcmd </dev/null || exit 1
-  if [ -n "$sdcard" -o $external_device -eq 1 ]; then
-    if [ $external_device -eq 1 -a -n "$serial_number" ]; then
+  if [ -n "$sdcard" ] || [ "$external_device" -eq 1 ]; then
+    if [ "$external_device" -eq 1 ] && [ -n "$serial_number" ]; then
       make_sdcard_args="$make_sdcard_args --serial-number $serial_number"
     fi
     if [ -n "$pre_sdcard_sed" ]; then
       rm -f signed/flash.xml.tmp.in
       mv signed/flash.xml.tmp signed/flash.xml.tmp.in
+      # $pre_sdcard_sed and $make_sdcard_args are argument lists built up
+      # above; they must word-split into separate argv entries.
+      # shellcheck disable=SC2086
       sed $pre_sdcard_sed signed/flash.xml.tmp.in >signed/flash.xml.tmp
     fi
-    $here/make-sdcard $make_sdcard_args signed/flash.xml.tmp "$@"
+    # shellcheck disable=SC2086
+    "$here/make-sdcard" $make_sdcard_args signed/flash.xml.tmp "$@"
   fi
 fi

@@ -8,7 +8,7 @@
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
 
-archive_name=$(cat $AVOCADO_STONE_MANIFEST | jq -r .storage_devices.rootdisk.out)
+archive_name=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r .storage_devices.rootdisk.out)
 archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
 archive_image="${archive_file%%.*}.img"
 

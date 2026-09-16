@@ -26,14 +26,14 @@ fi
 SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
 if [ -z "$SWTPM_BIN" ]; then
   echo "Error: Could not find swtpm binary"
-  return -1
+  exit 1
 fi
 
 LIBPCREDIR="$SYSROOT_COMPONENTS_DIR/libpcre-native/usr/lib"
 ln -sf "$LIBPCREDIR/libpcre.so.1.2.13" "$LIBPCREDIR/libpcre.so.3"
 ln -sf "$LIBPCREDIR/libpcre.so.1.2.13" "$LIBPCREDIR/libpcre.so.3.0.0"
 
-LIB_PATH=$("$SCRIPT_DIR/find-library-path" $SWTPM_BIN $SYSROOT_COMPONENTS_DIR $SYSROOT_UNINATIVE_DIR)
+LIB_PATH=$("$SCRIPT_DIR/find-library-path" "$SWTPM_BIN" "$SYSROOT_COMPONENTS_DIR" "$SYSROOT_UNINATIVE_DIR")
 
 echo "Starting swtpm with socket at $TPM_SOCK"
 LD_LIBRARY_PATH="$LIB_PATH" "$SWTPM_BIN" socket \

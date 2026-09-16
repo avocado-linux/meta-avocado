@@ -16,7 +16,7 @@ start() {
   done
 
   echo 1 >$NODE
-  cd /usr/src/rubikpi-btapp/
+  cd /usr/src/rubikpi-btapp/ || exit 1
   ./bsa_server -d /dev/ttyHS7 -p ./BCM4345C5_003.006.006.1081.1154.hcd -r 13 -pcmint 31100 -pcmi2s=1011
 }
 
@@ -25,9 +25,9 @@ stop() {
   echo 0 >$NODE
 }
 
-if [[ $1 == "start" ]]; then
+if [ "$1" = "start" ]; then
   start
-elif [[ $1 == "stop" ]]; then
+elif [ "$1" = "stop" ]; then
   stop
 else
   exit 1

@@ -59,7 +59,7 @@ run_native "$SWTPM_BIN" socket \
   --daemon
 
 # Wait up to 10 s for the socket
-for i in $(seq 1 10); do
+for _ in $(seq 1 10); do
   [ -S "$TPM_SOCK" ] && break
   sleep 1
 done

@@ -8,9 +8,9 @@ stop() {
   killall -9 wpa_supplicant
 }
 
-if [[ $1 == "start" ]]; then
+if [ "$1" = "start" ]; then
   start
-elif [[ $1 == "stop" ]]; then
+elif [ "$1" = "stop" ]; then
   stop
 else
   exit 1

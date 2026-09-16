@@ -89,6 +89,8 @@ if check_sdp; then
 else
   echo "Please put device into serial download mode..."
   echo "(Set the board's boot-mode switches to serial download and power-cycle; see the board user manual for the exact positions)"
+  # shellcheck disable=SC2034 # i is a bare 60-iteration counter; the loop
+  # polls check_sdp and never reads the index.
   for i in $(seq 1 60); do
     if check_sdp; then
       echo "Device detected in serial download mode"

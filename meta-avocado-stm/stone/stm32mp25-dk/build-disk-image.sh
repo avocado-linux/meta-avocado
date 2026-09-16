@@ -27,6 +27,10 @@ DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
+# Not consumed below: sgdisk works in 512-byte sectors regardless of block_size,
+# as the comment at the SGDISK_ARGS loop already records, so BLOCK_SIZE is stone
+# metadata only. Parsed here so that manifest field stays visibly handled.
+# shellcheck disable=SC2034
 BLOCK_SIZE=$(jq -r '.storage_devices.rootdisk.block_size // 512' "$MANIFEST")
 
 NUM_PARTITIONS=$(jq '.storage_devices.rootdisk.partitions | length' "$MANIFEST")

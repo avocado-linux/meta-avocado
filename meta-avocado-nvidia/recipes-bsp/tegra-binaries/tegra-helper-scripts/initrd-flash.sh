@@ -1,10 +1,27 @@
 #!/bin/bash
 
+# Derived from meta-tegra's initrd-flash; this drives real board flashing, so
+# three shellcheck classes are silenced file-wide rather than rewritten:
+#
+# SC2155: none of these `local x=$(cmd)` sites inspects the substitution's exit
+# status - every one checks the resulting value for emptiness instead - so
+# splitting the declarations would add churn without adding a check.
+# shellcheck disable=SC2155
+#
+# SC2003: `expr` is carried over from the original. Every use is an integer
+# counter, and swapping the arithmetic engine in a flashing script buys nothing.
+# shellcheck disable=SC2003
+#
+# SC1091: .env.initrd-flash, .presigning-vars, ./boardvars.sh and .found-jetson
+# are generated at flash time and are not in this repo, so they cannot be
+# followed statically.
+# shellcheck disable=SC1091
 set -o pipefail
 
 me=$(basename "$0")
-here=$(readlink -f $(dirname "$0"))
+here=$(readlink -f "$(dirname "$0")")
 
+# shellcheck disable=SC2034  # reserved for the per-machine default table the flashvars file may populate
 declare -A DEFAULTS
 
 usage() {
@@ -54,8 +71,7 @@ erase_emmc=0
 erase_only=0
 check_usb_instance="${TEGRAFLASH_CHECK_USB_INSTANCE:-no}"
 
-ARGS=$(getopt -n $(basename "$0") -l "usb-instance:,help,skip-bootloader,erase-nvme,erase-emmc,erase-only" -o "u:v:h" -- "$@")
-if [ $? -ne 0 ]; then
+if ! ARGS=$(getopt -n "$(basename "$0")" -l "usb-instance:,help,skip-bootloader,erase-nvme,erase-emmc,erase-only" -o "u:v:h" -- "$@"); then
   usage >&2
   exit 1
 fi
@@ -109,7 +125,7 @@ while true; do
 done
 
 if [ -n "$PRESIGNED" ]; then
-  if [ -n "$keyfile" -o -n "$sbk_keyfile" ]; then
+  if [ -n "$keyfile" ] || [ -n "$sbk_keyfile" ]; then
     echo "WARN: binaries already signed; ignoring signing options" >&2
     keyfile=
     sbk_keyfile=
@@ -325,14 +341,18 @@ disconnect_usb_device() {
   return 0
 }
 
+# shellcheck disable=SC2329  # kept as a companion to the signing path; called by hand when re-staging already-signed binaries
 copy_signed_binaries() {
   local signdir="${1:-signed}"
   local xmlfile="${2:-flash.xml.tmp}"
   local destdir="${3:-.}"
+  # Names every field the `eval "$line"` below assigns, so the eval cannot
+  # leak a global; not all of them are read here.
+  # shellcheck disable=SC2034
   local blksize partnumber partname partsize partfile partguid parttype partfilltoend
   local line
 
-  while read line; do
+  while read -r line; do
     eval "$line"
     [ -n "$partfile" ] || continue
     if [ ! -e "$signdir/$partfile" ]; then
@@ -382,10 +402,13 @@ sign_binaries() {
     return 0
   fi
 
-  if [ -z "$BOARDID" -o -z "$FAB" ]; then
+  if [ -z "$BOARDID" ] || [ -z "$FAB" ]; then
     wait_for_rcm
   fi
   rm -rf rcmboot_blob
+  # $instance_args is an argument list, and the *FILE/*IMAGE/*BCTS names come
+  # from the sourced ./flashvars rather than from a typo.
+  # shellcheck disable=SC2086,SC2153
   if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU serial_number=$serial_number \
     "$here/$FLASH_HELPER" --no-flash --sign -u "$keyfile" -v "$sbk_keyfile" $instance_args \
     flash.xml.in $DTBFILE $EMMC_BCTS $ODMDATA $LNXFILE $ROOTFS_IMAGE; then
@@ -403,6 +426,9 @@ sign_binaries() {
   if [ -e external-flash.xml.in ]; then
     if grep -q 'oem_sign="true"' external-flash.xml.in 2>/dev/null; then
       . ./boardvars.sh
+      # $instance_args is an argument list, and the *FILE/*IMAGE/*BCTS
+      # names come from the sourced ./flashvars rather than from a typo.
+      # shellcheck disable=SC2086,SC2153
       if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU \
         "$here/$FLASH_HELPER" --no-flash --sign --external-device -u "$keyfile" -v "$sbk_keyfile" $instance_args \
         external-flash.xml.in $DTBFILE $EMMC_BCTS $ODMDATA $LNXFILE $ROOTFS_IMAGE; then
@@ -541,6 +567,7 @@ mount_partition() {
   local dev="$1"
   local mnt_base="/tmp/usb_mount"
   local mnt_point="${mnt_base}_$$_$(basename "$dev")"
+  # shellcheck disable=SC2034  # declared up front so the mount helpers below cannot leak these into the global scope
   local existing_mnt fstype
 
   # Check if device is already mounted and unmount all existing mounts
@@ -638,7 +665,7 @@ wait_for_exported_storage() {
     # Check timeout
     local current_time=$(date +%s)
     local elapsed=$((current_time - start_time))
-    if [ $elapsed -ge $timeout ]; then
+    if [ "$elapsed" -ge "$timeout" ]; then
       echo "" >&2
       echo "ERR: Timeout waiting for exported storage device $name after ${timeout}s" >&2
       echo "The target was asked to export '$name' and never did. This is a" >&2
@@ -652,7 +679,7 @@ wait_for_exported_storage() {
       echo "is the target:" >&2
       for candidate in /dev/sd[a-z]; do
         [ -b "$candidate" ] || continue
-        local size_blocks=$(cat /sys/block/$(basename "$candidate")/size 2>/dev/null || echo "0")
+        local size_blocks=$(cat "/sys/block/$(basename "$candidate")/size" 2>/dev/null || echo "0")
         local size_mb=$((size_blocks / 2048))
         local vendor=$(get_device_property "$candidate" "ID_VENDOR")
         echo "  $candidate: ${size_mb}MB, vendor: $vendor" >&2
@@ -667,7 +694,7 @@ wait_for_exported_storage() {
         if [ "$cand_model" = "$sessid" ]; then
           ok=yes
         fi
-      elif [ -n "$usbi" -a "$check_usb_instance" = "yes" ]; then
+      elif [ -n "$usbi" ] && [ "$check_usb_instance" = "yes" ]; then
         cand_devpath=$(get_device_property "$candidate" "DEVPATH")
         if echo "$cand_devpath" | grep -q "/$usbi/" 2>/dev/null; then
           ok=yes
@@ -678,18 +705,18 @@ wait_for_exported_storage() {
       if [ "$ok" = "yes" ]; then
         cand_vendor=$(get_device_property "$candidate" "ID_VENDOR")
         # Check device size to ensure it's the exported storage, not the command device
-        local device_size_blocks=$(cat /sys/block/$(basename "$candidate")/size 2>/dev/null || echo "0")
+        local device_size_blocks=$(cat "/sys/block/$(basename "$candidate")/size" 2>/dev/null || echo "0")
         device_size_mb=$((device_size_blocks / 2048)) # Convert 512-byte blocks to MB
 
-        if [ "$cand_vendor" = "$name" ] || [ "$name" != "flashpkg" -a "$cand_vendor" = "flashpkg" ]; then
-          if [ $device_size_mb -ge $min_size_mb ]; then
+        if [ "$cand_vendor" = "$name" ] || { [ "$name" != "flashpkg" ] && [ "$cand_vendor" = "flashpkg" ]; }; then
+          if [ "$device_size_mb" -ge "$min_size_mb" ]; then
             echo "[$candidate] (${device_size_mb}MB, vendor: $cand_vendor)" >&2
             output="$candidate"
             break
           else
             echo -n "[${candidate}:${device_size_mb}MB<${min_size_mb}MB]" >&2
           fi
-        elif [ $count -gt 0 ] && [ $(expr $count % 20) -eq 0 ]; then
+        elif [ "$count" -gt 0 ] && [ "$(expr "$count" % 20)" -eq 0 ]; then
           # Periodically show what devices we're seeing for debugging
           echo -n "[${candidate}:${device_size_mb}MB,vendor:$cand_vendor]" >&2
         fi
@@ -697,8 +724,8 @@ wait_for_exported_storage() {
     done
     if [ -z "$output" ]; then
       sleep 1
-      count=$(expr $count \+ 1)
-      if [ $count -ge 5 ]; then
+      count=$(expr "$count" \+ 1)
+      if [ "$count" -ge 5 ]; then
         echo -n "." >&2
         count=0
       fi
@@ -726,7 +753,7 @@ wait_for_usb_storage() {
         if [ "$cand_model" = "$sessid" ]; then
           ok=yes
         fi
-      elif [ -n "$usbi" -a "$check_usb_instance" = "yes" ]; then
+      elif [ -n "$usbi" ] && [ "$check_usb_instance" = "yes" ]; then
         cand_devpath=$(get_device_property "$candidate" "DEVPATH")
         if echo "$cand_devpath" | grep -q "/$usbi/" 2>/dev/null; then
           ok=yes
@@ -740,7 +767,7 @@ wait_for_usb_storage() {
           echo "[$candidate]" >&2
           output="$candidate"
           break
-        elif [ "$name" != "flashpkg" -a "$cand_vendor" = "flashpkg" ]; then
+        elif [ "$name" != "flashpkg" ] && [ "$cand_vendor" = "flashpkg" ]; then
           # Accept flashpkg devices when waiting for any USB storage device
           echo "[$candidate] (accepting flashpkg device)" >&2
           output="$candidate"
@@ -750,8 +777,8 @@ wait_for_usb_storage() {
     done
     if [ -z "$output" ]; then
       sleep 1
-      count=$(expr $count \+ 1)
-      if [ $count -ge 5 ]; then
+      count=$(expr "$count" \+ 1)
+      if [ "$count" -ge 5 ]; then
         echo -n "." >&2
         count=0
       fi
@@ -767,7 +794,10 @@ copy_bootloader_files() {
   local devnum instnum
   local is_spi is_mmcboot
   rm -f "$dest/partitions.conf"
-  while IFS=", " read partnumber partloc start_location partsize partfile partattrs partsha; do
+  # partnumber, partattrs and partsha absorb their flash.idx columns so the
+  # fields after them line up positionally; not every one is read here.
+  # shellcheck disable=SC2034
+  while IFS=", " read -r partnumber partloc start_location partsize partfile partattrs partsha; do
     # Need to trim off leading blanks
     devnum=$(echo "$partloc" | cut -d':' -f 1)
     instnum=$(echo "$partloc" | cut -d':' -f 2)
@@ -776,13 +806,13 @@ copy_bootloader_files() {
     # eMMC boot blocks (boot0/boot1) are 0:3
     # eMMC user is 1:3
     # NVMe (any external device) is 9:0
-    if [ $devnum -eq 3 -a $instnum -eq 0 ] || [ $devnum -eq 0 -a $instnum -eq 3 ]; then
+    if { [ "$devnum" -eq 3 ] && [ "$instnum" -eq 0 ]; } || { [ "$devnum" -eq 0 ] && [ "$instnum" -eq 3 ]; }; then
       if [ -n "$partfile" ]; then
         cp "$partfile" "$dest/"
       fi
-      if [ $devnum -eq 3 -a $instnum -eq 0 ]; then
+      if [ "$devnum" -eq 3 ] && [ "$instnum" -eq 0 ]; then
         is_spi=yes
-      elif [ $devnum -eq 0 -a $instnum -eq 3 ]; then
+      elif [ "$devnum" -eq 0 ] && [ "$instnum" -eq 3 ]; then
         is_mmcboot=yes
       fi
       echo "$partname:$start_location:$partsize:$partfile" >>"$dest/partitions.conf"
@@ -808,13 +838,14 @@ generate_flash_package() {
   # satisfy this stage's reuse-cycle disconnect below.
   agent_twiddle_done=
   local dev=$(wait_for_usb_storage "$session_id" "flashpkg" "$usb_instance")
+  # shellcheck disable=SC2034  # declared so the helpers sourced below cannot leak it into the global scope
   local exports
 
   if [ -z "$dev" ]; then
     echo "ERR: could not locate USB storage device for sending flashing commands" >&2
     return 1
   fi
-  local devsize=$(cat /sys/block/$(basename $dev)/size 2>/dev/null)
+  local devsize=$(cat "/sys/block/$(basename "$dev")/size" 2>/dev/null)
   echo "Device size in blocks: $devsize" >&2
   local mnt=$(mount_partition "$dev")
   if [ -z "$mnt" ]; then
@@ -839,7 +870,7 @@ generate_flash_package() {
   if [ $erase_emmc -eq 1 ]; then
     echo "erase-mmc" >>"$mnt/flashpkg/conf/command_sequence"
   else
-    [ $EXTERNAL_ROOTFS_DRIVE -eq 0 -o $NO_INTERNAL_STORAGE -eq 1 ] || echo "erase-mmc" >>"$mnt/flashpkg/conf/command_sequence"
+    [ "$EXTERNAL_ROOTFS_DRIVE" -eq 0 ] || [ "$NO_INTERNAL_STORAGE" -eq 1 ] || echo "erase-mmc" >>"$mnt/flashpkg/conf/command_sequence"
   fi
 
   if [ $erase_only -eq 0 ]; then
@@ -851,7 +882,7 @@ generate_flash_package() {
 
   # Show what commands were written for debugging
   echo "Commands written to device:" >&2
-  cat "$mnt/flashpkg/conf/command_sequence" | while read cmd; do
+  cat "$mnt/flashpkg/conf/command_sequence" | while read -r cmd; do
     echo "  - $cmd" >&2
   done
 
@@ -866,7 +897,7 @@ generate_flash_package() {
   # Show current USB devices for debugging
   if command -v lsusb >/dev/null 2>&1; then
     echo "Current USB devices before disconnect:" >&2
-    lsusb | grep -E "(0955|nvidia|flashpkg)" | while read line; do
+    lsusb | grep -E "(0955|nvidia|flashpkg)" | while read -r line; do
       echo "  $line" >&2
     done
   fi
@@ -886,7 +917,7 @@ generate_flash_package() {
   local disconnect_count=0
   local max_disconnect_wait=60 # Increased timeout
 
-  while [ $disconnect_count -lt $max_disconnect_wait ]; do
+  while [ "$disconnect_count" -lt "$max_disconnect_wait" ]; do
     # Check if block device still exists
     if [ ! -b "$dev" ]; then
       echo "Device $dev disconnected after ${disconnect_count}s" >&2
@@ -901,18 +932,18 @@ generate_flash_package() {
     fi
 
     sleep 1
-    disconnect_count=$(expr $disconnect_count + 1)
-    if [ $(expr $disconnect_count % 5) -eq 0 ]; then
+    disconnect_count=$(expr "$disconnect_count" + 1)
+    if [ "$(expr "$disconnect_count" % 5)" -eq 0 ]; then
       echo -n "." >&2
     fi
 
     # Show periodic status
-    if [ $(expr $disconnect_count % 15) -eq 0 ]; then
+    if [ "$(expr "$disconnect_count" % 15)" -eq 0 ]; then
       echo -n "[${disconnect_count}s]" >&2
     fi
   done
 
-  if [ $disconnect_count -ge $max_disconnect_wait ]; then
+  if [ "$disconnect_count" -ge "$max_disconnect_wait" ]; then
     echo "" >&2
     echo "WARNING: Device did not disconnect after ${max_disconnect_wait}s" >&2
     echo "Continuing with device detection..." >&2
@@ -961,7 +992,11 @@ write_to_device() {
   # the raw image name.
   # XXX
   simgname="${ROOTFS_IMAGE%.*}.img"
+  # $datased, $opts and $extraarg are argument lists (or empty) and must
+  # word-split; quoting them would pass an empty argument.
+  # shellcheck disable=SC2086
   sed -i -e"s,$simgname,$ROOTFS_IMAGE," -e"s,APPFILE_b,$ROOTFS_IMAGE," -e"s,APPFILE,$ROOTFS_IMAGE," -e"s,DTB_FILE,kernel_$DTBFILE," $datased initrd-flash.xml
+  # shellcheck disable=SC2086
   if "$here/make-sdcard" -y $opts $extraarg initrd-flash.xml "$dev"; then
     rc=0
   fi
@@ -984,7 +1019,7 @@ get_final_status() {
     echo "ERR: could not mount USB device to get final status from device" >&2
     return 1
   fi
-  final_status=$(cat $mnt/flashpkg/status)
+  final_status=$(cat "$mnt/flashpkg/status")
   if [ -d "$mnt/flashpkg/logs" ]; then
     logdir="device-logs-$dtstamp"
     if [ -d "$logdir" ]; then
@@ -1011,7 +1046,7 @@ stepnumber=1
 step_banner() {
   local msg="$1"
   echo "== Step $stepnumber: $msg at $(date -Is) ==" | tee -a "$logfile"
-  stepnumber=$(expr $stepnumber \+ 1)
+  stepnumber=$(expr "$stepnumber" \+ 1)
 }
 
 echo "Starting at $(date -Is)" | tee "$logfile"
@@ -1021,7 +1056,7 @@ if ! wait_for_rcm 2>&1 | tee -a "$logfile"; then
   echo "ERR: Device not found at $(date -Is)" | tee -a "$logfile"
   exit 1
 fi
-if [ -z "$usb_instance" -a -e ".found-jetson" ]; then
+if [ -z "$usb_instance" ] && [ -e ".found-jetson" ]; then
   . .found-jetson
 fi
 if [ -n "$usb_instance" ]; then
@@ -1030,6 +1065,7 @@ fi
 step_banner "Signing binaries"
 rm -rf bootloader_staging
 mkdir bootloader_staging
+# shellcheck disable=SC2069  # order is deliberate: stderr stays on the console, stdout goes to the log
 if ! sign_binaries 2>&1 >>"$logfile"; then
   echo "ERR: signing failed at $(date -Is)" | tee -a "$logfile"
   exit 1
@@ -1038,6 +1074,7 @@ if [ -z "$PRESIGNED" ]; then
   [ ! -f ./boardvars.sh ] || . ./boardvars.sh
 fi
 step_banner "Boot Jetson via RCM"
+# shellcheck disable=SC2069  # order is deliberate: stderr stays on the console, stdout goes to the log
 if ! prepare_for_rcm_boot 2>&1 >>"$logfile"; then
   echo "ERR: Preparing RCM boot command failed at $(date -Is)" | tee -a "$logfile"
   exit 1
@@ -1046,6 +1083,7 @@ if ! wait_for_rcm 2>&1 | tee -a "$logfile"; then
   echo "ERR: Device not found at $(date -Is)" | tee -a "$logfile"
   exit 1
 fi
+# shellcheck disable=SC2069  # order is deliberate: stderr stays on the console, stdout goes to the log
 if ! run_rcm_boot 2>&1 >>"$logfile"; then
   echo "ERR: RCM boot failed at $(date -Is)" | tee -a "$logfile"
   exit 1
@@ -1067,10 +1105,11 @@ if ! generate_flash_package 2>&1 | tee -a "$logfile"; then
 fi
 if [ $erase_only -eq 1 ]; then
   step_banner "Erase-only mode — skipping partition writing"
-elif [ $EXTERNAL_ROOTFS_DRIVE -eq 1 ]; then
+elif [ "$EXTERNAL_ROOTFS_DRIVE" -eq 1 ]; then
+  # shellcheck disable=SC2034  # kept as an explicit record that this branch is the resumable one; nothing reads it yet
   keep_going=1
   step_banner "Writing partitions on external storage device"
-  if ! write_to_device $ROOTFS_DEVICE external-flash.xml.in 2>&1 | tee -a "$logfile"; then
+  if ! write_to_device "$ROOTFS_DEVICE" external-flash.xml.in 2>&1 | tee -a "$logfile"; then
     echo "ERR: write failure to external storage at $(date -Is)" | tee -a "$logfile"
     if [ $early_final_status -eq 0 ]; then
       exit 1
@@ -1078,7 +1117,7 @@ elif [ $EXTERNAL_ROOTFS_DRIVE -eq 1 ]; then
   fi
 else
   step_banner "Writing partitions on internal storage device"
-  if ! write_to_device $ROOTFS_DEVICE flash.xml.in 2>&1 | tee -a "$logfile"; then
+  if ! write_to_device "$ROOTFS_DEVICE" flash.xml.in 2>&1 | tee -a "$logfile"; then
     echo "ERR: write failure to internal storage at $(date -Is)" | tee -a "$logfile"
     if [ $early_final_status -eq 0 ]; then
       exit 1

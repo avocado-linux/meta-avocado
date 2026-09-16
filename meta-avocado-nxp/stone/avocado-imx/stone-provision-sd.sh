@@ -93,6 +93,10 @@ if [[ -f /proc/mounts ]]; then
   if [[ -n "$root_mount" && -b "$root_mount" ]]; then
     root_dev=$(echo "$root_mount" | sed -E 's/p?[0-9]+$//')
     if [[ "$root_dev" == "$root_mount" ]]; then
+      # shellcheck disable=SC2001 # stripping a trailing run of digits
+      # needs a regex anchored at the end; ${var//search/replace} cannot
+      # anchor, and the extglob alternative would change which device
+      # path this boot-disk guard resolves to.
       root_dev=$(echo "$root_mount" | sed 's/[0-9]*$//')
     fi
   fi

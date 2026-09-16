@@ -1,9 +1,19 @@
 #!/bin/bash
 
+# SC2003: `expr` is carried over from the meta-tegra original. Under the
+# `set -e` below, expr's exit status of 1 on a zero result is part of the
+# control flow, so swapping in $((...)) is not behaviour-preserving here.
+# shellcheck disable=SC2003
+#
+# SC2155: `local x=$(cmd)` masks the substitution's exit status, and under
+# `set -e` that masking is what keeps these helpers from aborting a flash
+# mid-run on a transient failure. Splitting the declarations would change
+# behaviour, so it is deliberately not done.
+# shellcheck disable=SC2155
 set -e
 
 me=$(basename "$0")
-here=$(readlink -f $(dirname "$0"))
+here=$(readlink -f "$(dirname "$0")")
 declare -a PARTS
 FINALPART=
 DEVNAME=
@@ -12,7 +22,7 @@ OUTSYSBLK=
 HAVEBMAPTOOL=
 
 SUDO=
-[ $(id -u) -eq 0 ] || SUDO="sudo"
+[ "$(id -u)" -eq 0 ] || SUDO="sudo"
 
 usage() {
   cat <<EOF
@@ -47,20 +57,20 @@ EOF
 compute_size() {
   local s="$1"
   local sfx="${s: -1}"
-  if [ "$sfx" = "G" -o "$sfx" = "K" -o "$sfx" = "M" ]; then
+  if [ "$sfx" = "G" ] || [ "$sfx" = "K" ] || [ "$sfx" = "M" ]; then
     s="${s:0:-1}"
     case "$sfx" in
       K)
-        s=$(expr $s \* 1000)
+        s=$(expr "$s" \* 1000)
         ;;
       M)
-        s=$(expr $s \* 1000 \* 1000)
+        s=$(expr "$s" \* 1000 \* 1000)
         ;;
       G)
-        s=$(expr $s \* 1000 \* 1000 \* 1000)
+        s=$(expr "$s" \* 1000 \* 1000 \* 1000)
         ;;
     esac
-    expr \( $s \* 99 / 100 \+ 511 \) / 512
+    expr \( "$s" \* 99 / 100 \+ 511 \) / 512
     return 0
   fi
   echo "$s"
@@ -77,7 +87,7 @@ find_finalpart() {
   i=0
   for pline in "${PARTS[@]}"; do
     eval "$pline"
-    if [ $partfilltoend -eq 1 ]; then
+    if [ "$partfilltoend" -eq 1 ]; then
       FINALPART=$i
       return 0
     fi
@@ -86,7 +96,7 @@ find_finalpart() {
     elif [ "$partname" = "APP_b" ]; then
       app_b_idx=$i
     fi
-    i=$(expr $i + 1)
+    i=$(expr "$i" + 1)
   done
   if [ -n "$appidx" ]; then
     if [ -n "$app_b_idx" ]; then
@@ -110,16 +120,16 @@ make_partitions() {
   sgdiskcmd="sgdisk \"$output\" $alignarg"
   i=0
   for pline in "${PARTS[@]}"; do
-    if [ $i -ne $FINALPART ]; then
+    if [ "$i" -ne "$FINALPART" ]; then
       eval "$pline"
       [ -n "$parttype" ] || parttype="0700"
       if [ "$use_start_locations" != "yes" ]; then
         start_location=0
       fi
-      printf "  [%02d] name=%s start=%s size=%s sectors\n" $partnumber $partname $start_location $partsize
+      printf "  [%02d] name=%s start=%s size=%s sectors\n" "$partnumber" "$partname" "$start_location" "$partsize"
       sgdiskcmd="$sgdiskcmd --new=$partnumber:$start_location:+$partsize --typecode=$partnumber:$parttype -c $partnumber:$partname"
     fi
-    i=$(expr $i + 1)
+    i=$(expr "$i" + 1)
   done
   if [ -z "$ignore_finalpart" ]; then
     eval "${PARTS[$FINALPART]}"
@@ -127,7 +137,7 @@ make_partitions() {
     if [ "$use_start_locations" != "yes" ]; then
       start_location=0
     fi
-    printf "  [%02d] name=%s (fills to end)\n" $partnumber $partname
+    printf "  [%02d] name=%s (fills to end)\n" "$partnumber" "$partname"
     sgdiskcmd="$sgdiskcmd --largest-new=$partnumber --typecode=$partnumber:$parttype -c $partnumber:$partname"
   fi
   local errlog=$(mktemp)
@@ -148,7 +158,7 @@ create_filesystems() {
   for pline in "${PARTS[@]}"; do
     eval "$pline"
     if [ -z "$partfile" ] && [ -n "$fstype" ] && [ "$fstype" != "basic" ]; then
-      printf "Creating $fstype filesystem to /dev/$DEVNAME$PARTSEP$partnumber\n"
+      printf 'Creating %s filesystem to /dev/%s%s%s\n' "$fstype" "$DEVNAME" "$PARTSEP" "$partnumber"
       mke2fscmd="mkfs.$fstype /dev/$DEVNAME$PARTSEP$partnumber"
       if ! eval "$mke2fscmd" >/dev/null 2>"$errlog"; then
         echo "ERR: filesystem failed" >&2
@@ -199,6 +209,7 @@ unmount_device() {
         # Try lazy unmount as last resort
         echo "Trying lazy unmount of $mnt..."
         umount -l "${mnt}" >/dev/null 2>&1 || true
+        # shellcheck disable=SC2034  # tracked for readability; the function unconditionally returns 0
         success=1
       fi
     fi
@@ -218,13 +229,13 @@ write_partitions_to_device() {
   n_written=0
   i=0
   for pline in "${PARTS[@]}"; do
-    if [ $i -eq $FINALPART ]; then
-      i=$(expr $i + 1)
+    if [ "$i" -eq "$FINALPART" ]; then
+      i=$(expr "$i" + 1)
       continue
     fi
     eval "$pline"
     if [ -z "$partfile" ]; then
-      i=$(expr $i + 1)
+      i=$(expr "$i" + 1)
       continue
     fi
     if [ -e "signed/$partfile" ]; then
@@ -244,7 +255,7 @@ write_partitions_to_device() {
       return 1
     fi
     destsize=$(blockdev --getsize64 "$dest" 2>/dev/null)
-    if [ $n_written -eq 0 -a -z "$destsize" ]; then
+    if [ "$n_written" -eq 0 ] && [ -z "$destsize" ]; then
       sleep 1
       destsize=$(blockdev --getsize64 "$dest" 2>/dev/null)
     fi
@@ -253,8 +264,8 @@ write_partitions_to_device() {
       echo "ERR: failed to write $partfile to $dest" >&2
       return 1
     fi
-    n_written=$(expr $n_written + 1)
-    i=$(expr $i + 1)
+    n_written=$(expr "$n_written" + 1)
+    i=$(expr "$i" + 1)
   done
   if [ -n "$ignore_finalpart" ]; then
     return 0
@@ -276,7 +287,7 @@ write_partitions_to_device() {
       return 1
     fi
     destsize=$(blockdev --getsize64 "$dest" 2>/dev/null)
-    if [ $n_written -eq 0 -a -z "$destsize" ]; then
+    if [ "$n_written" -eq 0 ] && [ -z "$destsize" ]; then
       sleep 1
       destsize=$(blockdev --getsize64 "$dest" 2>/dev/null)
     fi
@@ -290,12 +301,22 @@ write_partitions_to_device() {
 
 write_partitions_to_image() {
   local -a partstart
+  # Both `local` lines name every field `eval "$pline"` assigns below, so the
+  # eval cannot leak a global; blksize, partguid and partend are unused here
+  # but must stay declared for that scoping to hold.
+  # shellcheck disable=SC2034
   local blksize partnumber partname start_location partsize partfile partguid parttype fstype partfilltoend
+  # shellcheck disable=SC2034
   local i s e stuff partstart partend pline
 
-  while read partnumber s e stuff; do
+  # `e` and `stuff` absorb the trailing sgdisk --print columns that this loop
+  # does not need; they are named so the fields line up positionally.
+  # SC2004: $partnumber is kept explicit so a malformed sgdisk line fails loudly
+  # as a bad subscript rather than silently indexing element 0.
+  # shellcheck disable=SC2034,SC2004
+  while read -r partnumber s e stuff; do
     partstart[$partnumber]=$s
-  done < <(sgdisk "$output" --print | egrep '^ +[0-9]')
+  done < <(sgdisk "$output" --print | grep -E '^ +[0-9]')
 
   i=0
   for pline in "${PARTS[@]}"; do
@@ -308,17 +329,17 @@ write_partitions_to_image() {
       return 1
     fi
     echo "  Writing $partfile..."
-    if ! dd if="$partfile" of="$output" conv=notrunc seek=${partstart[$partnumber]} status=none >/dev/null 2>&1; then
+    if ! dd if="$partfile" of="$output" conv=notrunc seek="${partstart[$partnumber]}" status=none >/dev/null 2>&1; then
       echo "ERR: failed to write $partfile to $output (offset ${partstart[$partnumber]}" >&2
       return 1
     fi
-    i=$(expr $i + 1)
+    i=$(expr "$i" + 1)
   done
 }
 
 confirm() {
   while true; do
-    if read -p "About to make an SDcard image on $1. OK? "; then
+    if read -r -p "About to make an SDcard image on $1. OK? "; then
       case "${REPLY^^}" in
         Y | YES)
           return 0
@@ -337,6 +358,11 @@ confirm() {
 }
 
 ARGS=$(getopt -l "serial-number:,keep-connection,no-final-part,honor-start-locations" -o "yhs:b:" -n "$me" -- "$@")
+# SC2181: under `set -e` a getopt failure already aborts on the line above, so
+# this check is a belt-and-braces leftover. Folding it into `if ! ARGS=...`
+# would suppress that abort and start printing usage, which is a behaviour
+# change, so the indirect check stays.
+# shellcheck disable=SC2181
 if [ $? -ne 0 ]; then
   usage
   exit 1
@@ -572,7 +598,7 @@ fi
 if [ -b "$output" ]; then
   realoutput=$(readlink -f "$output")
   DEVNAME=$(basename "$realoutput")
-  if [ $(dirname "$realoutput") != "/dev" -o ! -e "/sys/block/$DEVNAME" ]; then
+  if [ "$(dirname "$realoutput")" != "/dev" ] || [ ! -e "/sys/block/$DEVNAME" ]; then
     echo "ERR: $output does not appear to be an appropriate device" >&2
     exit 1
   fi
@@ -599,7 +625,7 @@ if [ ${#PARTS[@]} -eq 0 ]; then
 fi
 
 echo "Creating partitions"
-[ -b "$output" ] || dd if=/dev/zero of="$output" bs=512 count=0 seek=$outsize status=none
+[ -b "$output" ] || dd if=/dev/zero of="$output" bs=512 count=0 seek="$outsize" status=none
 
 # Ensure device is not mounted before partitioning
 if [ -b "$output" ]; then
@@ -672,13 +698,14 @@ else
   fi
 fi
 echo "[OK: $output]"
-if [ "$wait_for_usb_device" = "yes" -a "$keep_connection" != "yes" ]; then
+if [ "$wait_for_usb_device" = "yes" ] && [ "$keep_connection" != "yes" ]; then
   echo "Disconnecting $output"
   # Use sync and sysfs-based device management instead of udisksctl
   sync
 
   # Try to flush device buffers using container-friendly methods
-  local dev_name=$(basename "$output")
+  # shellcheck disable=SC2034  # computed for symmetry with the sysfs helpers; the flush below uses "$output" directly
+  dev_name=$(basename "$output")
   if command -v blockdev >/dev/null 2>&1; then
     blockdev --flushbufs "$output" 2>/dev/null || true
   fi
@@ -697,9 +724,9 @@ fi
 # Rescan using serial number to handle case where device reconnected with different path
 if [ -b "$output" ] && [ "$wait_for_usb_device" = "yes" ]; then
   # Try to rescan by serial first
-  local current_output="$output"
+  current_output="$output"
   if [ -n "$serial_number" ]; then
-    local rescanned_dev=$(find_device_by_serial "$serial_number")
+    rescanned_dev=$(find_device_by_serial "$serial_number")
     if [ -n "$rescanned_dev" ]; then
       current_output="$rescanned_dev"
       echo "Final disconnect: device rescanned to $current_output" >&2

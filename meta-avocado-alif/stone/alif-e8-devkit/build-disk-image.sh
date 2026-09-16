@@ -25,6 +25,10 @@ DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
+# Read but not yet consumed: the layout below works in KiB (sgdisk -a/-n and
+# dd bs=1024), so it never needs the sector size. Kept so the manifest field
+# stays wired up for when a non-512-byte rootdisk appears.
+# shellcheck disable=SC2034
 BLOCK_SIZE=$(jq -r '.storage_devices.rootdisk.block_size // 512' "$MANIFEST")
 
 NUM_PARTITIONS=$(jq '.storage_devices.rootdisk.partitions | length' "$MANIFEST")

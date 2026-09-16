@@ -19,7 +19,11 @@ overlays=""
 
 [ -d "$DROPDIR" ] || exit 0
 
-for f in $(ls "$DROPDIR"/*.conf 2>/dev/null | sort); do
+for f in "$DROPDIR"/*.conf; do
+	# Shell glob expansion is already sorted, and unlike `ls | sort` it survives
+	# a fragment name containing whitespace. With no matches the pattern stays
+	# literal in POSIX sh, so skip it.
+	[ -e "$f" ] || continue
 	d=""
 	o=""
 	while IFS='=' read -r k v; do

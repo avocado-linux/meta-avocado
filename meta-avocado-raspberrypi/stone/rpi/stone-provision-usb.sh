@@ -129,7 +129,7 @@ if [[ "${AVOCADO_FLASH_EEPROM:-0}" == "1" ]]; then
   echo ""
   echo "EEPROM flashed with BOOT_ORDER=${BOOT_ORDER}."
   echo "Power-cycle the device and put it back into USB boot mode,"
-  read -p "then press Enter to continue. " 2>&1
+  read -p "then press Enter to continue. " -r 2>&1
 else
   echo "Skipping EEPROM configuration (set AVOCADO_FLASH_EEPROM=1 to enable)"
 fi
@@ -154,6 +154,10 @@ while :; do
         if [[ "$device_pid" == "$pid" ]]; then
           echo "" # New line after progress dots
           echo "rpi boot device detected at $(basename "$d") (${device_vid}:${device_pid})"
+          # shellcheck disable=SC2034 # found is never read; the `break 3`
+          # below is what ends the wait, and the device is re-derived later
+          # from the block-device scan. Kept as a marker rather than deleted
+          # so the detection branch stays legible.
           found=true
           break 3 # break out of all loops
         fi
