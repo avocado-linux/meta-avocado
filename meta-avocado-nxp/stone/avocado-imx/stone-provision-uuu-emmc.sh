@@ -21,15 +21,15 @@ archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
 archive_image="${archive_file%%.*}.img"
 
 if [ ! -f "$archive_image" ]; then
-    echo "Building disk image from archive..."
-    fwup \
-      -a \
-      -i "${archive_file}" \
-      -d "${archive_image}" \
-      -t complete
-    echo "Disk image created: $archive_image"
+  echo "Building disk image from archive..."
+  fwup \
+    -a \
+    -i "${archive_file}" \
+    -d "${archive_image}" \
+    -t complete
+  echo "Disk image created: $archive_image"
 else
-    echo "Using existing disk image: $archive_image"
+  echo "Using existing disk image: $archive_image"
 fi
 
 # --- Step 2: Read per-machine eMMC parameters from manifest ---
@@ -39,15 +39,15 @@ profile_config_path='.provision.profiles."uuu-emmc".config'
 emmc_uboot_dev=$(jq -r "${profile_config_path}.emmc_uboot_dev // empty" "$AVOCADO_STONE_MANIFEST")
 emmc_mmcblk=$(jq -r "${profile_config_path}.emmc_mmcblk // empty" "$AVOCADO_STONE_MANIFEST")
 if [ -z "$emmc_uboot_dev" ] || [ -z "$emmc_mmcblk" ]; then
-    echo "ERROR: provision.profiles.uuu-emmc.config must define emmc_uboot_dev and emmc_mmcblk"
-    exit 1
+  echo "ERROR: provision.profiles.uuu-emmc.config must define emmc_uboot_dev and emmc_mmcblk"
+  exit 1
 fi
 
 # --- Step 3: Patch U-Boot env to point root/devnum at eMMC ---
 echo "Patching U-Boot environment for eMMC boot (devnum=${emmc_uboot_dev}, mmcblk=${emmc_mmcblk})..."
 
 fw_env_img_config="${AVOCADO_STONE_BUILD_DIR}/fw_env_img.config"
-cat > "$fw_env_img_config" << EOF
+cat >"$fw_env_img_config" <<EOF
 ${archive_image}	0x400000	0x20000	0x200	256
 ${archive_image}	0x440000	0x20000	0x200	256
 EOF
@@ -63,17 +63,17 @@ echo "U-Boot env patched: devnum=${emmc_uboot_dev}, mmcblk=${emmc_mmcblk}"
 #        via CONFIG_FASTBOOT_UUU_SUPPORT, no separate variant exists.
 imx_boot_name=$(jq -r '.storage_devices.rootdisk.images.imx_boot_emmc_fastboot // empty' "$AVOCADO_STONE_MANIFEST")
 if [ -z "$imx_boot_name" ]; then
-    imx_boot_name=$(jq -r '.storage_devices.rootdisk.images.imx_boot // empty' "$AVOCADO_STONE_MANIFEST")
+  imx_boot_name=$(jq -r '.storage_devices.rootdisk.images.imx_boot // empty' "$AVOCADO_STONE_MANIFEST")
 fi
 if [ -z "$imx_boot_name" ]; then
-    echo "ERROR: no imx_boot image specified in manifest"
-    exit 1
+  echo "ERROR: no imx_boot image specified in manifest"
+  exit 1
 fi
 
 imx_boot_path="${AVOCADO_STONE_DATA_DIR}/${imx_boot_name}"
 if [ ! -f "$imx_boot_path" ]; then
-    echo "ERROR: imx-boot not found at $imx_boot_path"
-    exit 1
+  echo "ERROR: imx-boot not found at $imx_boot_path"
+  exit 1
 fi
 echo "Using imx-boot: $imx_boot_path"
 
@@ -81,25 +81,25 @@ echo "Using imx-boot: $imx_boot_path"
 # NXP i.MX devices in serial download mode use USB vendor IDs:
 #   1fc9 (NXP) or 15a2 (Freescale legacy)
 check_sdp() {
-    lsusb -d 1fc9: >/dev/null 2>&1 || lsusb -d 15a2: >/dev/null 2>&1
+  lsusb -d 1fc9: >/dev/null 2>&1 || lsusb -d 15a2: >/dev/null 2>&1
 }
 
 if check_sdp; then
-    echo "Device detected in serial download mode"
+  echo "Device detected in serial download mode"
 else
-    echo "Please put device into serial download mode..."
-    echo "(Set the board's boot-mode switches to serial download and power-cycle; see the board user manual for the exact positions)"
-    for i in $(seq 1 60); do
-        if check_sdp; then
-            echo "Device detected in serial download mode"
-            break
-        fi
-        sleep 1
-    done
-    if ! check_sdp; then
-        echo "ERROR: Device not detected in serial download mode (waited 60s)"
-        exit 1
+  echo "Please put device into serial download mode..."
+  echo "(Set the board's boot-mode switches to serial download and power-cycle; see the board user manual for the exact positions)"
+  for i in $(seq 1 60); do
+    if check_sdp; then
+      echo "Device detected in serial download mode"
+      break
     fi
+    sleep 1
+  done
+  if ! check_sdp; then
+    echo "ERROR: Device not detected in serial download mode (waited 60s)"
+    exit 1
+  fi
 fi
 
 # --- Step 6: Generate custom uuu script and flash ---
@@ -116,13 +116,13 @@ ln -sf "$archive_image" "$uuu_dir/rootdisk.img"
 # the same image. Always link it so the .uuu script can reference it.
 imx_boot_sd_name=$(jq -r '.storage_devices.rootdisk.images.imx_boot // empty' "$AVOCADO_STONE_MANIFEST")
 if [ -n "$imx_boot_sd_name" ]; then
-    ln -sf "${AVOCADO_STONE_DATA_DIR}/${imx_boot_sd_name}" "$uuu_dir/imx-boot-sd"
+  ln -sf "${AVOCADO_STONE_DATA_DIR}/${imx_boot_sd_name}" "$uuu_dir/imx-boot-sd"
 else
-    ln -sf "$imx_boot_path" "$uuu_dir/imx-boot-sd"
+  ln -sf "$imx_boot_path" "$uuu_dir/imx-boot-sd"
 fi
 
 uuu_script="${uuu_dir}/flash_emmc.uuu"
-cat > "$uuu_script" << EOF
+cat >"$uuu_script" <<EOF
 uuu_version 1.2.39
 
 # Boot U-Boot via SDPS

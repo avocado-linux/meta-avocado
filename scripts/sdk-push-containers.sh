@@ -17,7 +17,7 @@ docker manifest create avocadolinux/sdk:${RELEASE} \
   avocadolinux/sdk:${RELEASE}-arm64
 
 docker manifest annotate avocadolinux/sdk:${RELEASE} \
-  avocadolinux/sdk:${RELEASE}-amd64 --os linux --arch amd64 
+  avocadolinux/sdk:${RELEASE}-amd64 --os linux --arch amd64
 
 docker manifest annotate avocadolinux/sdk:${RELEASE} \
   avocadolinux/sdk:${RELEASE}-arm64 --os linux --arch arm64

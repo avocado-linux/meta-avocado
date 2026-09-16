@@ -10,23 +10,23 @@ fi
 
 if [[ ${RUNNER_STATUS_UPDATE_HOOK:-false} == true ]]; then
 
-    apiserver=https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}
-    serviceaccount=/var/run/secrets/kubernetes.io/serviceaccount
-    namespace=$(cat ${serviceaccount}/namespace)
-    token=$(cat ${serviceaccount}/token)
-    phase=$1
-    message=${2:-}
+  apiserver=https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}
+  serviceaccount=/var/run/secrets/kubernetes.io/serviceaccount
+  namespace=$(cat ${serviceaccount}/namespace)
+  token=$(cat ${serviceaccount}/token)
+  phase=$1
+  message=${2:-}
 
-    data=$(jq -n --arg phase "$phase" \
-      --arg message "$message" \
-      --arg workflow_repository "${GITHUB_REPOSITORY:-}" \
-      --arg workflow_repository_owner "${GITHUB_REPOSITORY_OWNER:-}" \
-      --arg workflow_name "${GITHUB_WORKFLOW:-}" \
-      --arg workflow_run_id "${GITHUB_RUN_ID:-}" \
-      --arg workflow_run_number "${GITHUB_RUN_NUMBER:-}" \
-      --arg workflow_job "${GITHUB_JOB:-}" \
-      --arg workflow_action "${GITHUB_ACTION:-}" \
-      '
+  data=$(jq -n --arg phase "$phase" \
+    --arg message "$message" \
+    --arg workflow_repository "${GITHUB_REPOSITORY:-}" \
+    --arg workflow_repository_owner "${GITHUB_REPOSITORY_OWNER:-}" \
+    --arg workflow_name "${GITHUB_WORKFLOW:-}" \
+    --arg workflow_run_id "${GITHUB_RUN_ID:-}" \
+    --arg workflow_run_number "${GITHUB_RUN_NUMBER:-}" \
+    --arg workflow_job "${GITHUB_JOB:-}" \
+    --arg workflow_action "${GITHUB_ACTION:-}" \
+    '
        .status.phase = $phase
      | .status.message = $message
      | .status.workflow.name = $workflow_name
@@ -37,16 +37,16 @@ if [[ ${RUNNER_STATUS_UPDATE_HOOK:-false} == true ]]; then
      | .status.workflow.job = $workflow_job
      | .status.workflow.action = $workflow_action
       ')
-      
-    echo "$data" | curl \
-        --cacert ${serviceaccount}/ca.crt \
-        --data @- \
-        --noproxy '*' \
-        --header "Content-Type: application/merge-patch+json" \
-        --header "Authorization: Bearer ${token}" \
-        --show-error \
-        --silent \
-        --request PATCH \
-        "${apiserver}/apis/actions.summerwind.dev/v1alpha1/namespaces/${namespace}/runners/${HOSTNAME}/status" \
-        1>/dev/null
+
+  echo "$data" | curl \
+    --cacert ${serviceaccount}/ca.crt \
+    --data @- \
+    --noproxy '*' \
+    --header "Content-Type: application/merge-patch+json" \
+    --header "Authorization: Bearer ${token}" \
+    --show-error \
+    --silent \
+    --request PATCH \
+    "${apiserver}/apis/actions.summerwind.dev/v1alpha1/namespaces/${namespace}/runners/${HOSTNAME}/status" \
+    1>/dev/null
 fi

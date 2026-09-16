@@ -28,7 +28,7 @@ docker manifest create avocadolinux/sdk:${RELEASE} \
   avocadolinux/sdk:${RELEASE}-arm64
 
 docker manifest annotate avocadolinux/sdk:${RELEASE} \
-  avocadolinux/sdk:${RELEASE}-amd64 --os linux --arch amd64 
+  avocadolinux/sdk:${RELEASE}-amd64 --os linux --arch amd64
 
 docker manifest annotate avocadolinux/sdk:${RELEASE} \
   avocadolinux/sdk:${RELEASE}-arm64 --os linux --arch arm64
@@ -40,4 +40,3 @@ echo "  - avocadolinux/sdk:${RELEASE} (local tag for testing)"
 echo ""
 echo "Local testing:  docker run -it avocadolinux/sdk:${RELEASE}"
 echo "Push to Hub:    ./sdk-push-containers.sh ${RELEASE}"
-

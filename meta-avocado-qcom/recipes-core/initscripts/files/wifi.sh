@@ -1,18 +1,17 @@
 #!/bin/sh
 
 start() {
-	wpa_supplicant  -B -Dnl80211 -iwlan0 -c /etc/wpa_supplicant.conf
+  wpa_supplicant -B -Dnl80211 -iwlan0 -c /etc/wpa_supplicant.conf
 }
 
 stop() {
-	killall -9 wpa_supplicant
+  killall -9 wpa_supplicant
 }
 
 if [[ $1 == "start" ]]; then
-    start
+  start
 elif [[ $1 == "stop" ]]; then
-    stop
+  stop
 else
-    exit 1
+  exit 1
 fi
-

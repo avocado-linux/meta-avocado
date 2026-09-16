@@ -12,7 +12,7 @@ DEFAULT_RELEASE_ID="dev-$(date -u '+%Y%m%d-%H%M%S')"
 
 # Function to show usage
 usage() {
-    cat << EOF
+  cat <<EOF
 Usage: $0 [OPTIONS] <target>
 
 Sync packages from a build target to a development repository.
@@ -57,66 +57,66 @@ TARGET=""
 CONTAINER_NAME="avocado-dev-repo"
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        -r|--repo-dir)
-            REPO_DIR="$2"
-            shift 2
-            ;;
-        -d|--distro)
-            DISTRO_CODENAME="$2"
-            shift 2
-            ;;
-        -i|--release-id)
-            RELEASE_ID="$2"
-            shift 2
-            ;;
-        -b|--build-dir)
-            BUILD_DIR="$2"
-            shift 2
-            ;;
-        -c|--container-name)
-            CONTAINER_NAME="$2"
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        -*)
-            echo "Error: Unknown option $1" >&2
-            usage >&2
-            exit 1
-            ;;
-        *)
-            if [ -z "$TARGET" ]; then
-                TARGET="$1"
-            else
-                echo "Error: Multiple targets specified" >&2
-                usage >&2
-                exit 1
-            fi
-            shift
-            ;;
-    esac
+  case $1 in
+    -r | --repo-dir)
+      REPO_DIR="$2"
+      shift 2
+      ;;
+    -d | --distro)
+      DISTRO_CODENAME="$2"
+      shift 2
+      ;;
+    -i | --release-id)
+      RELEASE_ID="$2"
+      shift 2
+      ;;
+    -b | --build-dir)
+      BUILD_DIR="$2"
+      shift 2
+      ;;
+    -c | --container-name)
+      CONTAINER_NAME="$2"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Error: Unknown option $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [ -z "$TARGET" ]; then
+        TARGET="$1"
+      else
+        echo "Error: Multiple targets specified" >&2
+        usage >&2
+        exit 1
+      fi
+      shift
+      ;;
+  esac
 done
 
 # Validate required arguments
 if [ -z "$TARGET" ]; then
-    echo "Error: Target is required" >&2
-    usage >&2
-    exit 1
+  echo "Error: Target is required" >&2
+  usage >&2
+  exit 1
 fi
 
 # Set default build directory if not specified
 if [ -z "$BUILD_DIR" ]; then
-    BUILD_DIR="build-$TARGET"
+  BUILD_DIR="build-$TARGET"
 fi
 
 # Validate build directory exists
 if [ ! -d "$BUILD_DIR" ]; then
-    echo "Error: Build directory '$BUILD_DIR' not found" >&2
-    echo "Have you built the target '$TARGET'? Expected directory: $BUILD_DIR" >&2
-    exit 1
+  echo "Error: Build directory '$BUILD_DIR' not found" >&2
+  echo "Have you built the target '$TARGET'? Expected directory: $BUILD_DIR" >&2
+  exit 1
 fi
 
 # Set up paths
@@ -126,17 +126,17 @@ RELEASES_PATH="$REPO_DIR/releases/$DISTRO_CODENAME/$RELEASE_ID"
 
 # Validate source directory exists
 if [ ! -d "$SOURCE_DEPLOY_DIR" ]; then
-    echo "Error: Source deploy directory '$SOURCE_DEPLOY_DIR' not found" >&2
-    echo "Have you completed the build for target '$TARGET'?" >&2
-    exit 1
+  echo "Error: Source deploy directory '$SOURCE_DEPLOY_DIR' not found" >&2
+  echo "Have you completed the build for target '$TARGET'?" >&2
+  exit 1
 fi
 
 # Validate map file exists
 MAP_FILE="$SOURCE_DEPLOY_DIR/avocado-repo.map"
 if [ ! -f "$MAP_FILE" ]; then
-    echo "Error: Map file not found at '$MAP_FILE'" >&2
-    echo "The build may not have completed successfully." >&2
-    exit 1
+  echo "Error: Map file not found at '$MAP_FILE'" >&2
+  echo "The build may not have completed successfully." >&2
+  exit 1
 fi
 
 echo "=== Avocado Development Package Sync ==="
@@ -160,10 +160,10 @@ echo "Staging packages from build to repository..."
 "$SCRIPT_DIR/repo-stage-rpms.sh" "$SOURCE_DEPLOY_DIR" "$PACKAGES_PATH" "$DISTRO_CODENAME"
 
 if [ $? -eq 0 ]; then
-    echo "✓ Package staging completed successfully"
+  echo "✓ Package staging completed successfully"
 else
-    echo "✗ Package staging failed" >&2
-    exit 1
+  echo "✗ Package staging failed" >&2
+  exit 1
 fi
 
 # Generate target fragment for targets.json
@@ -176,10 +176,10 @@ mkdir -p "$FRAGMENTS_DIR"
 "$SCRIPT_DIR/repo-generate-target-fragment.sh" "$SOURCE_DEPLOY_DIR" "$TARGET" "$FRAGMENTS_DIR" "$DISTRO_CODENAME"
 
 if [ $? -eq 0 ]; then
-    echo "✓ Target fragment generated successfully"
+  echo "✓ Target fragment generated successfully"
 else
-    echo "✗ Target fragment generation failed" >&2
-    exit 1
+  echo "✗ Target fragment generation failed" >&2
+  exit 1
 fi
 
 # Render the repositories to mirror the PRODUCTION content-addressed-pool layout:
@@ -193,37 +193,37 @@ echo "Rendering pooled repositories (mirrors production render)..."
 
 RENDER_TOOL="$SCRIPT_DIR/render-pool-local.py"
 if [ ! -f "$RENDER_TOOL" ]; then
-    echo "Error: render tool not found at $RENDER_TOOL" >&2
-    exit 1
+  echo "Error: render tool not found at $RENDER_TOOL" >&2
+  exit 1
 fi
 
 rendered_any=false
 while IFS='=' read -r key value || [ -n "$key" ]; do
-    [ "$key" = "repo" ] || continue
-    # Strip the literal "$releasever/" prefix -> path relative to the channel root.
-    rel_root="${value#\$releasever/}"
-    # Extension repos are rendered by dev-build-extensions.sh; skip here.
-    case "$rel_root" in
-        target/*-ext) continue ;;
-    esac
+  [ "$key" = "repo" ] || continue
+  # Strip the literal "$releasever/" prefix -> path relative to the channel root.
+  rel_root="${value#\$releasever/}"
+  # Extension repos are rendered by dev-build-extensions.sh; skip here.
+  case "$rel_root" in
+    target/*-ext) continue ;;
+  esac
 
-    staged="$PACKAGES_PATH/$DISTRO_CODENAME/$rel_root"
-    if [ ! -d "$staged" ]; then
-        echo "  Skipping $rel_root (no staged packages at $staged)"
-        continue
-    fi
+  staged="$PACKAGES_PATH/$DISTRO_CODENAME/$rel_root"
+  if [ ! -d "$staged" ]; then
+    echo "  Skipping $rel_root (no staged packages at $staged)"
+    continue
+  fi
 
-    echo "  Rendering $rel_root ..."
-    if ! python3 "$RENDER_TOOL" --staged "$staged" --channel-root "$RELEASES_PATH" --subpath "$rel_root"; then
-        echo "✗ Render failed for $rel_root" >&2
-        exit 1
-    fi
-    rendered_any=true
-done < "$MAP_FILE"
+  echo "  Rendering $rel_root ..."
+  if ! python3 "$RENDER_TOOL" --staged "$staged" --channel-root "$RELEASES_PATH" --subpath "$rel_root"; then
+    echo "✗ Render failed for $rel_root" >&2
+    exit 1
+  fi
+  rendered_any=true
+done <"$MAP_FILE"
 
 if [ "$rendered_any" != true ]; then
-    echo "✗ No repositories rendered (no repo= roots in $MAP_FILE)" >&2
-    exit 1
+  echo "✗ No repositories rendered (no repo= roots in $MAP_FILE)" >&2
+  exit 1
 fi
 echo "✓ Repositories rendered into the content-addressed pool ($RELEASES_PATH/_pkgs)"
 

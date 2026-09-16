@@ -3,7 +3,7 @@
 # Usage: ./start-tpm
 # Assumes pwd is the build directory
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$(pwd)/build"
 SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
@@ -14,19 +14,19 @@ mkdir -p "$TPM_DIR"
 TPM_SOCK="$TPM_DIR/swtpm-sock"
 
 # Save socket location for other scripts
-echo "$TPM_SOCK" > "$TPM_DIR/socket-path"
+echo "$TPM_SOCK" >"$TPM_DIR/socket-path"
 
 # Remove existing socket if it exists
 if [ -S "$TPM_SOCK" ]; then
-    rm -f "$TPM_SOCK"
+  rm -f "$TPM_SOCK"
 fi
 
 # Set the paths based on our successful debug run - using hardcoded paths
 # that are known to work in your environment
 SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
 if [ -z "$SWTPM_BIN" ]; then
-    echo "Error: Could not find swtpm binary"
-    return -1
+  echo "Error: Could not find swtpm binary"
+  return -1
 fi
 
 LIBPCREDIR="$SYSROOT_COMPONENTS_DIR/libpcre-native/usr/lib"
@@ -37,7 +37,7 @@ LIB_PATH=$("$SCRIPT_DIR/find-library-path" $SWTPM_BIN $SYSROOT_COMPONENTS_DIR $S
 
 echo "Starting swtpm with socket at $TPM_SOCK"
 LD_LIBRARY_PATH="$LIB_PATH" "$SWTPM_BIN" socket \
-    --tpmstate dir="$TPM_DIR" \
-    --ctrl type=unixio,path="$TPM_SOCK" \
-    --log level=20 \
-    --tpm2
+  --tpmstate dir="$TPM_DIR" \
+  --ctrl type=unixio,path="$TPM_SOCK" \
+  --log level=20 \
+  --tpm2
