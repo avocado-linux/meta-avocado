@@ -40,6 +40,11 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --network)
       NETWORK="$2"
+      # shellcheck disable=SC2001
+      # ${NETWORK//[^a-zA-Z0-9]/-} is not equivalent: bash globbing matches
+      # a-z by codepoint while sed matches it by locale collation, so a
+      # network name with accented characters yields a different container
+      # name under the two forms (measured on en_US.UTF-8).
       CONTAINER_NAME="avocado-prserv-$(echo "$NETWORK" | sed 's/[^a-zA-Z0-9]/-/g')"
       shift 2
       ;;

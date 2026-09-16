@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 if [[ ${1:-} == '' ]]; then
   # shellcheck source=runner/logger.sh
+  # logger.sh ships beside this script in the runner image and is resolved at
+  # runtime; shellcheck cannot follow it without -x.
+  # shellcheck disable=SC1091
   source logger.sh
   log.error "Missing required argument -- '<phase>'"
   exit 64

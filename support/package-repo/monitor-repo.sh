@@ -167,7 +167,7 @@ monitor_done_file_inotify() {
   inotifywait -m -e create,modify,moved_to \
     --format '%f %e %T' --timefmt '%Y-%m-%d %H:%M:%S' \
     "${REPO_DIR}" 2>/dev/null \
-    | while read filename event timestamp; do
+    | while read -r filename event timestamp; do
       if [[ "$filename" == "avocado-build.done" ]]; then
         log_info "Build completion detected via inotify: ${event} at ${timestamp}"
 

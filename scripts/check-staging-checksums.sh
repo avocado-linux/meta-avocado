@@ -81,7 +81,7 @@ show_progress() {
   local percent=$((current * 100 / total))
 
   # Simple percentage display - always works in any terminal
-  printf "\r%s: %d%% (%d/%d)" "$desc" $percent $current $total
+  printf "\r%s: %d%% (%d/%d)" "$desc" "$percent" "$current" "$total"
 }
 
 # Find latest timestamped directory
@@ -130,6 +130,9 @@ determine_staging_dir() {
 }
 
 # Extract RPM checksum and package info
+# shellcheck disable=SC2329
+# Invoked indirectly: `export -f extract_rpm_info` below hands it to GNU parallel
+# and to the `bash -c` workers under xargs, so no call site is visible here.
 extract_rpm_info() {
   local rpm_file="$1"
   local staging_dir="$2"
@@ -151,7 +154,7 @@ extract_rpm_info() {
   fi
 
   # Calculate normalized path (relative to staging dir)
-  local rel_path="${rpm_file#$staging_dir/}"
+  local rel_path="${rpm_file#"$staging_dir"/}"
   local dir_path="${rel_path%/*}"
 
   # Output: checksum|package_name|normalized_path|full_path
@@ -210,6 +213,12 @@ process_rpms_parallel() {
       local update_interval=$((total_files / 100))        # Update every 1%
       [[ $update_interval -lt 10 ]] && update_interval=10 # At least every 10 files
 
+      # shellcheck disable=SC2016,SC2086
+      # The bash -c body is single-quoted on purpose: $1/$2/$3 and the
+      # loop-local variables are expanded by the worker shell, not here.
+      # $update_interval and $total_files are spliced in by closing the
+      # quote around them; both hold integers computed above, so the
+      # unquoted splice cannot word-split.
       printf '%s\0' "${rpm_files[@]}" \
         | xargs -0 -P "$MAX_JOBS" -I {} bash -c '
                 result=$(extract_rpm_info "$1" "$2")
@@ -244,6 +253,9 @@ process_rpms_parallel() {
       fi
     else
       # No progress tracking
+      # shellcheck disable=SC2016
+      # Single-quoted on purpose: $1 and $2 are the worker shell's own
+      # positional parameters, supplied by xargs after the _ placeholder.
       printf '%s\0' "${rpm_files[@]}" \
         | xargs -0 -P "$MAX_JOBS" -I {} bash -c 'extract_rpm_info "$1" "$2"' _ {} "$staging_dir" \
         | grep -v '^$' >"$results_file" || true
@@ -284,7 +296,7 @@ analyze_duplicates() {
 
   # Analyze each group for anomalies
   local anomalies_file="$temp_dir/anomalies.txt"
-  >"$anomalies_file" # Clear file
+  : >"$anomalies_file" # Clear file
 
   local total_groups=0
   local anomaly_groups=0
@@ -548,6 +560,10 @@ main() {
   # Create temporary directory
   local temp_dir
   temp_dir=$(mktemp -d)
+  # shellcheck disable=SC2064
+  # Expanding now is the point: the trap captures the directory mktemp just
+  # created. Deferring it would re-read a function-local that is out of scope
+  # when the EXIT trap runs, leaving the temp dir behind or removing nothing.
   trap "rm -rf '$temp_dir'" EXIT
 
   # Start timing

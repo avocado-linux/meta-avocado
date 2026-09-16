@@ -96,7 +96,8 @@ avocado_parse_yaml_supported_targets() {
   fi
 
   # First, try to get inline value (e.g., "supported_targets: '*'" or "supported_targets: [a, b]")
-  local inline_value=$(grep '^supported_targets:' "$yaml_file" | sed 's/supported_targets: *//' | tr -d '"' | tr -d "'" | tr -d ' ')
+  local inline_value
+  inline_value=$(grep '^supported_targets:' "$yaml_file" | sed 's/supported_targets: *//' | tr -d '"' | tr -d "'" | tr -d ' ')
 
   if [ -n "$inline_value" ]; then
     # Inline format found
@@ -106,7 +107,8 @@ avocado_parse_yaml_supported_targets() {
 
   # Multi-line YAML list format - extract items following "supported_targets:"
   # Use awk to find lines starting with "- " (possibly indented) after "supported_targets:" until next non-list line
-  local targets=$(awk '
+  local targets
+  targets=$(awk '
         /^supported_targets:/ { in_list=1; next }
         in_list && /^[^ \t-]/ { exit }
         in_list && /^[ \t]*- / { gsub(/^[ \t]*- /, ""); gsub(/["\047]/, ""); printf "%s,", $0 }
@@ -136,8 +138,10 @@ avocado_discover_extensions() {
   # Discover regular extensions.
   for ext_dir in extensions/*/; do
     if [ -d "$ext_dir" ] && [ -f "$ext_dir/avocado.yaml" ]; then
-      local extension=$(basename "$ext_dir")
-      local supported_targets=$(avocado_parse_yaml_supported_targets "$ext_dir/avocado.yaml")
+      local extension
+      extension=$(basename "$ext_dir")
+      local supported_targets
+      supported_targets=$(avocado_parse_yaml_supported_targets "$ext_dir/avocado.yaml")
       extensions_info+=("$extension:$supported_targets")
     fi
   done
@@ -147,9 +151,11 @@ avocado_discover_extensions() {
   # `avocado-bsp-<name>` package.
   for bsp_dir in bsp/*/; do
     if [ -d "$bsp_dir" ] && [ -f "$bsp_dir/avocado.yaml" ]; then
-      local bsp_name=$(basename "$bsp_dir")
+      local bsp_name
+      bsp_name=$(basename "$bsp_dir")
       local extension="bsp-$bsp_name"
-      local supported_targets=$(avocado_parse_yaml_supported_targets "$bsp_dir/avocado.yaml")
+      local supported_targets
+      supported_targets=$(avocado_parse_yaml_supported_targets "$bsp_dir/avocado.yaml")
       extensions_info+=("$extension:$supported_targets")
     fi
   done
@@ -168,7 +174,8 @@ avocado_extension_supports_target() {
   fi
 
   # Parse comma-separated targets or inline array format: [target1, target2]
-  local targets_list=$(echo "$supported_targets" | sed 's/\[//g' | sed 's/\]//g' | sed 's/"//g' | sed "s/'//g" | tr ',' '\n')
+  local targets_list
+  targets_list=$(echo "$supported_targets" | sed 's/\[//g' | sed 's/\]//g' | sed 's/"//g' | sed "s/'//g" | tr ',' '\n')
 
   for supported_target in $targets_list; do
     supported_target=$(echo "$supported_target" | xargs) # trim whitespace
@@ -215,7 +222,7 @@ avocado_generate_build_matrix() {
   # Generate JSON array
   local matrix_json="["
   for i in "${!selected_machines[@]}"; do
-    if [ $i -gt 0 ]; then
+    if [ "$i" -gt 0 ]; then
       matrix_json+=","
     fi
     matrix_json+="\"${selected_machines[$i]}\""
@@ -254,7 +261,8 @@ avocado_generate_extension_matrix() {
       extension_targets=("${filtered_targets[@]}")
     else
       # Parse the list of specific targets
-      local targets_list=$(echo "$supported_targets" | sed 's/\[//g' | sed 's/\]//g' | sed 's/"//g' | sed "s/'//g" | tr ',' '\n')
+      local targets_list
+      targets_list=$(echo "$supported_targets" | sed 's/\[//g' | sed 's/\]//g' | sed 's/"//g' | sed "s/'//g" | tr ',' '\n')
 
       for target in $targets_list; do
         target=$(echo "$target" | xargs) # trim whitespace
@@ -279,7 +287,7 @@ avocado_generate_extension_matrix() {
   # Create JSON matrix
   local matrix_json="["
   for i in "${!matrix_includes[@]}"; do
-    if [ $i -gt 0 ]; then
+    if [ "$i" -gt 0 ]; then
       matrix_json+=","
     fi
     matrix_json+="${matrix_includes[$i]}"

@@ -74,7 +74,8 @@ find_latest_release_dir() {
   fi
 
   # Find the latest timestamped directory (dev-YYYYMMDD-HHMMSS format)
-  local latest_dir=$(find "$releases_base_dir" -maxdepth 1 -type d -name "dev-*" | sort -V | tail -n 1)
+  local latest_dir
+  latest_dir=$(find "$releases_base_dir" -maxdepth 1 -type d -name "dev-*" | sort -V | tail -n 1)
 
   if [ -z "$latest_dir" ]; then
     echo "Error: No release directories found in $releases_base_dir" >&2
@@ -82,7 +83,7 @@ find_latest_release_dir() {
     return 1
   fi
 
-  echo "$(basename "$latest_dir")"
+  basename "$latest_dir"
 }
 
 # Function to check if avocado CLI is available
@@ -108,7 +109,8 @@ parse_yaml_supported_targets() {
   fi
 
   # First, try to get inline value (e.g., "supported_targets: '*'" or "supported_targets: [a, b]")
-  local inline_value=$(grep '^supported_targets:' "$yaml_file" | sed 's/supported_targets: *//' | tr -d '"' | tr -d "'" | tr -d ' ')
+  local inline_value
+  inline_value=$(grep '^supported_targets:' "$yaml_file" | sed 's/supported_targets: *//' | tr -d '"' | tr -d "'" | tr -d ' ')
 
   if [ -n "$inline_value" ]; then
     # Inline format found
@@ -118,7 +120,8 @@ parse_yaml_supported_targets() {
 
   # Multi-line YAML list format - extract items following "supported_targets:"
   # Use awk to find lines starting with "- " (possibly indented) after "supported_targets:" until next non-list line
-  local targets=$(awk '
+  local targets
+  targets=$(awk '
         /^supported_targets:/ { in_list=1; next }
         in_list && /^[^ \t-]/ { exit }
         in_list && /^[ \t]*- / { gsub(/^[ \t]*- /, ""); gsub(/["\047]/, ""); printf "%s,", $0 }
@@ -164,8 +167,10 @@ discover_extensions() {
     local ext_dir
     for ext_dir in "$EXTENSIONS_DIR"/*/; do
       if [ -d "$ext_dir" ] && [ -f "$ext_dir/avocado.yaml" ]; then
-        local extension=$(basename "$ext_dir")
-        local supported_targets=$(parse_yaml_supported_targets "$ext_dir/avocado.yaml")
+        local extension
+        extension=$(basename "$ext_dir")
+        local supported_targets
+        supported_targets=$(parse_yaml_supported_targets "$ext_dir/avocado.yaml")
         extensions_info+=("$extension:$supported_targets")
       fi
     done
@@ -176,8 +181,10 @@ discover_extensions() {
   # Legacy in-repo layout: regular extensions under extensions/, BSPs under bsp/.
   for ext_dir in extensions/*/; do
     if [ -d "$ext_dir" ] && [ -f "$ext_dir/avocado.yaml" ]; then
-      local extension=$(basename "$ext_dir")
-      local supported_targets=$(parse_yaml_supported_targets "$ext_dir/avocado.yaml")
+      local extension
+      extension=$(basename "$ext_dir")
+      local supported_targets
+      supported_targets=$(parse_yaml_supported_targets "$ext_dir/avocado.yaml")
       extensions_info+=("$extension:$supported_targets")
     fi
   done
@@ -185,9 +192,11 @@ discover_extensions() {
   # Discover BSP extensions
   for bsp_dir in bsp/*/; do
     if [ -d "$bsp_dir" ] && [ -f "$bsp_dir/avocado.yaml" ]; then
-      local bsp_name=$(basename "$bsp_dir")
+      local bsp_name
+      bsp_name=$(basename "$bsp_dir")
       local extension="bsp-$bsp_name"
-      local supported_targets=$(parse_yaml_supported_targets "$bsp_dir/avocado.yaml")
+      local supported_targets
+      supported_targets=$(parse_yaml_supported_targets "$bsp_dir/avocado.yaml")
       extensions_info+=("$extension:$supported_targets")
     fi
   done
@@ -243,7 +252,8 @@ extension_supports_target() {
   fi
 
   # Parse comma-separated targets or inline array format: [target1, target2]
-  local targets_list=$(echo "$supported_targets" | sed 's/\[//g' | sed 's/\]//g' | sed 's/"//g' | sed "s/'//g" | tr ',' '\n')
+  local targets_list
+  targets_list=$(echo "$supported_targets" | sed 's/\[//g' | sed 's/\]//g' | sed 's/"//g' | sed "s/'//g" | tr ',' '\n')
 
   for supported_target in $targets_list; do
     supported_target=$(echo "$supported_target" | xargs) # trim whitespace
@@ -290,7 +300,8 @@ cleanup_extension() {
   cd "$ext_dir"
 
   # Parse src_dir from avocado.yaml and remove .avocado folder from there
-  local src_dir=$(grep '^src_dir:' avocado.yaml | sed 's/src_dir: *//' | tr -d '"' | tr -d "'" | xargs)
+  local src_dir
+  src_dir=$(grep '^src_dir:' avocado.yaml | sed 's/src_dir: *//' | tr -d '"' | tr -d "'" | xargs)
   if [ -z "$src_dir" ]; then
     src_dir="."
   fi
@@ -337,7 +348,8 @@ package_extension() {
   cd "$ext_dir"
 
   # Parse src_dir from avocado.yaml and remove .avocado folder from there
-  local src_dir=$(grep '^src_dir:' avocado.yaml | sed 's/src_dir: *//' | tr -d '"' | tr -d "'" | xargs)
+  local src_dir
+  src_dir=$(grep '^src_dir:' avocado.yaml | sed 's/src_dir: *//' | tr -d '"' | tr -d "'" | xargs)
   if [ -z "$src_dir" ]; then
     src_dir="."
   fi
@@ -409,7 +421,8 @@ package_extension() {
 
     # Process each RPM package individually to handle all_avocadosdk packages specially
     while IFS= read -r -d '' rpm_file; do
-      local rpm_basename=$(basename "$rpm_file")
+      local rpm_basename
+      rpm_basename=$(basename "$rpm_file")
 
       if [[ "$rpm_basename" == *"all_avocadosdk"* ]]; then
         # Copy all_avocadosdk packages to SDK directories
@@ -496,7 +509,8 @@ update_extension_metadata() {
       echo "Using fragments from staging directory: $staging_dir"
     else
       # Fallback: find the most recent staging directory with fragments
-      local latest_staging_dir=$(find "$staging_base_dir" -maxdepth 1 -type d -not -path "$staging_base_dir" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
+      local latest_staging_dir
+      latest_staging_dir=$(find "$staging_base_dir" -maxdepth 1 -type d -not -path "$staging_base_dir" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
 
       if [ -n "$latest_staging_dir" ] && [ -d "$latest_staging_dir/fragments" ]; then
         fragments_dir="$latest_staging_dir/fragments"
@@ -507,7 +521,8 @@ update_extension_metadata() {
 
   if [ -n "$fragments_dir" ] && [ -d "$fragments_dir" ]; then
     # Count fragments to provide better feedback
-    local fragment_count=$(find "$fragments_dir" -name "*-fragment.json" -type f | wc -l)
+    local fragment_count
+    fragment_count=$(find "$fragments_dir" -name "*-fragment.json" -type f | wc -l)
     echo "Found $fragment_count target fragment(s) in $fragments_dir"
 
     # Check for existing persistent targets.json in staging directory
@@ -520,6 +535,10 @@ update_extension_metadata() {
       "$SCRIPT_DIR/repo-aggregate-targets.sh" "$fragments_dir" "$targets_json_file"
     fi
 
+    # shellcheck disable=SC2181
+    # $? is the status of whichever branch of the if/else above ran, not of a
+    # single command, so `if cmd; then` would mean duplicating both
+    # repo-aggregate-targets.sh invocations.
     if [ $? -eq 0 ]; then
       echo "✓ targets.json generated successfully from $fragment_count target(s)"
 
@@ -578,6 +597,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -n | --container-name)
+      # shellcheck disable=SC2034
+      # --container-name is documented in usage() and dev-build-extensions.sh
+      # passes it through on every call; the assignment records the accepted
+      # input even though only the packaging path that reads REPO_URL is
+      # live today. Dropping it would turn the option into an error.
       CONTAINER_NAME="$2"
       shift 2
       ;;
@@ -653,8 +677,7 @@ check_avocado_cli
 # Determine release directory
 if [ -z "$RELEASE_DIR" ]; then
   echo "Auto-detecting latest release directory..."
-  RELEASE_DIR=$(find_latest_release_dir)
-  if [ $? -ne 0 ]; then
+  if ! RELEASE_DIR=$(find_latest_release_dir); then
     exit 1
   fi
   echo "Using latest release directory: $RELEASE_DIR"

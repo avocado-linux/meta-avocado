@@ -12,6 +12,8 @@ fi
 YOCTO_DEPLOY_DIR=$1
 MAP_FILE="${YOCTO_DEPLOY_DIR}/avocado-repo.map"
 
+# shellcheck disable=SC2034  # read by the `eval "echo ..."` below: map values carry a
+# literal $releasever placeholder (see avocado-arch-utils.bbclass) expanded at that point.
 releasever="${AVOCADO_SDK_REPO_RELEASE:-dev}"
 
 if [ ! -f "${MAP_FILE}" ]; then

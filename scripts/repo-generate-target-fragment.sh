@@ -48,7 +48,7 @@ while IFS='=' read -r key value || [ -n "$key" ]; do
 
   # Convert absolute path to relative path by removing the releasever prefix
   # This makes paths relative to the targets.json file location
-  relative_path="${expanded_value#${releasever}/}"
+  relative_path="${expanded_value#"${releasever}"/}"
 
   case "${relative_path}" in
     "target/${TARGET_NAME}" | "sdk/${TARGET_NAME}")
@@ -64,7 +64,7 @@ done <"${MAP_FILE}"
 # Add the SDK repository for this target if not already present (relative path)
 sdk_repo="sdk/${TARGET_NAME}"
 sdk_repo_quoted="\"${sdk_repo}\""
-if [[ ! " ${repos[*]} " =~ " ${sdk_repo_quoted} " ]]; then
+if [[ " ${repos[*]} " != *" ${sdk_repo_quoted} "* ]]; then
   repos+=("${sdk_repo_quoted}")
   echo "Added SDK repository: ${sdk_repo}"
 else

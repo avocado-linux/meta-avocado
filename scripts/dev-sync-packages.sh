@@ -75,6 +75,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -c | --container-name)
+      # shellcheck disable=SC2034
+      # --container-name is a recognised option that dev-build.sh passes on
+      # every invocation; the assignment documents the accepted input even
+      # though nothing in this script reads it back yet. Dropping it would
+      # make the option an unknown-argument error for the caller.
       CONTAINER_NAME="$2"
       shift 2
       ;;
@@ -159,6 +164,11 @@ mkdir -p "$RELEASES_PATH"
 echo "Staging packages from build to repository..."
 "$SCRIPT_DIR/repo-stage-rpms.sh" "$SOURCE_DEPLOY_DIR" "$PACKAGES_PATH" "$DISTRO_CODENAME"
 
+# shellcheck disable=SC2181
+# set -e is live at top level, so a failing repo-stage-rpms.sh already exits here
+# with that script's own status and this else branch never runs. Folding the test
+# into `if cmd; then` would suspend set -e, print the failure line and exit 1
+# instead, changing both the output and the exit status.
 if [ $? -eq 0 ]; then
   echo "✓ Package staging completed successfully"
 else
@@ -175,6 +185,9 @@ mkdir -p "$FRAGMENTS_DIR"
 
 "$SCRIPT_DIR/repo-generate-target-fragment.sh" "$SOURCE_DEPLOY_DIR" "$TARGET" "$FRAGMENTS_DIR" "$DISTRO_CODENAME"
 
+# shellcheck disable=SC2181
+# Same as above: set -e exits on a failing repo-generate-target-fragment.sh
+# before this test is reached, so rewriting it would change the exit status.
 if [ $? -eq 0 ]; then
   echo "✓ Target fragment generated successfully"
 else

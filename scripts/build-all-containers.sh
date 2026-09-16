@@ -34,7 +34,7 @@ for arg in "$@"; do
       ;;
   esac
 done
-ARGS="${PASSTHRU_ARGS[@]}"
+ARGS="${PASSTHRU_ARGS[*]}"
 
 # Arrays to track build results
 SUCCESSFUL_BUILDS=()
@@ -55,6 +55,10 @@ for sdk_config in "$PROJECT_ROOT"/kas/sdk/*.yml; do
 
     # Source the init-build script with the SDK config
     # This creates the build directory and sets up the environment
+    # shellcheck disable=SC2164
+    # A failed cd needs no guard here: init-build is sourced by the relative
+    # path below, so it cannot be found from any other directory and the
+    # else branch records this SDK as failed, which is what set +e wants.
     cd "$PROJECT_ROOT"
 
     # Try to source init-build and handle potential errors
@@ -68,7 +72,10 @@ for sdk_config in "$PROJECT_ROOT"/kas/sdk/*.yml; do
 
       # Run kas build with the original arguments
       echo "Running: kas build $sdk_config $ARGS"
-      if kas build $sdk_config $ARGS; then
+      # shellcheck disable=SC2086
+      # $ARGS is a built-up argument list and must word-split; quoting it
+      # would hand kas one argument containing spaces.
+      if kas build "$sdk_config" $ARGS; then
         echo "✅ Build SUCCEEDED for $sdk_name"
         SUCCESSFUL_BUILDS+=("$sdk_name")
       else

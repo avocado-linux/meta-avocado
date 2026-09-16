@@ -39,7 +39,7 @@ for repo_dir in "${TARGET_REPO_BASE_DIR}"/*/; do
       # Check if repodata exists, as --update requires it.
       # If not, it means the repo might be empty after deletion, or was malformed.
       # createrepo_c will create it if it's missing and there are RPMs.
-      if [ -d "${repo_dir}/repodata" ] || [ -n "$(ls -A ${repo_dir}/*.rpm 2>/dev/null)" ]; then
+      if [ -d "${repo_dir}/repodata" ] || [ -n "$(ls -A "${repo_dir}"/*.rpm 2>/dev/null)" ]; then
         createrepo_c --update "${repo_dir}"
       else
         echo "Skipping metadata update for ${repo_dir} as it's empty or has no repodata."

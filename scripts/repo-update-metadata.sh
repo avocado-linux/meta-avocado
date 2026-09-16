@@ -53,7 +53,7 @@ while IFS= read -r rpm_dir; do
   # Determine output directory for this repo
   if [ -n "$OUTPUTDIR" ]; then
     # Calculate relative path from TARGET_DEPLOY_DIR to rpm_dir
-    rel_path="${rpm_dir#${TARGET_DEPLOY_DIR}/}"
+    rel_path="${rpm_dir#"${TARGET_DEPLOY_DIR}"/}"
     output_path="${OUTPUTDIR}/${rel_path}"
     mkdir -p "${output_path}"
   else
@@ -65,7 +65,7 @@ while IFS= read -r rpm_dir; do
 
   if [ -n "$BASEURL" ]; then
     # Calculate relative path from TARGET_DEPLOY_DIR to rpm_dir
-    rel_path="${rpm_dir#${TARGET_DEPLOY_DIR}/}"
+    rel_path="${rpm_dir#"${TARGET_DEPLOY_DIR}"/}"
     # Construct full baseurl for this specific repo directory
     full_baseurl="${BASEURL}/${rel_path}"
     cmd_args+=(--baseurl "${full_baseurl}")

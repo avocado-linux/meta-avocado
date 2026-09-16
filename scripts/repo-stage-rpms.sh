@@ -27,6 +27,7 @@ fi
 
 SOURCE_DEPLOY_DIR=$1
 TARGET_DEPLOY_DIR=$2
+# shellcheck disable=SC2034  # read indirectly: avocado-repo.map values contain a literal $releasever, expanded by the eval in the map-processing loop below.
 releasever=$3
 
 MAP_FILE="${SOURCE_DEPLOY_DIR}/avocado-repo.map"

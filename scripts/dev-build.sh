@@ -108,15 +108,13 @@ sync_target_packages() {
 
   log "Syncing packages for target: $target"
 
-  "$SCRIPT_DIR/dev-sync-packages.sh" \
+  if "$SCRIPT_DIR/dev-sync-packages.sh" \
     --repo-dir "$REPO_DIR" \
     --distro "$DISTRO_CODENAME" \
     --release-id "$RELEASE_ID" \
     --build-dir "$build_dir" \
     --container-name "$CONTAINER_NAME" \
-    "$target"
-
-  if [ $? -eq 0 ]; then
+    "$target"; then
     log "✓ Package sync completed for target: $target"
     return 0
   else
@@ -129,11 +127,9 @@ sync_target_packages() {
 start_repo_server() {
   log "Starting repository server..."
 
-  "$SCRIPT_DIR/dev-start-repo.sh" \
+  if "$SCRIPT_DIR/dev-start-repo.sh" \
     --repo-dir "$REPO_DIR" \
-    --port "$PORT"
-
-  if [ $? -eq 0 ]; then
+    --port "$PORT"; then
     log "✓ Repository server started successfully"
     return 0
   else
@@ -197,6 +193,10 @@ process_target_extensions() {
     "$SCRIPT_DIR/dev-package-extensions.sh" "${ext_args[@]}"
   fi
 
+  # shellcheck disable=SC2181
+  # $? here is the status of whichever branch of the if/else above ran, not of
+  # a single command, so `if cmd; then` would mean duplicating both extension
+  # script invocations.
   if [ $? -eq 0 ]; then
     log "✓ Extension processing completed for target: $target"
     return 0
@@ -212,6 +212,12 @@ stop_repo_server() {
 
   "$SCRIPT_DIR/dev-start-repo.sh" --stop
 
+  # shellcheck disable=SC2181
+  # stop_repo_server is the only one of these helpers called bare rather than
+  # under `if !`, so set -e is live in its body: a failing --stop exits the
+  # shell at the command above with that command's status. Folding the test
+  # into `if cmd; then` would suspend set -e, emit the failure log, and exit 1
+  # instead.
   if [ $? -eq 0 ]; then
     log "✓ Repository server stopped"
     return 0

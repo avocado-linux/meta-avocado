@@ -1,4 +1,5 @@
 #!/bin/ash
+# shellcheck shell=dash  # busybox ash in nginx:alpine; dash is shellcheck's closest model
 set -e
 
 # Get UID and GID from environment variables

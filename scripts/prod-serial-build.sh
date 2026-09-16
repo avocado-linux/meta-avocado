@@ -22,10 +22,10 @@ echo
 
 # Parse targets from JSON (using jq if available, otherwise python)
 if command -v jq &>/dev/null; then
-  TARGETS=($(jq -r '.[]' "$TARGETS_JSON"))
+  mapfile -t TARGETS < <(jq -r '.[]' "$TARGETS_JSON")
 else
   # Fallback to python if jq is not available
-  TARGETS=($(python3 -c "import json; import sys; data = json.load(open('$TARGETS_JSON')); print('\n'.join(data))"))
+  mapfile -t TARGETS < <(python3 -c "import json; import sys; data = json.load(open('$TARGETS_JSON')); print('\n'.join(data))")
 fi
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
@@ -73,6 +73,7 @@ for target in "${TARGETS[@]}"; do
   echo "=========================================="
 
   # Initialize build environment
+  # shellcheck disable=SC2164  # PROJECT_ROOT was produced by a successful cd at the top of this script, so this cd cannot fail; the loop deliberately continues past per-target errors rather than exiting.
   cd "$PROJECT_ROOT"
 
   if ! . scripts/init-build "$machine_config"; then

@@ -64,7 +64,7 @@ else
 fi
 
 # Find all fragment files
-fragment_files=($(find "${FRAGMENTS_DIR}" -name "*-fragment.json" -type f | sort))
+mapfile -t fragment_files < <(find "${FRAGMENTS_DIR}" -name "*-fragment.json" -type f | sort)
 
 if [ ${#fragment_files[@]} -eq 0 ]; then
   if [ ${#existing_targets[@]} -eq 0 ]; then
@@ -113,6 +113,7 @@ for fragment_file in "${fragment_files[@]}"; do
   fragment_content=$(cat "${fragment_file}" | sed 's/^{//' | sed 's/}$//')
 
   # Extract target name for duplicate detection
+  # shellcheck disable=SC2001  # the sed uses a capture group and back-reference, which ${var//search/replace} cannot express.
   target_name=$(echo "$fragment_content" | sed 's/^\"\([^\"]*\)\".*/\1/')
 
   # Debug: show what we're adding
@@ -130,6 +131,7 @@ printf "{" >"${OUTPUT_FILE}"
 first_entry=true
 for target_entry in "${existing_targets[@]}"; do
   # Extract target name from existing entry
+  # shellcheck disable=SC2001  # the sed uses a capture group and back-reference, which ${var//search/replace} cannot express.
   existing_target_name=$(echo "$target_entry" | sed 's/^\"\([^\"]*\)\".*/\1/')
 
   # Check if this target is being updated by a new fragment
@@ -178,7 +180,7 @@ if command -v jq >/dev/null 2>&1; then
     echo "✓ Generated JSON is valid"
     echo "Preview of generated targets.json (formatted for readability):"
     jq . "${OUTPUT_FILE}" | head -20
-    if [ $(jq . "${OUTPUT_FILE}" | wc -l) -gt 20 ]; then
+    if [ "$(jq . "${OUTPUT_FILE}" | wc -l)" -gt 20 ]; then
       echo "... (truncated)"
     fi
     echo ""
