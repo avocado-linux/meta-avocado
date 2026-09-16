@@ -51,8 +51,10 @@ set (see §3).
 | cloud-aws    | `cloud-aws`   | greengrass-bin, aws-iot-device-client           | meta-aws                | aarch64/x86_64 |
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
+| smartcard    | `smartcard`   | pcsc-lite, ccid, yubico-piv-tool, ykcs11        | (none)                  | -        |
+| printing     | `printing`    | cups, cups-filters, ghostscript, ipp-usb        | (none)                  | -        |
 | ai           | `ai`          | DeepX NPU runtime (dx-driver, dx-rt, dx-stream) | meta-deepx-m1           | MACHINE_FEATURES deepx |
-| observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
+| observability | `observability` | Fluent Bit log and metric collector           | (none)                  | -        |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
