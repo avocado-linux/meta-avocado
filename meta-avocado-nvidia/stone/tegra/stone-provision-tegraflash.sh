@@ -393,6 +393,25 @@ chmod +x "$temp_bin_dir/cpp"
 # Add temporary directory and tegraflash tools to PATH
 export PATH="$temp_bin_dir:$build_dir:$PATH"
 
+# Rootfs PARTUUIDs for this flash. Empty means "not pinned", which keeps the
+# pre-existing behaviour end to end: the layout below keeps its APPUUID
+# placeholders, the flashing tool picks its own GUIDs, and the initrd falls back
+# to locating APP by PARTLABEL.
+#
+# Pinning matters because PARTLABEL does not identify a disk. A board carrying a
+# provisioned SD card AND a provisioned NVMe has two partitions labelled APP with
+# equally valid contents, and the initrd takes whichever the kernel enumerated
+# first - the SD card, since PCIe enumeration finishes about two seconds after
+# the SD controller is up. Naming the PARTUUID makes the rootfs a property of
+# what was provisioned rather than of probe timing.
+#
+# Generated per flash rather than fixed per medium: a constant published in this
+# repo would be identical on every board, so removable media carrying that
+# PARTUUID could present itself as the rootfs, and changing one later would
+# orphan every board already flashed with the old value.
+app_partuuid=""
+app_b_partuuid=""
+
 # When avocado-cli has staged a kernel Image from the resolver-pinned rootfs
 # sysroot, repack boot.img on the host so the booted kernel matches the
 # resolver's kernel.version pin. Without this, the prebuilt boot.img copied
@@ -409,14 +428,65 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
         echo "ERROR: initramfs cpio not staged at $initramfs_in_build"
         exit 1
     fi
+    # Carry over the kernel command line from the prebuilt boot.img before we
+    # overwrite it. The Yocto cboot image type builds that one with
+    # `mkbootimg --cmdline '${KERNEL_ARGS}'`; mkbootimg here defaults to an
+    # EMPTY cmdline, and an empty cmdline is silently fatal - UEFI's L4TLauncher
+    # falls back to the stock NVIDIA bootargs baked into the kernel DTB, which
+    # point console at a different tegra-utc instance than the one wired out and
+    # set root=/dev/initrd rootfstype=ext4. The board flashes, prints one line,
+    # then hangs with a dead console.
+    #
+    # Read it back out of the boot.img header rather than plumbing KERNEL_ARGS
+    # through the manifest, so the Yocto build stays the single source of truth.
+    #
+    # devtool-debt: assumes an Android boot header v0-v2, where cmdline is 512
+    # bytes at offset 0x40. Ceiling: the BSP's own boot.img header version.
+    # Upgrade trigger: a BSP ships a v3/v4 header, where the field moves to
+    # offset 44 and grows to 1536 - read the version at offset 0x28 instead of
+    # assuming it.
+    boot_cmdline=$(dd if="$build_dir/boot.img" bs=1 skip=64 count=512 \
+                      2>/dev/null | tr -d '\0')
+    if [ -z "$boot_cmdline" ]; then
+        echo "ERROR: no kernel command line found in the prebuilt $build_dir/boot.img."
+        echo "       Repacking without one produces a board that flashes but never boots."
+        exit 1
+    fi
+
+    # Name the rootfs this run is about to write, so the initrd stops
+    # rediscovering it. Both slots are carried because the same boot.img is
+    # written to A_kernel and B_kernel, so one command line has to serve
+    # whichever slot nvbootctrl later selects; avocado-tegra-init picks between
+    # them using the slot it already resolves from BootChainOsCurrent.
+    app_partuuid=$(tr 'a-f' 'A-F' < /proc/sys/kernel/random/uuid)
+    app_b_partuuid=$(tr 'a-f' 'A-F' < /proc/sys/kernel/random/uuid)
+    boot_cmdline="$boot_cmdline avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
+
+    # mkbootimg truncates silently past the header field, and the tail is
+    # exactly what we just appended - the board would flash clean and then boot
+    # the wrong disk, with nothing logged anywhere. Refuse instead. 511 leaves
+    # room for the terminating NUL.
+    if [ "${#boot_cmdline}" -gt 511 ]; then
+        echo "ERROR: kernel command line is ${#boot_cmdline} bytes, over the 511-byte" >&2
+        echo "       boot.img header field. Appending the rootfs PARTUUIDs does not fit." >&2
+        echo "       Shorten this machine's KERNEL_ARGS." >&2
+        echo "       cmdline: $boot_cmdline" >&2
+        exit 1
+    fi
+
     echo "Packing boot.img from kernel ${AVOCADO_PROVISION_KERNEL_VERSION:-?} (Image=$AVOCADO_PROVISION_KERNEL_IMAGE)"
+    echo "  cmdline: $boot_cmdline"
     mkbootimg \
         --kernel "$AVOCADO_PROVISION_KERNEL_IMAGE" \
         --ramdisk "$initramfs_in_build" \
+        --cmdline "$boot_cmdline" \
         --output "$build_dir/boot.img"
     echo "boot.img repacked at provision time"
 else
     echo "AVOCADO_PROVISION_KERNEL_IMAGE not set — using prebuilt boot.img from BSP"
+    echo "WARNING: the prebuilt boot.img names no rootfs PARTUUID, so the initrd"
+    echo "         locates APP by label. On a board that also carries another"
+    echo "         provisioned disk, the label does not say which one."
 fi
 
 # Check if any NVIDIA device is in RCM mode (vendor 0955).
@@ -561,6 +631,41 @@ case "$boot_media" in
             "$build_dir/.env.initrd-flash"
         ;;
 esac
+
+# Write the rootfs PARTUUIDs the command line names into the layout the flash is
+# about to apply. Runs after the media case because the eMMC branch swaps the
+# whole layout file in, and substituting before that would fill the copy we then
+# discard.
+if [ -n "$app_partuuid" ]; then
+    layout_xml="$build_dir/external-flash.xml.in"
+    if [ ! -f "$layout_xml" ]; then
+        echo "ERROR: $layout_xml not found; cannot pin the rootfs PARTUUIDs." >&2
+        exit 1
+    fi
+    # APPUUID_b contains APPUUID, so a bare grep for the latter is satisfied by
+    # the former and would pass a layout that pins only slot B. Match each
+    # exactly. A missing placeholder means this is not the templated layout we
+    # expect - flashing on would write GUIDs that disagree with the command line
+    # we just baked, giving an initrd that cannot find its root.
+    for pattern in 'APPUUID_b' 'APPUUID[^_]'; do
+        if ! grep -q "$pattern" "$layout_xml"; then
+            echo "ERROR: $layout_xml has no $pattern placeholder." >&2
+            echo "       tegraflash-bsp.bb is expected to leave these for us to" >&2
+            echo "       fill; if it blanks them again, the command line names a" >&2
+            echo "       rootfs PARTUUID this layout will never produce." >&2
+            exit 1
+        fi
+    done
+    sed -i \
+        -e "s/APPUUID_b/$app_b_partuuid/g" \
+        -e "s/APPUUID/$app_partuuid/g" \
+        "$layout_xml"
+    if grep -q 'APPUUID' "$layout_xml"; then
+        echo "ERROR: APPUUID placeholder survived substitution in $layout_xml." >&2
+        exit 1
+    fi
+    echo "Rootfs PARTUUID: $app_partuuid (slot A), $app_b_partuuid (slot B)"
+fi
 
 # Composable env var flags (override defaults from profile)
 [ "${ERASE_NVME:-0}" = "1" ] && flash_args="$flash_args --erase-nvme"

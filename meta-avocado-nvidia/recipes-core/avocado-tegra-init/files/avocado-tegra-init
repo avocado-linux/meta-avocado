@@ -4,6 +4,8 @@ set -e
 slotsfx=""
 mayberoot=""
 foundslotsfx="no"
+partuuid_a=""
+partuuid_b=""
 read -r cmdline < /proc/cmdline
 # The command line is a whitespace-separated list, so splitting it is the point.
 # mayberoot, opt, wait and fstype record arguments this script recognises but
@@ -14,12 +16,19 @@ for bootarg in $cmdline; do
     case "$bootarg" in
         boot.slot_suffix=*) slotsfx="${bootarg##boot.slot_suffix=}"; foundslotsfx="yes" ;;
         root=*) mayberoot="${bootarg##root=}" ;;
+        avocado.root_partuuid=*)   partuuid_a="${bootarg##avocado.root_partuuid=}" ;;
+        avocado.root_partuuid_b=*) partuuid_b="${bootarg##avocado.root_partuuid_b=}" ;;
         ro) opt="ro" ;;
         rootwait) wait="yes" ;;
         rootfstype=*) fstype="${bootarg##rootfstype=}" ;;
     esac
 done
 
+rootdev=""
+
+# Resolve the slot first, unconditionally. Both the pinned-PARTUUID path and
+# the PARTLABEL fallback below need it, so it can no longer be computed inside
+# whichever branch happens to run.
 if [ "$foundslotsfx" != "yes" ]; then
     # This variable file contains a type (should be 6) followed by the value (should be 0 or 1)
     # awk splits on runs of whitespace and ignores the leading blank hexdump
@@ -29,7 +38,84 @@ if [ "$foundslotsfx" != "yes" ]; then
         slotnum=$(echo "$bcdata" | awk '{print $2}')
         [ "$slotnum" != "1" ] || slotsfx="_b"
     fi
+fi
 
+# Preferred: the rootfs PARTUUID that provisioning pinned for the medium it
+# wrote, carried on the kernel command line. stone-provision-tegraflash.sh
+# passes both slots because one boot.img serves A_kernel and B_kernel alike.
+#
+# Discovery by PARTLABEL cannot answer this question. A board with a
+# provisioned SD card AND a provisioned NVMe has two partitions labelled APP,
+# so the label identifies a role and not a disk, and the winner is whichever
+# the kernel enumerated first - which is the SD card, because PCIe enumeration
+# finishes about two seconds after the SD controller is up. Waiting longer does
+# not help: once both disks are up the label is ambiguous rather than missing.
+if [ "$slotsfx" = "_b" ]; then
+    want_partuuid="$partuuid_b"
+else
+    want_partuuid="$partuuid_a"
+fi
+
+if [ -n "$want_partuuid" ]; then
+    # udev lowercases GPT PARTUUIDs under /dev/disk/by-partuuid, and util-linux
+    # blkid normalizes them the same way before comparing -t case-sensitively.
+    # Both lookups therefore want the lowercased form, not the uppercase one the
+    # layout XML carries.
+    want_lower=$(echo "$want_partuuid" | tr 'A-F' 'a-f')
+    echo -n "Waiting for rootfs PARTUUID=$want_partuuid..."
+    for count in $(seq 1 20); do
+        # Cheap first: udev usually has the symlink already. readlink is not
+        # allowed to abort init under set -e - busybox builds it without
+        # CONFIG_FEATURE_READLINK_FOLLOW, where -f exits non-zero.
+        if [ -e "/dev/disk/by-partuuid/$want_lower" ]; then
+            rootdev=$(readlink -f "/dev/disk/by-partuuid/$want_lower") || rootdev=""
+        fi
+        if [ -z "$rootdev" ]; then
+            for dev in $(lsblk -dnpo NAME); do
+              blkid --probe "$dev" || true
+            done
+            rootdev=$(blkid -l -t "PARTUUID=$want_lower" | cut -d: -f1)
+        fi
+        if [ -n "$rootdev" ]; then
+            echo "[OK: $rootdev]"
+            break
+        fi
+        echo -n "."
+        sleep 0.5
+    done
+
+    if [ -z "$rootdev" ]; then
+        echo "[FAIL]"
+        # Fall back to the label only when it cannot be ambiguous. One APP
+        # partition means one candidate disk, so this is a board whose GPT was
+        # rewritten out from under the command line - a repair flash, a manual
+        # partition re-create - and refusing would strand a rootfs that is
+        # plainly the right one.
+        #
+        # Two or more is exactly the case this path exists for. The label names
+        # a role, not a disk, so picking one would be guessing between separate
+        # installs; say so and stop.
+        appcount=$(blkid -t "PARTLABEL=APP$slotsfx" | wc -l)
+        if [ "$appcount" = "1" ]; then
+            rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
+            echo "WARNING: PARTUUID=$want_partuuid is absent, but exactly one disk"
+            echo "         carries APP$slotsfx. Booting $rootdev by label."
+            echo "         Re-provision to restore the PARTUUID pin."
+        else
+            echo "Error: rootfs PARTUUID=$want_partuuid (slot '${slotsfx:-a}') never appeared,"
+            echo "       and $appcount disks carry PARTLABEL=APP$slotsfx - refusing to guess."
+            echo "  cmdline: $(cat /proc/cmdline)"
+            blkid || true
+            lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
+            exit 1
+        fi
+    fi
+fi
+
+# Fallback for boards provisioned before the PARTUUID pin existed: locate
+# APP$slotsfx by PARTLABEL. Probe every block device first since blkid's label
+# cache may be stale right after a fresh flash.
+if [ -z "$rootdev" ]; then
     message="Waiting for APP$slotsfx partition..."
     printf '%s' "$message"
     for _ in $(seq 1 10); do
