@@ -4,8 +4,12 @@ repos:
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.13.1-1
     hooks:
+      # -w is what makes shfmt rewrite the file. Without it shfmt prints the
+      # formatted result to stdout and exits 0, so the hook reported success on
+      # every commit while never formatting anything - which is why the tree
+      # was still 4-space indented long after this config landed.
       - id: shfmt
-        args: [-i, "2", -ci, -bn]
+        args: [-w, -i, "2", -ci, -bn]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
