@@ -1,106 +1,62 @@
-# Selecting the boot device
+# Boot device selection: layer notes
 
-On a board carrying more than one bootable disk, "where the image was written"
-and "which disk the board boots" are two separate decisions, and only the first
-one is made at provision time.
+How `avocado-boot-device` is built and wired. For what the tool does and how to
+use it, see the Boot device selection guide on the docs site - this page covers
+only what someone changing this layer needs.
 
-`avocado provision --profile tegraflash-nvme` writes a complete, bootable NVMe
-and reports success. If the board also has a provisioned SD card, it keeps
-booting the SD card, because the firmware picks the boot device and nothing in
-the provisioning flow tells it to prefer the disk that was just written. A
-Jetson makes this vivid: its UEFI creates a `UEFI SD Device` entry on its own
-and places it at the front of `BootOrder`.
+## Where the recipe lives, and why it is not in meta-avocado-nvidia
 
-`avocado-set-boot-device` is the runtime half of that decision. It moves no
-data. It tells the firmware which of the disks already present to prefer.
+`meta-avocado/recipes-avocado/boot-device/avocado-boot-device_1.0.bb`.
 
-## Using it
+It sits in the common layer because `BootOrder` is a UEFI concept rather than a
+Tegra one. `meta-avocado-x86-64` already ships `efibootmgr` in its rootfs
+packagegroup for A/B slot activation, so it can consume this unchanged rather
+than growing a second copy.
 
-The tool ships as the `avocado-boot-device` package. Add it to a runtime
-extension in `avocado.yaml`:
+`inherit allarch` - the payload is a POSIX shell script with no compiled
+content, matching `avocado-dtc-overlay-deliver` in each BSP layer.
 
-```yaml
-extensions:
-  boot-device:
-    types:
-      - sysext
-    version: "1.0.0"
-    packages:
-      avocado-boot-device: "*"
+## The efibootmgr dependency
 
-runtimes:
-  dev:
-    extensions:
-      - boot-device
+```bitbake
+RDEPENDS:${PN} = "efibootmgr efivar"
 ```
 
-Then, on the board:
+Both come from oe-core (`meta/recipes-bsp/efibootmgr`, `meta/recipes-bsp/efivar`)
+and declare `aarch64` in `COMPATIBLE_HOST`, so the dependency resolves on Tegra
+as well as x86-64. oe-core is always enabled, so no layer needs adding.
 
-```console
-# avocado-set-boot-device --list
-Current boot order, first entry wins:
+`efibootmgr` is doing the part that is genuinely hard in shell: decoding an EFI
+device path far enough to say which boot entry refers to an NVMe device.
+`efivar` is what clears the immutable flag efivarfs sets on those variables -
+without it, a direct write needs `chattr -i` by hand.
 
-  Boot0001* UEFI SD Device  VenHw(...)/SD(0)
-  Boot0003* UEFI Samsung SSD 960 EVO 250GB  PciRoot(0x0)/.../NVMe(0x1,...)
+## Enabling it for another BSP
 
-Recognised device classes on this board:
-  nvme  0003
-  sd    0001
-  emmc  -
-  usb   -
+Only the Tegra feed is wired up today, because that is the hardware it was
+designed against:
 
-# avocado-set-boot-device nvme
-Boot device: nvme (entry 0003)
-  before: 0001,0003,0000,0002
-  after:  0003,0001,0000,0002
-BootOrder=0003,0001,0000,0002
+```bitbake
+# meta-avocado-nvidia/recipes-avocado/packagegroups/packagegroup-avocado-tegra-extra.bb
+RDEPENDS:${PN} = " \
+  ...
+  avocado-boot-device \
+"
 ```
 
-The device classes are `nvme`, `sd`, `emmc` and `usb`.
+Adding it to another BSP means adding the same line to that layer's
+`packagegroup-avocado-<bsp>-extra.bb`, which is what puts the package in that
+target's feed. Nothing else is BSP-specific.
 
-## Test with `--once` first
+Before doing that, check the device-path node names the script matches on
+(`NVMe(`, `SD(`, `eMMC(`, `USB(`) against what that board's firmware actually
+emits - `efibootmgr -v` on the board is the answer. A class that does not match
+makes the tool refuse rather than misbehave, but it also makes it useless on
+that board.
 
-`--once` writes `BootNext` instead of `BootOrder`, so the selection applies to
-the next boot and then reverts on its own:
+## Related
 
-```console
-# avocado-set-boot-device --once nvme
-Next boot only: 0003 (nvme)
-BootNext=0003
-```
-
-Prefer this while you are finding out whether a disk boots at all. A permanent
-`BootOrder` pointing at a disk that turns out not to boot needs someone at the
-board with a console; a `BootNext` that fails is undone by the power cycle that
-follows it.
-
-`--dry-run` prints the order that would be written and changes nothing.
-
-## What it will not do
-
-**It will not create a boot entry.** The firmware creates an entry for a disk
-it can see and boot, so a disk that was provisioned but never booted may have
-no entry yet. Reboot once so the firmware enumerates it, then run the tool
-again. `--list` shows what exists.
-
-**It will not guess.** If two entries match a class it says so and uses the
-first; if none match it fails and prints the entries it did find, rather than
-picking something and reporting success.
-
-**It will not report a write it cannot confirm.** Both paths read the variable
-back after writing and fail if it does not hold the expected value. efivarfs
-can accept a write that the firmware then discards, and a boot selection that
-silently did not take is the failure this tool exists to prevent.
-
-## The other half
-
-Choosing the boot device only settles which kernel the firmware loads. Which
-rootfs that kernel then mounts is decided separately, by the PARTUUID the
-provisioning flow writes into the kernel command line. Both halves have to
-agree, or a board can boot one disk's kernel against another disk's rootfs.
-
-If your board predates that change, the initrd finds its rootfs by PARTLABEL
-instead - and on a board with two provisioned disks both carry a partition
-labelled `APP`, so it takes whichever the kernel enumerated first. Reordering
-`BootOrder` alone will not fix that; the kernel will come from the disk you
-chose and the rootfs from whichever won the probe race.
+- `meta-avocado/recipes-avocado/boot-device/files/avocado-set-boot-device` - the script
+- `meta-avocado-nvidia/recipes-core/avocado-tegra-init/files/avocado-tegra-init` -
+  the initrd side, which resolves the rootfs. Boot order chooses the kernel;
+  that script chooses the rootfs, and the two have to agree.
