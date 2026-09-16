@@ -106,7 +106,14 @@ if [ -f "${input_dir}/${ufs_image}" ]; then
   mv "${input_dir}/${ufs_image}" "${input_dir}/${ufs_image}.backup"
 
   # Create new tar.gz from the modified temp directory
-  (cd "$tmp_dir" && tar -czf "${input_dir}/${ufs_image}" .[^.]* * 2>/dev/null || tar -czf "${input_dir}/${ufs_image}" *)
+  # cd gets its own exit path: in the old `cd && tar || tar` form a failed cd
+  # fell through to the fallback tar, which would repack the caller's cwd into
+  # the UFS image. `--` stops a dash-leading filename being read as a tar
+  # option; it leaves stored member names unchanged (no ./ prefix added).
+  (
+    cd "$tmp_dir" || exit 1
+    tar -czf "${input_dir}/${ufs_image}" -- .[^.]* * 2>/dev/null || tar -czf "${input_dir}/${ufs_image}" -- *
+  )
 
   # Clean up temp directory
   rm -rf "$tmp_dir"
@@ -122,14 +129,19 @@ echo -e "\033[94m[INFO]\033[0m Running stone validate.
   Input directories:$(build_include_display "$input_dir")"
 
 include_flags=$(build_include_flags "$input_dir")
-eval stone validate -m \"${manifest}\" $include_flags
+# $include_flags is a pre-quoted "-i <path>" list built above and must word-split
+# into separate arguments; quoting it would pass one argument containing spaces.
+# shellcheck disable=SC2086
+eval stone validate -m "\"${manifest}\"" $include_flags
 
 echo -e "\033[94m[INFO]\033[0m Running stone create.
   Manifest:          ${manifest}
   Input directories:$(build_include_display "$input_dir")
   Output directory:  ${output_dir}"
 
-eval stone create --os-release \"${AVOCADO_PREFIX}/rootfs/usr/lib/os-release\" -m \"$manifest\" $include_flags -o \"$output_dir\"
+# $include_flags must word-split here for the same reason as above.
+# shellcheck disable=SC2086
+eval stone create --os-release "\"${AVOCADO_PREFIX}/rootfs/usr/lib/os-release\"" -m "\"$manifest\"" $include_flags -o "\"$output_dir\""
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0

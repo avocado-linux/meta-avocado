@@ -82,6 +82,9 @@ if [[ "$AVOCADO_SDK_TARGET" =~ x86-64$ ]]; then
   QEMU_CPU="max"
   QEMU_MACHINE=""
 elif [[ "$AVOCADO_SDK_TARGET" =~ arm64$ ]]; then
+  # Not consumed below (QEMU_BINARY already encodes the arch), but kept so
+  # both branches of this mapping describe the target the same way.
+  # shellcheck disable=SC2034
   QEMU_ARCH="aarch64"
   QEMU_BINARY="qemu-system-aarch64"
   QEMU_BIOS_FILE="flash.bin"
@@ -137,6 +140,9 @@ qemu-img resize -f raw "$IMAGE_FILE" "${resize_mib}M"
 QEMU_BIOS="${STONE_DATA_DIR}/${QEMU_BIOS_FILE}"
 
 # Build QEMU command arguments
+# The commas below belong to QEMU's own option syntax (sd-card,drive=mmc and
+# the -drive property list); they are not array element separators.
+# shellcheck disable=SC2054
 QEMU_ARGS=(
   -bios "${QEMU_BIOS}"
   -device sdhci-pci
@@ -169,6 +175,9 @@ fi
 # TCP chardev is host-reachable because `avocado sdk run` uses --network=host,
 # so the host connects to 127.0.0.1:${QGA_PORT}.
 if [ -n "$QGA_PORT" ]; then
+  # Commas here are QEMU chardev/device property separators, not array
+  # element separators.
+  # shellcheck disable=SC2054
   QEMU_ARGS+=(
     -chardev "socket,id=qga,host=127.0.0.1,port=${QGA_PORT},server=on,wait=off"
     -device virtio-serial

@@ -56,14 +56,20 @@ echo -e "\033[94m[INFO]\033[0m Running stone validate.
   Input directories:$(build_include_display "$input_dir")"
 
 include_flags=$(build_include_flags "$input_dir")
-eval stone validate -m \"${manifest}\" $include_flags
+# include_flags holds a pre-built flag list (-i "p1" -i "p2") that eval must
+# word-split back into separate arguments; quoting it would hand stone the
+# whole list as one argument.
+# shellcheck disable=SC2086
+eval stone validate -m "\"${manifest}\"" $include_flags
 
 echo -e "\033[94m[INFO]\033[0m Running stone create.
   Manifest:          ${manifest}
   Input directories:$(build_include_display "$input_dir")
   Output directory:  ${output_dir}"
 
-eval stone create --os-release \"${AVOCADO_PREFIX}/rootfs/usr/lib/os-release\" -m \"$manifest\" $include_flags -o \"$output_dir\"
+# include_flags must stay unquoted for the same reason as the validate call.
+# shellcheck disable=SC2086
+eval stone create --os-release "\"${AVOCADO_PREFIX}/rootfs/usr/lib/os-release\"" -m "\"$manifest\"" $include_flags -o "\"$output_dir\""
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
