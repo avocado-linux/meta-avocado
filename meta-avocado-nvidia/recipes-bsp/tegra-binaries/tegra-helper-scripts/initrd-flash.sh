@@ -987,6 +987,10 @@ get_final_status() {
     # never prompt the user for a manual cable cycle here.
     unmount_and_release "$mnt" "$dev" no-prompt || return 1
     echo "Final status: $final_status"
+    if [ "$final_status" != "SUCCESS" ]; then
+	echo "ERR: device reported final status: $final_status" >&2
+	return 1
+    fi
     return 0
 }
 
