@@ -428,51 +428,28 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
         echo "ERROR: initramfs cpio not staged at $initramfs_in_build"
         exit 1
     fi
-    # Carry over the kernel command line from the prebuilt boot.img before we
-    # overwrite it. The Yocto cboot image type builds that one with
-    # `mkbootimg --cmdline '${KERNEL_ARGS}'`; mkbootimg here defaults to an
-    # EMPTY cmdline, and an empty cmdline is silently fatal - UEFI's L4TLauncher
-    # falls back to the stock NVIDIA bootargs baked into the kernel DTB, which
-    # point console at a different tegra-utc instance than the one wired out and
-    # set root=/dev/initrd rootfstype=ext4. The board flashes, prints one line,
-    # then hangs with a dead console.
-    #
-    # Read it back out of the boot.img header rather than plumbing KERNEL_ARGS
-    # through the manifest, so the Yocto build stays the single source of truth.
-    #
-    # devtool-debt: assumes an Android boot header v0-v2, where cmdline is 512
-    # bytes at offset 0x40. Ceiling: the BSP's own boot.img header version.
-    # Upgrade trigger: a BSP ships a v3/v4 header, where the field moves to
-    # offset 44 and grows to 1536 - read the version at offset 0x28 instead of
-    # assuming it.
-    boot_cmdline=$(dd if="$build_dir/boot.img" bs=1 skip=64 count=512 \
-                      2>/dev/null | tr -d '\0')
-    if [ -z "$boot_cmdline" ]; then
-        echo "ERROR: no kernel command line found in the prebuilt $build_dir/boot.img."
-        echo "       Repacking without one produces a board that flashes but never boots."
-        exit 1
-    fi
-
     # Name the rootfs this run is about to write, so the initrd stops
     # rediscovering it. Both slots are carried because the same boot.img is
     # written to A_kernel and B_kernel, so one command line has to serve
     # whichever slot nvbootctrl later selects; avocado-tegra-init picks between
     # them using the slot it already resolves from BootChainOsCurrent.
+    #
+    # Deliberately NOT carrying the machine's KERNEL_ARGS forward here. An
+    # earlier version of this hunk read them out of the prebuilt boot.img
+    # header (dd at the Android v0-v2 cmdline offset) and re-appended the
+    # PARTUUID args to them, on the theory that mkbootimg's default empty
+    # cmdline is silently fatal. Hardware evidence on THIS machine says
+    # otherwise: an empty mkbootimg cmdline reaches a working login prompt
+    # every time (confirmed 2026-09-17, both a from-scratch flash and the
+    # published reference image), while carrying the real KERNEL_ARGS
+    # forward produced a silent hang partway into userspace boot on two
+    # independent flashes, with no error or panic. The exact offending
+    # token was not isolated - see the follow-up issue. Passing only the
+    # two PARTUUID args keeps this fix scoped to what it is verified to do:
+    # name the rootfs.
     app_partuuid=$(tr 'a-f' 'A-F' < /proc/sys/kernel/random/uuid)
     app_b_partuuid=$(tr 'a-f' 'A-F' < /proc/sys/kernel/random/uuid)
-    boot_cmdline="$boot_cmdline avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
-
-    # mkbootimg truncates silently past the header field, and the tail is
-    # exactly what we just appended - the board would flash clean and then boot
-    # the wrong disk, with nothing logged anywhere. Refuse instead. 511 leaves
-    # room for the terminating NUL.
-    if [ "${#boot_cmdline}" -gt 511 ]; then
-        echo "ERROR: kernel command line is ${#boot_cmdline} bytes, over the 511-byte" >&2
-        echo "       boot.img header field. Appending the rootfs PARTUUIDs does not fit." >&2
-        echo "       Shorten this machine's KERNEL_ARGS." >&2
-        echo "       cmdline: $boot_cmdline" >&2
-        exit 1
-    fi
+    boot_cmdline="avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
 
     echo "Packing boot.img from kernel ${AVOCADO_PROVISION_KERNEL_VERSION:-?} (Image=$AVOCADO_PROVISION_KERNEL_IMAGE)"
     echo "  cmdline: $boot_cmdline"
