@@ -1,0 +1,236 @@
+#!/bin/sh
+# Select which storage device UEFI boots from, by reordering BootOrder.
+#
+# Provisioning decides where the bytes are WRITTEN. Firmware decides which disk
+# is BOOTED, and on a board carrying more than one bootable disk those are not
+# the same choice: UEFI creates its own entries (a Jetson auto-creates
+# "UEFI SD Device" and puts it first), so a correctly provisioned NVMe can sit
+# there while the board keeps booting the SD card.
+#
+# This is the runtime half of that. It does not move any data - it tells the
+# firmware which of the disks already present to prefer.
+set -e
+
+SELF=${0##*/}
+EFIVARS=/sys/firmware/efi/efivars
+
+usage() {
+  cat <<EOF
+Usage: $SELF [options] <device-class>
+       $SELF --list
+
+Device classes:
+  nvme        an NVMe SSD
+  sd          an SD card
+  emmc        on-board eMMC
+  usb         a USB mass-storage device
+
+Options:
+  --list      show the current boot order and stop
+  --once      boot the selected device on the NEXT boot only, then revert
+              (writes BootNext instead of BootOrder)
+  --dry-run   print the order that would be written, change nothing
+  -h, --help  this text
+
+With no --once, the change is permanent until something rewrites BootOrder.
+Prefer --once when you are testing: it cannot strand a board, because a power
+cycle after the test boot restores the previous order on its own.
+EOF
+}
+
+die() {
+  echo "$SELF: $*" >&2
+  exit 1
+}
+
+require_efi() {
+  [ -d "$EFIVARS" ] || die "efivarfs is not mounted at $EFIVARS; this system did not boot via UEFI"
+  command -v efibootmgr >/dev/null 2>&1 || die "efibootmgr is not installed"
+}
+
+# Map a device class to the EFI device-path node that identifies it.
+#
+# Matching on the device path rather than the entry description is deliberate,
+# and an Orin Nano shows why. Its NVMe entry reads "UEFI Samsung SSD 960 EVO
+# 250GB S3ESNX0JA13241W 1" - vendor text, model number and serial, with the
+# word NVMe nowhere in it. The device path is the part that is actually typed:
+# that same entry carries node 03 17 (Messaging, NVMe Namespace), which
+# efibootmgr prints as NVMe(...), and the board's SD entry carries 03 1a
+# (Messaging, SD), printed as SD(...).
+class_pattern() {
+  case "$1" in
+    nvme) echo 'NVMe(' ;;
+    sd) echo 'SD(' ;;
+    emmc) echo 'eMMC(' ;;
+    usb) echo 'USB(' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Fallback for firmware that omits the node above. Descriptions are vendor
+# strings, so this cannot be made reliable - it is a second guess, not a second
+# source. The storage patterns take the marketing words too ("SSD", "M.2")
+# because the drive that prompted this carries no protocol name at all; the
+# cost is that a SATA SSD would answer to `nvme` here, which the
+# more-than-one-match warning is there to make visible.
+class_description_pattern() {
+  case "$1" in
+    nvme) echo 'NVMe\|NVME\|nvme\|SSD\|M\.2' ;;
+    sd) echo 'SD Device\|SD Card\|SDHC' ;;
+    emmc) echo 'eMMC\|EMMC\|MMC' ;;
+    usb) echo 'USB' ;;
+    *) return 1 ;;
+  esac
+}
+
+current_order() {
+  efibootmgr | sed -n 's/^BootOrder: //p' | tr -d '[:space:]'
+}
+
+# Boot entry numbers matching a class, in the order efibootmgr lists them.
+entries_for_class() {
+  class="$1"
+  path_pat=$(class_pattern "$class")
+  desc_pat=$(class_description_pattern "$class")
+
+  found=$(efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | grep -F "$path_pat" \
+    | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/' || true)
+  if [ -z "$found" ]; then
+    found=$(efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | grep "$desc_pat" \
+      | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/' || true)
+  fi
+  echo "$found"
+}
+
+show_list() {
+  echo "Current boot order, first entry wins:"
+  echo
+  order=$(current_order)
+  if [ -z "$order" ]; then
+    echo "  (BootOrder is unset)"
+  else
+    echo "$order" | tr ',' '\n' | while IFS= read -r num; do
+      [ -n "$num" ] || continue
+      line=$(efibootmgr -v | grep "^Boot${num}" || true)
+      if [ -z "$line" ]; then
+        echo "  $num  <no such entry - BootOrder references a deleted entry>"
+      else
+        echo "  $(echo "$line" | cut -c1-100)"
+      fi
+    done
+  fi
+
+  echo
+  echo "Recognised device classes on this board:"
+  for c in nvme sd emmc usb; do
+    e=$(entries_for_class "$c")
+    if [ -n "$e" ]; then
+      printf '  %-5s %s\n' "$c" "$(echo "$e" | tr '\n' ' ')"
+    else
+      printf '  %-5s -\n' "$c"
+    fi
+  done
+}
+
+once=0
+dry_run=0
+want=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)
+      require_efi
+      show_list
+      exit 0
+      ;;
+    --once) once=1 ;;
+    --dry-run) dry_run=1 ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*) die "unknown option '$1' (try --help)" ;;
+    *)
+      [ -z "$want" ] || die "give exactly one device class"
+      want="$1"
+      ;;
+  esac
+  shift
+done
+
+[ -n "$want" ] || {
+  usage >&2
+  exit 1
+}
+class_pattern "$want" >/dev/null 2>&1 || die "unknown device class '$want' (try --help)"
+
+require_efi
+
+matches=$(entries_for_class "$want")
+if [ -z "$matches" ]; then
+  echo "$SELF: no UEFI boot entry refers to a $want device." >&2
+  echo >&2
+  echo "The firmware only creates an entry for a disk it can see and boot." >&2
+  echo "If the disk was provisioned but never booted, reboot once so the" >&2
+  echo "firmware enumerates it, then run this again. Current entries:" >&2
+  echo >&2
+  efibootmgr -v >&2 || true
+  exit 1
+fi
+
+count=$(echo "$matches" | grep -c .)
+target=$(echo "$matches" | head -n1)
+if [ "$count" -gt 1 ]; then
+  echo "$SELF: warning: $count entries match '$want' ($(echo "$matches" | tr '\n' ' ')); using $target" >&2
+fi
+
+if [ "$once" -eq 1 ]; then
+  echo "Next boot only: $target ($want)"
+  if [ "$dry_run" -eq 1 ]; then
+    echo "(dry run, BootNext not written)"
+    exit 0
+  fi
+  efibootmgr -n "$target" >/dev/null
+  readback=$(efibootmgr | sed -n 's/^BootNext: //p' | tr -d '[:space:]')
+  # Read back rather than trusting the exit status: efivarfs can accept a
+  # write that the firmware then discards, and a boot selection that silently
+  # did not take is the whole failure this tool exists to prevent.
+  [ "$readback" = "$target" ] \
+    || die "BootNext reads back as '${readback:-unset}', expected '$target'"
+  echo "BootNext=$readback"
+  exit 0
+fi
+
+order=$(current_order)
+[ -n "$order" ] || die "BootOrder is unset; refusing to invent one"
+
+# Move the target to the front, keep everything else in its existing relative
+# order. Dropping the other entries would leave the board with no fallback if
+# the selected disk later fails to boot.
+rest=$(echo "$order" | tr ',' '\n' | grep -v "^${target}$" | tr '\n' ',' | sed 's/,$//')
+if [ -n "$rest" ]; then
+  neworder="${target},${rest}"
+else
+  neworder="$target"
+fi
+
+echo "Boot device: $want (entry $target)"
+echo "  before: $order"
+echo "  after:  $neworder"
+
+if [ "$dry_run" -eq 1 ]; then
+  echo "(dry run, BootOrder not written)"
+  exit 0
+fi
+
+if [ "$neworder" = "$order" ]; then
+  echo "Already first in the boot order; nothing to do."
+  exit 0
+fi
+
+efibootmgr -o "$neworder" >/dev/null
+
+readback=$(current_order)
+[ "$readback" = "$neworder" ] \
+  || die "BootOrder reads back as '$readback', expected '$neworder'"
+echo "BootOrder=$readback"

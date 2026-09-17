@@ -42,6 +42,7 @@ RDEPENDS:${PN} = " \
   kernel-module-r8168 \
   ${GSTREAMER_PACKAGES} \
   swupdate \
+  avocado-boot-device \
 "
 
 GSTREAMER_PACKAGES = " \
