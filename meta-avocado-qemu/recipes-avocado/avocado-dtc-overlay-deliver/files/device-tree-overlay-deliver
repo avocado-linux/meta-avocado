@@ -8,20 +8,31 @@
 # one BSP's implementation of this path is installed in a given machine build,
 # so this file owns delivery for the QEMU targets.
 #
-# Scope: DELIVERY ONLY. Each <name>.dtbo is placed on the boot FAT under
-# overlays/<name>.dtbo via a stone `files_append` manifest fragment (which the
-# CLI passes to `stone bundle --overlay`), and each overlay is marked
-# claimed_by. Boot-time SELECTION (wiring u-boot's apply_overlays / fdt_overlays
-# so the overlay is actually applied onto the DTB) is a separate step: QEMU's
-# `virt` machine hands u-boot a firmware-generated DTB with no overlay wiring in
-# place today. This hook proves the build/delivery path; the u-boot boot chain
-# is added on top of it.
+# Each <name>.dtbo is placed on the boot FAT under overlays/<name>.dtbo via a
+# stone `files_append` manifest fragment (which the CLI passes to
+# `stone bundle --overlay`), and each overlay is marked claimed_by.
+#
+# Boot-time selection is wired: alongside the blobs this writes an overlay list
+# (OVERLAY_LIST_FILE) that the u-boot env's avocado_apply_overlays imports and
+# iterates, applying each onto the DTB QEMU's `virt` machine hands u-boot. That
+# is why claiming here is honest - an overlay delivered by this hook is one the
+# boot chain actually applies. See
+# meta-avocado-qemu/recipes-bsp/u-boot/u-boot/env/avocado-qemuarm64.txt; the
+# apply path needs CONFIG_OF_LIBFDT_OVERLAY, which avocado.cfg sets because
+# qemu_arm64_defconfig does not.
 
 import json
 import os
 import sys
 
 KERNEL_NAMES = ("Image", "zImage", "uImage", "bzImage", "vmlinux", "vmlinuz")
+
+# The overlay list the boot script iterates. Named to match the Pi hook's file
+# of the same name - each holds the overlay list in its platform's own boot
+# format, and only one BSP hook is ever installed in a given build. The contents
+# here are `env import -t`-able, so the name is a contract with
+# meta-avocado-qemu/recipes-bsp/u-boot/u-boot/env/avocado-qemuarm64.txt.
+OVERLAY_LIST_FILE = "avocado-overlays.txt"
 
 
 def die(msg):
@@ -68,6 +79,7 @@ def find_boot_fat(stone):
 
 
 def main():
+    staging = env("AVOCADO_DTBO_STAGING")
     manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
     fragment_path = env("AVOCADO_DELIVERY_FRAGMENT")
     stone_path = env("AVOCADO_STONE_MANIFEST")
@@ -88,6 +100,16 @@ def main():
     files_append = [
         {"in": ov["file"], "out": f"overlays/{ov['file']}"} for ov in overlays
     ]
+
+    # The boot script cannot enumerate a directory, so hand it the list. One
+    # `env import -t`-able line next to the kernel; the script iterates it and
+    # applies overlays/<name>.dtbo for each. Names, not filenames, so the boot
+    # script owns the overlays/ prefix and the .dtbo suffix in one place.
+    names = " ".join(ov["name"] for ov in overlays)
+    with open(os.path.join(staging, OVERLAY_LIST_FILE), "w") as f:
+        f.write(f"avocado_fdt_overlays={names}\n")
+    files_append.append({"in": OVERLAY_LIST_FILE, "out": OVERLAY_LIST_FILE})
+
     fragment = {
         "storage_devices": {
             dev_key: {"images": {img_key: {"build_args": {"files_append": files_append}}}}
