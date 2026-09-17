@@ -40,12 +40,19 @@ MODULES_MODULE_SYMVERS_LOCATION = "kernel-open"
 # under arch/x86), but NVIDIA's kernel-open/Makefile only accepts its own arch
 # names (x86_64/aarch64/...) and errors "Unsupported architecture x86". The
 # kernel Makefile maps ARCH=x86_64 -> SRCARCH=x86, so this satisfies both.
+# CC='${KERNEL_CC}' (not ${CC}): KERNEL_CC carries the -ffile-prefix-map pair for
+# STAGING_KERNEL_DIR/STAGING_KERNEL_BUILDDIR (kernel-arch.bbclass), which module.bbclass
+# passes for the builds it drives itself. This recipe supplies its own do_compile, so a
+# plain ${CC} compiled the kernel headers with no prefix map and baked raw TMPDIR paths
+# into the .ko via __FILE__ in inlined WARN_ON/BUG_ON -- failing the buildpaths QA, which
+# the avocado distro treats as fatal. Only shows up on 6.18: file_ref.h and ucopysize.h
+# are new headers that inline such macros, so the 6.6 build never tripped it.
 EXTRA_OEMAKE += " \
     ARCH='x86_64' \
     TARGET_ARCH='x86_64' \
     SYSSRC='${STAGING_KERNEL_DIR}' \
     SYSOUT='${STAGING_KERNEL_BUILDDIR}' \
-    CC='${CC}' \
+    CC='${KERNEL_CC}' \
     LD='${LD}' \
     AR='${AR}' \
     LDFLAGS='' \
