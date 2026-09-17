@@ -15,20 +15,20 @@ COMPLETE_BUILD=false
 SDKMACHINE="x86_64"
 PASSTHRU_ARGS=()
 for arg in "$@"; do
-    case $arg in
-        --clean)
-        CLEAN_BUILD=true
-        ;;
-        --complete)
-        COMPLETE_BUILD=true
-        ;;
-        --sdkmachine=*)
-        SDKMACHINE="${arg#*=}"
-        ;;
-        *)
-        PASSTHRU_ARGS+=("$arg")
-        ;;
-    esac
+  case $arg in
+    --clean)
+      CLEAN_BUILD=true
+      ;;
+    --complete)
+      COMPLETE_BUILD=true
+      ;;
+    --sdkmachine=*)
+      SDKMACHINE="${arg#*=}"
+      ;;
+    *)
+      PASSTHRU_ARGS+=("$arg")
+      ;;
+  esac
 done
 ARGS="${PASSTHRU_ARGS[*]}"
 
@@ -43,51 +43,51 @@ echo
 
 # Find all .yml files in kas/machine directory
 for machine_config in "$PROJECT_ROOT"/kas/machine/*.yml; do
-    if [ -f "$machine_config" ]; then
-        machine_name=$(basename "$machine_config" .yml)
-        echo "=========================================="
-        echo "Building machine: $machine_name"
-        echo "Config: $machine_config"
-        echo "=========================================="
-        
-        # Source the init-build script with the machine config
-        # This creates the build directory and sets up the environment
-        cd "$PROJECT_ROOT" || exit 1
-        
-        # Try to source init-build and handle potential errors
-        if . scripts/init-build "$machine_config"; then
-            echo "Successfully initialized build environment for $machine_name"
+  if [ -f "$machine_config" ]; then
+    machine_name=$(basename "$machine_config" .yml)
+    echo "=========================================="
+    echo "Building machine: $machine_name"
+    echo "Config: $machine_config"
+    echo "=========================================="
 
-            if [ "$CLEAN_BUILD" = true ]; then
-                echo "--> --clean specified, removing build directory"
-                rm -rf ./build
-            fi
-            
-            # Compose the build config; --complete appends the full-feature
-            # umbrella so this build ships the full image (default is minimal).
-            build_config="$machine_config"
-            if [ "$COMPLETE_BUILD" = true ]; then
-                build_config="$machine_config:$PROJECT_ROOT/kas/feature/complete.yml"
-            fi
+    # Source the init-build script with the machine config
+    # This creates the build directory and sets up the environment
+    cd "$PROJECT_ROOT" || exit 1
 
-            # Run kas build with the original arguments
-            echo "Running: SDKMACHINE=$SDKMACHINE kas build $build_config ${PASSTHRU_ARGS[*]}"
-            if SDKMACHINE="$SDKMACHINE" kas build "$build_config" "${PASSTHRU_ARGS[@]}"; then
-                echo "✅ Build SUCCEEDED for $machine_name"
-                SUCCESSFUL_BUILDS+=("$machine_name")
-            else
-                echo "❌ Build FAILED for $machine_name"
-                FAILED_BUILDS+=("$machine_name")
-            fi
-        else
-            echo "❌ Failed to initialize build environment for $machine_name"
-            FAILED_BUILDS+=("$machine_name")
-        fi
-        
-        echo
-        echo "Completed build attempt for $machine_name"
-        echo
+    # Try to source init-build and handle potential errors
+    if . scripts/init-build "$machine_config"; then
+      echo "Successfully initialized build environment for $machine_name"
+
+      if [ "$CLEAN_BUILD" = true ]; then
+        echo "--> --clean specified, removing build directory"
+        rm -rf ./build
+      fi
+
+      # Compose the build config; --complete appends the full-feature
+      # umbrella so this build ships the full image (default is minimal).
+      build_config="$machine_config"
+      if [ "$COMPLETE_BUILD" = true ]; then
+        build_config="$machine_config:$PROJECT_ROOT/kas/feature/complete.yml"
+      fi
+
+      # Run kas build with the original arguments
+      echo "Running: SDKMACHINE=$SDKMACHINE kas build $build_config ${PASSTHRU_ARGS[*]}"
+      if SDKMACHINE="$SDKMACHINE" kas build "$build_config" "${PASSTHRU_ARGS[@]}"; then
+        echo "✅ Build SUCCEEDED for $machine_name"
+        SUCCESSFUL_BUILDS+=("$machine_name")
+      else
+        echo "❌ Build FAILED for $machine_name"
+        FAILED_BUILDS+=("$machine_name")
+      fi
+    else
+      echo "❌ Failed to initialize build environment for $machine_name"
+      FAILED_BUILDS+=("$machine_name")
     fi
+
+    echo
+    echo "Completed build attempt for $machine_name"
+    echo
+  fi
 done
 
 echo "=========================================="
@@ -98,26 +98,26 @@ echo "Total machines processed: $((${#SUCCESSFUL_BUILDS[@]} + ${#FAILED_BUILDS[@
 echo
 
 if [ ${#SUCCESSFUL_BUILDS[@]} -gt 0 ]; then
-    echo "✅ SUCCESSFUL BUILDS (${#SUCCESSFUL_BUILDS[@]}):"
-    for machine in "${SUCCESSFUL_BUILDS[@]}"; do
-        echo "  - $machine"
-    done
-    echo
+  echo "✅ SUCCESSFUL BUILDS (${#SUCCESSFUL_BUILDS[@]}):"
+  for machine in "${SUCCESSFUL_BUILDS[@]}"; do
+    echo "  - $machine"
+  done
+  echo
 fi
 
 if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
-    echo "❌ FAILED BUILDS (${#FAILED_BUILDS[@]}):"
-    for machine in "${FAILED_BUILDS[@]}"; do
-        echo "  - $machine"
-    done
-    echo
+  echo "❌ FAILED BUILDS (${#FAILED_BUILDS[@]}):"
+  for machine in "${FAILED_BUILDS[@]}"; do
+    echo "  - $machine"
+  done
+  echo
 fi
 
 # Exit with appropriate code
 if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
-    echo "Some builds failed. Check the output above for details."
-    exit 1
+  echo "Some builds failed. Check the output above for details."
+  exit 1
 else
-    echo "All builds completed successfully! 🎉"
-    exit 0
+  echo "All builds completed successfully! 🎉"
+  exit 0
 fi

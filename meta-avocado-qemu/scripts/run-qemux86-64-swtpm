@@ -6,7 +6,10 @@
 set -euo pipefail
 
 BUILD_DIR="$(pwd)/build"
-[ -d "$BUILD_DIR/tmp" ] || { echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"; exit 1; }
+[ -d "$BUILD_DIR/tmp" ] || {
+  echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"
+  exit 1
+}
 SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
@@ -32,7 +35,7 @@ LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev
 LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
 
 run_native() {
-    "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
+  "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
 }
 
 trap 'pkill -f "swtpm socket.*${TPM_DIR}" 2>/dev/null || true' EXIT INT TERM
@@ -49,18 +52,21 @@ mkdir -p "$TPM_DIR"
 
 echo "Starting swtpm daemon (log: $TPM_LOG)"
 run_native "$SWTPM_BIN" socket \
-    --tpmstate dir="$TPM_DIR" \
-    --ctrl type=unixio,path="$TPM_SOCK" \
-    --log file="$TPM_LOG",level=5 \
-    --tpm2 \
-    --daemon
+  --tpmstate dir="$TPM_DIR" \
+  --ctrl type=unixio,path="$TPM_SOCK" \
+  --log file="$TPM_LOG",level=5 \
+  --tpm2 \
+  --daemon
 
 # Wait up to 10 s for the socket
-for i in $(seq 1 10); do
-    [ -S "$TPM_SOCK" ] && break
-    sleep 1
+for _ in $(seq 1 10); do
+  [ -S "$TPM_SOCK" ] && break
+  sleep 1
 done
-[ -S "$TPM_SOCK" ] || { echo "Error: swtpm socket did not appear after 10 s"; exit 1; }
+[ -S "$TPM_SOCK" ] || {
+  echo "Error: swtpm socket did not appear after 10 s"
+  exit 1
+}
 
 # ---------------------------------------------------------------------------
 # QEMU
@@ -72,14 +78,14 @@ run_native "$QEMU_IMG" resize -f raw "$IMAGE_FILE" 1024M
 echo "Starting QEMU..."
 echo "-------------------------------------"
 run_native "$QEMU_EXEC" \
-    -L "$QEMU_DATA_DIR" \
-    -bios "${QEMU_BIOS}" \
-    -device sdhci-pci \
-    -device sd-card,drive=mmc \
-    -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
-    -chardev socket,id=chrtpm,path="$TPM_SOCK" \
-    -tpmdev emulator,id=tpm0,chardev=chrtpm \
-    -device tpm-tis,tpmdev=tpm0 \
-    -m 256 \
-    -cpu max \
-    -nographic
+  -L "$QEMU_DATA_DIR" \
+  -bios "${QEMU_BIOS}" \
+  -device sdhci-pci \
+  -device sd-card,drive=mmc \
+  -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
+  -chardev socket,id=chrtpm,path="$TPM_SOCK" \
+  -tpmdev emulator,id=tpm0,chardev=chrtpm \
+  -device tpm-tis,tpmdev=tpm0 \
+  -m 256 \
+  -cpu max \
+  -nographic

@@ -8,51 +8,55 @@ target="icam-540"
 RUNTIME_NAME="$1"
 
 input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+# Deliberately unused: `stone provision` takes no -m flag. Kept so this hook still
+# declares AVOCADO_STONE_MANIFEST as a recognised input and stays comparable with
+# its avocado-build sibling.
+# shellcheck disable=SC2034
 manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 build_include_flags() {
-    local main_input_dir="$1"
-    local include_flags=""
-    
-    # Add SDK stone directory for BSP files and devicetree
-    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
-        include_flags="$include_flags -i \"$AVOCADO_SDK_PREFIX/stone\""
-    fi
-    
-    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
-        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
-        for path in "${PATHS[@]}"; do
-            if [ -n "$path" ]; then
-                include_flags="$include_flags -i \"$path\""
-            fi
-        done
-    fi
-    
-    include_flags="$include_flags -i \"$main_input_dir\""
-    echo "$include_flags"
+  local main_input_dir="$1"
+  local include_flags=""
+
+  # Add SDK stone directory for BSP files and devicetree
+  if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+    include_flags="$include_flags -i \"$AVOCADO_SDK_PREFIX/stone\""
+  fi
+
+  if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+    IFS=':' read -ra PATHS <<<"$AVOCADO_STONE_INCLUDE_PATHS"
+    for path in "${PATHS[@]}"; do
+      if [ -n "$path" ]; then
+        include_flags="$include_flags -i \"$path\""
+      fi
+    done
+  fi
+
+  include_flags="$include_flags -i \"$main_input_dir\""
+  echo "$include_flags"
 }
 
 # Build display string of all include paths
 build_include_display() {
-    local main_input_dir="$1"
-    local display=""
-    
-    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
-        display="${display}\n    - ${AVOCADO_SDK_PREFIX}/stone"
-    fi
-    
-    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
-        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
-        for path in "${PATHS[@]}"; do
-            if [ -n "$path" ]; then
-                display="${display}\n    - ${path}"
-            fi
-        done
-    fi
-    
-    display="${display}\n    - ${main_input_dir}"
-    echo -e "$display"
+  local main_input_dir="$1"
+  local display=""
+
+  if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+    display="${display}\n    - ${AVOCADO_SDK_PREFIX}/stone"
+  fi
+
+  if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+    IFS=':' read -ra PATHS <<<"$AVOCADO_STONE_INCLUDE_PATHS"
+    for path in "${PATHS[@]}"; do
+      if [ -n "$path" ]; then
+        display="${display}\n    - ${path}"
+      fi
+    done
+  fi
+
+  display="${display}\n    - ${main_input_dir}"
+  echo -e "$display"
 }
 
 echo -e "\033[94m[INFO]\033[0m Running stone provision.
@@ -66,8 +70,10 @@ include_flags=$(build_include_flags "$input_dir")
 var_image="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/avocado-image-var-${target}.btrfs"
 var_image_bytes=$(stat -c%s "$var_image")
 
-eval stone provision $include_flags --partition-size \"var=$var_image_bytes\"
-
+# include_flags is a flag list of pre-quoted -i "path" pairs and must word-split
+# under eval; quoting it would hand stone one argument containing spaces.
+# shellcheck disable=SC2086
+eval stone provision $include_flags --partition-size "\"var=$var_image_bytes\""
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
