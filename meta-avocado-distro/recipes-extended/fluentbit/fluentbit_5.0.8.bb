@@ -50,6 +50,11 @@ SRC_URI:append:libc-musl = "\
     file://0004-chunkio-Link-with-fts-library-with-musl.patch \
 "
 
+# The git fetcher unpacks to ${WORKDIR}/git, but S defaults to ${WORKDIR}/${BP}
+# (fluentbit-5.0.8), which nothing creates -- so do_patch ran quilt against an
+# empty path and every patch failed with "can't find file to patch".
+S = "${WORKDIR}/git"
+
 # prefix tag with "v" to avoid upgrade to random tags like "20220215"
 UPSTREAM_CHECK_GITTAGREGEX = "v(?P<pver>(\d+(\.\d+)+))"
 
