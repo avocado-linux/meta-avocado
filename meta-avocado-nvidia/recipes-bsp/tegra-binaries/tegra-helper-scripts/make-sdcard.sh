@@ -128,6 +128,12 @@ make_partitions() {
       fi
       printf "  [%02d] name=%s start=%s size=%s sectors\n" "$partnumber" "$partname" "$start_location" "$partsize"
       sgdiskcmd="$sgdiskcmd --new=$partnumber:$start_location:+$partsize --typecode=$partnumber:$parttype -c $partnumber:$partname"
+      # Without this, sgdisk invents a random GUID and the layout's
+      # unique_guid is dropped on the floor - nvflashxmlparse parses it and
+      # emits it as partguid, and it landed in a variable nothing read.
+      # Anything naming a rootfs by PARTUUID then waits for a value that is
+      # not on the disk.
+      [ -z "$partguid" ] || sgdiskcmd="$sgdiskcmd --partition-guid=$partnumber:$partguid"
     fi
     i=$(expr "$i" + 1)
   done
@@ -139,6 +145,7 @@ make_partitions() {
     fi
     printf "  [%02d] name=%s (fills to end)\n" "$partnumber" "$partname"
     sgdiskcmd="$sgdiskcmd --largest-new=$partnumber --typecode=$partnumber:$parttype -c $partnumber:$partname"
+    [ -z "$partguid" ] || sgdiskcmd="$sgdiskcmd --partition-guid=$partnumber:$partguid"
   fi
   local errlog=$(mktemp)
   if ! eval "$sgdiskcmd" >/dev/null 2>"$errlog"; then
