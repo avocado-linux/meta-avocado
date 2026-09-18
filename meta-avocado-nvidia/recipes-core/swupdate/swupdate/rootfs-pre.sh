@@ -9,8 +9,17 @@ LOGFILE="/tmp/swupdate-tegra-ab.log"
 VARS_FILE="/tmp/tegra-ab-vars"
 TARGET_SYMLINK="/tmp/target_rootfs" # set device="/tmp/target_rootfs" in sw-description to use this
 
+# Diagnostics go to stderr, not stdout. resolve_partlabel_on_disk() returns its
+# result by echoing it and is called inside "$(...)", so anything log() writes to
+# stdout is captured as that result instead of being printed. That is not
+# hypothetical: with log() on stdout, the "more than one partition carries this
+# label" refusal did not refuse. The caller tests the captured value for
+# emptiness, a log line is not empty, so the script took the message itself as a
+# device path, symlinked it, and reported success - defeating the one guard
+# standing between an ambiguous layout and writing the payload somewhere nobody
+# chose.
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE" >&2
 }
 
 # Device the running rootfs came from. This is the ground truth for which disk
