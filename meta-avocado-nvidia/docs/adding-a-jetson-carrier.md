@@ -385,6 +385,40 @@ cause).
   Check yours against the target's own console
   (`mmcblkN: mmcN:0001 USD 29.8 GiB`) the first time you flash it, and
   correct the manifest if it disagrees.
+- **USB boot names its disk per run, and there is nowhere to declare
+  it.** The `tegraflash-usb` profile takes the target disk from
+  `AVOCADO_PROVISION_USB_DEVICE` only, and refuses when it is unset:
+
+  ```bash
+  AVOCADO_PROVISION_USB_DEVICE=sda \
+    avocado provision -r dev --profile tegraflash-usb
+  ```
+
+  The missing manifest key is deliberate, and is the one place this
+  profile does not mirror `tegraflash-sd` above. `sd_device` belongs in
+  a board file because which `mmcblkN` the card lands on follows from
+  the module. A SCSI letter does not: it is handed out in attach order,
+  so the same stick is `sda` on its own and `sdb` behind a card reader
+  that claimed `sda` first. A bench Orin Nano showed exactly that, the
+  stick at `sda` with an empty reader slot already holding `sdb`. No
+  board file can be right twice, and a value committed to one would
+  become a standing default that destroys whatever holds that letter on
+  every later flash.
+
+  The consequence of a wrong value differs too, which is why the two
+  profiles are allowed to disagree. A wrong `mmcblkN` can only reach
+  storage soldered to the module; a wrong `sdX` is an unrelated disk
+  somebody left plugged in. Read the target's own `/sys/block` before
+  flashing rather than assuming last run's letter still applies.
+
+  The value is a bare `sdX` name. A `/dev/...` path and a partition
+  such as `sda1` are both rejected before they reach the flash, since
+  the whole disk is what gets written.
+
+  Note the partition suffix differs from the MMC and NVMe profiles:
+  those produce `mmcblk0p1` and `nvme0n1p1`, while USB produces `sda1`.
+  That follows the kernel's own rule, where a device name ending in a
+  digit takes a `p` separator and one ending in a letter does not.
 - **EEPROM SKU mismatch aborts signing.** If the actual SOM SKU
   doesn't match `CHECK_BOARDSKU` in flashvars, tegraflash refuses to
   sign with `actual board SKU X does not match expected board SKU Y`.
