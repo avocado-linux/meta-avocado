@@ -436,26 +436,53 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
   # whichever slot nvbootctrl later selects; avocado-tegra-init picks between
   # them using the slot it already resolves from BootChainOsCurrent.
   #
-  # Deliberately NOT carrying the machine's KERNEL_ARGS forward here. An
-  # earlier version of this hunk read them out of the prebuilt boot.img
-  # header (dd at the Android v0-v2 cmdline offset) and re-appended the
-  # PARTUUID args to them, on the theory that mkbootimg's default empty
-  # cmdline is silently fatal. Hardware evidence on THIS machine says
-  # otherwise: an empty mkbootimg cmdline reaches a working login prompt
-  # every time (confirmed 2026-09-17, both a from-scratch flash and the
-  # published reference image), while carrying the real KERNEL_ARGS
-  # forward produced a silent hang partway into userspace boot on two
-  # independent flashes, with no error or panic. The exact offending
-  # token was not isolated; issue #398 records the candidate list and the
-  # leading suspect, which is that console=tty0 sorts after
-  # console=ttyTCU0 and so takes /dev/console away from the serial port.
-  # Passing only the two PARTUUID args keeps this fix scoped to what it
-  # is verified to do: name the rootfs. Revisit when #398 identifies the
-  # token, since the machine's nvme_core and pcie_aspm settings are not
-  # reaching the kernel by any path today.
   app_partuuid=$(tr 'a-f' 'A-F' </proc/sys/kernel/random/uuid)
   app_b_partuuid=$(tr 'a-f' 'A-F' </proc/sys/kernel/random/uuid)
   boot_cmdline="avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
+
+  # Carry the machine's KERNEL_ARGS forward. mkbootimg writes an empty command
+  # line otherwise, and the machine config's arguments then reach the kernel by
+  # no path at all - `nvme_core.default_ps_max_latency_us=0` and `pcie_aspm=off`
+  # are set for this hardware and were not being applied to a provisioned board.
+  #
+  # Console ORDERING is not handled here on purpose. /dev/console follows the
+  # last `console=` on the line, and meta-tegra's tegra234 lists end with
+  # `console=tty0` while also setting `video=efifb:off`, which is what made a
+  # working board look hung (#398). That is fixed in the machine configs, where
+  # meta-avocado already owns KERNEL_ARGS, so it applies to the prebuilt
+  # boot.img too rather than only to images this function repacks.
+  #
+  # The prebuilt image is read as an Android boot header, where v0-v2 keep a
+  # 512-byte command line at offset 64. Check the magic and the version rather
+  # than assuming: a v3+ header moved the field, and reading offset 64 there
+  # returns a fragment of some other field that is non-empty and looks fine.
+  prebuilt_cmdline=""
+  if [ -f "$build_dir/boot.img" ]; then
+    boot_magic=$(dd if="$build_dir/boot.img" bs=8 count=1 2>/dev/null)
+    boot_hdr_version=$(od -An -tu4 -j40 -N4 "$build_dir/boot.img" 2>/dev/null | tr -d ' ')
+    if [ "$boot_magic" = "ANDROID!" ] && [ -n "$boot_hdr_version" ] && [ "$boot_hdr_version" -le 2 ]; then
+      prebuilt_cmdline=$(dd if="$build_dir/boot.img" bs=1 skip=64 count=512 2>/dev/null | tr -d '\0')
+    else
+      echo "WARNING: $build_dir/boot.img is not an Android boot header v0-v2"
+      echo "         (magic='$boot_magic' header_version='$boot_hdr_version')."
+      echo "         Not carrying KERNEL_ARGS forward; the repacked image will"
+      echo "         name only the rootfs PARTUUIDs."
+    fi
+  fi
+
+  [ -z "$prebuilt_cmdline" ] || boot_cmdline="$prebuilt_cmdline $boot_cmdline"
+
+  # mkbootimg does not reject an over-long command line for a v0-v2 header, it
+  # SPLITS it: the first 511 bytes stay in cmdline and the rest goes to the
+  # extra_cmdline field. The PARTUUID arguments are appended last and would be
+  # the part that moves, so an overflow would silently un-name the rootfs. Refuse
+  # instead, while the operator is watching a provision run.
+  if [ "${#boot_cmdline}" -gt 511 ]; then
+    echo "ERROR: kernel command line is ${#boot_cmdline} bytes, over the 511"
+    echo "       an Android v0-v2 boot header holds before mkbootimg splits it."
+    echo "       cmdline: $boot_cmdline"
+    exit 1
+  fi
 
   echo "Packing boot.img from kernel ${AVOCADO_PROVISION_KERNEL_VERSION:-?} (Image=$AVOCADO_PROVISION_KERNEL_IMAGE)"
   echo "  cmdline: $boot_cmdline"
