@@ -28,7 +28,8 @@ build_include_flags() {
     include_flags="$include_flags -i \"$main_input_dir\""
 
     if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
-        for path in $AVOCADO_STONE_INCLUDE_PATHS; do
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
             if [ -n "$path" ]; then
                 include_flags="$include_flags -i \"$path\""
             fi
@@ -50,7 +51,8 @@ build_include_display() {
     display="${display}\n    - ${main_input_dir}"
 
     if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
-        for path in $AVOCADO_STONE_INCLUDE_PATHS; do
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
             if [ -n "$path" ]; then
                 display="${display}\n    - ${path}"
             fi
