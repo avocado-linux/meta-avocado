@@ -487,6 +487,9 @@ case "${AVOCADO_PROVISION_PROFILE:-tegraflash}" in
     tegraflash-sd)
         boot_media="sd"
         ;;
+    tegraflash-usb)
+        boot_media="usb"
+        ;;
     *)
         echo "WARNING: Unknown tegraflash profile '${AVOCADO_PROVISION_PROFILE}', defaulting to nvme"
         ;;
@@ -557,6 +560,48 @@ case "$boot_media" in
         sed -i \
             -e "s/^BOOTDEV=.*/BOOTDEV=\"${sd_device}p1\"/" \
             -e "s/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE=\"${sd_device}\"/" \
+            -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
+            "$build_dir/.env.initrd-flash"
+        ;;
+    usb)
+        # Operator-supplied per run, with no manifest fallback - deliberately
+        # unlike the sd branch above. sd_device is declared per board because
+        # which mmcblkN the card lands on IS a property of the module: an
+        # eMMC-less module puts it at mmcblk0, one carrying eMMC at mmcblk1.
+        # A USB disk has no equivalent. SCSI letters are handed out in attach
+        # order, so the same stick is sda alone and sdb behind a card reader
+        # that claimed sda first - the bench Orin Nano shows exactly that, the
+        # stick at sda and an empty reader slot at sdb. A board file cannot
+        # know the answer, so there is nowhere to declare it that would be
+        # right twice, and a value committed to a manifest would become a
+        # standing default that destroys whatever holds that letter on every
+        # later flash. The blast radius is what makes this worth the
+        # asymmetry: a wrong mmcblkN can only reach storage soldered to the
+        # module, while a wrong sdX is somebody's unrelated USB disk.
+        usb_device="${AVOCADO_PROVISION_USB_DEVICE:-}"
+        if [ -z "$usb_device" ]; then
+            echo "ERROR: no USB disk device declared." >&2
+            echo "       Set AVOCADO_PROVISION_USB_DEVICE to the bare kernel" >&2
+            echo "       name of the disk to provision - e.g. sda - after" >&2
+            echo "       checking which one it is on the board that will be" >&2
+            echo "       flashed. Everything on that disk is destroyed." >&2
+            exit 1
+        fi
+        # Same validation as the sd branch, and for the same reason: a /dev
+        # path would turn the substitution into s/^BOOTDEV=.*/BOOTDEV="/dev/
+        # sda1"/ and die on "unknown option to `s'", while an & would silently
+        # splice in the matched text. Partition suffixes are rejected too, so
+        # "sda1" cannot be passed where the whole-disk name is meant.
+        if [[ ! "$usb_device" =~ ^sd[a-z]+$ ]]; then
+            echo "ERROR: USB disk device '$usb_device' is not a bare sdX name." >&2
+            echo "       Expected e.g. sda, not a /dev path and not a" >&2
+            echo "       partition such as sda1." >&2
+            exit 1
+        fi
+        echo "USB disk device: $usb_device (all existing data will be erased)"
+        sed -i \
+            -e "s/^BOOTDEV=.*/BOOTDEV=\"${usb_device}1\"/" \
+            -e "s/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE=\"${usb_device}\"/" \
             -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
             "$build_dir/.env.initrd-flash"
         ;;
