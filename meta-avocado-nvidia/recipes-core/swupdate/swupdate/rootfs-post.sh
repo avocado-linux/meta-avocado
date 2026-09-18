@@ -56,9 +56,23 @@ if [ -L "$BYLABEL" ]; then
   fi
 fi
 
-# 4) Optional filesystem sanity (skip if blkid not available)
+# 4) Optional filesystem sanity
+#
+# `command -v blkid` succeeds on this rootfs and tells you nothing useful: the
+# blkid there is busybox's, which ignores -o and -s and prints its own line
+# instead. `blkid -o value -s TYPE /dev/nvme0n1p2` returns
+# `/dev/nvme0n1p2: TYPE="squashfs"` rather than `squashfs`, so the equality test
+# below failed on a perfectly good image and warned on every successful update -
+# training whoever reads these logs to ignore the one warning that would flag a
+# genuinely wrong payload.
+#
+# Parse the value out of whichever form came back rather than trusting the
+# flags. util-linux prints the bare value and passes through the case unchanged.
 if command -v blkid >/dev/null 2>&1; then
   FS_TYPE="$(blkid -o value -s TYPE "$TEGRA_TARGET_DEV" 2>/dev/null || true)"
+  case "$FS_TYPE" in
+    *TYPE=\"*) FS_TYPE="$(printf '%s\n' "$FS_TYPE" | sed -n 's/.*TYPE="\([^"]*\)".*/\1/p')" ;;
+  esac
   if [ -n "$FS_TYPE" ]; then
     log "blkid reports filesystem type: $FS_TYPE"
     if [ "$FS_TYPE" != "squashfs" ]; then

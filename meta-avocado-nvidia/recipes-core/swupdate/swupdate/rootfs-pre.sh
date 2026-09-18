@@ -44,6 +44,32 @@ disk_of() {
   esac
 }
 
+# GPT partition name for one partition, read from the kernel.
+#
+# blkid cannot answer this here. This script runs in the booted rootfs, which
+# ships busybox's blkid, and that reports TYPE/UUID/LABEL only - no PARTLABEL -
+# while silently ignoring -t, -o and -s. It does not fail when asked for a field
+# it does not implement; it answers a different question. Measured on a Jetson
+# Orin Nano: `blkid -o value -s PARTLABEL /dev/nvme0n1p1` prints
+# `/dev/nvme0n1p1: TYPE="erofs"`, which is not empty, so testing for emptiness to
+# mean "unavailable" yields a confident wrong answer rather than a blank.
+#
+# The kernel publishes the same GPT name as PARTNAME in each partition's uevent,
+# needing no package at all. avocado-tegra-init reads partitions this way in
+# find_datapart_on_disk().
+partname_of() {
+  [ -f "$1/uevent" ] || return 1
+  while IFS='=' read -r key val; do
+    if [ "$key" = "PARTNAME" ]; then
+      # printf, not echo: a name starting with -n or -e, or containing a
+      # backslash, is an option or an escape to some echo implementations.
+      printf '%s\n' "$val"
+      return 0
+    fi
+  done <"$1/uevent"
+  return 1
+}
+
 resolve_partlabel_on_disk() {
   # A PARTLABEL names a role, not a disk. A board provisioned to more than one
   # medium carries APP and APP_b on each of them, so resolving a label across
@@ -52,25 +78,35 @@ resolve_partlabel_on_disk() {
   # slot on the disk that never received it, and the board reboots into a
   # stale rootfs. Restrict the search to the disk we are running from, and
   # refuse rather than choose when it is still not unique.
+  #
+  # Walking that disk's own partition directories is what restricts it. The
+  # previous form searched every disk and filtered by name prefix, which had to
+  # anchor carefully so that /dev/nvme0n11p2 did not pass for /dev/nvme0n1;
+  # nvme0n11 is a sibling of nvme0n1 in /sys/block rather than a child, so
+  # enumerating one disk's children cannot express that mistake.
   label="$1"
   disk="$2"
+  diskname="${disk#/dev/}"
   found=""
   count=0
 
-  # Anchor on the exact partition prefix rather than accepting either form.
-  # Testing both would let /dev/nvme0n11p2 pass for disk /dev/nvme0n1, since
-  # the bare "$disk"[0-9]* alternative matches the next namespace's digit.
-  case "$disk" in
-    /dev/nvme* | /dev/mmcblk*) partprefix="${disk}p" ;;
-    *) partprefix="$disk" ;;
-  esac
+  # An absent disk directory is not "no partition carries the label" - it means
+  # the name we derived does not exist in sysfs at all. Saying so beats letting
+  # an unmatched glob report the same thing as a genuine miss.
+  if [ ! -d "/sys/block/$diskname" ]; then
+    log "ERROR: no sysfs directory for $disk (/sys/block/$diskname)"
+    return 1
+  fi
 
-  for cand in $(blkid -t "PARTLABEL=$label" -o device 2>/dev/null || true); do
-    case "$cand" in
-      "$partprefix"[0-9]*) ;;
-      *) continue ;;
-    esac
-    [ -b "$cand" ] || continue
+  for partdir in "/sys/block/$diskname/$diskname"*; do
+    [ "$(partname_of "$partdir" || true)" = "$label" ] || continue
+    cand="/dev/$(basename "$partdir")"
+    # A matching partition with no device node is worth a line: it is the one
+    # case where the label was found and the result still comes back empty.
+    if [ ! -b "$cand" ]; then
+      log "WARNING: $partdir carries PARTLABEL='$label' but $cand is not a block device"
+      continue
+    fi
     found="$cand"
     count=$((count + 1))
   done
@@ -164,8 +200,19 @@ log "Booted rootfs: $ACTIVE_DEV on $BOOT_DISK"
 # Cross-check nvbootctrl against the disk. If the slot it reports does not match
 # the partition we are actually running, writing the "inactive" slot would
 # overwrite something other than what we think, so stop.
-RUNNING_LABEL="$(blkid -o value -s PARTLABEL "$ACTIVE_DEV" 2>/dev/null || true)"
-if [ -n "$RUNNING_LABEL" ] && [ "$RUNNING_LABEL" != "$ACTIVE_PARTLABEL" ]; then
+# Both halves of this path are already known, so there is nothing to search for:
+# /dev/nvme0n1 plus /dev/nvme0n1p1 gives /sys/block/nvme0n1/nvme0n1p1.
+RUNNING_LABEL="$(partname_of "/sys/block/${BOOT_DISK#/dev/}/${ACTIVE_DEV#/dev/}" || true)"
+if [ -z "$RUNNING_LABEL" ]; then
+  # Previously an unreadable label was skipped, on the reading that it should
+  # not block an update. Reading the kernel's own PARTNAME changes what a blank
+  # means: every GPT partition has one, and nothing else in this script works
+  # without GPT names, so a blank says the partition we booted is not the shape
+  # the rest of this assumes. Refuse before reaching the part that writes.
+  log "ERROR: no PARTNAME in sysfs for $ACTIVE_DEV - not a GPT partition?"
+  exit 1
+fi
+if [ "$RUNNING_LABEL" != "$ACTIVE_PARTLABEL" ]; then
   log "ERROR: nvbootctrl reports slot $CURRENT_SLOT (active label"
   log "       '$ACTIVE_PARTLABEL') but / is '$RUNNING_LABEL' on $ACTIVE_DEV"
   exit 1
@@ -175,8 +222,28 @@ fi
 TARGET_DEV="$(resolve_partlabel_on_disk "$TARGET_PARTLABEL" "$BOOT_DISK" || true)"
 if [ -z "$TARGET_DEV" ]; then
   log "ERROR: Could not resolve PARTLABEL='$TARGET_PARTLABEL' on $BOOT_DISK"
-  # Show what's available to aid debugging
-  blkid 2>&1 | tee -a "$LOGFILE" || true
+  # Dump the names the resolver matches on, using its own glob so this shows the
+  # candidate set it actually considered. A blkid dump said nothing useful here:
+  # on this rootfs it cannot report PARTNAME at all.
+  boot_diskname="${BOOT_DISK#/dev/}"
+  log "  partitions on $BOOT_DISK:"
+  for partdir in "/sys/block/$boot_diskname/$boot_diskname"*; do
+    [ -f "$partdir/uevent" ] || continue
+    log "    $(basename "$partdir") PARTNAME=$(partname_of "$partdir" || echo '<none>')"
+  done
+  # Then say whether the label exists at all. Restricting the search to the boot
+  # disk is the point of this change, so the interesting failure is the label
+  # sitting on a disk we deliberately did not search - which the first dump, by
+  # construction, cannot show.
+  log "  same label elsewhere:"
+  for diskdir in /sys/block/*; do
+    [ "$(basename "$diskdir")" = "$boot_diskname" ] && continue
+    for partdir in "$diskdir/$(basename "$diskdir")"*; do
+      [ -f "$partdir/uevent" ] || continue
+      [ "$(partname_of "$partdir" || true)" = "$TARGET_PARTLABEL" ] || continue
+      log "    $(basename "$partdir") on $(basename "$diskdir")"
+    done
+  done
   exit 1
 fi
 
