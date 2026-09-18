@@ -62,8 +62,12 @@ if [ -n "$want_partuuid" ]; then
     # Both lookups therefore want the lowercased form, not the uppercase one the
     # layout XML carries.
     want_lower=$(echo "$want_partuuid" | tr 'A-F' 'a-f')
-    echo -n "Waiting for rootfs PARTUUID=$want_partuuid..."
-    for count in $(seq 1 20); do
+    printf '%s' "Waiting for rootfs PARTUUID=$want_partuuid..."
+    # DIAG-partuuid-timeout: 60 tries at 0.5s (30s) instead of 20 (10s), to test
+    # whether the 10s window was too short for this boot's PCIe/NVMe enumeration
+    # on hardware. Revert to 20 once the real timeout is known, or replace this
+    # polling loop with a udevadm settle/trigger wait if 30s turns out to be it.
+    for _ in $(seq 1 60); do
         # Cheap first: udev usually has the symlink already. readlink is not
         # allowed to abort init under set -e - busybox builds it without
         # CONFIG_FEATURE_READLINK_FOLLOW, where -f exits non-zero.
@@ -80,7 +84,7 @@ if [ -n "$want_partuuid" ]; then
             echo "[OK: $rootdev]"
             break
         fi
-        echo -n "."
+        printf '%s' "."
         sleep 0.5
     done
 
