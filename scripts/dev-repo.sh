@@ -34,13 +34,13 @@ DEFAULT_RELEASE_ID="dev"
 # otherwise the conventional sibling checkout next to this repo root.
 DEFAULT_EXTENSIONS_DIR=""
 if [ -n "${AVOCADO_EXTENSIONS_DIR:-}" ]; then
-    DEFAULT_EXTENSIONS_DIR="$AVOCADO_EXTENSIONS_DIR"
+  DEFAULT_EXTENSIONS_DIR="$AVOCADO_EXTENSIONS_DIR"
 elif [ -d "$REPO_ROOT/../extensions" ]; then
-    DEFAULT_EXTENSIONS_DIR="$(cd "$REPO_ROOT/../extensions" && pwd)"
+  DEFAULT_EXTENSIONS_DIR="$(cd "$REPO_ROOT/../extensions" && pwd)"
 fi
 
 usage() {
-    cat << EOF
+  cat <<EOF
 Usage: $0 [OPTIONS] <year> <target> [target2 ...]
 
 (Re)populate and serve a local package feed for one or more targets, then
@@ -89,25 +89,25 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 # are guaranteed target-exclusive; shared tunes (noarch, cortexa53_crypto) and
 # the _pkgs content pool are intentionally preserved and self-heal on re-sync.
 clean_target() {
-    local target="$1"
-    local pkgs="$REPO_DIR/packages/$CODENAME"
-    local rel="$REPO_DIR/releases/$CODENAME/$RELEASE_ID"
-    local frag="$REPO_DIR/staging/$RELEASE_ID/fragments/$target-fragment.json"
-    local count=0
-    local d
-    for d in \
-        "$pkgs/target/$target" "$pkgs/target/$target-ext" "$pkgs/sdk/$target" \
-        "$rel/target/$target" "$rel/target/$target-ext" "$rel/sdk/$target"; do
-        if [ -d "$d" ]; then
-            rm -rf "$d"
-            count=$((count + 1))
-        fi
-    done
-    if [ -f "$frag" ]; then
-        rm -f "$frag"
-        count=$((count + 1))
+  local target="$1"
+  local pkgs="$REPO_DIR/packages/$CODENAME"
+  local rel="$REPO_DIR/releases/$CODENAME/$RELEASE_ID"
+  local frag="$REPO_DIR/staging/$RELEASE_ID/fragments/$target-fragment.json"
+  local count=0
+  local d
+  for d in \
+    "$pkgs/target/$target" "$pkgs/target/$target-ext" "$pkgs/sdk/$target" \
+    "$rel/target/$target" "$rel/target/$target-ext" "$rel/sdk/$target"; do
+    if [ -d "$d" ]; then
+      rm -rf "$d"
+      count=$((count + 1))
     fi
-    log "  ✓ Reset $count target-scoped path(s) for '$target' (shared pools left intact)"
+  done
+  if [ -f "$frag" ]; then
+    rm -f "$frag"
+    count=$((count + 1))
+  fi
+  log "  ✓ Reset $count target-scoped path(s) for '$target' (shared pools left intact)"
 }
 
 # --- Parse arguments ----------------------------------------------------------
@@ -123,49 +123,80 @@ YEAR=""
 TARGETS=()
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        -c|--channel)        CHANNEL="$2"; shift 2 ;;
-        -r|--repo-dir)       REPO_DIR="$2"; shift 2 ;;
-        -E|--extensions-dir) EXTENSIONS_DIR="$2"; shift 2 ;;
-        -p|--port)           PORT="$2"; shift 2 ;;
-        -i|--release-id)     RELEASE_ID="$2"; shift 2 ;;
-        --build-ext)         BUILD_EXT=true; shift ;;
-        --clean)             CLEAN=true; shift ;;
-        --no-serve)          SERVE=false; shift ;;
-        -h|--help)           usage; exit 0 ;;
-        -*)                  echo "Error: Unknown option $1" >&2; usage >&2; exit 1 ;;
-        *)
-            if [ -z "$YEAR" ]; then
-                YEAR="$1"
-            else
-                TARGETS+=("$1")
-            fi
-            shift
-            ;;
-    esac
+  case $1 in
+    -c | --channel)
+      CHANNEL="$2"
+      shift 2
+      ;;
+    -r | --repo-dir)
+      REPO_DIR="$2"
+      shift 2
+      ;;
+    -E | --extensions-dir)
+      EXTENSIONS_DIR="$2"
+      shift 2
+      ;;
+    -p | --port)
+      PORT="$2"
+      shift 2
+      ;;
+    -i | --release-id)
+      RELEASE_ID="$2"
+      shift 2
+      ;;
+    --build-ext)
+      BUILD_EXT=true
+      shift
+      ;;
+    --clean)
+      CLEAN=true
+      shift
+      ;;
+    --no-serve)
+      SERVE=false
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Error: Unknown option $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      if [ -z "$YEAR" ]; then
+        YEAR="$1"
+      else
+        TARGETS+=("$1")
+      fi
+      shift
+      ;;
+  esac
 done
 
 # --- Validate -----------------------------------------------------------------
 if [ -z "$YEAR" ] || [ ${#TARGETS[@]} -eq 0 ]; then
-    echo "Error: need a <year> and at least one <target>" >&2
-    usage >&2
-    exit 1
+  echo "Error: need a <year> and at least one <target>" >&2
+  usage >&2
+  exit 1
 fi
 
 if ! [[ "$YEAR" =~ ^[0-9]{4}$ ]]; then
-    echo "Error: '<year>' should be a 4-digit feed year (e.g. 2026), got '$YEAR'." >&2
-    echo "       Did you swap the argument order? Usage: $0 <year> <target> ..." >&2
-    exit 1
+  echo "Error: '<year>' should be a 4-digit feed year (e.g. 2026), got '$YEAR'." >&2
+  echo "       Did you swap the argument order? Usage: $0 <year> <target> ..." >&2
+  exit 1
 fi
 
 if [ -z "$EXTENSIONS_DIR" ]; then
-    echo "Error: no extensions dir found. Pass -E <dir>, set AVOCADO_EXTENSIONS_DIR," >&2
-    echo "       or check out the extensions repos at $REPO_ROOT/../extensions." >&2
-    exit 1
+  echo "Error: no extensions dir found. Pass -E <dir>, set AVOCADO_EXTENSIONS_DIR," >&2
+  echo "       or check out the extensions repos at $REPO_ROOT/../extensions." >&2
+  exit 1
 fi
 if [ ! -d "$EXTENSIONS_DIR" ]; then
-    echo "Error: extensions dir '$EXTENSIONS_DIR' not found" >&2
-    exit 1
+  echo "Error: extensions dir '$EXTENSIONS_DIR' not found" >&2
+  exit 1
 fi
 
 CODENAME="$YEAR/$CHANNEL"
@@ -184,19 +215,19 @@ log ""
 
 # --- Clean (per-target) -------------------------------------------------------
 if [ "$CLEAN" = true ]; then
-    log "Resetting target-scoped artifacts..."
-    for target in "${TARGETS[@]}"; do
-        clean_target "$target"
-    done
-    log ""
+  log "Resetting target-scoped artifacts..."
+  for target in "${TARGETS[@]}"; do
+    clean_target "$target"
+  done
+  log ""
 fi
 
 # --- Sync / build -------------------------------------------------------------
 build_args=(
-    -r "$REPO_DIR"
-    -d "$CODENAME"
-    -i "$RELEASE_ID"
-    -E "$EXTENSIONS_DIR"
+  -r "$REPO_DIR"
+  -d "$CODENAME"
+  -i "$RELEASE_ID"
+  -E "$EXTENSIONS_DIR"
 )
 [ "$BUILD_EXT" = true ] && build_args+=(--build-ext)
 build_args+=("${TARGETS[@]}")
@@ -207,11 +238,11 @@ log ""
 
 # --- Serve --------------------------------------------------------------------
 if [ "$SERVE" = true ]; then
-    log "(Re)starting repo server on port $PORT..."
-    "$SCRIPT_DIR/dev-start-repo.sh" --restart -r "$REPO_DIR" -p "$PORT" \
-        -d "$CODENAME" -i "$RELEASE_ID"
+  log "(Re)starting repo server on port $PORT..."
+  "$SCRIPT_DIR/dev-start-repo.sh" --restart -r "$REPO_DIR" -p "$PORT" \
+    -d "$CODENAME" -i "$RELEASE_ID"
 else
-    log "Skipping repo server (--no-serve)."
+  log "Skipping repo server (--no-serve)."
 fi
 
 log "✓ Done. Feed: $REPO_DIR/releases/$CODENAME/$RELEASE_ID"

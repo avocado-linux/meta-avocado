@@ -48,7 +48,7 @@ trap 'rm -rf "$work"' EXIT
 # Lift wait_for_exported_storage out of the script. Sourcing the script whole
 # would run the flash.
 awk '/^wait_for_exported_storage\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' \
-  "$TARGET" > "$work/fn.sh"
+  "$TARGET" >"$work/fn.sh"
 
 if [ ! -s "$work/fn.sh" ]; then
   fail "could not extract wait_for_exported_storage from the script"
@@ -57,12 +57,12 @@ if [ ! -s "$work/fn.sh" ]; then
 fi
 
 # Stubs for the helpers the function calls, so it runs standalone.
-cat > "$work/harness.sh" <<'EOF'
+cat >"$work/harness.sh" <<'EOF'
 get_device_property() { echo "ATA"; }
 check_usb_instance=no
 EOF
-cat "$work/fn.sh" >> "$work/harness.sh"
-cat >> "$work/harness.sh" <<'EOF'
+cat "$work/fn.sh" >>"$work/harness.sh"
+cat >>"$work/harness.sh" <<'EOF'
 # session id, device name, usb instance, min size, 1s timeout
 wait_for_exported_storage "deadbeef" "mmcblk0" "" 1000 1
 EOF

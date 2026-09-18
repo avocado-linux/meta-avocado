@@ -18,13 +18,13 @@ set -u
 set -o pipefail
 
 if [ "${AVOCADO_USB_PASSTHROUGH:-1}" != "1" ]; then
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 ERROR: serial provisioning requires USB device passthrough into the SDK so
 the host can talk to the stm32mp2 ROM over USB-DFU. AVOCADO_USB_PASSTHROUGH=${AVOCADO_USB_PASSTHROUGH:-}
 indicates the SDK was launched without USB access (likely Docker Desktop).
 Run on a Linux host or expose the USB device to the container explicitly.
 EOF
-    exit 1
+  exit 1
 fi
 
 MANIFEST="$AVOCADO_STONE_MANIFEST"
@@ -34,10 +34,10 @@ FSBL=$(jq -r '.storage_devices.rootdisk.images.fsbl' "$MANIFEST")
 FIP=$(jq -r '.storage_devices.rootdisk.images.fip' "$MANIFEST")
 
 for f in "$FSBL" "$FIP"; do
-    if [ ! -f "${DATA_DIR}/${f}" ]; then
-        echo "ERROR: missing artifact ${DATA_DIR}/${f}" >&2
-        exit 1
-    fi
+  if [ ! -f "${DATA_DIR}/${f}" ]; then
+    echo "ERROR: missing artifact ${DATA_DIR}/${f}" >&2
+    exit 1
+  fi
 done
 
 # stm32mp2 USB-DFU VID:PID — the ROM enumerates as 0483:df11 (STMicroelectronics
@@ -62,12 +62,12 @@ read -r _
 
 echo "Waiting for stm32mp2 USB-DFU device (${DFU_VID_PID})..."
 for _ in $(seq 1 30); do
-    if dfu-util -l 2>/dev/null | grep -q "${DFU_VID_PID}"; then break; fi
-    sleep 1
+  if dfu-util -l 2>/dev/null | grep -q "${DFU_VID_PID}"; then break; fi
+  sleep 1
 done
 if ! dfu-util -l 2>/dev/null | grep -q "${DFU_VID_PID}"; then
-    echo "ERROR: no DFU device found at ${DFU_VID_PID}. Check BOOT pins and USB cable." >&2
-    exit 1
+  echo "ERROR: no DFU device found at ${DFU_VID_PID}. Check BOOT pins and USB cable." >&2
+  exit 1
 fi
 
 echo "=== Downloading FSBL via DFU alt 0 ==="

@@ -28,14 +28,14 @@ set -u
 set -o pipefail
 
 if [ "${AVOCADO_USB_PASSTHROUGH:-1}" != "1" ]; then
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 ERROR: emmc provisioning requires USB device passthrough into the SDK so
 rkdeveloptool can talk to the board over USB-C OTG.
 AVOCADO_USB_PASSTHROUGH=${AVOCADO_USB_PASSTHROUGH:-} indicates the SDK was
 launched without USB access (likely Docker Desktop on macOS/Windows). Run
 on a Linux host, or expose the USB device to the container explicitly.
 EOF
-    exit 1
+  exit 1
 fi
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -43,9 +43,9 @@ DISK_IMAGE=$("${SCRIPT_DIR}/build-disk-image.sh")
 
 LOADER="${AVOCADO_STONE_DATA_DIR}/idbloader.img"
 if [ ! -f "$LOADER" ]; then
-    echo "ERROR: idbloader.img not found in ${AVOCADO_STONE_DATA_DIR}." >&2
-    echo "       u-boot:do_deploy should have produced it. Check the build." >&2
-    exit 1
+  echo "ERROR: idbloader.img not found in ${AVOCADO_STONE_DATA_DIR}." >&2
+  echo "       u-boot:do_deploy should have produced it. Check the build." >&2
+  exit 1
 fi
 
 cat <<EOF
@@ -66,16 +66,16 @@ read -r _
 
 echo "=== Waiting for Maskrom device ==="
 for _ in $(seq 1 30); do
-    if rkdeveloptool ld 2>/dev/null | grep -qi "Maskrom\|Loader"; then
-        break
-    fi
-    sleep 1
+  if rkdeveloptool ld 2>/dev/null | grep -qi "Maskrom\|Loader"; then
+    break
+  fi
+  sleep 1
 done
 if ! rkdeveloptool ld 2>/dev/null | grep -qi "Maskrom\|Loader"; then
-    echo "ERROR: no rkdeveloptool device detected after 30s." >&2
-    echo "       Is the OTG cable connected? Was MaskROM held during reset?" >&2
-    rkdeveloptool ld >&2 || true
-    exit 1
+  echo "ERROR: no rkdeveloptool device detected after 30s." >&2
+  echo "       Is the OTG cable connected? Was MaskROM held during reset?" >&2
+  rkdeveloptool ld >&2 || true
+  exit 1
 fi
 
 echo "rkdeveloptool device(s):"

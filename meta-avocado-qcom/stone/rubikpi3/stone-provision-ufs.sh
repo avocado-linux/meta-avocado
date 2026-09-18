@@ -18,8 +18,8 @@ set -o pipefail
 # at runtime — extensions applied, users configured — and injected here so the
 # device flashes the runtime-correct images, not the yocto-pristine ones.
 bootfiles_name=$(jq -r .storage_devices.rootdisk.images.bootfiles "$AVOCADO_STONE_MANIFEST")
-rootfs_name=$(jq    -r .storage_devices.rootdisk.images.rootfs    "$AVOCADO_STONE_MANIFEST")
-var_name=$(jq       -r .storage_devices.rootdisk.images.var       "$AVOCADO_STONE_MANIFEST")
+rootfs_name=$(jq -r .storage_devices.rootdisk.images.rootfs "$AVOCADO_STONE_MANIFEST")
+var_name=$(jq -r .storage_devices.rootdisk.images.var "$AVOCADO_STONE_MANIFEST")
 
 bootfiles_file="${AVOCADO_STONE_DATA_DIR}/${bootfiles_name}"
 rootfs_file="${AVOCADO_STONE_DATA_DIR}/${rootfs_name}"
@@ -47,16 +47,16 @@ cp "$var_file" "$var_name"
 # 4. Wait for QDL device on USB
 echo "Waiting for QDL device..."
 for i in {1..30}; do
-    if lsusb | grep -q "05c6:9008"; then
-        echo "QDL device found"
-        sleep 1  # let it settle
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo "ERROR: QDL device not found after 30 seconds, aborting"
-        exit 1
-    fi
-    sleep 1
+  if lsusb | grep -q "05c6:9008"; then
+    echo "QDL device found"
+    sleep 1 # let it settle
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "ERROR: QDL device not found after 30 seconds, aborting"
+    exit 1
+  fi
+  sleep 1
 done
 
 # 5. Flash via firehose programmer + rawprogram XMLs
