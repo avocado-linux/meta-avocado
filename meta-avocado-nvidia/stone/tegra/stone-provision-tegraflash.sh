@@ -446,9 +446,13 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
   # published reference image), while carrying the real KERNEL_ARGS
   # forward produced a silent hang partway into userspace boot on two
   # independent flashes, with no error or panic. The exact offending
-  # token was not isolated - see the follow-up issue. Passing only the
-  # two PARTUUID args keeps this fix scoped to what it is verified to do:
-  # name the rootfs.
+  # token was not isolated; issue #398 records the candidate list and the
+  # leading suspect, which is that console=tty0 sorts after
+  # console=ttyTCU0 and so takes /dev/console away from the serial port.
+  # Passing only the two PARTUUID args keeps this fix scoped to what it
+  # is verified to do: name the rootfs. Revisit when #398 identifies the
+  # token, since the machine's nvme_core and pcie_aspm settings are not
+  # reaching the kernel by any path today.
   app_partuuid=$(tr 'a-f' 'A-F' </proc/sys/kernel/random/uuid)
   app_b_partuuid=$(tr 'a-f' 'A-F' </proc/sys/kernel/random/uuid)
   boot_cmdline="avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
