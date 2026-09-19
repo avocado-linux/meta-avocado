@@ -39,6 +39,15 @@ do_deploy_fixup[depends] += "esp-avocado-qcom-image:do_image_complete"
 # combined-dtb.dtb for KERNEL_DEVICETREE - the same file layout Thundercomm's
 # UEFI reads that the old meta-qcom-hwe dtb-qcom-image produced from mergedtb.
 do_deploy_fixup[depends] += "virtual/kernel:do_qcom_dtbbin_deploy"
+# The FIT branch below builds dtb.bin around ${DEPLOY_DIR_IMAGE}/qclinuxfitImage,
+# which the kernel's do_generate_qcom_fitimage produces (only when dtb-fit-image
+# is in KERNEL_CLASSES). do_deploy_fixup is nostamp, so without an explicit
+# dependency it can run before that task has deployed the FIT and then silently
+# fall through to the legacy raw dtb -- which on this board intermittently bricks
+# UEFI. Depend on it so the FIT is always present when enabled.
+do_deploy_fixup[depends] += "${@'virtual/kernel:do_generate_qcom_fitimage' if 'dtb-fit-image' in (d.getVar('KERNEL_CLASSES') or '').split() else ''}"
+# mkfs.vfat/mcopy: build the FIT dtb.bin FAT (qclinux_fit.img + fallback)
+do_deploy_fixup[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
 do_deploy_fixup[deptask] = "do_image_complete"
 
 DEPLOYDEPENDS = " \
@@ -128,13 +137,43 @@ do_deploy_fixup () {
 
     # copy dtb.bin -- the payload rawprogram[0-9].xml flashes to dtb_a.
     #
-    # Two producers, two names. meta-qcom's multi-dtb `dtb-qcom-image` recipe
-    # deploys dtb-qcom-image-${MACHINE}.rootfs.vfat, but a machine that pins a
-    # single dtb through QCOM_DTB_DEFAULT (avocado-rubikpi3 does: one board,
-    # one dtb, no qcom-dtb-metadata) never builds that recipe. It gets
-    # linux-qcom-dtbbin's dtb-${QCOM_DTB_DEFAULT}-image.vfat instead -- the
-    # same name meta-qcom's own qcom-capsule.bbclass stages as dtb.bin.
-    if [ -f ${DEPLOY_DIR_IMAGE}/dtb-qcom-image-${MACHINE}.rootfs.vfat ]; then
+    # When the machine builds a FIT device tree (KERNEL_CLASSES +=
+    # "dtb-fit-image" -> DEPLOY_DIR_IMAGE/qclinuxfitImage), assemble dtb.bin as
+    # a FAT whose root holds \qclinux_fit.img. UEFI's DtPlatformLoadDtbBlob
+    # loads that and does FIT-based DT selection, which SKIPS the legacy
+    # combined-dtb.dtb path whose BoardInfoDxe qcom,platform-parts-info fixup
+    # intermittently reads an uninitialised pointer, faults into XBL dload
+    # (05c6:900e) and bricks the board -- unrecoverable without a physical EDL
+    # power cycle. Bench-measured on rb3gen2: ~65% of boots brick on the legacy
+    # path vs 0/20 with the FIT.
+    #
+    # meta-qcom's own switch for this is QCOM_DTB_DEFAULT="multi-dtb" (see
+    # linux-qcom-dtbbin.bbclass), but we cannot use it: linux-avocado-qcom-uki.bb
+    # reads ${QCOM_DTB_DEFAULT}.dtb as the base for the UKI's embedded tree, so
+    # QCOM_DTB_DEFAULT must stay the real board dtb. dtb-fit-image still builds
+    # qclinuxfitImage on its own, so we fold it into dtb.bin here instead.
+    #
+    # combined-dtb.dtb is copied into the SAME FAT as a fail-safe: UEFI tries
+    # \qclinux_fit.img first and only falls back to \combined-dtb.dtb if the FIT
+    # is ever unreadable, so a bad FIT degrades to the old behaviour instead of
+    # a hard brick. mkfs geometry must match the board's UEFI FAT driver
+    # (QCOM_VFAT_SECTOR_SIZE, 4096 on UFS parts); 4 MiB matches the legacy
+    # dtb.bin and fits the 64 MiB dtb_a partition.
+    if [ -f ${DEPLOY_DIR_IMAGE}/qclinuxfitImage ]; then
+        rm -f dtb.bin
+        mkfs.vfat -S ${QCOM_VFAT_SECTOR_SIZE} -C dtb.bin 4096
+        mcopy -i dtb.bin ${DEPLOY_DIR_IMAGE}/qclinuxfitImage ::/qclinux_fit.img
+        if [ -n "${QCOM_DTB_DEFAULT}" ] && \
+           [ -f ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat ]; then
+            mcopy -i ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat ::/combined-dtb.dtb combined-dtb.dtb
+            mcopy -o -i dtb.bin combined-dtb.dtb ::/combined-dtb.dtb
+            rm -f combined-dtb.dtb
+        fi
+    # Legacy staging for machines without a FIT. meta-qcom's multi-dtb
+    # `dtb-qcom-image` recipe deploys dtb-qcom-image-${MACHINE}.rootfs.vfat,
+    # while a machine that pins one dtb through QCOM_DTB_DEFAULT gets
+    # linux-qcom-dtbbin's dtb-${QCOM_DTB_DEFAULT}-image.vfat.
+    elif [ -f ${DEPLOY_DIR_IMAGE}/dtb-qcom-image-${MACHINE}.rootfs.vfat ]; then
         install -m 0644 ${DEPLOY_DIR_IMAGE}/dtb-qcom-image-${MACHINE}.rootfs.vfat dtb.bin
     elif [ -n "${QCOM_DTB_DEFAULT}" ] && \
          [ -f ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat ]; then
