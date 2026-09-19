@@ -20,4 +20,5 @@ PACKAGES = "${PN}"
 RDEPENDS:${PN} = " \
   tegra-firmware-tegra234 \
   avocado-tegra-esp-generator \
+  avocado-boot-device \
 "
