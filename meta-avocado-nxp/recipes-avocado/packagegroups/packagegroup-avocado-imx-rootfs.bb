@@ -20,14 +20,17 @@ inherit packagegroup nospdx
 # imx8mp-evk). Same fix nvidia/qcom carry per-vendor; this is the shared one.
 # avocado-imx-bootpart: the activation step of a bootloader update - flips
 # PARTITION_CONFIG to the eMMC boot partition avocadoctl just wrote imx-boot to
-# (stone slot target emmc-boot:<n>), refusing an empty one.
+# (stone slot target emmc-boot:<n>), refusing an empty one. It used to be
+# mx8m-only because its boot-image guard recognised just the HABv4 IVT; it now
+# accepts the i.MX9 AHAB container too, and it is a no-op on any medium without
+# eMMC hardware boot partitions, so every i.MX board can carry it. A board only
+# exercises it if its stone manifest wires the activate/rollback hooks.
 RDEPENDS:${PN} = " \
+  avocado-imx-bootpart \
   avocado-uboot-env \
   mmc-utils \
   systemd-serial-console-preset \
 "
-# 8M only: the recipe's boot-image guard knows the HABv4 IVT, not AHAB.
-RDEPENDS:${PN}:append:mx8m-generic-bsp = " avocado-imx-bootpart"
 
 # SDMA RAM firmware (sdma-imx7d.bin) for the i.MX SDMAv3 controller (audio/SAI,
 # UART, SPI DMA). On the NXP BSP it lives in firmware-imx (IMX_USE_LINUX_FIRMWARE_SDMA=0);

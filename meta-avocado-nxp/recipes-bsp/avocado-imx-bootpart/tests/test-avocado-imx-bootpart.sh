@@ -38,6 +38,16 @@ printf '08' > "$work/cfg"; : > "$work/log"
 out=$(run b 2>&1); { grep -q "^mmc bootpart enable 2 0 $work/mmcblk9$" "$work/log"; } && ok "BOOT_ACK is preserved as provisioning left it (off stays off)" || bad "boot_ack: $out / $(cat "$work/log")"
 out=$(run a 2>&1); { echo "$out" | grep -q "now boots slot a from $work/mmcblk9boot0" && [ "$(cat "$work/cfg")" = 48 ]; } && ok "rollback to slot a enables boot partition 1" || bad "rollback: $out"
 out=$(run c 2>&1); echo "$out" | grep -q "^usage" && ok "unknown slot is a usage error" || bad "usage: $out"
+# i.MX9 (93/95) writes an AHAB container, not a HABv4 IVT: version, 16-bit
+# length, tag 0x87 at byte 3. It must be accepted the same way, or a bootloader
+# update on those boards can never activate.
+printf '\x02\x23\x20\x87ahab' > "$work/mmcblk9boot1"; printf '48' > "$work/cfg"; : > "$work/log"
+out=$(run b 2>&1)
+echo "$out" | grep -q "now boots slot b from $work/mmcblk9boot1" && ok "an AHAB container (i.MX9) is accepted" || bad "ahab: $out"
+# ...and the looser AHAB pattern must not turn the guard into a rubber stamp.
+printf '\x00\x11\x22\x33junk' > "$work/mmcblk9boot0"; : > "$work/log"
+out=$(run a 2>&1)
+{ echo "$out" | grep -q "refusing to enable $work/mmcblk9boot0" && [ ! -s "$work/log" ]; } && ok "content that is neither IVT nor AHAB is still refused" || bad "junk: $out"
 # SD card: no hardware boot partitions at all -> nothing to select, exit 0, mmc untouched
 rm -f "$work/mmcblk9boot0" "$work/mmcblk9boot1"; : > "$work/log"
 out=$(run b 2>&1); rc=$?
