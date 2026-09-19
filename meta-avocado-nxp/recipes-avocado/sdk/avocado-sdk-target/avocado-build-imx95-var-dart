@@ -57,5 +57,22 @@ build_include_display() {
 # now the pre-bundle seam only: stage artifacts the manifest references that the
 # generic pipeline cannot build, and let stone bundle consume them.
 
+# stone's rootfs_hash artifact resolves avocado-image-rootfs-imx95-var-dart.verity
+# from this directory. avocado-img-bootfiles installs a 4096-byte zero
+# placeholder for it (see its bbappend), but runtimes/<name> is BOTH that dnf
+# installroot and the build output dir, and avocado-cli's rootfs image step
+# rm -f's "${ROOTFS_OUTPUT%.*}.verity" in its verity-off branch -- which with
+# ROOTFS_FS=erofs-lz4 is exactly that path. Every reference project runs
+# verity-off, so the placeholder is always deleted and `stone bundle` then fails
+# with "Image file '...verity' for artifact 'rootfs_hash' not found in any input
+# directory". Restore it here: this hook is the documented pre-bundle seam, and
+# it runs after the rootfs step and before stone. A verity-on build writes a
+# real hash tree to the same path, and the -f test below leaves it alone.
+verity_image="$input_dir/avocado-image-rootfs-imx95-var-dart.verity"
+if [ ! -f "$verity_image" ]; then
+    echo "Restoring dm-verity placeholder: $(basename "$verity_image")"
+    head -c 4096 /dev/zero > "$verity_image" || exit 1
+fi
+
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
