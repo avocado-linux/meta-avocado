@@ -41,6 +41,13 @@ RDEPENDS:${PN} = " \
 # variable feeds packagegroup-core-boot, a *Yocto image* concept: avocado's
 # runtime rootfs is assembled by avocado-cli from its own package list, so a
 # recipe named only there is never built into the feed and never installed.
+#
+# GPU userspace for the Adreno 643 (mainline drm/msm + Mesa Freedreno/Turnip):
+# mesa-vulkan-drivers is the Turnip Vulkan ICD, plus GLES/EGL/GBM and the
+# Gallium DRI driver -- `mesa` (base) alone does not pull the runtime drivers.
+# vulkan-loader ships libvulkan.so.1, the loader every Vulkan app links against;
+# without it the Turnip ICD manifest is never read and vulkaninfo sees 0 ICDs.
+# vulkan-tools carries vulkaninfo, the bring-up check for "Turnip loaded".
 RDEPENDS:${PN}:append:qcm6490 = " \
     avocado-bls \
     linux-firmware-qcom-adreno-a660 \
@@ -54,6 +61,13 @@ RDEPENDS:${PN}:append:qcm6490 = " \
     packagegroup-qcom-boot-essential \
     packagegroup-qcom-boot-additional \
     mesa \
+    mesa-vulkan-drivers \
+    vulkan-loader \
+    vulkan-tools \
+    mesa-megadriver \
+    libgles2-mesa \
+    libegl-mesa \
+    libgbm \
     gstreamer1.0 \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \

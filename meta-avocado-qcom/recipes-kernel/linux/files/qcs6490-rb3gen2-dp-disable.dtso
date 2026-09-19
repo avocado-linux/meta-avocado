@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/dts-v1/;
+/plugin/;
+
+/*
+ * Disable ONLY the USB-C DisplayPort altmode output (mdss_dp @ae90000) on the
+ * RB3 Gen 2.
+ *
+ * The msm DPU binds every ENABLED display output plus the Adreno GPU as one
+ * component aggregate, so any output that never binds stalls the whole aggregate
+ * and there is no /dev/dri. This board has three outputs, and the rule cuts two
+ * ways -- which is the whole point of this overlay:
+ *
+ *   mdss_dp  @ae90000  USB-C DP altmode. Its retimer/altmode chain is not wired
+ *                      on this board (pmic_glink altmode never acquires the
+ *                      retimer-switch), so the controller fails probe with a hard
+ *                      -EINVAL. There is no software fix without the retimer in
+ *                      the DT, so it is UNFIXABLE here -> disable it.
+ *   mdss_edp @aea0000  the board's mini-DisplayPort (dp-connector labelled "DP";
+ *                      this is what shows up as card0-DP-1). It only deferred
+ *                      because its eDP PHY driver (phy-qcom-edp) was missing from
+ *                      the image; once that module is present it binds fine. So it
+ *                      is FIXABLE -> keep it enabled; the BSP extension ships the
+ *                      phy-qcom-edp module. DO NOT disable it.
+ *   DSI -> LT9611(UXC) HDMI. Works once the lontium-lt9611uxc bridge module is
+ *                      present (also shipped by the BSP extension).
+ *
+ * So disabling the one unfixable output (mdss_dp) lets the aggregate complete
+ * over mini-DP (mdss_edp / card0-DP-1) and HDMI, and the GPU binds. Verified on
+ * hardware: card0 + card0-DP-1 + card0-HDMI-A-1 + renderD128, a660 GMU loaded.
+ *
+ * Delivered ONLY as a UKI-embedded overlay (AVOCADO_UKI_DTB_OVERLAYS), never as
+ * a change to the base dtb flashed to dtb_a. sd-stub's EFI_DT_FIXUP handles the
+ * overlaid embedded tree fine (the same path kodiak-el2 and
+ * qcs6490-rb3gen2-staging ride). So the base tree UEFI parses stays stock.
+ *
+ * WARNING: do NOT add mdss_edp (or any other display node) to this overlay to
+ * "fix" a deferred output. Disabling a display node in the embedded tree makes
+ * UEFI's BoardInfoDxe DT-fixup panic (data abort ~0x1D680_x000, "panic caller
+ * 0x9fb02c88: die") and bricks the board into XBL dload -- verified on hardware.
+ * A deferred output is fixed by supplying its missing driver, not by disabling
+ * it. Drop this overlay entirely once the USB-C DP retimer is described in DT.
+ */
+&mdss_dp {
+	status = "disabled";
+};
