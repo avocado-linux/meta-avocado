@@ -157,18 +157,74 @@ do_deploy_fixup () {
     # \qclinux_fit.img first and only falls back to \combined-dtb.dtb if the FIT
     # is ever unreadable, so a bad FIT degrades to the old behaviour instead of
     # a hard brick. mkfs geometry must match the board's UEFI FAT driver
-    # (QCOM_VFAT_SECTOR_SIZE, 4096 on UFS parts); 4 MiB matches the legacy
-    # dtb.bin and fits the 64 MiB dtb_a partition.
-    if [ -f ${DEPLOY_DIR_IMAGE}/qclinuxfitImage ]; then
-        rm -f dtb.bin
-        mkfs.vfat -S ${QCOM_VFAT_SECTOR_SIZE} -C dtb.bin 4096
-        mcopy -i dtb.bin ${DEPLOY_DIR_IMAGE}/qclinuxfitImage ::/qclinux_fit.img
-        if [ -n "${QCOM_DTB_DEFAULT}" ] && \
-           [ -f ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat ]; then
-            mcopy -i ${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat ::/combined-dtb.dtb combined-dtb.dtb
-            mcopy -o -i dtb.bin combined-dtb.dtb ::/combined-dtb.dtb
-            rm -f combined-dtb.dtb
+    # (QCOM_VFAT_SECTOR_SIZE, 4096 on UFS parts).
+    #
+    # Gate on KERNEL_CLASSES (set in machine conf, the single source of truth),
+    # NOT on the presence of qclinuxfitImage. DEPLOY_DIR_IMAGE is never pruned,
+    # so a file test would keep folding in a STALE FIT after the machine turns
+    # the class off, and would silently fall through to the bricking legacy dtb
+    # if the FIT were missing. When the class is on the FIT must be present --
+    # fail the build rather than ship a bricking image (same fail-closed
+    # contract linux-avocado-qcom-uki.bb uses for its base dtb). NEVRA note: if
+    # this recipe's staged bootfiles change, bump PR:<machine> in avocado-img-ufs.bb.
+    if ${@bb.utils.contains('KERNEL_CLASSES', 'dtb-fit-image', 'true', 'false', d)}; then
+        if [ ! -f ${DEPLOY_DIR_IMAGE}/qclinuxfitImage ]; then
+            bbfatal "dtb-fit-image is enabled but ${DEPLOY_DIR_IMAGE}/qclinuxfitImage is missing;" \
+                    "staging the legacy dtb here would ship the UEFI path that bricks this board."
         fi
+
+        # Size the FAT to the legacy dtb vfat linux-qcom-dtbbin builds: its size
+        # IS meta-qcom's DTBBIN_SIZE, so this tracks a DTBBIN_SIZE bump without
+        # reaching into the kernel recipe's datastore (DTBBIN_SIZE is ?= in a
+        # KERNEL class and is not visible here). Fall back to 4 MiB if the legacy
+        # vfat is absent (then there is no fallback dtb to fold in either).
+        legacy_vfat="${DEPLOY_DIR_IMAGE}/dtb-${QCOM_DTB_DEFAULT}-image.vfat"
+        if [ -n "${QCOM_DTB_DEFAULT}" ] && [ -f "$legacy_vfat" ]; then
+            legacy_bytes=$(stat -c %s "$legacy_vfat")
+            dtbbin_kib=$(expr "$legacy_bytes" / 1024)
+        else
+            dtbbin_kib=4096
+            legacy_vfat=""
+        fi
+
+        # Stage the payload files: the FIT, plus the legacy combined-dtb.dtb
+        # fallback lifted out of the vfat linux-qcom-dtbbin built. Normalise
+        # their mtimes to SOURCE_DATE_EPOCH so the FAT is byte-reproducible
+        # (mcopy -m preserves the mtime we set); without this the nostamp task
+        # would publish a different archive under the same avocado-img-ufs NEVRA
+        # every build. combined-dtb.dtb is the fail-safe: UEFI tries
+        # \qclinux_fit.img first and only falls back to it if the FIT is
+        # unreadable, so a bad FIT degrades to the old behaviour, not a brick.
+        epoch="${SOURCE_DATE_EPOCH}"; [ -n "$epoch" ] || epoch=315532800
+        cp ${DEPLOY_DIR_IMAGE}/qclinuxfitImage qclinux_fit.img
+        touch -d @$epoch qclinux_fit.img
+        if [ -n "$legacy_vfat" ]; then
+            mcopy -i "$legacy_vfat" ::/combined-dtb.dtb combined-dtb.dtb
+            touch -d @$epoch combined-dtb.dtb
+        fi
+
+        # Fail with a clear message if the payload will not fit, rather than let
+        # mcopy die with a disk-full error that does not name this file. Sum the
+        # actual payload FILE sizes (not the 4 MiB source vfat).
+        budget=$(expr "$dtbbin_kib" \* 1024)
+        need=$(stat -c %s qclinux_fit.img)
+        if [ -f combined-dtb.dtb ]; then
+            comb_bytes=$(stat -c %s combined-dtb.dtb)
+            need=$(expr "$need" + "$comb_bytes")
+        fi
+        limit=$(expr "$budget" - 65536)
+        if [ "$need" -gt "$limit" ]; then
+            bbfatal "FIT dtb.bin payload needs ~${need} bytes but the ${dtbbin_kib} KiB FAT budget" \
+                    "(minus ~64 KiB overhead) is ${limit} bytes. Raise DTBBIN_SIZE in" \
+                    "linux-qcom-dtbbin, or shrink the device trees / overlay set."
+        fi
+
+        # Deterministic FAT: fixed volume id (mkfs.vfat -i) + preserved mtimes.
+        rm -f dtb.bin
+        mkfs.vfat -S ${QCOM_VFAT_SECTOR_SIZE} -i 00000000 -C dtb.bin ${dtbbin_kib}
+        mcopy -m -i dtb.bin qclinux_fit.img ::/qclinux_fit.img
+        [ -f combined-dtb.dtb ] && mcopy -m -i dtb.bin combined-dtb.dtb ::/combined-dtb.dtb
+        rm -f qclinux_fit.img combined-dtb.dtb
     # Legacy staging for machines without a FIT. meta-qcom's multi-dtb
     # `dtb-qcom-image` recipe deploys dtb-qcom-image-${MACHINE}.rootfs.vfat,
     # while a machine that pins one dtb through QCOM_DTB_DEFAULT gets
