@@ -153,11 +153,16 @@ do_deploy_fixup () {
     # QCOM_DTB_DEFAULT must stay the real board dtb. dtb-fit-image still builds
     # qclinuxfitImage on its own, so we fold it into dtb.bin here instead.
     #
-    # combined-dtb.dtb is copied into the SAME FAT as a fail-safe: UEFI tries
-    # \qclinux_fit.img first and only falls back to \combined-dtb.dtb if the FIT
-    # is ever unreadable, so a bad FIT degrades to the old behaviour instead of
-    # a hard brick. mkfs geometry must match the board's UEFI FAT driver
-    # (QCOM_VFAT_SECTOR_SIZE, 4096 on UFS parts).
+    # combined-dtb.dtb is kept in the SAME FAT as a fallback for the case UEFI
+    # cannot read \qclinux_fit.img at all (that fall-through to the legacy path
+    # is what we measured, and it boots -- at the old brick rate). Note the
+    # limit of that safety net: if the FIT loads but XBL reports a compatible no
+    # built FIT_DTB_COMPATIBLE combo covers, whether UEFI errors or itself falls
+    # back to \combined-dtb.dtb is UEFI's own behaviour and is NOT measured here
+    # (dtb-fit-image drops combos whose parts are absent from KERNEL_DEVICETREE
+    # with a bb.note, not an error -- a machine that builds a FIT with no usable
+    # config should grow a build-time check upstream). mkfs geometry must match
+    # the board's UEFI FAT driver (QCOM_VFAT_SECTOR_SIZE, 4096 on UFS parts).
     #
     # Gate on KERNEL_CLASSES (set in machine conf, the single source of truth),
     # NOT on the presence of qclinuxfitImage. DEPLOY_DIR_IMAGE is never pruned,
@@ -192,9 +197,8 @@ do_deploy_fixup () {
         # their mtimes to SOURCE_DATE_EPOCH so the FAT is byte-reproducible
         # (mcopy -m preserves the mtime we set); without this the nostamp task
         # would publish a different archive under the same avocado-img-ufs NEVRA
-        # every build. combined-dtb.dtb is the fail-safe: UEFI tries
-        # \qclinux_fit.img first and only falls back to it if the FIT is
-        # unreadable, so a bad FIT degrades to the old behaviour, not a brick.
+        # every build. combined-dtb.dtb is the fallback for an unreadable FIT
+        # (see the scope note above -- it does not cover a loaded-but-unmatched FIT).
         epoch="${SOURCE_DATE_EPOCH}"; [ -n "$epoch" ] || epoch=315532800
         cp ${DEPLOY_DIR_IMAGE}/qclinuxfitImage qclinux_fit.img
         touch -d @$epoch qclinux_fit.img
