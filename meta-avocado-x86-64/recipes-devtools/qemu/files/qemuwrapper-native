@@ -1,0 +1,111 @@
+#!/bin/sh
+# Run a target x86-64 binary directly on the build host, in place of qemu-user.
+#
+# Drop-in replacement for OE's qemuwrapper, used only where the target ISA is a
+# superset of what QEMU's TCG can emulate (see the bbappend that installs this).
+# Build host and target are both x86-64, so no emulation is needed at all -- but
+# the binary is linked against the *target* sysroot, so it has to be started
+# through the target's own dynamic loader rather than the host's.
+#
+# Accepts the qemu-user option subset that OE actually passes
+# (oe.qemu.qemu_wrapper_cmdline): -L <rootfs>, -E VAR=VAL, -r <kver>, -cpu <model>.
+set -e
+
+ROOTFS=""
+LIBPATH=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -L)
+            ROOTFS="$2"
+            shift 2
+            ;;
+        -E)
+            # LD_LIBRARY_PATH must reach the loader as --library-path; exporting it
+            # would be ignored, because the loader is invoked explicitly below.
+            case "$2" in
+                LD_LIBRARY_PATH=*)
+                    LIBPATH=$(echo "$2" | sed 's/^LD_LIBRARY_PATH=//')
+                    ;;
+                *)
+                    export "$2"
+                    ;;
+            esac
+            shift 2
+            ;;
+        -r|-cpu|-g)
+            # Meaningless without emulation: -r fakes a kernel version to the
+            # emulated binary, -cpu picks the emulated model. Running natively,
+            # the real kernel and real CPU answer instead.
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "qemuwrapper(native): ignoring unsupported qemu option '$1'" >&2
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ $# -eq 0 ]; then
+    echo "qemuwrapper(native): no binary given" >&2
+    exit 1
+fi
+
+if [ -z "$ROOTFS" ]; then
+    echo "qemuwrapper(native): no -L <rootfs> given; cannot locate the target loader" >&2
+    exit 1
+fi
+
+LOADER=""
+for candidate in "$ROOTFS/lib/ld-linux-x86-64.so.2" "$ROOTFS/usr/lib/ld-linux-x86-64.so.2"; do
+    if [ -x "$candidate" ]; then
+        LOADER="$candidate"
+        break
+    fi
+done
+
+if [ -z "$LOADER" ]; then
+    echo "qemuwrapper(native): no dynamic loader found under '$ROOTFS'" >&2
+    exit 1
+fi
+
+# qemu -L <rootfs> re-roots the binary's *absolute* RUNPATH/RPATH entries inside
+# the rootfs. The host loader instead resolves them against /, so a binary like
+# udevadm (RUNPATH=/usr/lib/systemd, NEEDED libsystemd-shared-NNN.so) fails with
+# "cannot open shared object file". Rebuild that behaviour by putting the
+# rootfs's own library directories on --library-path, which the loader consults
+# ahead of RUNPATH.
+#
+# Ceiling: one level below each lib root, and only directories that actually hold
+# shared objects. That covers the private dirs OE produces (/usr/lib/systemd,
+# /usr/lib/dri, ...). Nothing in-tree nests deeper; if something ever does, this
+# needs the real RUNPATH read out of the ELF instead.
+for base in "$ROOTFS/usr/lib" "$ROOTFS/lib" "$ROOTFS/usr/lib64" "$ROOTFS/lib64"; do
+    [ -d "$base" ] || continue
+    LIBPATH="$LIBPATH:$base"
+    for sub in "$base"/*/; do
+        [ -d "$sub" ] || continue
+        for so in "$sub"*.so*; do
+            if [ -e "$so" ]; then
+                LIBPATH="$LIBPATH:$(dirname "$so")"
+                break
+            fi
+        done
+    done
+done
+
+# Strip any leading ':' so the loader does not read it as the current directory.
+LIBPATH=$(echo "$LIBPATH" | sed 's/^://')
+
+if [ -n "$LIBPATH" ]; then
+    exec "$LOADER" --library-path "$LIBPATH" "$@"
+fi
+
+exec "$LOADER" "$@"
