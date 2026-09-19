@@ -970,6 +970,21 @@
 	status = "okay";
 };
 
+/*
+ * Software reboot-into-EDL, so `reboot edl` reaches Qualcomm EDL (9008) without
+ * the physical EDL button -- same as qcs6490-rb3gen2.dts. The magic values are
+ * passed to PSCI SYSTEM_RESET2; the firmware (identical XBL/TZ to rb3gen2)
+ * interprets mode-edl to enter EDL on the next reset. qcom,dload-mode comes from
+ * sc7280.dtsi. Without this the rubikpi3 DTS had no reboot-mode node at all, so
+ * `reboot edl` fell through to a normal reboot (rb3gen2 worked, rubikpi3 did not).
+ */
+&psci {
+	reboot-mode {
+		mode-bootloader = <0x10001 0x2>;
+		mode-edl = <0 0x1>;
+	};
+};
+
 &qupv3_id_0 {
 	firmware-name = "qcom/qcm6490/qupv3fw.elf";
 
