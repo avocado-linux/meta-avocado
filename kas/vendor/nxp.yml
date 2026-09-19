@@ -17,19 +17,32 @@ repos:
   # meta-imx pin (see nxp-frdm.yml, compulab.yml) so families can track
   # different NXP releases without forcing cross-family revalidation. kas deep
   # -merges the per-family {branch, commit} onto this {url, path, layers}.
+  # Base ML recipes (neutron, litert, tensorflow-lite, nnstreamer) that
+  # meta-imx-ml's i.MX deltas require. LAYERDEPENDS is freescale-layer +
+  # meta-python, both already present. Its wrynose branch is LAYERSERIES_COMPAT
+  # with wrynose.
+  meta-freescale-ml:
+    url: https://github.com/avocado-linux/vendor-meta-freescale-ml.git
+    path: meta-freescale-ml
+    branch: wrynose
+    commit: 1330790bc6cdd3808260a16383d928e05a0e0eeb
+    layers:
+      .:
+
   meta-imx:
     url: https://github.com/avocado-linux/vendor-meta-imx.git
     path: meta-imx
     layers:
       meta-imx-bsp:
       meta-imx-v2x:
-      # meta-imx-ml does not parse at wrynose-6.18.20-2.0.0: neutron_3.1.1.bb
-      # requires a neutron_1.0.0.bb the release no longer ships, and its
-      # tim-vx/tvm/nnshark/nnstreamer appends have no base recipe in this layer
-      # set. Its only consumer was the mx8mp NPU stack in
-      # packagegroup-avocado-imx-ml, which is emptied alongside. Re-enable both
-      # when NXP ships a self-contained meta-imx-ml.
-      meta-imx-ml: disabled
+      # meta-imx-ml holds only the i.MX deltas now: NXP moved the base ML
+      # recipes out to meta-freescale-ml in meta-imx e6e7f71d02 ("Clean up
+      # recipes as the changes are upstreamed to meta-freescale-ml"). So
+      # neutron_3.1.1.bb `require`s a neutron_1.0.0.bb that lives there, and the
+      # tim-vx / nnstreamer / tensorflow-lite appends have no base recipe
+      # without it. That is why this layer was disabled; it is not going to
+      # become self-contained, so vendor meta-freescale-ml below instead.
+      meta-imx-ml:
 
 local_conf_header:
   vendor-nxp: |
@@ -37,8 +50,8 @@ local_conf_header:
     DISTRO_FEATURES_EXTRA:append = "opengl wayland seccomp virtualization"
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-imx-rootfs"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-extra"
-    # NPU/eIQ ML stack -> feed. Currently empty on every machine (meta-imx-ml is
-    # disabled above); kept wired so re-enabling the layer is a one-file change.
+    # NPU/eIQ ML stack -> feed. Per-SoC: the VIP9000 VX delegate on mx8mp, the
+    # eIQ Neutron delegate on mx95. Empty on machines with no NPU.
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-ml"
     BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
     BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"
