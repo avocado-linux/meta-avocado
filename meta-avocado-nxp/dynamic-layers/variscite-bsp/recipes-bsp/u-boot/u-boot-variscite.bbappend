@@ -1,9 +1,11 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}/env:"
 
-# The UUU tag goes on the boot partition. For 8+, the boot partition image is
-# imx-boot, so disable UUU-tagging here.
-UUU_BOOTLOADER:mx8m-generic-bsp = ""
+# The UUU tag goes on the boot partition. On every Variscite SOM Avocado
+# targets (i.MX8M Plus, i.MX95) that image is imx-boot, not the bare u-boot
+# binary, so disable UUU-tagging outright rather than per SoC-family override
+# -- uuu_bootloader_tag.bbclass sets it for both mx8- and mx9-generic-bsp.
+UUU_BOOTLOADER = ""
 
 SRC_URI:append:class-target = " \
   file://avocado.cfg \
@@ -21,9 +23,13 @@ SRC_URI:remove = "file://fw_env.config"
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
-# Variscite's UBOOT_CONFIG[sd] = "imx8mp_var_dart_config,sdcard"; the defconfig
-# we append our fragments to is the part before the comma.
-UBOOT_DEFCONFIG = "imx8mp_var_dart_config"
+# The defconfig we append our fragments to is whatever the vendor machine conf
+# named in UBOOT_CONFIG[sd], minus the optional ",<image-fstype>" suffix
+# (imx8mp-var-dart: "imx8mp_var_dart_config", imx95-var-dart:
+# "imx95_var_dart_defconfig"). Derived rather than hardcoded so a new Variscite
+# machine cannot silently inherit another board's defconfig; one that sets no
+# UBOOT_CONFIG[sd] fails loudly here instead.
+UBOOT_DEFCONFIG = "${@d.getVarFlag('UBOOT_CONFIG', 'sd').split(',')[0]}"
 
 do_configure:append:class-target () {
   cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
