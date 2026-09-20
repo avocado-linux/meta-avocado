@@ -15,7 +15,10 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/avocado-imx-bootpart ${D}${bindir}/
 }
 
-# i.MX 8M only for now: the image guard checks the HABv4 IVT (0xD1 .. 0x41)
-# that heads 8M boot images. i.MX 9 boots AHAB containers with a different
-# header, so enabling would refuse every image there until the guard learns it.
-COMPATIBLE_MACHINE = "(mx8m-generic-bsp)"
+# Every i.MX: the image guard now recognises both headers a boot image can
+# carry -- the HABv4 IVT (0xD1 .. 0x41) on i.MX6/7/8M and the AHAB container
+# (tag 0x87 at byte 3) on i.MX9x. On a medium with no eMMC hardware boot
+# partitions the script is a no-op exit 0, and a board only exercises it if its
+# stone manifest wires the activate/rollback hooks, so this is safe to build
+# everywhere rather than adding a new override per SoC family.
+COMPATIBLE_MACHINE = "(imx-generic-bsp)"

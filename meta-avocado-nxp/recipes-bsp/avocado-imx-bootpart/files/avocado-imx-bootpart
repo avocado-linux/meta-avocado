@@ -62,10 +62,17 @@ case "$1" in
 esac
 
 bootdev="$devdir/${disk}boot$((n - 1))"
-# i.MX8M boot images start with an IVT: tag 0xD1, length, version 0x41.
+# Refuse to point the BootROM at a partition that does not hold a boot image.
+# The two i.MX families label that image differently in their first four bytes:
+#   HABv4 IVT   (i.MX6/7/8M): tag 0xD1, 16-bit length, version 0x41
+#   AHAB container (i.MX9x):  version, 16-bit length, tag 0x87 at byte 3
+#                             (02 23 20 87 on a DART-MX95 imx-boot)
+# The tag is the discriminating field in both, so match on it and leave the
+# length free.
 sig=$(dd if="$bootdev" bs=4 count=1 2>/dev/null | head -c 4 | od -A n -t x1 | tr -d ' ')
 case "$sig" in
     d1????41) ;;
+    ??????87) ;;
     *) echo "avocado-imx-bootpart: refusing to enable $bootdev: no i.MX boot image there (first bytes: ${sig:-none})" >&2; exit 1 ;;
 esac
 

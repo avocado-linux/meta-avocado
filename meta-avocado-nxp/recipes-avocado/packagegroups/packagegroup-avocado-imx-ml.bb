@@ -5,26 +5,54 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
-# Only the i.MX8M Plus (Vivante VIP9000 NPU) gets the VX-delegate eIQ stack.
-# tim-vx / tflite-vx-delegate are version-matched to NXP's imx-gpu-viv 6.4.11
-# (libOpenVX/libVSC) + galcore, and are COMPATIBLE only on mx8-nxp-bsp +
-# imxgpu3d -- which the NXP-BSP i.MX8MP boards (e.g. ucm-imx8m-plus) carry.
-# Empty on every other machine so this is safe to wire into the shared NXP
-# PKG_EXTRA_INSTALL. Other NPUs (Ethos-U on mx93, Neutron on mx95) use
-# different delegates and would get their own packagegroup. The NN/OpenVX
-# userspace itself arrives with imx-gpu-viv (already built for the GPU).
+# The NPU userspace, per SoC. The accelerator differs by part, so the delegate
+# does too, and naming the wrong one is a runtime fallback to CPU rather than a
+# build error -- hence the explicit per-override lists and an empty default.
+#
+# Both stacks need meta-imx-ml (the i.MX deltas) AND meta-freescale-ml (the base
+# recipes NXP moved out in meta-imx e6e7f71d02); see kas/vendor/nxp.yml.
 NPU_ML_PKGS = ""
-# wrynose: meta-imx-ml is disabled in kas/vendor/nxp.yml (it does not parse at
-# 6.18.20-2.0.0), so the mx8mp list below is empty until that layer comes back.
-# scarthgap shipped: tensorflow-lite tensorflow-lite-vx-delegate tim-vx
-# nnstreamer nnstreamer-tensorflow-lite nnstreamer-python3
-NPU_ML_PKGS:mx8mp-nxp-bsp = ""
+
+# i.MX8M Plus: Vivante VIP9000, reached through tim-vx and the TFLite VX
+# delegate. Version-matched to NXP's imx-gpu-viv (libOpenVX/libVSC) + galcore,
+# which arrive with the GPU stack.
+NPU_ML_PKGS:mx8mp-nxp-bsp = " \
+  tensorflow-lite \
+  tensorflow-lite-vx-delegate \
+  tim-vx \
+  nnstreamer \
+  nnstreamer-tensorflow-lite \
+  nnstreamer-python3 \
+"
+
+# i.MX95: eIQ Neutron, reached through the TFLite Neutron delegate. `neutron`
+# is the driver userspace (libNeutronDriver.so) behind it; the kernel side is
+# the imx95-neutron remoteproc, already in the device tree.
+#
+# litert + litert-neutron-delegate (the newer LiteRT generation, also present on
+# Variscite's reference image) are deliberately left out: litert_2.1.0 DEPENDS
+# on virtual/libopencl1, which on i.MX comes from imx-gpu-viv and is therefore
+# Vivante-only -- i.MX95 has a Mali GPU. The other provider, opencl-icd-loader,
+# lives in meta-imx-sdk, a meta-imx sublayer Avocado does not vendor. Adding
+# LiteRT means vendoring that sublayer first; the TFLite delegate is what the
+# nnstreamer inference path uses either way.
+#
+# A model must be compiled for Neutron offline (NXP's neutron-converter) after
+# INT8 quantization -- the delegate does not JIT an unconverted .tflite, it
+# silently falls back to CPU.
+NPU_ML_PKGS:mx95-nxp-bsp = " \
+  neutron \
+  tensorflow-lite \
+  tensorflow-lite-neutron-delegate \
+  nnstreamer \
+  nnstreamer-tensorflow-lite \
+  nnstreamer-python3 \
+"
 
 # nnshark (GStreamer NN profiler) is intentionally omitted: it DEPENDS on
 # libgpuperfcnt, which lives in meta-imx-sdk -- a meta-imx sublayer Avocado does
-# not vendor (we pull only meta-imx-bsp / -ml / -v2x). It's an optional profiling
-# overlay, not part of the inference path. Add it (and vendor meta-imx-sdk) only
-# if GPU/NPU perf-counter profiling is specifically wanted.
+# not vendor. It is an optional profiling overlay, not part of the inference
+# path.
 
 ALLOW_EMPTY:${PN} = "1"
 RDEPENDS:${PN} = "${NPU_ML_PKGS}"

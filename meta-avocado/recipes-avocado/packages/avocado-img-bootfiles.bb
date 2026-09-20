@@ -19,7 +19,18 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 PACKAGES = "${PN}"
 
 # Default skip patterns for bootfiles collection
-AVOCADO_IMG_BOOTFILES_SKIP_DEFAULT = "rootfs initramfs var. -var-"
+# NOTE: these are unanchored substring matches against the deploy filename, so
+# a pattern must not be a substring of any MACHINE name. "-var-" used to stand
+# in for the /var image here and did exactly that: every Variscite machine is
+# named *-var-dart / *-var-som, so on imx95-var-dart it matched the kernel
+# (Image--<ver>-avocado-imx95-var-dart-<ts>.bin), every device tree
+# (imx95-var-dart-sonata*.dtb) and the bootloader
+# (imx-boot-avocado-imx95-var-dart-sd.bin-flash_a55) -- dropping all three while
+# keeping the bare `Image` and `imx-boot` SYMLINKS the deploy dir also carries.
+# The package then looked fine and stone failed much later with "File 'Image'
+# not found in any input directory". "avocado-image-var-" names the same /var
+# image but is anchored by a prefix no machine can contain.
+AVOCADO_IMG_BOOTFILES_SKIP_DEFAULT = "rootfs initramfs var. avocado-image-var-"
 # Additional skip patterns (can be extended via bbappends)
 AVOCADO_IMG_BOOTFILES_SKIP_EXTRA ?= ""
 # Combined skip patterns

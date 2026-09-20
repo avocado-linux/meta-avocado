@@ -1,0 +1,71 @@
+machine=imx95-var-dart
+kernel_file=Image
+initramfs_file=avocado-image-initramfs-imx95-var-dart.cpio.zst
+devicetree_file=imx95-var-dart-sonata.dtb
+# Space-separated list of .dtbo overlay files on the boot partition, applied
+# (in order) on top of devicetree_file at boot. Composed from avocado config by
+# avocado-devicetree.service (fw_setenv fdt_overlays). Empty default.
+fdt_overlays=
+
+# DART-MX95 debug console is LPUART1 (/dev/ttyLP0) on the Sonata-Board; it is
+# the machine's only SERIAL_CONSOLES entry.
+console=ttyLP0,115200
+# Base device is the SD card: U-Boot mmc 1 / Linux mmcblk1 on the DART-MX95
+# (42850000.mmc = eMMC -> mmc 0 / mmcblk0, 42860000.mmc = SD -> mmc 1 /
+# mmcblk1; confirmed on the bench against /sys/class/mmc_host). NOTE this is
+# the reverse of the i.MX8MP DART, where eMMC is mmc 2. The img/sd provision
+# profiles boot from SD with these values; the uuu-emmc profile flashes the
+# eMMC and patches devnum/mmcblk to 0 (see stone-provision-uuu-emmc.sh). Do NOT
+# set the eMMC values here or SD boot loads from the eMMC instead.
+devtype=mmc
+devnum=1
+mmcblk=1
+bootpart=3
+rootdev=/dev/mmcblk${mmcblk}p5
+
+# Matches the vendor u-boot env on the board (loadaddr/fdt_addr/initrd_addr);
+# i.MX95 DRAM starts at 0x80000000.
+image_addr=0x90400000
+fdt_addr=0x93000000
+fdt_overlay_addr=0x93100000
+ramdisk_addr=0x93800000
+
+# Slot A/B only: no recovery partition. An unset or invalid slot boots A.
+avocado_boot_init=\
+  if test "${avocado_boot_slot}" = "b"; then\
+    echo "Booting B";\
+    setenv bootpart 4;\
+    setenv rootdev /dev/mmcblk${mmcblk}p6;\
+  else\
+    if test "${avocado_boot_slot}" != "a"; then\
+      echo "avocado_boot_slot=${avocado_boot_slot} unset or invalid";\
+    fi;\
+    echo "Booting A";\
+    setenv bootpart 3;\
+    setenv rootdev /dev/mmcblk${mmcblk}p5;\
+  fi;\
+  setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;
+
+load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
+load_devicetree=load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file}
+load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}
+
+# Apply each overlay in ${fdt_overlays} onto the loaded base DTB. Needs the base
+# built with -@ (symbols) and u-boot CONFIG_OF_LIBFDT_OVERLAY (see avocado.cfg).
+# resize gives libfdt headroom for the overlay fragments; a missing/bad overlay
+# warns and is skipped rather than aborting the boot.
+apply_overlays=\
+  fdt addr ${fdt_addr};\
+  fdt resize 0x40000;\
+  for ov in ${fdt_overlays}; do\
+    echo "Applying DT overlay ${ov}";\
+    if load ${devtype} ${devnum}:${bootpart} ${fdt_overlay_addr} ${ov}; then\
+      fdt apply ${fdt_overlay_addr} || echo "WARN: fdt apply ${ov} failed";\
+    else\
+      echo "WARN: overlay ${ov} not found on boot partition";\
+    fi;\
+  done
+
+avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
+
+bootcmd=run avocado_boot_init load_image load_devicetree apply_overlays load_initramfs avocado_boot
