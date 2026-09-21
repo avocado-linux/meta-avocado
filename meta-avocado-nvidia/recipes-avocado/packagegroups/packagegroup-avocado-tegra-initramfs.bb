@@ -10,4 +10,6 @@ RDEPENDS:${PN} = " \
     avocado-boot-order-assert \
     avocado-tegra-init \
     tegra-firmware-xusb \
+    grep \
+    sed \
 "
