@@ -28,6 +28,11 @@ while [ $# -gt 0 ]; do
                     LIBPATH=$(echo "$2" | sed 's/^LD_LIBRARY_PATH=//')
                     ;;
                 *)
+                    # $2 is a caller-supplied VAR=VALUE pair, not a variable
+                    # name to export - this dynamically exports whatever pair
+                    # was passed, the same idiom shellcheck flags as if it
+                    # were meant literally.
+                    # shellcheck disable=SC2163
                     export "$2"
                     ;;
             esac
