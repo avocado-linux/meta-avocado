@@ -16,6 +16,11 @@ set -u
 set -o pipefail
 
 MANIFEST="$AVOCADO_STONE_MANIFEST"
+# Never read below, but the assignment is load-bearing under `set -u`: it aborts
+# the script here if stone did not export AVOCADO_STONE_DATA_DIR, rather than
+# part-way through writing a disk.
+# shellcheck disable=SC2034
+DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
 
@@ -61,7 +66,11 @@ if [ -f /proc/mounts ]; then
     if [ -n "$root_mount" ] && [ -b "$root_mount" ]; then
         root_dev=$(echo "$root_mount" | sed -E 's/p?[0-9]+$//')
         if [ "$root_dev" = "$root_mount" ]; then
-            root_dev="${root_mount%[0-9]}"
+            # ${var//search/replace} cannot express "strip only TRAILING digits":
+            # ${root_mount%%[0-9]*} cuts at the first digit and would turn
+            # /dev/nvme0n1 into /dev/nvme, losing the boot-volume match below.
+            # shellcheck disable=SC2001
+            root_dev=$(echo "$root_mount" | sed 's/[0-9]*$//')
         fi
     fi
 fi
