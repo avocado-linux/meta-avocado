@@ -20,6 +20,7 @@ SRC_URI:append:avocado-x86-64 = " \
 # bbappends, since ${LAYERDIR} is not available at this recipe's parse time.
 FILESEXTRAPATHS:prepend:avocado-amd-x86-64 := "${AVOCADO_AMD_X86_64_KERNEL_FILESDIR}:"
 SRC_URI:append:avocado-amd-x86-64 = " file://amd-x86-64.cfg"
+KBUILD_DEFCONFIG:avocado-amd-x86-64 = "x86_64_defconfig"
 
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
