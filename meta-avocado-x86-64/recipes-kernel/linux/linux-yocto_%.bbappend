@@ -14,7 +14,8 @@ SRC_URI:append:avocado-x86-64 = " \
     file://x86-efi.cfg \
 "
 
-# amd-x86-64.cfg lives in meta-avocado-amd-x86-64, not this layer's own
+# The AMD fragments (avocado-core.cfg, x86-64-platform.cfg) live in
+# meta-avocado-amd-x86-64, not this layer's own
 # recipes-kernel/linux/files/ - expose that dir the same way
 # meta-avocado-nxp's AVOCADO_NXP_KERNEL_FILESDIR does for its relocated
 # bbappends, since ${LAYERDIR} is not available at this recipe's parse time.
@@ -24,7 +25,6 @@ SRC_URI:append:avocado-amd-x86-64 = " \
     file://avocado-extra.cfg \
     file://tpm.cfg \
     file://x86-64-platform.cfg \
-    file://amd-x86-64.cfg \
 "
 # AMD uses yocto-kernel-cache's own amd-x86-64 BSP instead of a bare
 # x86_64_defconfig. With KBUILD_DEFCONFIG set, kernel-yocto merges every
