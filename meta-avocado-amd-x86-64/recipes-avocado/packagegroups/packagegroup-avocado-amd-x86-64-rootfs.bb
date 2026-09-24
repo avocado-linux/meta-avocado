@@ -15,6 +15,13 @@ GPU_FIRMWARE = " \
   linux-firmware-amdgpu-misc \
 "
 
+# The XDNA NPU loads amdnpu/1502_00 when amdxdna probes, which udev does from
+# the base rootfs before extensions merge - the same constraint as amdgpu.
+NPU_FIRMWARE = " \
+  linux-firmware-amdxdna \
+"
+
 RDEPENDS:${PN} = " \
   ${GPU_FIRMWARE} \
+  ${NPU_FIRMWARE} \
 "
