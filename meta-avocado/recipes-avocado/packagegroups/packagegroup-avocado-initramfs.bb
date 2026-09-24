@@ -20,3 +20,9 @@ RDEPENDS:${PN} = "\
 "
 
 RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"
+
+# The shell tools initrd units call. Nothing else this packagegroup installs
+# provides sed or grep - coreutils ships neither, and busybox is not part of
+# it - so an initramfs has them only if something names them. Named here once
+# rather than per unit, so every initramfs script can rely on them.
+RDEPENDS:${PN} += "sed grep"
