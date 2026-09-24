@@ -212,6 +212,14 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
     if [ -n "${PART_UUIDS[$i]}" ]; then
         SGDISK_ARGS="${SGDISK_ARGS} -u ${pnum}:${PART_UUIDS[$i]}"
     fi
+
+    # GPT attribute bit 56 is how an image tells avocado-var-grow to extend the
+    # partition to the end of whatever disk it lands on - the fwup templates set
+    # it from the same manifest field. Without it the grower sees an unmarked
+    # partition and leaves var at the image's size.
+    if [ "${PART_EXPAND[$i]}" = "true" ]; then
+        SGDISK_ARGS="${SGDISK_ARGS} -A ${pnum}:set:56"
+    fi
 done
 
 # shellcheck disable=SC2086
