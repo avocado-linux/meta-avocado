@@ -2,21 +2,6 @@ KBRANCH ?= "v7.2/standard/base"
 
 require recipes-kernel/linux/linux-yocto.inc
 
-# tools/objtool's disassembly support (DISAS, gated on #include <bfd.h> in
-# tools/objtool/include/objtool/arch.h) auto-detects via a link-only probe in
-# tools/objtool/Makefile - it checks that -lopcodes/-lbfd link, never that
-# bfd.h itself is present. binutils-native's runtime .so is already staged
-# via the cross-toolchain dependency chain, so the probe passes and
-# BUILD_DISAS gets enabled, but do_compile then fails on the missing header:
-# "fatal error: bfd.h: No such file or directory". linux-yocto.inc's own
-# DEPENDS carries no binutils-native, so nothing stages the header into this
-# recipe's own native sysroot. The Intel kernel recipe carries no
-# PREFERRED_VERSION_linux-yocto override (grep across meta-avocado-x86-64/
-# meta-avocado finds none), so it tracks wrynose's distro-default 6.18 line,
-# not this vendored 7.2 - add the dependency here, scoped to the recipe that
-# needs it, rather than to the shared .inc every kernel recipe includes.
-DEPENDS += "binutils-native"
-
 # CVE exclusions
 include recipes-kernel/linux/cve-exclusion.inc
 
@@ -55,7 +40,8 @@ PN:class-devupstream = "linux-yocto-upstream"
 KBRANCH:class-devupstream = "v7.2/base"
 
 SRC_URI = "git://git.yoctoproject.org/linux-yocto.git;name=machine;branch=${KBRANCH};protocol=https \
-           git://git.yoctoproject.org/yocto-kernel-cache;type=kmeta;name=meta;branch=yocto-7.2;destsuffix=${KMETA};protocol=https"
+           git://git.yoctoproject.org/yocto-kernel-cache;type=kmeta;name=meta;branch=yocto-7.2;destsuffix=${KMETA};protocol=https \
+           file://0001-objtool-skip-the-libopcodes-disassembly-probe.patch"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
 LINUX_VERSION ?= "7.2.6"
