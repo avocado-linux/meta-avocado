@@ -13,4 +13,4 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
-RDEPENDS:${PN} = "tegra-firmware-tegra234"
+RDEPENDS:${PN} = "tegra-firmware-tegra234 avocado-boot-device"

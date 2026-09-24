@@ -54,6 +54,83 @@ emits - `efibootmgr -v` on the board is the answer. A class that does not match
 makes the tool refuse rather than misbehave, but it also makes it useless on
 that board.
 
+## Fixing a board that keeps booting the wrong medium
+
+Provisioning writing a new image to a disk and firmware then booting a
+different, older one are not the same event - `BootOrder` is a firmware
+setting, not something a flash or write operation touches. When that happens,
+run this from the board's currently-booted OS:
+
+```sh
+avocado-set-boot-device nvme
+```
+
+Substitute the medium that should come first: `nvme`, `sd`, `emmc`, or `usb`.
+This moves that device's UEFI boot entry to the front of the persistent
+`BootOrder` and leaves every other entry in place as a fallback, so a later
+failure of the selected disk does not strand the board. Confirm the change
+took with:
+
+```sh
+avocado-set-boot-device --list
+```
+
+Use `avocado-set-boot-device --once nvme` instead when testing a boot rather
+than committing to it - it writes `BootNext` for a single boot and self-heals
+on the next power cycle even if you forget to revert it.
+
+### Fallback: the currently-booted OS predates this change
+
+The instructions above assume the running OS has `avocado-set-boot-device`
+installed - it shipped in the Tegra feed on `avocado-linux/meta-avocado`
+starting with the `avocado-boot-device` recipe. A board's OS that predates
+this change has no such command and `command -v avocado-set-boot-device` will
+return nothing. Two options, in order of preference:
+
+**Install the package separately**, if the board's package feed still serves
+it (it lives in the common layer, not a Tegra-only one, so any feed built
+after this recipe merged carries it):
+
+```sh
+avocado install avocado-boot-device
+```
+
+If that succeeds, use the tool as described above rather than the manual
+procedure below.
+
+**Manual fallback**, when the package is unavailable: reorder `BootOrder`
+directly with `efibootmgr`, using the board's own `BootXXXX` entries.
+
+1. List the raw firmware boot-manager entries and find the four hex digits
+   for the medium you want to boot:
+
+   ```sh
+   efibootmgr -v
+   ```
+
+   Look for the entry whose description or device path names your target -
+   an NVMe entry's device path contains `NVMe(`, an SD card's contains `SD(`,
+   eMMC's contains `eMMC(`, and USB mass storage's contains `USB(`. The four
+   hex digits after `Boot` (e.g. `Boot0003`) are that entry's number.
+
+2. Read the current `BootOrder` line from the same `efibootmgr -v` output,
+   e.g. `BootOrder: 0000,0001,0003,0002`.
+
+3. Rewrite it with the target entry moved to the front, keeping every other
+   entry's relative order so there is still a fallback path:
+
+   ```sh
+   efibootmgr -o 0003,0000,0001,0002
+   ```
+
+4. Confirm the write took by re-running `efibootmgr` and checking the
+   `BootOrder:` line reads back exactly as written - efivarfs can silently
+   accept a write that the firmware later discards.
+
+If `efibootmgr` itself is missing, no in-OS path exists; the board's OS needs
+reflashing with an image that carries `efibootmgr` before boot order can be
+managed from userspace at all.
+
 ## Related
 
 - `meta-avocado/recipes-avocado/boot-device/files/avocado-set-boot-device` - the script

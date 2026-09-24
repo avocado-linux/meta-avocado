@@ -1,0 +1,37 @@
+#!/bin/sh
+# Assert BootOrder for the medium that was just flashed, if a marker asks for
+# it. Runs after avocado-tegra-init has mounted the var partition at
+# /sysroot/var, and before switch-root hands off to the real rootfs.
+#
+# The marker is a single line naming a device class avocado-set-boot-device
+# understands (nvme, sd, emmc, usb). Absence of the marker means there is
+# nothing to do this boot - that is the common case, not an error.
+set -e
+
+MARKER=/sysroot/var/lib/avocado/boot-order-marker
+
+[ -f "$MARKER" ] || exit 0
+
+medium=$(head -n1 "$MARKER")
+
+# Validate against the fixed set avocado-set-boot-device itself recognizes,
+# rather than relying on its own option parser to reject a bad value: a
+# marker value starting with '-' would otherwise be read by that tool's
+# argument loop as an unrecognized option instead of a device class.
+case "$medium" in
+    nvme | sd | emmc | usb) ;;
+    *)
+        echo "avocado-boot-order-assert: marker names unrecognized device class '$medium'; marker left in place" >&2
+        exit 1
+        ;;
+esac
+
+if /usr/sbin/avocado-set-boot-device "$medium"; then
+    rm -f "$MARKER"
+else
+    echo "avocado-boot-order-assert: failed to assert boot order for '$medium'; marker left in place" >&2
+    # WantedBy=initrd-root-fs.target is a soft "Wants" relationship, so a
+    # non-zero exit here fails only this unit and does not block the boot -
+    # exiting 0 would make the assertion failure invisible to unit status.
+    exit 1
+fi
