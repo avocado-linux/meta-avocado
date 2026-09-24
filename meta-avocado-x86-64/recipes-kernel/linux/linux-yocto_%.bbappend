@@ -21,6 +21,8 @@ SRC_URI:append:avocado-x86-64 = " \
 FILESEXTRAPATHS:prepend:avocado-amd-x86-64 := "${AVOCADO_AMD_X86_64_KERNEL_FILESDIR}:"
 SRC_URI:append:avocado-amd-x86-64 = " \
     file://avocado-core.cfg \
+    file://avocado-extra.cfg \
+    file://tpm.cfg \
     file://x86-64-platform.cfg \
     file://amd-x86-64.cfg \
 "
