@@ -19,7 +19,10 @@ SRC_URI:append:avocado-x86-64 = " \
 # meta-avocado-nxp's AVOCADO_NXP_KERNEL_FILESDIR does for its relocated
 # bbappends, since ${LAYERDIR} is not available at this recipe's parse time.
 FILESEXTRAPATHS:prepend:avocado-amd-x86-64 := "${AVOCADO_AMD_X86_64_KERNEL_FILESDIR}:"
-SRC_URI:append:avocado-amd-x86-64 = " file://amd-x86-64.cfg"
+SRC_URI:append:avocado-amd-x86-64 = " \
+    file://avocado-core.cfg \
+    file://amd-x86-64.cfg \
+"
 KBUILD_DEFCONFIG:avocado-amd-x86-64 = "x86_64_defconfig"
 
 inherit avocado-kernel-feed
