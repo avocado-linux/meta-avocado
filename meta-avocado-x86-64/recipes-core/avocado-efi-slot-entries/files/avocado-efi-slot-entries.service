@@ -1,0 +1,14 @@
+[Unit]
+Description=Create the UEFI boot entries for the A/B boot slots
+# The PARTUUID/PARTNAME links it reads come from udev; efivarfs is mounted by
+# systemd itself before any of this runs.
+After=local-fs.target systemd-udevd.service
+ConditionPathExists=/sys/firmware/efi/efivars
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/avocado-efi-slot-entries
+
+[Install]
+WantedBy=multi-user.target
