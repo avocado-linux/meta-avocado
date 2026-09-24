@@ -7,4 +7,5 @@ local_conf_header:
     DISTRO_FEATURES_EXTRA:append = " opengl wayland efi seccomp virtualization"
 
     ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-amd-x86-64-rootfs"
+    INITRAMFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-amd-x86-64-initramfs"
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-amd-x86-64-extra"
