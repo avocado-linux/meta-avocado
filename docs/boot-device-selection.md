@@ -48,11 +48,18 @@ Adding it to another BSP means adding the same line to that layer's
 `packagegroup-avocado-<bsp>-extra.bb`, which is what puts the package in that
 target's feed. Nothing else is BSP-specific.
 
-Before doing that, check the device-path node names the script matches on
-(`NVMe(`, `SD(`, `eMMC(`, `USB(`) against what that board's firmware actually
-emits - `efibootmgr -v` on the board is the answer. A class that does not match
-makes the tool refuse rather than misbehave, but it also makes it useless on
-that board.
+Before doing that, check what that board's firmware actually emits -
+`efibootmgr -v` on the board is the answer. The script tries three things in
+order: a typed device-path node (`NVMe(`, `SD(`, `eMMC(`, `USB(`); then, for an
+entry whose path starts at a bare `HD(n,GPT,<guid>,...)` node, the disk that
+partition GUID lives on, classified from sysfs (`nvme*`, an MMC card type of SD
+or MMC, or a USB controller in the device's sysfs path); and only then the
+entry description. The middle step exists for AMI firmware, which on the
+SolidRun R8000 writes a single short-form "UEFI OS" entry with no class node at
+all. A class that matches none of the three makes the tool refuse rather than
+misbehave, but it also makes it useless on that board.
+
+Host test: `meta-avocado/recipes-avocado/boot-device/tests/test-avocado-set-boot-device.sh`.
 
 ## Related
 

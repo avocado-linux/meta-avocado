@@ -12,7 +12,9 @@
 set -e
 
 SELF=${0##*/}
-EFIVARS=/sys/firmware/efi/efivars
+EFIVARS=${AVOCADO_BOOT_DEVICE_EFIVARS:-/sys/firmware/efi/efivars}
+DEVDIR=${AVOCADO_BOOT_DEVICE_DEVDIR:-/dev}
+SYSBLOCK=${AVOCADO_BOOT_DEVICE_SYSBLOCK:-/sys/class/block}
 
 usage() {
   cat <<EOF
@@ -83,6 +85,45 @@ class_description_pattern() {
   esac
 }
 
+# Class of the disk holding a GPT partition, from the partition GUID.
+#
+# Some firmware writes a short-form device path for the disks it finds on its
+# own: AMI on the SolidRun R8000 makes a single "UEFI OS" entry reading
+# HD(1,GPT,<guid>,...)/File(\EFI\BOOT\BOOTX64.EFI) - no USB( or NVMe( node, and
+# no class word in the description. The GUID is still exact, and the kernel
+# knows which disk carries it and how that disk is attached.
+disk_class_of_partuuid() {
+  part=$(readlink -f "$DEVDIR/disk/by-partuuid/$1" 2>/dev/null) || return 1
+  [ -e "$part" ] || return 1
+  diskpath=$(readlink -f "$SYSBLOCK/${part##*/}/..") || return 1
+  case "${diskpath##*/}" in
+    nvme*) echo nvme ;;
+    mmcblk*)
+      case "$(cat "$diskpath/device/type" 2>/dev/null)" in
+        SD) echo sd ;;
+        MMC) echo emmc ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      case "$diskpath" in
+        */usb[0-9]*/*) echo usb ;;
+        *) return 1 ;;
+      esac
+      ;;
+  esac
+}
+
+# Boot entries whose device path starts at an HD() node, resolved to a class.
+entries_for_class_by_partuuid() {
+  efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | while IFS= read -r line; do
+    guid=$(echo "$line" | sed -n 's/.*HD([0-9]*,GPT,\([0-9A-Fa-f-]*\),.*/\1/p' | tr 'A-F' 'a-f')
+    [ -n "$guid" ] || continue
+    [ "$(disk_class_of_partuuid "$guid")" = "$1" ] || continue
+    echo "$line" | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/'
+  done
+}
+
 current_order() {
   efibootmgr | sed -n 's/^BootOrder: //p' | tr -d '[:space:]'
 }
@@ -95,6 +136,9 @@ entries_for_class() {
 
   found=$(efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | grep -F "$path_pat" \
     | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/' || true)
+  if [ -z "$found" ]; then
+    found=$(entries_for_class_by_partuuid "$class" || true)
+  fi
   if [ -z "$found" ]; then
     found=$(efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | grep "$desc_pat" \
       | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/' || true)
