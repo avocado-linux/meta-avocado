@@ -24,6 +24,10 @@
     "rollback": {
       "type": "efibootmgr",
       "slot_entries": { "a": "boot-a", "b": "boot-b" }
+    },
+    "commit": {
+      "type": "efibootmgr",
+      "slot_entries": { "a": "boot-a", "b": "boot-b" }
     }
   },
   "provision": {
