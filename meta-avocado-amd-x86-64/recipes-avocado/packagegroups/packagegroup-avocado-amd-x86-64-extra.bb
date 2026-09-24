@@ -31,7 +31,7 @@ GPU_FIRMWARE = " \
 
 # CPU microcode - AMD
 CPU_MICROCODE = " \
-  linux-firmware-amd-ucode \
+  linux-firmware-microcode-amd \
 "
 
 # WiFi and Bluetooth userspace tools
