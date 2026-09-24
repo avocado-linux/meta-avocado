@@ -1,0 +1,96 @@
+#!/bin/sh
+# avocado-efi-slot-entries - make sure UEFI has one boot entry per A/B boot
+# slot on the disk this system booted from, labelled the way avocadoctl's
+# `efibootmgr` slot action looks them up (the stone manifest's slot_entries:
+# boot-a, boot-b).
+#
+# Provisioning writes the disk image and nothing else, so firmware only ever
+# creates its own entries: on the R8000 that is a PXE entry and a removable-
+# media 'UEFI OS' entry pointing at the first ESP. Without an entry per slot,
+# activation cannot find the target slot, and the second ESP is unreachable.
+#
+# The disk comes from LoaderDevicePartUUID, the ESP systemd-boot was loaded
+# from, so a same-named partition on another disk is never used. BootOrder is
+# rewritten only when an entry had to be created: reordering an existing pair
+# on every boot would make a BootNext trial of a new slot permanent before
+# avocadoctl verified it.
+set -eu
+
+efivars=${AVOCADO_EFI_SLOTS_EFIVARS:-/sys/firmware/efi/efivars}
+devdir=${AVOCADO_EFI_SLOTS_DEVDIR:-/dev}
+sysblock=${AVOCADO_EFI_SLOTS_SYSBLOCK:-/sys/class/block}
+slots=${AVOCADO_EFI_SLOTS_LABELS:-boot-a boot-b}
+loader='\EFI\BOOT\BOOTX64.EFI'
+
+log() { echo "avocado-efi-slot-entries: $*"; }
+
+var=$efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+[ -r "$var" ] || { log "no LoaderDevicePartUUID, not booted through systemd-boot; nothing to do"; exit 0; }
+# efivarfs prefixes 4 attribute bytes; the rest is a UTF-16LE GUID string.
+booted=$(tail -c +5 "$var" | tr -d '\000\n' | tr 'A-F' 'a-f')
+esp=$(readlink -f "$devdir/disk/by-partuuid/$booted" 2>/dev/null) || esp=
+[ -n "$esp" ] && [ -e "$esp" ] || { log "booted ESP $booted has no block device"; exit 1; }
+disk=$(basename "$(readlink -f "$sysblock/$(basename "$esp")/..")")
+
+# Partition device name for a GPT partition label, on the booted disk only.
+part_for_label() {
+    for u in "$sysblock/$disk"/*/uevent; do
+        [ -r "$u" ] || continue
+        grep -qx "PARTNAME=$1" "$u" && { basename "$(dirname "$u")"; return 0; }
+    done
+    return 1
+}
+
+partuuid_of() {
+    for l in "$devdir"/disk/by-partuuid/*; do
+        [ "$(readlink -f "$l")" = "$(readlink -f "$devdir/$1")" ] && { basename "$l" | tr 'A-F' 'a-f'; return 0; }
+    done
+    return 1
+}
+
+# Boot entry number carrying exactly this label, as avocadoctl matches it.
+entry_for_label() {
+    efibootmgr -v | awk -v want="$1" '
+        /^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ {
+            num = substr($0, 5, 4); rest = substr($0, 9)
+            sub(/^\*/, "", rest); sub(/^ +/, "", rest)
+            label = rest; sub(/\t.*/, "", label); sub(/ +$/, "", label)
+            if (label == want) print num
+        }'
+}
+
+created=
+wanted_order=
+# Create in reverse so the first slot ends up first even before the explicit
+# reorder below (efibootmgr -c prepends to BootOrder).
+reversed=
+for s in $slots; do reversed="$s $reversed"; done
+for s in $reversed; do
+    p=$(part_for_label "$s") || { log "no partition labelled $s on /dev/$disk, skipping it"; continue; }
+    uuid=$(partuuid_of "$p") || { log "$p has no PARTUUID link, skipping $s"; continue; }
+    num=$(entry_for_label "$s")
+    if [ -n "$num" ]; then
+        if efibootmgr -v | grep "^Boot$num" | tr 'A-F' 'a-f' | grep -q "$uuid"; then
+            continue
+        fi
+        log "entry Boot$num '$s' points elsewhere, replacing it"
+        efibootmgr -q -b "$num" -B
+    fi
+    partno=$(cat "$sysblock/$p/partition")
+    log "creating '$s' for /dev/$p (partition $partno of /dev/$disk)"
+    efibootmgr -q -c -d "$devdir/$disk" -p "$partno" -L "$s" -l "$loader"
+    created=1
+done
+
+[ -n "$created" ] || exit 0
+
+for s in $slots; do
+    num=$(entry_for_label "$s")
+    [ -n "$num" ] && wanted_order="${wanted_order:+$wanted_order,}$num"
+done
+rest=$(efibootmgr | sed -n 's/^BootOrder: //p' | awk -F, -v skip="$wanted_order" '
+    BEGIN { n = split(skip, s, ","); for (i = 1; i <= n; i++) drop[s[i]] = 1 }
+    { for (i = 1; i <= NF; i++) if (!($i in drop)) out = out (out == "" ? "" : ",") $i }
+    END { print out }')
+efibootmgr -q -o "$wanted_order${rest:+,$rest}"
+log "BootOrder now $wanted_order${rest:+,$rest}"

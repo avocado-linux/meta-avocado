@@ -21,7 +21,17 @@ NPU_FIRMWARE = " \
   linux-firmware-amdxdna \
 "
 
+# A/B slot activation: avocadoctl's efibootmgr slot action (the stone
+# manifest's activate/rollback) runs efibootmgr from the rootfs, and looks the
+# target slot up by an entry label that avocado-efi-slot-entries creates.
+EFI_TOOLS = " \
+  efibootmgr \
+  efivar \
+  avocado-efi-slot-entries \
+"
+
 RDEPENDS:${PN} = " \
   ${GPU_FIRMWARE} \
   ${NPU_FIRMWARE} \
+  ${EFI_TOOLS} \
 "
