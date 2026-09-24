@@ -26,7 +26,13 @@ SRC_URI:append:avocado-amd-x86-64 = " \
     file://x86-64-platform.cfg \
     file://amd-x86-64.cfg \
 "
-KBUILD_DEFCONFIG:avocado-amd-x86-64 = "x86_64_defconfig"
+# AMD uses yocto-kernel-cache's own amd-x86-64 BSP instead of a bare
+# x86_64_defconfig. With KBUILD_DEFCONFIG set, kernel-yocto merges every
+# fragment over allnoconfig (merge_config.sh -n), so each "default y" the
+# defconfig leaves unnamed silently drops - 64BIT, ACPI/EFI, UNIX all did. The
+# BSP brings the standard ktype baseline plus a curated AMD fragment, and with
+# no defconfig seed the merge runs over alldefconfig.
+KMACHINE:avocado-amd-x86-64 = "amd-x86-64"
 
 inherit avocado-kernel-feed
 inherit avocado-kernel-builtin-provides
