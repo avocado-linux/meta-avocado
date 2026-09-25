@@ -31,3 +31,11 @@ RDEPENDS:${PN}:append:bootvars-ubootenv = " libubootenv-bin"
 # rather than on the machine because that is the property the generator needs:
 # a U-Boot target reads its slot from a U-Boot variable and has no ESP to ask.
 RDEPENDS:${PN} += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uefi', 'avocado-slot-root-generator', '', d)}"
+
+# The shell tools initrd units call. Nothing else this packagegroup installs
+# provides sed or grep - coreutils ships neither, and busybox is not part of
+# it - so an initramfs has them only if something names them, and
+# avocado-var-grow (parsing sgdisk -i) and avocado-initramfs-id both use sed.
+# Named here once rather than per unit, so every initramfs script can rely on
+# them.
+RDEPENDS:${PN} += "sed grep"
