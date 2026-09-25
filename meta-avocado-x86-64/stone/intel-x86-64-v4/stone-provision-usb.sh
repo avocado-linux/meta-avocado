@@ -170,6 +170,10 @@ fi
 if in_list "$target_name" "$root_chain"; then
     die "${target_device} holds the running root filesystem -- refusing to overwrite"
 fi
+# The image is a whole-disk layout. A dm volume, md array or loop device is a
+# whole block device too, but writing a disk image over it destroys a volume.
+target_type=$(lsblk -dno TYPE "$target_device" 2>/dev/null) || target_type=
+[ "$target_type" = "disk" ] || die "${target_device} is a ${target_type:-unknown} device, not a disk"
 
 # =============================================================================
 # Step 4: Safety checks

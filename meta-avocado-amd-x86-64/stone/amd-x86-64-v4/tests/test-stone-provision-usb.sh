@@ -44,6 +44,8 @@ cat > "$w/bin/lsblk" <<S
 echo "lsblk \$*" >> "$w/log"
 case " \$* " in
   *" -nslo NAME,TYPE "*) cat "$w/st/lsblk-root" ;;
+  # Device type of one device: st/type-<name> when present, else "disk".
+  *" -dno TYPE "*) n=\$(basename "\${@: -1}"); cat "$w/st/type-\$n" 2>/dev/null || echo disk ;;
   # Like the real tool: the device itself, then only its own partitions.
   *" -nlo PATH,MOUNTPOINT "*) dev=\${@: -1}; echo "\$dev"; grep -E "^\${dev}p?[0-9]+ " "$w/st/mounts" || true ;;
 esac
@@ -164,6 +166,13 @@ setup; out=$(run "$w/dev/sdb"); rc=$?
 { echo "$out" | grep -q "/dev/sdb " && ! echo "$out" | grep -q "/dev/sda " ; } \
   && ok "the device list shows the stick and hides the root disk" || bad "listing: out=[$out]"
 
+# 15. A whole block device that is not a disk (a data volume on dm, an md
+#     array, a loop device) is refused: it has no partition file and is not
+#     under /, but writing a disk image onto it destroys a volume.
+setup; mkdir -p "$w/sys/dm-3"; : > "$w/dev/dm-3"; ln -s ../dm-3 "$w/dev/mapper/data"; echo lvm > "$w/st/type-dm-3"
+out=$(run "$w/dev/mapper/data"); rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "not a disk"; } \
+  && ok "a dm data volume is refused as a target" || bad "non-disk: rc=$rc out=[$out]"
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/14 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 14 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/15 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 15 ]
