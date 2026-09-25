@@ -138,10 +138,10 @@ rc=$?
 { [ $rc -eq 0 ] && [ "$(writes)" -eq 0 ] && [ "$(cat "$w/nv/order")" = "$b,$a,0002,0003" ]; } \
   && ok "a correct pair is never reordered" || bad "reorder: rc=$rc order=$(cat "$w/nv/order") log=$(cat "$w/log")"
 
-# 4. A boot-b entry that points at another partition is replaced in its
-#    BootOrder position (test 3 left boot-b first), and the
+# 4. A boot-b entry that points at another partition is replaced, and the
 #    replacement exists before the stale one goes, so a failure in between
-#    never leaves the slot with no entry.
+#    never leaves the slot with no entry. Test 3 left boot-b first; replacing
+#    an entry puts the booted slot (A) back ahead of the other one.
 sed -i "s/^$b|boot-b|HD(2,GPT,$UB,/$b|boot-b|HD(9,GPT,deadbeef-0000-0000-0000-000000000009,/" "$w/nv/entries"
 out=$(run)
 rc=$?
@@ -149,8 +149,8 @@ nb=$(num_of boot-b)
 { [ $rc -eq 0 ] && grep -q "efibootmgr .*-b $b -B" "$w/log" && grep -q "^$nb|boot-b|HD(2,GPT,$UB," "$w/nv/entries" \
   && [ "$(grep -n -- '-L boot-b' "$w/log" | cut -d: -f1)" -lt "$(grep -n -- "-b $b -B" "$w/log" | cut -d: -f1)" ] \
   && [ "$(grep -c '|boot-b|' "$w/nv/entries")" -eq 1 ] && [ "$(num_of boot-a)" = "$a" ] \
-  && [ "$(cat "$w/nv/order")" = "$nb,$a,0002,0003" ]; } \
-  && ok "a stale boot-b is replaced on sda2 (created before the delete) in its BootOrder slot" \
+  && [ "$(cat "$w/nv/order")" = "$a,$nb,0002,0003" ]; } \
+  && ok "a stale boot-b is replaced on sda2 (created before the delete), booted slot first" \
   || bad "stale: log=$(cat "$w/log") entries=$(cat "$w/nv/entries")"
 
 # 5. Not booted through systemd-boot: nothing to anchor on, nothing written.
@@ -306,6 +306,22 @@ rc=$?
   && ok "a duplicated slot UUID alone also stops the run before any NVRAM write" \
   || bad "slot clone: rc=$rc writes=$(writes) out=[$out]"
 
+# 16. After a reflash both slot entries are stale, and the stale boot-b sat
+#     ahead of the stale boot-a. Each replacement takes its predecessor's
+#     place, which would leave boot-b ahead: once firmware drops its own entry
+#     (the R8000's AMI does at POST) a plain reboot lands on slot B. The booted
+#     slot's entry is put ahead of the other slot's; nothing else moves.
+setup
+printf '0000|boot-b|HD(2,GPT,dead0000-0000-0000-0000-00000000000b,0x80800,0x80000)/File(x)\n0001|boot-a|HD(1,GPT,dead0000-0000-0000-0000-00000000000a,0x800,0x80000)/File(x)\n' >>"$w/nv/entries"
+echo 0003,0002,0000,0001 >"$w/nv/order"
+out=$(run)
+rc=$?
+a=$(num_of boot-a)
+b=$(num_of boot-b)
+{ [ $rc -eq 0 ] && [ -n "$a" ] && [ -n "$b" ] && [ "$(cat "$w/nv/order")" = "0003,0002,$a,$b" ]; } \
+  && ok "replacing stale entries puts the booted slot ahead of the other, in place" \
+  || bad "reflash order: rc=$rc out=[$out] order=$(cat "$w/nv/order") entries=$(cat "$w/nv/entries")"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/15 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 15 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/16 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 16 ]
