@@ -5,5 +5,6 @@ RDEPENDS:${PN}:append = " \
   nativesdk-mtools \
   nativesdk-dnsmasq \
   nativesdk-gptfdisk \
+  nativesdk-util-linux-findmnt \
   nativesdk-util-linux-lsblk \
 "

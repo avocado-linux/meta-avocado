@@ -15,9 +15,10 @@ set -e
 set -u
 set -o pipefail
 
-# The target checks read lsblk and blockdev. Missing, they would report a real
-# disk as "unknown" or its mounts as none, so stop before anything else runs.
-for tool in lsblk blockdev; do
+# The target checks read findmnt, lsblk and blockdev. Missing, they would lose
+# the root disk, report a real disk as "unknown" or its mounts as none, so stop
+# before anything else runs.
+for tool in findmnt lsblk blockdev; do
     command -v "$tool" >/dev/null 2>&1 \
         || { echo "ERROR: ${tool} not found; the target checks need util-linux ${tool}"; exit 1; }
 done
@@ -79,7 +80,9 @@ die() {
 # is spelled. A root on overlay, tmpfs or NFS has no backing disk here.
 
 # --nofsroot drops the "[/@]" a btrfs subvolume or bind mount appends to SOURCE.
-root_src=$(findmnt -n --nofsroot -o SOURCE / 2>/dev/null || true)
+# A failed query would read as "no local root disk" and skip every root guard.
+root_src=$(findmnt -n --nofsroot -o SOURCE /) \
+    || die "cannot tell what / is mounted from; refusing to guess"
 case "$root_src" in
     //*) root_src="" ;; # CIFS share, no local disk
     /*)
@@ -243,11 +246,13 @@ EOF
 
 # lsblk sees only this mount namespace. Inside the SDK container a partition
 # the host has mounted looks free; the kernel still refuses to re-read the
-# table of a disk with a partition in use, whoever uses it.
-if ! rr_err=$(blockdev --rereadpt "$target_device" 2>&1); then
+# table of a disk with a partition in use, whoever uses it. That refusal is the
+# only evidence the disk is free, so any failure stops the run; LC_ALL=C keeps
+# the EBUSY text untranslated for the message.
+if ! rr_err=$(LC_ALL=C blockdev --rereadpt "$target_device" 2>&1); then
     case "$rr_err" in
         *busy*) die "${target_device} is still in use (mounted or held outside this environment, e.g. by the host); release it and retry" ;;
-        *) echo "  warning: could not re-read the partition table of ${target_device}: ${rr_err}" ;;
+        *) die "cannot re-read the partition table of ${target_device} (${rr_err}), so nothing shows it is free" ;;
     esac
 fi
 
