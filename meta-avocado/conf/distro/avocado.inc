@@ -4,6 +4,33 @@ DISTRO_VENDOR = "Avocado Linux"
 DISTRO_VENDOR_URL = "https://avocadolinux.org"
 DISTRO_DOCUMENTATION_URL = "https://docs.avocadolinux.org"
 
+# release/channel, and the release names the generation rather than the word
+# "dev". DISTRO_CODENAME is what dnf expands $releasever to, so it decides both
+# the feed directory a build renders into and the one a client resolves
+# against; two generations sharing a value share a package set.
+#
+# That is not hypothetical. Every local build used to be "dev/local", so a
+# scarthgap tree and a wrynose tree rendered into one channel and the snapshot
+# was their union - two libdevmapper, two lvm2 and two busybox versions in one
+# repo, which dnf refuses to resolve. Naming the year and the Yocto series
+# makes the collision impossible rather than unlikely: a tree can only collide
+# with another tree of the same generation, which is the case where sharing is
+# correct.
+#
+# Composed only when the caller left it empty, which is the shape kas passes
+# through: a released build sets the whole codename in the environment and that
+# value wins untouched. `?=` would not be enough, because kas exports the key
+# with an empty default rather than leaving it unset, and an empty string is
+# still a value that `?=` declines to replace.
+#
+# The fallbacks are deliberately wrong-looking. A tree that reaches here with
+# no parts has lost kas/base.yml, and "0000-unknown" says so in the feed path
+# rather than quietly resolving to something plausible.
+AVOCADO_RELEASE_YEAR ??= "0000"
+AVOCADO_YOCTO_SERIES ??= "unknown"
+DISTRO_CHANNEL ??= "local"
+DISTRO_CODENAME := "${@d.getVar('DISTRO_CODENAME') or '${AVOCADO_RELEASE_YEAR}-${AVOCADO_YOCTO_SERIES}/${DISTRO_CHANNEL}'}"
+
 SDK_VENDOR = "-avocadosdk"
 SDK_VERSION := "${@'${DISTRO_VERSION}'.replace('snapshot-${METADATA_REVISION}','snapshot')}"
 SDK_VERSION[vardepvalue] = "${SDK_VERSION}"
