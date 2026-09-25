@@ -99,13 +99,29 @@ pick() {
     return 1
 }
 
+# BootOrder with every occurrence of $2 replaced by $3, duplicates dropped.
+# When $2 sits ahead of $3 the kept entry moves up into $2's place: that is
+# the position whoever wrote BootOrder last (normally avocadoctl's commit)
+# gave the slot.
+swap_in_order() {
+    printf '%s\n' "$1" | awk -F, -v from="$2" -v to="$3" '{
+        for (i = 1; i <= NF; i++) {
+            e = ($i == from) ? to : $i
+            if (e != "" && !(e in seen)) { seen[e] = 1; out = out (out == "" ? "" : ",") e }
+        }
+        print out }'
+}
+
+boot_order() {
+    o=$(efibootmgr_out) || return 1
+    printf '%s\n' "$o" | sed -n 's/^BootOrder: //p'
+}
+
 nv=$(efibootmgr_out -v)
-order0=$(printf '%s\n' "$nv" | sed -n 's/^BootOrder: //p')
-next0=$(printf '%s\n' "$nv" | sed -n 's/^BootNext: //p')
-prefs="$next0 $(printf '%s\n' "$nv" | sed -n 's/^BootCurrent: //p') $(printf '%s' "$order0" | tr ',' ' ')"
+next=$(printf '%s\n' "$nv" | sed -n 's/^BootNext: //p')
+prefs="$next $(printf '%s\n' "$nv" | sed -n 's/^BootCurrent: //p') $(printf '%s\n' "$nv" | sed -n 's/^BootOrder: //p' | tr ',' ' ')"
 
 kept=
-map=
 for s in $slots; do
     p=$(part_for_label "$s") || { log "no partition labelled $s on /dev/$disk, skipping it"; continue; }
     uuid=$(partuuid_of "$p") || { log "$p has no PARTUUID link, skipping $s"; continue; }
@@ -118,31 +134,40 @@ for s in $slots; do
         nv=$(efibootmgr_out -v)
         keep=$(pick "$(good_entries "$s" "$uuid" "$nv")") || { log "created '$s' but efibootmgr does not list it"; exit 1; }
     fi
-    # Stale and duplicate entries go only once a good one exists, so a failure
-    # part-way never leaves the slot with no entry at all.
+    # Stale and duplicate entries go only once a good one exists. Before each
+    # delete, the kept entry takes over the doomed one's BootOrder position and
+    # any BootNext pointing at it, so an NVRAM write failing at any point
+    # leaves nothing naming an entry that no longer exists: a lost BootNext
+    # would drop a pending trial or rollback, and -B also removes the number
+    # from BootOrder, which would push the slot out of it.
     for n in $(entries_for_label "$s" "$nv"); do
         [ "$n" = "$keep" ] && continue
         log "removing Boot$n '$s', it duplicates Boot$keep or points elsewhere"
+        order=$(boot_order)
+        swapped=$(swap_in_order "$order" "$n" "$keep")
+        if [ "$swapped" != "$order" ]; then
+            log "BootOrder $order -> $swapped (Boot$keep takes Boot$n's place)"
+            efibootmgr -q -o "$swapped"
+        fi
+        if [ "$n" = "$next" ]; then
+            log "BootNext Boot$n is being removed, pointing it at Boot$keep"
+            efibootmgr -q -n "$keep"
+            next=$keep
+        fi
         efibootmgr -q -b "$n" -B
-        map="$map $n:$keep"
     done
     if [ "$uuid" = "$booted" ]; then kept="$keep $kept"; else kept="$kept $keep"; fi
 done
 
-# A BootNext naming a deleted entry would be ignored by firmware, dropping a
-# pending trial or rollback; point it at the entry that replaced it.
-for m in $map; do
-    [ "${m%%:*}" = "$next0" ] && { log "BootNext $next0 was removed, now ${m#*:}"; efibootmgr -q -n "${m#*:}"; }
-done
-
-wanted=$(awk -v order="$order0" -v map="$map" -v slots="$kept" 'BEGIN {
-    nm = split(map, ms, " "); for (i = 1; i <= nm; i++) { split(ms[i], kv, ":"); to[kv[1]] = kv[2] }
+# Only slots still missing from BootOrder are added: next to the other slot
+# when one is there, at the front (booted slot first) when none is (first boot).
+current=$(boot_order)
+wanted=$(awk -v order="$current" -v slots="$kept" 'BEGIN {
     ns = split(slots, sl, " "); for (i = 1; i <= ns; i++) isslot[sl[i]] = 1
     no = split(order, od, ","); n = 0; last = 0
     for (i = 1; i <= no; i++) {
-        e = (od[i] in to) ? to[od[i]] : od[i]
-        if (e == "" || e in seen) continue
-        seen[e] = 1; out[++n] = e; if (e in isslot) last = n
+        if (od[i] == "" || od[i] in seen) continue
+        seen[od[i]] = 1; out[++n] = od[i]; if (od[i] in isslot) last = n
     }
     miss = ""; for (i = 1; i <= ns; i++) if (!(sl[i] in seen)) miss = miss " " sl[i]
     nmiss = split(miss, mv, " ")
@@ -154,8 +179,6 @@ wanted=$(awk -v order="$order0" -v map="$map" -v slots="$kept" 'BEGIN {
     if (n == 0) for (j = 1; j <= nmiss; j++) r = r (r == "" ? "" : ",") mv[j]
     print r
 }')
-current=$(efibootmgr_out)
-current=$(printf '%s\n' "$current" | sed -n 's/^BootOrder: //p')
 [ "$wanted" = "$current" ] && exit 0
 efibootmgr -q -o "$wanted"
-log "BootOrder now $wanted (was $order0)"
+log "BootOrder now $wanted (was $current)"
