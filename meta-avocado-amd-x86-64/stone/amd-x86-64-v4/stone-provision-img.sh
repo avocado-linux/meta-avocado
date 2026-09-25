@@ -192,8 +192,12 @@ IMAGE_FILE="${BUILD_DIR}/${IMAGE_NAME}"
 # The USB script writes whatever sits at IMAGE_FILE to a disk, so the image is
 # built under a temporary name and renamed only once every partition is in it.
 IMAGE_TMP="${IMAGE_FILE}.partial"
-trap 'rm -f "$IMAGE_TMP"' EXIT
-rm -f "$IMAGE_TMP"
+# The same image wrapped for avocado-flash's fwup backend. An archive left by an
+# earlier build is removed now, so it can never be flashed in place of this one.
+ARCHIVE_FILE="${BUILD_DIR}/${PLATFORM}-rootdisk.fw"
+FWUP=${AVOCADO_PROVISION_FWUP:-fwup}
+trap 'rm -f "$IMAGE_TMP" "${ARCHIVE_FILE}.partial" "${ARCHIVE_FILE}.conf"' EXIT
+rm -f "$IMAGE_TMP" "$ARCHIVE_FILE"
 
 echo "  Total image: ${TOTAL_MIB} MiB"
 
@@ -347,9 +351,28 @@ fi
 
 mv -f "$IMAGE_TMP" "$IMAGE_FILE"
 
+# avocado-flash writes a fwup archive, not a raw image: one resource, the whole
+# image, raw-written from offset 0 by the "complete" task. Without fwup (an SDK
+# that does not ship it) the raw image is still the product.
+if command -v "$FWUP" >/dev/null 2>&1; then
+    printf '%s\n' \
+        'file-resource image {' \
+        "    host-path = \"${IMAGE_FILE}\"" \
+        '}' \
+        'task complete {' \
+        '    on-resource image { raw_write(0) }' \
+        '}' >"${ARCHIVE_FILE}.conf"
+    "$FWUP" -c -f "${ARCHIVE_FILE}.conf" -o "${ARCHIVE_FILE}.partial"
+    mv -f "${ARCHIVE_FILE}.partial" "$ARCHIVE_FILE"
+    rm -f "${ARCHIVE_FILE}.conf"
+else
+    echo "  fwup not found: no ${PLATFORM}-rootdisk.fw, flash the raw image instead"
+fi
+
 echo ""
 echo "=== Disk image created: ${IMAGE_FILE} ==="
 echo "  Size: $(du -h "$IMAGE_FILE" | cut -f1)"
+[ -f "$ARCHIVE_FILE" ] && echo "  fwup archive: ${ARCHIVE_FILE}"
 
 # Copy to output directory if specified
 if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
