@@ -5,7 +5,13 @@ set -e
 hook="avocado-build"
 target="amd-x86-64-v4"
 
-RUNTIME_NAME="$1"
+RUNTIME_NAME="${1:-}"
+
+# The name becomes a path component under output/runtimes/; refuse anything
+# that would be empty or step outside it.
+case "$RUNTIME_NAME" in
+    ''|.|..|*/*) echo "ERROR: invalid runtime name '${RUNTIME_NAME}'" >&2; exit 1 ;;
+esac
 
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
 
