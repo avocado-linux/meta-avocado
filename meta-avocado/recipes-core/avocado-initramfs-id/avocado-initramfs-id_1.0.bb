@@ -10,8 +10,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = "file://avocado-initramfs-id file://avocado-initramfs-id.service"
 S = "${UNPACKDIR}"
 
-# sed and printf only, from busybox or coreutils - both already in every
-# initramfs, so this adds no runtime dependency of its own.
+# The script uses sed, coreutils' tr and head, and the shell's printf. No
+# RDEPENDS here: packagegroup-avocado-initramfs, which is what installs this
+# recipe, names sed (and grep) once for every initramfs script.
 
 inherit systemd
 SYSTEMD_SERVICE:${PN} = "avocado-initramfs-id.service"
