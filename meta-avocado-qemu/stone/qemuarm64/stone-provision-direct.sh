@@ -29,46 +29,46 @@ mkdir -p "$stage"
 kernel_name=""
 initramfs_name=""
 while IFS= read -r f; do
-    case "$f" in
-        Image|bzImage|vmlinuz*) kernel_name="$f" ;;
-        *initramfs*)            initramfs_name="$f" ;;
-    esac
+  case "$f" in
+    Image | bzImage | vmlinuz*) kernel_name="$f" ;;
+    *initramfs*) initramfs_name="$f" ;;
+  esac
 done < <(jq -r '.storage_devices.rootdisk.images.boot.build_args.files[]' "$manifest")
 
 if [ -z "$kernel_name" ] || [ -z "$initramfs_name" ]; then
-    echo "manifest's boot.build_args.files must include a kernel + initramfs entry" >&2
-    exit 1
+  echo "manifest's boot.build_args.files must include a kernel + initramfs entry" >&2
+  exit 1
 fi
 
 rootfs_name=$(jq -r '.storage_devices.rootdisk.images.rootfs' "$manifest")
-var_name=$(jq -r    '.storage_devices.rootdisk.images.var'    "$manifest")
-platform=$(jq -r    '.runtime.platform'                       "$manifest")
-arch=$(jq -r        '.runtime.architecture'                   "$manifest")
+var_name=$(jq -r '.storage_devices.rootdisk.images.var' "$manifest")
+platform=$(jq -r '.runtime.platform' "$manifest")
+arch=$(jq -r '.runtime.architecture' "$manifest")
 
 # Per-arch serial console default. Kept here, not in the manifest, because it's
 # a QEMU/boot concern not a runtime contract.
 case "$arch" in
-    arm64)  console="ttyAMA0" ;;
-    x86_64) console="ttyS0"   ;;
-    *)      console="ttyS0"   ;;
+  arm64) console="ttyAMA0" ;;
+  x86_64) console="ttyS0" ;;
+  *) console="ttyS0" ;;
 esac
 
 # Stage with original filenames (for traceability) + a stable alias for the role.
 stage_one() {
-    local role="$1" filename="$2"
-    cp -v "$src/$filename" "$stage/$filename"
-    ln -sf "$filename" "$stage/$role"
+  local role="$1" filename="$2"
+  cp -v "$src/$filename" "$stage/$filename"
+  ln -sf "$filename" "$stage/$role"
 }
 
-stage_one kernel    "$kernel_name"
+stage_one kernel "$kernel_name"
 stage_one initramfs "$initramfs_name"
-stage_one rootfs    "$rootfs_name"
-stage_one var       "$var_name"
+stage_one rootfs "$rootfs_name"
+stage_one var "$var_name"
 
 # manifest.json — the contract between this profile and the avocado CLI.
 sha() { sha256sum "$1" | awk '{print $1}'; }
 
-cat > "$stage/manifest.json" <<EOF
+cat >"$stage/manifest.json" <<EOF
 {
   "format": "avocado-direct",
   "format_version": 1,
@@ -99,7 +99,7 @@ echo "direct provisioning staged at: $stage"
 
 # Mirror to AVOCADO_PROVISION_OUT if requested (matches img profile behavior).
 if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
-    echo "copying to AVOCADO_PROVISION_OUT=$AVOCADO_PROVISION_OUT"
-    mkdir -p "$AVOCADO_PROVISION_OUT"
-    cp -av "$stage/." "$AVOCADO_PROVISION_OUT/"
+  echo "copying to AVOCADO_PROVISION_OUT=$AVOCADO_PROVISION_OUT"
+  mkdir -p "$AVOCADO_PROVISION_OUT"
+  cp -av "$stage/." "$AVOCADO_PROVISION_OUT/"
 fi
