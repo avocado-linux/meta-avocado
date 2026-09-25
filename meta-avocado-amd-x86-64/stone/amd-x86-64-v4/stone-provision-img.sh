@@ -189,6 +189,11 @@ TOTAL_MIB=$(( CURSOR_MIB + 1 ))
 
 IMAGE_NAME="avocado-os-${PLATFORM}.img"
 IMAGE_FILE="${BUILD_DIR}/${IMAGE_NAME}"
+# The USB script writes whatever sits at IMAGE_FILE to a disk, so the image is
+# built under a temporary name and renamed only once every partition is in it.
+IMAGE_TMP="${IMAGE_FILE}.partial"
+trap 'rm -f "$IMAGE_TMP"' EXIT
+rm -f "$IMAGE_TMP"
 
 echo "  Total image: ${TOTAL_MIB} MiB"
 
@@ -197,14 +202,14 @@ echo "  Total image: ${TOTAL_MIB} MiB"
 # =============================================================================
 echo ""
 echo "=== Creating raw disk image ==="
-truncate -s "${TOTAL_MIB}M" "$IMAGE_FILE"
+truncate -s "${TOTAL_MIB}M" "$IMAGE_TMP"
 
 # =============================================================================
 # Create GPT partition table from manifest
 # =============================================================================
 echo "=== Creating GPT partition table ==="
 
-sgdisk --zap-all "$IMAGE_FILE"
+sgdisk --zap-all "$IMAGE_TMP"
 
 SGDISK_ARGS=""
 for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
@@ -236,7 +241,7 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
 done
 
 # shellcheck disable=SC2086
-sgdisk $SGDISK_ARGS "$IMAGE_FILE"
+sgdisk $SGDISK_ARGS "$IMAGE_TMP"
 echo "  Partition table created"
 
 # =============================================================================
@@ -331,7 +336,7 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
         exit 1
     fi
 
-    write_image "$img_file" "$IMAGE_FILE" "${PART_OFFSETS_MIB[$i]}" "${PART_NAMES[$i]}" "${PART_SIZES_MIB[$i]}"
+    write_image "$img_file" "$IMAGE_TMP" "${PART_OFFSETS_MIB[$i]}" "${PART_NAMES[$i]}" "${PART_SIZES_MIB[$i]}"
 done
 
 # Cleanup built images
@@ -339,6 +344,8 @@ if [ -n "$BOOT_IMAGE_KEY" ]; then
     img_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
     rm -f "${BUILD_DIR}/${img_out}"
 fi
+
+mv -f "$IMAGE_TMP" "$IMAGE_FILE"
 
 echo ""
 echo "=== Disk image created: ${IMAGE_FILE} ==="
