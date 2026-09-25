@@ -16,6 +16,13 @@ set -e
 set -u
 set -o pipefail
 
+# The target checks read lsblk and blockdev. Missing, they would report a real
+# disk as "unknown" or its mounts as none, so stop before anything else runs.
+for tool in lsblk blockdev; do
+    command -v "$tool" >/dev/null 2>&1 \
+        || { echo "ERROR: ${tool} not found; the target checks need util-linux ${tool}"; exit 1; }
+done
+
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 # Never read below, but the assignment is load-bearing under `set -u`: it aborts
 # the script here if stone did not export AVOCADO_STONE_DATA_DIR, rather than
