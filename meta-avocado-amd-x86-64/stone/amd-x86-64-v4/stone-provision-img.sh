@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Disk Image Provisioning Script for Intel x86-64
+# Disk Image Provisioning Script for AMD x86-64
 #
 # Creates a complete GPT disk image from the stone manifest partition table.
 # Partition layout, sizes, types, and UUIDs are all read from the manifest JSON.

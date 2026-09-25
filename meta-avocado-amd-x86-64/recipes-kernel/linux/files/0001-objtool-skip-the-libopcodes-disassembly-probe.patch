@@ -1,0 +1,56 @@
+From: Javier Tia <javier.tia@peridio.com>
+Subject: [PATCH] objtool: skip the libopcodes disassembly probe
+
+The link-only probe in tools/objtool/Makefile finds -lopcodes/-lbfd via
+this build host's binutils and sets BUILD_DISAS, but
+tools/include/tools/dis-asm-compat.h's own HAVE_DISASM_STYLED detection
+does not correctly recognize the newer dis-asm.h API that binutils
+provides here, so the compat shim compiles against its pre-2.39
+assumptions alongside a newer header:
+
+    error: redeclaration of 'enum disassembler_style'
+    error: too few arguments to function 'init_disassemble_info'
+
+DISAS only gates objtool's optional disassembly output, not kernel
+functionality, so force the probe's result empty rather than chase the
+detection mismatch.
+
+Upstream-Status: Inappropriate [configuration]
+Signed-off-by: Javier Tia <javier.tia@peridio.com>
+---
+ tools/objtool/Makefile | 15 +++++++--------
+ 1 file changed, 7 insertions(+), 8 deletions(-)
+
+diff --git i/tools/objtool/Makefile w/tools/objtool/Makefile
+index a4484fd22a96..3c9b514a58c3 100644
+--- i/tools/objtool/Makefile
++++ w/tools/objtool/Makefile
+@@ -84,16 +84,15 @@ HOST_OVERRIDES := CC="$(HOSTCC)" LD="$(HOSTLD)" AR="$(HOSTAR)"
+ # against libopcodes' dependencies: libbfd, libiberty, and sometimes libz.
+ # Try each combination and use the first one that succeeds.
+ #
+-LIBOPCODES_LIBS := $(shell \
+-	for libs in "-lopcodes" \
+-		    "-lopcodes -lbfd" \
+-		    "-lopcodes -lbfd -liberty" \
+-		    "-lopcodes -lbfd -liberty -lz"; do \
+-		echo 'extern void disassemble_init_for_target(void *);' \
+-		     'int main(void) { disassemble_init_for_target(0); return 0; }' | \
+-			$(HOSTCC) -xc - -o /dev/null $$libs 2>/dev/null && \
+-			echo "$$libs" && break; \
+-	done)
++# Forced empty: avocado's build host stages a binutils-native dis-asm.h
++# newer than tools/include/tools/dis-asm-compat.h's HAVE_DISASM_STYLED probe
++# correctly detects, so the link-only probe below finds -lopcodes/-lbfd and
++# enables BUILD_DISAS while the compat shim still assumes the pre-2.39 API -
++# "redeclaration of 'enum disassembler_style'" / "too few arguments to
++# function 'init_disassemble_info'". DISAS only affects objtool's optional
++# disassembly output, not kernel functionality, so skip the probe instead of
++# chasing the detection mismatch.
++LIBOPCODES_LIBS :=
+ 
+ # Styled disassembler support requires binutils >= 2.39
+ HAVE_DISASM_STYLED := $(shell echo '$(pound)include <dis-asm.h>' | \
+-- 
+2.51.0
+

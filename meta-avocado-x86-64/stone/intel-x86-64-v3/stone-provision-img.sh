@@ -52,13 +52,23 @@ fi
 
 echo "  Partitions: ${NUM_PARTITIONS}"
 
-# Convert size_unit to MiB multiplier
+# Convert a manifest size or offset to whole MiB, rounding up. Anything but a
+# positive decimal integer is refused: it would otherwise reach sgdisk as "+0"
+# or garbage, KiB values used to floor to 0 MiB, and a leading zero would make
+# $(( )) read the value as octal.
 size_to_mib() {
     local size="$1"
     local unit="$2"
+    case "$size" in
+        ''|*[!0-9]*) echo "ERROR: size or offset must be a positive integer, got '$size' $unit" >&2; exit 1 ;;
+    esac
+    size=$(( 10#$size ))
+    if [ "$size" -eq 0 ]; then
+        echo "ERROR: size or offset must be a positive integer, got 0 $unit" >&2; exit 1
+    fi
     case "$unit" in
         mebibytes|MiB) echo "$size" ;;
-        kibibytes|KiB) echo $(( size / 1024 )) ;;
+        kibibytes|KiB) echo $(( (size + 1023) / 1024 )) ;;
         gibibytes|GiB) echo $(( size * 1024 )) ;;
         *) echo "ERROR: Unknown size unit: $unit" >&2; exit 1 ;;
     esac
@@ -82,10 +92,16 @@ resolve_image_filename() {
 # sparse. Progress is emitted as periodic newlines so it renders in captured
 # (non-TTY) provisioning logs -- dd's \r-based status=progress does not.
 write_image() {
-    local src="$1" dst="$2" seek_mib="$3" label="$4"
+    local src="$1" dst="$2" seek_mib="$3" label="$4" part_mib="$5"
     local total_bytes total_mib dd_pid pos written seek_bytes
     total_bytes=$(stat -c%s "$src")
     total_mib=$(( (total_bytes + 1048575) / 1048576 ))
+    # dd would run straight past the partition into the next one while the GPT
+    # still describes the old boundaries, and the image would look fine.
+    if [ "$total_bytes" -gt $(( part_mib * 1048576 )) ]; then
+        echo "ERROR: ${label} image is ${total_bytes} bytes, larger than its ${part_mib} MiB partition" >&2
+        exit 1
+    fi
     seek_bytes=$(( seek_mib * 1048576 ))
     echo "  Writing ${label}: ${total_mib} MiB"
 
@@ -173,6 +189,15 @@ TOTAL_MIB=$(( CURSOR_MIB + 1 ))
 
 IMAGE_NAME="avocado-os-${PLATFORM}.img"
 IMAGE_FILE="${BUILD_DIR}/${IMAGE_NAME}"
+# The USB script writes whatever sits at IMAGE_FILE to a disk, so the image is
+# built under a temporary name and renamed only once every partition is in it.
+IMAGE_TMP="${IMAGE_FILE}.partial"
+# The same image wrapped for avocado-flash's fwup backend. An archive left by an
+# earlier build is removed now, so it can never be flashed in place of this one.
+ARCHIVE_FILE="${BUILD_DIR}/${PLATFORM}-rootdisk.fw"
+FWUP=${AVOCADO_PROVISION_FWUP:-fwup}
+trap 'rm -f "$IMAGE_TMP" "${ARCHIVE_FILE}.partial" "${ARCHIVE_FILE}.conf"' EXIT
+rm -f "$IMAGE_TMP" "$ARCHIVE_FILE"
 
 echo "  Total image: ${TOTAL_MIB} MiB"
 
@@ -181,17 +206,14 @@ echo "  Total image: ${TOTAL_MIB} MiB"
 # =============================================================================
 echo ""
 echo "=== Creating raw disk image ==="
-# Start from a fresh file: write_image uses conv=sparse, which skips zero blocks,
-# so reusing a previous run's image would leave its bytes behind in them.
-rm -f "$IMAGE_FILE"
-truncate -s "${TOTAL_MIB}M" "$IMAGE_FILE"
+truncate -s "${TOTAL_MIB}M" "$IMAGE_TMP"
 
 # =============================================================================
 # Create GPT partition table from manifest
 # =============================================================================
 echo "=== Creating GPT partition table ==="
 
-sgdisk --zap-all "$IMAGE_FILE"
+sgdisk --zap-all "$IMAGE_TMP"
 
 SGDISK_ARGS=""
 for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
@@ -212,10 +234,18 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
     if [ -n "${PART_UUIDS[$i]}" ]; then
         SGDISK_ARGS="${SGDISK_ARGS} -u ${pnum}:${PART_UUIDS[$i]}"
     fi
+
+    # GPT attribute bit 56 is how an image tells avocado-var-grow to extend the
+    # partition to the end of whatever disk it lands on - the fwup templates set
+    # it from the same manifest field. Without it the grower sees an unmarked
+    # partition and leaves var at the image's size.
+    if [ "${PART_EXPAND[$i]}" = "true" ]; then
+        SGDISK_ARGS="${SGDISK_ARGS} -A ${pnum}:set:56"
+    fi
 done
 
 # shellcheck disable=SC2086
-sgdisk $SGDISK_ARGS "$IMAGE_FILE"
+sgdisk $SGDISK_ARGS "$IMAGE_TMP"
 echo "  Partition table created"
 
 # =============================================================================
@@ -310,7 +340,7 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
         exit 1
     fi
 
-    write_image "$img_file" "$IMAGE_FILE" "${PART_OFFSETS_MIB[$i]}" "${PART_NAMES[$i]}"
+    write_image "$img_file" "$IMAGE_TMP" "${PART_OFFSETS_MIB[$i]}" "${PART_NAMES[$i]}" "${PART_SIZES_MIB[$i]}"
 done
 
 # Cleanup built images
@@ -319,9 +349,30 @@ if [ -n "$BOOT_IMAGE_KEY" ]; then
     rm -f "${BUILD_DIR}/${img_out}"
 fi
 
+mv -f "$IMAGE_TMP" "$IMAGE_FILE"
+
+# avocado-flash writes a fwup archive, not a raw image: one resource, the whole
+# image, raw-written from offset 0 by the "complete" task. Without fwup (an SDK
+# that does not ship it) the raw image is still the product.
+if command -v "$FWUP" >/dev/null 2>&1; then
+    printf '%s\n' \
+        'file-resource image {' \
+        "    host-path = \"${IMAGE_FILE}\"" \
+        '}' \
+        'task complete {' \
+        '    on-resource image { raw_write(0) }' \
+        '}' >"${ARCHIVE_FILE}.conf"
+    "$FWUP" -c -f "${ARCHIVE_FILE}.conf" -o "${ARCHIVE_FILE}.partial"
+    mv -f "${ARCHIVE_FILE}.partial" "$ARCHIVE_FILE"
+    rm -f "${ARCHIVE_FILE}.conf"
+else
+    echo "  fwup not found: no ${PLATFORM}-rootdisk.fw, flash the raw image instead"
+fi
+
 echo ""
 echo "=== Disk image created: ${IMAGE_FILE} ==="
 echo "  Size: $(du -h "$IMAGE_FILE" | cut -f1)"
+[ -f "$ARCHIVE_FILE" ] && echo "  fwup archive: ${ARCHIVE_FILE}"
 
 # Copy to output directory if specified
 if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then

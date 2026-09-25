@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# USB Disk Provisioning Script for Intel x86-64
+# USB Disk Provisioning Script for AMD x86-64
 #
 # Creates a complete disk image and writes it to an attached USB/disk device.
 # This is the primary method for initial provisioning of bare-metal x86-64
@@ -9,7 +9,6 @@
 # Environment variables provided by avocado/stone:
 # AVOCADO_STONE_MANIFEST  - path to manifest JSON file
 # AVOCADO_STONE_BUILD_DIR - build output directory
-# AVOCADO_STONE_DATA_DIR  - stone data directory
 # AVOCADO_PROVISION_OUT   - (optional) output directory
 
 set -e

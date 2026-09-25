@@ -1,0 +1,22 @@
+header:
+  version: 16
+  includes:
+    - repo: meta-avocado
+      file: kas/base.yml
+    - repo: meta-avocado
+      file: kas/vendor/amd.yml
+    - repo: meta-avocado
+      file: kas/feature/tpm.yml
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    - repo: meta-avocado
+      file: kas/target/distro.yml
+
+repos:
+  meta-avocado:
+    path: meta-avocado
+    layers:
+      meta-avocado-x86-64:
+      meta-avocado-amd-x86-64:
+
+machine: avocado-amd-x86-64-v4
