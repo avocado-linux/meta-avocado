@@ -4,7 +4,7 @@
 # write_image (dd a partition image into the disk image at its offset).
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
-here=$(cd "$(dirname "$0")" && pwd); script=$here/../stone-provision-img.sh
+here=$(cd "$(dirname "$0")" && pwd); script=${1:-$here/../stone-provision-img.sh}
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
 pass=0; fail=0; ok(){ echo "  ok   - $1"; pass=$((pass+1)); }; bad(){ echo "  FAIL - $1"; fail=$((fail+1)); }
 
