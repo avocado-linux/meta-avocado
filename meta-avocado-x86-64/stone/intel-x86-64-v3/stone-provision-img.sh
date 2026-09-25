@@ -181,6 +181,9 @@ echo "  Total image: ${TOTAL_MIB} MiB"
 # =============================================================================
 echo ""
 echo "=== Creating raw disk image ==="
+# Start from a fresh file: write_image uses conv=sparse, which skips zero blocks,
+# so reusing a previous run's image would leave its bytes behind in them.
+rm -f "$IMAGE_FILE"
 truncate -s "${TOTAL_MIB}M" "$IMAGE_FILE"
 
 # =============================================================================

@@ -44,8 +44,11 @@ while [ $# -gt 0 ]; do
             break
             ;;
         -*)
-            echo "qemuwrapper(native): ignoring unsupported qemu option '$1'" >&2
-            shift
+            # Fail rather than skip: an unknown option may take a value, and
+            # shifting past only the flag would leave that value to be run as
+            # the binary.
+            echo "qemuwrapper(native): unsupported qemu option '$1'" >&2
+            exit 1
             ;;
         *)
             break
@@ -63,6 +66,8 @@ if [ -z "$ROOTFS" ]; then
     exit 1
 fi
 
+ROOTFS=${ROOTFS%/}
+
 LOADER=""
 for candidate in "$ROOTFS/lib/ld-linux-x86-64.so.2" "$ROOTFS/usr/lib/ld-linux-x86-64.so.2"; do
     if [ -x "$candidate" ]; then
@@ -79,9 +84,15 @@ fi
 # qemu -L <rootfs> re-roots the binary's *absolute* RUNPATH/RPATH entries inside
 # the rootfs. The host loader instead resolves them against /, so a binary like
 # udevadm (RUNPATH=/usr/lib/systemd, NEEDED libsystemd-shared-NNN.so) fails with
-# "cannot open shared object file". Rebuild that behaviour by putting the
+# "cannot open shared object file". Approximate that behaviour by putting the
 # rootfs's own library directories on --library-path, which the loader consults
 # ahead of RUNPATH.
+#
+# Unlike qemu -L this does not re-root the loader: anything not found on
+# --library-path still falls through to the build host's /lib and /usr/lib.
+# --inhibit-cache drops the host's ld.so.cache, and the --list check below
+# refuses to run a binary if any library would come from outside the rootfs,
+# so a host library can never silently stand in for a target one.
 #
 # Ceiling: one level below each lib root, and only directories that actually hold
 # shared objects. That covers the private dirs OE produces (/usr/lib/systemd,
@@ -104,8 +115,18 @@ done
 # Strip any leading ':' so the loader does not read it as the current directory.
 LIBPATH=$(echo "$LIBPATH" | sed 's/^://')
 
-if [ -n "$LIBPATH" ]; then
-    exec "$LOADER" --library-path "$LIBPATH" "$@"
+# The loader prints "name => path" for each resolved NEEDED entry, and
+# "name => not found" for a missing one; both must stay inside the rootfs.
+# --list takes the binary alone: anything after it is read as symbols to look up.
+libs=$("$LOADER" --inhibit-cache ${LIBPATH:+--library-path "$LIBPATH"} --list "$1") || {
+    echo "qemuwrapper(native): cannot resolve the libraries of $1" >&2
+    exit 1
+}
+escaped=$(printf '%s\n' "$libs" | awk -v r="$ROOTFS/" '$2 == "=>" && index($3, r) != 1')
+if [ -n "$escaped" ]; then
+    echo "qemuwrapper(native): libraries resolve outside $ROOTFS:" >&2
+    echo "$escaped" >&2
+    exit 1
 fi
 
-exec "$LOADER" "$@"
+exec "$LOADER" --inhibit-cache ${LIBPATH:+--library-path "$LIBPATH"} "$@"

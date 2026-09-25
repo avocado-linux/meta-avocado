@@ -32,5 +32,7 @@ PKG_EXTRA_INSTALL:append = " packagegroup-avocado-nvidia-gpu"
 # nvidia-gpu-modules recipe. The feed image (avocado-pkg-extra) is packages-only
 # with do_rootfs[noexec], which does not pull dynamic out-of-tree providers into
 # the build -- so name the provider here and image-packages-only.bbclass forces
-# its RPMs into the feed. See that class for the mechanism.
-IMAGE_PACKAGES_ONLY_FORCE_PROVIDERS += "nvidia-gpu-modules"
+# its RPMs into the feed. See that class for the mechanism. Scoped to
+# avocado-pkg-extra, the only image that installs PKG_EXTRA_INSTALL: the SDK
+# packages-only images inherit the same class and must not build the modules.
+IMAGE_PACKAGES_ONLY_FORCE_PROVIDERS:append:pn-avocado-pkg-extra = " nvidia-gpu-modules"

@@ -41,7 +41,9 @@ EXCLUDE_FROM_WORLD = "1"
 #
 # Any packages-only image that (transitively) pulls such a provider lists the
 # provider recipe(s) in IMAGE_PACKAGES_ONLY_FORCE_PROVIDERS -- typically set in
-# the machine/vendor conf next to the PKG_EXTRA_INSTALL that adds the packagegroup.
+# the machine/vendor conf next to the PKG_EXTRA_INSTALL that adds the packagegroup,
+# with a :pn-avocado-pkg-extra override so the SDK images that also inherit this
+# class do not pick it up.
 # The class turns each into a hard build+deploy dependency of do_build. do_build
 # is deliberately chosen over the packagegroup's own do_package_write_rpm: it is
 # never sstate/setscene-covered, so a shared-sstate build that restores the

@@ -21,22 +21,27 @@
 #
 # v2 and v3 are deliberately untouched: SSE4.2 and AVX2 are within TCG's range,
 # so their proven qemu path keeps working and this carries no risk for them.
+#
+# Everything below is scoped to class-target. nativesdk-qemuwrapper-cross runs on
+# whatever host the SDK lands on, which need not have AVX-512 -- oe-core exempts
+# it from the qemu-usermode guard for the same reason -- so it keeps the stock
+# qemu wrapper and skips the build-host check.
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-SRC_URI:append:intel-x86-64-v4 = " file://qemuwrapper-native"
+SRC_URI:append:intel-x86-64-v4:class-target = " file://qemuwrapper-native"
 
 # Adding a SRC_URI to a recipe that previously fetched nothing makes the
 # license-checksum QA check apply, and neither qemuwrapper-cross recipe carries a
 # LIC_FILES_CHKSUM (they had nothing to fetch). The wrapper is our own file under
 # the recipe's MIT licence, so point at the common MIT text.
-LIC_FILES_CHKSUM:intel-x86-64-v4 = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+LIC_FILES_CHKSUM:intel-x86-64-v4:class-target = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 # Host CPU flags a build host must have for the above to work. Only set for the
 # machines that execute target binaries natively; empty elsewhere disables the
 # check entirely.
 AVOCADO_NATIVE_EXEC_REQUIRES_FLAGS ?= ""
-AVOCADO_NATIVE_EXEC_REQUIRES_FLAGS:intel-x86-64-v4 = "avx512f avx512bw avx512cd avx512dq avx512vl"
+AVOCADO_NATIVE_EXEC_REQUIRES_FLAGS:intel-x86-64-v4:class-target = "avx512f avx512bw avx512cd avx512dq avx512vl"
 
 # Fail at parse, not two hours later inside do_rootfs. Without this the build
 # runs to ~95% and then dies on a SIGILL or an offline-postinst error whose text
@@ -77,7 +82,7 @@ python () {
             % (d.getVar('MACHINE'), ' '.join(missing), d.getVar('MACHINE')))
 }
 
-do_install:append:intel-x86-64-v4() {
+do_install:append:intel-x86-64-v4:class-target() {
     install -m 0755 ${UNPACKDIR}/qemuwrapper-native \
         ${D}${bindir_crossscripts}/${MLPREFIX}qemuwrapper
 }
