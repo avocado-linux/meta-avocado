@@ -134,8 +134,9 @@ rc=$?
 #    a BootNext trial of a new slot permanent before it was verified.
 echo "$b,$a,0002,0003" >"$w/nv/order"
 out=$(run)
-{ [ "$(writes)" -eq 0 ] && [ "$(cat "$w/nv/order")" = "$b,$a,0002,0003" ]; } \
-  && ok "a correct pair is never reordered" || bad "reorder: order=$(cat "$w/nv/order") log=$(cat "$w/log")"
+rc=$?
+{ [ $rc -eq 0 ] && [ "$(writes)" -eq 0 ] && [ "$(cat "$w/nv/order")" = "$b,$a,0002,0003" ]; } \
+  && ok "a correct pair is never reordered" || bad "reorder: rc=$rc order=$(cat "$w/nv/order") log=$(cat "$w/log")"
 
 # 4. A boot-b entry that points at another partition is replaced in its
 #    BootOrder position (test 3 left boot-b first), and the
@@ -143,8 +144,9 @@ out=$(run)
 #    never leaves the slot with no entry.
 sed -i "s/^$b|boot-b|HD(2,GPT,$UB,/$b|boot-b|HD(9,GPT,deadbeef-0000-0000-0000-000000000009,/" "$w/nv/entries"
 out=$(run)
+rc=$?
 nb=$(num_of boot-b)
-{ grep -q "efibootmgr .*-b $b -B" "$w/log" && grep -q "^$nb|boot-b|HD(2,GPT,$UB," "$w/nv/entries" \
+{ [ $rc -eq 0 ] && grep -q "efibootmgr .*-b $b -B" "$w/log" && grep -q "^$nb|boot-b|HD(2,GPT,$UB," "$w/nv/entries" \
   && [ "$(grep -n -- '-L boot-b' "$w/log" | cut -d: -f1)" -lt "$(grep -n -- "-b $b -B" "$w/log" | cut -d: -f1)" ] \
   && [ "$(grep -c '|boot-b|' "$w/nv/entries")" -eq 1 ] && [ "$(num_of boot-a)" = "$a" ] \
   && [ "$(cat "$w/nv/order")" = "$nb,$a,0002,0003" ]; } \
