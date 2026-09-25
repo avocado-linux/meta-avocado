@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Host test for stone-provision-usb.sh: the target checks that stand between a
 # typed device path and a raw dd. Everything that touches a disk is a stub
-# (lsblk, findmnt, blockdev, umount, dd), sysfs is a fake tree, and the "disks"
+# (lsblk, findmnt, blockdev, umount, dd). Pass another copy of the script (the
+# Intel x86-64 siblings share it) as $1 to run the same cases against it., sysfs is a fake tree, and the "disks"
 # are regular files under a temp dir, so a stub that fails to intercept writes
 # into that dir and nowhere else.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
-here=$(cd "$(dirname "$0")" && pwd); script=$here/../stone-provision-usb.sh
+here=$(cd "$(dirname "$0")" && pwd); script=${1:-$here/../stone-provision-usb.sh}
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
 pass=0; fail=0; ok(){ echo "  ok   - $1"; pass=$((pass+1)); }; bad(){ echo "  FAIL - $1"; fail=$((fail+1)); }
 
