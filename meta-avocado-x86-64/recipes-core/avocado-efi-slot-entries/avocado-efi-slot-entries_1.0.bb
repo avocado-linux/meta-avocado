@@ -13,7 +13,8 @@ S = "${UNPACKDIR}"
 inherit allarch systemd
 SYSTEMD_SERVICE:${PN} = "avocado-efi-slot-entries.service"
 
-RDEPENDS:${PN} = "efibootmgr"
+# flock: the NVRAM lock shared with avocadoctl's efibootmgr slot action.
+RDEPENDS:${PN} = "efibootmgr util-linux-flock"
 
 do_install() {
     install -d ${D}${libexecdir}

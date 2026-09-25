@@ -138,6 +138,18 @@ boot_order() {
     printf '%s\n' "$o" | sed -n 's/^BootOrder: //p'
 }
 
+# avocadoctl's efibootmgr slot action takes this lock around its own listing
+# and writes, so neither acts on an entry number the other is deleting. The
+# wait is bounded and a failure only logs: a wedged holder must not stop the
+# slot entries from being repaired.
+lock=${AVOCADO_EFI_SLOTS_LOCK:-/run/avocado/efi-nvram.lock}
+if command -v flock >/dev/null 2>&1 && mkdir -p "$(dirname "$lock")" && (umask 077 && : >>"$lock"); then
+    exec 9<"$lock"
+    flock -w "${AVOCADO_EFI_SLOTS_LOCK_WAIT:-30}" 9 || log "$lock is held elsewhere, continuing without it"
+else
+    log "cannot take $lock, continuing without it"
+fi
+
 nv=$(efibootmgr_out -v)
 next=$(printf '%s\n' "$nv" | sed -n 's/^BootNext: //p')
 prefs="$next $(printf '%s\n' "$nv" | sed -n 's/^BootCurrent: //p') $(printf '%s\n' "$nv" | sed -n 's/^BootOrder: //p' | tr ',' ' ')"
