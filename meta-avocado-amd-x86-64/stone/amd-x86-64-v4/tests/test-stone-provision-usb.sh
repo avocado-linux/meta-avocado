@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Host test for stone-provision-usb.sh: the target checks that stand between a
 # typed device path and a raw dd. Everything that touches a disk is a stub
-# (lsblk, findmnt, blockdev, umount, dd). Pass another copy of the script (the
-# Intel x86-64 siblings share it) as $1 to run the same cases against it., sysfs is a fake tree, and the "disks"
+# (lsblk, findmnt, blockdev, umount, dd), sysfs is a fake tree, and the "disks"
 # are regular files under a temp dir, so a stub that fails to intercept writes
-# into that dir and nowhere else.
+# into that dir and nowhere else. Pass another copy of the script (the Intel
+# x86-64 siblings share it) as $1 to run the same cases against it.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
 here=$(cd "$(dirname "$0")" && pwd); script=${1:-$here/../stone-provision-usb.sh}
@@ -173,6 +173,17 @@ setup; mkdir -p "$w/sys/dm-3"; : > "$w/dev/dm-3"; ln -s ../dm-3 "$w/dev/mapper/d
 out=$(run "$w/dev/mapper/data"); rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "not a disk"; } \
   && ok "a dm data volume is refused as a target" || bad "non-disk: rc=$rc out=[$out]"
+
+# 16. Without lsblk (the x86 SDK container shipped none) every guard that reads
+#     it would misreport the target, so the run stops up front and names it.
+#     PATH holds bash and the stubs other than lsblk, nothing from the host.
+setup; mkdir -p "$w/nolsblk"; ln -sf "$(command -v bash)" "$w/nolsblk/bash"
+for t in "$w/bin/"*; do [ "${t##*/}" = lsblk ] || ln -sf "$t" "$w/nolsblk/"; done
+: > "$w/log"; out=$(printf '%s\nyes\n' "$w/dev/sdb" | PATH="$w/nolsblk" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+  AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
+  bash "$script" 2>&1); rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "lsblk not found"; } \
+  && ok "a missing lsblk stops the run before any check or write" || bad "no lsblk: rc=$rc out=[$out]"
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/15 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 15 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/16 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 16 ]
