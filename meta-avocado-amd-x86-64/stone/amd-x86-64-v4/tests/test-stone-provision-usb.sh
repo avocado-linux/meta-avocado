@@ -33,6 +33,7 @@ mkdir -p "$w/bin"
 cat > "$w/bin/findmnt" <<S
 #!/bin/bash
 echo "findmnt \$*" >> "$w/log"
+[ -e "$w/st/findmnt-fail" ] && { echo "findmnt: failed" >&2; exit 1; }
 case " \$* " in
   *" MAJ:MIN "*) cat "$w/st/majmin" 2>/dev/null ;;
   *" -v "*|*" --nofsroot "*) cat "$w/st/rootsrc" ;;
@@ -53,7 +54,15 @@ S
 cat > "$w/bin/blockdev" <<S
 #!/bin/bash
 echo "blockdev \$*" >> "$w/log"
-if [ "\$1" = --rereadpt ]; then [ -e "$w/st/busy" ] && { echo "blockdev: ioctl error on BLKRRPART: Device or resource busy" >&2; exit 1; }; exit 0; fi
+if [ "\$1" = --rereadpt ]; then
+  # strerror is translated unless LC_ALL=C; a German EBUSY has no "busy" in it.
+  if [ -e "$w/st/busy" ]; then
+    case "\${LC_ALL:-\${LANG:-}}" in de*) echo "blockdev: ioctl error on BLKRRPART: Das Gerät oder die Ressource ist belegt" >&2; exit 1 ;; esac
+    echo "blockdev: ioctl error on BLKRRPART: Device or resource busy" >&2; exit 1
+  fi
+  [ -e "$w/st/rr-fail" ] && { echo "blockdev: ioctl error on BLKRRPART: Permission denied" >&2; exit 1; }
+  exit 0
+fi
 [ -s "$w/st/size" ] && cat "$w/st/size"
 S
 cat > "$w/bin/umount" <<S
@@ -184,6 +193,23 @@ for t in "$w/bin/"*; do [ "${t##*/}" = lsblk ] || ln -sf "$t" "$w/nolsblk/"; don
   bash "$script" 2>&1); rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "lsblk not found"; } \
   && ok "a missing lsblk stops the run before any check or write" || bad "no lsblk: rc=$rc out=[$out]"
+
+# 17. A table re-read that fails for any reason other than EBUSY still stops the
+#     run: nothing else shows the disk is free from inside the container.
+setup; : > "$w/st/rr-fail"; out=$(run "$w/dev/sdb"); rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "re-read"; } \
+  && ok "a failed partition-table re-read is refused, not warned about" || bad "rereadpt failure: rc=$rc out=[$out]"
+
+# 18. Under a translated locale a busy target is still reported as in use.
+setup; : > "$w/st/busy"; out=$(LANG=de_DE.UTF-8 run "$w/dev/sdb"); rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "in use"; } \
+  && ok "the busy check does not depend on the locale" || bad "locale: rc=$rc out=[$out]"
+
+# 19. When findmnt cannot say what / is, the root guards would be skipped, so
+#     the run stops instead.
+setup; : > "$w/st/findmnt-fail"; out=$(run "$w/dev/sda"); rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "mounted from"; } \
+  && ok "an unreadable / source fails closed" || bad "findmnt failure: rc=$rc out=[$out]"
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/16 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 16 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/19 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 19 ]
