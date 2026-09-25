@@ -66,6 +66,7 @@ mkdir -p "$w/bin"
 cat >"$w/bin/efibootmgr" <<S
 #!/bin/bash
 nv="$w/nv"; echo "efibootmgr \$*" >> "$w/log"
+flock -n "$w/lock/efi-nvram.lock" true 2>/dev/null && echo "UNLOCKED efibootmgr \$*" >> "$w/log"
 [ "\${STUB_FAIL:-0}" = 1 ] && { echo "efibootmgr: EFI variables are not supported" >&2; exit 2; }
 args=("\$@"); disk=; part=; label=; loader=; num=; del=0; order=; prepend=; next=
 for ((i=0;i<\${#args[@]};i++)); do case "\${args[i]}" in
@@ -93,7 +94,7 @@ chmod +x "$w/bin/efibootmgr"
 
 run() {
   : >"$w/log"
-  PATH="$w/bin:$PATH" AVOCADO_EFI_SLOTS_NO_SETTLE=1 AVOCADO_EFI_SLOTS_EFIVARS="$w/efivars" AVOCADO_EFI_SLOTS_DEVDIR="$w/dev" AVOCADO_EFI_SLOTS_SYSBLOCK="$w/sys" sh "$script" 2>&1
+  PATH="$w/bin:$PATH" AVOCADO_EFI_SLOTS_LOCK="$w/lock/efi-nvram.lock" AVOCADO_EFI_SLOTS_LOCK_WAIT="${LOCK_WAIT:-30}" AVOCADO_EFI_SLOTS_NO_SETTLE=1 AVOCADO_EFI_SLOTS_EFIVARS="$w/efivars" AVOCADO_EFI_SLOTS_DEVDIR="$w/dev" AVOCADO_EFI_SLOTS_SYSBLOCK="$w/sys" sh "$script" 2>&1
 }
 num_of() { awk -F'|' -v l="$1" '$2==l{print $1}' "$w/nv/entries"; }
 writes() { grep -cE 'efibootmgr .*(-c|-C|-B|-o|-n)( |$)' "$w/log"; }
@@ -322,6 +323,32 @@ b=$(num_of boot-b)
   && ok "replacing stale entries puts the booted slot ahead of the other, in place" \
   || bad "reflash order: rc=$rc out=[$out] order=$(cat "$w/nv/order") entries=$(cat "$w/nv/entries")"
 
+# 17. Every efibootmgr call, reads included, runs under the NVRAM lock that
+#     avocadoctl's slot action also takes. The stub logs any call it can lock
+#     the file itself for.
+setup
+out=$(run)
+rc=$?
+{ [ $rc -eq 0 ] && [ "$(writes)" -gt 0 ] && ! grep -q '^UNLOCKED' "$w/log"; } \
+  && ok "every efibootmgr call holds /run/avocado/efi-nvram.lock" \
+  || bad "lock: rc=$rc log=$(cat "$w/log")"
+
+# 18. A lock held elsewhere delays the repair by the bounded wait, then it goes
+#     ahead: a wedged avocadoctl must not keep the slot entries broken.
+setup
+mkdir -p "$w/lock"
+flock "$w/lock/efi-nvram.lock" sleep 10 &
+holder=$!
+sleep 0.3
+out=$(LOCK_WAIT=1 run)
+rc=$?
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+{ [ $rc -eq 0 ] && [ -n "$(num_of boot-a)" ] && [ -n "$(num_of boot-b)" ] \
+  && printf '%s\n' "$out" | grep -q 'held elsewhere, continuing without it'; } \
+  && ok "a lock held elsewhere times out and the entries are still repaired" \
+  || bad "held lock: rc=$rc out=[$out] entries=$(cat "$w/nv/entries")"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/16 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 16 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/18 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 18 ]
