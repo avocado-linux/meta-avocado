@@ -23,6 +23,17 @@ repos:
       meta-rzv2n:
       meta:
 
+  # RZ/V2N DRP-AI3 driver. Lives in this machine kas (not the shared renesas
+  # vendor file) because its u-boot/kernel patches are rzv2n-specific and break
+  # other Renesas machines if applied globally.
+  rzv2n-drp-ai-driver:
+    url: https://github.com/avocado-linux/vendor-rzv2n_drp-ai_driver
+    path: rzv2n_drp-ai_driver
+    branch: main
+    commit: bb3e6a9283e2dda2bb4a3c25986a0a309f1db905
+    layers:
+      meta-rz-features/meta-rz-drpai:
+
 local_conf_header:
   machine-avocado-rzv2n-sr-som: |
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-solidrun-extra"
