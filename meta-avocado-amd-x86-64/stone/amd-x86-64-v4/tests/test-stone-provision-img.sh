@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Host test for two helpers in stone-provision-img.sh, extracted from the
-# script and run against temp files: size_to_mib (manifest size -> MiB) and
-# write_image (dd a partition image into the disk image at its offset).
+# Host test for stone-provision-img.sh: two helpers extracted from the script
+# and run against temp files - size_to_mib (manifest size -> MiB) and
+# write_image (dd a partition image into the disk image at its offset) - then
+# the whole script against a small manifest.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
 here=$(cd "$(dirname "$0")" && pwd); script=${1:-$here/../stone-provision-img.sh}
@@ -38,6 +39,25 @@ out=$(call "write_image '$w/big.img' '$w/disk2.img' 2 rootfs-a 1"); rc=$?
 { [ $rc -ne 0 ] && cmp -s "$w/disk2.img" "$w/disk2.orig" && echo "$out" | grep -q "rootfs-a"; } \
   && ok "an image one byte larger than its partition is refused, disk untouched" || bad "too big: rc=$rc out=[$out]"
 
+# The whole script, against a two-partition manifest and real sgdisk/dd on temp
+# files. The USB script reuses any file at the final image path, so a build
+# that fails part-way must leave nothing there.
+build(){ mkdir -p "$w/b/build" "$w/b/data"; rm -f "$w/b/build/"*
+  printf '%s' '{"runtime":{"platform":"t"},"storage_devices":{"rootdisk":{"images":{"a":"a.img","b":"b.img"},
+    "partitions":[{"name":"p1","image":"a","size":1,"size_unit":"mebibytes"},
+                  {"name":"p2","image":"b","size":1,"size_unit":"mebibytes"}]}}}' > "$w/b/m.json"
+  AVOCADO_STONE_MANIFEST="$w/b/m.json" AVOCADO_STONE_DATA_DIR="$w/b/data" AVOCADO_STONE_BUILD_DIR="$w/b/build" \
+    bash "$script" 2>&1; }
+head -c 4096 /dev/urandom > "$w/b-a.img"
+mkdir -p "$w/b/data"; cp "$w/b-a.img" "$w/b/data/a.img"; rm -f "$w/b/data/b.img"
+out=$(build); rc=$?
+{ [ $rc -ne 0 ] && [ ! -e "$w/b/build/avocado-os-t.img" ]; } \
+  && ok "a build that fails part-way leaves no image at the final path" || bad "partial: rc=$rc files=[$(ls "$w/b/build")] out=[$out]"
+
+cp "$w/b-a.img" "$w/b/data/b.img"; out=$(build); rc=$?
+{ [ $rc -eq 0 ] && [ -s "$w/b/build/avocado-os-t.img" ] && [ "$(ls "$w/b/build")" = "avocado-os-t.img" ]; } \
+  && ok "a complete build publishes the image and nothing else" || bad "complete: rc=$rc files=[$(ls "$w/b/build")] out=[$out]"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/13 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 13 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/15 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 15 ]
