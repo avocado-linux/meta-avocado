@@ -46,8 +46,8 @@ build(){ mkdir -p "$w/b/build" "$w/b/data"; rm -f "$w/b/build/"*
   printf '%s' '{"runtime":{"platform":"t"},"storage_devices":{"rootdisk":{"images":{"a":"a.img","b":"b.img"},
     "partitions":[{"name":"p1","image":"a","size":1,"size_unit":"mebibytes"},
                   {"name":"p2","image":"b","size":1,"size_unit":"mebibytes"}]}}}' > "$w/b/m.json"
-  AVOCADO_STONE_MANIFEST="$w/b/m.json" AVOCADO_STONE_DATA_DIR="$w/b/data" AVOCADO_STONE_BUILD_DIR="$w/b/build" \
-    bash "$script" 2>&1; }
+  AVOCADO_PROVISION_FWUP=no-such-fwup AVOCADO_STONE_MANIFEST="$w/b/m.json" AVOCADO_STONE_DATA_DIR="$w/b/data" \
+    AVOCADO_STONE_BUILD_DIR="$w/b/build" bash "$script" 2>&1; }
 head -c 4096 /dev/urandom > "$w/b-a.img"
 mkdir -p "$w/b/data"; cp "$w/b-a.img" "$w/b/data/a.img"; rm -f "$w/b/data/b.img"
 out=$(build); rc=$?
@@ -58,6 +58,38 @@ cp "$w/b-a.img" "$w/b/data/b.img"; out=$(build); rc=$?
 { [ $rc -eq 0 ] && [ -s "$w/b/build/avocado-os-t.img" ] && [ "$(ls "$w/b/build")" = "avocado-os-t.img" ]; } \
   && ok "a complete build publishes the image and nothing else" || bad "complete: rc=$rc files=[$(ls "$w/b/build")] out=[$out]"
 
+# 16. With fwup installed the finished image is also wrapped in the archive
+#     avocado-flash's fwup backend writes: <platform>-rootdisk.fw, whose
+#     "complete" task raw-writes the image from offset 0. The stub records the
+#     conf it was handed instead of building a real archive.
+mkdir -p "$w/fwbin"
+cat >"$w/fwbin/fwup" <<'S'
+#!/bin/bash
+conf=; out=
+while [ $# -gt 0 ]; do case "$1" in -f) conf=$2; shift ;; -o) out=$2; shift ;; esac; shift; done
+cp "$conf" "$out"
+S
+chmod +x "$w/fwbin/fwup"
+build_fw(){ mkdir -p "$w/b/build"; rm -f "$w/b/build/"* "$w/b/build/".[!.]* 2>/dev/null
+  AVOCADO_PROVISION_FWUP="$1" AVOCADO_STONE_MANIFEST="$w/b/m.json" AVOCADO_STONE_DATA_DIR="$w/b/data" \
+    AVOCADO_STONE_BUILD_DIR="$w/b/build" bash "$script" 2>&1; }
+out=$(build_fw "$w/fwbin/fwup"); rc=$?
+fw="$w/b/build/t-rootdisk.fw"
+{ [ $rc -eq 0 ] && [ -s "$fw" ] && grep -q "host-path = \"$w/b/build/avocado-os-t.img\"" "$fw" && grep -q 'raw_write(0)' "$fw" \
+  && [ "$(find "$w/b/build" -mindepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "avocado-os-t.img t-rootdisk.fw " ]; } \
+  && ok "the image is also wrapped in <platform>-rootdisk.fw for avocado-flash, nothing else left behind" \
+  || bad "fwup archive: rc=$rc files=[$(ls -A "$w/b/build")] out=[$out]"
+
+# 17. Without fwup the raw image is still the product, the run says why there is
+#     no archive, and an archive from an earlier build does not survive to be
+#     flashed in place of the new image.
+out=$(mkdir -p "$w/b/build"; rm -f "$w/b/build/"*; echo stale >"$w/b/build/t-rootdisk.fw"
+  AVOCADO_PROVISION_FWUP=no-such-fwup AVOCADO_STONE_MANIFEST="$w/b/m.json" AVOCADO_STONE_DATA_DIR="$w/b/data" \
+    AVOCADO_STONE_BUILD_DIR="$w/b/build" bash "$script" 2>&1); rc=$?
+{ [ $rc -eq 0 ] && [ -s "$w/b/build/avocado-os-t.img" ] && [ ! -e "$w/b/build/t-rootdisk.fw" ] && echo "$out" | grep -qi "fwup"; } \
+  && ok "without fwup the raw image ships alone and a stale archive is removed" \
+  || bad "no fwup: rc=$rc files=[$(ls -A "$w/b/build")] out=[$out]"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/15 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 15 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/17 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 17 ]
