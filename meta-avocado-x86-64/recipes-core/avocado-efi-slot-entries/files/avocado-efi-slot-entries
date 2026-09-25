@@ -16,11 +16,12 @@
 # apart, so the script refuses to touch NVRAM while one is attached.
 #
 # BootOrder belongs to avocadoctl: commit moves the committed slot to the
-# front, and a rollback that runs without a reboot leaves the failed slot
-# running. So this script never promotes the slot it booted. A replaced entry
+# front. So this script leaves an intact pair where it is. A replaced entry
 # takes the position of the one it replaces, a slot missing from BootOrder goes
 # next to the other slot, and only when no slot is in BootOrder at all (first
-# boot) do the slots go to the front, booted slot first.
+# boot) do the slots go to the front, booted slot first. The one reordering:
+# when a run created or replaced entries, the booted slot's entry is put ahead
+# of the other slot's, in place, unless BootNext is set (see below).
 set -eu
 
 efivars=${AVOCADO_EFI_SLOTS_EFIVARS:-/sys/firmware/efi/efivars}
@@ -151,6 +152,8 @@ for s in $slots; do
 done
 
 kept=
+booted_keep=
+replaced=
 for s in $slots; do
     p=$(part_for_label "$s") || { log "no partition labelled $s on /dev/$disk, skipping it"; continue; }
     uuid=$(partuuid_of "$p") || { log "$p has no PARTUUID, skipping $s"; continue; }
@@ -160,6 +163,7 @@ for s in $slots; do
         log "creating '$s' for /dev/$p (partition $partno of /dev/$disk)"
         # -C, not -c: -c prepends to BootOrder, which would promote this slot.
         efibootmgr -q -C -d "$devdir/$disk" -p "$partno" -L "$s" -l "$loader"
+        replaced=1
         nv=$(efibootmgr_out -v)
         keep=$(pick "$(good_entries "$s" "$uuid" "$nv")") || { log "created '$s' but efibootmgr does not list it"; exit 1; }
     fi
@@ -184,8 +188,14 @@ for s in $slots; do
             next=$keep
         fi
         efibootmgr -q -b "$n" -B
+        replaced=1
     done
-    if [ "$uuid" = "$booted" ]; then kept="$keep $kept"; else kept="$kept $keep"; fi
+    if [ "$uuid" = "$booted" ]; then
+        kept="$keep $kept"
+        booted_keep=$keep
+    else
+        kept="$kept $keep"
+    fi
 done
 
 # Only slots still missing from BootOrder are added: next to the other slot
@@ -208,6 +218,27 @@ wanted=$(awk -v order="$current" -v slots="$kept" 'BEGIN {
     if (n == 0) for (j = 1; j <= nmiss; j++) r = r (r == "" ? "" : ",") mv[j]
     print r
 }')
+
+# Entries this run created or replaced inherit whatever positions the stale ones
+# held, so after a reflash the pair's order is left over from the previous image
+# and can put the other slot first. Firmware that later drops its own entries
+# (the R8000's AMI rebuilds BootOrder at POST) then boots that slot on a plain
+# reboot. Put the booted slot's entry ahead of the other slot's, swapping only
+# the two. The boot that reaches this service has passed avocadoctl's
+# verification - a failed one reboots from the initrd - so this never promotes a
+# failed slot. Not while BootNext is set: the next boot is already decided,
+# possibly mid-rollback on an avocadoctl that does not reboot after one.
+if [ -n "$replaced" ] && [ -z "$next" ] && [ -n "$booted_keep" ]; then
+    wanted=$(printf '%s\n' "$wanted" | awk -F, -v mine="$booted_keep" -v slots="$kept" '{
+        ns = split(slots, sl, " "); other = ""
+        for (i = 1; i <= ns; i++) if (sl[i] != mine) { other = sl[i]; break }
+        im = 0; io = 0
+        for (i = 1; i <= NF; i++) { if ($i == mine) im = i; if ($i == other) io = i }
+        if (im && io && io < im) { t = $im; $im = $io; $io = t }
+        r = ""; for (i = 1; i <= NF; i++) r = r (i > 1 ? "," : "") $i
+        print r }')
+fi
+
 [ "$wanted" = "$current" ] && exit 0
 efibootmgr -q -o "$wanted"
 log "BootOrder now $wanted (was $current)"
