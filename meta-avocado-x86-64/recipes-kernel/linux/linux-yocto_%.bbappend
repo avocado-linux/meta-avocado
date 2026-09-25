@@ -14,9 +14,9 @@ SRC_URI:append:avocado-x86-64 = " \
     file://x86-efi.cfg \
 "
 
-# The AMD fragments (avocado-core.cfg, x86-64-platform.cfg) live in
-# meta-avocado-amd-x86-64, not this layer's own
-# recipes-kernel/linux/files/ - expose that dir the same way
+# avocado-core.cfg, avocado-extra.cfg and tpm.cfg are this layer's own, found
+# through the unscoped prepend above. x86-64-platform.cfg lives in
+# meta-avocado-amd-x86-64 - expose that dir the same way
 # meta-avocado-nxp's AVOCADO_NXP_KERNEL_FILESDIR does for its relocated
 # bbappends, since ${LAYERDIR} is not available at this recipe's parse time.
 FILESEXTRAPATHS:prepend:avocado-amd-x86-64 := "${AVOCADO_AMD_X86_64_KERNEL_FILESDIR}:"
