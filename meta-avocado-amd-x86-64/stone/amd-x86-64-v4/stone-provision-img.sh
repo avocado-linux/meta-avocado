@@ -52,13 +52,23 @@ fi
 
 echo "  Partitions: ${NUM_PARTITIONS}"
 
-# Convert size_unit to MiB multiplier
+# Convert a manifest size or offset to whole MiB, rounding up. Anything but a
+# positive decimal integer is refused: it would otherwise reach sgdisk as "+0"
+# or garbage, KiB values used to floor to 0 MiB, and a leading zero would make
+# $(( )) read the value as octal.
 size_to_mib() {
     local size="$1"
     local unit="$2"
+    case "$size" in
+        ''|*[!0-9]*) echo "ERROR: size or offset must be a positive integer, got '$size' $unit" >&2; exit 1 ;;
+    esac
+    size=$(( 10#$size ))
+    if [ "$size" -eq 0 ]; then
+        echo "ERROR: size or offset must be a positive integer, got 0 $unit" >&2; exit 1
+    fi
     case "$unit" in
         mebibytes|MiB) echo "$size" ;;
-        kibibytes|KiB) echo $(( size / 1024 )) ;;
+        kibibytes|KiB) echo $(( (size + 1023) / 1024 )) ;;
         gibibytes|GiB) echo $(( size * 1024 )) ;;
         *) echo "ERROR: Unknown size unit: $unit" >&2; exit 1 ;;
     esac
@@ -82,10 +92,16 @@ resolve_image_filename() {
 # sparse. Progress is emitted as periodic newlines so it renders in captured
 # (non-TTY) provisioning logs -- dd's \r-based status=progress does not.
 write_image() {
-    local src="$1" dst="$2" seek_mib="$3" label="$4"
+    local src="$1" dst="$2" seek_mib="$3" label="$4" part_mib="$5"
     local total_bytes total_mib dd_pid pos written seek_bytes
     total_bytes=$(stat -c%s "$src")
     total_mib=$(( (total_bytes + 1048575) / 1048576 ))
+    # dd would run straight past the partition into the next one while the GPT
+    # still describes the old boundaries, and the image would look fine.
+    if [ "$total_bytes" -gt $(( part_mib * 1048576 )) ]; then
+        echo "ERROR: ${label} image is ${total_bytes} bytes, larger than its ${part_mib} MiB partition" >&2
+        exit 1
+    fi
     seek_bytes=$(( seek_mib * 1048576 ))
     echo "  Writing ${label}: ${total_mib} MiB"
 
@@ -315,7 +331,7 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
         exit 1
     fi
 
-    write_image "$img_file" "$IMAGE_FILE" "${PART_OFFSETS_MIB[$i]}" "${PART_NAMES[$i]}"
+    write_image "$img_file" "$IMAGE_FILE" "${PART_OFFSETS_MIB[$i]}" "${PART_NAMES[$i]}" "${PART_SIZES_MIB[$i]}"
 done
 
 # Cleanup built images
