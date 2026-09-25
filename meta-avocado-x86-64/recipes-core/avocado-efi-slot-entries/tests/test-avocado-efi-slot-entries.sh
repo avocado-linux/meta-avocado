@@ -60,7 +60,8 @@ setup() {
 
 # efibootmgr stub: -v lists, -c creates and prepends to BootOrder, -C creates
 # and leaves BootOrder alone (both as the real tool does), -b N -B deletes, -o
-# sets the order, -n sets BootNext. Every call is logged. STUB_FAIL=1 makes every call fail.
+# sets the order, -n sets BootNext. Every call is logged. STUB_FAIL_DELETE=<num>
+# makes deleting that one entry fail, as an NVRAM write error would. STUB_FAIL=1 makes every call fail.
 mkdir -p "$w/bin"
 cat >"$w/bin/efibootmgr" <<S
 #!/bin/bash
@@ -78,6 +79,7 @@ if [ -n "\$label" ]; then
   [ -n "\$prepend" ] && echo "\$n,\$(cat "\$nv/order")" > "\$nv/order"; exit 0
 fi
 if [ "\$del" = 1 ]; then
+  [ "\$num" = "\${STUB_FAIL_DELETE:-}" ] && { echo "efibootmgr: Could not delete Boot\$num" >&2; exit 5; }
   grep -v "^\$num|" "\$nv/entries" > "\$nv/e.tmp"; mv "\$nv/e.tmp" "\$nv/entries"
   tr ',' '\n' < "\$nv/order" | grep -vx "\$num" | paste -sd, > "\$nv/o.tmp"; mv "\$nv/o.tmp" "\$nv/order"; exit 0
 fi
@@ -215,7 +217,8 @@ setup
 printf '0004|boot-a|HD(1,GPT,%s,0x800,0x80000)/File(x)\n0006|boot-a|HD(1,GPT,%s,0x800,0x80000)/File(x)\n0007|boot-b|HD(2,GPT,%s,0x800,0x80000)/File(x)\n' \
   "$UA" "$UA" "$UB" >>"$w/nv/entries"
 echo 0006,0007,0002,0003 >"$w/nv/order"
-out=$(run); rc=$?
+out=$(run)
+rc=$?
 { [ $rc -eq 0 ] && [ "$(num_of boot-a)" = 0006 ] && grep -q -- "-b 0004 -B" "$w/log" \
   && [ "$(cat "$w/nv/order")" = 0006,0007,0002,0003 ] && ! grep -q -- ' -o ' "$w/log"; } \
   && ok "of two good duplicates the one in BootOrder is kept, and BootOrder is untouched" \
@@ -229,7 +232,8 @@ set_booted "$UB"
 printf '0004|boot-a|HD(9,GPT,deadbeef-0000-0000-0000-000000000009,0x800,0x80000)/File(x)\n0005|boot-b|HD(2,GPT,%s,0x800,0x80000)/File(x)\n' "$UB" >>"$w/nv/entries"
 echo 0004,0005,0002,0003 >"$w/nv/order"
 echo 0004 >"$w/nv/next"
-out=$(run); rc=$?
+out=$(run)
+rc=$?
 na=$(num_of boot-a)
 { [ $rc -eq 0 ] && [ -n "$na" ] && [ "$na" != 0004 ] && [ "$(cat "$w/nv/order")" = "$na,0005,0002,0003" ] \
   && [ "$(cat "$w/nv/next")" = "$na" ]; } \
@@ -241,11 +245,30 @@ na=$(num_of boot-a)
 setup
 printf '0004|boot-a|HD(1,GPT,%s,0x800,0x80000)/File(x)\n0005|boot-b|HD(2,GPT,%s,0x800,0x80000)/File(x)\n' "$UA" "$UB" >>"$w/nv/entries"
 echo 0005,0002,0003 >"$w/nv/order"
-out=$(run); rc=$?
+out=$(run)
+rc=$?
 { [ $rc -eq 0 ] && [ "$(cat "$w/nv/order")" = 0005,0004,0002,0003 ] && ! grep -qE -- ' -[cCB] ' "$w/log"; } \
   && ok "a slot missing from BootOrder is re-added after the other slot" \
   || bad "re-add: rc=$rc log=$(cat "$w/log") order=$(cat "$w/nv/order")"
 
+# 13. An NVRAM write failing part-way must not leave BootNext or BootOrder
+#     naming a deleted entry. BootNext targets a stale boot-a that is
+#     replaced; deleting a stale boot-b duplicate afterwards fails and aborts
+#     the run. BootNext and both BootOrder slots must already be on the kept
+#     entries by then (0006 hands its place to 0005 before its delete).
+setup
+set_booted "$UB"
+printf '0004|boot-a|HD(9,GPT,deadbeef-0000-0000-0000-000000000009,0x800,0x80000)/File(x)\n0005|boot-b|HD(2,GPT,%s,0x800,0x80000)/File(x)\n0006|boot-b|HD(8,GPT,deadbeef-0000-0000-0000-000000000008,0x800,0x80000)/File(x)\n' "$UB" >>"$w/nv/entries"
+echo 0004,0005,0006,0002,0003 >"$w/nv/order"
+echo 0004 >"$w/nv/next"
+out=$(STUB_FAIL_DELETE=0006 run)
+rc=$?
+na=$(num_of boot-a)
+{ [ $rc -ne 0 ] && [ -n "$na" ] && [ "$na" != 0004 ] && ! grep -q '^0004|' "$w/nv/entries" \
+  && [ "$(cat "$w/nv/next")" = "$na" ] && [ "$(cat "$w/nv/order")" = "$na,0005,0002,0003" ]; } \
+  && ok "a failed delete part-way leaves BootNext and BootOrder on the replacement entry" \
+  || bad "partial write: rc=$rc out=[$out] order=$(cat "$w/nv/order") next=$(cat "$w/nv/next" 2>/dev/null) entries=$(cat "$w/nv/entries")"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/12 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 12 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/13 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 13 ]
