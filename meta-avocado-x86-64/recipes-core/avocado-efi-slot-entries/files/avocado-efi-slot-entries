@@ -10,7 +10,10 @@
 # activation cannot find the target slot, and the second ESP is unreachable.
 #
 # The disk comes from LoaderDevicePartUUID, the ESP systemd-boot was loaded
-# from, so a same-named partition on another disk is never used.
+# from, so a same-named partition on another disk is never used. A second disk
+# flashed from the same image carries the same partition UUIDs, and neither
+# udev's by-partuuid link nor firmware's HD() device path can tell the two
+# apart, so the script refuses to touch NVRAM while one is attached.
 #
 # BootOrder belongs to avocadoctl: commit moves the committed slot to the
 # front, and a rollback that runs without a reboot leaves the failed slot
@@ -31,18 +34,37 @@ log() { echo "avocado-efi-slot-entries: $*"; }
 var=$efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
 [ -r "$var" ] || { log "no LoaderDevicePartUUID, not booted through systemd-boot; nothing to do"; exit 0; }
 
-# local-fs.target only waits for what is mounted. The other slot's ESP is not
-# mounted, so its by-partuuid link can still be in flight from coldplug, and
-# skipping that slot would leave it without an entry until the next boot.
+# local-fs.target only waits for what is mounted. A disk still being probed
+# from coldplug, such as a second USB stick carrying this image, would be
+# missed by the duplicate-PARTUUID check below, so wait out the event queue.
 if [ -z "${AVOCADO_EFI_SLOTS_NO_SETTLE:-}" ] && command -v udevadm >/dev/null 2>&1; then
     udevadm settle --timeout=30 || log "udevadm settle timed out, continuing"
 fi
 
 # efivarfs prefixes 4 attribute bytes; the rest is a UTF-16LE GUID string.
 booted=$(tail -c +5 "$var" | tr -d '\000\n' | tr 'A-F' 'a-f')
-esp=$(readlink -f "$devdir/disk/by-partuuid/$booted" 2>/dev/null) || esp=
-[ -n "$esp" ] && [ -e "$esp" ] || { log "booted ESP $booted has no block device"; exit 1; }
-disk=$(basename "$(readlink -f "$sysblock/$(basename "$esp")/..")")
+
+# Partitions carrying a PARTUUID, read from sysfs rather than the single
+# by-partuuid link, which names only one of several.
+parts_with_uuid() {
+    for u in "$sysblock"/*/uevent; do
+        [ -r "$u" ] || continue
+        tr '[:upper:]' '[:lower:]' <"$u" | grep -qxF "partuuid=$1" && basename "$(dirname "$u")"
+    done
+    return 0
+}
+
+unique_part() {
+    # shellcheck disable=SC2046 # split on purpose: one kernel partition name per word
+    set -- $(parts_with_uuid "$1")
+    [ $# -le 1 ] || { log "PARTUUID $u is carried by more than one partition ($*): a disk cloned from this image is attached; detach it, nothing written" >&2; exit 1; }
+    [ $# -eq 1 ] && echo "$1"
+    return 0
+}
+
+esp=$(u=$booted unique_part "$booted")
+[ -n "$esp" ] && [ -e "$devdir/$esp" ] || { log "booted ESP $booted has no block device"; exit 1; }
+disk=$(basename "$(readlink -f "$sysblock/$esp/..")")
 
 # Partition device name for a GPT partition label, on the booted disk only.
 part_for_label() {
@@ -54,10 +76,8 @@ part_for_label() {
 }
 
 partuuid_of() {
-    for l in "$devdir"/disk/by-partuuid/*; do
-        [ "$(readlink -f "$l")" = "$(readlink -f "$devdir/$1")" ] && { basename "$l" | tr 'A-F' 'a-f'; return 0; }
-    done
-    return 1
+    uuid=$(tr '[:upper:]' '[:lower:]' <"$sysblock/$1/uevent" | sed -n 's/^partuuid=//p')
+    [ -n "$uuid" ] && echo "$uuid"
 }
 
 # Callers capture this with `x=$(efibootmgr_out ...)`, so a failure fails the
@@ -121,10 +141,19 @@ nv=$(efibootmgr_out -v)
 next=$(printf '%s\n' "$nv" | sed -n 's/^BootNext: //p')
 prefs="$next $(printf '%s\n' "$nv" | sed -n 's/^BootCurrent: //p') $(printf '%s\n' "$nv" | sed -n 's/^BootOrder: //p' | tr ',' ' ')"
 
+# Every slot is checked before the first write, so a clone of either slot
+# stops the run with NVRAM untouched. unique_part exits only its subshell, so
+# the refusal is repeated here.
+for s in $slots; do
+    p=$(part_for_label "$s") || continue
+    uuid=$(partuuid_of "$p") || continue
+    [ "$(u=$uuid unique_part "$uuid")" = "$p" ] || exit 1
+done
+
 kept=
 for s in $slots; do
     p=$(part_for_label "$s") || { log "no partition labelled $s on /dev/$disk, skipping it"; continue; }
-    uuid=$(partuuid_of "$p") || { log "$p has no PARTUUID link, skipping $s"; continue; }
+    uuid=$(partuuid_of "$p") || { log "$p has no PARTUUID, skipping $s"; continue; }
     keep=$(pick "$(good_entries "$s" "$uuid" "$nv")") || keep=
     if [ -z "$keep" ]; then
         partno=$(cat "$sysblock/$p/partition")
