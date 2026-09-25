@@ -1,0 +1,116 @@
+SUMMARY = "NVIDIA Linux Open GPU Kernel Modules"
+DESCRIPTION = "Open-source kernel modules for NVIDIA GPUs (Turing and later). \
+Built from NVIDIA's open-gpu-kernel-modules repository. Supports RTX 20/30/40/50 \
+series GPUs for compute and display workloads."
+HOMEPAGE = "https://github.com/NVIDIA/open-gpu-kernel-modules"
+LICENSE = "MIT & GPL-2.0-only"
+LIC_FILES_CHKSUM = "file://COPYING;md5=1d5fa2a493e937d5a4b96e5e03b90f7c"
+
+# nobranch=1: SRCREV below is the 595.84 release tag's commit, which is not
+# reachable from the main branch tip, so a branch= check fails ("Unable to find
+# revision ... in branch main"). Pin the exact commit instead.
+SRC_URI = " \
+    git://github.com/NVIDIA/open-gpu-kernel-modules.git;nobranch=1;protocol=https \
+    file://nvidia-gpu-modules-load.conf \
+"
+SRCREV = "722ae84526a09ed672fbe75448e2909834ba4cce"
+
+
+inherit module
+
+# The x86-64 kernel runs objtool (ORC/retpoline validation) on external modules.
+# objtool is a host tool the kernel recipe built against its OWN recipe-sysroot-
+# native; that RPATH is stale during this build (rm_work has cleaned the kernel's
+# native sysroot), so objtool aborts at runtime with
+# "libelf.so.1: cannot open shared object file". Depend on elfutils-native so
+# libelf is staged into our native sysroot, and put it on the loader path in
+# do_compile below.
+DEPENDS += "elfutils-native"
+
+# The open kernel modules are built from the kernel-open/ subdirectory.
+# The top-level Makefile dispatches into kernel-open/ when modules= target is used.
+MODULES_MODULE_SYMVERS_LOCATION = "kernel-open"
+
+# Build only the open kernel modules (not the proprietary ones).
+# LDFLAGS='' : NVIDIA prelinks nv-kernel.o with a raw `ld` ($(LD) $(LDFLAGS) -r),
+# but OE's LDFLAGS holds compiler-driver flags (-Wl,-O1 ...) that a bare `ld`
+# rejects ("unrecognized option '-Wl,-O1'"). The .ko files are linked by kbuild
+# with the kernel's own flags, so clearing LDFLAGS here is correct.
+# ARCH='x86_64': OE exports the kernel ARCH ('x86' -- Linux puts 32/64-bit x86
+# under arch/x86), but NVIDIA's kernel-open/Makefile only accepts its own arch
+# names (x86_64/aarch64/...) and errors "Unsupported architecture x86". The
+# kernel Makefile maps ARCH=x86_64 -> SRCARCH=x86, so this satisfies both.
+# CC='${KERNEL_CC}' (not ${CC}): KERNEL_CC carries the -ffile-prefix-map pair for
+# STAGING_KERNEL_DIR/STAGING_KERNEL_BUILDDIR (kernel-arch.bbclass), which module.bbclass
+# passes for the builds it drives itself. This recipe supplies its own do_compile, so a
+# plain ${CC} compiled the kernel headers with no prefix map and baked raw TMPDIR paths
+# into the .ko via __FILE__ in inlined WARN_ON/BUG_ON -- failing the buildpaths QA, which
+# the avocado distro treats as fatal. Only shows up on 6.18: file_ref.h and ucopysize.h
+# are new headers that inline such macros, so the 6.6 build never tripped it.
+EXTRA_OEMAKE += " \
+    ARCH='x86_64' \
+    TARGET_ARCH='x86_64' \
+    SYSSRC='${STAGING_KERNEL_DIR}' \
+    SYSOUT='${STAGING_KERNEL_BUILDDIR}' \
+    CC='${KERNEL_CC}' \
+    LD='${LD}' \
+    AR='${AR}' \
+    LDFLAGS='' \
+    NV_VERBOSE=1 \
+"
+
+# Build the open modules via the top-level Makefile target
+do_compile() {
+    # Let the kernel's objtool find libelf.so.1 (from elfutils-native) -- its own
+    # RPATH into the kernel's native sysroot no longer resolves here. Guard the
+    # append so an unset LD_LIBRARY_PATH does not leave a trailing ':' (an empty
+    # element the loader treats as the CWD).
+    export LD_LIBRARY_PATH="${STAGING_LIBDIR_NATIVE}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    oe_runmake KERNEL_UNAME=${KERNEL_VERSION} modules
+}
+
+do_install() {
+    # Install kernel modules. Use MODLIB (as module.bbclass does) rather than
+    # INSTALL_MOD_PATH=${D}: the kernel's modules_install hardcodes .../lib/...,
+    # which lands at a literal ${D}/lib/modules, but on usrmerge systems the
+    # kernel-module-split scans ${nonarch_base_libdir}/modules (= ${D}/usr/lib/
+    # modules), so modules installed to /lib were "installed but not shipped".
+    # MODLIB points the install straight at the directory the split scans.
+    # DEPMOD=echo avoids running (cross) depmod during install.
+    oe_runmake KERNEL_UNAME=${KERNEL_VERSION} \
+        MODLIB=${D}${nonarch_base_libdir}/modules/${KERNEL_VERSION} \
+        INSTALL_MOD_DIR=kernel/drivers/video/nvidia \
+        DEPMOD=echo \
+        modules_install
+
+    # Install modules-load.d config for automatic loading at boot
+    install -d ${D}${sysconfdir}/modules-load.d
+    install -m 0644 ${UNPACKDIR}/nvidia-gpu-modules-load.conf \
+        ${D}${sysconfdir}/modules-load.d/nvidia-gpu-modules.conf
+}
+
+# kernel-module-split (inherited via module) automatically creates:
+#   kernel-module-nvidia
+#   kernel-module-nvidia-modeset
+#   kernel-module-nvidia-drm
+#   kernel-module-nvidia-uvm
+#   kernel-module-nvidia-peermem
+#
+# Users can install individual modules or all of them via ${PN}.
+
+# The modules-load.d config file goes into the base package
+FILES:${PN} += "${sysconfdir}/modules-load.d/nvidia-gpu-modules.conf"
+
+# Module loading dependencies (nvidia must be loaded before modeset, etc.)
+# These are normally handled by depmod, but explicit RDEPENDS ensures correct
+# package resolution when installing individual modules.
+RDEPENDS:kernel-module-nvidia-modeset = "kernel-module-nvidia"
+RDEPENDS:kernel-module-nvidia-drm = "kernel-module-nvidia kernel-module-nvidia-modeset"
+RDEPENDS:kernel-module-nvidia-uvm = "kernel-module-nvidia"
+RDEPENDS:kernel-module-nvidia-peermem = "kernel-module-nvidia"
+
+# x86-64 only -- the open kernel modules require x86_64
+COMPATIBLE_HOST = "x86_64.*-linux"
+
+# Parallel build
+PARALLEL_MAKE = ""
