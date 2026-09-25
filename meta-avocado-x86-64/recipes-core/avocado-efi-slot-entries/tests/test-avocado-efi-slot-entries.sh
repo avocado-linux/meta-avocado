@@ -40,7 +40,7 @@ setup() {
     case $disk in nvme*) p=${disk}p$n ;; *) p=$disk$n ;; esac
     mkdir -p "$w/sys/$disk/$p"
     echo "$n" >"$w/sys/$disk/$p/partition"
-    printf 'DEVNAME=%s\nPARTN=%s\nPARTNAME=%s\n' "$p" "$n" "$name" >"$w/sys/$disk/$p/uevent"
+    printf 'DEVNAME=%s\nPARTN=%s\nPARTNAME=%s\nPARTUUID=%s\n' "$p" "$n" "$name" "$uuid" >"$w/sys/$disk/$p/uevent"
     ln -s "$disk/$p" "$w/sys/$p"
     : >"$w/dev/$disk"
     : >"$w/dev/$p"
@@ -271,6 +271,41 @@ na=$(num_of boot-a)
   && ok "a failed delete part-way leaves BootNext and BootOrder on the replacement entry" \
   || bad "partial write: rc=$rc out=[$out] order=$(cat "$w/nv/order") next=$(cat "$w/nv/next" 2>/dev/null) entries=$(cat "$w/nv/entries")"
 
+# 14. A second disk flashed from the same image (a USB stick being prepared)
+#     carries the same partition UUIDs. udev's by-partuuid link may name
+#     either disk and firmware cannot tell them apart, so nothing is written
+#     and the unit fails - even when the link happens to name the clone.
+setup
+for n in 1 2; do
+  mkdir -p "$w/sys/sdb/sdb$n"
+  echo "$n" >"$w/sys/sdb/sdb$n/partition"
+  u=$UA; l=boot-a; [ "$n" = 2 ] && { u=$UB; l=boot-b; }
+  printf 'DEVNAME=sdb%s\nPARTN=%s\nPARTNAME=%s\nPARTUUID=%s\n' "$n" "$n" "$l" "$u" >"$w/sys/sdb/sdb$n/uevent"
+  ln -s "sdb/sdb$n" "$w/sys/sdb$n"
+  : >"$w/dev/sdb$n"
+  ln -sfn "../../sdb$n" "$w/dev/disk/by-partuuid/$u"
+done
+: >"$w/dev/sdb"
+before=$(cat "$w/nv/entries" "$w/nv/order")
+out=$(run)
+rc=$?
+{ [ $rc -ne 0 ] && [ "$(writes)" -eq 0 ] && [ "$(cat "$w/nv/entries" "$w/nv/order")" = "$before" ] && echo "$out" | grep -qi "more than one"; } \
+  && ok "a cloned disk with the same partition UUIDs stops the run before any NVRAM write" \
+  || bad "clone: rc=$rc writes=$(writes) out=[$out] entries=$(cat "$w/nv/entries")"
+
+# 15. Only the other slot's UUID is duplicated: still nothing is written.
+setup
+mkdir -p "$w/sys/sdb/sdb2"
+echo 2 >"$w/sys/sdb/sdb2/partition"
+printf 'DEVNAME=sdb2\nPARTN=2\nPARTNAME=boot-b\nPARTUUID=%s\n' "$UB" >"$w/sys/sdb/sdb2/uevent"
+ln -s sdb/sdb2 "$w/sys/sdb2"
+: >"$w/dev/sdb2"
+out=$(run)
+rc=$?
+{ [ $rc -ne 0 ] && [ "$(writes)" -eq 0 ] && echo "$out" | grep -qi "more than one"; } \
+  && ok "a duplicated slot UUID alone also stops the run before any NVRAM write" \
+  || bad "slot clone: rc=$rc writes=$(writes) out=[$out]"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/13 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 13 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/15 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 15 ]
