@@ -5,13 +5,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-# EFI boot management - required for A/B slot activation via efibootmgr.
-# avocadoctl's efibootmgr slot action looks the target slot up by an entry
-# label that avocado-efi-slot-entries creates.
+# EFI boot management - required for A/B slot activation via efibootmgr
 EFI_TOOLS = " \
   efibootmgr \
   efivar \
-  avocado-efi-slot-entries \
 "
 
 RDEPENDS:${PN} = " \
