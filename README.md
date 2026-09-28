@@ -36,14 +36,19 @@ This will open a tmux session.
 
 ## Local package feed
 
-To serve a local package feed from your build outputs (sync packages, package
-extensions, and start a browsable repo server in one command):
+Building `avocado-complete` also indexes `build/tmp/deploy/rpm` into a feed at
+`build/tmp/deploy/avocado-feed` (symlinks plus repodata, nothing copied). Serve it
+once and keep it running across rebuilds:
 
 ```bash
-./scripts/dev-repo.sh 2026 qemux86-64
+./scripts/feed-serve.sh build-qemux86-64
+AVOCADO_REPO_URL=http://localhost:8080 avocado install
 ```
 
-See [docs/local-package-feed.md](docs/local-package-feed.md) for the full guide.
+After rebuilding single packages, refresh the index with
+`bitbake avocado-feed-index`. See
+[docs/local-package-feed.md](docs/local-package-feed.md) for extensions and for
+`dev-repo.sh`, which mirrors the production render pipeline.
 
 ## Testing
 
