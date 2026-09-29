@@ -1,6 +1,12 @@
 inherit stone
 
 do_compile[depends] += "u-boot:do_deploy"
+# The qemuarm64 manifest also consumes flash.bin (TF-A) from the deploy dir;
+# without this dependency a parallel cold build can bundle before (or with a
+# stale copy of) the TF-A deploy. Gated on MACHINE because avocado-qemux86-64
+# shares this .bbappend and has no TF-A provider -- and because varflags take no
+# override suffix on bitbake 2.8.1. Fixes #286.
+do_compile[depends] += "${@bb.utils.contains('MACHINE', 'avocado-qemuarm64', 'trusted-firmware-a:do_deploy', '', d)}"
 
 DEPENDS += " jq-native mkfat-native fwup-native"
 
