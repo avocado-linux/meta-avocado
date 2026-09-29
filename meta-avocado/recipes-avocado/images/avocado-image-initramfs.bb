@@ -31,8 +31,6 @@ INHIBIT_PACKAGE_STRIP = "0"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 INSANE_SKIP = "ldflags"
 
-do_image[nostamp] = "1"
-
 # Only build the initramfs
 python __anonymous() {
     d.setVar('INITRAMFS_IMAGE', d.getVar('PN'))
