@@ -30,6 +30,10 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+      # test-rootfs-partuuid-pin.sh writes a real GPT with sgdisk and fails
+      # under CI when it is missing, rather than skipping.
+      - name: install gdisk
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gdisk
       - name: run tegra provisioning tests
         shell: bash
         run: meta-avocado-nvidia/stone/tegra/tests/run-tegra-tests.sh
