@@ -313,13 +313,56 @@ unknown vars can break the flash flow. Either remove the unused knob
 from carrier.env, or fix the variable name (a typo is the most common
 cause).
 
+## Module SKU auto-detection (T264 / Thor)
+
+On Thor a carrier does **not** pin its module SKU. `initrd-flash.sh`
+reads the module EEPROM before it prepares any binaries
+(`get_board_info_t264`) and then retargets every module-specific flash
+file at the SKU it found (`retarget_module_sku_t264`), so one carrier
+extension covers both the T5000 (P3834-0008) and the T4000
+(P3834-0000). The substitution is over the `3834-<sku>` token, which
+appears in all seven of them:
+
+```
+flashvars:          BCTFILE BPFDTB_FILE BPMP_MEM_CONFIG DTB_FILE
+                    MISC_CONFIG PMIC_CONFIG WB0SDRAM_BCT
+.env.initrd-flash:  DTBFILE EMC_BCT
+```
+
+`CHIP_SKU`, `RAMCODE` and `BPF_FILE` are already derived from the
+detected chip by meta-tegra's `tegra-flash-helper.sh`, and the
+`p3834-xxxx` BCTs (pinmux, GPIO, prod, …) are SOM-SKU independent, so
+none of those need a knob either.
+
+What this asks of a carrier extension:
+
+- **Do not set `CARRIER_FV_CHECK_BOARDSKU`.** Set it and the flash
+  aborts on the module you did not pin. `CARRIER_FV_CHECK_BOARDID`
+  (`3834`) is the gate you do want — it rejects a module from another
+  family. An SKU with no files to move to is refused outright rather
+  than guessed at.
+- **Ship every SKU's copy of any carrier file you rename.** A carrier
+  BPMP DTB named `tegra264-bpmp-3834-0008-4071-xxxx-adv.dtb` is
+  retargeted to `…-3834-0000-…-adv.dtb` on a T4000, so both have to be
+  in `stone/carrier-bsp/`. Stock files are already in the
+  MACHINE-baked `tegraflash-bsp/` for every SKU.
+
+The Orin equivalent is per-SKU: meta-tegra's `tegra-flash-helper.sh`
+does its own `3701-0000` → `3701-$BOARDSKU` rewrite for the P3701
+family, but the Orin NX/Nano parts still pin `CHECK_BOARDSKU` as the
+ICAM-540 example above does.
+
+Regression test:
+[tests/test-module-sku-retarget.sh](../recipes-bsp/tegra-binaries/tests/test-module-sku-retarget.sh).
+
 ## Caveats
 
 - **EEPROM SKU mismatch aborts signing.** If the actual SOM SKU
   doesn't match `CHECK_BOARDSKU` in flashvars, tegraflash refuses to
   sign with `actual board SKU X does not match expected board SKU Y`.
-  Always set `CARRIER_FV_CHECK_BOARDSKU` to the SOM SKU you expect on
-  the carrier.
+  On Orin, set `CARRIER_FV_CHECK_BOARDSKU` to the SOM SKU you expect
+  on the carrier. On Thor, leave it unset and let the module be
+  detected — see *Module SKU auto-detection* above.
 - **Wrong SDRAM dts bricks DRAM init.** SKU 0000 vs 0001 SDRAM params
   are not compatible. Without `CARRIER_FV_WB0SDRAM_BCT` and
   `CARRIER_ENV_EMMC_BCTS`, MB1 reports `SDRAM initialized!` then fails
@@ -345,9 +388,10 @@ cause).
   meta-tegra `tegraflash-bsp/` into a `nativesdk-tegra-bsp-common`
   package available to all Jetson targets via SDK. BSP extensions
   would then ship only their per-carrier delta.
-- **Provision-time SOM-SKU detection** — read EEPROM at provision
-  time and pick the right `CARRIER_FV_*` set automatically rather
-  than requiring per-carrier configuration up front.
+- **SOM-SKU detection on Orin** — T264 does this already (see
+  *Module SKU auto-detection* above). T234's per-SKU file naming is
+  irregular enough that the same one-token substitution does not
+  cover it, so Orin carriers still pin `CHECK_BOARDSKU`.
 
 ## See also
 
