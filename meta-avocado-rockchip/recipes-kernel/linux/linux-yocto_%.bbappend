@@ -11,6 +11,14 @@ SRC_URI:append:rk3588 = " \
     file://avocado-rk3588.cfg \
 "
 
+COMPATIBLE_MACHINE:nanopi-r5s = "nanopi-r5s"
+
+SRC_URI:append:rk3568 = " \
+    file://avocado-core.cfg \
+    file://avocado-extra.cfg \
+    file://avocado-rk3568.cfg \
+"
+
 # Boilerplate per distro/docs/adding-a-machine-target.md §10:
 # adds the kernel to the avocado-cli kernel-resolver virtual, renames
 # kernel-{devsrc,devicetree,modules} to include KERNEL_VERSION, emits
