@@ -497,3 +497,104 @@ def test_collect_rejects_path_traversal(tmp_path):
     with pytest.raises(HostError):
         host.collect(t, "r1", tmp_path / "l", remote_run_dir="/x")
     assert not (tmp_path / "evil").exists()
+
+
+# --- root-direct privilege mode --------------------------------------------
+
+
+def _id_handler(id_out: bytes, id_rc: int = 0):
+    def h(argv, stdin, sudo):
+        if argv == ["id", "-u"]:
+            return RunResult(id_rc, id_out, b"")
+        if argv[:2] == ["id", "-un"]:
+            return RunResult(0, b"root\n", b"")
+        if argv == ["sudo", "-n", "true"]:
+            return RunResult(1, b"", b"sudo: not found")
+        return RunResult(0, b"", b"")
+
+    return h
+
+
+def test_root_login_runs_without_sudo_and_never_prompts():
+    t = StubTransport(handler=_id_handler(b"0\n"))
+    asked = []
+    mode = host.acquire_sudo(t, ask_password=lambda: asked.append(1) or PASSWORD)
+    assert mode == host.PRIVILEGE_ROOT == "root (no sudo)"
+    assert asked == [] and t.sudo_password is None
+    res = t.run(["install", "-d", "/x"], None, sudo=True)
+    assert res.rc == 0
+    assert t.calls[-1].argv == ["install", "-d", "/x"]
+    assert all("sudo" not in c.argv for c in t.calls)
+
+
+def test_root_mode_applies_to_streamed_payloads_too():
+    t = StubTransport(handler=_id_handler(b"0\n"))
+    host.acquire_sudo(t, ask_password=lambda: PASSWORD)
+    t.run(["tee", "/x"], b"body", sudo=True)
+    assert t.calls[-1].argv == ["tee", "/x"] and t.calls[-1].stdin_bytes == b"body"
+
+
+def test_non_root_keeps_sudo_probe_then_prompt():
+    seen = []
+
+    def h(argv, stdin, sudo):
+        seen.append(list(argv))
+        if argv == ["id", "-u"]:
+            return RunResult(0, b"1000\n", b"")
+        if argv == ["sudo", "-n", "true"]:
+            return RunResult(1, b"", b"password required")
+        return RunResult(0, b"", b"")
+
+    t = StubTransport(handler=h)
+    mode = host.acquire_sudo(t, ask_password=lambda: PASSWORD)
+    assert mode == host.PRIVILEGE_SUDO_PASSWORD
+    assert seen.index(["id", "-u"]) < seen.index(["sudo", "-n", "true"])
+    assert isinstance(t.sudo_password, Secret)
+
+
+def test_non_root_without_password_need_reports_sudo_mode():
+    def h(argv, stdin, sudo):
+        if argv == ["id", "-u"]:
+            return RunResult(0, b"1000\n", b"")
+        return RunResult(0, b"", b"")
+
+    t = StubTransport(handler=h)
+    assert host.acquire_sudo(t, ask_password=lambda: PASSWORD) == host.PRIVILEGE_SUDO_NOPASS
+    assert t.calls[-1].argv == ["sudo", "-n", "true"]
+
+
+@pytest.mark.parametrize("garbage", [b"uid=0(root)\n", b"root\n", b"0 1\n", b"-0\n", b"0x0\n"])
+def test_unparseable_id_refuses_closed(garbage):
+    t = StubTransport(handler=_id_handler(garbage))
+    with pytest.raises(HostError, match="privilege"):
+        host.acquire_sudo(t, ask_password=lambda: PASSWORD)
+    assert not host_is_root(t)
+
+
+def host_is_root(t) -> bool:
+    return getattr(t, "root_direct", False)
+
+
+@pytest.mark.parametrize("rc,out", [(127, b""), (1, b"0\n"), (0, b"")])
+def test_unanswerable_id_falls_through_to_sudo_never_root(rc, out):
+    t = StubTransport(handler=_id_handler(out, rc))
+    # sudo -n true fails in this handler and the password is supplied
+    def h(argv, stdin, sudo):
+        if argv == ["id", "-u"]:
+            return RunResult(rc, out, b"")
+        if argv == ["sudo", "-n", "true"]:
+            return RunResult(1, b"", b"")
+        return RunResult(0, b"", b"")
+
+    t = StubTransport(handler=h)
+    assert host.acquire_sudo(t, ask_password=lambda: PASSWORD) == host.PRIVILEGE_SUDO_PASSWORD
+    assert not host_is_root(t)
+
+
+def test_reacquire_resets_root_mode():
+    t = StubTransport(handler=_id_handler(b"0\n"))
+    host.acquire_sudo(t)
+    assert t.root_direct is True
+    t.handler = lambda a, s, u: RunResult(0, b"1000\n", b"") if a == ["id", "-u"] else RunResult(0, b"", b"")
+    host.acquire_sudo(t)
+    assert t.root_direct is False

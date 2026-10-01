@@ -146,7 +146,8 @@ class _Ctx:
             if probe.rc != 0:
                 _err(f"{PREFIX}: the runner bundle is not on the board: run stage first")
                 return 1
-        host.acquire_sudo(self.transport, self.ask_password or host.default_ask_password)
+        mode = host.acquire_sudo(self.transport, self.ask_password or host.default_ask_password)
+        self.out(f"privilege: {mode}")
         return None
 
     def invoke(self, sub: str, request: dict, detach: bool = False):

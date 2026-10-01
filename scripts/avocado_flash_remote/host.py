@@ -112,13 +112,19 @@ class _TransportBase:
     """Shared sudo wrapping so the stub exercises the same bytes as ssh."""
 
     sudo_password: Optional[Secret] = None
+    # Decided only from the remote ``id -u`` answer (see acquire_sudo); the one
+    # place _wrap consults, so no call site can bypass the mode.
+    root_direct: bool = False
+
+    def set_root_direct(self, value: bool) -> None:
+        self.root_direct = bool(value)
 
     def set_password(self, secret: Optional[Secret]) -> None:
         self.sudo_password = secret
 
     def _wrap(self, argv_remote, stdin, sudo: bool):
         argv = list(argv_remote)
-        if not sudo:
+        if not sudo or self.root_direct:
             return argv, stdin
         if self.sudo_password is None:
             return ["sudo", "-n"] + argv, stdin
@@ -311,11 +317,41 @@ def default_ask_password() -> str:
     return getpass.getpass("sudo password on the board: ")
 
 
-def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_password) -> None:
-    """Make privileged calls work: sudo -n if possible, else a prompted password."""
+PRIVILEGE_ROOT = "root (no sudo)"
+PRIVILEGE_SUDO_NOPASS = "sudo (password not needed)"
+PRIVILEGE_SUDO_PASSWORD = "sudo (password supplied)"
+
+
+def remote_is_root(transport) -> bool:
+    """True only when the board itself says the login uid is 0.
+
+    Rule: a call that fails or prints nothing is "cannot tell" and is treated
+    as not root (the sudo path follows, which is never less safe). Output that
+    is present but is not a plain decimal uid is malformed and refuses, so a
+    garbled answer is never guessed into root.
+    """
+    res = transport.run(["id", "-u"], None, sudo=False, timeout=60)
+    text = res.out.strip()
+    if res.rc != 0 or not text:
+        return False
+    if not re.fullmatch(r"[0-9]+", text):
+        raise HostError("cannot determine the privilege mode: unexpected output from 'id -u' on the board")
+    return int(text) == 0
+
+
+def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_password) -> str:
+    """Make privileged calls work and return the privilege mode.
+
+    Root login: privileged commands run as given, no sudo, no prompt. Otherwise
+    sudo -n if possible, else a prompted password.
+    """
     transport.set_password(None)
+    transport.set_root_direct(False)
+    if remote_is_root(transport):
+        transport.set_root_direct(True)
+        return PRIVILEGE_ROOT
     if sudo_probe(transport):
-        return
+        return PRIVILEGE_SUDO_NOPASS
     password = ask_password()
     if not password:
         raise HostError("empty sudo password")
@@ -324,6 +360,7 @@ def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_passwo
     if res.rc != 0:
         transport.set_password(None)
         raise HostError("sudo authentication failed on the board")
+    return PRIVILEGE_SUDO_PASSWORD
 
 
 # --- staging --------------------------------------------------------------
