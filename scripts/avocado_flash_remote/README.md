@@ -1,0 +1,404 @@
+# avocado_flash_remote: the ssh-emmc medium
+
+`avocado-flash ssh-emmc` writes a board's internal eMMC from the board's own
+running system, over SSH. It exists for boards whose eMMC cannot be reached
+from the operator's machine (no USB download mode, no removable media) but
+which boot a working system from somewhere else.
+
+The tool has two halves:
+
+- The host half (`cli.py`, `host.py`, `bundle.py`, `profile_resolve.py`) runs on
+  the operator's machine. It resolves the board profile, copies the verified
+  images and a runner bundle to the board, calls the runner over SSH, and
+  collects and verifies the records the runner leaves behind.
+- The runner half (everything else in this directory) is packed into one
+  zipapp, `runner.pyz`, and runs on the board with the board's `python3`. It
+  does every board operation.
+
+Both halves use only the Python standard library, and the runner is written for
+a board interpreter of Python 3.10 or newer. Nothing in a profile is ever
+imported or executed; a profile only selects among a closed set of strategies.
+
+## Invocation
+
+`ssh-emmc` must be the first argument to `avocado-flash`. Everything after it is
+parsed by `cli.py` and none of the local-medium options (`--machine`,
+`--deploy`, `--backend`, ...) apply.
+
+```text
+avocado-flash ssh-emmc <subcommand> --board NAME --images DIR --host HOST [options]
+```
+
+`avocado-flash ssh-emmc --help` prints the same usage text this document is
+written from.
+
+### Options
+
+| Option | Meaning |
+|--------|---------|
+| `--board NAME` | Board profile name. Required. |
+| `--images DIR` | Image directory holding `MANIFEST.hashes`. Needed by `stage`. |
+| `--host HOST` | `[user@]host`. Never starts with `-`. Required, except for `stage --dry-run`. |
+| `--extension-dir DIR` | Board-support extension profile directory. |
+| `--evidence-dir DIR` | Where per-run records are collected. Default `./ssh-emmc-evidence`. |
+| `--dry-run` | `stage` only: list what would be copied, make no connection. |
+| `--assume-yes` | Let the runner skip its own interactive prompt (see the retype gate below, which is separate). |
+| `--ack-run RUN_ID` | Acknowledge a run (`write`, `restore`). |
+| `--emergency-disarm` | `restore`: disarm without a run acknowledgement. |
+| `--expected-boot-order V` | `check`, `write`: the comma-separated BootOrder the board must still have. |
+| `--reference-boot-order V` | `readback`: the BootOrder recorded before the run. |
+| `--run-id RUN_ID` | `write`, `restore`, `readback`, `status`: which run. |
+| `--ssh-opt=OPT` | Extra ssh option, repeatable. Use the `=` form: `--ssh-opt=-p2222`. |
+| `--batch` | Run ssh with `BatchMode=yes`. The default is `BatchMode=no`. |
+| `--remote-python PATH` | Interpreter on the board. Default `python3`. |
+| `--wait-seconds N` | `write`: how long to follow the run. Default 7200. |
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | ok |
+| 1 | refusal or failure |
+| 2 | not examined (a check or readback could not look at its target) |
+| 3 | profile mismatch (the bundled profile hash disagrees with the request) |
+| 64 | usage error |
+| 70 | unexpected error |
+| 130 | interrupted |
+
+Exit 2 is a separate answer from exit 1: a run that could not look has not
+passed, and has not found a fault either.
+
+## Subcommands and their gates
+
+A normal run is `stage`, `check`, `plan`, `write`, then (after the board
+reboots into the test image) `readback`, and `restore` when you want to undo
+the arming.
+
+| Subcommand | What it does | Gate |
+|------------|--------------|------|
+| `stage` | Verifies the images against `MANIFEST.hashes`, builds `runner.pyz`, checks free space on the board, copies images, the exact profile and the bundle into the profile's staging directory, then re-verifies the hashes on the board. | Refuses when `MANIFEST.hashes` is missing, unparseable, names a missing file or disagrees with a file's sha256; when the staging filesystem lacks room (`staging.min_free_kib` plus the payload); and when the profile file changed after it was resolved. `--dry-run` lists files and sizes and makes no connection. |
+| `check` | Read-only preflight. Runs every assertion in the profile's `checks` list and prints one `PASS` or `FAIL` line each. | Exit 0 only when every check passed and every listed check was examined (`checks: N/M` with N equal to M). Exit 1 when any check failed. Exit 2 when nothing failed but a check could not run. |
+| `plan` | Looks, decides, and writes one plan record (`plan.json`). Changes nothing on the board. Creates the run id. | Refuses on a wrong device name, wrong sector count, a target that backs the running system or is mounted, a non-empty target when `require_empty` is set, a layout that does not fit, staged images that fail their checksums, a failing guard, or an arm pre-flight refusal. |
+| `write` | Writes the planned run: partition table, then each image, read-back verification, guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
+| `readback` | After the test image has booted, mounts the profile's data partition read-only, copies the persistent journal and boot logs, compares BootOrder with the reference, and prints (never runs) cleanup commands. | Needs `--reference-boot-order` unless the profile's arm strategy is `none`. Refuses to mount when the output directory is not on tmpfs, so logs never land on the live system's disk. |
+| `restore` | Undoes the arming. See "Restore scope". | Takes the per-host lock. `--emergency-disarm` needs `--ack-run`. |
+| `status` | Prints the board's recorded phase: `status: PHASE run=RUN_ID recovery=TEXT`, or `status: no run recorded`. Strictly read-only. | None. Use it after a dropped connection. |
+
+### Write gates
+
+All of these hold before the first byte is written to the board:
+
+1. A collected plan record for `--run-id` exists under the evidence directory
+   and its record set verifies (`MANIFEST.json` hashes match). Otherwise the host
+   refuses with "run plan first".
+2. The host prints the target device and every image-to-partition mapping, then
+   asks you to retype the device (for example `/dev/mmcblk0`). Any mismatch
+   refuses, and nothing is written. This gate is separate from `--assume-yes`,
+   which only affects the runner's own prompt.
+3. The host takes the per-host lock (`.lock-<host>` in the evidence directory)
+   and refuses while another run holds it.
+4. On the board, the runner re-checks that the staged image hashes, the profile
+   hash, the board identity (machine id and device serial), the target device
+   and the partition table input all still match the plan record.
+5. The guard's staged-image check passes.
+6. No unfinished earlier run is recorded in the state directory (see the
+   recovery table), and the plan was not already used by a finished run.
+7. The on-board flash lock is held.
+8. The preflight check passes again, and the plan's device, sector count,
+   in-use and emptiness tests pass again.
+9. The runner's own confirmation matches the device, unless `--assume-yes` was
+   given.
+
+A write is reported `COMPLETE` only when the board's last recorded phase is
+`complete` and the collected records verify. A board that says `complete` but
+whose records do not verify is reported as not verified, with exit 1.
+
+## Board profiles
+
+A profile is a JSON file named `<board>.json`. Two ship with the tool, in
+`profiles/`:
+
+- `jetson-agx-orin-j5012.json`: a real board. Writes the internal eMMC from the
+  running NVMe system, arms a one-shot UEFI boot entry and guards against
+  booting a kernel that would see the NVMe disk.
+- `fixture-none.json`: a stub device for the generic lifecycle tests. It arms
+  nothing and guards nothing. Its `checks` list names `device-exists` and
+  `device-empty`, which have no implementation in `cmd_check.py`, so running
+  `check` against it with the real runner reports those checks as not examined
+  (exit 2). It is meant to be used with the stub transport, not a real board.
+
+### Resolution and override order
+
+The profile for `--board NAME` is looked up in this order, and the first file
+found wins:
+
+1. The directory given with `--extension-dir`, if any. This is how a
+   board-support layer supplies or overrides a profile; the code has no other
+   lookup, so a BSP extension directory is used only when it is passed here.
+2. The tool-shipped `profiles/` directory.
+
+Rules that follow from `profile_resolve.py`:
+
+- The board name must be kebab-case `[a-z0-9-]+` with no leading dash.
+- An invalid profile in the extension directory is an error. It never falls back
+  silently to the shipped one.
+- When both directories hold a file of that name, the output line says
+  `shadows shipped: <path>`.
+- A candidate that is a dangling symlink, or resolves outside its own
+  directory, is refused.
+- The file's `board` field must equal the requested name.
+- The file is read once as bytes. Those exact bytes are validated, hashed
+  (sha256), bundled and sent to the board, so host and runner agree on the
+  hash. The host rechecks before bundling that the file is unchanged, and the
+  runner exits 3 if the bundled profile, `BUNDLE.json` and the request disagree.
+
+An unknown board lists the known board names.
+
+### Schema version 1
+
+Every object is closed: an unknown key anywhere is an error naming its dotted
+path. Numbers must be plain integers. Duplicate JSON keys are rejected.
+
+| Field | Contents |
+|-------|----------|
+| `schema_version` | Must be `1`. |
+| `board` | Kebab-case name, `[a-z0-9-]+`. |
+| `description` | Optional string. |
+| `target` | `device`, `sector_size`, `sectors`, `require_empty` (bool), and `identity`. |
+| `target.identity` | `kind` (one of `by-path`, `serial`, `sysfs-name`), `value`, optional `sysfs_attr`. |
+| `layout` | `{"strategy": "explicit-table", "params": {...}}`. |
+| `images` | Map of role name to `{partition, max_bytes, must_be_populated, file}`. `file` is a plain file name: no separators, no leading dash. |
+| `checks` | List of unique preflight assertion names. |
+| `arm` | `{"strategy": "uefi-bootnext" or "none", "params": {...}}`. |
+| `guard` | `{"strategy": "boot-arg" or "none", "params": {...}}`. |
+| `staging` | `dir` (absolute) and `min_free_kib`. |
+| `state_dir` | Absolute directory for run state on the board. |
+
+`staging.dir` and `state_dir` must be absolute, must not contain `..`, and must
+not be under `/dev`, `/sys` or `/proc`.
+
+Cross-checks applied when the layout is `explicit-table`: `target.sectors` and
+`target.sector_size` must equal the layout's `device_sectors` and `sector_size`;
+every image's `partition` must be a number in the layout table; and every
+partition named by a `boot-arg` guard must exist in the table by name.
+
+The preflight check names the runner implements are `emmc-exists`,
+`target-identity`, `emmc-not-read-only`, `emmc-sector-count`,
+`emmc-no-partition-table`, `emmc-not-mounted`, `efibootmgr-supports-create`,
+`boot-order-unchanged`, `boot-next-unset`, `no-stale-oneshot-entry`,
+`efivarfs-rw`, `secure-boot-disabled`, `staged-images-present`,
+`staged-image-checksums` and `staging-space-free`. `boot-order-unchanged` is not
+examined unless `--expected-boot-order` is given.
+
+### Adding a board
+
+Adding a board is a profile-only change. There is no code to write and none to
+load. Strategies are a closed registry in `strategies.py`; a profile chooses
+among them and supplies declarative parameters.
+
+| Kind | Allowed strategies | Parameters |
+|------|--------------------|------------|
+| `arm` | `uefi-bootnext` | `label`, `loader_path`, optional `boot_args` (all strings). Creates one entry with `efibootmgr -C` and sets `BootNext` only. Never writes the boot order. |
+| `arm` | `none` | None. Nothing is armed. |
+| `guard` | `boot-arg` | `argument` (string) and `partitions` (list of layout partition names). Reads the boot image header and refuses to arm unless the argument is in its command line. |
+| `guard` | `none` | None. |
+| `layout` | `explicit-table` | `sector_size` (default 512), `first_lba`, `last_lba`, `device_sectors`, and `table`. |
+
+An unknown strategy name, an unknown parameter or a missing required parameter
+is a profile error. A new strategy is a code change to `strategies.py` and the
+modules that implement it, not a profile change.
+
+Layout rules enforced by `explicit-table`: `last_lba` must equal
+`device_sectors - 34` (the GPT secondary table); `first_lba` must not be after
+`last_lba`; the table must not be empty; each partition has a positive,
+unique `number`, a unique non-empty `name`, a `start`, a positive `size`, a
+`type_guid` (and optional `uuid`) in 8-4-4-4-12 hex form; every partition must
+sit within `first_lba` and `last_lba`; and no two partitions may overlap.
+
+To add a board:
+
+1. Copy the closest shipped profile to `<board>.json`.
+2. Set `board` to the same name as the file.
+3. Fill in `target`, the full partition `table`, `images`, `checks`, the `arm`
+   and `guard` strategies, `staging` and `state_dir`.
+4. Put it in a directory and pass that directory with `--extension-dir`, or add
+   it to `profiles/` if it ships with the tool.
+5. Run `avocado-flash ssh-emmc stage --dry-run --board <board> --images DIR`.
+   This validates the profile (the error names the dotted path of the first
+   fault) and lists what would be copied, without a connection.
+
+## Run state and recovery
+
+The runner keeps one JSON document per run at
+`<state_dir>/<run_id>/state.json`, and `<state_dir>/current` names the active
+run. Every write is temp file, fsync, rename, directory fsync, so an interruption
+leaves either the previous complete file or the new complete file. Decisions use
+the phase and a monotonic sequence number, never wall time.
+
+Phases, in order: `planned`, `table-writing`, `table-written`, `image-writing`,
+`image-written`, `verified`, `armed`, `complete`. `failed` can follow any
+non-terminal phase. `complete` and `failed` are terminal. `image-writing` and
+`image-written` repeat once per image, in the profile's image order. `armed`
+is skipped when the profile's arm strategy is `none`.
+
+A run that ends normally is in a terminal phase. A non-terminal phase on the
+board means the runner was killed or lost power mid-run. While one is recorded,
+a new `write` is refused with a message beginning "a previous run is not
+finished" and naming the permitted recovery. A run acknowledged with `--ack-run`
+is allowed through for recovery only: `write` still refuses and tells you to run
+`restore`, then `plan` and `write` again.
+
+Find the phase with `avocado-flash ssh-emmc status --board NAME --host HOST`.
+
+| Phase on the board | What it means | Operator action |
+|--------------------|---------------|-----------------|
+| `planned` | The state file was created and no board change is recorded. The run never reached the first mutation. | None recorded (`none-recorded`). Safe to discard only if the run never took the on-board lock; check the lock before rerunning after acknowledging the run. |
+| `table-writing` | Killed during the partition table write. The table may be partly or fully rewritten. | `restore-then-restart`: re-inspect the target, run `restore`, then plan and write again from the start. |
+| `table-written` | The table is written; no image has started. | `restore-then-restart`, as above. |
+| `image-writing` | Killed while an image was being written. That partition holds partial data. | `restore-then-restart`, as above. |
+| `image-written` | At least one image is written and verified by read-back; more remain. | `restore-then-restart`, as above. |
+| `verified` | All images are written and read back correctly, but the guard or arming did not finish. | `restore`. Do not rewrite the images. |
+| `armed` | The boot entry exists and `BootNext` may be set. The board will boot the test image on the next reboot. | `restore`. Do not reboot first unless you want to boot the test image. |
+| `complete`, `failed` | Terminal. | No recovery needed. A failed write prints the phase it failed in, the recovery text, and whether the board was armed ("DO NOT REBOOT; run restore" when it was). |
+| state unreadable | The state file or `current` pointer is missing or malformed. | Manual: inspect the state directory and the board's `efibootmgr -v`, then use `restore --emergency-disarm`. |
+
+The recovery column is the text `status` and the write refusal print. It is
+advice about what state the target may be in; what `restore` actually changes is
+listed next.
+
+## Restore scope
+
+`restore` is a disarm and a clean-up. It is not a rollback.
+
+What it does, per `cmd_restore.py`:
+
+- Removes the boot entry this tool created, matched by both its recorded entry
+  number and its label, and clears `BootNext`.
+- Checks that `BootOrder` still equals the value recorded before any mutation,
+  and reports a difference without changing it.
+- Removes the profile's staging directory, only when the path is exactly the
+  profile's `staging.dir`, is deep enough, and is not a symlink.
+- If the board already booted the test entry (`BootCurrent` equals the recorded
+  entry), leaves the boot entries alone and cleans staging only.
+- If no entry was armed, makes no `efibootmgr` calls and cleans staging only.
+- If the state file is unreadable, refuses and touches nothing.
+
+What it does not do: it does not restore the partition table and it does not
+restore any image content. Its output says so
+(`note: restore does not roll back partition table or image changes`). It does
+not rewrite `state.json`.
+
+`restore --emergency-disarm --ack-run TEXT` is for a missing or unreadable state
+file. It requires a non-empty acknowledgement and removes only boot entries whose
+label equals the profile's `arm.params.label`, plus `BootNext` if it points at
+one of them. `BootOrder`, all other entries and staging are left alone.
+
+## Privilege and sudo
+
+The runner needs root. After connecting, the host decides how to get it:
+
+1. If the login uid on the board is 0 (`id -u`), privileged commands run
+   directly with no sudo and no prompt. The tool prints `privilege: root (no sudo)`.
+2. Otherwise it tries `sudo -n true`. If that works it prints
+   `privilege: sudo (password not needed)`.
+3. Otherwise it asks for the password on the operator's terminal
+   (`getpass`) and verifies it with a trivial privileged command. It prints
+   `privilege: sudo (password supplied)`. With no terminal to ask on, it
+   refuses instead of hanging.
+
+The password is only ever the first line of standard input to `sudo -S -p ''`
+on each privileged ssh call. It is never put in an argument list, the
+environment, a log, an exception message, a record or a `repr()`. A streamed
+payload cannot be combined with a password and is refused. An `id -u` answer
+that is not a plain decimal is a refusal, not a guess; a failed or empty answer
+is treated as not root and takes the sudo path.
+
+ssh itself runs with `BatchMode=no` by default so you can type an ssh password
+through your own agent. Pass `--batch` for key-only setups where a prompt must
+fail instead of waiting.
+
+## The remote interpreter
+
+The runner needs a `python3` on the board with the standard-library modules it
+imports. `--remote-python PATH` names a different interpreter. The value is
+spliced into a remote command line, so it must be an absolute path or a plain
+command name made of `[A-Za-z0-9_./+-]`, must not start with `-`, and must not
+contain a `..` segment.
+
+Before any runner call (and so before `stage` copies anything), the host runs a
+probe with that interpreter that tries to import every standard-library module
+the runner bundle needs. It prints the interpreter version on success
+(`remote python: python3 3.x.y`) and refuses with a message that names the
+cause otherwise:
+
+- the interpreter was not found (exit status 127 from the board);
+- the interpreter failed to run;
+- the interpreter lacks named standard-library modules, which is typical of a
+  stripped-down board python.
+
+Each refusal tells you to install a full `python3` or pass `--remote-python`.
+After copying the bundle, `stage` also confirms that the board's interpreter can
+open the staged archive.
+
+## Detached writes
+
+`write` is run detached on the board so that a dropped SSH connection does not
+kill a half-written disk. This is the runner's `--detach` option (valid for
+`write` only), and the host adds it automatically; it is not an option of
+`avocado-flash ssh-emmc` itself.
+
+The runner double-forks, starts a new session, redirects its output to
+`<run_dir>/runner.log` on the board, and returns immediately with
+`detached: run=<id> log=<path>`. The host then polls the board's `status` every
+few seconds until the run reaches a terminal phase or `--wait-seconds` elapses.
+A connection error during polling is reported and retried. If the board records
+no state for the run after three polls, the host reports that the write did not
+start and prints the tail of `runner.log`. If `--wait-seconds` runs out the
+write keeps going on the board; follow it with `status`. Ctrl-C on the host has
+the same effect: a started write is not stopped.
+
+## Evidence records
+
+Each run has a directory under `--evidence-dir` on the operator's machine, named
+`run-<UTC timestamp>-<8 hex>`; that name is the run id. On the board the same
+records are written under `<state_dir>/<run_id>/records`.
+
+| Record | Written by |
+|--------|------------|
+| `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time. |
+| `write.json` | `write`: final phase, error, per-image state, arm record, transition log. |
+| `runner.log` | A detached `write`: the runner's output. |
+| `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
+
+The host collects the on-board records after `plan` and after `write`, into
+`<evidence-dir>/<run-id>` and `<evidence-dir>/<run-id>-write`, and verifies the
+set: every file listed in `MANIFEST.json` must exist with the recorded size and
+hash, and no unlisted file may be present. The record stream is rejected if it
+contains anything but flat regular files. Timestamps and clock skew are
+evidence only; nothing is authorised on a clock.
+
+A record set that fails verification is reported with the first problems found
+and exit 1, whatever the board claimed.
+
+## Opt-in loop-device rehearsal
+
+A rehearsal that runs the real, non-stub runner as root against a loop-backed
+block device is planned (change task 7.3, with a fixture profile) but is not yet
+provided: `tests/remote/test_rehearsal_loop.py` does not exist in this tree. Until
+it does, the default suite (`tests/remote`) runs only against the stub
+transport and in-process fakes, with no ssh and no network, and the end-to-end
+behaviour on a real board has to be exercised by hand with `check`, `plan` and
+`write` against a spare board.
+
+## Tests and hygiene gate
+
+```text
+cd scripts
+uv run --with pytest python3 -m pytest tests/remote -q
+uv run --with pytest python3 -m pytest tests/remote/test_hygiene.py -q
+```
+
+The hygiene gate fails on a leaked test password in a record, log or source
+file, on a forbidden token anywhere in this tree (including this file), on a
+runner-side module importing outside the standard library, and on a plan,
+check or status module that can reach a mutating verb.
