@@ -15,9 +15,14 @@ after, in order:
 
 Then the state machine runs: table-writing, table-written, one image-writing / image-written
 pair per image (re-verify the staged file, ``dd`` it with the kit's vector,
-read the partition back and compare sha256), verified, guard, arm, complete.
-Every transition is durable before the next step. A read-back mismatch, a
-guard refusal or any exception records ``failed`` and never arms.
+read the partition back and compare sha256), verified, guard, arming, armed, complete.
+Every transition is durable before the next step; ``arming`` is recorded
+before the first ``efibootmgr`` call and refreshed as the entry number and
+BootNext become known, so a crash mid-arm leaves a state that says the board
+may be armed. A read-back mismatch, a guard refusal or any exception before
+the arm step records ``failed`` and never arms. A failure inside the arm step
+that may have changed the boot variables leaves ``arming`` with an error note
+(armed state unknown), so restore and status treat it as possibly armed.
 
 Detaching the runner from the SSH session is the runner entry's job; this
 module is the pure write logic. When in doubt it refuses and says why.
@@ -141,6 +146,39 @@ def _reread_target_tests(ro: Ops, profile, staging_dir: str) -> None:
         cmd_plan._check_empty(ro, profile)
 
 
+class _ArmWatch:
+    """Pass-through to the ops that notes whether a boot-variable mutation was attempted."""
+
+    def __init__(self, ops):
+        self._ops = ops
+        self.attempted = False
+
+    def __getattr__(self, name):
+        attr = getattr(self._ops, name)
+        if name in ("efibootmgr_create", "efibootmgr_next"):
+
+            def watched(*a, **kw):
+                self.attempted = True
+                return attr(*a, **kw)
+
+            return watched
+        return attr
+
+
+class _TrackedRecord(armmod.ArmRecord):
+    """ArmRecord that reports each change of what is known about the boot entry.
+
+    Arm.arm fills entry_number and next_armed in place as it goes; this hook
+    makes each of those durable immediately so the state names what exists.
+    """
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        hook = self.__dict__.get("_hook")
+        if hook is not None and name in ("entry_number", "next_armed"):
+            hook(self)
+
+
 def _prior_state_gate(state_dir, plan_run_id: str, ack_run_id) -> None:
     try:
         decision = check_rerun_allowed(state_dir, ack_run_id)
@@ -153,6 +191,13 @@ def _prior_state_gate(state_dir, plan_run_id: str, ack_run_id) -> None:
     prior = load_state(state_dir)
     if prior.status == "ok" and prior.state is not None and prior.state.run_id == plan_run_id:
         raise _Refusal(f"plan {plan_run_id} was already used by a finished run; run plan again")
+    # Whatever `current` names, a run id that already has a state record is never
+    # written again: create_run would overwrite that record.
+    if (Path(state_dir) / plan_run_id / "state.json").exists():
+        raise _Refusal(
+            f"run {plan_run_id} already has a state record under {state_dir}; "
+            "it is never overwritten: run plan again for a new run id"
+        )
 
 
 # ---------------------------------------------------------------- mutation
@@ -399,28 +444,52 @@ def _locked(
         except armmod.GuardError as exc:
             raise _Failed(f"guard refused to arm: {exc}") from None
         if arm_enabled:
+            tracked = _TrackedRecord(**record.to_dict())
+            # Write-ahead: durable before the first efibootmgr mutation.
+            st = advance(st, "arming", armed=tracked.to_dict())
+
+            def note_progress(rec):
+                advance(box["st"], "arming", armed=rec.to_dict())
+
+            object.__setattr__(tracked, "_hook", note_progress)
+            watch = _ArmWatch(ops)
             try:
-                record = arm_impl.arm(ops, profile, record)
+                record = arm_impl.arm(watch, profile, tracked)
             except Exception as exc:  # noqa: BLE001
-                # Arm.arm fills ``record`` in place as it goes. If an entry was
-                # created or BootNext set before the failure, put it in the
-                # state so `restore` can undo exactly that and nothing else.
-                if record.entry_number or record.next_armed:
-                    advance(st, "armed", armed=record.to_dict())
-                raise _Failed(f"{exc} [entry {record.entry_number or 'none'} recorded for restore]") from None
+                box["arm_attempted"] = watch.attempted
+                raise _Failed(
+                    f"{exc} [entry {tracked.entry_number or 'unknown'} recorded for restore]"
+                ) from None
+            except BaseException:
+                box["arm_attempted"] = watch.attempted
+                raise
             st = advance(st, "armed", armed=record.to_dict())
         st = advance(st, "complete")
     except BaseException as exc:  # noqa: BLE001 - record failed, then let non-Exception propagate
         text = str(exc) if isinstance(exc, (_Failed, Exception)) and str(exc) else type(exc).__name__
+        # A failure inside the arm step that may have touched the boot
+        # variables stays in `arming`: the board may be armed and the state
+        # must say so. Before any efibootmgr mutation it is an ordinary failure.
+        maybe_armed = box["st"].phase == "arming" and box.get("arm_attempted", True)
         try:
-            box["st"] = transition(box["st"], "failed", error=text)
+            if maybe_armed:
+                box["st"] = transition(box["st"], "arming", armed=box["st"].data.get("armed"), error=text)
+            else:
+                box["st"] = transition(box["st"], "failed", error=text)
         except Exception:  # noqa: BLE001 - the last durable phase stands
             pass
         result.final_phase = box["st"].phase
         say(f"write FAILED in phase {box['st'].phase}: {text}")
         say(f"recovery: {describe_recovery(box['st'])}")
-        if box["st"].data.get("armed"):
-            say("the board WAS armed: DO NOT REBOOT; run restore")
+        armed_rec = box["st"].data.get("armed") or {}
+        if armed_rec.get("next_armed"):
+            say(f"the board WAS armed: DO NOT REBOOT; run restore --ack-run {run_id}")
+        elif box["st"].phase == "arming":
+            known = armed_rec.get("entry_number")
+            say(
+                f"the arm state is UNKNOWN (boot entry {known or 'number not recorded'}; BootNext may be set): "
+                f"DO NOT REBOOT; run restore --ack-run {run_id}"
+            )
         else:
             say("the board was not armed")
         _write_evidence(writer, run_dir, box["st"], say)
