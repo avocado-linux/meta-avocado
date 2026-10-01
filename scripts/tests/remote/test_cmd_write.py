@@ -659,6 +659,25 @@ def test_staged_image_changed_after_plan_fails_the_run_at_that_image(env):
     assert not [c for c in ops.calls if c.vector[0] == "efibootmgr" and vector_mutates(c.vector)]
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [boot_header("quiet"), boot_header(NVME_ARG + "y"), boot_header(NVME_ARG)[:40] + (3).to_bytes(4, "little") + boot_header(NVME_ARG)[44:],
+     b"NOTANDRO" + boot_header(NVME_ARG)[8:]],
+    ids=["noarg", "nearmiss", "hdrv3", "nomagic"],
+)
+def test_bad_staged_boot_image_refuses_with_zero_mutations(env, bad):
+    res, ops = env.run(file_reader=lambda p: bad if p.endswith("boot.img") else boot_header())
+    assert_clean_refusal(res, ops, "write refused: staged boot image boot.img")
+    assert res.final_phase is None
+    assert not (env.state_dir / RUN_ID).exists()
+    assert not [c for c in ops.calls if c.kind == "exec" and c.vector[0] in ("sfdisk", "dd", "efibootmgr") and vector_mutates(c.vector)]
+
+
+def test_good_staged_boot_image_lets_the_write_proceed(env):
+    res, _ = env.run(file_reader=lambda p: boot_header())
+    assert res.exit_code == 0
+
+
 def test_arm_never_attempted_after_a_guard_failure(env):
     res, ops = env.run(script=env.script(**{env.guard_key("A_kernel"): boot_header("quiet")}))
     assert res.exit_code == 1

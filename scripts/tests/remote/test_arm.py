@@ -336,3 +336,86 @@ def test_no_unbind_or_detach_in_source():
     src = pathlib.Path(armmod.__file__).read_text()
     for word in ("unbind", "detach", "sysfs_write"):
         assert word not in src
+
+
+# ------------------------------------------------------ staged image check
+
+
+STAGE = "/run/stage"
+
+
+def staged_profile():
+    p = profile()
+    p.layout = NS(params={"table": [
+        {"number": 3, "name": "A_kernel"}, {"number": 6, "name": "B_kernel"},
+    ]})
+    p.images = {
+        "kernel_a": NS(partition=3, file="boot.img"),
+        "kernel_b": NS(partition=6, file="boot-b.img"),
+        "esp": NS(partition=11, file="esp.img"),
+    }
+    return p
+
+
+def reader(files):
+    seen = []
+
+    def read(path):
+        seen.append(path)
+        return files[path]
+
+    read.seen = seen
+    return read
+
+
+def test_staged_check_passes_and_reads_each_mapped_file():
+    rd = reader({f"{STAGE}/boot.img": header("a " + ARG), f"{STAGE}/boot-b.img": header(ARG)})
+    get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+    assert rd.seen == [f"{STAGE}/boot.img", f"{STAGE}/boot-b.img"]
+
+
+def test_staged_check_refuses_missing_argument_with_kit_wording():
+    rd = reader({f"{STAGE}/boot.img": header("root=/dev/x"), f"{STAGE}/boot-b.img": header(ARG)})
+    with pytest.raises(GuardError) as ei:
+        get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+    assert str(ei.value) == f"staged boot image boot.img lacks the required argument {ARG} (guard boot-arg)"
+
+
+def test_staged_check_near_miss_wrong_version_and_missing_magic_refused():
+    for bad in (header(ARG + "y"), header("x" + ARG), header(version=3), header(magic=b"NOTANDRO"), b"ANDROID!"):
+        rd = reader({f"{STAGE}/boot.img": header(ARG), f"{STAGE}/boot-b.img": bad})
+        with pytest.raises(GuardError, match="boot-b.img"):
+            get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+
+
+def test_staged_check_accepts_extra_cmdline():
+    rd = reader({f"{STAGE}/boot.img": header("a", extra=ARG), f"{STAGE}/boot-b.img": header(ARG)})
+    get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+
+
+def test_staged_check_unmapped_guard_partition_is_a_profile_error():
+    p = staged_profile()
+    del p.images["kernel_b"]
+    rd = reader({f"{STAGE}/boot.img": header(ARG)})
+    with pytest.raises(GuardError, match="B_kernel"):
+        get_guard("boot-arg").check_staged(p, STAGE, rd)
+
+
+def test_staged_check_unreadable_file_refused():
+    def rd(path):
+        raise FileNotFoundError(path)
+
+    with pytest.raises(GuardError, match="boot.img"):
+        get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+
+
+def test_staged_check_none_guard_reads_nothing():
+    rd = reader({})
+    get_guard("none").check_staged(staged_profile(), STAGE, rd)
+    assert rd.seen == []
+
+
+def test_read_staged_header_is_bounded(tmp_path):
+    f = tmp_path / "x.img"
+    f.write_bytes(b"A" * 10000)
+    assert len(armmod.read_staged_header(str(f))) == 2048
