@@ -123,6 +123,52 @@ def _need(req, *keys):
     return [req[k] for k in keys]
 
 
+# --------------------------------------------------------------- run dir
+
+# Subcommands that write into run_dir. check and status stay free of side effects.
+_RUN_DIR_SUBS = ("plan", "write", "restore", "readback")
+
+
+def _prepare_run_dir(sub, profile, req):
+    """Create run_dir (0700, parents included) under the profile's state_dir.
+
+    Refuses a run_dir that is not under state_dir, or that is, or passes
+    through, a symlink or a non-directory. Existing directories are reused
+    untouched. Nothing is created outside state_dir.
+    """
+    if sub not in _RUN_DIR_SUBS or req.get("run_dir") is None:
+        return
+    run_dir = req["run_dir"]
+
+    def refuse(why):
+        return _Exit(EXIT_USAGE, f"runner error: run_dir {run_dir!r} refused: {why}", sys.stderr)
+
+    if not isinstance(run_dir, str) or not os.path.isabs(run_dir):
+        raise refuse("not an absolute path")
+    state_dir = os.path.normpath(profile.state_dir)
+    target = os.path.normpath(run_dir)
+    if os.path.commonpath([state_dir, target]) != state_dir:
+        raise refuse(f"not under state_dir {state_dir!r}")
+    parts = [] if target == state_dir else os.path.relpath(target, state_dir).split(os.sep)
+    # Validate every existing component before creating anything.
+    chain = [state_dir]
+    for part in parts:
+        chain.append(os.path.join(chain[-1], part))
+    for i, path in enumerate(chain):
+        if i and os.path.islink(path):
+            raise refuse(f"{path!r} is a symlink")
+        if os.path.lexists(path) and not os.path.isdir(path):
+            raise refuse(f"{path!r} exists and is not a directory")
+    for path in chain:
+        if os.path.lexists(path):
+            continue
+        try:
+            os.mkdir(path, 0o700)
+            os.chmod(path, 0o700)  # independent of umask
+        except OSError as e:
+            raise _Exit(EXIT_ERROR, f"runner error: cannot create {path}: {e}", sys.stderr)
+
+
 # ---------------------------------------------------------------- dispatch
 
 
@@ -279,6 +325,7 @@ def main(argv, *, archive=None):
             profile = load_profile_bytes(profile_bytes)
         except ProfileError as e:
             raise _Exit(EXIT_PROFILE, f"runner error: bundled profile invalid: {e}", sys.stderr)
+        _prepare_run_dir(sub, profile, req)
         if detach:
             run_dir, run_id = _need(req, "run_dir", "run_id")
             if not _detach(run_dir, run_id):
