@@ -24,6 +24,9 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 
+# Name of the on-board flash lock file inside state_dir (write and restore both take it).
+LOCK_NAME = "lock"
+
 PHASES = (
     "planned",
     "table-writing",
@@ -34,8 +37,9 @@ PHASES = (
     "armed",
     "complete",
     "failed",
+    "restored",
 )
-TERMINAL = ("complete", "failed")
+TERMINAL = ("complete", "failed", "restored")
 
 RECOVERY = {
     "planned": "none-recorded",
@@ -47,6 +51,9 @@ RECOVERY = {
     "armed": "restore",
 }
 
+# {run_id} is filled in by describe_recovery. `restore` only disarms a boot
+# entry this tool created and removes staging; it never rolls the partition
+# table or any image back, so the text must not promise that.
 _RECOVERY_TEXT = {
     "none-recorded": (
         "no board change has been recorded; the run never reached the first "
@@ -54,13 +61,15 @@ _RECOVERY_TEXT = {
         "on-board lock (check the lock before rerunning after acknowledging the run)"
     ),
     "restore-then-restart": (
-        "the partition table may be partly or fully rewritten: re-inspect the "
-        "target, restore the saved partition table and original data, then "
-        "restart from the table phase"
+        "the partition table may be partly or fully rewritten and an image may be partial: "
+        "re-inspect the target, run restore with --ack-run {run_id} (it removes any boot entry "
+        "this run created and the staging directory; it does NOT roll back the partition table "
+        "or any image), then plan and write again from the start"
     ),
     "restore": (
-        "restore the saved state (partition table, boot order and next-boot "
-        "entry) from the recorded values; do not rewrite images"
+        "run restore with --ack-run {run_id} to remove the boot entry and the next-boot "
+        "setting this run created, and the staging directory; it does NOT roll back the "
+        "partition table or any image, and the images need no rewrite"
     ),
 }
 
@@ -175,6 +184,12 @@ def _check_legal(data: dict[str, Any], new_phase: str, image: str | None) -> Non
     cur = data["phase"]
     if new_phase not in PHASES:
         raise IllegalTransition(f"unknown phase {new_phase!r}")
+    if new_phase == "restored":
+        # Reached from any phase, terminal ones included: a restore is how a
+        # stuck or failed run is closed so a new plan and write can proceed.
+        if cur == "restored":
+            raise IllegalTransition("run is already restored")
+        return
     if cur in TERMINAL:
         raise IllegalTransition(f"{cur} is terminal; cannot go to {new_phase}")
     if new_phase == "failed":
@@ -229,16 +244,56 @@ def transition(state: RunState, new_phase: str, **fields: Any) -> RunState:
         data["armed"] = fields.get("armed")
     elif new_phase == "failed":
         data["error"] = fields.get("error")
+    elif new_phase == "restored":
+        data["restored_from"] = state.data["phase"]
     data["phases_done"].append(entry)
     _atomic_write(state.run_dir / "state.json", _dump(data))
     return RunState(state.run_dir, data)
 
 
+def _describe_failed(state: RunState) -> str:
+    data = state.data
+    phases = [p.get("phase") for p in data.get("phases_done", [])]
+    parts = [f"the run failed ({data.get('error') or 'no error recorded'})."]
+    if "table-writing" in phases:
+        parts.append("The partition table was possibly rewritten (it is not rolled back).")
+    else:
+        parts.append("The partition table was not touched.")
+    images = data.get("images") or {}
+    written = [r for r in data.get("image_order", []) if images.get(r, {}).get("state") == "written"]
+    partial = [r for r in data.get("image_order", []) if images.get(r, {}).get("state") == "writing"]
+    pending = [r for r in data.get("image_order", []) if images.get(r, {}).get("state") == "pending"]
+    if written or partial or pending:
+        bits = []
+        if written:
+            bits.append("written and read back: " + ", ".join(written))
+        if partial:
+            bits.append("partial: " + ", ".join(partial))
+        if pending:
+            bits.append("not started: " + ", ".join(pending))
+        parts.append("Images " + "; ".join(bits) + ".")
+    armed = data.get("armed")
+    if isinstance(armed, dict) and (armed.get("entry_number") or armed.get("next_armed")):
+        parts.append(
+            f"A boot entry was armed ({armed.get('entry_number') or 'number unknown'}): "
+            "DO NOT REBOOT until restore has removed it."
+        )
+    else:
+        parts.append("No boot entry is recorded as armed.")
+    parts.append(
+        "Run restore to disarm and clean staging (no acknowledgement is needed for a finished run), "
+        "then plan and write again; restore does not roll back the table or images."
+    )
+    return " ".join(parts)
+
+
 def describe_recovery(state: RunState) -> str:
-    action = RECOVERY.get(state.phase)
-    if action is None:
+    if state.phase == "failed":
+        return _describe_failed(state)
+    if state.phase in TERMINAL:
         return "no recovery needed (terminal)"
-    return f"{action}: {_RECOVERY_TEXT[action]}"
+    action = RECOVERY[state.phase]
+    return f"{action}: " + _RECOVERY_TEXT[action].format(run_id=state.run_id)
 
 
 @dataclass
@@ -311,7 +366,7 @@ def check_rerun_allowed(state_dir, ack_run_id: str | None = None) -> RerunDecisi
         return RerunDecision(r.state, recovery_only=True)
     raise RerunRefused(
         f"run {run_id} left {what}. Permitted recovery: {recovery}. "
-        f"Acknowledge by passing the run id {run_id} to proceed with recovery."
+        f"Acknowledge by passing --ack-run {run_id} to proceed with recovery."
     )
 
 
