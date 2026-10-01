@@ -608,6 +608,30 @@ def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: s
     return Reconciled(False, raw=text)
 
 
+ACCEPTED_MARKER = "accepted"
+
+
+def runner_presence(transport, remote_run_dir: str) -> str:
+    """Has a detached runner taken this run: 'alive', 'exited', 'absent' or 'unknown'.
+
+    The runner writes ``accepted`` (its pid) into run_dir before any pre-check
+    or hashing, so the marker exists long before state.json does. 'absent' is
+    the only answer that means the runner never took the request; anything the
+    host cannot read is 'unknown', which callers must treat as possibly started.
+    """
+    try:
+        res = transport.run(["cat", f"{remote_run_dir}/{ACCEPTED_MARKER}"], None, sudo=True, timeout=60)
+        if res.rc != 0:
+            return "absent"
+        pid = res.out.strip()
+        if not pid.isdigit():
+            return "unknown"
+        alive = transport.run(["test", "-d", f"/proc/{pid}"], None, sudo=False, timeout=60)
+    except HostError:
+        return "unknown"
+    return "alive" if alive.rc == 0 else "exited"
+
+
 def final_outcome(phase: Optional[str], verify: evidence.VerifyResult) -> str:
     """'complete' only when the board says so AND the records verify."""
     return evidence.final_status(phase or "", verify)

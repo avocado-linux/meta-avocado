@@ -417,6 +417,42 @@ def test_detach(tmp_path):
     assert runner.main(["status", "--request", str(req)], archive=str(info.path)) == 0
 
 
+def test_detach_writes_accepted_marker_before_the_subcommand_runs(tmp_path):
+    info = _archive_for_runner(tmp_path)
+    run_dir = tmp_path / "state" / "r1" / "records"
+    seen = tmp_path / "seen.json"
+    req = _request(tmp_path)
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        textwrap.dedent(
+            f"""
+            import json, os, sys, dataclasses
+            sys.path.insert(0, {str(PKG.parent)!r})
+            from avocado_flash_remote import runner
+
+            def stub(*a, **k):
+                m = os.path.join({str(run_dir)!r}, "accepted")
+                body = open(m).read() if os.path.exists(m) else None
+                json.dump({{"body": body, "pid": os.getpid(), "tmp": os.path.exists(m + ".tmp")}}, open({str(seen)!r}, "w"))
+                return type("R", (), {{"exit_code": 0}})()
+
+            _real = runner.load_profile_bytes
+            runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={str(tmp_path / "state")!r})
+            runner.run_write = stub
+            sys.exit(runner.main(["write", "--request", {str(req)!r}, "--detach"], archive={str(info.path)!r}))
+            """
+        )
+    )
+    rc, out, err = _run([sys.executable, str(driver)], tmp_path, "d", timeout=20)
+    assert rc == 0, err
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not seen.exists():
+        time.sleep(0.05)
+    m = json.loads(seen.read_text())
+    assert m["body"] == f"{m['pid']}\n"
+    assert m["tmp"] is False
+
+
 # ------------------------------------------------------------ run_dir (5.11)
 
 
