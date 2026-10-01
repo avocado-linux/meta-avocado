@@ -1,0 +1,35 @@
+=== CASE sd-dryrun
+argv: --deploy <TMP>/build/tmp/deploy --dry-run sd /dev/fixture-sd
+exit: 0
+--- stdout
+machine: fixture-machine
+deploy:  <TMP>/build/tmp/deploy
+  archive: <TMP>/build/tmp/deploy/stone/_build/fixture-machine-rootdisk.zip (2026-01-02 04:04)
+  task:    complete
+dry-run: sudo fwup -a -i <TMP>/build/tmp/deploy/stone/_build/fixture-machine-rootdisk.zip -d /dev/fixture-sd -t complete
+dry run: nothing was written to /dev/fixture-sd.
+--- stderr
+=== CASE unknown-medium
+argv: floppy
+exit: 2
+--- stdout
+--- stderr
+usage: avocado-flash [-h] [-m MACHINE] [-d DEPLOY] [-b {fwup,bmaptool,uuu}]
+                     [-t TASK] [-n] [--stale-ok] [-y] [-p PORT] [-k KEYS]
+                     [--key-type KEY_TYPE] [--spsdk-bin SPSDK_BIN] [--commit]
+                     [--interrupt] [--ums-dev UMS_DEV]
+                     [--usb-controller USB_CONTROLLER]
+                     {sd,emmc,ums,fuse-srk} [device]
+avocado-flash: error: argument medium: invalid choice: 'floppy' (choose from 'sd', 'emmc', 'ums', 'fuse-srk')
+=== CASE unknown-option
+argv: --bogus sd /dev/fixture-sd
+exit: 2
+--- stdout
+--- stderr
+usage: avocado-flash [-h] [-m MACHINE] [-d DEPLOY] [-b {fwup,bmaptool,uuu}]
+                     [-t TASK] [-n] [--stale-ok] [-y] [-p PORT] [-k KEYS]
+                     [--key-type KEY_TYPE] [--spsdk-bin SPSDK_BIN] [--commit]
+                     [--interrupt] [--ums-dev UMS_DEV]
+                     [--usb-controller USB_CONTROLLER]
+                     {sd,emmc,ums,fuse-srk} [device]
+avocado-flash: error: unrecognized arguments: --bogus
