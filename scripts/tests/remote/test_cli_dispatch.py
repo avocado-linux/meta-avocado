@@ -22,8 +22,8 @@ def module(monkeypatch):
 
 def test_ssh_emmc_reaches_stub_without_deploy_or_machine_lines(module, monkeypatch, tmp_path):
     result = run_main_in_process(module, ["ssh-emmc"], monkeypatch, tmp_path)
-    assert result.exit != 0
-    assert "not implemented" in result.stderr
+    assert result.exit == 64
+    assert "valid subcommands: stage, check, plan, write, readback, restore, status" in result.stderr
     assert "machine:" not in result.stdout
     assert "deploy:" not in result.stdout
 
