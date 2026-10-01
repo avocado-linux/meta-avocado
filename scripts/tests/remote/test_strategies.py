@@ -326,3 +326,91 @@ def test_layout_missing_required_and_empty_table():
     with pytest.raises(StrategyError) as exc:
         validate("layout", "explicit-table", p)
     assert "table" in str(exc.value)
+
+
+# --- optional per-partition uuid ---------------------------------------------
+
+JETSON_UUID = "4D21B016-B534-45C2-A9FB-5C16E091FD2D"
+PROFILE_JSON = (
+    pathlib.Path(strategies.__file__).parent
+    / "profiles"
+    / "jetson-agx-orin-j5012.json"
+)
+
+
+def _set_uuid(number_to_uuid):
+    def m(p):
+        for part in p["table"]:
+            if part["number"] in number_to_uuid:
+                part["uuid"] = number_to_uuid[part["number"]]
+
+    return m
+
+
+def test_layout_uuid_is_optional():
+    out = validate("layout", "explicit-table", jetson_layout())
+    assert all("uuid" not in p for p in out["table"])
+
+
+@pytest.mark.parametrize("value", [JETSON_UUID, JETSON_UUID.lower()])
+def test_layout_uuid_accepted_any_case(value):
+    out = validate(
+        "layout", "explicit-table", _layout_with(_set_uuid({16: value}))
+    )
+    assert [p["uuid"] for p in out["table"] if "uuid" in p] == [value]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "4D21B016-B534-45C2-A9FB-5C16E091FD2",
+        "4D21B016-B534-45C2-A9FB-5C16E091FD2DD",
+        "4D21B016-B534-45C2-A9FB-5C16E091FD2G",
+        "4D21B016B53445C2A9FB5C16E091FD2D",
+        "",
+    ],
+)
+def test_layout_uuid_malformed_rejected(value):
+    with pytest.raises(StrategyError) as exc:
+        validate("layout", "explicit-table", _layout_with(_set_uuid({16: value})))
+    assert "uuid" in str(exc.value)
+
+
+def test_layout_uuid_wrong_type_rejected():
+    with pytest.raises(StrategyError):
+        validate("layout", "explicit-table", _layout_with(_set_uuid({16: 5})))
+
+
+def test_layout_uuid_duplicate_rejected_case_insensitive():
+    with pytest.raises(StrategyError) as exc:
+        validate(
+            "layout",
+            "explicit-table",
+            _layout_with(_set_uuid({1: JETSON_UUID, 16: JETSON_UUID.lower()})),
+        )
+    assert "uuid" in str(exc.value)
+
+
+def test_jetson_profile_partition_16_carries_uuid():
+    import json
+
+    table = json.loads(PROFILE_JSON.read_text())["layout"]["params"]["table"]
+    carried = {p["number"]: p["uuid"] for p in table if "uuid" in p}
+    assert carried == {16: JETSON_UUID}
+
+
+def test_jetson_profile_sfdisk_input_equals_golden_without_uuids_argument():
+    import json
+
+    from avocado_flash_remote import layout
+
+    params = json.loads(PROFILE_JSON.read_text())["layout"]["params"]
+    got = layout.sfdisk_input(params, "/dev/mmcblk0")
+    lines = GOLDEN.read_text().splitlines()
+    start = lines.index("    label: gpt")
+    block = []
+    for line in lines[start:]:
+        if not line.startswith("    "):
+            break
+        block.append(line[4:])
+    assert got == "\n".join(block) + "\n"

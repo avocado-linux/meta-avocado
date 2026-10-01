@@ -83,6 +83,7 @@ _PART_SCHEMA = {
     "start": ("int", True, None),
     "size": ("int", True, None),
     "type_guid": ("str", True, None),
+    "uuid": ("str", False, None),
 }
 
 _LAYOUT_SCHEMA = {
@@ -117,6 +118,7 @@ def _validate_explicit_table(where, params):
     parts = []
     numbers = set()
     names = set()
+    uuids = set()
     for i, raw in enumerate(table):
         pw = f"{where}: table[{i}]"
         if not isinstance(raw, dict):
@@ -138,6 +140,15 @@ def _validate_explicit_table(where, params):
             raise StrategyError(
                 f"{pw}: type_guid '{part['type_guid']}' is not an 8-4-4-4-12 hex GUID"
             )
+        if "uuid" in part:
+            if not _GUID_RE.match(part["uuid"]):
+                raise StrategyError(
+                    f"{pw}: uuid '{part['uuid']}' is not an 8-4-4-4-12 hex GUID"
+                )
+            folded = part["uuid"].lower()
+            if folded in uuids:
+                raise StrategyError(f"{pw}: duplicate uuid '{part['uuid']}'")
+            uuids.add(folded)
         end = part["start"] + part["size"] - 1
         if part["start"] < out["first_lba"]:
             raise StrategyError(
