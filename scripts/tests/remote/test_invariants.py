@@ -608,6 +608,8 @@ class Board:
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":
             return RunResult(0, b"runner log line\n")
+        if len(argv) >= 3 and argv[1] == "-c":
+            return RunResult(0, b"OK 3.12.1\n")
         if argv[0] == "python3":
             return self._runner(argv)
         return RunResult(0)

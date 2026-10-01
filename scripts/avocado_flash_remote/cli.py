@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from . import evidence, host
-from .bundle import BundleError, build_bundle
+from .bundle import BundleError, build_bundle, required_stdlib
 from .profile import ProfileError
 from .profile_resolve import (
     InvalidBoard,
@@ -78,6 +78,7 @@ options:
   --run-id RUN_ID          write, restore, readback, status: which run
   --ssh-opt=OPT            extra ssh option, repeatable (use the = form: --ssh-opt=-p2222)
   --batch                  ssh BatchMode=yes
+  --remote-python PATH     interpreter on the board (default python3); probed before any runner call
   --wait-seconds N         write: how long to follow the run (default {DEFAULT_WAIT_SECONDS})
 
 exit codes: 0 ok, 1 refusal or failure, 2 not examined, 3 profile mismatch,
@@ -111,6 +112,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--run-id")
     p.add_argument("--ssh-opt", action="append", default=[])
     p.add_argument("--batch", action="store_true")
+    p.add_argument("--remote-python", default=host.DEFAULT_PYTHON)
     p.add_argument("--wait-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     return p
 
@@ -136,6 +138,7 @@ class _Ctx:
         self.staging_dir = staging
         self.state_dir = self.profile.state_dir
         self.bundle_remote = f"{staging}/{BUNDLE_NAME}"
+        self.remote_python = args.remote_python
 
     # -- board access ------------------------------------------------------
     def connect(self, need_staged: bool) -> Optional[int]:
@@ -148,12 +151,18 @@ class _Ctx:
                 return 1
         mode = host.acquire_sudo(self.transport, self.ask_password or host.default_ask_password)
         self.out(f"privilege: {mode}")
+        try:
+            version = host.probe_interpreter(self.transport, self.remote_python, required_stdlib())
+        except host.HostError as exc:
+            _err(f"{PREFIX}: {exc}")
+            return 1
+        self.out(f"remote python: {self.remote_python} {version}")
         return None
 
     def invoke(self, sub: str, request: dict, detach: bool = False):
         request = dict(request)
         request["profile_hash"] = self.resolved.sha256
-        res = host.run_remote(self.transport, sub, request, self.bundle_remote, detach=detach)
+        res = host.run_remote(self.transport, sub, request, self.bundle_remote, detach=detach, python=self.remote_python)
         if res.out.strip():
             self.out(res.out.rstrip("\n"))
         if res.err.strip():
@@ -189,7 +198,7 @@ def _do_stage(ctx: _Ctx) -> int:
         rc = ctx.connect(need_staged=False)
         if rc is not None:
             return rc
-        result = host.stage(ctx.transport, ctx.profile, ctx.resolved, args.images, info.path, out=ctx.out)
+        result = host.stage(ctx.transport, ctx.profile, ctx.resolved, args.images, info.path, out=ctx.out, python=ctx.remote_python)
     ctx.out(f"staged to {result.staging_dir}")
     return 0
 
@@ -328,7 +337,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
     for _ in range(polls):
         rec = None
         try:
-            rec = host.reconcile(ctx.transport, ctx.state_dir, ctx.bundle_remote, ctx.staging_dir)
+            rec = host.reconcile(ctx.transport, ctx.state_dir, ctx.bundle_remote, ctx.staging_dir, python=ctx.remote_python)
         except host.HostError as exc:
             ctx.out(f"connection problem, will retry: {exc}")
         phase = None
@@ -432,6 +441,10 @@ def _run(argv, factory, ask_password, confirm, sleep, out, poll_interval) -> int
             raise _Usage(f"--host is required for {sub}")
     if args.host:
         host._check_host(args.host)
+    try:
+        host.validate_remote_python(args.remote_python)
+    except host.HostError as exc:
+        raise _Usage(f"{exc} (an absolute path or a plain command name)") from None
 
     resolved = resolve_profile(args.board, Path(args.extension_dir) if args.extension_dir else None)
     out(describe(resolved))
