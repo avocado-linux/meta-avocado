@@ -693,3 +693,49 @@ def test_stage_verifies_bundle_with_given_interpreter(kit, resolved):
     host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False, python="/opt/p/python3")
     py = [c for c in t.calls if c.kind == "run" and c.argv and c.argv[0] == "/opt/p/python3"]
     assert len(py) == 1 and bundle_path.name in py[0].argv[-1]
+
+
+# --- 5.14: has the detached runner accepted the write ----------------------
+
+
+def _presence(handler):
+    def unwrapped(argv, stdin, sudo):
+        argv = list(argv)
+        if argv[:2] == ["sudo", "-n"]:
+            argv = argv[2:]
+        return handler(argv, stdin, sudo)
+
+    return host.runner_presence(StubTransport(unwrapped), "/var/lib/x/r1/records")
+
+
+def test_runner_presence_absent_without_marker():
+    assert _presence(lambda a, s, u: RunResult(1, b"", b"No such file")) == "absent"
+
+
+def test_runner_presence_alive_when_pid_visible():
+    def h(argv, stdin, sudo):
+        if argv[0] == "cat":
+            return RunResult(0, b"4242\n")
+        assert argv == ["test", "-d", "/proc/4242"]
+        return RunResult(0)
+
+    assert _presence(h) == "alive"
+
+
+def test_runner_presence_exited_when_pid_gone():
+    def h(argv, stdin, sudo):
+        if argv[0] == "cat":
+            return RunResult(0, b"4242\n")
+        return RunResult(1)
+
+    assert _presence(h) == "exited"
+
+
+def test_runner_presence_unknown_for_unparsable_marker_or_transport_error():
+    assert _presence(lambda a, s, u: RunResult(0, b"garbage\n")) == "unknown"
+    assert _presence(lambda a, s, u: RunResult(0, b"")) == "unknown"
+
+    def boom(a, s, u):
+        raise host.HostError("reset")
+
+    assert _presence(boom) == "unknown"

@@ -8,7 +8,8 @@ module only parses arguments, enforces the lifecycle gates (plan record
 required, retyped device confirmation, one writer per host), collects and
 verifies the on-board records and maps outcomes to exit codes.
 
-Exit codes: 0 ok; 1 refusal or failure; 2 not examined (check); 3 profile
+Exit codes: 0 ok; 1 refusal or failure; 2 not examined (check) or the
+connection to the board dropped (ssh 255 is never passed through); 3 profile
 mismatch; 64 usage; 70 unexpected error; 130 interrupted.
 """
 
@@ -42,6 +43,8 @@ PREFIX = "avocado-flash ssh-emmc"
 TOOL_VERSION = "avocado-flash-ssh-emmc"
 BUNDLE_NAME = "runner.pyz"
 DEFAULT_WAIT_SECONDS = 7200
+SSH_FAILURE = 255
+EXIT_DROPPED = 2
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_+][A-Za-z0-9._+-]*\Z")
 
 HELP = f"""\
@@ -81,8 +84,8 @@ options:
   --remote-python PATH     interpreter on the board (default python3); probed before any runner call
   --wait-seconds N         write: how long to follow the run (default {DEFAULT_WAIT_SECONDS})
 
-exit codes: 0 ok, 1 refusal or failure, 2 not examined, 3 profile mismatch,
-64 usage, 70 unexpected error, 130 interrupted
+exit codes: 0 ok, 1 refusal or failure, 2 not examined or connection dropped,
+3 profile mismatch, 64 usage, 70 unexpected error, 130 interrupted
 """
 
 
@@ -203,11 +206,22 @@ def _do_stage(ctx: _Ctx) -> int:
     return 0
 
 
+def _exit_code(sub: str, rc: int) -> int:
+    """Map a runner call's exit status; ssh's 255 (transport failure) becomes 2."""
+    if rc != SSH_FAILURE:
+        return rc
+    _err(
+        f"{PREFIX}: the connection to the board dropped during {sub}; the runner may have acted "
+        "before the drop: run the status subcommand to see the recorded phase"
+    )
+    return EXIT_DROPPED
+
+
 def _do_simple(ctx: _Ctx, sub: str, request: dict) -> int:
     rc = ctx.connect(need_staged=True)
     if rc is not None:
         return rc
-    return ctx.invoke(sub, request).rc
+    return _exit_code(sub, ctx.invoke(sub, request).rc)
 
 
 def _do_check(ctx: _Ctx) -> int:
@@ -300,21 +314,28 @@ def _do_write(ctx: _Ctx) -> int:
         if rc is not None:
             return rc
         remote_dir = ctx.remote_run_dir(run_id)
-        res = ctx.invoke(
-            "write",
-            {
-                "staging_dir": ctx.staging_dir,
-                "state_dir": ctx.state_dir,
-                "run_dir": remote_dir,
-                "plan_path": f"{remote_dir}/plan.json",
-                "run_id": run_id,
-                "confirmed_device": str(typed).strip(),
-                "assume_yes": bool(args.assume_yes),
-                "expected_boot_order": args.expected_boot_order,
-                "ack_run_id": args.ack_run,
-            },
-            detach=True,
-        )
+        request = {
+            "staging_dir": ctx.staging_dir,
+            "state_dir": ctx.state_dir,
+            "run_dir": remote_dir,
+            "plan_path": f"{remote_dir}/plan.json",
+            "run_id": run_id,
+            "confirmed_device": str(typed).strip(),
+            "assume_yes": bool(args.assume_yes),
+            "expected_boot_order": args.expected_boot_order,
+            "ack_run_id": args.ack_run,
+        }
+        try:
+            res = ctx.invoke("write", request, detach=True)
+        except host.HostTimeout as exc:
+            # The request may have been sent and the runner forked before the
+            # timeout: never assume nothing happened.
+            _err(f"{PREFIX}: {exc}")
+            ctx.out("connection lost after the write request was sent; reconciling with the board")
+            return _follow_write(ctx, run_id, remote_dir)
+        if res.rc == SSH_FAILURE:
+            ctx.out("connection dropped after the write request was sent; reconciling with the board")
+            return _follow_write(ctx, run_id, remote_dir)
         if res.rc != 0:
             return res.rc
         return _follow_write(ctx, run_id, remote_dir)
@@ -351,9 +372,24 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
         if phase in TERMINAL:
             break
         if unstarted >= 3:
-            ctx.out("the board has recorded no state for this run: the write did not start")
-            _tail_log(ctx, remote_dir)
-            return 1
+            presence = host.runner_presence(ctx.transport, remote_dir)
+            if presence in ("alive", "unknown"):
+                # Accepted and still hashing or checking, or unreadable: keep waiting.
+                unstarted = 0
+            elif presence == "exited":
+                ctx.out(
+                    "the runner accepted the write and exited without recording state; the board may have "
+                    "been changed: run the status subcommand and read the runner log before anything else"
+                )
+                _tail_log(ctx, remote_dir)
+                return 1
+            else:
+                ctx.out(
+                    "the board has no marker, no state and no runner process for this run: the write did not "
+                    "start. Run the status subcommand before assuming nothing happened"
+                )
+                _tail_log(ctx, remote_dir)
+                return 1
         ctx.sleep(ctx.poll_interval)
     else:
         ctx.out(f"write still in progress after {ctx.args.wait_seconds}s; follow it with the status subcommand")
@@ -379,7 +415,7 @@ def _do_restore(ctx: _Ctx) -> int:
         rc = ctx.connect(need_staged=True)
         if rc is not None:
             return rc
-        return ctx.invoke(
+        res = ctx.invoke(
             "restore",
             {
                 "staging_dir": ctx.staging_dir,
@@ -387,7 +423,8 @@ def _do_restore(ctx: _Ctx) -> int:
                 "ack_run_id": args.ack_run,
                 "emergency_disarm": bool(args.emergency_disarm),
             },
-        ).rc
+        )
+        return _exit_code("restore", res.rc)
 
 
 def _do_readback(ctx: _Ctx) -> int:

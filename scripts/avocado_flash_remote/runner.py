@@ -345,6 +345,28 @@ def _run_sub(sub, profile, phash, req):
 
 # ------------------------------------------------------------------ detach
 
+ACCEPTED_MARKER = "accepted"
+
+
+def _write_accepted(run_dir):
+    """Record that the detached runner took the request, before any real work.
+
+    The host reads this to tell a runner that is still hashing (no state.json
+    yet) from one that never started. Written atomically; advisory, so a
+    failure is logged and does not stop the write.
+    """
+    final = os.path.join(run_dir, ACCEPTED_MARKER)
+    tmp = final + ".tmp"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(f"{os.getpid()}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, final)
+    except OSError as e:
+        print(f"runner error: cannot write {ACCEPTED_MARKER} marker: {e}", file=sys.stderr)
+
 
 def _detach(run_dir, run_id):
     """Classic double fork. Returns True in the grandchild, False in the parent."""
@@ -404,6 +426,7 @@ def main(argv, *, archive=None):
             run_dir, run_id = _need(req, "run_dir", "run_id")
             if not _detach(run_dir, run_id):
                 return 0
+            _write_accepted(run_dir)
             rc = _run_guarded(sub, profile, phash, req)
             sys.stdout.flush()
             sys.stderr.flush()

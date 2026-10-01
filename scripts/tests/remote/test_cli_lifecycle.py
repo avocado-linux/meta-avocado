@@ -27,6 +27,11 @@ class Board:
     """Scripted board: answers the host's calls the way the runner would."""
 
     def __init__(self, tmp_path, *, need_password=False, corrupt_write=False, write_phase="complete", missing=(), interp_rc=0):
+        self.accepted = True  # the runner's `accepted` marker exists once write is detached
+        self.runner_alive = False
+        self.hidden_polls = 0  # status answers "no run recorded" this many times after write
+        self.write_rc = 0
+        self.cat_calls = []
         self.missing = set(missing)
         self.interp_rc = interp_rc
         self.probes = []
@@ -37,6 +42,7 @@ class Board:
         self.corrupt_write = corrupt_write
         self.write_phase = write_phase
         self.staged = False
+        self.wrote = False
         self.phase = None
         self.run_id = None
         self.requests = {}
@@ -86,6 +92,13 @@ class Board:
         if argv[0] == "sh" and "cat >" in argv[2]:
             self.requests[argv[-1]] = json.loads(stdin)
             return RunResult(0)
+        if argv[:2] == ["test", "-d"] and argv[2].startswith("/proc/"):
+            return RunResult(0 if self.runner_alive else 1)
+        if argv[0] == "cat" and argv[1].endswith("/accepted"):
+            self.cat_calls.append(argv[1])
+            if self.accepted and self.wrote:
+                return RunResult(0, b"4242\n")
+            return RunResult(1, b"", b"No such file")
         if argv[0] == "test":
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":
@@ -115,11 +128,17 @@ class Board:
             return RunResult(0, b"plan: ok\n")
         if sub == "write":
             self.records[req["run_dir"]] = self._records("write", True)
+            self.wrote = True
             self.phase = self.write_phase
+            if self.write_rc:
+                return RunResult(self.write_rc, b"", b"ssh: connection reset")
             return RunResult(0, f"detached: run={self.run_id} log=x\n".encode())
         if sub == "restore":
             return RunResult(0, b"restore: done\n")
         if sub == "status":
+            if self.wrote and self.hidden_polls > 0:
+                self.hidden_polls -= 1
+                return RunResult(0, b"status: no run recorded\n")
             if self.phase is None:
                 return RunResult(0, b"status: no run recorded\n")
             return RunResult(0, f"status: {self.phase} run={self.run_id} recovery=none-recorded\n".encode())
@@ -319,6 +338,79 @@ def test_host_lock_contention_refuses(images, tmp_path, board, capsys):
     assert rc == 1
     assert "held by" in capsys.readouterr().err
     assert "write" not in board.subs()
+
+
+# --- 5.14: a slow or dropped runner is never reported as not started -----
+
+
+def _write(images, tmp_path, board, *extra):
+    rid = _stage_and_plan(images, tmp_path, board)
+    return run(args(images, tmp_path, "write", "--run-id", rid, *extra), board)
+
+
+def test_slow_runner_that_has_accepted_is_not_reported_as_not_started(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.hidden_polls = 10  # still hashing: no state for far longer than three polls
+    board.runner_alive = True
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text
+    assert "did not start" not in text + capsys.readouterr().err
+    assert "write COMPLETE" in text
+
+
+def test_accepted_marker_alone_keeps_the_host_waiting(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.hidden_polls = 10
+    board.runner_alive = False  # marker present, process not visible: still not "never started"
+    rc, text = _write(images, tmp_path, board)
+    assert "the write did not start" not in text + capsys.readouterr().err
+
+
+def test_never_started_run_is_reported_and_points_at_status(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.accepted = False
+    board.hidden_polls = 10**6
+    board.runner_alive = False
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 1
+    assert "did not start" in text
+    assert "status" in text
+    assert "before assuming nothing happened" in text
+
+
+def test_dropped_connection_after_detach_reconciles_and_reports_true_phase(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.write_rc = 255
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text
+    assert "write COMPLETE" in text
+    assert "connection" in (text + capsys.readouterr().err).lower()
+
+
+def test_dropped_connection_after_detach_with_failed_phase_is_not_255(images, tmp_path):
+    board = Board(tmp_path, write_phase="failed")
+    board.write_rc = 255
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 1
+    assert "write COMPLETE" not in text
+
+
+@pytest.mark.parametrize("sub", ["check", "status", "restore"])
+def test_exit_255_is_never_returned(images, tmp_path, sub, capsys):
+    board = Board(tmp_path)
+    assert run(args(images, tmp_path, "stage"), board)[0] == 0
+    orig = board._runner
+
+    def dropped(argv):
+        if argv[2] == sub:
+            return RunResult(255, b"", b"ssh: connection reset")
+        return orig(argv)
+
+    board._runner = dropped
+    extra = ["--emergency-disarm"] if sub == "restore" else []
+    rc, _ = run(args(images, tmp_path, sub, *extra), board)
+    assert rc == 2
+    assert "status" in capsys.readouterr().err
 
 
 # --- full lifecycle ------------------------------------------------------
