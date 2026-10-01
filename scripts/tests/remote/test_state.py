@@ -463,3 +463,34 @@ def test_restored_is_terminal_and_reachable_from_any_phase(tmp_path):
         st.transition(r, "restored")
     f = st.transition(s, "failed", error="x")
     assert st.transition(f, "restored").phase == "restored"
+
+
+# ---- 5.16: write-ahead arming phase ---------------------------------------------
+
+
+def test_arming_sits_between_verified_and_armed(tmp_path):
+    assert st.PHASES.index("verified") + 1 == st.PHASES.index("arming") == st.PHASES.index("armed") - 1
+    s = _walk_to_verified(_new(tmp_path))
+    s = st.transition(s, "arming", armed={"label": "x", "entry_number": ""})
+    assert s.phase == "arming" and "arming" not in st.TERMINAL
+    assert _read(tmp_path).data["armed"]["label"] == "x"
+    s = st.transition(s, "arming", armed={"label": "x", "entry_number": "0005"})  # progress update
+    assert _read(tmp_path).data["armed"]["entry_number"] == "0005"
+    assert [e["phase"] for e in s.data["phases_done"]].count("arming") == 1
+    assert st.transition(s, "armed", armed={"entry_number": "0005"}).phase == "armed"
+
+
+def test_arming_needs_verified_and_arm_enabled(tmp_path):
+    s = _table_written(_new(tmp_path))
+    with pytest.raises(st.IllegalTransition):
+        st.transition(s, "arming")
+    s2 = _walk_to_verified(_new(tmp_path / "n", arm=False))
+    with pytest.raises(st.IllegalTransition):
+        st.transition(s2, "arming")
+
+
+def test_arming_is_described_as_possibly_armed(tmp_path):
+    s = st.transition(_walk_to_verified(_new(tmp_path)), "arming", armed={"label": "x"})
+    text = st.describe_recovery(s)
+    assert "DO NOT REBOOT" in text and "--ack-run run-1" in text
+    assert "no recovery needed" not in text

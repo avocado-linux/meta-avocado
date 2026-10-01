@@ -32,7 +32,9 @@ from .ops import OpsError
 from .state import LOCK_NAME, TERMINAL, LockHeld, OnBoardLock, describe_recovery, load_state, transition
 
 NOTE_LINE = "note: restore does not roll back partition table or image changes"
-_ROLLED_PHASES = ("table-writing", "table-written", "image-writing", "image-written", "verified", "armed", "complete")
+_ROLLED_PHASES = (
+    "table-writing", "table-written", "image-writing", "image-written", "verified", "arming", "armed", "complete",
+)  # fmt: skip
 _MIN_PARTS = 3  # "/", "run", "dir"
 
 
@@ -183,12 +185,19 @@ def _restore_locked(
     note = any(p in _ROLLED_PHASES for p in phases)
     say(f"run {state.run_id} phase {state.phase}: {describe_recovery(state)}")
     armed = state.data.get("armed")
-    if not isinstance(armed, dict) or not (armed.get("entry_number") or armed.get("next_armed")):
+    possibly_armed = state.phase == "arming"  # recorded before the first efibootmgr call
+    if not isinstance(armed, dict) or not (possibly_armed or armed.get("entry_number") or armed.get("next_armed")):
         say("no boot entry was armed by this run; no efibootmgr calls made")
         ok = clean_staging()
         return finish(0 if ok else 1, note)
 
     record = ArmRecord.from_dict(armed)
+    if state.phase == "arming":
+        # The arm step began and may have changed the boot variables further than the
+        # record shows: assume BootNext is set, and find an unrecorded entry by label.
+        record.next_armed = True
+        if not record.entry_number:
+            return _disarm_by_label(ops, record, say, result, finish, clean_staging, note)
     try:
         live = ops.efibootmgr_list()
         current = _field(live, "BootCurrent").upper()
@@ -228,6 +237,41 @@ def _restore_locked(
     if problem:
         say("staging kept")
         return finish(1, note)
+    ok = clean_staging()
+    return finish(0 if ok else 1, note)
+
+
+def _disarm_by_label(ops, record, say, result, finish, clean_staging, note):
+    """arming with no recorded entry number: remove only entries with the recorded label."""
+    label = record.label
+    if not label:
+        say("refusing: the arming record has no label to match; use --emergency-disarm with an acknowledgement")
+        return finish(1, True)
+    try:
+        live = ops.efibootmgr_list()
+        ours = entries_with_label(live, label)
+        nxt = boot_next_of(live).upper()
+        if nxt and nxt in ours:
+            ops.efibootmgr_delete_next()
+            result.actions.append(f"cleared BootNext {nxt}")
+            say(f"cleared BootNext {nxt}")
+        for num in ours:
+            ops.efibootmgr_delete(num)
+            result.actions.append(f"deleted boot entry {num}")
+            say(f"deleted boot entry {num}")
+        if not ours:
+            say(f"no boot entry labelled {label!r} found; nothing removed")
+        after = ops.efibootmgr_list()
+    except OpsError as e:
+        say(f"restore FAILED: {e}; staging kept, rerun `restore` after inspecting efibootmgr -v")
+        return finish(1, note)
+    now = boot_order_of(after)
+    if record.preexisting_boot_order and now != record.preexisting_boot_order:
+        say(f"BootOrder {now!r} differs from recorded {record.preexisting_boot_order!r}; not changed")
+        say("staging kept")
+        return finish(1, note)
+    if record.preexisting_boot_order:
+        say(f"BootOrder {now} equals the recorded value")
     ok = clean_staging()
     return finish(0 if ok else 1, note)
 

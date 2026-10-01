@@ -268,15 +268,28 @@ def _read_json(path):
     return data if isinstance(data, dict) else None
 
 
-def _finalize_records(sub, profile, phash, req, rc):
+def _finished_manifest(run_dir):
+    """True when run_dir already holds a complete or host-verified record set."""
+    manifest = _read_json(os.path.join(run_dir, evidence.MANIFEST))
+    if not manifest or manifest.get("run_status") not in ("runner-complete", "host-verified"):
+        return False
+    return evidence.verify_record_set(run_dir).ok
+
+
+def _finalize_records(sub, profile, phash, req, rc, refused_early=False):
     """Write MANIFEST.json (atomically, last) over the files present in run_dir.
 
     Rebuilt from scratch on every call so a re-run never lists a file that is
-    gone. check and status write nothing. Never raises: a missing manifest is
-    reported by the host as not verified, which is the honest outcome.
+    gone. check and status write nothing. A write refused before it did any
+    work leaves an already complete or verified manifest as it is: marking a
+    finished run incomplete because a replay was turned away would destroy its
+    evidence. Never raises: a missing manifest is reported by the host as not
+    verified, which is the honest outcome.
     """
     run_dir = req.get("run_dir")
     if sub not in _RUN_DIR_SUBS or not isinstance(run_dir, str) or not os.path.isdir(run_dir):
+        return
+    if refused_early and _finished_manifest(run_dir):
         return
     try:
         plan = _read_json(os.path.join(run_dir, "plan.json")) or {}
@@ -321,26 +334,29 @@ def _finalize_records(sub, profile, phash, req, rc):
 
 
 def _run_guarded(sub, profile, phash, req):
-    rc = _run_sub(sub, profile, phash, req)
-    _finalize_records(sub, profile, phash, req, rc)
+    rc, refused_early = _run_sub(sub, profile, phash, req)
+    _finalize_records(sub, profile, phash, req, rc, refused_early)
     return rc
 
 
 def _run_sub(sub, profile, phash, req):
+    """Return (exit code, refused_early); refused_early is only ever true for a write
+    that returned without creating any run state (it did no work)."""
     try:
         real = RealOps(req.get("tool_dir"))
         result = _HANDLERS[sub](real, profile, phash, req)
         sys.stdout.flush()
-        return int(result.exit_code)
+        rc = int(result.exit_code)
+        return rc, sub == "write" and rc != 0 and getattr(result, "final_phase", "unset") is None
     except _Exit as e:
         if e.message:
             print(e.message, file=e.stream or sys.stderr)
-        return e.code
+        return e.code, False
     except KeyboardInterrupt:
-        return EXIT_INTERRUPTED
+        return EXIT_INTERRUPTED, False
     except Exception as e:  # noqa: BLE001 - last line of defence, reported plainly
         print(f"runner error: {type(e).__name__}: {e}", file=sys.stderr)
-        return EXIT_ERROR
+        return EXIT_ERROR, False
 
 
 # ------------------------------------------------------------------ detach
@@ -368,10 +384,21 @@ def _write_accepted(run_dir):
         print(f"runner error: cannot write {ACCEPTED_MARKER} marker: {e}", file=sys.stderr)
 
 
-def _detach(run_dir, run_id):
-    """Classic double fork. Returns True in the grandchild, False in the parent."""
+def _already_written(run_dir):
+    """A run_dir that holds write.json belongs to a write that already finished."""
+    return os.path.isfile(os.path.join(run_dir, "write.json"))
+
+
+def _detach(run_dir, run_id, replay=False):
+    """Classic double fork. Returns True in the grandchild, False in the parent.
+
+    ``replay`` sends the log outside run_dir: appending to the log of a write
+    that already finished would invalidate that run's manifest.
+    """
     os.makedirs(run_dir, mode=0o700, exist_ok=True)
     log = os.path.join(run_dir, "runner.log")
+    if replay:
+        log = os.path.join(os.path.dirname(os.path.normpath(run_dir)), f"refused-{os.getpid()}.log")
     sys.stdout.flush()
     sys.stderr.flush()
     pid = os.fork()
@@ -424,9 +451,11 @@ def main(argv, *, archive=None):
         _prepare_run_dir(sub, profile, req)
         if detach:
             run_dir, run_id = _need(req, "run_dir", "run_id")
-            if not _detach(run_dir, run_id):
+            replay = _already_written(run_dir)
+            if not _detach(run_dir, run_id, replay=replay):
                 return 0
-            _write_accepted(run_dir)
+            if not replay:
+                _write_accepted(run_dir)
             rc = _run_guarded(sub, profile, phash, req)
             sys.stdout.flush()
             sys.stderr.flush()

@@ -34,6 +34,7 @@ PHASES = (
     "image-writing",
     "image-written",
     "verified",
+    "arming",
     "armed",
     "complete",
     "failed",
@@ -48,6 +49,7 @@ RECOVERY = {
     "image-writing": "restore-then-restart",
     "image-written": "restore-then-restart",
     "verified": "restore",
+    "arming": "restore-unknown-arm",
     "armed": "restore",
 }
 
@@ -65,6 +67,12 @@ _RECOVERY_TEXT = {
         "re-inspect the target, run restore with --ack-run {run_id} (it removes any boot entry "
         "this run created and the staging directory; it does NOT roll back the partition table "
         "or any image), then plan and write again from the start"
+    ),
+    "restore-unknown-arm": (
+        "the arm step started: a boot entry and the next-boot setting may already exist even if "
+        "this record does not name them. DO NOT REBOOT. Run restore with --ack-run {run_id}: it "
+        "removes the entry (found by its label when the number is unrecorded) and the next-boot "
+        "setting, and the staging directory; it does NOT roll back the partition table or any image"
     ),
     "restore": (
         "run restore with --ack-run {run_id} to remove the boot entry and the next-boot "
@@ -208,8 +216,12 @@ def _check_legal(data: dict[str, Any], new_phase: str, image: str | None) -> Non
         )
     elif new_phase == "verified":
         ok = cur in ("table-written", "image-written") and _next_image(data) is None
+    elif new_phase == "arming":
+        # Written (and fsynced) before the first efibootmgr call; re-entering
+        # arming only refreshes what is known about the entry.
+        ok = (cur == "verified" and data["arm_enabled"]) or cur == "arming"
     elif new_phase == "armed":
-        ok = cur == "verified" and data["arm_enabled"]
+        ok = cur in ("verified", "arming") and data["arm_enabled"]
     elif new_phase == "complete":
         ok = (cur == "verified" and not data["arm_enabled"]) or cur == "armed"
     else:  # planned
@@ -227,6 +239,7 @@ def transition(state: RunState, new_phase: str, **fields: Any) -> RunState:
     image = fields.get("image")
     _check_legal(state.data, new_phase, image)
     data = copy.deepcopy(state.data)
+    progress_only = new_phase == "arming" and state.data["phase"] == "arming"
     data["seq"] += 1
     data["phase"] = new_phase
     entry: dict[str, Any] = {"seq": data["seq"], "phase": new_phase, "wall_time": time.time()}
@@ -240,13 +253,18 @@ def transition(state: RunState, new_phase: str, **fields: Any) -> RunState:
         for k in ("bytes_written", "expected_sha256", "readback_sha256"):
             if k in fields:
                 rec[k] = fields[k]
+    elif new_phase == "arming":
+        data["armed"] = fields.get("armed")
+        if "error" in fields:
+            data["error"] = fields["error"]
     elif new_phase == "armed":
         data["armed"] = fields.get("armed")
     elif new_phase == "failed":
         data["error"] = fields.get("error")
     elif new_phase == "restored":
         data["restored_from"] = state.data["phase"]
-    data["phases_done"].append(entry)
+    if not progress_only:
+        data["phases_done"].append(entry)
     _atomic_write(state.run_dir / "state.json", _dump(data))
     return RunState(state.run_dir, data)
 

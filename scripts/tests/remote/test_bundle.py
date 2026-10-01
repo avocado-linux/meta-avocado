@@ -689,3 +689,80 @@ def test_manifest_takes_transition_log_from_state_file(tmp_path, monkeypatch):
 def test_check_status_write_no_manifest(tmp_path, recs, sub):
     assert _main(sub, tmp_path) == 0
     assert not list(tmp_path.rglob("MANIFEST.json"))
+
+
+# ------------------------------------------- refused write leaves a finished run alone (5.16)
+
+
+def _finished_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path))
+    assert _main("plan", tmp_path) == 0
+    rd = tmp_path / "state" / "r1" / "records"
+    assert _manifest(rd)["run_status"] == "runner-complete"
+    return rd
+
+
+def test_write_refused_before_any_work_leaves_a_finished_manifest_alone(tmp_path, monkeypatch):
+    from avocado_flash_remote import evidence
+
+    rd = _finished_run(tmp_path, monkeypatch)
+    before = (rd / "MANIFEST.json").read_bytes()
+    refused = type("R", (), {"exit_code": 1, "final_phase": None})()
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: refused)
+    assert _main("write", tmp_path) == 1
+    assert (rd / "MANIFEST.json").read_bytes() == before
+    assert evidence.verify_record_set(rd).ok
+
+
+def test_write_that_did_work_and_failed_still_marks_the_manifest_incomplete(tmp_path, monkeypatch):
+    rd = _finished_run(tmp_path, monkeypatch)
+    failed = type("R", (), {"exit_code": 1, "final_phase": "failed"})()
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: failed)
+    assert _main("write", tmp_path) == 1
+    assert _manifest(rd)["run_status"] == "incomplete"
+
+
+def test_write_refused_without_a_prior_manifest_still_writes_an_incomplete_one(tmp_path, monkeypatch):
+    refused = type("R", (), {"exit_code": 1, "final_phase": None})()
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: refused)
+    (tmp_path / "plan.json").write_text("{}")
+    assert _main("write", tmp_path) == 1
+    assert _manifest(tmp_path / "state" / "r1" / "records")["run_status"] == "incomplete"
+
+
+def test_detached_replay_of_a_written_run_does_not_touch_its_record_set(tmp_path):
+    from avocado_flash_remote import evidence
+
+    info = _archive_for_runner(tmp_path)
+    run_dir = tmp_path / "state" / "r1" / "records"
+    run_dir.mkdir(parents=True)
+    rs = evidence.RecordSet(run_dir, "t", "1", "p" * 64, {}, {}, [], "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
+    rs.add("write.json", {"ok": True})
+    rs.add("runner.log", b"first run\n")
+    rs.finalize("runner-complete")
+    before = {p.name: p.read_bytes() for p in run_dir.iterdir()}
+    req = _request(tmp_path)
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        textwrap.dedent(
+            f"""
+            import dataclasses, sys
+            sys.path.insert(0, {str(PKG.parent)!r})
+            from avocado_flash_remote import runner
+            _real = runner.load_profile_bytes
+            runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={str(tmp_path / "state")!r})
+            runner.run_write = lambda *a, **k: (print("write refused: replay"), type("R", (), {{"exit_code": 1, "final_phase": None}})())[1]
+            sys.exit(runner.main(["write", "--request", {str(req)!r}, "--detach"], archive={str(info.path)!r}))
+            """
+        )
+    )
+    rc, out, err = _run([sys.executable, str(driver)], tmp_path, "replay", timeout=20)
+    assert rc == 0, err
+    deadline = time.monotonic() + 10
+    refused = []
+    while time.monotonic() < deadline and not refused:
+        refused = list((tmp_path / "state" / "r1").glob("refused-*.log"))
+        time.sleep(0.05)
+    assert refused and "write refused: replay" in refused[0].read_text()
+    assert {p.name: p.read_bytes() for p in run_dir.iterdir()} == before
+    assert evidence.verify_record_set(run_dir).ok

@@ -440,12 +440,15 @@ def never_armed_unless_created(ops, res_state):
             raise AssertionError(f"dd after the first arm call: {ln}")
 
 
-def assert_failed_point(env, res, ops, k, good):
+def assert_failed_point(env, res, ops, k, good, pid=None):
     assert res.exit_code == 1, res.lines
     r = statemod.load_state(env.state_dir)
     assert r.status == "ok"
     st = r.state
-    assert st.phase == "failed" and res.final_phase == "failed"
+    # The arm step that began mutating boot variables stays in `arming` (armed state unknown).
+    stays_arming = pid in ("arm-create-fails", "arm-next-fails")
+    want = "arming" if stays_arming else "failed"
+    assert st.phase == want and res.final_phase == want
     assert st.data["error"]
     lock_is_free(env)
     assert [c.line for c in mutations(ops)] == good[:k], "a mutating call ran past the failure point"
@@ -454,22 +457,26 @@ def assert_failed_point(env, res, ops, k, good):
     assert any(ln.startswith("efibootmgr -n ") for ln in log) == (k >= len(good))
     never_armed_unless_created(ops, st)
     phases = [p["phase"] for p in st.data["phases_done"]]
-    assert ("armed" in phases) == (k == len(good))
+    assert ("armed" in phases) == (k == len(good) and not stays_arming)
     text = "\n".join(res.lines)
     assert "recovery:" in text
-    assert ("the board WAS armed" in text) == (k == len(good))
-    assert ("the board was not armed" in text) == (k != len(good))
+    if stays_arming:
+        assert "DO NOT REBOOT" in text and "the board was not armed" not in text
+    else:
+        assert ("the board WAS armed" in text) == (k == len(good))
+        assert ("the board was not armed" in text) == (k != len(good))
 
 
 @pytest.mark.parametrize("pid", FAIL_POINTS)
 def test_injected_failure_records_failed_never_arms_and_blocks_rerun(env, good_mutations, pid):
     over, k = make_point(env, pid, good_mutations)
     res, ops = env.run(script=env.script(**over))
-    assert_failed_point(env, res, ops, k, good_mutations)
+    assert_failed_point(env, res, ops, k, good_mutations, pid)
     res2, ops2 = env.run()
     assert res2.exit_code == 1
     assert mutations(ops2) == []
-    assert "already used" in "\n".join(res2.lines)
+    text2 = "\n".join(res2.lines)
+    assert ("previous run is not finished" if pid in ("arm-create-fails", "arm-next-fails") else "already used") in text2
 
 
 @pytest.mark.parametrize("pid", FAIL_POINTS)

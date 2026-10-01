@@ -214,7 +214,7 @@ def test_good_run_completes_and_records_every_transition(env):
     assert st.phase == "complete"
     phases = [p["phase"] for p in st.data["phases_done"]]
     expected = ["planned", "table-writing", "table-written"] + ["image-writing", "image-written"] * len(env.profile.images)
-    assert phases == expected + ["verified", "armed", "complete"]
+    assert phases == expected + ["verified", "arming", "armed", "complete"]
     for role, img in st.data["images"].items():
         assert img["state"] == "written"
         assert img["bytes_written"] == env.sizes[role]
@@ -551,9 +551,9 @@ def _inject_cases():
     cases.append(("esp-not-vfat", lambda e: {f"blkid -p -s TYPE -o value {e.node('esp')}": "ext4\n"}, "image-written"))
     cases.append(("guard-fails", lambda e: {e.guard_key("B_kernel"): boot_header("quiet")}, "verified"))
     cases.append(("arm-next-fails", lambda e: {f"efibootmgr -n {ENTRY}": OpFailed(["efibootmgr", "-n", ENTRY], 1, "x")},
-                  "armed"))  # entry exists, so it is recorded for restore  # fmt: skip
+                  "arming"))  # entry exists and BootNext may be set: stays arming  # fmt: skip
     cases.append(("arm-bootorder-moved", lambda e: {"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE.replace(ORDER, "0002,0001")]},
-                  "verified"))  # fmt: skip
+                  "arming"))  # write-ahead: arming was durable before the failed arm step  # fmt: skip
     return cases
 
 
@@ -561,8 +561,10 @@ def _inject_cases():
 def test_failure_at_each_step_records_failed_and_blocks_a_rerun(env, name, inject, crash_phase):
     res, ops = env.run(script=env.script(**inject(env)))
     assert res.exit_code == 1, res.lines
-    assert current_phase(env) == "failed"
-    assert res.final_phase == "failed"
+    # a failure after the arm step touched the boot variables stays in `arming`
+    expect = "arming" if name == "arm-next-fails" else "failed"
+    assert current_phase(env) == expect
+    assert res.final_phase == expect
     assert statemod.load_state(env.state_dir).state.data["error"]
     lock_is_free(env)
     efi_writes = [c for c in ops.calls if c.vector[0] == "efibootmgr" and vector_mutates(c.vector)]
@@ -572,7 +574,7 @@ def test_failure_at_each_step_records_failed_and_blocks_a_rerun(env, name, injec
     if name != "arm-next-fails":
         assert not [c for c in efi_writes if c.vector[:2] == ["efibootmgr", "-n"]]
     assert "recovery:" in "\n".join(res.lines)
-    # The same plan cannot be replayed over a failed run.
+    # The same plan cannot be replayed over a failed (or possibly armed) run.
     res2, ops2 = env.run()
     assert_clean_refusal(res2, ops2)
 
@@ -694,7 +696,7 @@ def test_arm_failure_after_entry_creation_says_do_not_reboot_and_keeps_the_recor
     assert ENTRY in err
     st = statemod.load_state(env.state_dir).state
     # The entry and the BootNext that were set are in the state, so restore undoes them.
-    assert st.phase == "failed"
+    assert st.phase == "arming"
     assert st.data["armed"]["entry_number"] == ENTRY and st.data["armed"]["next_armed"] is True
     assert len([c for c in ops.calls if c.vector[:2] == ["efibootmgr", "-n"]]) == 1
     assert "the board WAS armed" in "\n".join(res.lines)
@@ -720,3 +722,120 @@ def test_unrecordable_evidence_does_not_change_the_outcome(env):
     )  # fmt: skip
     assert res.exit_code == 0
     assert "cannot write write.json" in "\n".join(res.lines)
+
+
+# ---------------------------------------------------------------- 5.16
+
+
+class _PhaseSpy(RecordingOps):
+    """Records the durable phase seen at the moment each efibootmgr mutation is issued."""
+
+    def __init__(self, script, state_dir):
+        super().__init__(script)
+        self.state_dir = state_dir
+        self.seen = []
+
+    def _peek(self, what):
+        r = statemod.load_state(self.state_dir)
+        st = r.state
+        self.seen.append((what, st.phase, dict(st.data.get("armed") or {})))
+
+    def efibootmgr_create(self, *a, **kw):
+        self._peek("create")
+        return super().efibootmgr_create(*a, **kw)
+
+    def efibootmgr_next(self, *a, **kw):
+        self._peek("next")
+        return super().efibootmgr_next(*a, **kw)
+
+
+def test_arming_is_durable_before_the_first_efibootmgr_mutation(env):
+    spy = _PhaseSpy(env.script(), env.state_dir)
+    res, ops = env.run(ops=spy)
+    assert res.exit_code == 0, res.lines
+    assert [w for w, _, _ in spy.seen] == ["create", "next"]
+    assert spy.seen[0][1] == "arming"  # never "verified" while efibootmgr -C runs
+    assert spy.seen[0][2]["label"] == LABEL and spy.seen[0][2]["entry_number"] == ""
+    assert spy.seen[1][1] == "arming"
+    assert spy.seen[1][2]["entry_number"] == ENTRY  # recorded as soon as it was known
+    phases = [p["phase"] for p in statemod.load_state(env.state_dir).state.data["phases_done"]]
+    assert phases[-3:] == ["arming", "armed", "complete"]
+
+
+def _restore_for(env, ops, ack=RUN_ID):
+    from avocado_flash_remote import cmd_restore
+
+    removed = []
+    res = cmd_restore.run_restore(
+        ops, env.profile, state_dir=env.state_dir, staging_dir=STAGE, ack_run_id=ack,
+        remove_tree=removed.append, out=lambda x: None,
+    )  # fmt: skip
+    return res, removed
+
+
+def test_kill_between_create_and_armed_leaves_arming_and_restore_disarms_the_entry(env):
+    # efibootmgr -C ran; the process dies on the very next read, before any state update
+    script = env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, KeyboardInterrupt()]})
+    with pytest.raises(KeyboardInterrupt):
+        env.run(script=script)
+    st = statemod.load_state(env.state_dir).state
+    assert st.phase == "arming"
+    assert st.data["armed"]["entry_number"] == ""
+    # restore treats arming as possibly armed and finds the entry by its label
+    live = EFI_AFTER + f"BootNext: {ENTRY}\n"
+    rops = RecordingOps({"efibootmgr -v": [live, live, live, EFI_PRE]})
+    res, removed = _restore_for(env, rops)
+    assert res.exit_code == 0, res.lines
+    muts = [c.line for c in mutations(rops)]
+    assert f"efibootmgr -B -b {ENTRY}" in muts and "efibootmgr -N" in muts
+    assert statemod.load_state(env.state_dir).state.phase == "restored"
+
+
+def test_restore_of_arming_without_ack_refuses(env):
+    with pytest.raises(KeyboardInterrupt):
+        env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, KeyboardInterrupt()]}))
+    rops = RecordingOps({})
+    res, removed = _restore_for(env, rops, ack=None)
+    assert res.exit_code == 1 and removed == [] and rops.calls == []
+
+
+def test_arm_error_with_no_entry_number_says_state_unknown_and_not_to_reboot(env):
+    # the entry is created but efibootmgr lists none carrying the label
+    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_PRE]}))
+    assert res.exit_code == 1
+    text = "\n".join(res.lines)
+    assert "UNKNOWN" in text and "DO NOT REBOOT" in text
+    assert "the board was not armed" not in text
+    st = statemod.load_state(env.state_dir).state
+    assert st.phase == "arming"
+    assert "cannot find the new boot entry number" in st.data["error"]
+    assert res.final_phase == "arming"
+
+
+def test_arm_failure_before_any_efibootmgr_mutation_is_failed_and_not_armed(env):
+    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE.replace(ORDER, "0002,0001")]}))
+    assert res.exit_code == 1
+    assert not [c for c in ops.calls if c.vector[:2] in (["efibootmgr", "-C"], ["efibootmgr", "-n"])]
+    assert statemod.load_state(env.state_dir).state.phase == "failed"
+    assert "the board was not armed" in "\n".join(res.lines)
+
+
+def test_replay_of_an_old_run_id_is_refused_and_its_state_is_untouched(env):
+    res, _ = env.run()
+    assert res.exit_code == 0
+    first = (env.state_dir / RUN_ID / "state.json").read_bytes()
+    env.plan = dict(env.plan, run_id="run-0002")
+    res2, _ = env.run()
+    assert res2.exit_code == 0 and statemod.load_state(env.state_dir).state.run_id == "run-0002"
+    env.plan = dict(env.plan, run_id=RUN_ID)
+    res3, ops3 = env.run()
+    assert_clean_refusal(res3, ops3, RUN_ID, "state record")
+    assert (env.state_dir / RUN_ID / "state.json").read_bytes() == first
+    assert statemod.load_state(env.state_dir).state.run_id == "run-0002"
+
+
+def test_existing_state_json_refuses_whatever_current_says(env):
+    (env.state_dir / RUN_ID).mkdir(parents=True)
+    (env.state_dir / RUN_ID / "state.json").write_text("{}")
+    res, ops = env.run()
+    assert_clean_refusal(res, ops, "state record")
