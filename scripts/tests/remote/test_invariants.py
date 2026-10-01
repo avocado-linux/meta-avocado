@@ -738,7 +738,7 @@ def test_detached_runner_grandchild_outlives_its_parent(tmp_path):
     info = bundle.build_bundle(FIXTURE_BYTES, tmp_path / "r.pyz", "t")
     req = tmp_path / "req.json"
     req.write_text(json.dumps({
-        "staging_dir": "/stage", "state_dir": str(tmp_path / "state"), "run_dir": str(tmp_path / "run"),
+        "staging_dir": "/stage", "state_dir": str(tmp_path / "state"), "run_dir": str(tmp_path / "state" / "r1" / "records"),
         "run_id": "r1", "plan_path": str(tmp_path / "plan.json"),
     }))  # fmt: skip
     started, done = tmp_path / "started.json", tmp_path / "done"
@@ -755,6 +755,9 @@ def test_detached_runner_grandchild_outlives_its_parent(tmp_path):
             open({str(done)!r}, "w").write("done")
             return type("R", (), {{"exit_code": 0}})()
 
+        import dataclasses
+        _real = runner.load_profile_bytes
+        runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={str(tmp_path / "state")!r})
         runner.run_write = stub
         sys.exit(runner.main(["write", "--request", {str(req)!r}, "--detach"], archive={str(info.path)!r}))
     """))
@@ -811,7 +814,7 @@ def _runner_signal_setup(tmp_path):
     plan.write_text(json.dumps(e.plan))
     req = tmp_path / "req.json"
     req.write_text(json.dumps({
-        "staging_dir": STAGE, "state_dir": str(e.state_dir), "run_dir": str(tmp_path / "run"),
+        "staging_dir": STAGE, "state_dir": str(e.state_dir), "run_dir": str(e.state_dir / "r1" / "records"),
         "run_id": RUN_ID, "plan_path": str(plan), "assume_yes": True, "efivars_dir": str(e.efivars),
         "profile_hash": e.phash,
     }))  # fmt: skip
@@ -833,6 +836,9 @@ def _runner_signal_setup(tmp_path):
             kw["file_reader"] = lambda p: T.boot_header()
             return cmd_write.run_write(ops, profile, phash, **kw)
 
+        import dataclasses
+        _real = runner.load_profile_bytes
+        runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={str(tmp_path / "state")!r})
         runner.run_write = wrapper
         try:
             rc = runner.main(["write", "--request", {str(req)!r}], archive={str(info.path)!r})

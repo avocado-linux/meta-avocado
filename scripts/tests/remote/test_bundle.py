@@ -1,6 +1,7 @@
 """Runner dispatcher and single-archive bundle."""
 
 import ast
+import dataclasses
 import hashlib
 import json
 import os
@@ -191,7 +192,7 @@ def _request(tmp_path, **extra):
     req = {
         "staging_dir": "/stage",
         "state_dir": str(tmp_path / "state"),
-        "run_dir": str(tmp_path / "run"),
+        "run_dir": str(tmp_path / "state" / "r1" / "records"),
         "run_id": "r1",
         "expected_boot_order": "0001,0002",
         "reference_boot_order": "0001",
@@ -218,6 +219,15 @@ class _Rec:
     def __call__(self, *args, **kw):
         self.calls.append((args, kw))
         return type("R", (), {"exit_code": self.code})()
+
+
+@pytest.fixture(autouse=True)
+def _state_under_tmp(tmp_path, monkeypatch):
+    """Point the fixture profile's state_dir at tmp_path/state for runner.main."""
+    real = runner.load_profile_bytes
+    monkeypatch.setattr(
+        runner, "load_profile_bytes", lambda b: dataclasses.replace(real(b), state_dir=str(tmp_path / "state"))
+    )
 
 
 @pytest.fixture
@@ -266,7 +276,7 @@ def test_plan_wiring_and_exit_code(tmp_path, recs):
     (args, kw), = recs["plan"].calls
     assert isinstance(args[0], ops.ReadOnlyOps)
     assert args[2] == info.profile_sha256
-    assert kw == {"staging_dir": "/stage", "run_dir": str(tmp_path / "run"), "run_id": "r1"}
+    assert kw == {"staging_dir": "/stage", "run_dir": str(tmp_path / "state" / "r1" / "records"), "run_id": "r1"}
 
 
 def test_write_wiring(tmp_path, recs):
@@ -282,7 +292,7 @@ def test_write_wiring(tmp_path, recs):
     }  # fmt: skip
     assert kw["staging_dir"] == "/stage"
     assert kw["state_dir"] == str(tmp_path / "state")
-    assert kw["run_dir"] == str(tmp_path / "run")
+    assert kw["run_dir"] == str(tmp_path / "state" / "r1" / "records")
     assert kw["assume_yes"] is False
     assert kw["expected_boot_order"] == "0001,0002"
     assert kw["efivars_dir"] == "/efi"
@@ -350,7 +360,7 @@ def test_keyboard_interrupt_exit_130(tmp_path, monkeypatch):
 
 def test_detach(tmp_path):
     info = _archive_for_runner(tmp_path)
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / "state" / "r1" / "records"
     marker = tmp_path / "marker.json"
     req = _request(tmp_path)
     (tmp_path / "plan.json").write_text('{"run_id": "r1"}')
@@ -376,6 +386,9 @@ def test_detach(tmp_path):
                 time.sleep(0.5)
                 return type("R", (), {{"exit_code": 0}})()
 
+            import dataclasses
+            _real = runner.load_profile_bytes
+            runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={str(tmp_path / "state")!r})
             runner.run_write = stub
             sys.exit(runner.main(["write", "--request", {str(req)!r}, "--detach"], archive={str(info.path)!r}))
             """
@@ -402,6 +415,89 @@ def test_detach(tmp_path):
     assert m["pid"] != m["driver_pid"]
     # status reads the (absent) state afterwards without error
     assert runner.main(["status", "--request", str(req)], archive=str(info.path)) == 0
+
+
+# ------------------------------------------------------------ run_dir (5.11)
+
+
+def _main(sub, tmp_path, **extra):
+    info = _archive_for_runner(tmp_path)
+    return runner.main([sub, "--request", str(_request(tmp_path, **extra))], archive=info.path)
+
+
+@pytest.mark.parametrize("sub", ["plan", "write", "restore", "readback"])
+def test_run_dir_created_0700_for_mutating_subs(tmp_path, recs, sub):
+    (tmp_path / "plan.json").write_text("{}")
+    old = os.umask(0)  # mode must not depend on the umask
+    try:
+        _main(sub, tmp_path)
+    finally:
+        os.umask(old)
+    rd = tmp_path / "state" / "r1" / "records"
+    assert rd.is_dir() and rd.stat().st_mode & 0o777 == 0o700
+    assert (tmp_path / "state" / "r1").stat().st_mode & 0o777 == 0o700
+    assert len(recs[sub].calls) == 1
+
+
+@pytest.mark.parametrize("sub", ["check", "status"])
+def test_check_and_status_create_nothing(tmp_path, recs, sub):
+    assert _main(sub, tmp_path) == 0
+    assert not (tmp_path / "state").exists()
+
+
+def test_run_dir_outside_state_dir_refused(tmp_path, recs, capsys):
+    outside = tmp_path / "elsewhere" / "records"
+    assert _main("plan", tmp_path, run_dir=str(outside)) == 64
+    assert "run_dir" in capsys.readouterr().err
+    assert not (tmp_path / "elsewhere").exists() and not recs["plan"].calls
+
+
+def test_run_dir_dotdot_escape_refused(tmp_path, recs):
+    sneaky = str(tmp_path / "state" / ".." / "elsewhere")
+    assert _main("plan", tmp_path, run_dir=sneaky) == 64
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_run_dir_symlink_refused(tmp_path, recs):
+    (tmp_path / "state" / "r1").mkdir(parents=True)
+    (tmp_path / "target").mkdir()
+    (tmp_path / "state" / "r1" / "records").symlink_to(tmp_path / "target")
+    assert _main("plan", tmp_path) == 64
+    assert not recs["plan"].calls
+
+
+def test_run_dir_symlinked_parent_refused(tmp_path, recs):
+    (tmp_path / "state").mkdir()
+    (tmp_path / "target").mkdir()
+    (tmp_path / "state" / "r1").symlink_to(tmp_path / "target")
+    assert _main("plan", tmp_path) == 64
+    assert not (tmp_path / "target" / "records").exists()
+
+
+def test_run_dir_regular_file_refused(tmp_path, recs):
+    (tmp_path / "state" / "r1").mkdir(parents=True)
+    (tmp_path / "state" / "r1" / "records").write_text("x")
+    assert _main("plan", tmp_path) == 64
+
+
+def test_existing_run_dir_reused_untouched(tmp_path, recs):
+    rd = tmp_path / "state" / "r1" / "records"
+    rd.mkdir(parents=True)
+    rd.chmod(0o755)
+    (rd / "keep").write_text("k")
+    assert _main("plan", tmp_path) == 7
+    assert (rd / "keep").read_text() == "k" and rd.stat().st_mode & 0o777 == 0o755
+
+
+def test_create_run_tolerates_runner_made_parent(tmp_path, recs):
+    from avocado_flash_remote import state
+
+    assert _main("plan", tmp_path) == 7
+    sd = tmp_path / "state"
+    state.create_run(
+        sd, run_id="r1", profile_hash="p", plan_hash="h", board_identity={}, image_roles=["a"], arm=False
+    )
+    assert (sd / "r1" / "state.json").is_file() and (sd / "r1" / "records").is_dir()
 
 
 # --- required_stdlib (task 6.4) -------------------------------------------
