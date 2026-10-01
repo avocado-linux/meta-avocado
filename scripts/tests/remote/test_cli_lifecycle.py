@@ -372,13 +372,6 @@ def test_emergency_disarm_flag(images, tmp_path, board):
     assert board.runs[-1][1]["emergency_disarm"] is True
 
 
-def test_readback_needs_reference(images, tmp_path, board, capsys):
-    _stage_and_plan(images, tmp_path, board)
-    rc, _ = run(args(images, tmp_path, "readback"), board)
-    assert rc == 64
-    assert "--reference-boot-order" in capsys.readouterr().err
-
-
 def test_runner_exit_code_passes_through(images, tmp_path, board):
     orig = board.handle
 

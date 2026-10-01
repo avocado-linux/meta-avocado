@@ -53,7 +53,7 @@ subcommands:
   check     read-only preflight on the board
   plan      record what a write would do; creates the run id and plan record
   write     write the planned run (needs --run-id of a collected plan)
-  readback  read back what the test image left behind (needs --reference-boot-order)
+  readback  read back what the test image left behind (needs --reference-boot-order unless the board's arm strategy is none)
   restore   undo a run (--ack-run RUN_ID, or --emergency-disarm)
   status    print the board's recorded phase
 
@@ -392,20 +392,22 @@ def _do_restore(ctx: _Ctx) -> int:
 
 def _do_readback(ctx: _Ctx) -> int:
     args = ctx.args
-    if not args.reference_boot_order:
+    arm_none = ctx.profile.arm.strategy == "none"
+    if not arm_none and not args.reference_boot_order:
         raise _Usage("readback needs --reference-boot-order")
     run_id = args.run_id or f"readback-{secrets.token_hex(4)}"
-    return _do_simple(
-        ctx,
-        "readback",
-        {
-            "staging_dir": ctx.staging_dir,
-            "state_dir": ctx.state_dir,
-            "mount_dir": f"{ctx.state_dir}/readback-mnt",
-            "out_dir": f"{ctx.state_dir}/{run_id}/readback",
-            "reference_boot_order": args.reference_boot_order,
-        },
-    )
+    request = {
+        "staging_dir": ctx.staging_dir,
+        "state_dir": ctx.state_dir,
+        "mount_dir": f"{ctx.state_dir}/readback-mnt",
+        "out_dir": f"{ctx.state_dir}/{run_id}/readback",
+    }
+    if arm_none:
+        if args.reference_boot_order:
+            ctx.out("--reference-boot-order ignored (arm strategy none)")
+    else:
+        request["reference_boot_order"] = args.reference_boot_order
+    return _do_simple(ctx, "readback", request)
 
 
 _HANDLERS = {
