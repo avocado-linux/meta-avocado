@@ -402,3 +402,39 @@ def test_detach(tmp_path):
     assert m["pid"] != m["driver_pid"]
     # status reads the (absent) state afterwards without error
     assert runner.main(["status", "--request", str(req)], archive=str(info.path)) == 0
+
+
+# --- required_stdlib (task 6.4) -------------------------------------------
+
+
+def _independent_stdlib_walk(zf):
+    found = set()
+    for name in zf.namelist():
+        if not name.endswith(".py"):
+            continue
+        tree = ast.parse(zf.read(name).decode())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                found.add(node.module.split(".")[0])
+    return sorted(found - {bundle.PACKAGE})
+
+
+def test_bundle_json_required_stdlib_matches_independent_walk(built):
+    info, _ = built
+    with zipfile.ZipFile(info.path) as z:
+        meta = json.loads(z.read("BUNDLE.json"))
+        expected = _independent_stdlib_walk(z)
+    assert meta["required_stdlib"] == expected
+    assert meta["required_stdlib"] == sorted(set(meta["required_stdlib"]))
+    for must in ("hashlib", "json", "os", "sys", "zipfile"):
+        assert must in meta["required_stdlib"]
+    assert bundle.PACKAGE not in meta["required_stdlib"]
+    assert all("." not in m for m in meta["required_stdlib"])
+
+
+def test_required_stdlib_helper_counts_from_imports(tmp_path):
+    (tmp_path / "m.py").write_text("from os import path\nimport a.b\nfrom . import x\nfrom avocado_flash_remote import y\n")
+    src = (tmp_path / "m.py").read_bytes()
+    assert bundle._stdlib_modules(src, "m.py") == ["a", "os"]

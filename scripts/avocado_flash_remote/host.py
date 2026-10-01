@@ -51,6 +51,9 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9_+][A-Za-z0-9._+-]*\Z")
 _USER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*\Z")
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{64}\Z")
 
+_PYTHON_RE = re.compile(r"^[A-Za-z0-9_./+-]+\Z")
+DEFAULT_PYTHON = "python3"
+
 DEFAULT_TIMEOUT = 600
 TAR_TIMEOUT = 3600
 _KILL_GRACE = 5
@@ -106,6 +109,18 @@ def _check_host(host: str) -> str:
     if not isinstance(host, str) or not _HOST_RE.match(host):
         raise HostError(f"invalid ssh host: {host!r}")
     return host
+
+
+def validate_remote_python(path) -> str:
+    """The interpreter path is spliced into a remote command line; keep it plain."""
+    if (
+        not isinstance(path, str)
+        or not _PYTHON_RE.match(path)
+        or path.startswith("-")
+        or ".." in path.split("/")
+    ):
+        raise HostError(f"invalid --remote-python: {path!r}")
+    return path
 
 
 class _TransportBase:
@@ -363,6 +378,44 @@ def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_passwo
     return PRIVILEGE_SUDO_PASSWORD
 
 
+# --- remote interpreter -----------------------------------------------------
+
+# The probe uses only ``sys`` and ``__import__`` (present in every Python) so a
+# stripped interpreter can still say what it lacks. The module tuple is
+# computed by the bundle builder, never taken from user input.
+def _probe_code(modules) -> str:
+    return (
+        "import sys\n"
+        "def _ok(n):\n"
+        "    try:\n"
+        "        __import__(n)\n"
+        "    except Exception:\n"
+        "        return False\n"
+        "    return True\n"
+        f"m = [n for n in {tuple(modules)!r} if not _ok(n)]\n"
+        "print('MISSING ' + ' '.join(m) if m else 'OK ' + sys.version.split()[0])\n"
+    )
+
+
+def probe_interpreter(transport, python: str, modules) -> str:
+    """Return the board interpreter's version, or refuse naming what is missing."""
+    python = validate_remote_python(python)
+    hint = f"install a full python3 on the board or name one with --remote-python (interpreter: {python})"
+    res = transport.run([python, "-c", _probe_code(modules)], None, sudo=False, timeout=60)
+    if res.rc == 127:
+        raise HostError(f"interpreter not found on the board: {python}; {hint}")
+    lines = res.out.strip().splitlines()
+    last = lines[-1].strip() if lines else ""
+    if res.rc != 0:
+        raise HostError(f"the interpreter {python} failed on the board (rc={res.rc}); {hint}")
+    if last.startswith("OK ") and len(last.split()) == 2:
+        return last.split()[1]
+    if last.startswith("MISSING "):
+        names = " ".join(last.split()[1:])
+        raise HostError(f"the board's python lacks standard-library modules the runner needs: {names}; {hint}")
+    raise HostError(f"unexpected output from the interpreter probe on the board; {hint}")
+
+
 # --- staging --------------------------------------------------------------
 
 
@@ -445,7 +498,7 @@ def check_staging_space(transport, profile, payload_bytes: int = 0) -> int:
     return avail
 
 
-def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = False, out=print) -> StageResult:
+def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = False, out=print, python: str = DEFAULT_PYTHON) -> StageResult:
     staging_dir = profile.staging.dir
     rows = _plan_files(image_dir, bundle_path, resolved)
     result = StageResult(
@@ -486,6 +539,10 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     )
     if check.rc != 0:
         raise HostError("remote hash verification of the images failed")
+    unzip = "import sys, zipfile; sys.exit(1 if zipfile.ZipFile(sys.argv[1]).testzip() else 0)"
+    zcheck = transport.run([python, "-c", unzip, result.bundle_remote_path], None, sudo=False, timeout=120)
+    if zcheck.rc != 0:
+        raise HostError(f"the board's interpreter {python} cannot open the staged bundle (rc={zcheck.rc})")
     sums = {n: h for n, _s, _z, h in rows if n in (bundle_name, "profile.json")}
     listing = "".join(f"{h}  {n}\n" for n, h in sorted(sums.items())).encode()
     check = transport.run(
@@ -500,7 +557,7 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
 # --- run, reconcile, collect ----------------------------------------------
 
 
-def run_remote(transport, subcommand: str, request: dict, bundle_remote_path: str, *, detach: bool = False, timeout: float = DEFAULT_TIMEOUT) -> RunResult:
+def run_remote(transport, subcommand: str, request: dict, bundle_remote_path: str, *, detach: bool = False, timeout: float = DEFAULT_TIMEOUT, python: str = DEFAULT_PYTHON) -> RunResult:
     if subcommand not in SUBCOMMANDS:
         raise HostError(f"unknown subcommand: {subcommand!r}")
     staging = request.get("staging_dir")
@@ -514,7 +571,7 @@ def run_remote(transport, subcommand: str, request: dict, bundle_remote_path: st
     )
     if put.rc != 0:
         raise HostError("cannot write the request file on the board")
-    argv = ["python3", bundle_remote_path, subcommand, "--request", req_path]
+    argv = [validate_remote_python(python), bundle_remote_path, subcommand, "--request", req_path]
     if detach or subcommand == "write":
         argv.append("--detach")
     return transport.run(argv, None, sudo=True, timeout=timeout)
@@ -532,12 +589,12 @@ class Reconciled:
 _STATUS_RE = re.compile(r"^status: (\S+) run=(\S+) recovery=(.*)$")
 
 
-def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: str) -> Reconciled:
+def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: str, python: str = DEFAULT_PYTHON) -> Reconciled:
     """Ask the board's runner for its recorded phase (used after a drop)."""
     res = run_remote(
         transport, "status",
         {"staging_dir": staging_dir, "state_dir": state_dir},
-        bundle_remote_path, timeout=120,
+        bundle_remote_path, timeout=120, python=python,
     )
     text = res.out.strip()
     if res.rc != 0:

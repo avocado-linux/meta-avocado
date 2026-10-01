@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import ast
 import io
 import json
 import pathlib
+import re
 import shlex
 import subprocess
 import tarfile
@@ -598,3 +600,96 @@ def test_reacquire_resets_root_mode():
     t.handler = lambda a, s, u: RunResult(0, b"1000\n", b"") if a == ["id", "-u"] else RunResult(0, b"", b"")
     host.acquire_sudo(t)
     assert t.root_direct is False
+
+
+# --- remote interpreter (task 6.4) ----------------------------------------
+
+MISSING_ON_TARGET = "hashlib _hashlib _sha2 json tempfile datetime socket getpass base64 random uuid secrets".split()
+
+
+def probe_handler(missing=(), rc=0, version="3.12.1"):
+    """A board whose interpreter lacks `missing` (names it was asked about)."""
+
+    def h(argv, stdin, sudo):
+        if len(argv) >= 3 and argv[1] == "-c":
+            if rc != 0:
+                return RunResult(rc, b"", b"sh: not found")
+            asked = set(re.findall(r"'([A-Za-z0-9_]+)'", argv[2]))
+            gone = sorted(asked & set(missing))
+            out = ("MISSING " + " ".join(gone)) if gone else f"OK {version}"
+            return RunResult(0, (out + "\n").encode(), b"")
+        return RunResult(0, b"", b"")
+
+    return h
+
+
+@pytest.mark.parametrize("bad", ["-oFoo", "a b", "../x", "x/../y", "$(x)", "", "a;b", "-", "a\nb"])
+def test_validate_remote_python_rejects_hostile(bad):
+    with pytest.raises(HostError):
+        host.validate_remote_python(bad)
+
+
+@pytest.mark.parametrize("good", ["python3", "/usr/bin/python3", "/opt/py-3.12/bin/python3.12", "python3+x", "./py"])
+def test_validate_remote_python_accepts(good):
+    assert host.validate_remote_python(good) == good
+
+
+def test_probe_ok_returns_version_and_runs_list_form():
+    t = StubTransport(handler=probe_handler())
+    ver = host.probe_interpreter(t, "/opt/py/bin/python3", ["hashlib", "json", "sys"])
+    assert ver == "3.12.1"
+    (c,) = t.calls
+    assert c.argv[:2] == ["/opt/py/bin/python3", "-c"] and len(c.argv) == 3
+    assert c.sudo is False
+    assert "hashlib" in c.argv[2]
+
+
+def test_probe_missing_modules_refuses_naming_them():
+    t = StubTransport(handler=probe_handler(missing=MISSING_ON_TARGET))
+    mods = ["argparse", "hashlib", "json", "zipfile", "base64", "random"]
+    with pytest.raises(HostError) as ei:
+        host.probe_interpreter(t, "python3", mods)
+    msg = str(ei.value)
+    for name in ("hashlib", "json", "base64", "random"):
+        assert name in msg
+    assert "zipfile" not in msg
+    assert "python3" in msg and "--remote-python" in msg
+
+
+def test_probe_interpreter_not_found():
+    t = StubTransport(handler=probe_handler(rc=127))
+    with pytest.raises(HostError) as ei:
+        host.probe_interpreter(t, "/nope/python", ["sys"])
+    assert "not found" in str(ei.value) and "/nope/python" in str(ei.value) and "--remote-python" in str(ei.value)
+
+
+def test_probe_garbled_output_refuses():
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, b"banana\n", b""))
+    with pytest.raises(HostError):
+        host.probe_interpreter(t, "python3", ["sys"])
+
+
+def test_probe_code_needs_only_sys_and_builtins():
+    t = StubTransport(handler=probe_handler())
+    host.probe_interpreter(t, "python3", ["json"])
+    code = t.calls[0].argv[2]
+    tree = ast.parse(code)
+    imported = [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
+    assert all(a.name == "sys" for n in imported if isinstance(n, ast.Import) for a in n.names)
+    assert not [n for n in imported if isinstance(n, ast.ImportFrom)]
+
+
+def test_run_remote_and_reconcile_use_given_interpreter():
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, b"status: no run recorded\n", b""))
+    host.run_remote(t, "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz", python="/opt/p/python3")
+    assert t.calls[-1].argv[2:4] == ["/opt/p/python3", "/run/s/b.pyz"]
+    host.reconcile(t, "/s", "/run/s/b.pyz", "/run/s", python="/opt/p/python3")
+    assert t.calls[-1].argv[2:4] == ["/opt/p/python3", "/run/s/b.pyz"]
+
+
+def test_stage_verifies_bundle_with_given_interpreter(kit, resolved):
+    images, bundle_path, files = kit
+    t = StubTransport(handler=handler_for(10_000_000))
+    host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False, python="/opt/p/python3")
+    py = [c for c in t.calls if c.kind == "run" and c.argv and c.argv[0] == "/opt/p/python3"]
+    assert len(py) == 1 and bundle_path.name in py[0].argv[-1]

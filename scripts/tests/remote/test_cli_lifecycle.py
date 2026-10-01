@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import tarfile
 
 import pytest
@@ -25,7 +26,11 @@ def _sha(b: bytes) -> str:
 class Board:
     """Scripted board: answers the host's calls the way the runner would."""
 
-    def __init__(self, tmp_path, *, need_password=False, corrupt_write=False, write_phase="complete"):
+    def __init__(self, tmp_path, *, need_password=False, corrupt_write=False, write_phase="complete", missing=(), interp_rc=0):
+        self.missing = set(missing)
+        self.interp_rc = interp_rc
+        self.probes = []
+        self.pythons = []
         self.tmp = tmp_path / "board"
         self.tmp.mkdir()
         self.need_password = need_password
@@ -85,7 +90,15 @@ class Board:
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":
             return RunResult(0, self.log)
-        if argv[0] == "python3":
+        if len(argv) >= 3 and argv[1] == "-c":
+            self.probes.append(argv)
+            if self.interp_rc:
+                return RunResult(self.interp_rc, b"", b"not found")
+            asked = set(re.findall(r"'([A-Za-z0-9_]+)'", argv[2]))
+            gone = sorted(asked & self.missing)
+            return RunResult(0, (("MISSING " + " ".join(gone)) if gone else "OK 3.12.1").encode() + b"\n")
+        if argv[0].endswith("python3"):
+            self.pythons.append(argv[0])
             return self._runner(argv)
         return RunResult(0)
 
@@ -409,3 +422,101 @@ def test_interrupt_exits_130(images, tmp_path, capsys):
 
     rc, _ = run(args(images, tmp_path, "status"), transport_factory=boom)
     assert rc == 130
+
+
+# --- remote interpreter (task 6.4) -----------------------------------------
+
+TARGET_MISSING = "hashlib _hashlib _sha2 json tempfile datetime socket getpass base64 random uuid secrets".split()
+BOARD_SUBS = ["check", "plan", "write", "readback", "restore", "status"]
+
+
+def _sub_args(images, tmp_path, sub, rid="run-x"):
+    extra = {
+        "write": ["--run-id", rid],
+        "readback": ["--reference-boot-order", "0001"],
+        "restore": ["--ack-run", rid],
+    }.get(sub, [])
+    return args(images, tmp_path, sub, *extra)
+
+
+def _prepared(images, tmp_path):
+    """Stage and plan on a full interpreter; returns (board, run id)."""
+    board = Board(tmp_path)
+    rid = _stage_and_plan(images, tmp_path, board)
+    return board, rid
+
+
+@pytest.mark.parametrize("sub", BOARD_SUBS)
+def test_missing_stdlib_refuses_before_any_runner_call(images, tmp_path, sub, capsys):
+    board, rid = _prepared(images, tmp_path)
+    before = len(board.stub.calls)
+    board.missing = set(TARGET_MISSING)
+    board.requests.clear()
+    board.runs.clear()
+    rc, _ = run(_sub_args(images, tmp_path, sub, rid), board)
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert board.runs == [] and board.requests == {}
+    for name in ("hashlib", "json", "datetime"):
+        assert name in err
+    assert "python3" in err and "--remote-python" in err
+    assert not [c for c in board.stub.calls[before:] if c.stdin_len and b"staging_dir" in (c.stdin_bytes or b"")]
+
+
+def test_missing_stdlib_refuses_stage_too(images, tmp_path, capsys):
+    board = Board(tmp_path, missing=TARGET_MISSING)
+    rc, _ = run(args(images, tmp_path, "stage"), board)
+    assert rc == 1
+    assert not board.staged
+    assert "--remote-python" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("sub", BOARD_SUBS)
+def test_full_interpreter_proceeds_and_prints_line_once(images, tmp_path, sub):
+    if sub == "plan":  # a second plan in the same second would reuse the run id
+        board, rid = Board(tmp_path), "run-x"
+        assert run(args(images, tmp_path, "stage"), board)[0] == 0
+    else:
+        board, rid = _prepared(images, tmp_path)
+    rc, text = run(_sub_args(images, tmp_path, sub, rid), board)
+    assert rc == 0, text
+    assert text.count("remote python: python3 3.12.1") == 1
+    assert sub in board.subs()
+
+
+def test_probe_runs_after_privilege_and_before_runner(images, tmp_path):
+    board, rid = _prepared(images, tmp_path)
+    board.stub.calls.clear()
+    run(_sub_args(images, tmp_path, "status"), board)
+    plain = [_plain(c.argv) for c in board.stub.calls]
+    idx = lambda pred: next(i for i, a in enumerate(plain) if pred(a))  # noqa: E731
+    uid = idx(lambda a: a[:2] == ["id", "-u"])
+    probe = idx(lambda a: a[:2] == ["python3", "-c"])
+    req = idx(lambda a: a[0] == "sh" and "cat >" in a[2])
+    assert uid < probe < req
+
+
+def test_interpreter_not_found_message(images, tmp_path, capsys):
+    board = Board(tmp_path, interp_rc=127)
+    rc, _ = run(args(images, tmp_path, "stage"), board)
+    err = capsys.readouterr().err
+    assert rc == 1 and "not found" in err and "--remote-python" in err
+
+
+def test_remote_python_option_reaches_probe_and_runner(images, tmp_path):
+    board = Board(tmp_path)
+    assert run(args(images, tmp_path, "stage", "--remote-python", "/opt/py/bin/python3"), board)[0] == 0
+    rc, text = run(args(images, tmp_path, "check", "--remote-python", "/opt/py/bin/python3"), board)
+    assert rc == 0
+    assert "remote python: /opt/py/bin/python3 3.12.1" in text
+    assert board.probes[-1][0] == "/opt/py/bin/python3"
+    assert board.pythons[-1] == "/opt/py/bin/python3"
+    assert "python3" not in [p for p in board.pythons if p != "/opt/py/bin/python3"]
+
+
+@pytest.mark.parametrize("bad", ["-oFoo", "a b", "../x", "$(x)", "", "x/../y", "a;b"])
+@pytest.mark.parametrize("sub", ["check", "stage"])
+def test_hostile_remote_python_rejected_before_factory(images, tmp_path, bad, sub, capsys):
+    rc, _ = run(args(images, tmp_path, sub, f"--remote-python={bad}"))
+    assert rc == 64
+    assert "--remote-python" in capsys.readouterr().err

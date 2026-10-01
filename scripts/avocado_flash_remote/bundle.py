@@ -96,6 +96,37 @@ def _foreign_imports(source: bytes, filename: str) -> list:
     return bad
 
 
+def _stdlib_modules(source: bytes, filename: str) -> list:
+    """Sorted top-level module names a source imports, minus this package.
+
+    Relative imports are the package's own and are skipped.
+    """
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError as e:
+        raise BundleError(f"{filename}: syntax error: {e}")
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            found.add(node.module.split(".")[0])
+    found.discard(PACKAGE)
+    return sorted(found)
+
+
+def required_stdlib(modules_dir=None) -> list:
+    """Standard-library modules the archived runner modules import."""
+    modules_dir = Path(modules_dir) if modules_dir is not None else Path(__file__).resolve().parent
+    names = set()
+    for mod in ARCHIVE_MODULES:
+        src = modules_dir / f"{mod}.py"
+        if not src.is_file():
+            raise BundleError(f"required module missing: {mod} ({src})")
+        names.update(_stdlib_modules(src.read_bytes(), str(src)))
+    return sorted(names)
+
+
 def _add(zf, name: str, data: bytes):
     info = zipfile.ZipInfo(name, _DATE_TIME)
     info.compress_type = zipfile.ZIP_DEFLATED
@@ -109,6 +140,7 @@ def build_bundle(profile_bytes: bytes, out_path, tool_version: str, modules_dir=
     out_path = Path(out_path)
 
     sources = {}
+    stdlib = set()
     for mod in ARCHIVE_MODULES:
         src = modules_dir / f"{mod}.py"
         if not src.is_file():
@@ -118,6 +150,7 @@ def build_bundle(profile_bytes: bytes, out_path, tool_version: str, modules_dir=
         if bad:
             raise BundleError(f"{mod}.py imports outside the standard library: {', '.join(sorted(set(bad)))}")
         sources[f"{PACKAGE}/{mod}.py"] = data
+        stdlib.update(_stdlib_modules(data, str(src)))
 
     from .runner import RUNNER_VERSION  # the version the archive's runner reports
 
@@ -129,6 +162,7 @@ def build_bundle(profile_bytes: bytes, out_path, tool_version: str, modules_dir=
         "profile_sha256": profile_sha,
         "modules": {name: _sha(data) for name, data in sorted(sources.items())},
         "main_sha256": _sha(MAIN_SOURCE),
+        "required_stdlib": sorted(stdlib),
     }
     meta_bytes = (json.dumps(meta, indent=2, sort_keys=True) + "\n").encode()
 
