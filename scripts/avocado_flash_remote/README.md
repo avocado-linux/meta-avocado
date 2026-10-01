@@ -81,7 +81,7 @@ the arming.
 | `plan` | Looks, decides, and writes one plan record (`plan.json`). Changes nothing on the board. Creates the run id. | Refuses on a wrong device name, wrong sector count, a target that backs the running system or is mounted, a non-empty target when `require_empty` is set, a layout that does not fit, staged images that fail their checksums, a failing guard, or an arm pre-flight refusal. |
 | `write` | Writes the planned run: partition table, then each image, read-back verification, guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
 | `readback` | After the test image has booted, mounts the profile's data partition read-only, copies the persistent journal and boot logs, compares BootOrder with the reference, and prints (never runs) cleanup commands. | Needs `--reference-boot-order` unless the profile's arm strategy is `none`. Refuses to mount when the output directory is not on tmpfs, so logs never land on the live system's disk. |
-| `restore` | Undoes the arming. See "Restore scope". | Takes the per-host lock. `--emergency-disarm` needs `--ack-run`. |
+| `restore` | Undoes the arming. See "Restore scope". | Takes the per-host lock and, on the board, the on-board flash lock: it refuses while another holder (a write in progress) is live. A run in a non-terminal phase needs `--ack-run RUN_ID` naming it. `--emergency-disarm` needs `--ack-run`. |
 | `status` | Prints the board's recorded phase: `status: PHASE run=RUN_ID recovery=TEXT`, or `status: no run recorded`. Strictly read-only. | None. Use it after a dropped connection. |
 
 ### Write gates
@@ -237,7 +237,8 @@ the phase and a monotonic sequence number, never wall time.
 
 Phases, in order: `planned`, `table-writing`, `table-written`, `image-writing`,
 `image-written`, `verified`, `armed`, `complete`. `failed` can follow any
-non-terminal phase. `complete` and `failed` are terminal. `image-writing` and
+non-terminal phase. `restored` is written by a successful `restore` and can
+follow any phase. `complete`, `failed` and `restored` are terminal. `image-writing` and
 `image-written` repeat once per image, in the profile's image order. `armed`
 is skipped when the profile's arm strategy is `none`.
 
@@ -253,13 +254,15 @@ Find the phase with `avocado-flash ssh-emmc status --board NAME --host HOST`.
 | Phase on the board | What it means | Operator action |
 |--------------------|---------------|-----------------|
 | `planned` | The state file was created and no board change is recorded. The run never reached the first mutation. | None recorded (`none-recorded`). Safe to discard only if the run never took the on-board lock; check the lock before rerunning after acknowledging the run. |
-| `table-writing` | Killed during the partition table write. The table may be partly or fully rewritten. | `restore-then-restart`: re-inspect the target, run `restore`, then plan and write again from the start. |
+| `table-writing` | Killed during the partition table write. The table may be partly or fully rewritten. | `restore-then-restart`: re-inspect the target, run `restore --ack-run RUN_ID` (disarms and cleans staging; it does not roll back the table), then plan and write again from the start. |
 | `table-written` | The table is written; no image has started. | `restore-then-restart`, as above. |
 | `image-writing` | Killed while an image was being written. That partition holds partial data. | `restore-then-restart`, as above. |
 | `image-written` | At least one image is written and verified by read-back; more remain. | `restore-then-restart`, as above. |
-| `verified` | All images are written and read back correctly, but the guard or arming did not finish. | `restore`. Do not rewrite the images. |
-| `armed` | The boot entry exists and `BootNext` may be set. The board will boot the test image on the next reboot. | `restore`. Do not reboot first unless you want to boot the test image. |
-| `complete`, `failed` | Terminal. | No recovery needed. A failed write prints the phase it failed in, the recovery text, and whether the board was armed ("DO NOT REBOOT; run restore" when it was). |
+| `verified` | All images are written and read back correctly, but the guard or arming did not finish. | `restore --ack-run RUN_ID`. Do not rewrite the images. |
+| `armed` | The boot entry exists and `BootNext` may be set. The board will boot the test image on the next reboot. | `restore --ack-run RUN_ID`. Do not reboot first unless you want to boot the test image. |
+| `complete` | Terminal. | No recovery needed. |
+| `failed` | Terminal. | The recovery text names what is left: whether the table was possibly rewritten, which images are written, partial or not started, and whether a boot entry was armed ("DO NOT REBOOT" until `restore` removes it). Run `restore` (no acknowledgement needed for a finished run), then plan and write again. |
+| `restored` | Terminal. Written by a successful `restore`. | No recovery needed; a new plan and write are accepted. |
 | state unreadable | The state file or `current` pointer is missing or malformed. | Manual: inspect the state directory and the board's `efibootmgr -v`, then use `restore --emergency-disarm`. |
 
 The recovery column is the text `status` and the write refusal print. It is
@@ -286,7 +289,14 @@ What it does, per `cmd_restore.py`:
 What it does not do: it does not restore the partition table and it does not
 restore any image content. Its output says so
 (`note: restore does not roll back partition table or image changes`). It does
-not rewrite `state.json`.
+not touch `state.json` until it has succeeded; then it advances the run to the
+terminal `restored` phase so that a new plan and write are accepted. A failed
+restore leaves the phase as it was.
+
+Before doing anything `restore` takes the on-board flash lock and refuses while
+another holder is live, so it cannot delete staging under a running write. A
+run still in a non-terminal phase is restored only with `--ack-run RUN_ID`
+naming that run.
 
 `restore --emergency-disarm --ack-run TEXT` is for a missing or unreadable state
 file. It requires a non-empty acknowledgement and removes only boot entries whose

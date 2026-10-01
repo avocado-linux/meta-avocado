@@ -596,7 +596,8 @@ def _restore(tmp, *, armed=True, queue=None, phase="armed"):
     ops = RecordingOps({"efibootmgr -v": queue or [_efi()] * 3})
     removed, lines = [], []
     res = run_restore(
-        ops, profile, state_dir=state_dir, staging_dir=str(staging), remove_tree=removed.append, out=lines.append
+        ops, profile, state_dir=state_dir, staging_dir=str(staging), remove_tree=removed.append, out=lines.append,
+        ack_run_id="r1",  # the port requires the acknowledgement for a non-terminal run (5.15); the kit had none
     )
     return PortRun(res.exit_code, ops.log, lines, extra={"removed": removed, "res": res})
 

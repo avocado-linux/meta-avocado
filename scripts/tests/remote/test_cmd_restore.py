@@ -87,6 +87,10 @@ def rec(**kw):
 
 
 def go(env, ops, **kw):
+    # A non-terminal run needs its acknowledgement; supply it unless the test
+    # is about the emergency path or sets ack_run_id itself.
+    if not kw.get("emergency_disarm"):
+        kw.setdefault("ack_run_id", "r1")
     removed = []
 
     def rm(path):
@@ -323,3 +327,131 @@ def test_disarm_failure_keeps_staging(env):
     r, removed, out = go(env, ops)
     assert r.exit_code == 1
     assert removed == []
+
+
+# ---- 5.15: lock, acknowledgement, terminal state, true recovery text --------
+
+import re
+
+from avocado_flash_remote import cmd_write
+from avocado_flash_remote.state import LockHeld, OnBoardLock
+
+
+def go_raw(env, ops, **kw):
+    """Like go() but with no implicit acknowledgement."""
+    removed = []
+    out = []
+    r = run_restore(
+        ops, env.profile, state_dir=env.state_dir, staging_dir=str(env.staging),
+        out=out.append, remove_tree=removed.append, **kw,
+    )  # fmt: skip
+    return r, removed, out
+
+
+def image_writing_state(env):
+    s = st.create_run(
+        env.state_dir, run_id="r1", profile_hash="p", plan_hash="q",
+        board_identity={}, image_roles=["boot"], arm=True,
+    )  # fmt: skip
+    s = st.transition(s, "table-writing")
+    s = st.transition(s, "table-written")
+    return st.transition(s, "image-writing", image="boot")
+
+
+def test_restore_while_another_holder_has_the_lock_refuses_and_deletes_nothing(env):
+    image_writing_state(env)
+    ops = RecordingOps()
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="writer"):
+        r, removed, out = go(env, ops)
+    assert r.exit_code == 1
+    assert removed == []
+    assert ops.log == []
+    assert env.staging.exists()
+    assert "lock" in "\n".join(out)
+    assert st.load_state(env.state_dir).state.phase == "image-writing"
+
+
+def test_emergency_disarm_also_needs_the_lock(env):
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="writer"):
+        r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="because")
+    assert r.exit_code == 1
+    assert mutations(ops) == []
+
+
+def test_restore_releases_the_lock_when_done(env):
+    mk_state(env, "failed")
+    go(env, RecordingOps())
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME):
+        pass
+
+
+@pytest.mark.parametrize("phase", ["planned", "table-writing", "verified", "armed"])
+def test_non_terminal_run_without_ack_refuses_and_touches_nothing(env, phase):
+    mk_state(env, phase, rec() if phase == "armed" else None)
+    ops = RecordingOps()
+    r, removed, out = go_raw(env, ops)
+    assert r.exit_code == 1
+    assert ops.log == []
+    assert removed == []
+    assert "--ack-run r1" in "\n".join(out)
+    assert st.load_state(env.state_dir).state.phase == phase
+
+
+def test_image_writing_without_ack_refuses(env):
+    image_writing_state(env)
+    ops = RecordingOps()
+    r, removed, out = go_raw(env, ops)
+    assert r.exit_code == 1 and removed == [] and ops.log == []
+
+
+def test_wrong_ack_refuses(env):
+    image_writing_state(env)
+    r, removed, _ = go_raw(env, RecordingOps(), ack_run_id="some-other-run")
+    assert r.exit_code == 1 and removed == []
+
+
+def test_acknowledged_restore_disarms_cleans_and_unblocks_the_next_run(env):
+    mk_state(env, "armed", rec())
+    ops = RecordingOps({LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW]), efi()]})
+    r, removed, out = go_raw(env, ops, ack_run_id="r1")
+    assert r.exit_code == 0
+    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert removed == [str(env.staging)]
+    loaded = st.load_state(env.state_dir)
+    assert loaded.state.phase == "restored"
+    assert loaded.state.phase in st.TERMINAL
+    # a following plan and write are accepted
+    assert st.check_rerun_allowed(env.state_dir).recovery_only is False
+    cmd_write._prior_state_gate(env.state_dir, "r2", None)
+
+
+def test_restored_run_cannot_be_replayed_as_the_same_plan(env):
+    image_writing_state(env)
+    go_raw(env, RecordingOps(), ack_run_id="r1")
+    with pytest.raises(cmd_write._Refusal):
+        cmd_write._prior_state_gate(env.state_dir, "r1", None)
+
+
+def test_failed_restore_does_not_advance_the_state(env):
+    mk_state(env, "armed", rec())
+    ops = RecordingOps({LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW]), efi(order="0002,0001")]})
+    r, removed, _ = go_raw(env, ops, ack_run_id="r1")
+    assert r.exit_code == 1
+    assert st.load_state(env.state_dir).state.phase == "armed"
+
+
+def test_failed_run_restore_needs_no_ack_and_ends_restored(env):
+    mk_state(env, "failed")
+    r, removed, _ = go_raw(env, RecordingOps())
+    assert r.exit_code == 0
+    assert st.load_state(env.state_dir).state.phase == "restored"
+
+
+def test_emergency_hint_names_the_real_flag(env):
+    (env.state_dir / "current").write_text("r1\n")
+    r, _, out = go_raw(env, RecordingOps())
+    text = "\n".join(out)
+    assert r.exit_code == 1
+    assert "--ack-run" in text
+    assert not re.search(r"--ack(?!-run)", text)

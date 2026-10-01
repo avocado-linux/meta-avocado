@@ -6,6 +6,12 @@ equals the value recorded before any mutation, then remove the staging
 directory. Partition table and image changes are NOT rolled back, and the
 output says so. After a reboot into the test entry only staging is cleaned.
 
+It takes the on-board flash lock first and refuses while another holder is
+live, so it can never run against a write in progress. A run in a non-terminal
+phase needs ``--ack-run RUN_ID`` naming that run. After a successful restore the
+run's state is advanced to the terminal ``restored`` so a new plan and write
+are accepted.
+
 With missing or unparseable state it refuses; ``--emergency-disarm`` (plus an
 acknowledgement) removes only entries carrying the profile's arm label and a
 BootNext that points at one of them.
@@ -23,7 +29,7 @@ from pathlib import Path
 
 from .arm import Arm, ArmRecord, _field, boot_next_of, boot_order_of, entries_with_label
 from .ops import OpsError
-from .state import describe_recovery, load_state
+from .state import LOCK_NAME, TERMINAL, LockHeld, OnBoardLock, describe_recovery, load_state, transition
 
 NOTE_LINE = "note: restore does not roll back partition table or image changes"
 _ROLLED_PHASES = ("table-writing", "table-written", "image-writing", "image-written", "verified", "armed", "complete")
@@ -75,6 +81,36 @@ def run_restore(
     remove_tree=None,
     out=print,
 ) -> RestoreResult:
+    """Take the on-board lock, then restore. Refuses while a writer holds it."""
+    try:
+        with OnBoardLock(Path(state_dir) / LOCK_NAME, run_id=ack_run_id or ""):
+            return _restore_locked(
+                ops, profile, state_dir=state_dir, staging_dir=staging_dir, ack_run_id=ack_run_id,
+                emergency_disarm=emergency_disarm, remove_tree=remove_tree, out=out,
+            )  # fmt: skip
+    except (LockHeld, OSError) as exc:
+        if isinstance(exc, LockHeld):
+            why = f"another run holds the lock: {exc}"
+        else:
+            why = f"cannot take the on-board lock: {exc}"
+        result = RestoreResult(1)
+        for line in (f"refusing: {why}", "no boot entry or staging was touched"):
+            result.lines.append(line)
+            out(line)
+        return result
+
+
+def _restore_locked(
+    ops,
+    profile,
+    *,
+    state_dir,
+    staging_dir,
+    ack_run_id=None,
+    emergency_disarm=False,
+    remove_tree=None,
+    out=print,
+) -> RestoreResult:
     result = RestoreResult(0)
     expected_staging = profile.staging.dir
     if remove_tree is None:
@@ -84,9 +120,20 @@ def run_restore(
         result.lines.append(line)
         out(line)
 
+    to_close = {"state": None}
+
     def finish(code, note):
         if note:
             say(NOTE_LINE)
+        st = to_close["state"]
+        if code == 0 and st is not None and st.phase != "restored":
+            try:
+                transition(st, "restored")
+            except Exception as e:  # noqa: BLE001 - an unrecorded restore must not read as success
+                say(f"restore done but the run state could not be advanced: {e}; a new write stays blocked")
+                code = 1
+            else:
+                say(f"run {st.run_id} state advanced to restored: a new plan and write are allowed")
         result.exit_code = code
         return result
 
@@ -115,7 +162,7 @@ def run_restore(
         say("no boot entry or staging was touched")
         say(
             "inspect `efibootmgr -v` by hand, or run `restore --emergency-disarm "
-            "--ack <text>` to remove only entries labelled "
+            "--ack-run <text>` to remove only entries labelled "
             f"{label!r} and the one-shot setting"
         )
         return finish(1, True)
@@ -126,6 +173,12 @@ def run_restore(
         return finish(0 if ok else 1, True)
 
     state = loaded.state
+    if state.phase not in TERMINAL and ack_run_id != state.run_id:
+        say(f"refusing: run {state.run_id} is in phase {state.phase}, not finished")
+        say(f"recovery: {describe_recovery(state)}")
+        say(f"acknowledge it with --ack-run {state.run_id} to restore; no boot entry or staging was touched")
+        return finish(1, False)
+    to_close["state"] = state
     phases = [p.get("phase") for p in state.data.get("phases_done", [])]
     note = any(p in _ROLLED_PHASES for p in phases)
     say(f"run {state.run_id} phase {state.phase}: {describe_recovery(state)}")
@@ -181,7 +234,7 @@ def run_restore(
 
 def _emergency(ops, label, ack, loaded, say, result, finish):
     if not ack:
-        say("refusing: --emergency-disarm needs an acknowledgement (--ack <text>)")
+        say("refusing: --emergency-disarm needs an acknowledgement (--ack-run <text>)")
         say(f"it removes only boot entries labelled {label!r} and BootNext if it points at one")
         return finish(1, True)
     if not label:

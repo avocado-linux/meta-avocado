@@ -381,3 +381,85 @@ def test_host_lock_names_host(tmp_path):
             with st.HostLock(path, "board-7", run_id="b"):
                 pass
     assert "board-7" in str(ei.value)
+
+
+# ---- 5.15: recovery text is true, failed and restored are described ----------
+
+import re as _re
+
+
+def _no_bare_ack(text):
+    return not _re.search(r"--ack(?!-run)", text)
+
+
+@pytest.mark.parametrize("phase", ["table-writing", "table-written", "image-written", "verified", "armed"])
+def test_recovery_text_names_the_real_flag_and_the_real_restore_scope(tmp_path, phase):
+    s = _new(tmp_path)
+    if phase in ("verified", "armed"):
+        s = _walk_to_verified(s)
+    else:
+        s = st.transition(s, "table-writing")
+        if phase != "table-writing":
+            s = st.transition(s, "table-written")
+    if phase == "armed":
+        s = st.transition(s, "armed", armed={"entry_number": "0005"})
+    text = st.describe_recovery(s)
+    assert "--ack-run" in text and _no_bare_ack(text)
+    assert "restore the saved partition table" not in text
+    assert "restore the saved state" not in text
+
+
+def test_rerun_refusal_mentions_the_ack_flag(tmp_path):
+    st.transition(_new(tmp_path), "table-writing")
+    with pytest.raises(st.RerunRefused) as ei:
+        st.check_rerun_allowed(tmp_path)
+    assert "--ack-run" in str(ei.value) and _no_bare_ack(str(ei.value))
+
+
+def test_failed_recovery_is_not_no_recovery_needed(tmp_path):
+    s = st.transition(_new(tmp_path), "table-writing")
+    s = st.transition(s, "failed", error="sfdisk exploded")
+    text = st.describe_recovery(s)
+    assert "no recovery needed" not in text
+    assert "sfdisk exploded" in text
+    assert "partition table" in text and "possibly" in text
+    assert "no boot entry" in text.lower()
+
+
+def test_failed_recovery_names_partial_images_and_an_armed_entry(tmp_path):
+    s = st.create_run(
+        tmp_path, run_id="r1", profile_hash="p", plan_hash="q", board_identity={},
+        image_roles=["boot", "root"], arm=True,
+    )
+    s = st.transition(s, "table-writing")
+    s = st.transition(s, "table-written")
+    s = st.transition(s, "image-writing", image="boot")
+    s = st.transition(s, "image-written", image="boot", bytes_written=1, expected_sha256="a", readback_sha256="a")
+    s = st.transition(s, "image-writing", image="root")
+    clean = st.transition(s, "failed", error="dd failed")
+    t1 = st.describe_recovery(clean)
+    assert "root" in t1 and "partial" in t1 and "boot" in t1
+    s2 = st.transition(
+        st.create_run(
+            tmp_path / "b", run_id="r2", profile_hash="p", plan_hash="q", board_identity={},
+            image_roles=[], arm=True,
+        ),
+        "table-writing",
+    )
+    s2 = st.transition(s2, "table-written")
+    s2 = st.transition(s2, "verified")
+    s2 = st.transition(s2, "armed", armed={"entry_number": "0005", "next_armed": True})
+    t2 = st.describe_recovery(st.transition(s2, "failed", error="late"))
+    assert "armed" in t2 and "do not reboot" in t2.lower()
+
+
+def test_restored_is_terminal_and_reachable_from_any_phase(tmp_path):
+    assert "restored" in st.PHASES and "restored" in st.TERMINAL
+    s = st.transition(_new(tmp_path), "table-writing")
+    r = st.transition(s, "restored")
+    assert r.phase == "restored"
+    assert "no recovery needed" in st.describe_recovery(r)
+    with pytest.raises(st.IllegalTransition):
+        st.transition(r, "restored")
+    f = st.transition(s, "failed", error="x")
+    assert st.transition(f, "restored").phase == "restored"

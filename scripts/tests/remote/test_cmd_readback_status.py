@@ -197,6 +197,16 @@ def test_status_absent(tmp_path):
     assert res.exit_code == 0 and lines == ["status: no run recorded"]
 
 
+def test_status_after_a_failed_run_shows_the_failed_recovery_text(tmp_path):
+    s = st.transition(mk_state(tmp_path), "table-writing")
+    st.transition(s, "failed", error="sfdisk exploded")
+    lines = []
+    res = run_status(tmp_path, out=lines.append)
+    assert res.phase == "failed"
+    assert "no recovery needed" not in lines[0]
+    assert "sfdisk exploded" in lines[0] and "partition table" in lines[0]
+
+
 def test_status_reports_phase_run_and_recovery(tmp_path):
     s = mk_state(tmp_path)
     lines = []

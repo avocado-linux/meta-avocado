@@ -39,6 +39,7 @@ from . import cmd_plan, evidence, images, layout
 from .cmd_check import DEFAULT_EFIVARS_DIR, run_check
 from .ops import DD_WRITE_TIMEOUT, OpFailed, Ops, ReadOnlyOps
 from .state import (
+    LOCK_NAME,
     LockHeld,
     OnBoardLock,
     RerunRefused,
@@ -50,7 +51,6 @@ from .state import (
 )
 
 RECORD_NAME = "write.json"
-LOCK_NAME = "lock"
 READBACK_BS = "4M"
 
 _DUMP_PART_RE = re.compile(r"^(\S+)\s*:\s*start=\s*(\d+),\s*size=\s*(\d+)")
