@@ -81,7 +81,11 @@ def test_jetson_loads(jetson):
 
 
 def test_jetson_table_equals_golden(jetson):
-    assert list(jetson.layout.params["table"]) == _golden_table()
+    table = list(jetson.layout.params["table"])
+    carried = {r["number"]: r["uuid"] for r in table if "uuid" in r}
+    assert carried == {16: "4D21B016-B534-45C2-A9FB-5C16E091FD2D"}
+    stripped = [{k: v for k, v in r.items() if k != "uuid"} for r in table]
+    assert stripped == _golden_table()
     assert jetson.layout.params["first_lba"] == 40
     assert jetson.layout.params["last_lba"] == 122314718
     assert jetson.layout.params["device_sectors"] == 122314752
