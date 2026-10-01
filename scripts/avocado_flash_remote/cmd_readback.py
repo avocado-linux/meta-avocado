@@ -130,13 +130,20 @@ def run_readback(
     if nxt:
         say(f"NOTE: BootNext is still set ({nxt}): the one-shot boot did not consume it")
 
-    ops.lsblk_disks()
+    try:
+        ops.lsblk_disks()
+        listing_text = ops.lsblk(disk).text.rstrip("\n")
+    except OpsError as e:
+        return _not_examined(result, say, f"lsblk failed: {e}")
     say(f"== lsblk {disk} ==")
-    say(ops.lsblk(disk).text.rstrip("\n"))
+    say(listing_text)
 
     say("")
     say(f"== {label}, mounted read-only on {mount_dir} ==")
-    parts = ops.lsblk(disk, columns="NAME,PARTLABEL").text.splitlines()
+    try:
+        parts = ops.lsblk(disk, columns="NAME,PARTLABEL").text.splitlines()
+    except OpsError as e:
+        return _not_examined(result, say, f"lsblk failed: {e}")
     node = re.compile(rf"^{re.escape(posixpath.basename(disk))}p?\d+$")
     cands = []
     for row in parts:
@@ -152,7 +159,10 @@ def run_readback(
 
     makedirs(mount_dir, exist_ok=True)
     makedirs(out_dir, exist_ok=True)
-    fs = ops.findmnt_fstype(out_dir).text.strip().splitlines()
+    try:
+        fs = ops.findmnt_fstype(out_dir).text.strip().splitlines()
+    except OpsError as e:
+        return _not_examined(result, say, f"findmnt failed: {e}")
     outfs = fs[0] if fs else ""
     if require_ram_out and outfs not in RAM_FSTYPES:
         say(f"ERROR: {out_dir} is on '{outfs or 'unknown'}', not tmpfs; the logs must not land on the live system's disk. Not mounting.")
@@ -189,6 +199,12 @@ def run_readback(
             except OpsError as e:
                 say(f"WARNING: umount {mount_dir} failed ({e}); unmount it by hand")
     _cleanup_hints(say, mount_dir)
+    return result
+
+
+def _not_examined(result, say, why):
+    say(f"TARGET NOT EXAMINED: {why}")
+    result.exit_code = 2
     return result
 
 

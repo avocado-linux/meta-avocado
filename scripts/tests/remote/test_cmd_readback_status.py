@@ -261,3 +261,15 @@ def test_cmd_status_has_no_mutating_imports():
                 bad.append(f"os.{node.attr}")
     assert bad == []
 
+
+
+def test_missing_lsblk_is_not_examined_exit_2(profile, dirs):
+    ops = RecordingOps(
+        {**script(dirs), "lsblk -dn -o NAME": OpFailed(["lsblk", "-dn", "-o", "NAME"], None, "tool 'lsblk' not found")}
+    )
+    res, copies, lines = run(profile, dirs, ops)
+    assert res.exit_code == 2
+    assert any(ln.startswith("TARGET NOT EXAMINED: ") and "lsblk" in ln for ln in lines), lines
+    assert not any(vector_mutates(c.vector) for c in ops.calls if c.kind == "exec")
+    assert copies == []
+    assert not any(c.startswith("mount ") for c in ops.log)

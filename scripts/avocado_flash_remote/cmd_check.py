@@ -181,6 +181,9 @@ def _not_mounted(c: _Ctx):
 
 def _supports_create(c: _Ctx):
     res = c.ops.efibootmgr_help()
+    if res.rc != 0:
+        first = (res.stderr.strip().splitlines() or [""])[0]
+        raise NotExamined(f"efibootmgr --help failed rc={res.rc}: {first}".rstrip(": "))
     ok = bool(_CREATE_ONLY_RE.search(res.text + res.stderr))
     return ok, "-C listed in --help" if ok else "-C not listed in --help (-c would add to BootOrder)"
 
@@ -251,6 +254,8 @@ def _images_present(c: _Ctx):
 def _image_checksums(c: _Ctx):
     res = c.ops.sha256sum_check(c.staging_dir, MANIFEST)
     lines = (res.text + res.stderr).splitlines()
+    if res.rc != 0 and f"{MANIFEST}: No such file or directory" in res.stderr:
+        raise NotExamined(f"{MANIFEST} could not be read: sha256sum: {MANIFEST}: No such file or directory")
     if res.rc == 0:
         n = sum(1 for ln in lines if ln.endswith(": OK"))
         return True, f"sha256sum --strict -c {MANIFEST}: {n} OK"
