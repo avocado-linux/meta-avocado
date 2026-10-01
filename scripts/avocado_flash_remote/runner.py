@@ -232,7 +232,11 @@ def _do_restore(real, profile, phash, req):
 
 
 def _do_readback(real, profile, phash, req):
-    state_dir, mount_dir, out_dir, ref = _need(req, "state_dir", "mount_dir", "out_dir", "reference_boot_order")
+    state_dir, mount_dir, out_dir = _need(req, "state_dir", "mount_dir", "out_dir")
+    if profile.arm.strategy != "none":
+        (ref,) = _need(req, "reference_boot_order")
+    else:
+        ref = req.get("reference_boot_order")
     kw = {"state_dir": state_dir, "mount_dir": mount_dir, "out_dir": out_dir, "reference_boot_order": ref}
     for key in ("data_partition_name", "fstype"):
         if req.get(key) is not None:

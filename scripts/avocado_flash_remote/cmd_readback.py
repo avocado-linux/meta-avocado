@@ -109,26 +109,29 @@ def run_readback(
     disk = profile.target.device
     label = resolve_data_partition(profile, data_partition_name)
 
-    try:
-        efi = ops.efibootmgr_list()
-    except OpsError as e:
-        say(f"TARGET NOT EXAMINED: efibootmgr -v failed: {e}")
-        result.exit_code = 2
-        return result
-    current = boot_order_of(efi)
-    nxt = boot_next_of(efi)
-    say("== boot variables (efibootmgr -v) ==")
-    say(f"BootNext   : {nxt or '<unset>'}")
-    say(f"BootOrder  : {current or '<none>'}")
-    if not reference_boot_order:
-        say("no reference BootOrder recorded; not compared")
-    elif current == reference_boot_order:
-        say(f"BootOrder MATCHES the reference ({reference_boot_order})")
+    if profile.arm.strategy == "none":
+        say("boot variables: not applicable (arm strategy none)")
     else:
-        say(f"BootOrder DIFFERS: now '{current or '<none>'}', reference '{reference_boot_order}'")
-        result.exit_code = 1
-    if nxt:
-        say(f"NOTE: BootNext is still set ({nxt}): the one-shot boot did not consume it")
+        try:
+            efi = ops.efibootmgr_list()
+        except OpsError as e:
+            say(f"TARGET NOT EXAMINED: efibootmgr -v failed: {e}")
+            result.exit_code = 2
+            return result
+        current = boot_order_of(efi)
+        nxt = boot_next_of(efi)
+        say("== boot variables (efibootmgr -v) ==")
+        say(f"BootNext   : {nxt or '<unset>'}")
+        say(f"BootOrder  : {current or '<none>'}")
+        if not reference_boot_order:
+            say("no reference BootOrder recorded; not compared")
+        elif current == reference_boot_order:
+            say(f"BootOrder MATCHES the reference ({reference_boot_order})")
+        else:
+            say(f"BootOrder DIFFERS: now '{current or '<none>'}', reference '{reference_boot_order}'")
+            result.exit_code = 1
+        if nxt:
+            say(f"NOTE: BootNext is still set ({nxt}): the one-shot boot did not consume it")
 
     try:
         ops.lsblk_disks()
