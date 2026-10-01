@@ -1100,6 +1100,14 @@ def test_plan_body_equals_real_board_dry_run_byte_for_byte():
     body = res.lines[marker + 1 :]
     golden = DRY_RUN.read_text().splitlines()
     assert golden[-1].startswith("DRYRUN-RC=") and golden[-1] == "DRYRUN-RC=0"
+    # The one deliberate difference: the bash kit stages a file called MANIFEST,
+    # the host stages MANIFEST.hashes, so the port's first body line names that
+    # file. Only that exact line shape is normalised back to the kit's wording;
+    # the golden is never edited. The assertion below detects a silent golden edit.
+    kit_line = f"verifying checksums from {STAGE}/MANIFEST"
+    assert golden[0] == kit_line
+    assert body[0] == kit_line + ".hashes"
+    body = [kit_line] + body[1:]
     assert body == golden[:-1]
     assert "\n".join(body) + "\n" == "\n".join(golden[:-1]) + "\n"
 

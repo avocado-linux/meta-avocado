@@ -83,7 +83,7 @@ def script_for(profile, scans, *, root="/dev/nvme0n1p2", stage_src="tmpfs", moun
         "findmnt -no SOURCE -T /etc/ssh": root + "\n",
         "efibootmgr -v": efi,
         "read_file /etc/machine-id": MACHINE_ID + "\n",
-        f"read_file {STAGE}/MANIFEST": manifest if manifest is not None else manifest_text(scans),
+        f"read_file {STAGE}/MANIFEST.hashes": manifest if manifest is not None else manifest_text(scans),
     }
     if serial:
         s[f"read_file /sys/block/{name}/device/serial"] = serial + "\n"
@@ -159,6 +159,13 @@ def test_plan_body_matches_real_board_golden_byte_for_byte():
     header, body = res.lines[:marker], res.lines[marker + 1 :]
     golden = GOLDEN.read_text().splitlines()
     assert golden[-1].startswith("DRYRUN-RC=")
+    # One deliberate difference: the kit stages a file called MANIFEST, the host
+    # stages MANIFEST.hashes. Only that exact line is normalised back to the
+    # kit's wording; the assertions detect a silent edit of the golden.
+    kit_line = f"verifying checksums from {STAGE}/MANIFEST"
+    assert golden[0] == kit_line
+    assert body[0] == kit_line + ".hashes"
+    body = [kit_line] + body[1:]
     assert body == golden[:-1]
     joined = "\n".join(header)
     assert prof.profile_hash(PROFILE_PATH.read_bytes()) in joined
@@ -266,7 +273,7 @@ def test_real_scanner_on_real_files(tmp_path):
         f"{hashlib.sha256(b'data-' + f.encode()).hexdigest()}  {f}\n" for f in sorted(files)
     )
     script = script_for(profile, {}, manifest=man)
-    script[f"read_file {tmp_path}/MANIFEST"] = man
+    script[f"read_file {tmp_path}/MANIFEST.hashes"] = man
     script[f"findmnt -no SOURCE -T {tmp_path}"] = "tmpfs\n"
     ops = RecordingOps(script)
     res = cmd_plan.run_plan(
@@ -353,6 +360,24 @@ def test_refuses_missing_staged_image():
     del scans["boot.img"]
     res, ops, rec = plan(profile, phash, scans=scans, script=script_for(profile, scans_for(profile)))
     assert_clean_refusal(res, ops, rec, "boot.img", "not found")
+
+
+def test_plan_reads_manifest_hashes_from_staging_and_names_it():
+    profile, phash = load()
+    res, ops, rec = plan(profile, phash)
+    assert res.exit_code == 0, res.lines
+    assert f"verifying checksums from {STAGE}/MANIFEST.hashes" in res.lines
+    reads = [c.vector for c in ops.calls if c.kind == "fs" and c.vector[0] == "read_file"]
+    assert ("read_file", f"{STAGE}/MANIFEST.hashes") in [tuple(v) for v in reads]
+
+
+def test_refuses_when_only_a_kit_named_manifest_is_staged():
+    profile, phash = load()
+    scans = scans_for(profile)
+    script = script_for(profile, scans)
+    script[f"read_file {STAGE}/MANIFEST"] = script.pop(f"read_file {STAGE}/MANIFEST.hashes")
+    res, ops, rec = plan(profile, phash, scans=scans, script=script)
+    assert_clean_refusal(res, ops, rec, "manifest not found", f"{STAGE}/MANIFEST.hashes")
 
 
 def test_refuses_missing_manifest_entry():
