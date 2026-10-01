@@ -1,0 +1,338 @@
+"""Tests for the arm (uefi-bootnext, none) and guard (boot-arg, none) strategies."""
+
+import struct
+from types import SimpleNamespace as NS
+
+import pytest
+
+from avocado_flash_remote import arm as armmod
+from avocado_flash_remote.arm import (
+    ArmError,
+    ArmRecord,
+    GuardError,
+    get_arm,
+    get_guard,
+)
+from avocado_flash_remote.ops import MutationRefused, OpResult, ReadOnlyOps, RecordingOps
+
+LABEL = "avocado-emmc-oneshot"
+LOADER = "\\EFI\\BOOT\\BOOTAA64.EFI"
+ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+LIST = "efibootmgr -v"
+
+
+def efi(order="0001,0002,0003", nxt=None, extra=()):
+    lines = []
+    if nxt:
+        lines.append(f"BootNext: {nxt}")
+    lines += ["BootCurrent: 0001", "Timeout: 5 seconds", f"BootOrder: {order}"]
+    lines += ["Boot0001* UEFI NVMe", "Boot0002* UEFI eMMC"]
+    lines += list(extra)
+    return "\n".join(lines) + "\n"
+
+
+NEW = f"Boot0005* {LABEL}\tHD(11,GPT,1,0x0,0x0)/File({LOADER})"
+
+
+def profile(arm_name="uefi-bootnext"):
+    return NS(
+        target=NS(device="/dev/mmcblk0"),
+        images={"esp": NS(partition=11)},
+        arm=NS(
+            strategy=arm_name,
+            params={"label": LABEL, "loader_path": LOADER, "boot_args": "bootmode=bootimg"},
+        ),
+        guard=NS(
+            strategy="boot-arg",
+            params={"argument": ARG, "partitions": ["A_kernel", "B_kernel"]},
+        ),
+    )
+
+
+def calls(ops):
+    return ops.log
+
+
+def assert_no_order_edits(ops):
+    for line in ops.log:
+        parts = line.split()
+        if parts and parts[0] == "efibootmgr":
+            assert "-o" not in parts and "-O" not in parts and "-c" not in parts, line
+
+
+def happy_ops(after_order="0001,0002,0003", **kw):
+    return RecordingOps(
+        {
+            LIST: [
+                efi(),
+                efi(),
+                efi(extra=[NEW], order=after_order),
+                efi(extra=[NEW], order=after_order, nxt="0005"),
+            ],
+            f"efibootmgr -C -d /dev/mmcblk0 -p 11 -L {LABEL} -l {LOADER} -u bootmode=bootimg": efi(
+                extra=[NEW]
+            ),
+        }
+    )
+
+
+# ------------------------------------------------------------------- arm
+
+
+def test_prepare_records_boot_order_and_next():
+    ops = RecordingOps({LIST: efi()})
+    rec = get_arm("uefi-bootnext").prepare(ops, profile(), None)
+    assert rec.preexisting_boot_order == "0001,0002,0003"
+    assert rec.preexisting_next == ""
+    assert rec.label == LABEL
+    assert rec.entry_number == ""
+    assert ops.log == [LIST]
+
+
+def test_prepare_refuses_stale_entry_with_label():
+    ops = RecordingOps({LIST: efi(extra=[NEW])})
+    with pytest.raises(ArmError, match="already exists"):
+        get_arm("uefi-bootnext").prepare(ops, profile(), None)
+
+
+def test_prepare_refuses_existing_bootnext_like_the_kit():
+    ops = RecordingOps({LIST: efi(nxt="0002")})
+    with pytest.raises(ArmError, match="BootNext is already set"):
+        get_arm("uefi-bootnext").prepare(ops, profile(), None)
+
+
+def test_prepare_refuses_missing_boot_order():
+    ops = RecordingOps({LIST: "BootCurrent: 0001\n"})
+    with pytest.raises(ArmError, match="BootOrder"):
+        get_arm("uefi-bootnext").prepare(ops, profile(), None)
+
+
+def test_arm_happy_path_exact_vectors_next_only():
+    ops = happy_ops()
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    rec = a.arm(ops, profile(), rec)
+    assert rec.entry_number == "0005"
+    assert rec.next_armed is True
+    assert ops.log == [
+        LIST,
+        LIST,
+        f"efibootmgr -C -d /dev/mmcblk0 -p 11 -L {LABEL} -l {LOADER} -u bootmode=bootimg",
+        LIST,
+        "efibootmgr -n 0005",
+        LIST,
+    ]
+    assert_no_order_edits(ops)
+
+
+def test_arm_entry_number_falls_back_to_relisting():
+    ops = happy_ops()
+    key = f"efibootmgr -C -d /dev/mmcblk0 -p 11 -L {LABEL} -l {LOADER} -u bootmode=bootimg"
+    ops.script[key] = ""
+    a = get_arm("uefi-bootnext")
+    rec = a.arm(ops, profile(), a.prepare(ops, profile(), None))
+    assert rec.entry_number == "0005"
+
+
+def test_firmware_rewriting_boot_order_after_create_fails_do_not_reboot():
+    ops = happy_ops(after_order="0005,0001,0002,0003")
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError) as ei:
+        a.arm(ops, profile(), rec)
+    msg = str(ei.value)
+    assert "DO NOT REBOOT" in msg and "restore" in msg
+    assert ei.value.record.entry_number == "0005"
+    assert "efibootmgr -n 0005" not in ops.log  # never armed
+    assert_no_order_edits(ops)
+
+
+def test_firmware_rewriting_boot_order_after_next_fails():
+    ops = RecordingOps(
+        {
+            LIST: [
+                efi(),
+                efi(),
+                efi(extra=[NEW]),
+                efi(extra=[NEW], order="0005,0001,0002,0003", nxt="0005"),
+            ],
+        }
+    )
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="DO NOT REBOOT") as ei:
+        a.arm(ops, profile(), rec)
+    assert ei.value.record.next_armed is True
+    assert_no_order_edits(ops)
+
+
+def test_boot_order_changed_before_create_stops_before_any_mutation():
+    ops = RecordingOps({LIST: [efi(), efi(order="0002,0001")]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="changed"):
+        a.arm(ops, profile(), rec)
+    assert not any("-C" in line.split() for line in ops.log)
+
+
+def test_bootnext_not_reading_back_fails():
+    ops = RecordingOps(
+        {LIST: [efi(), efi(), efi(extra=[NEW]), efi(extra=[NEW])]},
+    )
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="DO NOT REBOOT"):
+        a.arm(ops, profile(), rec)
+
+
+def test_disarm_clears_next_and_deletes_only_recorded_entry():
+    ops = RecordingOps({LIST: efi(extra=[NEW], nxt="0005")})
+    rec = ArmRecord(
+        entry_number="0005",
+        label=LABEL,
+        preexisting_boot_order="0001,0002,0003",
+        preexisting_next="",
+        next_armed=True,
+    )
+    get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST, "efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert_no_order_edits(ops)
+
+
+def test_disarm_refuses_entry_with_different_label():
+    other = "Boot0005* something-else\tHD(1,GPT)"
+    ops = RecordingOps({LIST: efi(extra=[other])})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", False)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert not any("-B" in line.split() for line in ops.log)
+    assert any("leaving" in n for n in notes)
+
+
+def test_disarm_leaves_foreign_bootnext_alone():
+    ops = RecordingOps({LIST: efi(extra=[NEW], nxt="0002")})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    get_arm("uefi-bootnext").disarm(ops, rec)
+    assert "efibootmgr -N" not in ops.log
+    assert "efibootmgr -B -b 0005" in ops.log
+
+
+def test_disarm_without_entry_does_nothing():
+    ops = RecordingOps()
+    get_arm("uefi-bootnext").disarm(ops, ArmRecord("", LABEL, "0001", "", False))
+    assert ops.log == []
+
+
+def test_none_arm_does_nothing():
+    ops = RecordingOps()
+    a = get_arm("none")
+    rec = a.prepare(ops, profile("none"), None)
+    rec = a.arm(ops, profile("none"), rec)
+    a.disarm(ops, rec)
+    assert ops.log == []
+    assert rec.entry_number == "" and rec.next_armed is False
+
+
+def test_unknown_names():
+    with pytest.raises(KeyError):
+        get_arm("evil")
+    with pytest.raises(KeyError):
+        get_guard("evil")
+
+
+def test_record_round_trips():
+    rec = ArmRecord("0005", LABEL, "0001,0002", "", True)
+    assert ArmRecord.from_dict(rec.to_dict()) == rec
+
+
+# ----------------------------------------------------------------- guard
+
+
+def header(cmdline=ARG, extra="", magic=b"ANDROID!", version=0):
+    h = bytearray(2048)
+    h[0:8] = magic
+    h[40:44] = struct.pack("<I", version)
+    c = cmdline.encode()
+    h[64 : 64 + len(c)] = c
+    e = extra.encode()
+    h[608 : 608 + len(e)] = e
+    return bytes(h)
+
+
+NODES = {"A_kernel": "/dev/mmcblk0p3", "B_kernel": "/dev/mmcblk0p6"}
+
+
+def dd_key(node):
+    return f"dd if={node} bs=2048 count=1 status=none"
+
+
+def guard_ops(a, b):
+    return RecordingOps({dd_key("/dev/mmcblk0p3"): a, dd_key("/dev/mmcblk0p6"): b})
+
+
+def test_guard_passes_when_argument_present_on_both():
+    ops = guard_ops(header("root=/dev/x " + ARG + " quiet"), header(ARG))
+    get_guard("boot-arg").check(ops, profile(), NODES)
+    assert ops.log == [dd_key("/dev/mmcblk0p3"), dd_key("/dev/mmcblk0p6")]
+    assert not any("of=" in line for line in ops.log)
+
+
+def test_guard_refuses_missing_argument():
+    ops = guard_ops(header("root=/dev/x"), header(ARG))
+    with pytest.raises(GuardError, match="A_kernel"):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_token_match_is_exact():
+    ops = guard_ops(header(ARG + "y"), header(ARG))
+    with pytest.raises(GuardError):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+    ops = guard_ops(header("x" + ARG), header(ARG))
+    with pytest.raises(GuardError):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_counts_argument_in_extra_cmdline_like_the_kit():
+    ops = guard_ops(header("root=/dev/x", extra=ARG), header("a", extra="b " + ARG))
+    get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_kit_concatenation_quirk_is_preserved():
+    # kit: cmdline_has_arg tests BC_A+BC_B joined with and without a space.
+    ops = guard_ops(header("quiet module_blacklist=nvme,", extra="nvme_core,pcie_tegra194"), header(ARG))
+    get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_rejects_bad_magic_and_version_and_short_read():
+    for bad in (header(magic=b"NOTANDRO"), header(version=7), b"ANDROID!"):
+        ops = guard_ops(bad, header(ARG))
+        with pytest.raises(GuardError):
+            get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_unknown_partition_node():
+    ops = guard_ops(header(), header())
+    with pytest.raises(GuardError, match="B_kernel"):
+        get_guard("boot-arg").check(ops, profile(), {"A_kernel": "/dev/mmcblk0p3"})
+
+
+def test_guard_safe_under_read_only_ops():
+    inner = guard_ops(header(), header())
+    ro = ReadOnlyOps(inner)
+    get_guard("boot-arg").check(ro, profile(), NODES)
+    with pytest.raises(MutationRefused):
+        ro.efibootmgr_next("0005")
+    assert not any(line.startswith("efibootmgr") for line in inner.log)
+
+
+def test_guard_none_does_nothing():
+    ops = RecordingOps()
+    get_guard("none").check(ops, profile(), NODES)
+    assert ops.log == []
+
+
+def test_no_unbind_or_detach_in_source():
+    import pathlib
+
+    src = pathlib.Path(armmod.__file__).read_text()
+    for word in ("unbind", "detach", "sysfs_write"):
+        assert word not in src
