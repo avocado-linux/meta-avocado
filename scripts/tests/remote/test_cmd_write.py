@@ -213,7 +213,7 @@ def test_good_run_completes_and_records_every_transition(env):
     st = statemod.load_state(env.state_dir).state
     assert st.phase == "complete"
     phases = [p["phase"] for p in st.data["phases_done"]]
-    expected = ["planned", "table-written"] + ["image-writing", "image-written"] * len(env.profile.images)
+    expected = ["planned", "table-writing", "table-written"] + ["image-writing", "image-written"] * len(env.profile.images)
     assert phases == expected + ["verified", "armed", "complete"]
     for role, img in st.data["images"].items():
         assert img["state"] == "written"
@@ -540,7 +540,7 @@ ROLES = ["boot", "dtb_b", "var"]  # first, middle and last image of seven
 
 def _inject_cases():
     cases = [
-        ("sfdisk-write", lambda e: {f"sfdisk {DEV}": OpFailed(["sfdisk", DEV], 1, "boom")}, "planned"),
+        ("sfdisk-write", lambda e: {f"sfdisk {DEV}": OpFailed(["sfdisk", DEV], 1, "boom")}, "table-writing"),
         ("table-has-no-label", lambda e: {f"sfdisk --dump {DEV}": [BLANK, BLANK, BLANK]}, "table-written"),
         ("partition-size-wrong", lambda e: {f"blockdev --getsize64 {layout.partition_node(DEV, 3)}": "123\n"},
          "table-written"),
@@ -599,6 +599,47 @@ def test_crash_that_cannot_record_failed_leaves_last_phase_and_rerun_is_refused(
     assert not efi_writes or name.startswith("arm")
     res2, ops2 = env.run()
     assert_clean_refusal(res2, ops2, "previous run is not finished", "Permitted recovery", RUN_ID)
+
+
+def test_kill_after_table_write_before_table_written_leaves_table_writing(env, monkeypatch):
+    real = cmd_write.transition
+
+    def killing(state, phase, **kw):
+        if phase in ("table-written", "failed"):
+            raise OSError("killed")
+        return real(state, phase, **kw)
+
+    monkeypatch.setattr(cmd_write, "transition", killing)
+    res, ops = env.run()
+    assert res.exit_code == 1
+    r = statemod.load_state(env.state_dir)
+    assert r.status == "ok"
+    assert r.state.phase == "table-writing"
+    # The state was durable before the first mutating call ran.
+    vectors = [c.vector for c in ops.calls]
+    assert ["sfdisk", DEV] in vectors
+    assert not [c for c in mutations(ops) if c.vector[0] == "dd"]
+    lock_is_free(env)
+    res2, ops2 = env.run()
+    assert_clean_refusal(res2, ops2, "previous run is not finished", "restore-then-restart", RUN_ID)
+
+
+def test_table_writing_is_recorded_before_the_sfdisk_write(env, monkeypatch):
+    ops = RecordingOps(env.script())
+    at = {}
+    real = cmd_write.transition
+
+    def spy(state, phase, **kw):
+        if phase in ("table-writing", "table-written"):
+            at[phase] = len(mutations(ops))
+        return real(state, phase, **kw)
+
+    monkeypatch.setattr(cmd_write, "transition", spy)
+    res, _ = env.run(ops=ops)
+    assert res.exit_code == 0, res.lines
+    assert at["table-writing"] == 0  # no mutation had happened yet
+    assert at["table-written"] == 1  # exactly the sfdisk write
+    assert "sfdisk" == mutations(ops)[0].vector[0]
 
 
 def test_staged_image_changed_after_plan_fails_the_run_at_that_image(env):

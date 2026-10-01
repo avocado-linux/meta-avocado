@@ -29,8 +29,13 @@ def _new(tmp_path, arm=True):
     )
 
 
+def _table_written(s):
+    s = st.transition(s, "table-writing")
+    return st.transition(s, "table-written")
+
+
 def _walk_to_verified(s):
-    s = st.transition(s, "table-written")
+    s = _table_written(s)
     for role in ROLES:
         s = st.transition(s, "image-writing", image=role)
         s = st.transition(
@@ -82,7 +87,9 @@ def test_arm_required_when_enabled(tmp_path):
         st.transition(s, "complete")
 
 
-@pytest.mark.parametrize("target", ["image-writing", "verified", "armed", "complete", "planned"])
+@pytest.mark.parametrize(
+    "target", ["table-written", "image-writing", "verified", "armed", "complete", "planned"]
+)
 def test_no_skipping_from_planned(tmp_path, target):
     s = _new(tmp_path)
     with pytest.raises(st.IllegalTransition):
@@ -90,13 +97,13 @@ def test_no_skipping_from_planned(tmp_path, target):
 
 
 def test_no_going_back(tmp_path):
-    s = st.transition(_new(tmp_path), "table-written")
+    s = _table_written(_new(tmp_path))
     with pytest.raises(st.IllegalTransition):
         st.transition(s, "planned")
 
 
 def test_images_in_profile_order_and_all_required(tmp_path):
-    s = st.transition(_new(tmp_path), "table-written")
+    s = _table_written(_new(tmp_path))
     with pytest.raises(st.IllegalTransition):
         st.transition(s, "image-writing", image="rootfs")
     with pytest.raises(st.IllegalTransition):
@@ -107,13 +114,53 @@ def test_images_in_profile_order_and_all_required(tmp_path):
 
 
 def test_terminal_states_are_final_and_failed_from_anywhere(tmp_path):
-    s = st.transition(_new(tmp_path), "table-written")
+    s = _table_written(_new(tmp_path))
     s = st.transition(s, "failed", error="boom")
     assert _read(tmp_path).data["error"] == "boom"
     with pytest.raises(st.IllegalTransition):
         st.transition(s, "complete")
     with pytest.raises(st.IllegalTransition):
         st.transition(s, "failed")
+
+
+def test_table_writing_sits_between_planned_and_table_written(tmp_path):
+    s = st.transition(_new(tmp_path), "table-writing")
+    assert _read(tmp_path).phase == "table-writing"
+    for target in ("planned", "table-writing", "image-writing", "verified"):
+        with pytest.raises(st.IllegalTransition):
+            st.transition(s, target, image="boot")
+    assert st.transition(s, "table-written").phase == "table-written"
+    s2 = st.transition(_table_written(_new(tmp_path / "x")), "failed", error="e")
+    with pytest.raises(st.IllegalTransition):
+        st.transition(s2, "table-writing")
+
+
+def test_cannot_go_back_to_table_writing(tmp_path):
+    s = _table_written(_new(tmp_path))
+    with pytest.raises(st.IllegalTransition):
+        st.transition(s, "table-writing")
+
+
+def test_table_writing_may_fail(tmp_path):
+    s = st.transition(_new(tmp_path), "table-writing")
+    assert st.transition(s, "failed", error="x").phase == "failed"
+
+
+def test_table_writing_rerun_refusal_prints_restore_then_restart(tmp_path):
+    st.transition(_new(tmp_path), "table-writing")
+    with pytest.raises(st.RerunRefused) as ei:
+        st.check_rerun_allowed(tmp_path)
+    msg = str(ei.value)
+    assert "table-writing" in msg and "restore-then-restart" in msg
+    assert st.RECOVERY["table-writing"] == "restore-then-restart"
+    assert "re-inspect" in st.describe_recovery(_read(tmp_path))
+
+
+def test_planned_recovery_says_nothing_recorded_not_nothing_written(tmp_path):
+    text = st.describe_recovery(_new(tmp_path))
+    assert "no board change has been recorded" in text
+    assert "lock" in text
+    assert "nothing was written" not in text
 
 
 def test_failed_from_planned(tmp_path):
@@ -131,6 +178,7 @@ class Boom(BaseException):
 
 def _transitions(s):
     """Yield (name, callable) for every transition of the arm path."""
+    yield "table-writing", lambda s: st.transition(s, "table-writing")
     yield "table-written", lambda s: st.transition(s, "table-written")
     for role in ROLES:
         yield f"writing-{role}", lambda s, r=role: st.transition(s, "image-writing", image=r)
@@ -256,7 +304,7 @@ def test_recovery_table_one_action_per_nonterminal_phase():
     assert set(st.RECOVERY) == set(st.PHASES) - set(st.TERMINAL)
     assert all(isinstance(v, str) and v for v in st.RECOVERY.values())
     assert st.RECOVERY["verified"] == "restore"
-    assert st.RECOVERY["planned"] == "none-needed"
+    assert st.RECOVERY["planned"] == "none-recorded"
 
 
 # ---- locks ---------------------------------------------------------------

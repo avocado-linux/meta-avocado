@@ -26,7 +26,7 @@ from .ops import OpsError
 from .state import describe_recovery, load_state
 
 NOTE_LINE = "note: restore does not roll back partition table or image changes"
-_ROLLED_PHASES = ("table-written", "image-writing", "image-written", "verified", "armed", "complete")
+_ROLLED_PHASES = ("table-writing", "table-written", "image-writing", "image-written", "verified", "armed", "complete")
 _MIN_PARTS = 3  # "/", "run", "dir"
 
 
