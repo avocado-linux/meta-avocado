@@ -197,20 +197,37 @@ class NoneGuard:
     def check(self, ops, profile, node_by_partition_name) -> None:
         return None
 
+    def check_staged(self, profile, staging_dir, file_reader=None) -> None:
+        return None
 
-def read_boot_cmdline(ops, node):
-    """Return (cmdline, extra_cmdline) from the Android boot image header at node."""
-    hdr = ops.dd_read(node, 2048, count=1)
+
+def read_staged_header(path):
+    """Bounded read of the first header bytes of a staged image file."""
+    with open(path, "rb") as fh:
+        return fh.read(_HEADER_BYTES)
+
+
+def parse_boot_header(hdr, where):
+    """Return (cmdline, extra_cmdline) from Android boot image header bytes.
+
+    The single place the header is validated and decoded; ``where`` names the
+    source (a device node or a staged file) in the refusal text.
+    """
     if len(hdr) < _HEADER_BYTES:
-        raise GuardError(f"{node}: short read of the boot image header ({len(hdr)} bytes)")
+        raise GuardError(f"{where}: short read of the boot image header ({len(hdr)} bytes)")
     if hdr[:8] != _ANDROID_MAGIC:
-        raise GuardError(f"{node} does not start with an Android boot image header (magic ANDROID!)")
+        raise GuardError(f"{where} does not start with an Android boot image header (magic ANDROID!)")
     version = int.from_bytes(hdr[40:44], "little")
     if version not in (0, 1, 2):
-        raise GuardError(f"{node}: boot image header_version {version} is not understood (0, 1, 2)")
+        raise GuardError(f"{where}: boot image header_version {version} is not understood (0, 1, 2)")
     a = hdr[64:576].replace(b"\0", b"").decode("utf-8", errors="replace")
     b = hdr[608:1632].replace(b"\0", b"").decode("utf-8", errors="replace")
     return a, b
+
+
+def read_boot_cmdline(ops, node):
+    """Return (cmdline, extra_cmdline) from the Android boot image header at node."""
+    return parse_boot_header(ops.dd_read(node, 2048, count=1), node)
 
 
 def cmdline_has_arg(arg, a, b) -> bool:
@@ -235,6 +252,31 @@ class BootArgGuard:
                     f"'{arg}'; refusing to arm"
                 )
 
+    def check_staged(self, profile, staging_dir, file_reader=None) -> None:
+        """Same rules as ``check``, read from the staged files before any write."""
+        reader = file_reader or read_staged_header
+        params = profile.guard.params
+        arg = params["argument"]
+        number_of = {p["name"]: p["number"] for p in profile.layout.params["table"]}
+        for name in params["partitions"]:
+            img = next(
+                (i for i in profile.images.values() if i.partition == number_of.get(name)), None
+            )
+            if img is None:
+                raise GuardError(f"no image is mapped to guard partition {name}; fix the profile")
+            try:
+                hdr = reader(f"{staging_dir}/{img.file}")
+            except OSError as exc:
+                raise GuardError(f"staged boot image {img.file} cannot be read: {exc}") from None
+            try:
+                a, b = parse_boot_header(hdr, f"staged boot image {img.file}")
+            except GuardError as exc:
+                raise GuardError(f"{exc} (guard boot-arg)") from None
+            if not cmdline_has_arg(arg, a, b):
+                raise GuardError(
+                    f"staged boot image {img.file} lacks the required argument {arg} (guard boot-arg)"
+                )
+
 
 _GUARDS = {"boot-arg": BootArgGuard, "none": NoneGuard}
 
@@ -245,5 +287,6 @@ def get_guard(name):
 
 __all__ = [
     "Arm", "ArmError", "ArmRecord", "BootArgGuard", "GuardError", "NoneArm", "NoneGuard",
-    "cmdline_has_arg", "get_arm", "get_guard", "read_boot_cmdline",
+    "cmdline_has_arg", "get_arm", "get_guard", "parse_boot_header", "read_boot_cmdline",
+    "read_staged_header",
 ]  # fmt: skip

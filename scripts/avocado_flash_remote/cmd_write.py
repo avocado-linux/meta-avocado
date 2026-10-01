@@ -245,6 +245,7 @@ def run_write(
     out: Callable = print,
     scanner: Callable = images.scan,
     reverifier: Callable = images.reverify,
+    file_reader: Callable | None = None,
 ) -> WriteResult:
     """Write the planned images to the target. See the module docstring."""
     result = WriteResult(1, None, None)
@@ -281,6 +282,10 @@ def run_write(
         except layout.LayoutError as exc:
             raise _Refusal(f"layout does not fit the target: {exc}") from exc
         _authorise(plan, profile, profile_hash, ro, scans, sfdisk_text)
+        try:
+            armmod.get_guard(profile.guard.strategy).check_staged(profile, staging_dir, file_reader)
+        except armmod.GuardError as exc:
+            raise _Refusal(str(exc)) from exc
         # ---- 3: prior state
         _prior_state_gate(state_dir, result.run_id, ack_run_id)
     except _Refusal as exc:

@@ -828,6 +828,7 @@ def _runner_signal_setup(tmp_path):
         def wrapper(real, profile, phash, **kw):
             kw["scanner"] = lambda p: env.scans[p.rsplit("/", 1)[-1]]
             kw["reverifier"] = lambda p, s: None
+            kw["file_reader"] = lambda p: T.boot_header()
             return cmd_write.run_write(ops, profile, phash, **kw)
 
         runner.run_write = wrapper

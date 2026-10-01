@@ -280,6 +280,7 @@ def run_plan(
     out: Callable = print,
     scanner: Callable = images.scan,
     now: Callable = _utc_now,
+    file_reader: Callable | None = None,
 ) -> PlanResult:
     """Verify, decide and write the plan record. Mutates nothing on the board."""
     writer = record_writer or evidence.write_record
@@ -296,6 +297,10 @@ def run_plan(
         except layout.LayoutError as exc:
             raise _Refusal(f"layout does not fit the target: {exc}") from exc
         scans, n_manifest = _check_images(ops, profile, staging_dir, scanner)
+        try:
+            armmod.get_guard(profile.guard.strategy).check_staged(profile, staging_dir, file_reader)
+        except armmod.GuardError as exc:
+            raise _Refusal(str(exc)) from exc
         try:
             record = armmod.get_arm(profile.arm.strategy).prepare(ops, profile)
         except armmod.ArmError as exc:

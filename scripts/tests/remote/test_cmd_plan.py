@@ -33,6 +33,21 @@ EFI = (
 BLANK = OpResult(rc=1, stderr="sfdisk: /dev/mmcblk0: does not contain a recognized partition table")
 
 
+ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+
+
+def hdr(cmdline="console=ttyS0 " + ARG, extra="", magic=b"ANDROID!", version=0):
+    h = bytearray(2048)
+    h[0:8] = magic
+    h[40:44] = version.to_bytes(4, "little")
+    h[64 : 64 + len(cmdline)] = cmdline.encode()
+    h[608 : 608 + len(extra)] = extra.encode()
+    return bytes(h)
+
+
+GOOD_HDR = hdr()
+
+
 def load(data=None):
     raw = PROFILE_PATH.read_bytes() if data is None else data
     return prof.load_profile_bytes(raw), prof.profile_hash(raw)
@@ -257,6 +272,7 @@ def test_real_scanner_on_real_files(tmp_path):
     res = cmd_plan.run_plan(
         ops, profile, phash, staging_dir=str(tmp_path), run_dir=str(tmp_path / "run"),
         record_writer=Rec(), board_identity=None, run_id=RUN_ID, out=lambda s: None,
+        file_reader=lambda p: GOOD_HDR,
     )
     assert res.exit_code == 0, res.lines
 
@@ -353,6 +369,60 @@ def test_refuses_checksum_mismatch():
     man = manifest_text(scans).replace(scans["boot.img"].sha256, "0" * 64)
     res, ops, rec = plan(profile, phash, scans=scans, script=script_for(profile, scans, manifest=man))
     assert_clean_refusal(res, ops, rec, "checksum", "boot.img")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [hdr("root=/dev/x"), hdr(ARG + "y"), hdr("x" + ARG), hdr(version=3), hdr(magic=b"NOTANDRO"), b"ANDROID!"],
+    ids=["noarg", "nearmiss-suffix", "nearmiss-prefix", "hdrv3", "nomagic", "short"],
+)
+def test_refuses_bad_staged_boot_image_before_any_record(bad):
+    profile, phash = load()
+    res, ops, rec = plan(profile, phash, file_reader=lambda p: bad if p.endswith("boot.img") else GOOD_HDR)
+    assert_clean_refusal(res, ops, rec, "plan refused: staged boot image boot.img", "(guard boot-arg)")
+
+
+def test_staged_boot_image_refusal_wording_for_missing_argument():
+    profile, phash = load()
+    res, ops, rec = plan(profile, phash, file_reader=lambda p: hdr("root=/dev/x"))
+    assert res.lines == [
+        f"plan refused: staged boot image boot.img lacks the required argument {ARG} (guard boot-arg)"
+    ]
+
+
+def test_good_staged_boot_image_passes_and_argument_may_sit_in_extra_cmdline():
+    profile, phash = load()
+    seen = []
+
+    def rd(p):
+        seen.append(p)
+        return hdr("quiet", extra=ARG)
+
+    res, ops, rec = plan(profile, phash, file_reader=rd)
+    assert res.exit_code == 0
+    assert seen == [f"{STAGE}/boot.img", f"{STAGE}/boot.img"]
+
+
+def test_guard_none_checks_no_staged_image():
+    doc = json.loads(PROFILE_PATH.read_bytes())
+    doc["guard"] = {"strategy": "none", "params": {}}
+    raw = json.dumps(doc).encode()
+    profile, phash = load(raw)
+
+    def rd(p):
+        raise AssertionError("must not read")
+
+    res, ops, rec = plan(profile, phash, file_reader=rd)
+    assert res.exit_code == 0
+
+
+def test_refuses_when_guard_partition_has_no_image():
+    doc = json.loads(PROFILE_PATH.read_bytes())
+    del doc["images"]["boot"]
+    profile, phash = load(json.dumps(doc).encode())
+    scans = scans_for(profile)
+    res, ops, rec = plan(profile, phash, scans=scans, script=script_for(profile, scans))
+    assert_clean_refusal(res, ops, rec, "A_kernel", "no image")
 
 
 def test_refuses_zero_filled_var_naming_the_image():
