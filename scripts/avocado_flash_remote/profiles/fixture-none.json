@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "board": "fixture-none",
+  "description": "Stub device for the generic lifecycle tests; arms nothing and guards nothing.",
+  "target": {
+    "device": "/dev/loop-fixture",
+    "sector_size": 512,
+    "sectors": 20480,
+    "require_empty": true,
+    "identity": {
+      "kind": "sysfs-name",
+      "value": "loop-fixture"
+    }
+  },
+  "layout": {
+    "strategy": "explicit-table",
+    "params": {
+      "sector_size": 512,
+      "first_lba": 2048,
+      "last_lba": 20446,
+      "device_sectors": 20480,
+      "table": [
+        {
+          "number": 1,
+          "name": "boot",
+          "start": 2048,
+          "size": 2048,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 2,
+          "name": "esp",
+          "start": 4096,
+          "size": 2048,
+          "type_guid": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+        },
+        {
+          "number": 3,
+          "name": "data",
+          "start": 6144,
+          "size": 10240,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        }
+      ]
+    }
+  },
+  "images": {
+    "boot": {
+      "partition": 1,
+      "max_bytes": 1048576,
+      "must_be_populated": true,
+      "file": "boot.img"
+    },
+    "esp": {
+      "partition": 2,
+      "max_bytes": 1048576,
+      "must_be_populated": true,
+      "file": "esp.img"
+    },
+    "data": {
+      "partition": 3,
+      "max_bytes": 5242880,
+      "must_be_populated": true,
+      "file": "data.img"
+    }
+  },
+  "checks": [
+    "device-exists",
+    "device-empty",
+    "staged-images-present"
+  ],
+  "arm": {
+    "strategy": "none",
+    "params": {}
+  },
+  "guard": {
+    "strategy": "none",
+    "params": {}
+  },
+  "staging": {
+    "dir": "/run/fixture-images",
+    "min_free_kib": 1024
+  },
+  "state_dir": "/var/lib/fixture-flash"
+}
