@@ -16,9 +16,11 @@ Exit codes: the subcommand's own code; 3 profile/request mismatch; 64 usage;
 70 unexpected runner error; 130 interrupted.
 """
 
+import datetime
 import hashlib
 import json
 import os
+import stat
 import sys
 import zipfile
 
@@ -28,6 +30,7 @@ from .cmd_readback import run_readback
 from .cmd_restore import run_restore
 from .cmd_status import run_status
 from .cmd_write import run_write
+from . import evidence, state as runstate
 from .ops import ReadOnlyOps, RealOps
 from .profile import ProfileError, load_profile_bytes
 
@@ -252,7 +255,74 @@ _HANDLERS = {
 }
 
 
+def _read_json(path):
+    try:
+        with open(path, "rb") as f:
+            data = json.loads(f.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _finalize_records(sub, profile, phash, req, rc):
+    """Write MANIFEST.json (atomically, last) over the files present in run_dir.
+
+    Rebuilt from scratch on every call so a re-run never lists a file that is
+    gone. check and status write nothing. Never raises: a missing manifest is
+    reported by the host as not verified, which is the honest outcome.
+    """
+    run_dir = req.get("run_dir")
+    if sub not in _RUN_DIR_SUBS or not isinstance(run_dir, str) or not os.path.isdir(run_dir):
+        return
+    try:
+        plan = _read_json(os.path.join(run_dir, "plan.json")) or {}
+        st = {}
+        loaded = runstate.load_state(profile.state_dir)
+        if loaded.status == "ok" and req.get("run_id") in (None, loaded.state.run_id):
+            st = loaded.state.data
+        identity = plan.get("board_identity") or st.get("board_identity")
+        hashes = plan.get("image_hashes")
+        if not isinstance(hashes, dict):
+            hashes = {
+                r: i["expected_sha256"]
+                for r, i in (st.get("images") or {}).items()
+                if isinstance(i, dict) and i.get("expected_sha256")
+            }
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rs = evidence.RecordSet(
+            run_dir=run_dir,
+            host_tool_version=str(req.get("tool_version") or "unknown"),
+            runner_version=RUNNER_VERSION,
+            profile_hash=phash,
+            image_hashes=hashes,
+            board_identity=identity,
+            transition_log=list(st.get("phases_done") or []),
+            host_utc=str(req.get("host_utc") or now),
+            board_utc=now,
+        )
+        for name in sorted(os.listdir(run_dir)):
+            path = os.path.join(run_dir, name)
+            if name == evidence.MANIFEST or name.endswith(".tmp"):
+                continue
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                continue
+            with open(path, "rb") as f:
+                data = f.read()
+            rs.artifacts.append(
+                {"name": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            )
+        rs.finalize("runner-complete" if rc == 0 else "incomplete")
+    except Exception as e:  # noqa: BLE001 - evidence is best-effort, rc stays the subcommand's
+        print(f"runner error: cannot write {evidence.MANIFEST}: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 def _run_guarded(sub, profile, phash, req):
+    rc = _run_sub(sub, profile, phash, req)
+    _finalize_records(sub, profile, phash, req, rc)
+    return rc
+
+
+def _run_sub(sub, profile, phash, req):
     try:
         real = RealOps(req.get("tool_dir"))
         result = _HANDLERS[sub](real, profile, phash, req)

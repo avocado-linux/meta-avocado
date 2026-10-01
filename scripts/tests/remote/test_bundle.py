@@ -534,3 +534,122 @@ def test_required_stdlib_helper_counts_from_imports(tmp_path):
     (tmp_path / "m.py").write_text("from os import path\nimport a.b\nfrom . import x\nfrom avocado_flash_remote import y\n")
     src = (tmp_path / "m.py").read_bytes()
     assert bundle._stdlib_modules(src, "m.py") == ["a", "os"]
+
+
+# ------------------------------------------------- record-set manifest (5.12)
+
+
+def _plan_stub(tmp_path, code=0, write=True):
+    def stub(*a, run_dir=None, **k):
+        if write:
+            from avocado_flash_remote import evidence
+
+            evidence.write_record(
+                run_dir,
+                "plan.json",
+                {
+                    "run_id": "r1",
+                    "board_identity": {"machine_id": "m1", "device_serial": "s1"},
+                    "image_hashes": {"boot": "ab" * 32},
+                },
+            )
+        return type("R", (), {"exit_code": code})()
+
+    return stub
+
+
+def _manifest(rd):
+    return json.loads((rd / "MANIFEST.json").read_text())
+
+
+def test_manifest_written_after_plan_and_verifies(tmp_path, monkeypatch):
+    from avocado_flash_remote import evidence
+
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path))
+    assert _main("plan", tmp_path, tool_version="9.9") == 0
+    rd = tmp_path / "state" / "r1" / "records"
+    assert evidence.verify_record_set(rd).ok
+    m = _manifest(rd)
+    assert [a["name"] for a in m["artifacts"]] == ["plan.json"]
+    assert m["host_tool_version"] == "9.9"
+    assert m["runner_version"] == runner.RUNNER_VERSION
+    assert m["run_status"] == "runner-complete"
+    assert m["image_hashes"] == {"boot": "ab" * 32}
+    assert m["board_identity"] == {"machine_id": "m1", "device_serial": "s1"}
+    assert m["profile_hash"] == hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
+    assert "MANIFEST.json" not in [a["name"] for a in m["artifacts"]]
+    assert not [p for p in rd.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_manifest_defaults_and_incomplete_on_nonzero(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path, code=4, write=False))
+    assert _main("plan", tmp_path) == 4
+    m = _manifest(tmp_path / "state" / "r1" / "records")
+    assert m["host_tool_version"] == "unknown"
+    assert m["run_status"] == "incomplete"
+    assert m["board_identity"] is None and m["image_hashes"] == {}
+
+
+def test_manifest_for_refusal_without_records_lists_nothing_and_verifies(tmp_path, monkeypatch):
+    from avocado_flash_remote import evidence
+
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path, code=2, write=False))
+    assert _main("plan", tmp_path) == 2
+    rd = tmp_path / "state" / "r1" / "records"
+    assert _manifest(rd)["artifacts"] == []
+    assert evidence.verify_record_set(rd).ok
+
+
+def test_manifest_on_unexpected_exception(tmp_path, monkeypatch):
+    from avocado_flash_remote import evidence
+
+    def boom(*a, **k):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(runner, "run_plan", boom)
+    assert _main("plan", tmp_path) == 70
+    rd = tmp_path / "state" / "r1" / "records"
+    assert _manifest(rd)["run_status"] == "incomplete" and evidence.verify_record_set(rd).ok
+
+
+def test_tampered_record_fails_verify(tmp_path, monkeypatch):
+    from avocado_flash_remote import evidence
+
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path))
+    _main("plan", tmp_path)
+    rd = tmp_path / "state" / "r1" / "records"
+    (rd / "plan.json").write_text("{}")
+    assert not evidence.verify_record_set(rd).ok
+
+
+def test_rerun_rebuilds_manifest_without_stale_entries(tmp_path, monkeypatch):
+    from avocado_flash_remote import evidence
+
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path))
+    _main("plan", tmp_path)
+    rd = tmp_path / "state" / "r1" / "records"
+    (rd / "extra.json").write_text("{}")
+    _main("plan", tmp_path)
+    assert [a["name"] for a in _manifest(rd)["artifacts"]] == ["extra.json", "plan.json"]
+    (rd / "extra.json").unlink()
+    _main("plan", tmp_path)
+    assert [a["name"] for a in _manifest(rd)["artifacts"]] == ["plan.json"]
+    assert evidence.verify_record_set(rd).ok
+
+
+def test_manifest_takes_transition_log_from_state_file(tmp_path, monkeypatch):
+    from avocado_flash_remote import state
+
+    sd = tmp_path / "state"
+    state.create_run(sd, run_id="r1", profile_hash="p", plan_hash="h", board_identity={"machine_id": "zz"}, image_roles=["a"], arm=False)
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: type("R", (), {"exit_code": 0})())
+    assert _main("write", tmp_path) == 0
+    m = _manifest(sd / "r1" / "records")
+    assert [t["phase"] for t in m["transition_log"]] == ["planned"]
+    assert m["board_identity"] == {"machine_id": "zz"}
+
+
+@pytest.mark.parametrize("sub", ["check", "status"])
+def test_check_status_write_no_manifest(tmp_path, recs, sub):
+    assert _main(sub, tmp_path) == 0
+    assert not list(tmp_path.rglob("MANIFEST.json"))
