@@ -32,6 +32,9 @@ RECORD_NAME = "plan.json"
 BODY_MARKER = "== plan =="
 DONE_LINE = "dry run complete: no mutating tool was called"
 UNAVAILABLE = "unavailable"
+# The sha256sum-format file the host stages (the bash kit calls it MANIFEST).
+# Same value as cmd_check.MANIFEST; kept local so plan does not import check.
+MANIFEST_NAME = "MANIFEST.hashes"
 # Kit install.sh prints this in the section title; it names the design doc
 # the layout was validated against.
 _LAYOUT_REF = "boot-design.md section 1"
@@ -168,7 +171,7 @@ def _parse_manifest(text: str) -> dict:
 
 
 def _check_images(ops: Ops, profile, staging_dir: str, scanner) -> tuple[dict, int]:
-    manifest_path = f"{staging_dir}/MANIFEST"
+    manifest_path = f"{staging_dir}/{MANIFEST_NAME}"
     try:
         raw = ops.read_file(manifest_path)
     except (OSError, OpsError) as exc:
@@ -216,7 +219,7 @@ def _body(profile, staging_dir: str, sfdisk_text: str, n_manifest: int) -> list:
     name_of = {p["number"]: p["name"] for p in params["table"]}
     node_of_name = {p["name"]: layout.partition_node(dev, p["number"]) for p in params["table"]}
     lines = [
-        f"verifying checksums from {staging_dir}/MANIFEST",
+        f"verifying checksums from {staging_dir}/{MANIFEST_NAME}",
         f"checksums OK ({n_manifest} file(s))",
         f"== partitions to create on {dev} ({_LAYOUT_REF}) ==",
     ]

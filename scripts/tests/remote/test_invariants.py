@@ -1072,7 +1072,7 @@ def _check(script, checks=("emmc-exists",)):
 def _plan(tmp_path, over=None):
     e = Env(tmp_path)
     manifest = "".join(f"{s.sha256}  {name}\n" for name, s in e.scans.items())
-    script = e.script(**{f"read_file {STAGE}/MANIFEST": manifest}, **(over or {}))
+    script = e.script(**{f"read_file {STAGE}/MANIFEST.hashes": manifest}, **(over or {}))
     return cmd_plan.run_plan(
         RecordingOps(script), e.profile, e.phash, staging_dir=STAGE, run_dir=str(tmp_path / "run"), run_id=RUN_ID,
         record_writer=lambda *a: "x", out=lambda x: None, scanner=lambda p: e.scans[p.rsplit("/", 1)[-1]],
