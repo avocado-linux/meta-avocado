@@ -355,3 +355,50 @@ def test_pass_verdict_only_on_exit_zero(efivars):
     assert ("PREFLIGHT PASS" in res.lines) == (res.exit_code == 0)
     res, _ = run(efivars, **{f"blockdev --getro {DISK}": "1\n"})
     assert "PREFLIGHT PASS" not in res.lines
+
+
+# ------------------------------------------------- a failing tool is not a verdict
+
+
+def _assert_not_examined(res, rec, label, needle):
+    assert res.exit_code == 2
+    assert any(ln.startswith(f"FAIL  {label}: not examined: ") and needle in ln for ln in res.lines), res.lines
+    assert "PREFLIGHT FAIL" in res.lines[-1]
+    assert not any(vector_mutates(c.vector) for c in rec.calls if c.kind == "exec")
+
+
+def test_missing_manifest_is_not_examined(efivars):
+    over = {
+        f"read_file {STAGE}/MANIFEST.hashes": FileNotFoundError("MANIFEST.hashes"),
+        "sha256sum --strict -c MANIFEST.hashes": OpResult(
+            rc=1, stderr="sha256sum: MANIFEST.hashes: No such file or directory\n"
+        ),
+    }
+    prof = profile_with(["staged-image-checksums"])
+    res, rec = run(efivars, profile=prof, **over)
+    _assert_not_examined(res, rec, "staged image checksums", "MANIFEST.hashes")
+    assert res.examined == 0
+
+
+def test_failing_checksum_of_listed_image_is_still_a_verdict(efivars):
+    over = {
+        "sha256sum --strict -c MANIFEST.hashes": OpResult(rc=1, stdout=b"img0.bin: FAILED\n"),
+    }
+    res, _ = run(efivars, profile=profile_with(["staged-image-checksums"]), **over)
+    assert res.exit_code == 1
+    assert verdict(res, "staged image checksums") == "FAIL"
+    assert not any("not examined" in ln for ln in res.lines)
+
+
+def test_efibootmgr_help_failing_is_not_examined(efivars):
+    over = {"efibootmgr --help": OpResult(rc=1)}
+    res, rec = run(efivars, profile=profile_with(["efibootmgr-supports-create"]), **over)
+    _assert_not_examined(res, rec, "efibootmgr supports -C", "efibootmgr --help")
+
+
+def test_efibootmgr_help_without_dash_c_is_still_a_verdict(efivars):
+    over = {"efibootmgr --help": "Usage: efibootmgr [-c]\n"}
+    res, _ = run(efivars, profile=profile_with(["efibootmgr-supports-create"]), **over)
+    assert res.exit_code == 1
+    assert verdict(res, "efibootmgr supports -C") == "FAIL"
+    assert not any("not examined" in ln for ln in res.lines)
