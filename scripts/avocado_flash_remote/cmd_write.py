@@ -13,7 +13,7 @@ after, in order:
    tests pass again;
 5. the operator retyped the target device (or assumed yes).
 
-Then the state machine runs: table-written, one image-writing / image-written
+Then the state machine runs: table-writing, table-written, one image-writing / image-written
 pair per image (re-verify the staged file, ``dd`` it with the kit's vector,
 read the partition back and compare sha256), verified, guard, arm, complete.
 Every transition is durable before the next step. A read-back mismatch, a
@@ -377,6 +377,7 @@ def _locked(
             p["name"]: layout.partition_node(dev, p["number"]) for p in profile.layout.params["table"]
         }
         say(f"run {run_id}: writing the partition table on {dev}")
+        st = advance(st, "table-writing")  # durable before the first mutation
         ops.sfdisk_write(dev, sfdisk_text)
         st = advance(st, "table-written")
         try:

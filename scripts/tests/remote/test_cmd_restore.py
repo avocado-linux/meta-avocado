@@ -62,6 +62,9 @@ def mk_state(env, phase, armed=None):
     )
     if phase == "planned":
         return s
+    s = st.transition(s, "table-writing")
+    if phase == "table-writing":
+        return s
     s = st.transition(s, "table-written")
     s = st.transition(s, "verified")
     if phase == "verified":
@@ -146,6 +149,16 @@ def test_boot_order_mismatch_after_disarm_fails_and_keeps_staging(env):
 
 def test_failed_before_arm_makes_no_efibootmgr_calls(env):
     mk_state(env, "failed")
+    ops = RecordingOps()
+    r, removed, out = go(env, ops)
+    assert r.exit_code == 0
+    assert ops.log == []
+    assert removed == [str(env.staging)]
+    assert NOTE_LINE in out
+
+
+def test_table_writing_state_prints_note_and_only_cleans_staging(env):
+    mk_state(env, "table-writing")
     ops = RecordingOps()
     r, removed, out = go(env, ops)
     assert r.exit_code == 0

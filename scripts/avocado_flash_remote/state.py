@@ -26,6 +26,7 @@ SCHEMA_VERSION = 1
 
 PHASES = (
     "planned",
+    "table-writing",
     "table-written",
     "image-writing",
     "image-written",
@@ -37,7 +38,8 @@ PHASES = (
 TERMINAL = ("complete", "failed")
 
 RECOVERY = {
-    "planned": "none-needed",
+    "planned": "none-recorded",
+    "table-writing": "restore-then-restart",
     "table-written": "restore-then-restart",
     "image-writing": "restore-then-restart",
     "image-written": "restore-then-restart",
@@ -46,10 +48,15 @@ RECOVERY = {
 }
 
 _RECOVERY_TEXT = {
-    "none-needed": "nothing was written to the board; rerun after acknowledging the run",
+    "none-recorded": (
+        "no board change has been recorded; the run never reached the first "
+        "mutation, so it is safe to discard only if this run never took the "
+        "on-board lock (check the lock before rerunning after acknowledging the run)"
+    ),
     "restore-then-restart": (
-        "restore the saved partition table and original data, then restart "
-        "from the table phase"
+        "the partition table may be partly or fully rewritten: re-inspect the "
+        "target, restore the saved partition table and original data, then "
+        "restart from the table phase"
     ),
     "restore": (
         "restore the saved state (partition table, boot order and next-boot "
@@ -172,8 +179,10 @@ def _check_legal(data: dict[str, Any], new_phase: str, image: str | None) -> Non
         raise IllegalTransition(f"{cur} is terminal; cannot go to {new_phase}")
     if new_phase == "failed":
         return
-    if new_phase == "table-written":
+    if new_phase == "table-writing":
         ok = cur == "planned"
+    elif new_phase == "table-written":
+        ok = cur == "table-writing"
     elif new_phase == "image-writing":
         ok = cur in ("table-written", "image-written") and image is not None and image == _next_image(data)
     elif new_phase == "image-written":
