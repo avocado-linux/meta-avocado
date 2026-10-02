@@ -40,6 +40,7 @@ class Board:
         self.recovery = "none-recorded"
         self.advance_after = None  # status answers write_phase, then 'complete' after this many polls
         self.status_calls = 0
+        self.status_unreadable = False  # after write, status reports the per-run record as unreadable (rc 1)
         self.cat_calls = []
         self.missing = set(missing)
         self.interp_rc = interp_rc
@@ -167,6 +168,8 @@ class Board:
         if sub == "restore":
             return RunResult(0, b"restore: done\n")
         if sub == "status":
+            if self.wrote and self.status_unreadable:
+                return RunResult(1, f"status: state unreadable run={req.get('run_id')}: state.json: Expecting value\n".encode())
             if self.wrote and self.hidden_polls > 0:
                 self.hidden_polls -= 1
                 return RunResult(0, b"status: no run recorded\n")
@@ -881,3 +884,66 @@ def test_completion_between_the_poll_and_the_presence_probe_is_reported_as_compl
     assert rc == 0, text + capsys.readouterr().err
     assert "write COMPLETE" in text
     assert "exited" not in text
+
+
+# ---- 5.25: status honours --run-id; an unreadable record is never "still in progress"
+
+
+def test_the_status_subcommand_forwards_run_id_to_the_runner(images, tmp_path):
+    board = Board(tmp_path)
+    rid = _stage_and_plan(images, tmp_path, board)
+    board.runs.clear()
+    rc, _text = run(args(images, tmp_path, "status", "--run-id", rid), board)
+    assert rc == 0
+    assert [req.get("run_id") for sub, req, _d in board.runs if sub == "status"] == [rid]
+
+
+def test_the_status_subcommand_without_run_id_asks_for_the_current_run(images, tmp_path):
+    board = Board(tmp_path)
+    _stage_and_plan(images, tmp_path, board)
+    board.runs.clear()
+    rc, _text = run(args(images, tmp_path, "status"), board)
+    assert rc == 0
+    assert "run_id" not in [req for sub, req, _d in board.runs if sub == "status"][0]
+
+
+def test_a_hostile_run_id_on_status_is_refused_before_the_board_is_contacted(images, tmp_path):
+    board = Board(tmp_path)
+    _stage_and_plan(images, tmp_path, board)
+    board.runs.clear()
+    rc, _text = run(args(images, tmp_path, "status", "--run-id", "../x"), board)
+    assert rc != 0 and board.runs == []
+
+
+def test_host_messages_that_point_at_status_name_the_run_id(images, tmp_path):
+    board = Board(tmp_path)
+    board.accepted = False
+    board.hidden_polls = 10**6
+    board.runner_alive = False
+    rid = _stage_and_plan(images, tmp_path, board)
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
+    assert rc == 1 and f"--run-id {rid}" in text
+
+
+def test_a_dead_runner_with_an_unreadable_record_is_reported_unreadable_not_in_progress(images, tmp_path):
+    board = Board(tmp_path)
+    board.status_unreadable = True
+    board.runner_alive = False
+    rid = _stage_and_plan(images, tmp_path, board)
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid, "--wait-seconds", "100000"), board)
+    assert rc == 1
+    assert "still in progress" not in text
+    assert f"record for run {rid} is unreadable" in text
+    assert f"--run-id {rid}" in text
+    assert "write COMPLETE" not in text
+
+
+def test_an_unreadable_record_with_a_live_runner_still_never_reads_as_in_progress_at_the_end(images, tmp_path):
+    board = Board(tmp_path)
+    board.status_unreadable = True
+    board.runner_alive = True
+    rid = _stage_and_plan(images, tmp_path, board)
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid, "--wait-seconds", "30"), board)
+    assert rc == 1
+    assert "still in progress" not in text
+    assert f"record for run {rid} is unreadable" in text
