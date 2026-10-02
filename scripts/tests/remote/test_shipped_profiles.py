@@ -18,7 +18,7 @@ KIT_CHECKS = (
     "emmc-sector-count",
     "emmc-no-partition-table",
     "emmc-not-mounted",
-    "efibootmgr-supports-create",
+    "efibootmgr-supports-bootnext",
     "boot-order-unchanged",
     "boot-next-unset",
     "arm-entry-unique",
@@ -143,10 +143,10 @@ def test_jetson_arm_guard(jetson):
 
 
 def test_jetson_checks_are_the_kits_fourteen_plus_board_prerequisites(jetson):
-    assert len(jetson.checks) == 15
-    assert len(set(jetson.checks)) == 15
-    assert jetson.checks[:14] == KIT_CHECKS
-    assert jetson.checks[14:] == ("board-prerequisites",)
+    assert len(jetson.checks) == 16
+    assert len(set(jetson.checks)) == 16
+    assert [c for c in jetson.checks if c in KIT_CHECKS] == list(KIT_CHECKS)
+    assert [c for c in jetson.checks if c not in KIT_CHECKS] == ["arm-entry-after-boot-current", "board-prerequisites"]
 
 
 @pytest.mark.parametrize("name", ["jetson-agx-orin-j5012.json", "fixture-none.json"])

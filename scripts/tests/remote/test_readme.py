@@ -146,3 +146,32 @@ def test_known_limits_count_matches_the_debt_markers_in_the_code():
     assert f"{words[found]} debts were found" in text
     rows = [ln for ln in text.splitlines() if ln.startswith("| ") and not ln.startswith(("| Limit", "|---"))]
     assert len(rows) == found
+
+
+# ---- 5.39: the arm premises are written down ----
+
+
+def test_every_implemented_check_name_is_documented_and_the_removed_one_is_not():
+    from avocado_flash_remote import cmd_check
+
+    missing = [n for n in cmd_check.CHECKS if f"`{n}`" not in README]
+    assert not missing, missing
+    assert "efibootmgr-supports-create" not in README
+
+
+def test_guard_premise_and_first_boot_observation_are_documented():
+    assert "L4TDefaultBootMode" in README
+    assert "/proc/cmdline" in README
+    assert "first boot of the eMMC entry" in README
+
+
+def test_known_limits_states_the_deliberate_non_fix_for_the_record_schema():
+    text = _section("Known limits")
+    assert "entry_preexisting" in text
+    assert "state schema is not bumped" in text
+    assert "Seven debts" in text  # not a debt marker: the count stays seven
+
+
+def test_boot_order_premise_is_documented():
+    text = _section("The one-shot boot and its limits")
+    assert "precedes `BootCurrent`" in text

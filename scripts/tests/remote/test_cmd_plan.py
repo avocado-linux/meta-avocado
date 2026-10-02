@@ -609,3 +609,27 @@ def test_missing_serial_attribute_refuses_the_plan():
     scans = scans_for(profile)
     res, ops, rec = plan(profile, phash, script=script_for(profile, scans), scans=scans)
     assert_clean_refusal(res, ops, rec, "cannot be verified")
+
+
+# ---- 5.39 (1): plan refuses an entry that precedes BootCurrent in BootOrder ----
+
+
+def test_plan_refuses_an_entry_that_precedes_boot_current_naming_both_and_the_order():
+    profile, phash = load()
+    scans = scans_for(profile)
+    efi = EFI.replace("BootOrder: 0001,0002", "BootOrder: 0002,0001")
+    res, ops, rec = plan(profile, phash, script=script_for(profile, scans, efi=efi), scans=scans)
+    assert_clean_refusal(res, ops, rec, "arm pre-flight refused", "Boot0002", "BootCurrent 0001", "0002,0001")
+
+
+# ---- 5.39 (4): the arm section follows the strategy, not the name of an image role ----
+
+
+def test_a_uefi_bootnext_profile_without_an_esp_role_still_shows_the_arm_line():
+    doc = json.loads(PROFILE_PATH.read_bytes())
+    doc["images"]["efi_system"] = doc["images"].pop("esp")
+    profile, phash = load(json.dumps(doc).encode())
+    res, _, _ = plan(profile, phash)
+    assert res.exit_code == 0, res.lines
+    assert "  arm    : efibootmgr -n 0002" in res.lines
+    assert "DRY-RUN would run: efibootmgr -n 0002" in res.lines

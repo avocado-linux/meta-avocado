@@ -74,9 +74,9 @@ _RECOVERY_TEXT = {
         "'Starting over after a failed write' lists the steps"
     ),
     "restore-unknown-arm": (
-        "the arm step started: a boot entry and the next-boot setting may already exist even if "
-        "this record does not name them. DO NOT REBOOT. Run restore with --ack-run {run_id}: it "
-        "clears the next-boot setting if it names the entry carrying the profile's label, and removes "
+        "the arm step started: the next-boot setting (BootNext) may already be set even if "
+        "this record does not say so. DO NOT REBOOT. Run restore with --ack-run {run_id}: it "
+        "clears BootNext if it names the entry carrying the profile's label, and removes "
         "the staging directory; it deletes no boot entry and does NOT roll back the partition table or any image"
     ),
     "restore": (
@@ -300,10 +300,10 @@ def _describe_failed(state: RunState) -> str:
             bits.append("not started: " + ", ".join(pending))
         parts.append("Images " + "; ".join(bits) + ".")
     armed = data.get("armed")
-    if isinstance(armed, dict) and (armed.get("entry_number") or armed.get("next_armed")):
+    if isinstance(armed, dict) and armed.get("next_armed"):
         parts.append(
-            f"A boot entry was armed ({armed.get('entry_number') or 'number unknown'}): "
-            "DO NOT REBOOT until restore has removed it."
+            f"The board is armed: BootNext names boot entry {armed.get('entry_number') or '(number unknown)'}. "
+            "DO NOT REBOOT until restore has cleared BootNext."
         )
     else:
         parts.append("No boot entry is recorded as armed.")

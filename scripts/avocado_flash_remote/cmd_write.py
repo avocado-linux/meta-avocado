@@ -307,14 +307,23 @@ def _write_images(ops, profile, plan, st, scans, staging_dir, reverifier, say, a
     return st
 
 
+_ESP_TYPE_GUID = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+
+
 def _esp_is_vfat(ops, profile) -> None:
-    esp = profile.images.get("esp")
-    if profile.arm.strategy == "none" or esp is None:
+    """Every image written to an EFI System Partition (by type GUID, whatever its role is called) reads back as FAT."""
+    if profile.arm.strategy == "none":
         return
-    node = layout.partition_node(profile.target.device, esp.partition)
-    res = ops.blkid(node, check=False)
-    if res.text.strip() != "vfat":
-        raise _Failed(f"{node} does not read back as a FAT filesystem")
+    esp_numbers = {
+        p["number"] for p in profile.layout.params["table"] if p["type_guid"].upper() == _ESP_TYPE_GUID
+    }
+    for img in profile.images.values():
+        if img.partition not in esp_numbers:
+            continue
+        node = layout.partition_node(profile.target.device, img.partition)
+        res = ops.blkid(node, check=False)
+        if res.text.strip() != "vfat":
+            raise _Failed(f"{node} does not read back as a FAT filesystem")
 
 
 # --------------------------------------------------------------------- run
@@ -441,6 +450,10 @@ def _locked(
                 f"BootOrder changed since the plan (plan {planned_arm.get('preexisting_boot_order')!r}, "
                 f"now {record.preexisting_boot_order!r}); run plan again"
             )
+        if arm_enabled and (
+            record.entry_number != planned_arm.get("entry_number") or record.label != planned_arm.get("label")
+        ):
+            raise _Refusal("boot entry changed since the plan; run plan again")
         say(f"about to write {len(profile.images)} image(s) to {dev}; this destroys the eMMC contents")
         for role, img in profile.images.items():
             say(f"  {img.file} -> {layout.partition_node(dev, img.partition)} ({role})")
@@ -562,7 +575,11 @@ def _locked(
     result.final_phase = st.phase
     if arm_enabled:
         say(f"BootNext: {record.entry_number} armed, BootOrder unchanged: {record.preexisting_boot_order}")
-        say("next: systemctl reboot. A plain power cycle afterwards returns to the previous boot device. Undo with: restore")
+        say(
+            f"next: systemctl reboot. BootNext is consumed by that one boot; later boots follow BootOrder "
+            f"{record.preexisting_boot_order} unchanged (Boot{record.entry_number} comes after the entry that "
+            "booted this run in BootOrder, so it is reached only if the entries before it fail). Undo with: restore"
+        )
     else:
         say("images written and verified; nothing was armed")
     _write_evidence(writer, run_dir, st, say)

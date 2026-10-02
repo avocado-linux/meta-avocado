@@ -498,7 +498,7 @@ def test_entries_with_label_is_found_in_the_middle_of_a_listing():
 def test_disarm_does_not_touch_a_longer_labelled_entry_with_the_recorded_number():
     longer = f"Boot{ENTRY}* {LABEL} old\tHD(1,GPT)"
     ops = RecordingOps({LIST: efi(entry=False, extra=[longer], nxt=ENTRY)})
-    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", False)
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
     notes = get_arm("uefi-bootnext").disarm(ops, rec)
     assert ops.log == [LIST]
     assert any("leaving" in n for n in notes)
@@ -563,3 +563,58 @@ def test_disarm_clears_bootnext_when_efibootmgr_output_is_crlf():
     rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
     get_arm("uefi-bootnext").disarm(ops, rec)
     assert ops.log == [LIST, "efibootmgr -N"]
+
+
+# ---- 5.39 (1): an entry that precedes BootCurrent in BootOrder is not armed ----
+
+
+def _listing(order, current="0000", entry_number="0001", with_current=True):
+    lines = []
+    if with_current:
+        lines.append(f"BootCurrent: {current}")
+    lines += [f"BootOrder: {order}", "Boot0000* UEFI NVMe", f"Boot{entry_number}* {LABEL}\tVenHw(x)/SD(0)"]
+    return "\n".join(lines) + "\n"
+
+
+def test_prepare_refuses_an_entry_that_precedes_boot_current_in_boot_order():
+    ops = RecordingOps({LIST: _listing("0001,0000")})
+    with pytest.raises(ArmError) as ei:
+        get_arm("uefi-bootnext").prepare(ops, profile(), None)
+    msg = str(ei.value)
+    assert "0001" in msg and "BootCurrent 0000" in msg and "0001,0000" in msg
+    assert ops.log == [LIST]
+
+
+def test_prepare_accepts_an_entry_that_follows_boot_current_in_boot_order():
+    ops = RecordingOps({LIST: _listing("0000,0001")})
+    rec = get_arm("uefi-bootnext").prepare(ops, profile(), None)
+    assert rec.entry_number == "0001"
+
+
+def test_prepare_accepts_an_entry_absent_from_boot_order():
+    ops = RecordingOps({LIST: _listing("0000")})
+    rec = get_arm("uefi-bootnext").prepare(ops, profile(), None)
+    assert rec.entry_number == "0001"
+
+
+def test_prepare_refuses_a_listing_without_boot_current():
+    ops = RecordingOps({LIST: _listing("0000,0001", with_current=False)})
+    with pytest.raises(ArmError, match="BootCurrent"):
+        get_arm("uefi-bootnext").prepare(ops, profile(), None)
+
+
+def test_arm_refuses_an_entry_that_precedes_boot_current_before_any_mutation():
+    ops = RecordingOps({LIST: _listing("0001,0000")})
+    rec = ArmRecord("0001", LABEL, "0001,0000", "", False)
+    with pytest.raises(ArmError, match="0001,0000"):
+        get_arm("uefi-bootnext").arm(ops, profile(), rec)
+    assert ops.log == [LIST]
+
+
+def test_disarm_without_next_armed_makes_no_call_and_says_so():
+    # 5.39 (3): entry_number is known at prepare time and says nothing about BootNext.
+    ops = RecordingOps({LIST: efi(nxt=ENTRY)})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", False)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == []
+    assert any("did not set BootNext" in n for n in notes)

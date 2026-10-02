@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import efi
-from .arm import entries_with_label
+from .arm import boot_current_of, entries_with_label, preceding_current
 from .ops import PREREQUISITE_TOOLS, OpFailed, Ops, OpsError
 
 DEFAULT_EFIVARS_DIR = "/sys/firmware/efi/efivars"
@@ -42,7 +42,8 @@ MANIFEST = "MANIFEST.hashes"
 
 _SUM_RE = re.compile(r"^([0-9a-fA-F]{64})[ \t][ *](.+)$")
 _NO_TABLE_RE = re.compile(r"recognized partition table|no partition table")
-_CREATE_ONLY_RE = re.compile(r"(^|\s)-C([\s,|]|$)|--create-only")
+_BOOTNEXT_RE = re.compile(r"(^|\s)-n([\s,|]|$)|--bootnext")
+_DELETE_BOOTNEXT_RE = re.compile(r"(^|\s)-N([\s,|]|$)|--delete-bootnext")
 _READ_ERRORS = (OpsError, OSError, ValueError)
 
 # The standard-library modules the archived runner imports; a test keeps this a superset of what
@@ -193,13 +194,18 @@ def _not_mounted(c: _Ctx):
     return True, f"no {c.base} source in findmnt"
 
 
-def _supports_create(c: _Ctx):
+def _supports_bootnext(c: _Ctx):
     res = c.ops.efibootmgr_help()
     if res.rc != 0:
         first = (res.stderr.strip().splitlines() or [""])[0]
         raise NotExamined(f"efibootmgr --help failed rc={res.rc}: {first}".rstrip(": "))
-    ok = bool(_CREATE_ONLY_RE.search(res.text + res.stderr))
-    return ok, "-C listed in --help" if ok else "-C not listed in --help (-c would add to BootOrder)"
+    text = res.text + res.stderr
+    has_n = bool(_BOOTNEXT_RE.search(text))
+    has_cap_n = bool(_DELETE_BOOTNEXT_RE.search(text))
+    if has_n and has_cap_n:
+        return True, "-n and -N listed in --help"
+    missing = " and ".join(f for f, ok in (("-n", has_n), ("-N", has_cap_n)) if not ok)
+    return False, f"{missing} not listed in --help"
 
 
 def _boot_order(c: _Ctx):
@@ -230,6 +236,22 @@ def _arm_entry_unique(c: _Ctx):
         return True, f"Boot{found[0]}"
     names = f" ({', '.join('Boot' + n for n in found)})" if found else ""
     return False, f"{len(found)} boot entries labelled {label!r}{names}, expected exactly one"
+
+
+def _arm_entry_after_current(c: _Ctx):
+    label = _entry_label(c)
+    if not label:
+        raise NotExamined("profile arm declares no entry_label")
+    text = c.efi_list()
+    current = boot_current_of(text)
+    if not current:
+        raise NotExamined("no BootCurrent line in efibootmgr -v output")
+    # Every labelled entry is judged: a count other than one is the entry check's verdict, not this one's.
+    for number in entries_with_label(text, label):
+        why = preceding_current(text, number)
+        if why:
+            return False, why
+    return True, f"{label!r} entry does not precede BootCurrent {current} in BootOrder"
 
 
 def _efivarfs_rw(c: _Ctx):
@@ -328,10 +350,11 @@ CHECKS: dict[str, tuple[str, Callable]] = {
     "emmc-sector-count": ("eMMC sector count", _sector_count),
     "emmc-no-partition-table": ("eMMC has no partition table", _no_partition_table),
     "emmc-not-mounted": ("eMMC not mounted", _not_mounted),
-    "efibootmgr-supports-create": ("efibootmgr supports -C", _supports_create),
+    "efibootmgr-supports-bootnext": ("efibootmgr supports -n and -N", _supports_bootnext),
     "boot-order-unchanged": ("BootOrder unchanged", _boot_order),
     "boot-next-unset": ("BootNext unset", _boot_next),
     "arm-entry-unique": ("exactly one {label} entry", _arm_entry_unique),
+    "arm-entry-after-boot-current": ("{label} entry does not precede BootCurrent", _arm_entry_after_current),
     "efivarfs-rw": ("efivarfs mounted read-write", _efivarfs_rw),
     "secure-boot-disabled": ("SecureBoot disabled", _secure_boot),
     "staged-images-present": ("staged images present", _images_present),
@@ -380,6 +403,17 @@ def _info_lines(c: _Ctx) -> list:
         out.append(f"INFO  BootCurrent: {c.efi_field('BootCurrent')}")
     except _READ_ERRORS:
         pass
+
+    def l4t_mode():
+        found = sorted(glob.glob(os.path.join(c.efivars_dir, "L4TDefaultBootMode-*")))
+        if not found:
+            return "INFO  L4TDefaultBootMode: unset"
+        var = efi.read_variable(found[0])
+        if not var.ok:
+            return f"INFO  L4TDefaultBootMode: unreadable ({var.reason})"
+        return f"INFO  L4TDefaultBootMode: {int.from_bytes(var.data, 'little')} (data {var.data.hex()})"
+
+    out.append(attempt(l4t_mode, "INFO  L4TDefaultBootMode: unreadable ({why})"))
 
     def fstype():
         fst = c.ops.findmnt_fstype(c.staging_dir).text.strip().splitlines()
