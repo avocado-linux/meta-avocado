@@ -198,6 +198,8 @@ class LoopOps(RecordingOps):
         if kind == "read_file" and path.startswith("/sys/class/block/") and path.endswith("/partition"):
             name = path[len("/sys/class/block/"):-len("/partition")]
             return b"1\n" if name in parts else FileNotFoundError(path)
+        if kind == "read_file" and path.startswith("/sys/class/block/") and path.endswith("/loop/backing_file"):
+            return FileNotFoundError(path)
         if kind == "listdir" and path.startswith("/sys/class/block/") and path.endswith("/slaves"):
             return [] if path[len("/sys/class/block/"):-len("/slaves")] in disks else FileNotFoundError(path)
         return None
