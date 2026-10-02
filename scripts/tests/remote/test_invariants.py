@@ -611,6 +611,8 @@ class Board:
         if argv[0] == "sh" and "cat >" in argv[2]:
             self.requests[argv[-1]] = json.loads(stdin)
             return RunResult(0)
+        if argv[0] == "sh" and "refused-" in argv[2]:
+            return RunResult(0, b"CLEAR\n")
         if argv[0] == "test":
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":

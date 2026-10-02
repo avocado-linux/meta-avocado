@@ -351,51 +351,101 @@ def _tail_log(ctx: _Ctx, remote_dir: str) -> None:
         ctx.out(res.out.rstrip("\n"))
 
 
+def _judge_runner(ctx: _Ctx, run_id: str, remote_dir: str) -> tuple:
+    """What the board says about the detached runner: (verdict, refusal text).
+
+    verdict is 'refused' (the runner recorded a refusal for THIS run), 'finished',
+    'alive', 'exited', 'absent' or 'unknown'. The runner's own outcome marker is
+    read before the pid is judged, and anything the host could not read is
+    'unknown': a dropped ssh or a sudo failure never becomes a firm verdict.
+    """
+    kind, text = host.runner_outcome(ctx.transport, remote_dir, run_id)
+    if kind in ("refused", "finished"):
+        return kind, text
+    if kind == "unknown":
+        return "unknown", ""
+    return host.runner_presence(ctx.transport, remote_dir), ""
+
+
+def _reconcile_phase(ctx: _Ctx, run_id: str):
+    """(reconciled record or None, this run's phase or None)."""
+    try:
+        rec = host.reconcile(ctx.transport, ctx.state_dir, ctx.bundle_remote, ctx.staging_dir, python=ctx.remote_python)
+    except host.HostError as exc:
+        ctx.out(f"connection problem, will retry: {exc}")
+        return None, None
+    if rec.ok and rec.run_id == run_id:
+        return rec, rec.phase
+    return rec, None
+
+
 def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
     unstarted = 0
     last_phase = None
+    noted_unknown = False
     for _ in range(polls):
-        rec = None
-        try:
-            rec = host.reconcile(ctx.transport, ctx.state_dir, ctx.bundle_remote, ctx.staging_dir, python=ctx.remote_python)
-        except host.HostError as exc:
-            ctx.out(f"connection problem, will retry: {exc}")
-        phase = None
+        rec, phase = _reconcile_phase(ctx, run_id)
         if rec is not None and rec.ok:
-            if rec.run_id == run_id:
-                phase = rec.phase
-            if phase is None:
-                unstarted += 1
-            else:
-                unstarted = 0
+            unstarted = unstarted + 1 if phase is None else 0
         if phase in TERMINAL:
             break
-        if phase is not None and phase == last_phase:
+        if phase is None and rec is not None and rec.ok:
+            # No state for this run yet: a refusal before the lock leaves exactly this picture,
+            # and the board's own words for it beat any guess from a pid.
+            verdict, reason = _judge_runner(ctx, run_id, remote_dir)
+            if verdict == "refused":
+                ctx.out("the board refused the write and changed nothing:")
+                ctx.out(reason)
+                return 1
+        elif phase is not None and phase == last_phase:
             # A non-terminal phase that did not move: a runner that ended normally is always
             # terminal, so an exited runner here died (or stopped on a handled failure) mid-run.
-            if host.runner_presence(ctx.transport, remote_dir) == "exited":
-                ctx.out(
-                    f"the runner exited while the board is still recorded in the non-terminal phase {phase}; "
-                    "it will not advance"
-                )
-                ctx.out(f"recovery: {rec.recovery}")
-                _tail_log(ctx, remote_dir)
-                return 1
+            verdict, _reason = _judge_runner(ctx, run_id, remote_dir)
+            if verdict in ("exited", "finished"):
+                # The run may have finished between the poll and the probe: ask once more.
+                rec, now = _reconcile_phase(ctx, run_id)
+                if now in TERMINAL:
+                    phase = now
+                    break
+                if now is not None and now == phase:
+                    ctx.out(
+                        f"the runner exited while the board is still recorded in the non-terminal phase {phase}; "
+                        "it will not advance"
+                    )
+                    ctx.out(f"recovery: {rec.recovery}")
+                    _tail_log(ctx, remote_dir)
+                    return 1
+                phase = now if now is not None else phase
+            elif verdict == "unknown" and not noted_unknown:
+                noted_unknown = True
+                ctx.out("cannot read the runner's state from the board; still following (this is not a failure)")
         last_phase = phase
         if unstarted >= 3:
-            presence = host.runner_presence(ctx.transport, remote_dir)
-            if presence in ("alive", "unknown"):
+            verdict, reason = _judge_runner(ctx, run_id, remote_dir)
+            if verdict == "refused":
+                ctx.out("the board refused the write and changed nothing:")
+                ctx.out(reason)
+                return 1
+            if verdict in ("alive", "unknown"):
                 # Accepted and still hashing or checking, or unreadable: keep waiting.
                 unstarted = 0
-            elif presence == "exited":
-                ctx.out(
-                    "the runner accepted the write and exited without recording state; the board may have "
-                    "been changed: run the status subcommand and read the runner log before anything else"
-                )
-                _tail_log(ctx, remote_dir)
-                return 1
+            elif verdict in ("exited", "finished"):
+                # Ended while the board shows no state for this run: look once more before judging.
+                rec, now = _reconcile_phase(ctx, run_id)
+                if now is not None:
+                    unstarted = 0
+                    phase = now
+                    if now in TERMINAL:
+                        break
+                else:
+                    ctx.out(
+                        "the runner accepted the write and exited without recording state; the board may have "
+                        "been changed: run the status subcommand and read the runner log before anything else"
+                    )
+                    _tail_log(ctx, remote_dir)
+                    return 1
             else:
                 ctx.out(
                     "the board has no marker, no state and no runner process for this run: the write did not "
@@ -412,6 +462,19 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
     verify = ctx.collect(run_id, remote_dir, local)
     outcome = host.final_outcome(phase, verify)
     if outcome == "complete":
+        newer = host.refusal_newer_than_manifest(ctx.transport, remote_dir)
+        if newer != "clear":
+            ctx.out(
+                "not reporting COMPLETE: "
+                + (
+                    "a refused write left a log newer than this run's records"
+                    if newer == "newer"
+                    else "the board could not confirm that no refused write followed this run's records"
+                )
+                + f"; the records are in {local}. Run the status subcommand and read the runner logs"
+            )
+            _tail_log(ctx, remote_dir)
+            return 1
         ctx.out(f"write COMPLETE (run {run_id}); records verified: {local}")
         return 0
     if outcome == "not-verified":

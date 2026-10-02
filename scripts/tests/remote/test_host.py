@@ -695,29 +695,40 @@ def test_stage_verifies_bundle_with_given_interpreter(kit, resolved):
     assert len(py) == 1 and bundle_path.name in py[0].argv[-1]
 
 
-# --- 5.14: has the detached runner accepted the write ----------------------
+# --- 5.14 / 5.19: has the detached runner accepted the write ---------------
+
+NOFILE = b"cat: /var/lib/x/r1/records/accepted: No such file or directory"
+SUDO_FAIL = b"sudo: a password is required"
 
 
-def _presence(handler):
+def _presence(handler, calls=None):
     def unwrapped(argv, stdin, sudo):
         argv = list(argv)
         if argv[:2] == ["sudo", "-n"]:
             argv = argv[2:]
         return handler(argv, stdin, sudo)
 
-    return host.runner_presence(StubTransport(unwrapped), "/var/lib/x/r1/records")
+    t = StubTransport(unwrapped)
+    out = host.runner_presence(t, "/var/lib/x/r1/records")
+    if calls is not None:
+        calls.extend(t.calls)
+    return out
+
+
+def _proc_answer(word: bytes):
+    return RunResult(0, word + b"\n")
 
 
 def test_runner_presence_absent_without_marker():
-    assert _presence(lambda a, s, u: RunResult(1, b"", b"No such file")) == "absent"
+    assert _presence(lambda a, s, u: RunResult(1, b"", NOFILE)) == "absent"
 
 
 def test_runner_presence_alive_when_pid_visible():
     def h(argv, stdin, sudo):
         if argv[0] == "cat":
             return RunResult(0, b"4242\n")
-        assert argv == ["test", "-d", "/proc/4242"]
-        return RunResult(0)
+        assert "/proc/" in " ".join(argv) and argv[-1] == "4242"
+        return _proc_answer(b"alive")
 
     assert _presence(h) == "alive"
 
@@ -726,7 +737,7 @@ def test_runner_presence_exited_when_pid_gone():
     def h(argv, stdin, sudo):
         if argv[0] == "cat":
             return RunResult(0, b"4242\n")
-        return RunResult(1)
+        return _proc_answer(b"gone")
 
     assert _presence(h) == "exited"
 
@@ -739,3 +750,119 @@ def test_runner_presence_unknown_for_unparsable_marker_or_transport_error():
         raise host.HostError("reset")
 
     assert _presence(boom) == "unknown"
+
+
+@pytest.mark.parametrize(
+    "res",
+    [
+        RunResult(255, b"", b"ssh: connection reset"),
+        RunResult(1, b"", SUDO_FAIL),
+        RunResult(2, b"", b"cat: read error"),
+    ],
+)
+def test_marker_read_failure_other_than_not_found_is_unknown_not_absent(res):
+    assert _presence(lambda a, s, u: res) == "unknown"
+
+
+@pytest.mark.parametrize(
+    "res",
+    [
+        RunResult(255, b"", b"ssh: connection reset"),
+        RunResult(1, b"", SUDO_FAIL),
+        RunResult(0, b"", b""),
+        RunResult(0, b"maybe\n", b""),
+    ],
+)
+def test_proc_probe_failure_is_unknown_not_exited(res):
+    def h(argv, stdin, sudo):
+        if argv[0] == "cat":
+            return RunResult(0, b"4242\n")
+        return res
+
+    assert _presence(h) == "unknown"
+
+
+def test_proc_probe_runs_with_the_privilege_of_the_marker_read():
+    calls = []
+
+    def h(argv, stdin, sudo):
+        if argv[0] == "cat":
+            return RunResult(0, b"4242\n")
+        return _proc_answer(b"alive")
+
+    _presence(h, calls)
+    assert len(calls) == 2
+    assert all(c.sudo for c in calls), [(c.argv, c.sudo) for c in calls]
+
+
+# --- 5.19: the runner's outcome marker --------------------------------------
+
+
+def _outcome(handler):
+    def unwrapped(argv, stdin, sudo):
+        argv = list(argv)
+        if argv[:2] == ["sudo", "-n"]:
+            argv = argv[2:]
+        return handler(argv, stdin, sudo)
+
+    return host.runner_outcome(StubTransport(unwrapped), "/var/lib/x/r1/records", "r1")
+
+
+def test_outcome_refused_carries_the_reason_verbatim():
+    body = b"refused\nrun=r1\nwrite refused: BootOrder changed\nnothing was written to the board\n"
+    kind, text = _outcome(lambda a, s, u: RunResult(0, body))
+    assert kind == "refused"
+    assert text == "write refused: BootOrder changed\nnothing was written to the board"
+
+
+def test_outcome_finished():
+    assert _outcome(lambda a, s, u: RunResult(0, b"finished\nrun=r1\n")) == ("finished", "")
+
+
+def test_outcome_missing_file_is_none():
+    assert _outcome(lambda a, s, u: RunResult(1, b"", b"cat: x: No such file or directory"))[0] == "none"
+
+
+def test_outcome_from_another_run_is_not_trusted():
+    kind, _ = _outcome(lambda a, s, u: RunResult(0, b"refused\nrun=OTHER\nwrite refused: x\n"))
+    assert kind == "unknown"
+
+
+@pytest.mark.parametrize(
+    "res",
+    [
+        RunResult(255, b"", b"ssh: connection reset"),
+        RunResult(1, b"", SUDO_FAIL),
+        RunResult(0, b"", b""),
+        RunResult(0, b"weird\nrun=r1\n", b""),
+    ],
+)
+def test_outcome_unreadable_or_unrecognised_is_unknown(res):
+    assert _outcome(lambda a, s, u: res)[0] == "unknown"
+
+
+def test_outcome_transport_error_is_unknown():
+    def boom(a, s, u):
+        raise host.HostError("reset")
+
+    assert _outcome(boom)[0] == "unknown"
+
+
+# --- 5.19: a refusal log newer than the manifest ----------------------------
+
+
+def _newer(res_or_exc):
+    def h(argv, stdin, sudo):
+        if isinstance(res_or_exc, Exception):
+            raise res_or_exc
+        return res_or_exc
+
+    return host.refusal_newer_than_manifest(StubTransport(h), "/var/lib/x/r1/records")
+
+
+def test_refusal_newer_than_manifest_verdicts():
+    assert _newer(RunResult(0, b"NEWER\n")) == "newer"
+    assert _newer(RunResult(0, b"CLEAR\n")) == "clear"
+    assert _newer(RunResult(255, b"", b"")) == "unknown"
+    assert _newer(RunResult(0, b"", b"")) == "unknown"
+    assert _newer(host.HostError("x")) == "unknown"

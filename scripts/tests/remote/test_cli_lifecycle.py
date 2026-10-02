@@ -29,6 +29,11 @@ class Board:
     def __init__(self, tmp_path, *, need_password=False, corrupt_write=False, write_phase="complete", missing=(), interp_rc=0):
         self.accepted = True  # the runner's `accepted` marker exists once write is detached
         self.runner_alive = False
+        self.outcome = None  # the runner's `outcome` marker body (bytes) once it has ended
+        self.probe_fail = None  # a RunResult every presence probe (markers, /proc) answers with
+        self.refusal_probe = b"CLEAR\n"
+        self.write_err = b""
+        self.complete_on_proc_probe = False  # the write finishes between the poll and the probe
         self.hidden_polls = 0  # status answers "no run recorded" this many times after write
         self.write_rc = 0
         self.recovery = "none-recorded"
@@ -95,13 +100,27 @@ class Board:
         if argv[0] == "sh" and "cat >" in argv[2]:
             self.requests[argv[-1]] = json.loads(stdin)
             return RunResult(0)
-        if argv[:2] == ["test", "-d"] and argv[2].startswith("/proc/"):
-            return RunResult(0 if self.runner_alive else 1)
+        if argv[0] == "sh" and "/proc/" in argv[2]:
+            if self.probe_fail is not None:
+                return self.probe_fail
+            if self.complete_on_proc_probe:
+                self.phase = "complete"
+            return RunResult(0, b"alive\n" if self.runner_alive else b"gone\n")
+        if argv[0] == "sh" and "refused-" in argv[2]:
+            return RunResult(0, self.refusal_probe)
+        if argv[0] == "cat" and argv[1].endswith("/outcome"):
+            if self.probe_fail is not None:
+                return self.probe_fail
+            if self.outcome is not None:
+                return RunResult(0, self.outcome)
+            return RunResult(1, b"", b"cat: x: No such file or directory")
         if argv[0] == "cat" and argv[1].endswith("/accepted"):
             self.cat_calls.append(argv[1])
+            if self.probe_fail is not None:
+                return self.probe_fail
             if self.accepted and self.wrote:
                 return RunResult(0, b"4242\n")
-            return RunResult(1, b"", b"No such file")
+            return RunResult(1, b"", b"cat: x: No such file or directory")
         if argv[0] == "test":
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":
@@ -134,7 +153,7 @@ class Board:
             self.wrote = True
             self.phase = self.write_phase
             if self.write_rc:
-                return RunResult(self.write_rc, b"", b"ssh: connection reset")
+                return RunResult(self.write_rc, b"", self.write_err or b"ssh: connection reset")
             return RunResult(0, f"detached: run={self.run_id} log=x\n".encode())
         if sub == "restore":
             return RunResult(0, b"restore: done\n")
@@ -649,3 +668,109 @@ def test_hostile_remote_python_rejected_before_factory(images, tmp_path, bad, su
     rc, _ = run(args(images, tmp_path, sub, f"--remote-python={bad}"))
     assert rc == 64
     assert "--remote-python" in capsys.readouterr().err
+
+
+# --- 5.19: unknown stays unknown, a refusal is a refusal --------------------
+
+SSH_DROP = RunResult(255, b"", b"ssh: connection reset")
+SUDO_FAIL = RunResult(1, b"", b"sudo: a password is required")
+REFUSAL = (
+    "write refused: run r1 already has a state record under /var/lib/x; it is never "
+    "overwritten: run plan again for a new run id\nnothing was written to the board"
+)
+
+
+@pytest.mark.parametrize("fail", [SSH_DROP, SUDO_FAIL], ids=["ssh-drop", "sudo-failure"])
+def test_unreadable_markers_never_produce_a_not_started_or_exited_verdict(images, tmp_path, capsys, fail):
+    board = Board(tmp_path)
+    board.hidden_polls = 10**6  # no state is ever visible
+    board.probe_fail = fail
+    rc, text = _write(images, tmp_path, board, "--wait-seconds", "50")
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert "did not start" not in all_text
+    assert "may have been changed" not in all_text
+    assert "exited" not in all_text
+    assert "still in progress" in all_text
+
+
+@pytest.mark.parametrize("fail", [SSH_DROP, SUDO_FAIL], ids=["ssh-drop", "sudo-failure"])
+def test_failed_proc_probe_does_not_end_the_follow_of_a_live_runner(images, tmp_path, fail):
+    board = Board(tmp_path, write_phase="image-writing")
+    board.runner_alive = True  # it is alive, but the probe cannot say so
+    board.probe_fail = fail
+    board.advance_after = 8
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text
+    assert "write COMPLETE" in text
+    assert "exited" not in text
+
+
+def test_proc_probe_and_marker_read_run_with_the_same_privilege(images, tmp_path):
+    board = Board(tmp_path, write_phase="arming")
+    board.runner_alive = False
+    _write(images, tmp_path, board, "--wait-seconds", "100000")
+    probes = [c for c in board.stub.calls if c.argv and ("/proc/" in " ".join(map(str, c.argv)) or "accepted" in " ".join(map(str, c.argv)))]
+    assert probes
+    assert all(c.argv[:2] in (["sudo", "-n"],) for c in probes), [c.argv for c in probes]
+
+
+def test_pre_lock_refusal_is_printed_verbatim_and_not_called_a_possible_change(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.hidden_polls = 10**6
+    board.runner_alive = False  # the marker names a pid that is gone
+    board.outcome = ("refused\nrun=%s\n%s\n" % ("RID", REFUSAL)).encode()
+    rid = _stage_and_plan(images, tmp_path, board)
+    board.outcome = board.outcome.replace(b"RID", rid.encode())
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert REFUSAL in all_text
+    assert "may have been changed" not in all_text
+    assert "did not start" not in all_text
+    assert "write COMPLETE" not in all_text
+
+
+def test_refusal_from_another_run_is_not_trusted(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.hidden_polls = 10**6
+    board.runner_alive = True  # a recycled pid would read as alive
+    board.outcome = ("refused\nrun=SOMEONE-ELSE\n%s\n" % REFUSAL).encode()
+    rc, text = _write(images, tmp_path, board, "--wait-seconds", "50")
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert REFUSAL not in all_text
+    assert "still in progress" in all_text
+
+
+def test_refused_replay_exits_nonzero_with_the_refusal_and_never_prints_complete(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.write_rc = 1
+    board.write_err = REFUSAL.encode()
+    rc, text = _write(images, tmp_path, board)
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert REFUSAL in all_text
+    assert "COMPLETE" not in all_text
+    assert board.status_calls == 0  # the host never followed a run that was never started
+
+
+@pytest.mark.parametrize("probe", [b"NEWER\n", b"", b"garbage\n"], ids=["newer", "empty", "garbage"])
+def test_complete_phase_is_not_printed_as_complete_when_a_refusal_postdates_the_manifest(images, tmp_path, capsys, probe):
+    board = Board(tmp_path)
+    board.refusal_probe = probe
+    rc, text = _write(images, tmp_path, board)
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert "write COMPLETE" not in all_text
+    assert "refus" in all_text
+
+
+def test_completion_between_the_poll_and_the_presence_probe_is_reported_as_complete(images, tmp_path, capsys):
+    board = Board(tmp_path, write_phase="image-writing")
+    board.runner_alive = False
+    board.complete_on_proc_probe = True  # the runner ends normally just before the probe answers
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text + capsys.readouterr().err
+    assert "write COMPLETE" in text
+    assert "exited" not in text

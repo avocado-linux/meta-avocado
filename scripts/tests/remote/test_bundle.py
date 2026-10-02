@@ -730,39 +730,128 @@ def test_write_refused_without_a_prior_manifest_still_writes_an_incomplete_one(t
     assert _manifest(tmp_path / "state" / "r1" / "records")["run_status"] == "incomplete"
 
 
-def test_detached_replay_of_a_written_run_does_not_touch_its_record_set(tmp_path):
+def _finished_run_dir(tmp_path):
     from avocado_flash_remote import evidence
 
-    info = _archive_for_runner(tmp_path)
     run_dir = tmp_path / "state" / "r1" / "records"
     run_dir.mkdir(parents=True)
     rs = evidence.RecordSet(run_dir, "t", "1", "p" * 64, {}, {}, [], "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
     rs.add("write.json", {"ok": True})
     rs.add("runner.log", b"first run\n")
     rs.finalize("runner-complete")
+    return run_dir
+
+
+def test_detached_replay_of_a_written_run_is_refused_before_the_fork(tmp_path, monkeypatch, capsys):
+    from avocado_flash_remote import evidence, state
+
+    run_dir = _finished_run_dir(tmp_path)
+    state.create_run(tmp_path / "state", run_id="r1", profile_hash="p", plan_hash="h", board_identity={}, image_roles=["a"], arm=False)
     before = {p.name: p.read_bytes() for p in run_dir.iterdir()}
+    forks = []
+    monkeypatch.setattr(runner.os, "fork", lambda: forks.append(1) or 0)
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: pytest.fail("a replay must not reach the write"))
+    info = _archive_for_runner(tmp_path)
+    rc = runner.main(["write", "--request", str(_request(tmp_path)), "--detach"], archive=info.path)
+    cap = capsys.readouterr()
+    assert rc == 1
+    assert forks == []
+    assert "already has a state record" in cap.err and "nothing was written to the board" in cap.err
+    assert "detached:" not in cap.out
+    assert {p.name: p.read_bytes() for p in run_dir.iterdir()} == before
+    assert not list((tmp_path / "state" / "r1").glob("refused-*.log"))
+    assert evidence.verify_record_set(run_dir).ok
+
+
+def test_detached_write_whose_write_json_exists_without_state_is_also_refused(tmp_path, monkeypatch, capsys):
+    run_dir = _finished_run_dir(tmp_path)
+    monkeypatch.setattr(runner.os, "fork", lambda: pytest.fail("must refuse before forking"))
+    info = _archive_for_runner(tmp_path)
+    rc = runner.main(["write", "--request", str(_request(tmp_path)), "--detach"], archive=info.path)
+    assert rc == 1
+    assert "write refused" in capsys.readouterr().err
+    assert (run_dir / "write.json").is_file()
+
+
+_OUTCOME_DRIVER = """
+import dataclasses, os, sys
+sys.path.insert(0, {pkg!r})
+from avocado_flash_remote import runner
+
+def stub(*a, **k):
+    rd = {run_dir!r}
+    seen = {{n: os.path.exists(os.path.join(rd, n)) for n in ("outcome",)}}
+    with open(os.path.join({tmp!r}, "seen.txt"), "w") as f:
+        f.write(repr(seen) + " " + open(os.path.join(rd, "accepted")).read())
+    {body}
+
+_real = runner.load_profile_bytes
+runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={state!r})
+runner.run_write = stub
+sys.exit(runner.main(["write", "--request", {req!r}, "--detach"], archive={archive!r}))
+"""
+
+
+def _detached_write(tmp_path, body, *, pre=None):
+    info = _archive_for_runner(tmp_path)
+    run_dir = tmp_path / "state" / "r1" / "records"
+    if pre:
+        run_dir.mkdir(parents=True)
+        for name, text in pre.items():
+            (run_dir / name).write_text(text)
     req = _request(tmp_path)
     driver = tmp_path / "driver.py"
     driver.write_text(
-        textwrap.dedent(
-            f"""
-            import dataclasses, sys
-            sys.path.insert(0, {str(PKG.parent)!r})
-            from avocado_flash_remote import runner
-            _real = runner.load_profile_bytes
-            runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={str(tmp_path / "state")!r})
-            runner.run_write = lambda *a, **k: (print("write refused: replay"), type("R", (), {{"exit_code": 1, "final_phase": None}})())[1]
-            sys.exit(runner.main(["write", "--request", {str(req)!r}, "--detach"], archive={str(info.path)!r}))
-            """
+        _OUTCOME_DRIVER.format(
+            pkg=str(PKG.parent), run_dir=str(run_dir), tmp=str(tmp_path), body=body,
+            state=str(tmp_path / "state"), req=str(req), archive=str(info.path),
         )
     )
-    rc, out, err = _run([sys.executable, str(driver)], tmp_path, "replay", timeout=20)
+    rc, out, err = _run([sys.executable, str(driver)], tmp_path, "d", timeout=20)
     assert rc == 0, err
     deadline = time.monotonic() + 10
-    refused = []
-    while time.monotonic() < deadline and not refused:
-        refused = list((tmp_path / "state" / "r1").glob("refused-*.log"))
+    while time.monotonic() < deadline and not (run_dir / "MANIFEST.json").exists():
         time.sleep(0.05)
-    assert refused and "write refused: replay" in refused[0].read_text()
-    assert {p.name: p.read_bytes() for p in run_dir.iterdir()} == before
-    assert evidence.verify_record_set(run_dir).ok
+    assert (run_dir / "MANIFEST.json").exists(), "the detached runner never finished"
+    return run_dir
+
+
+def test_detached_refused_write_leaves_a_refused_outcome_with_the_reason(tmp_path):
+    body = (
+        'R = type("R", (), {"exit_code": 1, "final_phase": None, "lines": '
+        '["write refused: BootOrder changed since the plan", "nothing was written to the board"]})()\n'
+        "    return R"
+    )
+    rd = _detached_write(tmp_path, body)
+    assert (rd / "outcome").read_text() == (
+        "refused\nrun=r1\nwrite refused: BootOrder changed since the plan\nnothing was written to the board\n"
+    )
+
+
+def test_detached_write_that_did_work_leaves_a_finished_outcome(tmp_path):
+    body = 'return type("R", (), {"exit_code": 0, "final_phase": "complete", "lines": []})()'
+    rd = _detached_write(tmp_path, body)
+    assert (rd / "outcome").read_text() == "finished\nrun=r1\n"
+
+
+def test_detached_write_that_failed_after_work_is_finished_not_refused(tmp_path):
+    body = 'return type("R", (), {"exit_code": 1, "final_phase": "failed", "lines": ["write FAILED"]})()'
+    rd = _detached_write(tmp_path, body)
+    assert (rd / "outcome").read_text() == "finished\nrun=r1\n"
+
+
+def test_detached_runner_that_crashes_leaves_no_outcome(tmp_path):
+    rd = _detached_write(tmp_path, 'raise RuntimeError("kaput")')
+    assert not (rd / "outcome").exists()
+    assert "kaput" in (rd / "runner.log").read_text()
+
+
+def test_every_invocation_rewrites_the_marker_set_and_drops_a_stale_outcome(tmp_path):
+    pre = {"accepted": "99999\n", "outcome": "refused\nrun=r1\nwrite refused: an old attempt\n"}
+    body = 'return type("R", (), {"exit_code": 0, "final_phase": "complete", "lines": []})()'
+    rd = _detached_write(tmp_path, body, pre=pre)
+    seen = (tmp_path / "seen.txt").read_text()
+    assert seen.startswith("{'outcome': False}"), seen  # the old verdict was gone before the new run began
+    pid = seen.split("}", 1)[1].strip()
+    assert pid.isdigit() and pid != "99999"
+    assert (rd / "accepted").read_text() == pid + "\n"

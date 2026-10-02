@@ -609,27 +609,100 @@ def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: s
 
 
 ACCEPTED_MARKER = "accepted"
+OUTCOME_MARKER = "outcome"
+
+_ALIVE_PROBE = 'if test -d "/proc/$1"; then echo alive; else echo gone; fi'
+_REFUSAL_PROBE = (
+    'for f in "$1"/refused-*.log; do '
+    'if test -e "$f" && test "$f" -nt "$2"; then echo NEWER; exit 0; fi; done; echo CLEAR'
+)
+
+
+def _no_such_file(res) -> bool:
+    """A clean 'the file is not there': rc 1 and the system's own words for it.
+
+    rc 255 (ssh dropped), a sudo refusal and every other failure carry other
+    text, so they are never mistaken for an absent file.
+    """
+    return res.rc == 1 and "no such file" in res.err.lower()
 
 
 def runner_presence(transport, remote_run_dir: str) -> str:
     """Has a detached runner taken this run: 'alive', 'exited', 'absent' or 'unknown'.
 
     The runner writes ``accepted`` (its pid) into run_dir before any pre-check
-    or hashing, so the marker exists long before state.json does. 'absent' is
-    the only answer that means the runner never took the request; anything the
-    host cannot read is 'unknown', which callers must treat as possibly started.
+    or hashing, so the marker exists long before state.json does. 'absent' and
+    'exited' are firm answers and come only from a clean not-found and a clean
+    "no such process" respectively. Anything else the host cannot read (a
+    dropped ssh, a sudo failure, an unexpected answer) is 'unknown', which
+    callers must treat as possibly started and possibly alive.
     """
     try:
         res = transport.run(["cat", f"{remote_run_dir}/{ACCEPTED_MARKER}"], None, sudo=True, timeout=60)
-        if res.rc != 0:
+        if _no_such_file(res):
             return "absent"
+        if res.rc != 0:
+            return "unknown"
         pid = res.out.strip()
         if not pid.isdigit():
             return "unknown"
-        alive = transport.run(["test", "-d", f"/proc/{pid}"], None, sudo=False, timeout=60)
+        alive = transport.run(["sh", "-c", _ALIVE_PROBE, "sh", pid], None, sudo=True, timeout=60)
     except HostError:
         return "unknown"
-    return "alive" if alive.rc == 0 else "exited"
+    if alive.rc != 0:
+        return "unknown"
+    word = alive.out.strip()
+    if word == "alive":
+        return "alive"
+    if word == "gone":
+        return "exited"
+    return "unknown"
+
+
+def runner_outcome(transport, remote_run_dir: str, run_id: str) -> tuple:
+    """What the runner recorded when it ended: (kind, text).
+
+    kind is 'refused' (text is the board's refusal, verbatim), 'finished',
+    'none' (no marker: the runner has not ended, or died before recording) or
+    'unknown' (unreadable, unrecognised, or written for another run id). Only
+    'none' is a firm absence.
+    """
+    try:
+        res = transport.run(["cat", f"{remote_run_dir}/{OUTCOME_MARKER}"], None, sudo=True, timeout=60)
+    except HostError:
+        return ("unknown", "")
+    if _no_such_file(res):
+        return ("none", "")
+    if res.rc != 0:
+        return ("unknown", "")
+    lines = res.out.split("\n")
+    if len(lines) < 2 or lines[1] != f"run={run_id}":
+        return ("unknown", "")
+    if lines[0] == "finished":
+        return ("finished", "")
+    if lines[0] == "refused":
+        return ("refused", "\n".join(lines[2:]).strip("\n"))
+    return ("unknown", "")
+
+
+def refusal_newer_than_manifest(transport, remote_run_dir: str) -> str:
+    """'newer' when a refused-*.log beside the run's records postdates its manifest.
+
+    A completed run whose records were followed by a refusal must not read as a
+    clean completion. 'clear' needs the probe to say so; anything else is 'unknown'.
+    """
+    parent = remote_run_dir.rstrip("/").rsplit("/", 1)[0] or "/"
+    try:
+        res = transport.run(
+            ["sh", "-c", _REFUSAL_PROBE, "sh", parent, f"{remote_run_dir}/{evidence.MANIFEST}"],
+            None, sudo=True, timeout=60,
+        )
+    except HostError:
+        return "unknown"
+    if res.rc != 0:
+        return "unknown"
+    word = res.out.strip()
+    return {"NEWER": "newer", "CLEAR": "clear"}.get(word, "unknown")
 
 
 def final_outcome(phase: Optional[str], verify: evidence.VerifyResult) -> str:
