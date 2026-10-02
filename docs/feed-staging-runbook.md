@@ -208,7 +208,7 @@ bash meta-avocado/scripts/repo-aggregate-targets.sh \
 ## 4. Render-pool: render the production-served shape
 
 `render-pool-local.py` is the dev mirror of the production render
-(`render_pool.py` in avocado-package). It renders **one repo per invocation**
+(`render_pool.py` in the internal avocado-repo service). It renders **one repo per invocation**
 from a staged RPM tree into the content-addressed layout production serves:
 
 ```text
