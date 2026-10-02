@@ -118,8 +118,29 @@ def _is_partition(ops: Ops, name: str) -> bool:
     return True
 
 
-def _ancestors(ops: Ops, name: str, depth: int, seen: set) -> set:
-    """Kernel names of ``name`` and everything it is built on: parent disk of a partition, slaves of dm/md/loop."""
+def _loop_backing_file(ops: Ops, name: str) -> str | None:
+    """Path of the file behind loop device ``name``; None when it has no backing_file attribute (not a loop, or unconfigured).
+
+    An attribute that is unreadable, empty or marked deleted refuses: the file's filesystem cannot be probed,
+    so the device cannot be shown to be off the target.
+    """
+    try:
+        raw = ops.read_file(f"{_SYS_BLOCK}/{name}/loop/backing_file")
+    except FileNotFoundError:
+        return None
+    except (OSError, OpsError) as exc:
+        raise _Refusal(f"cannot resolve loop device {name}: backing file unreadable ({type(exc).__name__}); refusing") from None
+    path = raw.decode("utf-8", errors="replace").strip()
+    if not path.startswith("/"):
+        raise _Refusal(f"cannot resolve loop device {name}: backing file {path!r} is empty or not an absolute path; refusing")
+    if path.endswith(" (deleted)"):
+        raise _Refusal(f"cannot resolve loop device {name}: its backing file {path} is deleted; refusing")
+    return path
+
+
+def _ancestors(ops: Ops, name: str, depth: int, seen: set, target_name: str) -> set:
+    """Kernel names of ``name`` and everything it is built on: parent disk of a partition, slaves of dm/md, and for
+    a loop device the device behind its backing file (which adds ``target_name`` when that file sits on the target)."""
     if name in seen:
         return set()
     if depth > MAX_STACK_DEPTH:
@@ -131,18 +152,21 @@ def _ancestors(ops: Ops, name: str, depth: int, seen: set) -> set:
     except (OSError, OpsError) as exc:
         raise _Refusal(f"cannot resolve {name}: no sysfs entry ({type(exc).__name__}); refusing") from None
     if _is_partition(ops, name):
-        return found | _ancestors(ops, posixpath.basename(posixpath.dirname(sysnode)), depth + 1, seen)
+        return found | _ancestors(ops, posixpath.basename(posixpath.dirname(sysnode)), depth + 1, seen, target_name)
     try:
         slaves = ops.listdir(f"{_SYS_BLOCK}/{name}/slaves")
     except (OSError, OpsError) as exc:
         raise _Refusal(f"cannot resolve {name}: slaves unreadable ({type(exc).__name__}); refusing") from None
     for slave in slaves:
-        found |= _ancestors(ops, slave, depth + 1, seen)
+        found |= _ancestors(ops, slave, depth + 1, seen, target_name)
+    backing = _loop_backing_file(ops, name)
+    if backing is not None and _path_backs_target(ops, f"backing file of loop device {name}", backing, target_name, depth + 1):
+        found.add(target_name)
     return found
 
 
-def _backs_target(ops: Ops, source: str, target_name: str, what: str) -> bool:
-    return target_name in _ancestors(ops, _resolve_name(ops, source, what), 0, set())
+def _backs_target(ops: Ops, source: str, target_name: str, what: str, depth: int = 0) -> bool:
+    return target_name in _ancestors(ops, _resolve_name(ops, source, what), depth, set(), target_name)
 
 
 # Sources the kernel serves from RAM or itself; nothing on a block device can sit behind them.
@@ -195,7 +219,7 @@ def _path_backs_target(ops: Ops, what: str, path: str, target_name: str, depth: 
         raise _Refusal(f"overlay stack under the {what} is deeper than {MAX_STACK_DEPTH} levels; refusing")
     source = _SUBVOL_RE.sub("", _findmnt_one(ops, what, "SOURCE", path))
     if source.startswith("/"):
-        return source if _backs_target(ops, source, target_name, what) else None
+        return source if _backs_target(ops, source, target_name, what, depth) else None
     if source in _KERNEL_SOURCES:
         return None
     fstype = _findmnt_one(ops, what, "FSTYPE", path)

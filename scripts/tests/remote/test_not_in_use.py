@@ -311,3 +311,109 @@ def test_read_only_wrapper_allows_the_new_reads_and_still_refuses_writes():
     assert ro.listdir(f"{SYS}/mmcblk0/slaves") == []
     with pytest.raises(MutationRefused):
         ro._fs("write_file", "/x", b"")
+
+
+# -------------------------------------------------------------- loop devices
+
+BACKING = "/var/lib/images/root.img"
+
+
+def loop_run(g, backing_src, root="/dev/loop0", **kw):
+    over = src(BACKING, backing_src) if backing_src is not None else {}
+    over.update(kw.pop("over", {}))
+    return run(g, root=root, over=over, **kw)
+
+
+def test_root_on_loop_backed_by_a_file_on_the_target_refuses():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING, "/dev/mmcblk0p2"))
+    refused(res, ops, rec, "/dev/mmcblk0", "running root")
+
+
+def test_staging_and_ssh_on_a_loop_backed_by_the_target_refuse():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, stage="/dev/loop0", over=src(BACKING, "/dev/mmcblk0p3"))
+    refused(res, ops, rec, "staging directory")
+    res, ops, rec = run(g, ssh="/dev/loop0", over=src(BACKING, "/dev/mmcblk0"))
+    refused(res, ops, rec, "SSH path")
+
+
+def test_mounted_loop_backed_by_the_target_refuses():
+    g = standard().loop("loop3", BACKING)
+    res, ops, rec = run(g, mounted="/dev/nvme0n1p2\n/dev/loop3\n", over=src(BACKING, "/dev/mmcblk0p1"))
+    refused(res, ops, rec, "mounted")
+
+
+def test_root_on_loop_backed_by_an_unrelated_disk_passes():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING, "/dev/nvme0n1p2"))
+    assert res.exit_code == 0, res.lines
+
+
+def test_loop_backed_by_a_ram_filesystem_passes():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING, "tmpfs"))
+    assert res.exit_code == 0, res.lines
+
+
+def test_nested_loop_resolves_to_the_target():
+    g = standard().loop("loop0", BACKING).loop("loop1", "/mnt/outer.img")
+    over = src(BACKING, "/dev/loop1") | src("/mnt/outer.img", "/dev/mmcblk0p4")
+    res, ops, rec = run(g, root="/dev/loop0", over=over)
+    refused(res, ops, rec, "/dev/mmcblk0", "running root")
+
+
+def test_nested_loop_on_an_unrelated_disk_passes():
+    g = standard().loop("loop0", BACKING).loop("loop1", "/mnt/outer.img")
+    over = src(BACKING, "/dev/loop1") | src("/mnt/outer.img", "/dev/nvme0n1p1")
+    res, ops, rec = run(g, root="/dev/loop0", over=over)
+    assert res.exit_code == 0, res.lines
+
+
+def test_loop_that_backs_itself_hits_the_depth_bound():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING, "/dev/loop0"))
+    refused(res, ops, rec, "deeper than")
+
+
+@pytest.mark.parametrize("content", ["", "\n", "   \n"])
+def test_empty_backing_file_refuses_naming_the_loop(content):
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over={f"read_file {SYS}/loop0/loop/backing_file": content})
+    refused(res, ops, rec, "loop0")
+
+
+def test_deleted_backing_file_refuses_naming_the_loop():
+    g = standard().loop("loop0", BACKING + " (deleted)")
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING + " (deleted)", "/dev/nvme0n1p2"))
+    refused(res, ops, rec, "loop0", "deleted")
+
+
+@pytest.mark.parametrize("exc", [PermissionError("no"), OSError("io")])
+def test_unreadable_backing_file_attribute_refuses_naming_the_loop(exc):
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over={f"read_file {SYS}/loop0/loop/backing_file": exc})
+    refused(res, ops, rec, "loop0")
+
+
+def test_failed_backing_file_probe_refuses():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING, "") | {f"findmnt -no SOURCE -T {BACKING}": OpResult(rc=1)})
+    refused(res, ops, rec, "probe", "loop0")
+
+
+def test_unconfigured_loop_has_no_backing_file_and_is_not_a_source():
+    g = standard().disk("loop7")
+    res, ops, rec = run(g, root="/dev/loop7")
+    assert res.exit_code == 0, res.lines
+    assert not [c for c in ops.log if c.startswith("findmnt") and "loop" in c]
+
+
+def test_loop_reads_go_through_the_read_seam_and_probe_only_for_a_loop_source():
+    g = standard().loop("loop0", BACKING)
+    res, ops, rec = run(g, root="/dev/loop0", over=src(BACKING, "/dev/nvme0n1p2"))
+    assert res.exit_code == 0, res.lines
+    assert {c.vector[0] for c in ops.calls if c.kind == "fs"} == {"read_file", "realpath", "listdir"}
+    assert any(c.vector == ["read_file", f"{SYS}/loop0/loop/backing_file"] for c in ops.calls if c.kind == "fs")
+    res, ops, rec = run(standard())
+    assert not [c for c in ops.log if BACKING in c]

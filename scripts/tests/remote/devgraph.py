@@ -23,7 +23,14 @@ class Graph:
         self._s[f"realpath {SYS}/{name}"] = real + "\n"
         self._s[f"read_file {SYS}/{name}/partition"] = FileNotFoundError(f"{SYS}/{name}/partition")
         self._s[f"listdir {SYS}/{name}/slaves"] = "".join(f"{s}\n" for s in slaves)
+        self._s[f"read_file {SYS}/{name}/loop/backing_file"] = FileNotFoundError(f"{SYS}/{name}/loop/backing_file")
         self._s[f"__real__{name}"] = real
+        return self
+
+    def loop(self, name, backing_file):
+        """A configured loop device: whole device, no slaves, ``loop/backing_file`` names the file behind it."""
+        self.disk(name)
+        self._s[f"read_file {SYS}/{name}/loop/backing_file"] = backing_file + "\n"
         return self
 
     def part(self, disk, name, number):
