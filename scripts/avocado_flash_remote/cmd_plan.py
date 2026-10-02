@@ -188,7 +188,8 @@ def _path_backs_target(ops: Ops, what: str, path: str, target_name: str, depth: 
 
     A block-device source is walked through sysfs. An overlay is followed into every lower, upper and work
     directory with the same probe, so a stack on the target cannot hide behind the overlay's own name.
-    Other non-block sources (nfs and the like) stay the documented limit.
+    A source that is none of these (nfs, fuse, ecryptfs and the like) cannot be shown to be off the target,
+    so it refuses.
     """
     if depth > MAX_STACK_DEPTH:
         raise _Refusal(f"overlay stack under the {what} is deeper than {MAX_STACK_DEPTH} levels; refusing")
@@ -197,8 +198,14 @@ def _path_backs_target(ops: Ops, what: str, path: str, target_name: str, depth: 
         return source if _backs_target(ops, source, target_name, what) else None
     if source in _KERNEL_SOURCES:
         return None
-    if _findmnt_one(ops, what, "FSTYPE", path) != "overlay":
-        return None
+    fstype = _findmnt_one(ops, what, "FSTYPE", path)
+    if fstype != "overlay":
+        if fstype in _KERNEL_SOURCES:
+            return None
+        raise _Refusal(
+            f"cannot tell what backs the {what}: {path} is on a {fstype!r} filesystem that is not a block "
+            "device, an overlay or a kernel/RAM filesystem; refusing"
+        )
     for directory in _overlay_dirs(_findmnt_one(ops, what, "OPTIONS", path), path, what):
         hit = _path_backs_target(ops, what, directory, target_name, depth + 1)
         if hit is not None:
@@ -258,8 +265,22 @@ def _resolve_identity(ops: Ops, profile) -> tuple[str, str]:
         if got != ident.value:
             raise _Refusal(f"device identity mismatch: serial {got!r}, profile expects {ident.value!r}")
         return got, got
-    # by-path: no portable read-only probe; say so rather than claim a match.
-    return "unverified", serial
+    return _resolve_by_path(ops, dev, ident.value), serial
+
+
+def _resolve_by_path(ops: Ops, dev: str, value: str) -> str:
+    """The by-path link must resolve to the very device the profile names; absence or a mismatch refuses."""
+    if not value or "/" in value or value in (".", ".."):
+        raise _Refusal(f"device identity cannot be verified: by-path value {value!r} is not a bare link name")
+    link = f"/dev/disk/by-path/{value}"
+    try:
+        got = _resolve_name(ops, link, "by-path identity")
+    except _Refusal as exc:
+        raise _Refusal(f"device identity cannot be verified: {exc}") from None
+    want = _resolve_name(ops, dev, "target")
+    if got != want:
+        raise _Refusal(f"device identity mismatch: {link} resolves to {got}, the target is {want}")
+    return value
 
 
 def _parse_manifest(text: str) -> dict:

@@ -357,6 +357,45 @@ def test_refuses_identity_mismatch():
     assert_clean_refusal(res, ops, rec, "identity", "mmcblk9")
 
 
+BYPATH = "platform-3460000.mmc"
+BYPATH_NODE = f"/dev/disk/by-path/{BYPATH}"
+
+
+def _bypath_profile():
+    raw = PROFILE_PATH.read_bytes().replace(
+        b'"kind": "sysfs-name"', b'"kind": "by-path"'
+    ).replace(b'"value": "mmcblk0"', f'"value": "{BYPATH}"'.encode())
+    return load(raw)
+
+
+def test_by_path_identity_that_resolves_to_the_target_passes():
+    profile, phash = _bypath_profile()
+    scans = scans_for(profile)
+    script = script_for(profile, scans)
+    script[f"realpath {BYPATH_NODE}"] = "/dev/mmcblk0\n"
+    res, ops, rec = plan(profile, phash, script=script, scans=scans)
+    assert res.exit_code == 0, res.lines
+
+
+@pytest.mark.parametrize("answer", ["/dev/sda\n", "/dev/mmcblk0p1\n", FileNotFoundError("gone"), "/sys/x\n"])
+def test_by_path_identity_mismatch_or_absence_refuses(answer):
+    profile, phash = _bypath_profile()
+    scans = scans_for(profile)
+    script = script_for(profile, scans)
+    script[f"realpath {BYPATH_NODE}"] = answer
+    res, ops, rec = plan(profile, phash, script=script, scans=scans)
+    assert_clean_refusal(res, ops, rec, "identity", BYPATH)
+
+
+def test_by_path_identity_with_a_separator_refuses():
+    raw = PROFILE_PATH.read_bytes().replace(b'"kind": "sysfs-name"', b'"kind": "by-path"').replace(
+        b'"value": "mmcblk0"', b'"value": "../mmcblk0"'
+    )
+    profile, phash = load(raw)
+    res, ops, rec = plan(profile, phash)
+    assert_clean_refusal(res, ops, rec, "identity")
+
+
 def test_refuses_missing_staged_image():
     profile, phash = load()
     scans = scans_for(profile)

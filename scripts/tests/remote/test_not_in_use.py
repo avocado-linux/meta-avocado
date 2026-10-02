@@ -240,8 +240,15 @@ def test_fstype_probe_failure_on_an_unknown_non_block_source_refuses():
     refused(res, ops, rec, "probe")
 
 
-def test_unknown_non_block_source_that_is_not_overlay_still_passes():
-    res, ops, rec = run(standard(), root="host:/export", ssh="tmpfs", over={ROOT_FST: "nfs4\n"})
+@pytest.mark.parametrize("fstype", ["nfs4", "fuse.sshfs", "ecryptfs", "9p", "zfs"])
+def test_unknown_non_block_source_that_is_not_overlay_refuses_naming_path_and_type(fstype):
+    res, ops, rec = run(standard(), root="host:/export", ssh="tmpfs", over={ROOT_FST: fstype + "\n"})
+    refused(res, ops, rec, "running root", "/", fstype)
+
+
+@pytest.mark.parametrize("fstype", ["tmpfs", "ramfs", "devtmpfs", "proc", "cgroup2"])
+def test_unnamed_source_on_a_kernel_or_ram_filesystem_passes(fstype):
+    res, ops, rec = run(standard(), root="none", ssh="tmpfs", over={ROOT_FST: fstype + "\n"})
     assert res.exit_code == 0, res.lines
 
 

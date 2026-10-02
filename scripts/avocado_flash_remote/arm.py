@@ -76,6 +76,19 @@ def entries_with_label(text: str, label: str) -> list:
     return [m.group(1).upper() for m in rx.finditer(text)]
 
 
+def bootable_entries(live: str, ours) -> dict:
+    """Entries of ``ours`` the firmware may boot: in BootOrder, or the one just booted. Number -> reason."""
+    order = {e.strip().upper() for e in boot_order_of(live).split(",") if e.strip()}
+    current = _field(live, "BootCurrent").upper()
+    why = {}
+    for num in ours:
+        if num in order:
+            why[num] = "is in BootOrder"
+        elif current and num == current:
+            why[num] = "is BootCurrent (the board booted it)"
+    return why
+
+
 # ------------------------------------------------------------------------ arm
 
 
@@ -174,18 +187,25 @@ class Arm:
         if not record.entry_number and not record.next_armed:
             return notes
         live = ops.efibootmgr_list()
-        if record.next_armed and boot_next_of(live).upper() == record.entry_number.upper():
+        number = record.entry_number.upper()
+        if number and number not in entries_with_label(live, record.label):
+            notes.append(
+                f"boot entry {record.entry_number} with label {record.label} not found; "
+                "leaving the boot entries alone"
+            )
+            return notes
+        bootable = bootable_entries(live, [number]) if number else {}
+        if bootable:
+            raise ArmError(
+                f"refusing: boot entry {number} carries this tool's label but {bootable[number]}; no boot "
+                "entry was changed; inspect `efibootmgr -v` and remove the entry by hand if it is really ours"
+            )
+        if record.next_armed and boot_next_of(live).upper() == number:
             ops.efibootmgr_delete_next()
             notes.append(f"cleared BootNext {record.entry_number}")
-        if record.entry_number:
-            if record.entry_number.upper() in entries_with_label(live, record.label):
-                ops.efibootmgr_delete(record.entry_number)
-                notes.append(f"deleted boot entry {record.entry_number}")
-            else:
-                notes.append(
-                    f"boot entry {record.entry_number} with label {record.label} not found; "
-                    "leaving the boot entries alone"
-                )
+        if number:
+            ops.efibootmgr_delete(record.entry_number)
+            notes.append(f"deleted boot entry {record.entry_number}")
         return notes
 
 

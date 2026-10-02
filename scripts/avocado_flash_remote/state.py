@@ -17,6 +17,7 @@ import copy
 import fcntl
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -339,7 +340,33 @@ class LoadResult:
     run_id: str | None = None
 
 
-def _validate(data: Any) -> str | None:
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_+][A-Za-z0-9._+-]*\Z")
+_IMAGE_STATES = ("pending", "writing", "written")
+_ARM_STR_KEYS = ("entry_number", "label", "preexisting_boot_order", "preexisting_next")
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_armed(armed: Any) -> str | None:
+    if armed is None:
+        return None
+    if not isinstance(armed, dict):
+        return "armed is neither null nor an object"
+    unknown = sorted(set(armed) - set(_ARM_STR_KEYS) - {"next_armed"})
+    if unknown:
+        return f"armed has unknown keys {unknown}"
+    for k in _ARM_STR_KEYS:
+        if armed.get(k) is not None and not isinstance(armed[k], str):
+            return f"armed.{k} is not a string or null"
+    if "next_armed" in armed and not isinstance(armed["next_armed"], bool):
+        return "armed.next_armed is not a boolean"
+    return None
+
+
+def _validate(data: Any, expected_run_id: str | None = None) -> str | None:
+    """Why ``data`` is not a usable run state, or None. Types and consistency, not just key presence."""
     if not isinstance(data, dict):
         return "state document is not an object"
     if data.get("schema_version") != SCHEMA_VERSION:
@@ -349,7 +376,30 @@ def _validate(data: Any) -> str | None:
     for k in ("run_id", "seq", "arm_enabled", "image_order", "phases_done", "images"):
         if k not in data:
             return f"missing field {k!r}"
-    return None
+    run_id = data["run_id"]
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        return f"bad run_id {run_id!r}"
+    if expected_run_id is not None and run_id != expected_run_id:
+        return f"run_id {run_id!r} does not match the run it was loaded for ({expected_run_id!r})"
+    if not _is_int(data["seq"]) or data["seq"] < 1:
+        return f"seq {data['seq']!r} is not a positive integer"
+    if not isinstance(data["arm_enabled"], bool):
+        return "arm_enabled is not a boolean"
+    order = data["image_order"]
+    if not isinstance(order, list) or not all(isinstance(r, str) for r in order):
+        return "image_order is not a list of role names"
+    done = data["phases_done"]
+    if not isinstance(done, list) or not all(isinstance(p, dict) and p.get("phase") in PHASES for p in done):
+        return "phases_done is not a list of known phases"
+    images = data["images"]
+    if not isinstance(images, dict) or not all(
+        isinstance(v, dict) and v.get("state") in _IMAGE_STATES for v in images.values()
+    ):
+        return "images is not a mapping of image states"
+    missing = [r for r in order if r not in images]
+    if missing:
+        return f"images has no record for ordered roles {missing}"
+    return _validate_armed(data.get("armed"))
 
 
 def load_state(state_dir) -> LoadResult:
@@ -370,7 +420,7 @@ def load_state(state_dir) -> LoadResult:
         return LoadResult("unparseable", reason=f"{path} is missing", run_id=run_id)
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return LoadResult("unparseable", reason=f"{path}: {e}", run_id=run_id)
-    bad = _validate(data)
+    bad = _validate(data, run_id)
     if bad:
         return LoadResult("unparseable", reason=f"{path}: {bad}", run_id=run_id)
     return LoadResult("ok", state=RunState(path.parent, data), run_id=data["run_id"])

@@ -472,3 +472,29 @@ def test_disarm_does_not_delete_a_longer_labelled_entry_with_the_recorded_number
     notes = get_arm("uefi-bootnext").disarm(ops, rec)
     assert not any("-B" in line.split() for line in ops.log)
     assert any("leaving" in n for n in notes)
+
+
+def test_disarm_with_a_foreign_label_under_the_recorded_number_makes_no_efi_change_even_with_bootnext():
+    foreign = "Boot0005* something-else\tHD(1,GPT)"
+    ops = RecordingOps({LIST: efi(extra=[foreign], nxt="0005")})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST]
+    assert any("leaving" in n for n in notes)
+
+
+def test_disarm_refuses_a_recorded_entry_that_is_in_boot_order():
+    ops = RecordingOps({LIST: efi(order="0001,0005,0002", extra=[NEW], nxt="0005")})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    with pytest.raises(ArmError, match="BootOrder"):
+        get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST]
+
+
+def test_disarm_refuses_a_recorded_entry_that_is_boot_current():
+    live = efi(extra=[NEW], nxt="0005").replace("BootCurrent: 0001", "BootCurrent: 0005")
+    ops = RecordingOps({LIST: live})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    with pytest.raises(ArmError, match="BootCurrent"):
+        get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST]

@@ -35,7 +35,7 @@ def _load_run(state_dir, run_id):
         return LoadResult("absent", run_id=run_id)
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return LoadResult("unparseable", reason=f"{path}: {e}", run_id=run_id)
-    bad = _validate(data)
+    bad = _validate(data, run_id)
     if bad:
         return LoadResult("unparseable", reason=f"{path}: {bad}", run_id=run_id)
     return LoadResult("ok", state=RunState(path.parent, data), run_id=data["run_id"])
