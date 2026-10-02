@@ -31,6 +31,7 @@ class Board:
         self.runner_alive = False
         self.outcome = None  # the runner's `outcome` marker body (bytes) once it has ended
         self.probe_fail = None  # a RunResult every presence probe (markers, /proc) answers with
+        self.accepted_fail_times = 0  # the first N reads of the accepted marker fail (an ssh blip), then it is readable
         self.accepted_nonce = None  # override the nonce the accepted marker carries (another invocation's)
         self.write_err = b""
         self.complete_on_proc_probe = False  # the write finishes between the poll and the probe
@@ -121,6 +122,9 @@ class Board:
             return RunResult(3)
         if argv[0] == "sh" and "exit 3" in argv[2] and argv[-1].endswith("/accepted"):
             self.cat_calls.append(argv[-1])
+            if self.accepted_fail_times > 0:
+                self.accepted_fail_times -= 1
+                return SSH_DROP
             if self.probe_fail is not None:
                 return self.probe_fail
             if self.accepted and self.wrote:
@@ -711,7 +715,10 @@ def test_failed_proc_probe_does_not_end_the_follow_but_withholds_complete(images
     # Whose runner finished the run cannot be read either, so COMPLETE is withheld rather than guessed.
     assert rc == 1
     assert "write COMPLETE" not in text
-    assert "could not confirm whose runner" in text
+    # Reworded: "did not write it" is only for another invocation's run or none at all, never for an
+    # unreadable marker, so the unknown now says it could not confirm and points at status.
+    assert "could not confirm which invocation wrote it" in text and "status subcommand" in text
+    assert "did not write it" not in text
 
 
 def test_proc_probe_and_marker_read_run_with_the_same_privilege(images, tmp_path):
@@ -810,6 +817,34 @@ def test_complete_phase_with_an_unreadable_accepted_marker_is_not_reported_as_co
     all_text = text + capsys.readouterr().err
     assert rc == 1
     assert "write COMPLETE" not in all_text
+
+
+def test_one_ssh_blip_on_the_owner_probe_does_not_withhold_our_own_complete(images, tmp_path):
+    board = Board(tmp_path)
+    board.accepted_fail_times = 1
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0 and "write COMPLETE" in text
+    assert "did not write it" not in text
+    assert len([c for c in board.cat_calls if c.endswith("/accepted")]) == 2
+
+
+def test_an_owner_probe_that_stays_unreadable_is_unknown_never_did_not_write_it(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.accepted_fail_times = 10**6
+    rc, text = _write(images, tmp_path, board)
+    all_text = text + capsys.readouterr().err
+    assert rc == 1 and "write COMPLETE" not in all_text
+    assert "could not confirm which invocation wrote it" in all_text
+    assert "did not write it" not in all_text
+    # bounded: within --wait-seconds, not forever
+    assert len([c for c in board.cat_calls if c.endswith("/accepted")]) <= 10
+
+
+def test_a_marker_that_is_another_invocations_still_says_it_did_not_write_it(images, tmp_path):
+    board = Board(tmp_path)
+    board.accepted_nonce = "e5" * 8
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 1 and "did not write it" in text
 
 
 def test_complete_phase_with_our_refusal_recorded_is_not_complete(images, tmp_path, capsys):

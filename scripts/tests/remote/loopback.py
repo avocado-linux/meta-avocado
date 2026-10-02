@@ -67,6 +67,16 @@ sys.path.insert(0, {tests!r})
 import loopback_ops
 from avocado_flash_remote import runner
 runner.RealOps = lambda tool_dir: loopback_ops.LoopOps({root!r})
+import os
+if os.path.exists(os.path.join({root!r}, "fail-accepted")):
+    _atomic_marker = runner._atomic_marker
+
+    def _failing_marker(final, text):
+        if final.endswith("/accepted"):
+            raise OSError(28, "No space left on device")
+        return _atomic_marker(final, text)
+
+    runner._atomic_marker = _failing_marker
 sys.exit(runner.main(argv, archive=archive))
 """
 
@@ -191,6 +201,10 @@ class LoopbackBoard:
             if _path.endswith(f"request-{sub}.json") or f"request-{sub}" in _path:
                 return body
         raise AssertionError(f"no {sub} request was sent")
+
+    def fail_accepted_writes(self):
+        """From now on the runner's attempt to write its accepted marker fails (a full disk)."""
+        (self.root / "fail-accepted").write_text("1")
 
     # -- holding a write inside dd -------------------------------------------
     def hold(self):

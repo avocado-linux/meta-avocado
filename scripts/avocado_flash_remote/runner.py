@@ -252,7 +252,7 @@ def _do_readback(real, profile, phash, req):
 
 def _do_status(real, profile, phash, req):
     (state_dir,) = _need(req, "state_dir")
-    return run_status(state_dir)
+    return run_status(state_dir, run_id=req.get("run_id"))
 
 
 _HANDLERS = {
@@ -450,33 +450,40 @@ def _take_run_lock(state_dir, run_id):
     if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
         raise _Exit(EXIT_USAGE, f"runner error: invalid run id {run_id!r}", sys.stderr)
     path = os.path.join(state_dir, f".invocation-{run_id}.lock")
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    # O_NOFOLLOW where the platform has it: a symlink planted at the lock path must not make the runner
+    # lock (or create) some other file.
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError as e:
+        raise _Exit(1, f"write refused: cannot open the invocation lock {path}: {e}", sys.stderr) from None
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
         raise _Exit(
             1,
-            f"write refused: run {run_id} is already in progress under another invocation; "
-            "this invocation did not start and left the running one as it was. The board may be changing: "
-            "follow the running write with the status subcommand and do not start another",
+            f"write refused: run {run_id} is already in progress, a runner holds this run; "
+            "the board may be changing, run status to follow it and do not start another. "
+            "This invocation did not start and left the running one as it was",
             sys.stderr,
         ) from None
     return fd
 
 
 def _write_accepted(run_dir, nonce):
-    """Record that the detached runner took the request, before any real work.
+    """Record that the detached runner took the request, before any real work. True when it landed.
 
     The host reads this to tell a runner that is still hashing (no state.json
     yet) from one that never started, and the nonce on its second line to tell
-    its own invocation's runner from another's. Written atomically; advisory, so
-    a failure is logged and does not stop the write.
+    its own invocation's runner from another's. Written atomically. A host reports COMPLETE only
+    when this marker carries its nonce, so a failure here is fatal: the caller stops before any work.
     """
     try:
         _atomic_marker(os.path.join(run_dir, ACCEPTED_MARKER), f"{os.getpid()}\nnonce={nonce}\n")
     except OSError as e:
         print(f"runner error: cannot write {ACCEPTED_MARKER} marker: {e}", file=sys.stderr)
+        return False
+    return True
 
 
 def _write_outcome(run_dir, run_id, nonce, outcome):
@@ -507,10 +514,12 @@ def _replay_refusal(profile, run_dir, run_id):
     state_json = os.path.join(profile.state_dir, str(run_id), "state.json")
     if not (os.path.isfile(state_json) or os.path.isfile(os.path.join(run_dir, "write.json"))):
         return None
+    # Only reached with the per-run lock held and a state record present, so the run has already
+    # written (or begun to write) to the board: this text never calls the board unchanged.
     return (
         f"write refused: run {run_id} already has a state record under {profile.state_dir}; "
-        "it is never overwritten: run plan again for a new run id\n"
-        "nothing was written to the board"
+        "it is never overwritten: run plan again for a new run id. "
+        "This invocation did not start a write and left that run's records as they were"
     )
 
 
@@ -570,13 +579,12 @@ def main(argv, *, archive=None):
         if detach:
             run_dir, run_id = _need(req, "run_dir", "run_id")
             nonce = _invocation_nonce(req)
-            refusal = _replay_refusal(profile, run_dir, run_id)
-            if refusal is not None:
-                raise _Exit(1, refusal, sys.stderr)
         _prepare_run_dir(sub, profile, req)
         if detach:
-            # The lock comes before any marker is cleared: a runner already working on this
-            # run id keeps its markers, its manifest and its verdict.
+            # The lock comes before the replay check and before any marker is cleared: while a runner
+            # works on this run id its state record already exists, so a replay check made first would
+            # turn a live write into a "replay" and say nothing about the board changing. Whoever
+            # holds the lock keeps its markers, its manifest and its verdict.
             lock_fd = _take_run_lock(profile.state_dir, run_id)
             refusal = _replay_refusal(profile, run_dir, run_id)
             if refusal is not None:
@@ -585,7 +593,9 @@ def main(argv, *, archive=None):
             _clear_markers(run_dir)
             if not _detach(run_dir, run_id):
                 return 0
-            _write_accepted(run_dir, nonce)
+            if not _write_accepted(run_dir, nonce):
+                sys.stderr.flush()
+                os._exit(EXIT_ERROR)  # no marker, no work: the host will see a run that never started
             rc = _run_guarded(sub, profile, phash, req, detached=True)
             sys.stdout.flush()
             sys.stderr.flush()

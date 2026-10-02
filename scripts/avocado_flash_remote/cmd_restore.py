@@ -96,22 +96,52 @@ def _entry_present(text, number) -> bool:
     return re.search(rf"^Boot{re.escape(number)}\b", text, re.IGNORECASE | re.MULTILINE) is not None
 
 
-def _lock_holder(exc) -> str:
+def _lock_record(exc):
     raw = getattr(exc, "holder", "") or ""
     try:
         data = json.loads(raw)
-        return f"pid {data.get('pid')} (run {data.get('run_id') or 'none'})"
-    except (ValueError, AttributeError, TypeError):
-        return raw or "an unknown holder"
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _lock_holder(exc) -> str:
+    data = _lock_record(exc)
+    if data is None:
+        return getattr(exc, "holder", "") or "an unknown holder"
+    return f"pid {data.get('pid')} (run {data.get('run_id') or 'none'})"
+
+
+def _holder_gone(exc) -> bool:
+    """True only when the lock file names a pid and /proc says that process is not there.
+
+    Anything else (a record that is missing, unparseable or names no integer pid) counts as a live
+    holder: the lock is held, so a writer may be mid-write, and an unknown is never read as gone.
+    """
+    data = _lock_record(exc)
+    pid = data.get("pid") if data else None
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    return not os.path.exists(f"/proc/{pid}")
+
+
+def _live_holder_lines(holder) -> list:
+    return [
+        f"the on-board flash lock is held by {holder} and did not clear in time",
+        "that holder is alive or cannot be shown to be gone: a write may be changing the board right now "
+        "(image-writing is one phase for the whole dd, so a phase that is not moving proves nothing)",
+        "wait for it to finish and run the status subcommand again; do not touch any boot entry meanwhile",
+        "no boot entry or staging was touched",
+    ]
 
 
 def _manual_disarm_lines(label, holder) -> list:
     return [
         f"the on-board flash lock is held by {holder} and did not clear in time",
-        "STOP if that process is alive (ps -p <pid>) and the write's phase is still moving "
-        "(run the status subcommand twice): it is a healthy write still working, so wait for it and do nothing below",
+        "that pid is gone, but the lock is still held, so a tool it started may still be running: "
+        "check first on the board (ps -ef | grep -E 'dd|sfdisk|efibootmgr') and stop here if any is alive",
         "no boot entry or staging was touched",
-        "only if the holder is gone, or its phase has stopped moving, disarm by hand as root on the board:",
+        "only if nothing is running, disarm by hand as root on the board:",
         "  efibootmgr -v    (find the entries labelled "
         f"{label!r}; note BootNext, BootOrder and BootCurrent)",
         f"  efibootmgr -N    (only if BootNext names an entry labelled {label!r}; leave any other BootNext alone)",
@@ -154,7 +184,9 @@ def run_restore(
         result = RestoreResult(1)
         lines = [f"refusing: {why}", "no boot entry or staging was touched"]
         if emergency_disarm and isinstance(exc, LockHeld):
-            lines = [f"refusing: {why}"] + _manual_disarm_lines(label, _lock_holder(exc))
+            holder = _lock_holder(exc)
+            steps = _manual_disarm_lines(label, holder) if _holder_gone(exc) else _live_holder_lines(holder)
+            lines = [f"refusing: {why}"] + steps
         for line in lines:
             result.lines.append(line)
             out(line)

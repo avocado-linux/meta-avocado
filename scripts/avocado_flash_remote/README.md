@@ -380,10 +380,16 @@ one of them. `BootOrder`, all other entries and staging are left alone. Like the
 label-based path above, it deletes nothing when a labelled entry is in `BootOrder`
 or is `BootCurrent`.
 
-`--emergency-disarm` does not depend on the run state, so a hung write that still
-holds the flash lock must not block it for good. It waits up to 15 seconds for the
-lock. If the lock stays held it exits 1 having touched nothing, prints the holder
-(the pid and run id from the lock file) and the manual commands:
+`--emergency-disarm` does not depend on the run state, so a holder that never
+releases the flash lock must not block it for good. It waits up to 15 seconds for
+the lock. If the lock stays held it exits 1 having touched nothing and prints the
+holder (the pid and run id from the lock file). What follows depends on that pid
+alone, checked in `/proc` on the board, never on the write's phase (`image-writing`
+is one phase for the whole `dd`, and between taking the lock and the first state
+record `status` still shows the previous run's terminal phase). A live holder, or a
+lock record that cannot be read, gets no manual commands: wait for it and run
+`status` again. Only a holder whose pid is gone gets the manual commands, after a
+reminder to check that no tool it started is still running:
 `efibootmgr -v`, `efibootmgr -N`, and `efibootmgr -B -b XXXX` for one labelled
 entry that is not in `BootOrder` and is not `BootCurrent`. The normal `restore`
 keeps refusing at once while the lock is held.
@@ -453,28 +459,43 @@ write keeps going on the board; follow it with `status`. Ctrl-C on the host has
 the same effect: a started write is not stopped.
 
 A write whose run id already has a state record (or whose run directory holds
-`write.json`) is refused by the runner before it detaches: the host gets exit 1
-and the refusal on stderr, never follows it, and the finished records are left as
-they were.
+`write.json`) is refused by the runner before it detaches, and only after the
+runner has taken the per-run lock described next: the host gets exit 1 and the
+refusal on stderr, never follows it, and the finished records are left as they
+were. The check runs second on purpose. A runner that is still writing has a state
+record too, so a replay check made before the lock would call a live write a replay
+and say nothing about the board changing. The replay refusal itself never says the
+board is unchanged, because a run with a state record has already written to it.
 
-Each `write` invocation sends a fresh random nonce (`invocation_nonce`). Before
-it touches any marker the detached runner takes a per-run lock
+Each `write` invocation sends a fresh random nonce (`invocation_nonce`). The host
+also names its request file by that nonce (`request-write-<nonce>.json`, written
+through `request-write-<nonce>.json.tmp`), so two workstations never share a path,
+and it removes only the file it wrote once the runner call has returned (the runner
+reads its request before it forks). Before it touches any marker, and before the
+replay check, the detached runner takes a per-run lock
 (`<state_dir>/.invocation-<run_id>.lock`) that the detached process holds for as
 long as it lives, so a second invocation of the same run id while the first is
 still working (even while it is only hashing and has no state record yet) is
-refused with exit 1 and "already in progress". That refusal changes nothing: the
+refused with exit 1 and "already in progress, a runner holds this run; the board may
+be changing, run status". The lock is opened with `O_NOFOLLOW` where the platform
+has it, so a symlink planted at its path is refused rather than followed. That
+refusal leaves everything of the running runner alone: the
 running runner's markers, verdict and manifest are left alone, no `outcome` is
 written for the run, and the refusal text never says the board is unchanged,
 because it is not. A crashed runner releases the lock with its process.
 
-When the host stops following a run: at the start of every invocation the runner
-deletes the previous `accepted` and `outcome` markers, then a detached runner
-writes its pid and the invocation's nonce to an `accepted` marker file in the run
-directory before it does any check or hashing, and, when it ends, an `outcome`
-marker (also carrying the run id and the nonce): `finished`, or
-`refused` followed by the board's own refusal text for a write turned away before
-the lock (an unfinished prior run, a failed check, a changed `BootOrder`, a
-confirmation mismatch). A runner that crashed writes no `outcome`. The host reads
+When the host stops following a run: the runner deletes the previous `accepted` and
+`outcome` markers only for an accepted invocation, one that took the per-run lock
+and is not a replay. A refused invocation (a replay, a held lock, a bad nonce)
+deletes and writes no marker at all. An accepted detached runner then writes its pid
+and the invocation's nonce to an `accepted` marker file in the run directory
+before it does any check or hashing. If that write fails the runner stops before
+any work (COMPLETE depends on the marker), and the host later reports a write that
+did not start. When the runner ends it writes an `outcome` marker (also carrying
+the run id and the nonce): `finished`, or `refused` followed by the board's own
+refusal text for a write turned away after the lock and before any work (an
+unfinished prior run, a failed check, a changed `BootOrder`, a confirmation
+mismatch). A runner that crashed writes no `outcome`. The host reads
 `outcome` first and prints a `refused` text verbatim with exit 1. Anything the
 host cannot read (a dropped ssh, a sudo failure, an unrecognised answer, an
 `outcome` written for another run or another invocation) is unknown, and an unknown never ends the
@@ -483,8 +504,14 @@ until `--wait-seconds` runs out. When a run reaches `complete`, the host also
 checks that the run's `accepted` marker carries this invocation's nonce and that no
 refusal is recorded for it, and does not print `COMPLETE` otherwise (a replay that
 was turned away, followed after a dropped connection, lands here: the host reports
-the run's phase and says this invocation did not write it) or if the board could not
-confirm it. The marker probes decide absence by their own exit code, never by the
+the run's phase and says this invocation did not write it). The host says "did not
+write it" only when the markers belong to another invocation or no runner of this
+invocation recorded itself. When the markers cannot be read, it retries the probe
+within `--wait-seconds`, and if they stay unreadable it says it could not confirm
+which invocation wrote the run and points at `status`; it never says "did not write
+it" for an unknown. While following, the host asks `status` for its own run id, so a
+later run moving the board's `current` pointer cannot make a completed write look
+unrecorded. The marker probes decide absence by their own exit code, never by the
 wording of a localised error message. Before declaring
 a runner dead the host reconciles once more, so a run that finished between the
 poll and the probe is reported as complete. If the recorded phase is non-terminal and has not moved between two

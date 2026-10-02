@@ -216,6 +216,52 @@ def test_status_reports_phase_run_and_recovery(tmp_path):
     assert res.recovery == st.describe_recovery(s)
 
 
+def _two_runs(tmp_path):
+    a = st.create_run(tmp_path, run_id="rA", profile_hash="p", plan_hash="q", board_identity={}, image_roles=[], arm=True)
+    st.transition(a, "failed", error="run A ended")
+    b = st.create_run(tmp_path, run_id="rB", profile_hash="p", plan_hash="q", board_identity={}, image_roles=[], arm=True)
+    return a, b
+
+
+def test_status_without_a_run_id_reports_the_current_run_only(tmp_path):
+    _two_runs(tmp_path)
+    lines = []
+    res = run_status(tmp_path, out=lines.append)
+    assert (res.phase, res.run_id) == ("planned", "rB")
+
+
+def test_status_with_a_run_id_reads_that_runs_own_state_even_when_current_moved_on(tmp_path):
+    _two_runs(tmp_path)
+    lines = []
+    res = run_status(tmp_path, out=lines.append, run_id="rA")
+    assert (res.exit_code, res.phase, res.run_id) == (0, "failed", "rA")
+    assert lines[0].startswith("status: failed run=rA recovery=")
+
+
+def test_status_with_a_run_id_that_has_no_state_says_no_run_recorded(tmp_path):
+    _two_runs(tmp_path)
+    lines = []
+    res = run_status(tmp_path, out=lines.append, run_id="rZ")
+    assert res.exit_code == 0 and res.phase is None
+    assert "no run recorded" in lines[0] and "rZ" in lines[0]
+
+
+@pytest.mark.parametrize("bad", ["../x", "a/b", "..", ".", ""])
+def test_status_with_a_hostile_run_id_is_unreadable_not_a_path_walk(tmp_path, bad):
+    mk_state(tmp_path)
+    lines = []
+    res = run_status(tmp_path, out=lines.append, run_id=bad)
+    assert res.exit_code == 1 and "unreadable" in lines[0]
+
+
+def test_status_with_a_corrupt_run_state_is_unreadable(tmp_path):
+    _two_runs(tmp_path)
+    (tmp_path / "rA" / "state.json").write_text("{not json")
+    lines = []
+    res = run_status(tmp_path, out=lines.append, run_id="rA")
+    assert res.exit_code == 1 and "unreadable" in lines[0] and "rA" in lines[0]
+
+
 def test_status_unparseable_exits_1(tmp_path):
     (tmp_path / "current").write_text("r1\n")
     lines = []
@@ -246,7 +292,9 @@ def test_status_writes_nothing_on_read_only_dir(tmp_path):
 def test_status_takes_no_ops_object():
     import inspect
 
-    assert list(inspect.signature(run_status).parameters) == ["state_dir", "out"]
+    # run_id was added (keyword, default None): a host asking after its own run no longer depends on
+    # which run the `current` pointer names at that moment. Still no ops object.
+    assert list(inspect.signature(run_status).parameters) == ["state_dir", "out", "run_id"]
 
 
 FORBIDDEN_MODULES = {"subprocess", "shutil", "tempfile"}

@@ -447,10 +447,17 @@ def test_entries_with_label_does_not_match_a_longer_label(line):
         f"Boot0007* {LABEL}",  # no -v: end of line
         f"Boot0007* {LABEL}  ",  # trailing blanks at the end of the line
         f"Boot0007  {LABEL}\tHD(1,GPT)",  # inactive entry (no asterisk)
+        f"Boot0007* {LABEL}\r",  # CR line ending
+        f"Boot0007* {LABEL}  \r",  # trailing blanks then CR
+        f"Boot0007* {LABEL}\tHD(1,GPT)\r",
     ],
 )
 def test_entries_with_label_matches_the_exact_label(line):
     assert entries_with_label(efi(extra=[line]), LABEL) == ["0007"]
+
+
+def test_entries_with_label_still_refuses_a_longer_label_with_a_cr_ending():
+    assert entries_with_label(efi(extra=[f"Boot0007* {LABEL} old\r"]), LABEL) == []
 
 
 def test_entries_with_label_is_found_in_the_middle_of_a_listing():

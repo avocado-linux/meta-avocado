@@ -27,6 +27,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shlex
 import signal
 import subprocess
@@ -563,18 +564,37 @@ def run_remote(transport, subcommand: str, request: dict, bundle_remote_path: st
     staging = request.get("staging_dir")
     if not isinstance(staging, str) or not staging.startswith("/"):
         raise HostError("request needs an absolute staging_dir")
-    req_path = f"{staging}/request-{subcommand}.json"
+    # The invocation's own tag names its request and its temp file: two workstations (or two
+    # invocations) never share a path, so neither can overwrite or truncate the other's request
+    # before its runner reads it, and each removes only the file it wrote.
+    tag = request.get("invocation_nonce")
+    if not isinstance(tag, str) or not re.fullmatch(r"[0-9a-f]{16,64}", tag):
+        tag = secrets.token_hex(8)
+    req_path = f"{staging}/request-{subcommand}-{tag}.json"
     body = json.dumps(request, sort_keys=True).encode("utf-8")
     put = transport.run(
         ["sh", "-c", 'cat > "$1.tmp" && mv "$1.tmp" "$1"', "sh", req_path],
         body, sudo=False, timeout=60,
     )
     if put.rc != 0:
+        _remove_request(transport, req_path)
         raise HostError("cannot write the request file on the board")
     argv = [validate_remote_python(python), bundle_remote_path, subcommand, "--request", req_path]
     if detach or subcommand == "write":
         argv.append("--detach")
-    return transport.run(argv, None, sudo=True, timeout=timeout)
+    try:
+        return transport.run(argv, None, sudo=True, timeout=timeout)
+    finally:
+        # The runner reads its request before it forks, so the file is spent once the call returns.
+        # A dropped connection skips nothing here: the removal is a separate, best-effort call.
+        _remove_request(transport, req_path)
+
+
+def _remove_request(transport, req_path: str) -> None:
+    try:
+        transport.run(["rm", "-f", "--", req_path], None, sudo=False, timeout=60)
+    except HostError:
+        pass
 
 
 @dataclass
@@ -589,13 +609,16 @@ class Reconciled:
 _STATUS_RE = re.compile(r"^status: (\S+) run=(\S+) recovery=(.*)$")
 
 
-def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: str, python: str = DEFAULT_PYTHON) -> Reconciled:
-    """Ask the board's runner for its recorded phase (used after a drop)."""
-    res = run_remote(
-        transport, "status",
-        {"staging_dir": staging_dir, "state_dir": state_dir},
-        bundle_remote_path, timeout=120, python=python,
-    )
+def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: str, python: str = DEFAULT_PYTHON, run_id: Optional[str] = None) -> Reconciled:
+    """Ask the board's runner for its recorded phase (used after a drop).
+
+    With ``run_id`` the answer is that run's own record, not whichever run ``current`` names: another
+    run's create_run can move ``current`` after this host's run completed.
+    """
+    request = {"staging_dir": staging_dir, "state_dir": state_dir}
+    if run_id is not None:
+        request["run_id"] = run_id
+    res = run_remote(transport, "status", request, bundle_remote_path, timeout=120, python=python)
     text = res.out.strip()
     if res.rc != 0:
         return Reconciled(False, raw=text)
