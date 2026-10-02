@@ -223,7 +223,7 @@ def test_runner_modules_are_stdlib_only():
 def test_mutating_verb_list_is_not_vacuous():
     verbs = mutating_verbs()
     assert len(verbs) >= 10
-    assert {"dd_write", "sfdisk_write", "efibootmgr_create"} <= verbs
+    assert {"dd_write", "sfdisk_write", "efibootmgr_next"} <= verbs
 
 
 @pytest.mark.parametrize("mod", ["cmd_plan", "cmd_check", "cmd_status"])

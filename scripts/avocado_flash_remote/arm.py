@@ -2,9 +2,9 @@
 
 Ports the bash kit's install.sh logic (efibootmgr snapshot parsing, the
 BootOrder-unchanged check, the Android boot image header cmdline check).
-Arm strategies only ever create one entry with ``-C`` and set the next boot
-with ``-n``; they never write the boot order (no ``-o``, ``-O`` or ``-c``)
-and never touch an entry other than the one they recorded. The boot-arg
+The arm strategy selects the firmware's own storage entry with ``-n`` and
+clears BootNext with ``-N``; it never creates, deletes or reorders a boot
+entry (no ``-C``, ``-B``, ``-b``, ``-o``, ``-O`` or ``-c``). The boot-arg
 guard only reads. Every board action goes through ``Ops``.
 
 Standard library only (ships to a board running Python 3.10).
@@ -76,19 +76,6 @@ def entries_with_label(text: str, label: str) -> list:
     return [m.group(1).upper() for m in rx.finditer(text)]
 
 
-def bootable_entries(live: str, ours) -> dict:
-    """Entries of ``ours`` the firmware may boot: in BootOrder, or the one just booted. Number -> reason."""
-    order = {e.strip().upper() for e in boot_order_of(live).split(",") if e.strip()}
-    current = _field(live, "BootCurrent").upper()
-    why = {}
-    for num in ours:
-        if num in order:
-            why[num] = "is in BootOrder"
-        elif current and num == current:
-            why[num] = "is BootCurrent (the board booted it)"
-    return why
-
-
 # ------------------------------------------------------------------------ arm
 
 
@@ -105,11 +92,32 @@ class NoneArm:
         return []
 
 
+def _count_phrase(n: int) -> str:
+    return f"{n} boot {'entry' if n == 1 else 'entries'}"
+
+
+def _single_entry(text: str, label: str, where: str, record=None) -> str:
+    """The one entry number carrying ``label``; any other count refuses, naming count and label."""
+    found = entries_with_label(text, label)
+    if len(found) != 1:
+        raise ArmError(
+            f"{where}: found {_count_phrase(len(found))} labelled {label!r}, expected exactly one; "
+            "no boot variable was changed",
+            record,
+        )
+    return found[0]
+
+
 class Arm:
-    """uefi-bootnext: one-shot entry plus ``efibootmgr -n``, BootOrder untouched."""
+    """uefi-bootnext: select the firmware's own storage entry with ``efibootmgr -n``.
+
+    No boot entry is ever created, deleted or reordered: the firmware lists a
+    storage entry with a full device path, and only that entry is honoured by
+    BootNext (a short-form entry made by ``-C`` is ignored by the target firmware).
+    """
 
     def prepare(self, ops, profile, state=None) -> ArmRecord:
-        label = profile.arm.params["label"]
+        label = profile.arm.params["entry_label"]
         text = ops.efibootmgr_list()
         order = boot_order_of(text)
         if not order:
@@ -118,66 +126,39 @@ class Arm:
         if nxt:
             # Kit: refuse rather than replace someone else's one-shot.
             raise ArmError(f"BootNext is already set ({nxt}); refusing to replace another one-shot")
-        if entries_with_label(text, label):
-            raise ArmError(f"a boot entry labelled {label} already exists; {RESTORE_HINT}")
+        entry = _single_entry(text, label, "prepare")
         return ArmRecord(
-            label=label, preexisting_boot_order=order, preexisting_next=nxt
+            entry_number=entry, label=label, preexisting_boot_order=order, preexisting_next=nxt
         )
 
     def arm(self, ops, profile, record) -> ArmRecord:
-        params = profile.arm.params
-        label = params["label"]
+        label = profile.arm.params["entry_label"]
         order = record.preexisting_boot_order
         if not order:
             raise ArmError("record has no BootOrder to verify against", record)
         pre = ops.efibootmgr_list()
         if boot_order_of(pre) != order:
             raise ArmError(
-                "BootOrder changed since it was recorded; stopping before any boot entry call",
+                "BootOrder changed since it was recorded; stopping before any boot variable call",
                 record,
             )
         nxt = boot_next_of(pre)
         if nxt:
             raise ArmError(
                 f"BootNext is set ({nxt}) since the plan was prepared; refusing to replace "
-                "another one-shot; no boot entry was created",
+                "another one-shot; no boot variable was changed",
                 record,
             )
-        if entries_with_label(pre, label):
+        entry = _single_entry(pre, label, "arm", record)
+        if record.entry_number and record.entry_number.upper() != entry:
             raise ArmError(
-                f"a boot entry labelled {label} already exists; no boot entry was created; "
-                f"{RESTORE_HINT}",
+                f"the entry labelled {label!r} is Boot{entry} now but was Boot{record.entry_number} when "
+                "it was recorded; no boot variable was changed",
                 record,
             )
-        out = ops.efibootmgr_create(
-            profile.target.device,
-            profile.images["esp"].partition,
-            label,
-            params["loader_path"],
-            params.get("boot_args", ""),
-        )
-        after = ops.efibootmgr_list()
-        found = entries_with_label(out.text, label) or entries_with_label(after, label)
-        if not found:
-            raise ArmError(
-                f"cannot find the new boot entry number; DO NOT REBOOT. Inspect "
-                f"`efibootmgr -v` by hand and {RESTORE_HINT}",
-                record,
-            )
-        record.entry_number = found[0]
-        if record.entry_number not in entries_with_label(after, label):
-            raise ArmError(
-                f"entry {record.entry_number} is not listed by efibootmgr -v; DO NOT REBOOT; "
-                f"{RESTORE_HINT}",
-                record,
-            )
-        if boot_order_of(after) != order:
-            raise ArmError(
-                f"BootOrder changed after creating entry {record.entry_number}; NOT arming "
-                f"BootNext. DO NOT REBOOT; {RESTORE_HINT}",
-                record,
-            )
-        ops.efibootmgr_next(record.entry_number)
+        record.entry_number = entry
+        record.label = label
+        ops.efibootmgr_next(entry)
         record.next_armed = True
         final = ops.efibootmgr_list()
         if boot_order_of(final) != order:
@@ -186,39 +167,45 @@ class Arm:
                 f"{RESTORE_HINT}",
                 record,
             )
-        if boot_next_of(final).upper() != record.entry_number:
+        if boot_next_of(final).upper() != entry:
             raise ArmError(
-                f"BootNext does not read back as {record.entry_number}. DO NOT REBOOT; "
-                f"{RESTORE_HINT}",
+                f"BootNext does not read back as {entry}. DO NOT REBOOT; {RESTORE_HINT}",
                 record,
             )
         return record
 
     def disarm(self, ops, record) -> list:
-        """Clear our BootNext and delete only the entry we created; notes returned."""
+        """Clear BootNext when it names the recorded entry; delete nothing. Notes returned."""
         notes = []
         if not record.entry_number and not record.next_armed:
             return notes
         live = ops.efibootmgr_list()
         number = record.entry_number.upper()
-        if number and number not in entries_with_label(live, record.label):
+        if not number:
+            # The arm step began but the record never learned the number: use the label only when
+            # it still identifies exactly one entry.
+            ours = entries_with_label(live, record.label)
+            if len(ours) != 1:
+                notes.append(
+                    f"found {_count_phrase(len(ours))} labelled {record.label!r} and no recorded number; "
+                    "leaving the boot entries and BootNext alone"
+                )
+                return notes
+            number = ours[0]
+        if number not in entries_with_label(live, record.label):
             notes.append(
-                f"boot entry {record.entry_number} with label {record.label} not found; "
-                "leaving the boot entries alone"
+                f"boot entry {record.entry_number} no longer carries the label {record.label!r}; "
+                "leaving the boot entries and BootNext alone"
             )
             return notes
-        bootable = bootable_entries(live, [number]) if number else {}
-        if bootable:
-            raise ArmError(
-                f"refusing: boot entry {number} carries this tool's label but {bootable[number]}; no boot "
-                "entry was changed; inspect `efibootmgr -v` and remove the entry by hand if it is really ours"
-            )
-        if record.next_armed and boot_next_of(live).upper() == number:
+        nxt = boot_next_of(live).upper()
+        if nxt == number:
             ops.efibootmgr_delete_next()
-            notes.append(f"cleared BootNext {record.entry_number}")
-        if number:
-            ops.efibootmgr_delete(record.entry_number)
-            notes.append(f"deleted boot entry {record.entry_number}")
+            notes.append(f"cleared BootNext {number}")
+        elif not nxt:
+            notes.append("BootNext is already consumed by a boot (or cleared); nothing to clear")
+        else:
+            notes.append(f"BootNext names {nxt}, not {number}; leaving it alone")
         return notes
 
 

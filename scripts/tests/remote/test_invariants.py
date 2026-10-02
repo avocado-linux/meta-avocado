@@ -58,12 +58,16 @@ DEV = "/dev/mmcblk0"
 STAGE = "/run/emmc-test-images"
 RUN_ID = "run-0001"
 MACHINE_ID = "0123456789abcdef0123456789abcdef"
-LABEL = "avocado-emmc-oneshot"
+LABEL = "UEFI eMMC Device"
 ORDER = "0001,0002,0000,0003,0004"
-ENTRY = "0005"
-EFI_PRE = f"BootCurrent: 0001\nTimeout: 5 seconds\nBootOrder: {ORDER}\nBoot0000* UEFI Shell\nBoot0001* UEFI NVMe\n"
-EFI_AFTER = EFI_PRE + f"Boot{ENTRY}* {LABEL}\n"
-EFI_FINAL = EFI_AFTER + f"BootNext: {ENTRY}\n"
+ENTRY = "0002"
+# The firmware's own storage entry (full device path) is already listed; nothing creates it.
+EFI_PRE = (
+    f"BootCurrent: 0001\nTimeout: 5 seconds\nBootOrder: {ORDER}\nBoot0000* UEFI Shell\nBoot0001* UEFI NVMe\n"
+    f"Boot{ENTRY}* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)\n"
+)
+EFI_AFTER = EFI_PRE
+EFI_FINAL = EFI_PRE + f"BootNext: {ENTRY}\n"
 NVME_ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
 BLANK = OpResult(rc=1, stderr=f"sfdisk: {DEV}: does not contain a recognized partition table\n")
 
@@ -275,7 +279,7 @@ class Env:
             "image_sizes": {r: self.scans[i.file].size for r, i in self.profile.images.items()},
             "table_hash": hashlib.sha256(self.table.encode()).hexdigest(),
             "arm": {"strategy": "uefi-bootnext", "label": LABEL, "preexisting_boot_order": ORDER,
-                    "preexisting_next": "", "entry_number": "", "next_armed": False},
+                    "preexisting_next": "", "entry_number": ENTRY, "next_armed": False},
             "created_utc": "2026-01-01T00:00:00Z",
         }  # fmt: skip
 
@@ -309,7 +313,7 @@ class Env:
             "findmnt -no SOURCE -T /etc/ssh": "/dev/nvme0n1p2\n",
             "read_file /sys/block/mmcblk0/device/serial": _SERIAL + "\n",
             "efibootmgr --help": "Usage: efibootmgr [-c|-C] [-d DISK]\n  -C | --create-only\n",
-            "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_AFTER, EFI_FINAL],
+            "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_FINAL],
             f"findmnt -no OPTIONS {self.efivars}": "rw,nosuid,nodev,noexec,relatime\n",
             f"read_file {STAGE}/MANIFEST.hashes": "".join(f"{'a' * 64}  {n}\n" for n in names),
             "sha256sum --strict -c MANIFEST.hashes": "".join(f"{n}: OK\n" for n in names),
@@ -385,13 +389,15 @@ def _point_ids():
     ids = ["sfdisk-write", "table-no-label", "table-partition-size-wrong", "table-partition-missing"]
     for r in ROLE_NAMES:
         ids += [f"dd-{r}", f"readback-fails-{r}", f"readback-short-{r}"]
-    ids += ["esp-not-vfat", "guard-A", "guard-B", "arm-bootorder-moved", "arm-create-fails", "arm-next-fails"]
+    ids += ["esp-not-vfat", "guard-A", "guard-B", "arm-bootorder-moved", "arm-next-fails"]
     return ids
 
 
 FAIL_POINTS = _point_ids()
 TOLERATED_POINTS = ["settle-fails", "evidence-write-fails"]
-INJECTION_POINT_COUNT = 33  # 4 table + 3 per image + 6 esp/guard/arm + 2 tolerated; a removed point fails here
+# 4 table + 3 per image + 5 esp/guard/arm + 2 tolerated; a removed point fails here. 33 -> 32 in task 5.36:
+# the arm-create-fails point is gone because the tool no longer creates a boot entry.
+INJECTION_POINT_COUNT = 32
 
 
 def test_injection_point_count_is_pinned():
@@ -431,27 +437,22 @@ def make_point(env, pid, good):
         return {env.guard_key("B_kernel"): boot_header("quiet")}, n
     if pid == "arm-bootorder-moved":
         return {"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE.replace(ORDER, "0002,0001")]}, n
-    create = good[n]
-    assert create.startswith("efibootmgr -C ")
-    if pid == "arm-create-fails":
-        return {create: OpFailed(create.split(), 1, "no space in NVRAM")}, n + 1
+    assert good[n] == f"efibootmgr -n {ENTRY}" and len(good) == n + 1
     if pid == "arm-next-fails":
-        return {f"efibootmgr -n {ENTRY}": OpFailed(["efibootmgr", "-n", ENTRY], 1, "x")}, n + 2
+        return {f"efibootmgr -n {ENTRY}": OpFailed(["efibootmgr", "-n", ENTRY], 1, "x")}, n + 1
     raise AssertionError(pid)
 
 
-def never_armed_unless_created(ops, res_state):
-    """Scan the log: 'armed' only if an entry was made, and no dd after the first arm call."""
+def never_armed_unless_next_issued(ops, res_state):
+    """Scan the log: 'armed' only if -n was issued, no creating option ever, and no dd after the arm call."""
     log = ops.log
-    created = [i for i, ln in enumerate(log) if ln.startswith("efibootmgr -C ")]
     nexts = [i for i, ln in enumerate(log) if ln.startswith("efibootmgr -n ")]
+    assert not [ln for ln in log if ln.startswith("efibootmgr") and set(ln.split()[1:]) & {"-C", "-B", "-b", "-o", "-O", "-c"}]
     phases = [p["phase"] for p in res_state.data["phases_done"]]
     if "armed" in phases:
-        assert created, "state says armed but no efibootmgr -C was ever issued"
+        assert nexts, "state says armed but no efibootmgr -n was ever issued"
         assert res_state.data["armed"]["entry_number"]
-    if nexts:
-        assert created and min(created) < min(nexts)
-    first_arm = min(created + nexts, default=len(log))
+    first_arm = min(nexts, default=len(log))
     for i, ln in enumerate(log):
         if ln.startswith("dd ") and i > first_arm:
             raise AssertionError(f"dd after the first arm call: {ln}")
@@ -463,16 +464,15 @@ def assert_failed_point(env, res, ops, k, good, pid=None):
     assert r.status == "ok"
     st = r.state
     # The arm step that began mutating boot variables stays in `arming` (armed state unknown).
-    stays_arming = pid in ("arm-create-fails", "arm-next-fails")
+    stays_arming = pid == "arm-next-fails"
     want = "arming" if stays_arming else "failed"
     assert st.phase == want and res.final_phase == want
     assert st.data["error"]
     lock_is_free(env)
     assert [c.line for c in mutations(ops)] == good[:k], "a mutating call ran past the failure point"
     log = ops.log
-    assert any(ln.startswith("efibootmgr -C ") for ln in log) == (k >= len(good) - 1)
     assert any(ln.startswith("efibootmgr -n ") for ln in log) == (k >= len(good))
-    never_armed_unless_created(ops, st)
+    never_armed_unless_next_issued(ops, st)
     phases = [p["phase"] for p in st.data["phases_done"]]
     assert ("armed" in phases) == (k == len(good) and not stays_arming)
     text = "\n".join(res.lines)
@@ -493,7 +493,7 @@ def test_injected_failure_records_failed_never_arms_and_blocks_rerun(env, good_m
     assert res2.exit_code == 1
     assert mutations(ops2) == []
     text2 = "\n".join(res2.lines)
-    assert ("previous run is not finished" if pid in ("arm-create-fails", "arm-next-fails") else "already used") in text2
+    assert ("previous run is not finished" if pid == "arm-next-fails" else "already used") in text2
 
 
 @pytest.mark.parametrize("pid", FAIL_POINTS)
@@ -517,7 +517,7 @@ def test_injected_failure_whose_failed_record_cannot_be_written_leaves_last_phas
     assert res.final_phase == r.state.phase
     lock_is_free(env)
     assert [c.line for c in mutations(ops)] == good_mutations[:k]
-    never_armed_unless_created(ops, r.state)
+    never_armed_unless_next_issued(ops, r.state)
     res2, ops2 = env.run()
     assert res2.exit_code == 1 and mutations(ops2) == []
     text = "\n".join(res2.lines)
@@ -559,10 +559,10 @@ def test_aggregate_no_arm_call_follows_any_earlier_failure(tmp_path, good_mutati
         res, ops = e.run(script=e.script(**over))
         assert res.exit_code == 1
         seen += 1
-        if k < len(good_mutations) - 1:
-            assert not [ln for ln in ops.log if ln.startswith(("efibootmgr -C", "efibootmgr -n"))], pid
+        if k < len(good_mutations):
+            assert not [ln for ln in ops.log if ln.startswith("efibootmgr -n")], pid
         assert [c.line for c in mutations(ops)] == good_mutations[:k], pid
-    assert seen == len(FAIL_POINTS) == 31
+    assert seen == len(FAIL_POINTS) == 30
 
 
 # ======================================================================= 3
@@ -911,7 +911,7 @@ def test_signal_to_the_runner_leaves_parseable_state_and_a_free_lock(tmp_path, s
         log = None
     lock_is_free(e)
     if log is not None:
-        assert not [ln for ln in log if ln.startswith(("efibootmgr -C", "efibootmgr -n"))]
+        assert not [ln for ln in log if ln.startswith("efibootmgr -n")]
     assert "armed" not in [p["phase"] for p in r.state.data["phases_done"]]
 
 
@@ -1124,7 +1124,7 @@ def _restore(tmp_path, *, unparseable):
     sd.mkdir()
     if unparseable:
         (sd / "current").write_text("x\n")
-    prof_ns = NS(arm=NS(strategy="uefi-bootnext", params={"label": LABEL}), staging=NS(dir=str(staging)))
+    prof_ns = NS(arm=NS(strategy="uefi-bootnext", params={"entry_label": LABEL}), staging=NS(dir=str(staging)))
     return cmd_restore.run_restore(RecordingOps({}), prof_ns, state_dir=sd, staging_dir=str(staging), out=lambda x: None)
 
 

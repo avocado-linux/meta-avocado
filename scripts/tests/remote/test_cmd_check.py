@@ -22,13 +22,15 @@ SHIPPED = PROFILES / "jetson-agx-orin-j5012.json"
 DISK = "/dev/mmcblk0"
 STAGE = "/run/emmc-test-images"
 ORDER = "0001,0002,0000,0003,0004"
-LABEL = "avocado-emmc-oneshot"
+LABEL = "UEFI eMMC Device"
+ENTRY_LINE = f"Boot0002* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)\n"
 EFI_OK = (
     "BootCurrent: 0001\n"
     "Timeout: 5 seconds\n"
     f"BootOrder: {ORDER}\n"
     "Boot0000* UEFI Shell\n"
     "Boot0001* UEFI NVMe\n"
+    + ENTRY_LINE
 )
 MANIFEST = "".join(f"{'a' * 64}  img{i}.bin\n" for i in range(5))
 MIN_KIB = 716800
@@ -112,7 +114,7 @@ GOLDEN = [
     "PASS  efibootmgr supports -C: -C listed in --help",
     "PASS  BootOrder unchanged: actual '0001,0002,0000,0003,0004' (expected 0001,0002,0000,0003,0004)",
     "PASS  BootNext unset: unset",
-    "PASS  no stale avocado-emmc-oneshot entry: none",
+    "PASS  exactly one UEFI eMMC Device entry: Boot0002",
     "PASS  efivarfs mounted read-write: efivarfs options: rw,nosuid,nodev,noexec,relatime",
     "PASS  SecureBoot disabled: SecureBoot final byte = 0",
     "PASS  staged images present: 5 image(s) listed in MANIFEST.hashes are present in /run/emmc-test-images",
@@ -151,7 +153,8 @@ FAULTS = [
     ("efibootmgr supports -C", {"efibootmgr --help": "Usage: efibootmgr [-c]\n"}),
     ("BootOrder unchanged", {"efibootmgr -v": EFI_OK.replace(ORDER, "0001,0000")}),
     ("BootNext unset", {"efibootmgr -v": "BootNext: 0005\n" + EFI_OK}),
-    ("no stale avocado-emmc-oneshot entry", {"efibootmgr -v": EFI_OK + f"Boot0005* {LABEL}\tHD(1)\n"}),
+    ("exactly one UEFI eMMC Device entry", {"efibootmgr -v": EFI_OK + f"Boot0005* {LABEL}\tHD(1)\n"}),
+    ("exactly one UEFI eMMC Device entry", {"efibootmgr -v": EFI_OK.replace(ENTRY_LINE, "")}),
     ("efivarfs mounted read-write", {"__efivars_opts__": "ro,nosuid\n"}),
     ("staged images present", {f"stat -c %s {STAGE}/img3.bin": OpFailed(["stat"], 1, "no such file")}),
     ("staged image checksums", {"sha256sum --strict -c MANIFEST.hashes": OpResult(rc=1, stdout=b"img0.bin: FAILED\n")}),
@@ -443,12 +446,19 @@ def test_missing_serial_attribute_is_not_examined_and_does_not_pass(efivars):
 
 
 @pytest.mark.parametrize("tail", [f"{LABEL} old\tHD(1)\n", f"{LABEL}x\tHD(1)\n", f"{LABEL} old\n"])
-def test_a_longer_labelled_entry_is_not_a_stale_one_shot_entry(efivars, tail):
+def test_a_longer_labelled_entry_does_not_count_as_a_second_entry(efivars, tail):
     res, _ = run(efivars, **{"efibootmgr -v": EFI_OK + f"Boot0007* {tail}"})
-    assert verdict(res, "no stale avocado-emmc-oneshot entry") == "PASS"
+    assert verdict(res, "exactly one UEFI eMMC Device entry") == "PASS"
 
 
 @pytest.mark.parametrize("tail", [f"{LABEL}\n", f"{LABEL}  \n", f"{LABEL}\tHD(1)\n"])
-def test_the_exact_label_is_still_stale(efivars, tail):
+def test_a_second_exact_label_fails_and_names_the_count(efivars, tail):
     res, _ = run(efivars, **{"efibootmgr -v": EFI_OK + f"Boot0005* {tail}"})
-    assert verdict(res, "no stale avocado-emmc-oneshot entry") == "FAIL"
+    assert verdict(res, "exactly one UEFI eMMC Device entry") == "FAIL"
+    assert any("2 boot entries labelled" in ln and "Boot0002" in ln and "Boot0005" in ln for ln in res.lines)
+
+
+def test_zero_entries_fail_and_name_the_count_and_label(efivars):
+    res, _ = run(efivars, **{"efibootmgr -v": EFI_OK.replace(ENTRY_LINE, "")})
+    assert verdict(res, "exactly one UEFI eMMC Device entry") == "FAIL"
+    assert any(f"0 boot entries labelled {LABEL!r}" in ln for ln in res.lines)

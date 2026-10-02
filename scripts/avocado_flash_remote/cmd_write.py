@@ -201,7 +201,7 @@ class _ArmWatch:
 
     def __getattr__(self, name):
         attr = getattr(self._ops, name)
-        if name in ("efibootmgr_create", "efibootmgr_next"):
+        if name == "efibootmgr_next":
 
             def watched(*a, **kw):
                 self.attempted = True

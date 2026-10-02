@@ -50,7 +50,7 @@ def base():
         },
         "checks": ["device-identity", "device-empty"],
         "arm": {"strategy": "uefi-bootnext",
-                "params": {"label": "Avocado", "loader_path": "\\EFI\\BOOT\\BOOTX64.EFI"}},
+                "params": {"entry_label": "UEFI eMMC Device"}},
         "guard": {"strategy": "boot-arg",
                   "params": {"argument": "avocado.flash=1", "partitions": ["boot"]}},
         "staging": {"dir": "/var/tmp/avocado-flash", "min_free_kib": 1048576},

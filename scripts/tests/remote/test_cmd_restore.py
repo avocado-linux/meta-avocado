@@ -16,7 +16,7 @@ from avocado_flash_remote.cmd_restore import (
 )
 from avocado_flash_remote.ops import RecordingOps
 
-LABEL = "avocado-emmc-oneshot"
+LABEL = "UEFI eMMC Device"
 LIST = "efibootmgr -v"
 ORDER = "0001,0002,0003"
 
@@ -31,12 +31,13 @@ def efi(order=ORDER, nxt=None, current="0001", extra=()):
     return "\n".join(lines) + "\n"
 
 
-NEW = f"Boot0005* {LABEL}\tHD(11,GPT,1,0x0,0x0)/File(\\EFI\\BOOT\\BOOTAA64.EFI)"
+# The firmware's own storage entry (a full device path); the tool arms it and never creates it.
+NEW = f"Boot0005* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)"
 
 
 def make_profile(staging):
     return NS(
-        arm=NS(strategy="uefi-bootnext", params={"label": LABEL}),
+        arm=NS(strategy="uefi-bootnext", params={"entry_label": LABEL}),
         staging=NS(dir=str(staging)),
     )
 
@@ -113,27 +114,36 @@ def mutations(ops):
     ]  # fmt: skip
 
 
-def assert_safe(ops, allowed_b=("0005",)):
+def assert_safe(ops):
     for ln in ops.log:
         parts = ln.split()
         if parts and parts[0] == "efibootmgr":
-            assert "-o" not in parts and "-O" not in parts and "-c" not in parts, ln
-            assert "-C" not in parts, ln
-            if "-B" in parts:
-                assert parts[parts.index("-b") + 1] in allowed_b, ln
+            for opt in ("-C", "-B", "-b", "-o", "-O", "-c"):
+                assert opt not in parts, ln
 
 
-def test_restore_after_armed_matches_golden_sequence(env):
+def test_restore_after_armed_clears_bootnext_and_deletes_no_entry(env):
     mk_state(env, "armed", rec())
     ops = RecordingOps(
         {LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW]), efi()]}
     )
     r, removed, out = go(env, ops)
     assert r.exit_code == 0
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    # Deliberate change from the kit sequence (-N then -B -b 0005): the entry is the firmware's own.
+    assert mutations(ops) == ["efibootmgr -N"]
     assert removed == [str(env.staging)]
     assert NOTE_LINE in out
     assert_safe(ops)
+
+
+def test_restore_after_the_boot_consumed_bootnext_is_a_note_and_exit_zero(env):
+    mk_state(env, "armed", rec())
+    ops = RecordingOps({LIST: [efi(extra=[NEW]), efi(extra=[NEW]), efi(extra=[NEW])]})
+    r, removed, out = go(env, ops)
+    assert r.exit_code == 0
+    assert mutations(ops) == []
+    assert removed == [str(env.staging)]
+    assert any("already consumed" in ln for ln in out)
 
 
 def test_restore_reports_boot_order_verified(env):
@@ -224,13 +234,13 @@ def test_emergency_requires_acknowledgement(env):
     assert removed == []
 
 
-def test_emergency_disarm_removes_only_labelled_entries(env):
+def test_emergency_disarm_clears_bootnext_for_the_labelled_entry_and_deletes_nothing(env):
     (env.state_dir / "current").write_text("r1\n")
     extra = [NEW, "Boot0007* avocado-emmc-oneshot-old\tx", "Boot0009* UEFI Shell"]
     ops = RecordingOps({LIST: efi(nxt="0005", extra=extra)})
     r, removed, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
     assert r.exit_code == 0
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert mutations(ops) == ["efibootmgr -N"]
     assert removed == []
     assert NOTE_LINE in out
     assert_safe(ops)
@@ -241,7 +251,7 @@ def test_emergency_leaves_foreign_bootnext(env):
     ops = RecordingOps({LIST: efi(nxt="0002", extra=[NEW])})
     r, _, _ = go(env, ops, emergency_disarm=True, ack_run_id="yes")
     assert r.exit_code == 0
-    assert mutations(ops) == ["efibootmgr -B -b 0005"]
+    assert mutations(ops) == []
     assert_safe(ops)
 
 
@@ -321,8 +331,8 @@ def test_disarm_failure_keeps_staging(env):
 
     ops = RecordingOps(
         {
-            LIST: [efi(extra=[NEW]), efi(extra=[NEW])],
-            "efibootmgr -B -b 0005": OpFailed(["efibootmgr", "-B", "-b", "0005"], 1, "no"),
+            LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW])],
+            "efibootmgr -N": OpFailed(["efibootmgr", "-N"], 1, "no"),
         }
     )
     r, removed, out = go(env, ops)
@@ -417,7 +427,7 @@ def test_acknowledged_restore_disarms_cleans_and_unblocks_the_next_run(env):
     ops = RecordingOps({LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW]), efi()]})
     r, removed, out = go_raw(env, ops, ack_run_id="r1")
     assert r.exit_code == 0
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert mutations(ops) == ["efibootmgr -N"]
     assert removed == [str(env.staging)]
     loaded = st.load_state(env.state_dir)
     assert loaded.state.phase == "restored"
@@ -466,63 +476,63 @@ def arming_state(env):
     return st.transition(s, "arming", armed=rec(entry_number="", next_armed=False))
 
 
-def test_label_disarm_deletes_a_labelled_entry_that_is_not_in_boot_order(env):
+def test_label_disarm_clears_bootnext_of_the_single_labelled_entry_and_deletes_nothing(env):
     arming_state(env)
     live = efi(nxt="0005", extra=[NEW])
-    ops = RecordingOps({LIST: [live, efi()]})
+    ops = RecordingOps({LIST: [live, efi(extra=[NEW])]})
     r, removed, out = go(env, ops)
     assert r.exit_code == 0, out
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert mutations(ops) == ["efibootmgr -N"]
+    assert_safe(ops)
 
 
-def test_label_disarm_refuses_an_entry_that_is_in_boot_order(env):
-    arming_state(env)
-    ops = RecordingOps({LIST: [efi(order="0001,0005,0002", extra=[NEW]), efi(order="0001,0005,0002", extra=[NEW])]})
+def test_label_disarm_proceeds_for_an_entry_that_is_in_boot_order(env):
+    # Deliberate change: the firmware's own entry normally sits in BootOrder; the old refusal guarded a
+    # created entry from being deleted, and nothing is deleted now.
+    s0 = mk_state(env, "verified")
+    st.transition(s0, "arming", armed=rec(entry_number="", next_armed=False, preexisting_boot_order="0001,0005,0002"))
+    live = efi(order="0001,0005,0002", nxt="0005", extra=[NEW])
+    ops = RecordingOps({LIST: [live, efi(order="0001,0005,0002", extra=[NEW])]})
     r, removed, out = go(env, ops)
-    text = "\n".join(out)
-    assert r.exit_code == 1
-    assert mutations(ops) == []
-    assert removed == []
-    assert "0005" in text and "BootOrder" in text
-    assert "efibootmgr -v" in text  # the operator is told where to look
-    assert st.load_state(env.state_dir).state.phase == "arming"
+    assert r.exit_code == 0, out
+    assert mutations(ops) == ["efibootmgr -N"]
 
 
-def test_label_disarm_refuses_the_entry_the_board_booted_from(env):
+def test_label_disarm_tolerates_the_entry_the_board_booted_from(env):
     arming_state(env)
-    ops = RecordingOps({LIST: [efi(current="0005", extra=[NEW]), efi(current="0005", extra=[NEW])]})
+    live = efi(current="0005", extra=[NEW])
+    ops = RecordingOps({LIST: [live, live]})
     r, removed, out = go(env, ops)
-    assert r.exit_code == 1
+    assert r.exit_code == 0, out
     assert mutations(ops) == []
-    assert removed == []
-    assert "0005" in "\n".join(out) and "BootCurrent" in "\n".join(out)
-    assert st.load_state(env.state_dir).state.phase == "arming"
+    assert any("already consumed" in ln for ln in out)
 
 
-def test_label_disarm_refuses_everything_when_any_labelled_entry_is_bootable(env):
+def test_label_disarm_with_two_labelled_entries_mutates_nothing_and_keeps_staging(env):
     arming_state(env)
-    two = [NEW, f"Boot0006* {LABEL}\tHD(1,GPT,2,0x0,0x0)/File(\\EFI\\BOOT\\BOOTAA64.EFI)"]
+    two = [NEW, f"Boot0006* {LABEL}\tVenHw(1)/SD(1)"]
     live = efi(order="0001,0006,0002", nxt="0005", extra=two)
     ops = RecordingOps({LIST: [live, live]})
-    r, _, out = go(env, ops)
+    r, removed, out = go(env, ops)
     assert r.exit_code == 1
-    assert mutations(ops) == []  # not even the safe sibling or BootNext: ambiguity refuses
+    assert mutations(ops) == [] and removed == []
+    assert "2 boot entries" in "\n".join(out)
+    assert st.load_state(env.state_dir).state.phase == "arming"
 
 
-def test_emergency_disarm_also_refuses_a_labelled_entry_in_boot_order(env):
+def test_emergency_disarm_with_the_entry_in_boot_order_and_no_bootnext_changes_nothing(env):
     (env.state_dir / "current").write_text("r1\n")
     ops = RecordingOps({LIST: efi(order="0001,0005,0002", extra=[NEW])})
     r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
-    assert r.exit_code == 1
+    assert r.exit_code == 0
     assert mutations(ops) == []
-    assert "0005" in "\n".join(out) and "BootOrder" in "\n".join(out)
 
 
-def test_emergency_disarm_also_refuses_the_booted_entry(env):
+def test_emergency_disarm_with_the_booted_entry_changes_nothing(env):
     (env.state_dir / "current").write_text("r1\n")
     ops = RecordingOps({LIST: efi(current="0005", extra=[NEW])})
     r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
-    assert r.exit_code == 1
+    assert r.exit_code == 0
     assert mutations(ops) == []
 
 
@@ -622,7 +632,8 @@ def test_a_gone_holder_gets_the_manual_steps_with_the_stop_check_first(env):
     assert r.exit_code == 1 and removed == [] and ops.log == []
     assert f"pid {pid}" in text and "dead-writer" in text
     assert "is gone" in text
-    assert "efibootmgr -v" in text and "efibootmgr -N" in text and "efibootmgr -B -b" in text
+    assert "efibootmgr -v" in text and "efibootmgr -N" in text
+    assert "efibootmgr -B" not in text and "delete no boot entry" in text
     assert LABEL in text
     # The tool a dead runner started may still hold the lock: say to look before touching anything.
     check = next(i for i, ln in enumerate(lines) if "ps" in ln and "dd" in ln)
@@ -654,7 +665,7 @@ def test_emergency_disarm_proceeds_when_the_lock_is_released_during_the_wait(env
     r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes", lock_wait=5)
     assert r.exit_code == 0, out
     assert time.monotonic() - t0 < 4
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert mutations(ops) == ["efibootmgr -N"]
 
 
 def test_normal_restore_still_refuses_at_once_on_a_held_lock_whatever_the_wait(env):
@@ -674,7 +685,7 @@ def test_emergency_disarm_leaves_a_longer_label_with_our_label_as_its_prefix(env
     ops = RecordingOps({LIST: efi(nxt="0005", extra=extra)})
     r, _removed, _out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
     assert r.exit_code == 0
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert mutations(ops) == ["efibootmgr -N"]
     assert_safe(ops)
 
 
@@ -694,7 +705,7 @@ def test_run_id_naming_a_non_current_run_does_not_restore_current(env):
     ops = RecordingOps({LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW]), efi()]})
     r, removed, out = go(env, ops, run_id="r1", ack_run_id="r1")
     # r1 is the armed run: it is disarmed, and the closed run is r1, not the current r2
-    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert mutations(ops) == ["efibootmgr -N"]
     assert st.load_state(env.state_dir).state.phase == "planned"
     assert any("run r1" in ln for ln in out)
 
@@ -741,11 +752,13 @@ def test_bad_run_id_refuses(env):
     assert r.exit_code == 1 and removed == [] and mutations(ops) == []
 
 
-def test_restore_by_recorded_number_refuses_an_entry_in_boot_order_and_keeps_staging(env):
-    mk_state(env, "armed", rec())
+def test_restore_by_recorded_number_proceeds_for_an_entry_in_boot_order(env):
+    # Deliberate change: the arm entry is the firmware's own and is normally in BootOrder.
+    mk_state(env, "armed", rec(preexisting_boot_order="0001,0005,0002"))
     live = efi(order="0001,0005,0002", nxt="0005", extra=[NEW])
-    ops = RecordingOps({LIST: [live, live, live]})
+    after = efi(order="0001,0005,0002", extra=[NEW])
+    ops = RecordingOps({LIST: [live, live, after]})
     r, removed, out = go(env, ops)
-    assert r.exit_code == 1
-    assert mutations(ops) == [] and removed == []
-    assert "BootOrder" in "\n".join(out)
+    assert r.exit_code == 0
+    assert mutations(ops) == ["efibootmgr -N"]
+    assert removed == [str(env.staging)]

@@ -398,8 +398,8 @@ def s_unseated(tmp):
 
 def s_bochange(tmp):
     def over(env):
-        changed = tcw.EFI_AFTER.replace(f"BootOrder: {tcw.ORDER}", f"BootOrder: {tcw.ENTRY},{tcw.ORDER}")
-        return {"efibootmgr -v": [tcw.EFI_PRE, tcw.EFI_PRE, tcw.EFI_PRE, changed, tcw.EFI_FINAL]}
+        changed = tcw.EFI_PRE.replace(f"BootOrder: {tcw.ORDER}", f"BootOrder: {tcw.ENTRY},{tcw.ORDER}")
+        return {"efibootmgr -v": [tcw.EFI_PRE, tcw.EFI_PRE, changed]}
 
     return _write(tmp, over=over)
 
@@ -507,7 +507,7 @@ def s_pf_efi_fail(tmp):
 
 MNT, OUT = "<TMP>/mnt", "<TMP>/out"
 RB_DIRS = (pathlib.Path(MNT), pathlib.Path(OUT))
-ONESHOT = f"Boot0005* {LABEL}\tHD(11,GPT,1,0x0,0x0)/File(\\EFI\\BOOT\\BOOTAA64.EFI)bootmode=bootimg\n"
+ONESHOT = f"Boot0005* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)\n"  # the firmware's own entry
 
 
 def _rb(tmp, *, journal=True, efi=tcrb.EFI, reference=tcrb.ORDER, outfs="tmpfs\n", mount=None):
@@ -583,7 +583,7 @@ def _restore(tmp, *, armed=True, queue=None, phase="armed"):
     staging.mkdir(parents=True)
     state_dir = tmp / "state"
     state_dir.mkdir()
-    profile = NS(arm=NS(strategy="uefi-bootnext", params={"label": LABEL}), staging=NS(dir=str(staging)))
+    profile = NS(arm=NS(strategy="uefi-bootnext", params={"entry_label": LABEL}), staging=NS(dir=str(staging)))
     if armed:
         s = statemod.create_run(
             state_dir, run_id="r1", profile_hash="p", plan_hash="q", board_identity={}, image_roles=[], arm=True
@@ -616,7 +616,7 @@ def s_cleanup_none(tmp):
 
 def s_cleanup_two(tmp):
     other = ONESHOT.replace("Boot0005", "Boot0006")
-    return _restore(tmp, queue=[_efi(extra=[ONESHOT, other])] * 2 + [_efi(extra=[other])])
+    return _restore(tmp, queue=[_efi(nxt="0005", extra=[ONESHOT, other])] * 2 + [_efi(extra=[ONESHOT, other])])
 
 
 def s_cleanup_next_only(tmp):
@@ -662,19 +662,19 @@ def na(reason):
 PLAN_REF = dict(drop={"efibootmgr --help"}, unordered=())
 PF_REF = dict(drop=(), unordered={"efibootmgr -v"})
 
-OK_MUT = "same mutating sequence as the kit: sfdisk, udevadm settle, 7 dd, efibootmgr -C, efibootmgr -n"
+OK_MUT = "same sfdisk, udevadm settle and 7 dd as the kit; the arm is `efibootmgr -n <entry>` only, no `-C` (D9)"
 
 CASES = {
     "install:dry": outcome("plan: exit 0, no mutating call; body compared separately with real-board-dry-run.txt", reads=PLAN_REF),
     "install:dry#2": na("the kit's plain-form 'NVME-HIDE-ARG:' manifest line; the port takes the argument from the profile guard, not the manifest"),
-    "install:ok": differs("D5+D6", OK_MUT),
+    "install:ok": differs("D5+D6+D9", OK_MUT),
     "install:ok#2": outcome("second plan on the written disk is refused (exit 1, no mutating call)", reads=PLAN_REF),
     "install:ok#3": na("restore --dry-run: the port's restore has no dry-run mode"),
     "install:ok#4": differs("D8", "restore only disarms (efibootmgr -N, -B); it never deletes partitions or wipes the table"),
-    "install:ok#5": differs("D5+D6", "re-install on a fresh board: " + OK_MUT),
-    "install:rmismatch1": differs("D5+D6", OK_MUT),
+    "install:ok#5": differs("D5+D6+D9", "re-install on a fresh board: " + OK_MUT),
+    "install:rmismatch1": differs("D5+D6+D9", OK_MUT),
     "install:rmismatch1#2": na("the kit's label-id check before deleting partitions; the port's restore never touches the table"),
-    "install:rmismatch2": differs("D5+D6", OK_MUT),
+    "install:rmismatch2": differs("D5+D6+D9", OK_MUT),
     "install:rmismatch2#2": na("the kit's partition-vs-record check before deleting partitions; the port's restore never touches the table"),
     "install:rnostate": differs("D8", "restore with no run state exits 0 and cleans staging; the kit refuses"),
     "install:disk-nvme0n1": differs("D7", "NVMe target refused before any call"),
@@ -687,17 +687,17 @@ CASES = {
     "install:foreign-lsblk": outcome("lsblk shows a partition: plan refuses, no mutating call", reads=PLAN_REF),
     "install:mounted": outcome("a partition is mounted: plan refuses, no mutating call", reads=PLAN_REF),
     "install:badcmd": outcome("staged boot image without the NVMe-hiding argument: write refused before any mutation, exit 1"),
-    "install:unseated": differs("D5+D6", "guard-less profile (the kit's --nvme-unseated): " + OK_MUT),
+    "install:unseated": differs("D5+D6+D9", "guard-less profile (the kit's --nvme-unseated): " + OK_MUT),
     "install:readback": outcome("cmdline read back from the partition lacks the argument: sfdisk, settle, 7 dd, nothing armed, exit 1"),
-    "install:extracmd": differs("D5+D6", "argument in extra_cmdline (offset 608) accepted: " + OK_MUT),
+    "install:extracmd": differs("D5+D6+D9", "argument in extra_cmdline (offset 608) accepted: " + OK_MUT),
     "install:nearmiss": outcome("staged near-miss token: write refused before any mutation, exit 1"),
     "install:hdrv3": outcome("staged header version 3: write refused before any mutation, exit 1"),
     "install:noarg": outcome("staged boot image with no source of the NVMe-hiding argument: refused before any mutation, exit 1"),
-    "install:bochange": outcome("efibootmgr -C changes BootOrder: sfdisk, settle, 7 dd, -C, never -n; exit 1"),
+    "install:bochange": differs("D9", "BootOrder changes before the arm: sfdisk, settle, 7 dd, then refused before any boot variable call (the kit had already run -C); exit 1"),
     "install:noc": outcome("efibootmgr without -C: write refused by the pre-flight check, no mutating call"),
     "install:nocfb": na("the kit's --fallback-bootnext-0002 option; the port has no fallback arming"),
     "install:devimages": outcome("staging directory under /dev: the profile loader refuses, no call at all", exit_class=True),
-    "install:nondevimages": differs("D5+D6", "staging directory outside /dev: " + OK_MUT),
+    "install:nondevimages": differs("D5+D6+D9", "staging directory outside /dev: " + OK_MUT),
     "window:pf-good": outcome("check: exit 0, 14/14, no mutating call", reads=PF_REF),
     **{
         f"window:pf-{k}": differs("D1", f"{k}: FAIL line and exit 1, but checks: 14/14 (examined) instead of 13/14")
@@ -716,8 +716,8 @@ CASES = {
     "window:rb-notmpfs": exact("readback: out dir not on tmpfs, refuses before mounting"),
     "window:rb-mountfail": exact("readback: failed ro mount is reported, exit 1, no umount"),
     "window:rb-missing-tool": outcome("lsblk missing: no mutating call, exit 2"),
-    "window:rb-cleanup": outcome("restore with the recorded entry: efibootmgr -N then -B -b 0005, exit 0"),
-    "window:rb-cleanup-two": differs("D8", "restore removes only the recorded entry; the kit refused on two labelled entries"),
+    "window:rb-cleanup": differs("D8", "restore clears BootNext and deletes no entry (the kit also ran -B -b 0005), exit 0"),
+    "window:rb-cleanup-two": differs("D8", "restore clears BootNext for the recorded entry and touches no other; the kit refused on two labelled entries"),
     "window:rb-cleanup-none": outcome("restore with nothing left to remove: exit 0, no mutating call"),
     "window:rb-cleanup-next-only": differs("D8", "restore leaves a BootNext it did not set; the kit cleared it"),
 }  # fmt: skip
@@ -876,6 +876,7 @@ DIFFERENCES = {
     "D5": "cmd_write reads each image back right after writing it (the kit wrote all images, then read all back) and reads the boot header straight from the partition (the kit copied it to a scratch file).",
     "D6": "write requires a plan record and consumes it (a kit install has none): install success cases compare the mutating sequence only.",
     "D7": "the port refuses non-whole-disk and NVMe targets at plan, before any call, with the kit's zero-mutation outcome; the kit takes --disk and refuses in install.sh.",
+    "D9": "the arm selects the firmware's own storage entry with `efibootmgr -n` and never creates or deletes a boot entry (task 5.36): the kit's `-C` has no counterpart, restore runs `-N` but never `-B -b`, and a BootNext already consumed by a boot is a note, not a failure.",
     "D8": "restore is driven by the recorded arm entry (number AND label), never rolls back the table, and cleans staging when there is no state (spec: 'Restore undoes the arming and removes staging', 'Restore does not claim a data rollback').",
 }  # fmt: skip
 
@@ -887,6 +888,14 @@ WRITE_SEQ = (
                      ("esp.img", 11), ("rootfs.erofs-lz4", 1), ("var.btrfs", 16))
     ]
 )  # fmt: skip
+
+
+KIT_CREATE = f"efibootmgr -C -d {DEV} -p 11 -L avocado-emmc-oneshot -l \\EFI\\BOOT\\BOOTAA64.EFI -u bootmode=bootimg"
+
+
+def port_arm_muts(kit_muts):
+    """The kit's mutating lines with the arm lines D9 replaces: no `-C`, and `-n` names the firmware's entry."""
+    return [f"efibootmgr -n {tcw.ENTRY}" if ln == "efibootmgr -n 0005" else ln for ln in kit_muts if ln != KIT_CREATE]
 
 
 def d1(name, g, run):
@@ -931,7 +940,8 @@ def d8(name, g, run):
         kit_efi = [ln for ln in g.muts if ln.startswith("efibootmgr")]
         assert any(ln.startswith("sfdisk --delete") for ln in g.lines) and any(ln.startswith("wipefs") for ln in g.lines)
         assert run.exit == g.exit == 0
-        assert run.muts == kit_efi == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+        assert kit_efi == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+        assert run.muts == ["efibootmgr -N"], "D9: the entry is the firmware's own; restore never deletes it"
         assert NOTE_LINE in run.out
         assert run.extra["removed"], "staging is removed"
     elif name == "install:rnostate":
@@ -940,7 +950,11 @@ def d8(name, g, run):
     elif name == "window:rb-cleanup-two":
         assert g.exit == 1 and g.muts == []
         assert run.exit == 0
-        assert run.muts == ["efibootmgr -B -b 0005"], "only the recorded entry, never the other labelled one"
+        assert run.muts == ["efibootmgr -N"], "BootNext only; no entry is deleted, labelled or not"
+    elif name == "window:rb-cleanup":
+        assert g.exit == 0 and g.muts == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+        assert run.exit == 0
+        assert run.muts == ["efibootmgr -N"], "D9: the entry is the firmware's own; restore never deletes it"
     elif name == "window:rb-cleanup-next-only":
         assert g.exit == 0 and g.muts == ["efibootmgr -N"]
         assert run.exit == 0
@@ -953,11 +967,10 @@ def d56(name, g, run):
     """Success: only the MUTATING sequence is comparable (D6), and the port reads each
     image back right after writing it, with no scratch-file header copy (D5)."""
     assert g.exit == run.exit == 0, run.text
-    assert run.muts == g.muts, f"{name}: mutating sequence differs\nkit : {g.muts}\nport: {run.muts}"
-    assert run.muts == WRITE_SEQ + [
-        f"efibootmgr -C -d {DEV} -p 11 -L {LABEL} -l \\EFI\\BOOT\\BOOTAA64.EFI -u bootmode=bootimg",
-        "efibootmgr -n 0005",
-    ]
+    # D9: the kit's `-C` (create) has no counterpart and its `-n <new number>` names the firmware's entry.
+    assert g.muts == WRITE_SEQ + [KIT_CREATE, "efibootmgr -n 0005"], f"{name}: the golden changed: {g.muts}"
+    assert run.muts == port_arm_muts(g.muts), f"{name}: mutating sequence differs\nkit : {g.muts}\nport: {run.muts}"
+    assert run.muts == WRITE_SEQ + [f"efibootmgr -n {tcw.ENTRY}"]
     lines = run.lines
     for i, ln in enumerate(lines):
         if is_mut(ln) and ln.startswith("dd "):
@@ -966,7 +979,16 @@ def d56(name, g, run):
     assert not any("bhdr" in ln for ln in lines)
 
 
-DIFF_CHECKS = {"D5+D6": d56, "D1": d1, "D2": d2, "D4": d4, "D7": d7, "D8": d8}
+def d9_bochange(name, g, run):
+    """BootOrder moves before the arm: the kit had run -C by then, the port refuses with nothing armed."""
+    assert g.exit == run.exit == 1, run.text
+    assert g.muts == WRITE_SEQ + [KIT_CREATE], f"the golden changed: {g.muts}"
+    assert run.muts == WRITE_SEQ == port_arm_muts(g.muts)
+    assert not any(ln.startswith("efibootmgr -n") for ln in run.lines)
+    assert "the board was not armed" in run.text
+
+
+DIFF_CHECKS = {"D9": d9_bochange, "D5+D6+D9": d56, "D1": d1, "D2": d2, "D4": d4, "D7": d7, "D8": d8}
 
 
 # ---------------------------------------------------------------- per case
@@ -1113,8 +1135,10 @@ def test_plan_body_equals_real_board_dry_run_byte_for_byte():
     assert golden[0] == kit_line
     assert body[0] == kit_line + ".hashes"
     body = [kit_line] + body[1:]
-    assert body == golden[:-1]
-    assert "\n".join(body) + "\n" == "\n".join(golden[:-1]) + "\n"
+    # The arm lines are the second deliberate difference (task 5.36): see ARM_DEVIATION.
+    expected = tcp.kit_to_port_arm_lines(golden[:-1])
+    assert body == expected
+    assert "\n".join(body) + "\n" == "\n".join(expected) + "\n"
 
 
 def test_install_dry_read_prefix_is_a_subset_of_the_plan_calls(golden, runs):
@@ -1144,13 +1168,18 @@ def _bad_efi(tok):
     return {"-o", "-O", "-c", "--bootorder", "--create"} & set(tok[1:])
 
 
+def _bad_efi_port(tok):
+    """The port never creates, deletes or reorders a boot entry (D9), unlike the kit's golden calls."""
+    return _bad_efi(tok) or {"-C", "-B", "-b", "--create-only", "--delete-bootnum"} & set(tok[1:])
+
+
 def test_safety_rules_hold_for_every_recorded_port_call(runs):
     seen_mut = 0
     for name, run in runs.items():
         for ln in run.lines:
             tok = ln.split()
             if tok[:1] == ["efibootmgr"]:
-                assert not _bad_efi(tok), f"{name}: efibootmgr writes the boot order: {ln}"
+                assert not _bad_efi_port(tok), f"{name}: efibootmgr creates, deletes or reorders: {ln}"
             if not is_mut(ln):
                 continue
             seen_mut += 1
@@ -1175,13 +1204,9 @@ def test_golden_logs_obey_the_same_hard_rules(golden):
                 assert not _bad_efi(tok), f"{name}: {ln}"
 
 
-def test_the_good_run_arms_with_C_and_n_only(runs):
+def test_the_good_run_arms_with_n_only(runs):
     efi = [ln for ln in runs["install:ok"].lines if ln.startswith("efibootmgr") and ln != "efibootmgr -v"]
-    assert efi == [
-        "efibootmgr --help",
-        f"efibootmgr -C -d {DEV} -p 11 -L {LABEL} -l \\EFI\\BOOT\\BOOTAA64.EFI -u bootmode=bootimg",
-        "efibootmgr -n 0005",
-    ]
+    assert efi == ["efibootmgr --help", f"efibootmgr -n {tcw.ENTRY}"]
 
 
 # ------------------------------------------------------------------- stage
