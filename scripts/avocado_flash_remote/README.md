@@ -189,15 +189,22 @@ partition named by a `boot-arg` guard must exist in the table by name.
 
 The preflight check names the runner implements are `emmc-exists`,
 `target-identity`, `emmc-not-read-only`, `emmc-sector-count`,
-`emmc-no-partition-table`, `emmc-not-mounted`, `efibootmgr-supports-create`,
+`emmc-no-partition-table`, `emmc-not-mounted`, `efibootmgr-supports-bootnext`,
 `boot-order-unchanged`, `boot-next-unset`, `arm-entry-unique`,
+`arm-entry-after-boot-current`,
 `efivarfs-rw`, `secure-boot-disabled`, `staged-images-present`,
 `staged-image-checksums`, `staging-space-free` and `board-prerequisites`
 (GNU `install`, `sha256sum` and `dd` plus the Python standard library; see
 [Board prerequisites](#board-prerequisites)). `boot-order-unchanged` is not
 examined unless `--expected-boot-order` is given. `arm-entry-unique` passes when
 exactly one boot entry carries the profile's `arm.params.entry_label` (zero or
-several fail, naming the count and the label).
+several fail, naming the count and the label). `efibootmgr-supports-bootnext`
+asserts that `efibootmgr --help` lists `-n`/`--bootnext` and `-N`/`--delete-bootnext`.
+`arm-entry-after-boot-current` fails when that entry precedes `BootCurrent` in
+`BootOrder` (see [The one-shot boot and its limits](#the-one-shot-boot-and-its-limits));
+it is not examined when the listing has no `BootCurrent` line. `check` also
+prints an informational `L4TDefaultBootMode` line; it is never a refusal and is
+not counted in examined-out-of-declared.
 
 ### Pinning the eMMC serial in an extension profile
 
@@ -613,6 +620,8 @@ marker to carry a ceiling and an upgrade trigger.
 | Busybox portability is not provided: the runner assumes GNU `install -d`, GNU `sha256sum --strict`, `dd conv=fsync status=none` and a full Python 3 standard library, and `board-prerequisites` only reports their absence | `cmd_check.py` `_board_prerequisites`, `host.py` `probe_board_tools` | boards with GNU coreutils and a full Python 3 | a busybox-userland board becomes a real target |
 | The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
 
+The arming record does not gain an `entry_preexisting` field and the state schema is not bumped, because no run record from before the firmware-entry change exists outside the bench.
+
 ### The one-shot boot and its limits
 
 The profile arms the firmware's own `UEFI eMMC Device` entry with
@@ -625,9 +634,30 @@ auto-created full-path entry booted that device once with `BootOrder`
 unchanged. The `plan` output states the exact `efibootmgr -n <entry>` it would
 run.
 
+The arm refuses when the selected entry precedes `BootCurrent` in `BootOrder`
+(`Arm.prepare`, `Arm.arm`, `plan`, and the `arm-entry-after-boot-current`
+check), naming both numbers and the `BootOrder`. `BootNext` is one-shot, but an
+entry listed before the entry the board booted from is tried first on every
+later boot once it holds a bootable image, and `restore` clears `BootNext` only,
+so it could not undo that. An entry after `BootCurrent`, or absent from
+`BootOrder`, is accepted. A listing with no `BootCurrent` line is refused,
+because that position is the whole question. After a successful write the
+output states the real fallback: `BootNext` is consumed by the one boot, and
+later boots follow the unchanged `BootOrder`.
+
+The guard checks the boot image that the firmware's loader is expected to run.
+Dropping `bootmode=bootimg` means nothing forces the loader onto that boot
+image, so this tool's premise is that the firmware's own loader on the ESP
+selects it. `check` prints `L4TDefaultBootMode` (the efivarfs variable's value, or
+`unset`) so the operator can see the setting; it is informational only. The tool
+cannot be cleared for a new board until the first boot of the eMMC entry on the
+production board has been observed on the console and `/proc/cmdline` carries
+the guard argument.
+
 The bash kit's parity goldens still show `efibootmgr -C`; they are not edited.
 The parity suite records the deviation as D9 in `tests/remote/test_parity.py`:
-the kit's create line has no counterpart, the kit's `-n` names the firmware's
+the kit's create line has no counterpart, the kit's `-C` support check
+is replaced by `efibootmgr-supports-bootnext`, the kit's `-n` names the firmware's
 entry, restore runs `-N` but never `-B -b`, and the plan body is compared against
 the golden with only those lines rewritten.
 

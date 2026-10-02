@@ -392,8 +392,7 @@ def _body(profile, staging_dir: str, sfdisk_text: str, n_manifest: int, entry_nu
         lines.append(f"  {img.file} -> {node} ({name_of[img.partition]})")
 
     arm_params = profile.arm.params
-    esp = profile.images.get("esp")
-    arming = profile.arm.strategy == "uefi-bootnext" and esp is not None
+    arming = profile.arm.strategy == "uefi-bootnext"
     if arming:
         lines += [
             "== boot entry (BootNext only, BootOrder untouched) ==",

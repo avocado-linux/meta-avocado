@@ -290,7 +290,7 @@ def _restore_locked(
     say(f"run {state.run_id} phase {state.phase}: {describe_recovery(state)}")
     armed = state.data.get("armed")
     possibly_armed = state.phase == "arming"  # recorded before the first efibootmgr call
-    if not isinstance(armed, dict) or not (possibly_armed or armed.get("entry_number") or armed.get("next_armed")):
+    if not isinstance(armed, dict) or not (possibly_armed or armed.get("next_armed")):
         say("no boot entry was armed by this run; no efibootmgr calls made")
         ok = clean_staging()
         return finish(0 if ok else 1, note)
@@ -328,6 +328,11 @@ def _restore_locked(
         say(f"restore FAILED: {e}; staging kept, rerun `restore` after inspecting efibootmgr -v")
         return finish(1, note)
 
+    still = boot_next_of(after).upper()
+    if record.entry_number and still == record.entry_number.upper():
+        say(f"BootNext {still} still set: DO NOT REBOOT; it did not clear")
+        say("staging kept")
+        return finish(1, note)
     problem = False
     if record.entry_number and _entry_present(after, record.entry_number):
         if record.entry_number.upper() not in entries_with_label(after, record.label):
@@ -396,6 +401,10 @@ def _emergency(ops, label, ack, loaded, say, result, finish):
             ops.efibootmgr_delete_next()
             result.actions.append(f"cleared BootNext {nxt}")
             say(f"cleared BootNext {nxt}")
+            left = boot_next_of(ops.efibootmgr_list()).upper()
+            if left == nxt:
+                say(f"BootNext {left} still set: DO NOT REBOOT; it did not clear")
+                return finish(1, True)
         elif not ours:
             say(f"no boot entry labelled {label!r}; BootNext left alone")
         else:

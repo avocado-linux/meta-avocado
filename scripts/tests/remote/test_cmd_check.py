@@ -69,7 +69,7 @@ def script(efivars, **over):
         f"blockdev --getsz {DISK}": "122314752\n",
         f"sfdisk --dump {DISK}": OpResult(rc=1, stderr=f"sfdisk: {DISK}: does not contain a recognized partition table\n"),
         "findmnt -rn -o SOURCE": "/dev/nvme0n1p1\n/dev/nvme0n1p2\n",
-        "efibootmgr --help": "Usage: efibootmgr [-c|-C] [-d DISK]\n  -C | --create-only\n",
+        "efibootmgr --help": "Usage: efibootmgr [-n|-N]\n  -n | --bootnext XXXX\n  -N | --delete-bootnext\n",
         "efibootmgr -v": EFI_OK,
         f"findmnt -no OPTIONS {efivars}": "rw,nosuid,nodev,noexec,relatime\n",
         f"read_file {STAGE}/MANIFEST.hashes": MANIFEST,
@@ -118,10 +118,11 @@ GOLDEN = [
     "PASS  eMMC sector count: 122314752 (expected 122314752)",
     "PASS  eMMC has no partition table: sfdisk --dump reports no partition table",
     "PASS  eMMC not mounted: no mmcblk0 source in findmnt",
-    "PASS  efibootmgr supports -C: -C listed in --help",
+    "PASS  efibootmgr supports -n and -N: -n and -N listed in --help",
     "PASS  BootOrder unchanged: actual '0001,0002,0000,0003,0004' (expected 0001,0002,0000,0003,0004)",
     "PASS  BootNext unset: unset",
     "PASS  exactly one UEFI eMMC Device entry: Boot0002",
+    "PASS  UEFI eMMC Device entry does not precede BootCurrent: 'UEFI eMMC Device' entry does not precede BootCurrent 0001 in BootOrder",
     "PASS  efivarfs mounted read-write: efivarfs options: rw,nosuid,nodev,noexec,relatime",
     "PASS  SecureBoot disabled: SecureBoot final byte = 0",
     "PASS  staged images present: 5 image(s) listed in MANIFEST.hashes are present in /run/emmc-test-images",
@@ -140,15 +141,15 @@ def test_all_pass_matches_golden(efivars):
     assert "INFO  running containers: 3 (they stop at reboot)" in infos
     assert "INFO  kernel: 5.15.148-tegra" in infos
     assert "INFO  eMMC life time: 0x01 0x01 (pre_eol_info 0x01)" in infos
-    assert res.lines[-2:] == ["checks: 15/15", "PREFLIGHT PASS"]
-    assert (res.exit_code, res.examined, res.total) == (0, 15, 15)
+    assert res.lines[-2:] == ["checks: 16/16", "PREFLIGHT PASS"]
+    assert (res.exit_code, res.examined, res.total) == (0, 16, 16)
     assert not any(vector_mutates(c.vector) for c in rec.calls if c.kind == "exec")
 
 
 def test_info_lines_not_counted(efivars):
     res, _ = run(efivars)
-    assert res.total == 15
-    assert sum(ln.startswith(("PASS", "FAIL")) for ln in res.lines) == 15
+    assert res.total == 16
+    assert sum(ln.startswith(("PASS", "FAIL")) for ln in res.lines) == 16
 
 
 FAULTS = [
@@ -157,7 +158,7 @@ FAULTS = [
     ("eMMC sector count", {f"blockdev --getsz {DISK}": "122314751\n"}),
     ("eMMC has no partition table", {f"sfdisk --dump {DISK}": "label: gpt\n"}),
     ("eMMC not mounted", {"findmnt -rn -o SOURCE": "/dev/mmcblk0p1\n"}),
-    ("efibootmgr supports -C", {"efibootmgr --help": "Usage: efibootmgr [-c]\n"}),
+    ("efibootmgr supports -n and -N", {"efibootmgr --help": "Usage: efibootmgr [-c]\n"}),
     ("BootOrder unchanged", {"efibootmgr -v": EFI_OK.replace(ORDER, "0001,0000")}),
     ("BootNext unset", {"efibootmgr -v": "BootNext: 0005\n" + EFI_OK}),
     ("exactly one UEFI eMMC Device entry", {"efibootmgr -v": EFI_OK + f"Boot0005* {LABEL}\tHD(1)\n"}),
@@ -182,7 +183,7 @@ def test_single_fault_fails_but_still_counts_as_examined(efivars, label, over):
     assert res.lines[-1].startswith("PREFLIGHT FAIL:")
     assert f"[{label}]" in res.lines[-1]
     if label != "eMMC device exists":  # an absent device leaves its dependents unexamined
-        assert res.examined == 15 and res.total == 15
+        assert res.examined == 16 and res.total == 16
 
 
 def test_secure_boot_enabled_fails(efivars):
@@ -211,12 +212,12 @@ def test_unrunnable_check_is_not_examined_exit_2(efivars):
     rec = RecordingOps(script(efivars))
     del rec.script["efibootmgr --help"]
     res, _ = run(efivars, ops=rec)
-    assert verdict(res, "efibootmgr supports -C") == "FAIL"
-    line = [ln for ln in res.lines if "efibootmgr supports -C" in ln][0]
+    assert verdict(res, "efibootmgr supports -n and -N") == "FAIL"
+    line = [ln for ln in res.lines if "efibootmgr supports -n and -N" in ln][0]
     assert "not examined" in line
-    assert res.lines[-2:][0] == "checks: 14/15"
+    assert res.lines[-2:][0] == "checks: 15/16"
     assert res.exit_code == 2
-    assert res.examined == 14 and res.total == 15
+    assert res.examined == 15 and res.total == 16
     assert res.lines[-1].startswith("PREFLIGHT FAIL:")
 
 
@@ -225,14 +226,14 @@ def test_fail_beats_not_examined_for_exit_code(efivars):
     del rec.script["efibootmgr --help"]
     res, _ = run(efivars, ops=rec)
     assert res.exit_code == 1
-    assert res.lines[-2] == "checks: 14/15"
+    assert res.lines[-2] == "checks: 15/16"
 
 
 def test_efibootmgr_list_failure_not_examines_dependents(efivars):
     res, _ = run(efivars, **{"efibootmgr -v": OpFailed(["efibootmgr", "-v"], 1, "no efi")})
     assert res.exit_code == 2
     assert res.examined == 12
-    assert res.lines[-2] == "checks: 12/15"
+    assert res.lines[-2] == "checks: 12/16"
 
 
 def test_missing_manifest_not_examined(efivars):
@@ -240,14 +241,14 @@ def test_missing_manifest_not_examined(efivars):
     del rec.script[f"read_file {STAGE}/MANIFEST.hashes"]
     res, _ = run(efivars, ops=rec)
     assert res.exit_code == 2
-    assert res.examined == 14  # checksums run sha256sum, which reads the manifest itself
+    assert res.examined == 15  # checksums run sha256sum, which reads the manifest itself
 
 
 def test_device_absent_makes_dependents_not_examined(efivars):
     res, _ = run(efivars, **{f"lsblk -rn -o TYPE {DISK}": OpResult(rc=32)})
     assert res.exit_code == 1
     assert verdict(res, "eMMC device exists") == "FAIL"
-    assert res.examined == 11 and res.total == 15
+    assert res.examined == 12 and res.total == 16
 
 
 def test_expected_boot_order_missing_is_not_examined(efivars):
@@ -260,7 +261,7 @@ def test_expected_boot_order_missing_is_not_examined(efivars):
         out=lines.append,
     )
     assert res.exit_code == 2
-    assert res.examined == 14
+    assert res.examined == 15
 
 
 def test_unknown_check_name_is_not_examined(efivars):
@@ -333,7 +334,7 @@ def test_life_time_unavailable_is_info_only(efivars):
     del rec.script["read_file /sys/block/mmcblk0/device/life_time"]
     res, _ = run(efivars, ops=rec)
     assert "INFO  eMMC life time: unavailable" in res.lines
-    assert res.exit_code == 0 and res.total == 15
+    assert res.exit_code == 0 and res.total == 16
 
 
 def test_info_failures_never_change_verdict(efivars):
@@ -402,15 +403,15 @@ def test_failing_checksum_of_listed_image_is_still_a_verdict(efivars):
 
 def test_efibootmgr_help_failing_is_not_examined(efivars):
     over = {"efibootmgr --help": OpResult(rc=1)}
-    res, rec = run(efivars, profile=profile_with(["efibootmgr-supports-create"]), **over)
-    _assert_not_examined(res, rec, "efibootmgr supports -C", "efibootmgr --help")
+    res, rec = run(efivars, profile=profile_with(["efibootmgr-supports-bootnext"]), **over)
+    _assert_not_examined(res, rec, "efibootmgr supports -n and -N", "efibootmgr --help")
 
 
 def test_efibootmgr_help_without_dash_c_is_still_a_verdict(efivars):
     over = {"efibootmgr --help": "Usage: efibootmgr [-c]\n"}
-    res, _ = run(efivars, profile=profile_with(["efibootmgr-supports-create"]), **over)
+    res, _ = run(efivars, profile=profile_with(["efibootmgr-supports-bootnext"]), **over)
     assert res.exit_code == 1
-    assert verdict(res, "efibootmgr supports -C") == "FAIL"
+    assert verdict(res, "efibootmgr supports -n and -N") == "FAIL"
     assert not any("not examined" in ln for ln in res.lines)
 
 
@@ -561,12 +562,83 @@ def test_prerequisites_issue_only_read_vectors_and_call_no_mutating_verb(efivars
 
 def test_prerequisites_count_in_the_examined_out_of_declared_total(efivars):
     res, _ = run(efivars)
-    assert (res.examined, res.total) == (15, 15)
-    assert res.lines[-2:] == ["checks: 15/15", "PREFLIGHT PASS"]
+    assert (res.examined, res.total) == (16, 16)
+    assert res.lines[-2:] == ["checks: 16/16", "PREFLIGHT PASS"]
     assert verdict(res, PREREQ_LABEL) == "PASS"
 
 
 def test_failed_prerequisites_still_count_as_examined(efivars):
     res, _ = run(efivars, **{"install --version": BUSYBOX_REFUSAL})
-    assert res.exit_code == 1 and (res.examined, res.total) == (15, 15)
+    assert res.exit_code == 1 and (res.examined, res.total) == (16, 16)
     assert f"[{PREREQ_LABEL}]" in res.lines[-1]
+
+
+# ---- 5.39 (5): the arm needs -n and -N, not -C ----
+
+BOOTNEXT_HELP = "Usage: efibootmgr [options]\n  -n | --bootnext XXXX   set BootNext to XXXX (hex)\n  -N | --delete-bootnext delete BootNext\n"
+BOOTNEXT = "efibootmgr-supports-bootnext"
+BOOTNEXT_LABEL = "efibootmgr supports -n and -N"
+
+
+def test_supports_bootnext_passes_when_help_lists_both(efivars):
+    res, _ = run(efivars, profile=profile_with([BOOTNEXT]), **{"efibootmgr --help": BOOTNEXT_HELP})
+    assert res.exit_code == 0
+    assert verdict(res, BOOTNEXT_LABEL) == "PASS"
+
+
+@pytest.mark.parametrize(
+    "help_text",
+    ["Usage: efibootmgr\n  -n | --bootnext XXXX  set\n", "Usage: efibootmgr\n  -N | --delete-bootnext x\n", "Usage: efibootmgr [-C]\n"],
+)
+def test_supports_bootnext_fails_when_either_is_missing(efivars, help_text):
+    res, _ = run(efivars, profile=profile_with([BOOTNEXT]), **{"efibootmgr --help": help_text})
+    assert res.exit_code == 1
+    assert verdict(res, BOOTNEXT_LABEL) == "FAIL"
+
+
+def test_supports_bootnext_help_failing_is_not_examined(efivars):
+    res, rec = run(efivars, profile=profile_with([BOOTNEXT]), **{"efibootmgr --help": OpResult(rc=1)})
+    _assert_not_examined(res, rec, BOOTNEXT_LABEL, "efibootmgr --help")
+
+
+# ---- 5.39 (1): the entry must not precede BootCurrent in BootOrder ----
+
+AFTER = "arm-entry-after-boot-current"
+AFTER_LABEL = "UEFI eMMC Device entry does not precede BootCurrent"
+
+
+def test_entry_before_boot_current_fails_the_check_naming_both(efivars):
+    listing = EFI_OK.replace("BootCurrent: 0001", "BootCurrent: 0000").replace(ORDER, "0002,0000,0001")
+    res, _ = run(efivars, profile=profile_with([AFTER]), **{"efibootmgr -v": listing})
+    assert res.exit_code == 1
+    line = [ln for ln in res.lines if AFTER_LABEL in ln][0]
+    assert line.startswith("FAIL") and "Boot0002" in line and "BootCurrent 0000" in line
+
+
+def test_entry_after_boot_current_passes_the_check(efivars):
+    res, _ = run(efivars, profile=profile_with([AFTER]))
+    assert verdict(res, AFTER_LABEL) == "PASS"
+
+
+def test_missing_boot_current_is_not_examined_by_the_check(efivars):
+    listing = EFI_OK.replace("BootCurrent: 0001\n", "")
+    res, rec = run(efivars, profile=profile_with([AFTER]), **{"efibootmgr -v": listing})
+    _assert_not_examined(res, rec, AFTER_LABEL, "BootCurrent")
+
+
+# ---- 5.39 (6): L4TDefaultBootMode is shown, never judged ----
+
+L4T = "L4TDefaultBootMode-781e084c-a330-417c-b678-38e696380cb9"
+
+
+def test_l4t_default_boot_mode_is_an_info_line_with_its_value(efivars):
+    (efivars / L4T).write_bytes(bytes([7, 0, 0, 0, 2, 0, 0, 0]))
+    res, _ = run(efivars)
+    assert "INFO  L4TDefaultBootMode: 2 (data 02000000)" in res.lines
+    assert (res.exit_code, res.examined, res.total) == (0, 16, 16)
+
+
+def test_l4t_default_boot_mode_absent_reads_unset_and_changes_no_count(efivars):
+    res, _ = run(efivars)
+    assert "INFO  L4TDefaultBootMode: unset" in res.lines
+    assert res.exit_code == 0

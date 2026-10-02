@@ -312,7 +312,7 @@ class Env:
             f"findmnt -no SOURCE -T {STAGE}": "tmpfs\n",
             "findmnt -no SOURCE -T /etc/ssh": "/dev/nvme0n1p2\n",
             "read_file /sys/block/mmcblk0/device/serial": _SERIAL + "\n",
-            "efibootmgr --help": "Usage: efibootmgr [-c|-C] [-d DISK]\n  -C | --create-only\n",
+            "efibootmgr --help": "Usage: efibootmgr [-n|-N]\n  -n | --bootnext XXXX\n  -N | --delete-bootnext\n",
             "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_FINAL],
             f"findmnt -no OPTIONS {self.efivars}": "rw,nosuid,nodev,noexec,relatime\n",
             f"read_file {STAGE}/MANIFEST.hashes": "".join(f"{'a' * 64}  {n}\n" for n in names),

@@ -237,7 +237,7 @@ def test_emergency_requires_acknowledgement(env):
 def test_emergency_disarm_clears_bootnext_for_the_labelled_entry_and_deletes_nothing(env):
     (env.state_dir / "current").write_text("r1\n")
     extra = [NEW, "Boot0007* avocado-emmc-oneshot-old\tx", "Boot0009* UEFI Shell"]
-    ops = RecordingOps({LIST: efi(nxt="0005", extra=extra)})
+    ops = RecordingOps({LIST: [efi(nxt="0005", extra=extra), efi(extra=extra)]})
     r, removed, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
     assert r.exit_code == 0
     assert mutations(ops) == ["efibootmgr -N"]
@@ -657,7 +657,7 @@ def test_emergency_disarm_proceeds_when_the_lock_is_released_during_the_wait(env
     import time
 
     (env.state_dir / "current").write_text("r1\n")
-    ops = RecordingOps({LIST: efi(nxt="0005", extra=[NEW])})
+    ops = RecordingOps({LIST: [efi(nxt="0005", extra=[NEW]), efi(extra=[NEW])]})
     lock = OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="slow-writer")
     lock.__enter__()
     threading.Timer(0.2, lambda: lock.__exit__(None, None, None)).start()
@@ -682,7 +682,7 @@ def test_normal_restore_still_refuses_at_once_on_a_held_lock_whatever_the_wait(e
 def test_emergency_disarm_leaves_a_longer_label_with_our_label_as_its_prefix(env):
     (env.state_dir / "current").write_text("r1\n")
     extra = [NEW, f"Boot0007* {LABEL} old\tHD(1,GPT)", f"Boot0008* {LABEL}x\tHD(1,GPT)"]
-    ops = RecordingOps({LIST: efi(nxt="0005", extra=extra)})
+    ops = RecordingOps({LIST: [efi(nxt="0005", extra=extra), efi(extra=extra)]})
     r, _removed, _out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
     assert r.exit_code == 0
     assert mutations(ops) == ["efibootmgr -N"]
@@ -762,3 +762,28 @@ def test_restore_by_recorded_number_proceeds_for_an_entry_in_boot_order(env):
     assert r.exit_code == 0
     assert mutations(ops) == ["efibootmgr -N"]
     assert removed == [str(env.staging)]
+
+
+# ---- 5.39 (2): restore reads BootNext back after clearing it ----
+
+
+def test_restore_fails_when_bootnext_still_names_the_entry_after_clearing(env):
+    mk_state(env, "armed", rec())
+    still = efi(nxt="0005", extra=[NEW])
+    ops = RecordingOps({LIST: [still, still, still]})
+    r, removed, out = go_raw(env, ops, ack_run_id="r1")
+    text = "\n".join(out)
+    assert r.exit_code == 1
+    assert mutations(ops) == ["efibootmgr -N"]
+    assert "BootNext 0005 still set: DO NOT REBOOT" in text
+    assert removed == []
+    assert st.load_state(env.state_dir).state.phase == "armed"
+
+
+def test_emergency_disarm_fails_when_bootnext_still_names_the_entry_after_clearing(env):
+    (env.state_dir / "current").write_text("r1\n")
+    still = efi(nxt="0005", extra=[NEW])
+    ops = RecordingOps({LIST: [still, still]})
+    r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
+    assert r.exit_code == 1
+    assert "BootNext 0005 still set: DO NOT REBOOT" in "\n".join(out)

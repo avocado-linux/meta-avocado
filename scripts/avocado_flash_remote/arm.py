@@ -64,6 +64,34 @@ def boot_next_of(text: str) -> str:
     return _field(text, "BootNext")
 
 
+def boot_current_of(text: str) -> str:
+    return _field(text, "BootCurrent").upper()
+
+
+def preceding_current(text: str, entry: str):
+    """Why ``entry`` would be taken by every boot, or ``""`` when it would not.
+
+    BootNext is one-shot, but an entry listed in BootOrder before the entry the
+    board booted from (BootCurrent) is tried first on every later boot once it
+    holds a bootable image. Returns a refusal sentence naming both numbers and
+    the BootOrder; an entry after BootCurrent or absent from BootOrder returns
+    ``""``. A listing with no BootCurrent line cannot be judged: it is refused,
+    because that position is the whole question.
+    """
+    order = boot_order_of(text)
+    current = boot_current_of(text)
+    if not current:
+        return "no BootCurrent line in efibootmgr -v output; cannot tell whether the entry precedes the booted one"
+    ids = [x.strip().upper() for x in order.split(",") if x.strip()]
+    entry = entry.upper()
+    if entry in ids and (current not in ids or ids.index(entry) < ids.index(current)):
+        return (
+            f"Boot{entry} precedes BootCurrent {current} in BootOrder {order}: once it holds a bootable "
+            "image every boot takes it first, and restore cannot undo that"
+        )
+    return ""
+
+
 def entries_with_label(text: str, label: str) -> list:
     """Upper-case entry numbers whose label is exactly ``label``.
 
@@ -127,6 +155,9 @@ class Arm:
             # Kit: refuse rather than replace someone else's one-shot.
             raise ArmError(f"BootNext is already set ({nxt}); refusing to replace another one-shot")
         entry = _single_entry(text, label, "prepare")
+        why = preceding_current(text, entry)
+        if why:
+            raise ArmError(f"{why}; no boot variable was changed")
         return ArmRecord(
             entry_number=entry, label=label, preexisting_boot_order=order, preexisting_next=nxt
         )
@@ -156,6 +187,9 @@ class Arm:
                 "it was recorded; no boot variable was changed",
                 record,
             )
+        why = preceding_current(pre, entry)
+        if why:
+            raise ArmError(f"{why}; no boot variable was changed", record)
         record.entry_number = entry
         record.label = label
         ops.efibootmgr_next(entry)
@@ -177,7 +211,10 @@ class Arm:
     def disarm(self, ops, record) -> list:
         """Clear BootNext when it names the recorded entry; delete nothing. Notes returned."""
         notes = []
-        if not record.entry_number and not record.next_armed:
+        if not record.next_armed:
+            # entry_number is known from prepare time on; only next_armed (set, or the arming
+            # phase's assumption of it) says this run may have set BootNext.
+            notes.append("this run did not set BootNext; leaving BootNext alone")
             return notes
         live = ops.efibootmgr_list()
         number = record.entry_number.upper()

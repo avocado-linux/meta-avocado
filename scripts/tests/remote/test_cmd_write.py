@@ -138,7 +138,7 @@ class Env:
             "findmnt -no SOURCE -T /": "/dev/nvme0n1p2\n",
             f"findmnt -no SOURCE -T {STAGE}": "tmpfs\n",
             "findmnt -no SOURCE -T /etc/ssh": "/dev/nvme0n1p2\n",
-            "efibootmgr --help": "Usage: efibootmgr [-c|-C] [-d DISK]\n  -C | --create-only\n",
+            "efibootmgr --help": "Usage: efibootmgr [-n|-N]\n  -n | --bootnext XXXX\n  -N | --delete-bootnext\n",
             # check, prepare (pre-flight), arm: pre / final
             "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_FINAL],
             f"findmnt -no OPTIONS {self.efivars}": "rw,nosuid,nodev,noexec,relatime\n",
@@ -387,7 +387,7 @@ def test_no_arm_strategy_completes_without_efibootmgr_writes(tmp_path):
     doc["arm"] = {"strategy": "none", "params": {}}
     doc["guard"] = {"strategy": "none", "params": {}}
     doc["checks"] = [c for c in doc["checks"] if c not in ("boot-order-unchanged", "boot-next-unset",
-                     "arm-entry-unique", "efibootmgr-supports-create")]  # fmt: skip
+                     "arm-entry-unique", "efibootmgr-supports-bootnext", "arm-entry-after-boot-current")]  # fmt: skip
     e = Env(tmp_path, json.dumps(doc).encode())
     e.plan["arm"] = {"strategy": "none"}
     res, ops = e.run()
@@ -1242,3 +1242,97 @@ def test_image_limits_check_names_the_partition_when_an_image_outgrows_it(env):
     scans[img.file] = ScanResult(cap + 1, "0" * 64, False, (1, 1, cap + 1, 1))
     with pytest.raises(cmd_plan._Refusal, match="partition|limit"):
         cmd_plan.check_image_limits(env.profile, scans)
+
+
+# ---- 5.39 (3): entry_number is known at prepare time; only next_armed / arming mean "armed" ----
+
+_NO_ENTRY_PROMISE = ("removed it", "removes it", "removed the entry", "remove the entry", "removes the entry")
+
+
+def test_arm_refused_before_n_does_not_say_a_boot_entry_was_armed_and_restore_makes_no_n_call(env):
+    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE.replace(ORDER, "0002,0001")]}))
+    assert res.exit_code == 1
+    text = "\n".join(res.lines)
+    assert "A boot entry was armed" not in text
+    assert "No boot entry is recorded as armed" in text
+    for phrase in _NO_ENTRY_PROMISE:
+        assert phrase not in text
+    # someone else set BootNext to the same entry afterwards: restore must not clear it
+    rops = RecordingOps({"efibootmgr -v": [EFI_FINAL, EFI_FINAL]})
+    rres, _removed = _restore_for(env, rops)
+    assert [c.line for c in mutations(rops)] == []
+    assert rres.exit_code == 0, rres.lines
+
+
+def test_armed_failure_text_says_cleared_bootnext_not_removed(env):
+    res, _ = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_PRE]}))
+    st = statemod.load_state(env.state_dir).state
+    text = statemod.describe_recovery(st)
+    for phrase in _NO_ENTRY_PROMISE:
+        assert phrase not in text
+    assert "BootNext" in text
+
+
+def test_a_failed_state_with_next_armed_says_cleared_bootnext():
+    data = {
+        "phase": "failed", "error": "boom", "phases_done": [], "image_order": [], "images": {},
+        "armed": {"entry_number": ENTRY, "next_armed": True},
+    }
+    text = statemod._describe_failed(statemod.RunState(None, data))
+    assert "cleared BootNext" in text
+    for phrase in _NO_ENTRY_PROMISE:
+        assert phrase not in text
+
+
+def test_a_failed_state_with_only_an_entry_number_does_not_warn_of_an_armed_boot():
+    data = {
+        "phase": "failed", "error": "boom", "phases_done": [], "image_order": [], "images": {},
+        "armed": {"entry_number": ENTRY, "next_armed": False},
+    }
+    text = statemod._describe_failed(statemod.RunState(None, data))
+    assert "DO NOT REBOOT" not in text
+    assert "No boot entry is recorded as armed" in text
+
+
+def test_no_recovery_text_says_an_entry_may_already_exist():
+    for text in statemod._RECOVERY_TEXT.values():
+        assert "boot entry and the next-boot setting may already exist" not in text
+        for phrase in _NO_ENTRY_PROMISE:
+            assert phrase not in text
+
+
+# ---- 5.39 (4): write arms the planned entry; the ESP is found by its type, not its role name ----
+
+
+def test_esp_vfat_check_does_not_depend_on_the_role_being_named_esp():
+    doc = json.loads(SHIPPED_BYTES)
+    doc["images"]["efi_system"] = doc["images"].pop("esp")
+    profile = prof.load_profile_bytes(json.dumps(doc).encode())
+    node = layout.partition_node(DEV, profile.images["efi_system"].partition)
+    ops = RecordingOps({f"blkid -p -s TYPE -o value {node}": "ext4\n"})
+    with pytest.raises(cmd_write._Failed, match="FAT"):
+        cmd_write._esp_is_vfat(ops, profile)
+
+
+def test_write_refuses_when_the_entry_number_changed_since_the_plan(env):
+    moved = EFI_PRE.replace(f"Boot{ENTRY}*", "Boot0003*")
+    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, moved, moved, moved]}))
+    assert_clean_refusal(res, ops, "boot entry changed since the plan; run plan again")
+
+
+def test_write_refuses_when_the_entry_label_changed_since_the_plan(env):
+    env.plan["arm"]["label"] = "Some Other Label"
+    res, ops = env.run()
+    assert_clean_refusal(res, ops, "boot entry changed since the plan; run plan again")
+
+
+# ---- 5.39 (1): the write output states the real fallback order ----
+
+
+def test_good_run_output_states_the_boot_order_fallback_not_a_blanket_promise(env):
+    res, _ = env.run()
+    text = "\n".join(res.lines)
+    assert res.exit_code == 0
+    assert "A plain power cycle afterwards returns to the previous boot device" not in text
+    assert f"BootNext is consumed by that one boot; later boots follow BootOrder {ORDER} unchanged" in text
+    assert f"Boot{ENTRY} comes after the entry that booted this run in BootOrder" in text

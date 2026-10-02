@@ -698,9 +698,9 @@ CASES = {
     "install:nocfb": na("the kit's --fallback-bootnext-0002 option; the port has no fallback arming"),
     "install:devimages": outcome("staging directory under /dev: the profile loader refuses, no call at all", exit_class=True),
     "install:nondevimages": differs("D5+D6+D9", "staging directory outside /dev: " + OK_MUT),
-    "window:pf-good": outcome("check: exit 0, 15/15 (the kit's 14 plus board-prerequisites), no mutating call", reads=PF_REF),
+    "window:pf-good": outcome("check: exit 0, 15/15 (the kit's 14 plus board-prerequisites and the BootCurrent-order check), no mutating call", reads=PF_REF),
     **{
-        f"window:pf-{k}": differs("D1", f"{k}: FAIL line and exit 1, but checks: 15/15 (examined; the kit's 14 plus board-prerequisites) instead of 13/14")
+        f"window:pf-{k}": differs("D1", f"{k}: FAIL line and exit 1, but checks: 16/16 (examined; the kit's 14 plus board-prerequisites and the BootCurrent-order check) instead of 13/14")
         for k in PF_FAULTS
     },
     "window:pf-sb-absent": differs("D2", "missing SecureBoot variable is a FAIL (exit 1); the kit passed with a warning"),
@@ -869,14 +869,14 @@ def check_outcome(name, g, run, e):
 # The documented deliberate differences. Each is asserted from both sides.
 
 DIFFERENCES = {
-    "D1": "cmd_check counts a FAIL as examined: a single-fault preflight prints `checks: 15/15` (the kit's 14 plus board-prerequisites), the FAIL line and exits 1; the kit printed `checks: 13/14`.",
+    "D1": "cmd_check counts a FAIL as examined: a single-fault preflight prints `checks: 16/16` (the kit's 14 plus board-prerequisites and the BootCurrent-order check), the FAIL line and exits 1; the kit printed `checks: 13/14`.",
     "D2": "a missing SecureBoot variable is a FAIL in the port (Secure Boot state NOT VERIFIED); the kit passed it with a warning.",
     "D3": "device-dependent checks are `not examined` when emmc-exists fails (the kit's pf-* cases force the device to exist).",
     "D4": "cmd_readback always runs `ls -laR` on the journal directory; the kit tested for the directory first.",
     "D5": "cmd_write reads each image back right after writing it (the kit wrote all images, then read all back) and reads the boot header straight from the partition (the kit copied it to a scratch file).",
     "D6": "write requires a plan record and consumes it (a kit install has none): install success cases compare the mutating sequence only.",
     "D7": "the port refuses non-whole-disk and NVMe targets at plan, before any call, with the kit's zero-mutation outcome; the kit takes --disk and refuses in install.sh.",
-    "D9": "the arm selects the firmware's own storage entry with `efibootmgr -n` and never creates or deletes a boot entry (task 5.36): the kit's `-C` has no counterpart, restore runs `-N` but never `-B -b`, and a BootNext already consumed by a boot is a note, not a failure.",
+    "D9": "the arm selects the firmware's own storage entry with `efibootmgr -n` and never creates or deletes a boot entry (task 5.36): the kit's `-C` has no counterpart (and its `-C` support check is replaced by `efibootmgr-supports-bootnext`, which asserts `-n` and `-N` in `efibootmgr --help`), restore runs `-N` but never `-B -b`, and a BootNext already consumed by a boot is a note, not a failure.",
     "D8": "restore is driven by the recorded arm entry (number AND label), never rolls back the table, and cleans staging when there is no state (spec: 'Restore undoes the arming and removes staging', 'Restore does not claim a data rollback').",
 }  # fmt: skip
 
@@ -902,7 +902,7 @@ def d1(name, g, run):
     assert g.exit == 1, "the kit failed this case"
     assert run.exit == 1, run.text
     assert run.muts == [] and g.muts == []
-    assert "checks: 15/15" in run.out, run.text
+    assert "checks: 16/16" in run.out, run.text
     assert any(ln.startswith("FAIL  ") for ln in run.out)
     assert any(ln.startswith("PREFLIGHT FAIL") for ln in run.out)
     assert_reads(g, run, PF_REF)
@@ -1025,10 +1025,10 @@ def test_every_difference_id_is_documented_and_used():
 def test_d1_single_fault_preflight_counts_failures_as_examined(golden, runs):
     run = runs["window:pf-readonly"]
     assert golden["window:pf-readonly"].exit == 1
-    assert run.exit == 1 and "checks: 15/15" in run.out
+    assert run.exit == 1 and "checks: 16/16" in run.out
     assert "FAIL  eMMC not read-only: blockdev --getro: 1 (rc=0)" in run.out
     res = run.extra["res"]
-    assert (res.examined, res.total) == (15, 15)
+    assert (res.examined, res.total) == (16, 16)
 
 
 def test_d2_missing_secureboot_is_a_failure(golden, runs):
@@ -1047,7 +1047,7 @@ def test_d3_device_dependent_checks_are_not_examined_when_emmc_is_absent(tmp_pat
     assert res.exit_code == 1
     for label in ("eMMC not read-only", "eMMC sector count", "eMMC has no partition table", "eMMC not mounted"):
         assert f"FAIL  {label}: not examined: {tcc.DISK} is absent" in lines
-    assert (res.examined, res.total) == (11, 15)
+    assert (res.examined, res.total) == (12, 16)
     seen = [c.line for c in ops.calls if c.kind == "exec"]
     assert not any(ln.startswith(("blockdev", "sfdisk")) for ln in seen)
     # the kit's pf-good forced the device to exist and ran those reads
