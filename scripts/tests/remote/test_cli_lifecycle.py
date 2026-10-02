@@ -27,6 +27,9 @@ class Board:
     """Scripted board: answers the host's calls the way the runner would."""
 
     def __init__(self, tmp_path, *, need_password=False, corrupt_write=False, write_phase="complete", missing=(), interp_rc=0):
+        self.omit_write_json = False  # the write record set lacks write.json (still a verifying set)
+        self.write_run_status = "runner-complete"  # run_status of the write record set's manifest
+        self.timeout_sub = None  # the runner call that times out on the host side (ssh wait expired)
         self.accepted = True  # the runner's `accepted` marker exists once write is detached
         self.runner_alive = False
         self.outcome = None  # the runner's `outcome` marker body (bytes) once it has ended
@@ -70,9 +73,9 @@ class Board:
             "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
         )
         rs.add("plan.json", {"run_id": self.run_id})
-        if with_write:
+        if with_write and not self.omit_write_json:
             rs.add("write.json", {"ok": True})
-        rs.finalize("runner-complete")
+        rs.finalize(self.write_run_status if with_write else "runner-complete")
         if with_write and self.corrupt_write:
             (d / "write.json").write_bytes(b'{"ok": false}\n')
         buf = io.BytesIO()
@@ -151,6 +154,8 @@ class Board:
         sub = argv[2]
         req = self.requests[argv[4]]
         self.runs.append((sub, req, "--detach" in argv))
+        if sub == self.timeout_sub:
+            raise host.HostTimeout("ssh to the board timed out after 1s")
         if sub == "check":
             return RunResult(0, b"check: all passed\n")
         if sub == "plan":
@@ -1051,3 +1056,52 @@ def test_collect_is_retried_when_the_outcome_is_published_before_the_manifest_li
     rc, text = run(args(images, tmp_path, "write", "--run-id", rid, "--ack-run", rid), board)
     assert state["collects"] >= 2
     assert rc == 0 and "write COMPLETE" in text
+
+
+# --- final ds-verify fixes (task 5.34) -----------------------------------------
+
+
+def test_readback_refuses_a_run_id_with_a_slash_before_any_connection(images, tmp_path, capsys):
+    rc, _ = run(args(images, tmp_path, "readback", "--run-id", "../../etc"), None)
+    assert rc == 64
+    assert "invalid run id" in capsys.readouterr().err
+
+
+def test_readback_still_accepts_a_plain_run_id(images, tmp_path):
+    board, _rid = _prepared(images, tmp_path)
+    rc, _ = run(args(images, tmp_path, "readback", "--run-id", "rb-1"), board)
+    assert rc == 0
+    req = [r for sub, r, _d in board.runs if sub == "readback"][0]
+    assert req["out_dir"].endswith("/rb-1/readback")
+
+
+def test_write_does_not_print_complete_when_write_json_is_not_in_the_record_set(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    rid = _stage_and_plan(images, tmp_path, board)
+    board.omit_write_json = True
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
+    assert rc == 1
+    assert "write COMPLETE" not in text
+    assert "write.json" in capsys.readouterr().err
+
+
+def test_write_does_not_print_complete_when_the_manifest_is_not_runner_complete(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    rid = _stage_and_plan(images, tmp_path, board)
+    board.write_run_status = "incomplete"
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
+    assert rc == 1
+    assert "write COMPLETE" not in text
+    assert "runner-complete" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("sub", ["plan", "restore", "check", "status"])
+def test_a_host_timeout_exits_with_the_dropped_connection_code_and_says_to_run_status(images, tmp_path, sub, capsys):
+    board = Board(tmp_path)
+    rid = _stage_and_plan(images, tmp_path, board)
+    board.timeout_sub = sub
+    extra = {"restore": ["--ack-run", rid, "--run-id", rid]}.get(sub, [])
+    rc, _ = run(args(images, tmp_path, sub, *extra), board)
+    err = capsys.readouterr().err
+    assert rc == cli.EXIT_DROPPED
+    assert "may have acted" in err and "status" in err

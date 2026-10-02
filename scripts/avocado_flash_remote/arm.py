@@ -52,7 +52,7 @@ class ArmRecord:
 
 
 def _field(text: str, name: str) -> str:
-    m = re.search(rf"^{name}:[ \t]*(.*?)[ \t]*$", text, re.MULTILINE)
+    m = re.search(rf"^{name}:[ \t]*(.*?)[ \t\r]*$", text, re.MULTILINE)
     return m.group(1) if m else ""
 
 
@@ -134,6 +134,19 @@ class Arm:
         if boot_order_of(pre) != order:
             raise ArmError(
                 "BootOrder changed since it was recorded; stopping before any boot entry call",
+                record,
+            )
+        nxt = boot_next_of(pre)
+        if nxt:
+            raise ArmError(
+                f"BootNext is set ({nxt}) since the plan was prepared; refusing to replace "
+                "another one-shot; no boot entry was created",
+                record,
+            )
+        if entries_with_label(pre, label):
+            raise ArmError(
+                f"a boot entry labelled {label} already exists; no boot entry was created; "
+                f"{RESTORE_HINT}",
                 record,
             )
         out = ops.efibootmgr_create(

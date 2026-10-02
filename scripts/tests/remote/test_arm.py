@@ -528,3 +528,41 @@ def test_staged_guard_refuses_an_argument_that_only_appears_after_a_nul():
     rd = reader({f"{STAGE}/boot.img": _after_nul(ARG), f"{STAGE}/boot-b.img": header(ARG)})
     with pytest.raises(GuardError, match="boot.img"):
         get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+
+
+# ------------------------------------------------- CRLF and re-check before create
+
+
+def _crlf(text):
+    return text.replace("\n", "\r\n")
+
+
+def test_boot_order_and_next_strip_a_trailing_carriage_return():
+    text = _crlf(efi(nxt="0005"))
+    assert armmod.boot_order_of(text) == "0001,0002,0003"
+    assert armmod.boot_next_of(text) == "0005"
+
+
+def test_disarm_clears_bootnext_when_efibootmgr_output_is_crlf():
+    ops = RecordingOps({LIST: _crlf(efi(extra=[NEW], nxt="0005"))})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST, "efibootmgr -N", "efibootmgr -B -b 0005"]
+
+
+def test_arm_refuses_a_bootnext_set_after_prepare_before_any_mutation():
+    ops = RecordingOps({LIST: [efi(), efi(nxt="0002")]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="BootNext"):
+        a.arm(ops, profile(), rec)
+    assert ops.log == [LIST, LIST]
+
+
+def test_arm_refuses_a_labelled_entry_that_appeared_after_prepare_before_any_mutation():
+    ops = RecordingOps({LIST: [efi(), efi(extra=[NEW])]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="already exists"):
+        a.arm(ops, profile(), rec)
+    assert ops.log == [LIST, LIST]

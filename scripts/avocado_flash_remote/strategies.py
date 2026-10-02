@@ -163,6 +163,35 @@ def _validate_explicit_table(where, params):
     return out
 
 
+# --- guard: boot-arg ---------------------------------------------------------
+
+
+def _validate_boot_arg(where, params):
+    out = _check_fields(
+        where,
+        {
+            "argument": ("str", True, None),
+            "partitions": (_STR_LIST, True, None),
+        },
+        params,
+    )
+    arg = out["argument"]
+    # An empty or multi-token argument makes the guard vacuous or unmatchable
+    # (it is compared against whole command-line tokens).
+    if not arg or any(c.isspace() for c in arg):
+        raise StrategyError(
+            f"{where}: parameter 'argument' must be exactly one non-empty kernel command-line token"
+        )
+    parts = out["partitions"]
+    if not parts:
+        raise StrategyError(f"{where}: parameter 'partitions' must name at least one partition")
+    if any(not n for n in parts):
+        raise StrategyError(f"{where}: parameter 'partitions' must not contain an empty name")
+    if len(set(parts)) != len(parts):
+        raise StrategyError(f"{where}: parameter 'partitions' must not repeat a name")
+    return out
+
+
 # --- registry ---------------------------------------------------------------
 
 _STR_LIST = ("list", "str")
@@ -179,14 +208,7 @@ _REGISTRY = {
         p,
     ),
     ("arm", "none"): lambda w, p: _check_fields(w, {}, p),
-    ("guard", "boot-arg"): lambda w, p: _check_fields(
-        w,
-        {
-            "argument": ("str", True, None),
-            "partitions": (_STR_LIST, True, None),
-        },
-        p,
-    ),
+    ("guard", "boot-arg"): lambda w, p: _validate_boot_arg(w, p),
     ("guard", "none"): lambda w, p: _check_fields(w, {}, p),
     ("layout", "explicit-table"): _validate_explicit_table,
 }

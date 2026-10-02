@@ -352,6 +352,39 @@ def test_real_timeout_kills_child_group_without_orphans(tmp_path):
     assert not any(_alive(p) for p in pids), "orphan survived the group kill"
 
 
+def test_real_interrupt_during_wait_kills_the_child_group_and_reraises(tmp_path, monkeypatch):
+    pidfile = tmp_path / "pids"
+    _script(
+        tmp_path / "dd",
+        f'echo $$ > {pidfile}; sleep 60 &\necho $! >> {pidfile}\nwait\n',
+    )
+    real_popen = O.subprocess.Popen
+
+    class InterruptedOnFirstWait(real_popen):
+        interrupted = False
+
+        def wait(self, timeout=None):
+            if not InterruptedOnFirstWait.interrupted:
+                InterruptedOnFirstWait.interrupted = True
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and not pidfile.exists():
+                    time.sleep(0.02)
+                time.sleep(0.2)
+                raise KeyboardInterrupt
+            return super().wait(timeout=timeout)
+
+    monkeypatch.setattr(O.subprocess, "Popen", InterruptedOnFirstWait)
+    r = O.RealOps(tool_dir=tmp_path, term_grace=0.5)
+    with pytest.raises(KeyboardInterrupt):
+        r.dd_write("/i/x", DISK + "p3", timeout=30.0)
+    pids = [int(p) for p in pidfile.read_text().split()]
+    assert len(pids) == 2
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and any(_alive(p) for p in pids):
+        time.sleep(0.05)
+    assert not any(_alive(p) for p in pids), "dd survived an interrupted wait"
+
+
 def test_real_child_runs_in_its_own_session(tmp_path):
     _script(tmp_path / "blockdev", 'ps -o pid=,pgid= -p $$ > "$0.ps"; echo 1\n')
     O.RealOps(tool_dir=tmp_path).blockdev_getsz(DISK)
