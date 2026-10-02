@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "board": "jetson-agx-orin-j5012",
-  "description": "Jetson AGX Orin on the J5012 carrier: flash the internal eMMC from the running NVMe system.",
+  "description": "Jetson AGX Orin on the J5012 carrier: flash the internal eMMC from the running NVMe system. Generic profile: the eMMC identity is the device name plus the sector count, and the name check can never differ. A board-support extension profile (--extension-dir) must pin the eMMC serial (target.identity kind serial, sysfs_attr serial) and list target-identity in checks.",
   "target": {
     "device": "/dev/mmcblk0",
     "sector_size": 512,

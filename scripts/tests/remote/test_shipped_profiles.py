@@ -170,3 +170,12 @@ def test_fixture_loads_and_is_generic(fixture_profile):
 def test_profile_json_has_no_duplicate_keys(name):
     # The loader rejects duplicates at any depth; a clean load proves none.
     prof.load_profile_bytes((PROFILES / name).read_bytes())
+
+
+def test_shipped_jetson_profile_is_generic_and_pins_no_hardware_serial(jetson):
+    # A hardware serial identifies one board: it belongs in a board-support
+    # extension profile, never in the shipped generic profile.
+    assert jetson.target.identity.kind != "serial"
+    raw = (PROFILES / "jetson-agx-orin-j5012.json").read_text()
+    assert not re.search(r"0x[0-9a-fA-F]{6,}", raw)
+    assert "extension" in jetson.description.lower() and "serial" in jetson.description.lower()
