@@ -39,7 +39,19 @@ from avocado_flash_remote.ops import FS_READ_KINDS, OpFailed, OpResult, RealOps,
 HERE = pathlib.Path(__file__).resolve().parent
 PKG = HERE.parent.parent / "avocado_flash_remote"
 SHIPPED = PKG / "profiles" / "jetson-agx-orin-j5012.json"
-SHIPPED_BYTES = SHIPPED.read_bytes()
+_SERIAL = "0x0badc0de"
+
+
+def _pin_serial(raw):
+    """The shipped profile as an extension would pin it: a serial identity listed in checks."""
+    doc = json.loads(raw)
+    doc["target"]["identity"] = {"kind": "serial", "value": _SERIAL, "sysfs_attr": "serial"}
+    doc["checks"] = list(doc["checks"]) + ["target-identity"]
+    return json.dumps(doc).encode()
+
+
+# Writes need a pinned identity, so the generic good-run profile is the shipped one with a serial.
+SHIPPED_BYTES = _pin_serial(SHIPPED.read_bytes())
 FIXTURE_BYTES = (PKG / "profiles" / "fixture-none.json").read_bytes()
 
 DEV = "/dev/mmcblk0"
@@ -257,7 +269,7 @@ class Env:
             "schema_version": 1,
             "run_id": RUN_ID,
             "profile_hash": self.phash,
-            "board_identity": {"machine_id": MACHINE_ID, "device_serial": "unavailable"},
+            "board_identity": {"machine_id": MACHINE_ID, "device_serial": _SERIAL},
             "device": DEV,
             "image_hashes": {r: self.scans[i.file].sha256 for r, i in self.profile.images.items()},
             "image_sizes": {r: self.scans[i.file].size for r, i in self.profile.images.items()},
@@ -295,6 +307,7 @@ class Env:
             "findmnt -no SOURCE -T /": "/dev/nvme0n1p2\n",
             f"findmnt -no SOURCE -T {STAGE}": "tmpfs\n",
             "findmnt -no SOURCE -T /etc/ssh": "/dev/nvme0n1p2\n",
+            "read_file /sys/block/mmcblk0/device/serial": _SERIAL + "\n",
             "efibootmgr --help": "Usage: efibootmgr [-c|-C] [-d DISK]\n  -C | --create-only\n",
             "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_AFTER, EFI_FINAL],
             f"findmnt -no OPTIONS {self.efivars}": "rw,nosuid,nodev,noexec,relatime\n",

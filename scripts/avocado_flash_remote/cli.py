@@ -29,7 +29,7 @@ from typing import Callable, List, Optional
 
 from . import evidence, host
 from .bundle import BundleError, build_bundle, required_stdlib
-from .profile import ProfileError
+from .profile import ProfileError, write_identity_problem
 from .profile_resolve import (
     InvalidBoard,
     ProfileChanged,
@@ -326,6 +326,11 @@ def _do_write(ctx: _Ctx) -> int:
     plan_check = evidence.verify_record_set(plan_dir)
     if not plan_check.ok:
         _err(f"{PREFIX}: plan record for run {run_id} failed verification: " + "; ".join(plan_check.problems[:3]))
+        return 1
+
+    problem = write_identity_problem(ctx.profile)
+    if problem:
+        _err(f"{PREFIX}: write refused: {problem}; nothing was written to the board")
         return 1
 
     device = ctx.profile.target.device

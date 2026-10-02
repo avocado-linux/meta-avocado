@@ -44,6 +44,7 @@ from . import arm as armmod
 from . import cmd_plan, evidence, images, layout
 from .cmd_check import DEFAULT_EFIVARS_DIR, run_check
 from .ops import DD_WRITE_TIMEOUT, OpFailed, Ops, ReadOnlyOps
+from .profile import write_identity_problem as profile_identity_problem
 from .state import (
     LOCK_NAME,
     LockHeld,
@@ -132,6 +133,9 @@ def _recheck_staged(profile, scans: dict, staging_dir: str, stat_fn: Callable, p
 
 
 def _authorise(plan: dict, profile, profile_hash: str, ro: Ops, scans: dict, sfdisk_text: str) -> None:
+    problem = profile_identity_problem(profile)
+    if problem:
+        raise _Refusal(problem)
     for key in ("run_id", "profile_hash", "board_identity", "image_hashes", "device", "table_hash"):
         if key not in plan:
             raise _Refusal(f"plan record is malformed: missing {key!r}; run plan again")

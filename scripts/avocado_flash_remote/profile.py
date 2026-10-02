@@ -367,3 +367,28 @@ def load_profile_bytes(data: bytes) -> Profile:
         staging=staging,
         state_dir=state_dir,
     )
+
+
+def write_identity_problem(profile: Profile) -> str | None:
+    """Why this profile's target identity cannot authorise a write, or None.
+
+    Name-only means a ``sysfs-name`` identity equal to the basename of the
+    target device, whatever ``sysfs_attr`` says (the sysfs-name check ignores
+    it): any device at that path satisfies it. A profile whose ``checks`` omit ``target-identity`` never has
+    its identity examined by ``check``, so it cannot authorise a write either.
+    """
+    ident = profile.target.identity
+    tautological = ident.kind == "sysfs-name" and ident.value == posixpath.basename(profile.target.device)
+    missing_check = "target-identity" not in profile.checks
+    if not (tautological or missing_check):
+        return None
+    why = []
+    if tautological:
+        why.append("the target identity is name-only (the device name alone, which any device at that path satisfies)")
+    if missing_check:
+        why.append("the profile's checks do not list target-identity")
+    return (
+        "; ".join(why)
+        + ": use an extension profile that pins the eMMC serial (or a by-path identity) "
+        "and lists target-identity in its checks"
+    )

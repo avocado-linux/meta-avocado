@@ -1,5 +1,6 @@
 """The two shipped profiles load through the closed loader and match the kit."""
 
+import json
 import pathlib
 import re
 
@@ -179,3 +180,38 @@ def test_shipped_jetson_profile_is_generic_and_pins_no_hardware_serial(jetson):
     raw = (PROFILES / "jetson-agx-orin-j5012.json").read_text()
     assert not re.search(r"0x[0-9a-fA-F]{6,}", raw)
     assert "extension" in jetson.description.lower() and "serial" in jetson.description.lower()
+
+
+def _with_identity(identity, *, check=True):
+    doc = json.loads((PROFILES / "jetson-agx-orin-j5012.json").read_bytes())
+    doc["target"]["identity"] = identity
+    doc["checks"] = [c for c in doc["checks"] if c != "target-identity"] + (["target-identity"] if check else [])
+    return prof.load_profile_bytes(json.dumps(doc).encode())
+
+
+def test_shipped_jetson_identity_is_name_only_so_write_must_refuse(jetson):
+    problem = prof.write_identity_problem(jetson)
+    assert problem is not None
+    assert "target-identity" in problem and "serial" in problem and "by-path" in problem
+
+
+def test_fixture_profile_identity_is_good_enough_to_write(fixture_profile):
+    assert prof.write_identity_problem(fixture_profile) is None
+
+
+@pytest.mark.parametrize(
+    "identity,check,refused",
+    [
+        ({"kind": "sysfs-name", "value": "mmcblk0"}, True, True),
+        ({"kind": "serial", "value": "0x0badc0de", "sysfs_attr": "serial"}, False, True),
+        ({"kind": "serial", "value": "0x0badc0de", "sysfs_attr": "serial"}, True, False),
+        ({"kind": "serial", "value": "0x0badc0de"}, True, False),
+        ({"kind": "by-path", "value": "platform-x.mmc"}, True, False),
+        ({"kind": "by-path", "value": "platform-x.mmc"}, False, True),
+        ({"kind": "sysfs-name", "value": "mmcblk0", "sysfs_attr": "serial"}, True, True),
+        ({"kind": "sysfs-name", "value": "mmcblk9"}, True, False),
+    ],
+)
+def test_write_identity_gate_cases(identity, check, refused):
+    problem = prof.write_identity_problem(_with_identity(identity, check=check))
+    assert (problem is not None) is refused, problem

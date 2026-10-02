@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import re
+import pathlib
 import tarfile
 
 import pytest
@@ -16,6 +17,7 @@ from avocado_flash_remote.state import HostLock
 
 PASSWORD = "hunter2-Zq9!"
 HOST = "op@board.local"
+PROFILES = pathlib.Path(host.__file__).resolve().parent / "profiles"
 SEVEN = "stage, check, plan, write, readback, restore, status"
 
 
@@ -1105,3 +1107,37 @@ def test_a_host_timeout_exits_with_the_dropped_connection_code_and_says_to_run_s
     err = capsys.readouterr().err
     assert rc == cli.EXIT_DROPPED
     assert "may have acted" in err and "status" in err
+
+
+def _name_only_extension(tmp_path):
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    doc = json.loads((PROFILES / "fixture-none.json").read_bytes())
+    doc["target"]["identity"] = {"kind": "sysfs-name", "value": "loop-fixture"}
+    doc["checks"] = [c for c in doc["checks"] if c != "target-identity"]
+    (ext / "fixture-none.json").write_text(json.dumps(doc))
+    return ext
+
+
+def test_write_refuses_name_only_identity_before_the_retype_prompt(images, tmp_path, board, capsys):
+    ext = _name_only_extension(tmp_path)
+    a = args(images, tmp_path, "stage", "--extension-dir", str(ext))
+    assert run(a, board)[0] == 0
+    assert run(args(images, tmp_path, "plan", "--extension-dir", str(ext)), board)[0] == 0
+    rid = plan_run_id(tmp_path)
+
+    def boom(prompt):
+        raise AssertionError("the retype prompt must not appear")
+
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid, "--extension-dir", str(ext)), board, confirm=boom)
+    assert rc == 1
+    err = capsys.readouterr().err + text
+    assert "target-identity" in err and "serial" in err
+    assert "write" not in board.subs()
+
+
+def test_check_and_plan_keep_running_on_a_name_only_profile(images, tmp_path, board):
+    ext = _name_only_extension(tmp_path)
+    assert run(args(images, tmp_path, "stage", "--extension-dir", str(ext)), board)[0] == 0
+    assert run(args(images, tmp_path, "check", "--extension-dir", str(ext)), board)[0] == 0
+    assert run(args(images, tmp_path, "plan", "--extension-dir", str(ext)), board)[0] == 0
