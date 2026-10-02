@@ -6,12 +6,14 @@ import hashlib
 import json
 import pathlib
 
+import devgraph
 import pytest
 
 from avocado_flash_remote import cmd_plan, layout
 from avocado_flash_remote import profile as prof
 from avocado_flash_remote.images import ScanResult
 from avocado_flash_remote.ops import (
+    FS_READ_KINDS,
     MutationRefused,
     OpResult,
     ReadOnlyOps,
@@ -85,6 +87,7 @@ def script_for(profile, scans, *, root="/dev/nvme0n1p2", stage_src="tmpfs", moun
         "read_file /etc/machine-id": MACHINE_ID + "\n",
         f"read_file {STAGE}/MANIFEST.hashes": manifest if manifest is not None else manifest_text(scans),
     }
+    s.update(devgraph.standard_script())
     if serial:
         s[f"read_file /sys/block/{name}/device/serial"] = serial + "\n"
     return s
@@ -136,7 +139,7 @@ def assert_clean_refusal(res, ops, rec, *needles):
     assert res.plan_record is None
     assert rec.calls == []
     assert not any(vector_mutates(c.vector) for c in ops.calls if c.kind == "exec")
-    assert not any(c.kind == "fs" and c.vector[0] != "read_file" for c in ops.calls)
+    assert not any(c.kind == "fs" and c.vector[0] not in FS_READ_KINDS for c in ops.calls)
     text = "\n".join(res.lines)
     assert "no mutating tool was called" not in text
     for n in needles:
@@ -191,7 +194,7 @@ def test_no_mutation_recorded_and_works_under_readonly_ops():
     res, _, rec = plan(ops=ReadOnlyOps(inner))
     assert res.exit_code == 0
     assert not any(vector_mutates(c.vector) for c in inner.calls if c.kind == "exec")
-    assert not any(c.kind == "fs" and c.vector[0] != "read_file" for c in inner.calls)
+    assert not any(c.kind == "fs" and c.vector[0] not in FS_READ_KINDS for c in inner.calls)
     assert len(rec.calls) == 1
 
 
@@ -488,6 +491,7 @@ def test_non_trailing_p_device_naming():
     profile, phash = load(raw)
     scans = scans_for(profile)
     script = script_for(profile, scans)
+    script.update(devgraph.standard().disk("sdb", sysnode="/sys/devices/virtual/block/sdb").script())
     script["sfdisk --dump /dev/sdb"] = OpResult(rc=1, stderr="does not contain a recognized partition table")
     res, ops, rec = plan(profile, phash, script=script, scans=scans)
     assert res.exit_code == 0, res.lines

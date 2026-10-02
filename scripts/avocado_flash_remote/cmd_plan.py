@@ -40,10 +40,6 @@ MANIFEST_NAME = "MANIFEST.hashes"
 _LAYOUT_REF = "boot-design.md section 1"
 
 _DEVICE_RE = re.compile(r"^/dev/(?:mmcblk[0-9]+|sd[a-z]+|vd[a-z]+)$")
-_PARENT_RES = (
-    re.compile(r"^(/dev/(?:mmcblk[0-9]+|nvme[0-9]+n[0-9]+|loop[0-9]+))p[0-9]+$"),
-    re.compile(r"^(/dev/(?:sd|vd|hd)[a-z]+)[0-9]+$"),
-)
 _SUM_RE = re.compile(r"^([0-9a-fA-F]{64})[ \t][ *](.+)$")
 _NO_TABLE_RE = re.compile(r"recognized partition table|no partition table", re.I)
 _SAFE_RE = re.compile(r"^[A-Za-z0-9_@%+=:,./-]+$")
@@ -65,14 +61,6 @@ def _q(arg: str) -> str:
     if arg and _SAFE_RE.match(arg):
         return arg
     return "".join(c if _SAFE_RE.match(c) else "\\" + c for c in arg)
-
-
-def _parent_disk(source: str) -> str:
-    for rx in _PARENT_RES:
-        m = rx.match(source)
-        if m:
-            return m.group(1)
-    return source
 
 
 def _utc_now() -> str:
@@ -103,22 +91,86 @@ def _check_sectors(ops: Ops, profile) -> None:
         raise _Refusal(f"{dev} has {got} sectors, expected {profile.target.sectors}")
 
 
+# Deepest stack (partition -> dm -> dm -> md ...) the walk follows before it gives up and refuses.
+MAX_STACK_DEPTH = 8
+_SYS_BLOCK = "/sys/class/block"
+_SUBVOL_RE = re.compile(r"\[[^\]]*\]$")
+
+
+def _resolve_name(ops: Ops, node: str, what: str) -> str:
+    """Kernel name behind a /dev node, following every symlink (/dev/root, by-uuid, /dev/mapper)."""
+    try:
+        real = ops.realpath(node)
+    except (OSError, OpsError) as exc:
+        raise _Refusal(f"cannot resolve {what} {node} to a device ({type(exc).__name__}); refusing") from None
+    if not real.startswith("/dev/") or real == "/dev/":
+        raise _Refusal(f"cannot resolve {what} {node}: it resolves to {real}, not a device node; refusing")
+    return posixpath.basename(real)
+
+
+def _is_partition(ops: Ops, name: str) -> bool:
+    try:
+        ops.read_file(f"{_SYS_BLOCK}/{name}/partition")
+    except FileNotFoundError:
+        return False
+    except (OSError, OpsError) as exc:
+        raise _Refusal(f"cannot resolve {name}: sysfs partition attribute unreadable ({type(exc).__name__}); refusing") from None
+    return True
+
+
+def _ancestors(ops: Ops, name: str, depth: int, seen: set) -> set:
+    """Kernel names of ``name`` and everything it is built on: parent disk of a partition, slaves of dm/md/loop."""
+    if name in seen:
+        return set()
+    if depth > MAX_STACK_DEPTH:
+        raise _Refusal(f"device stack under {name} is deeper than {MAX_STACK_DEPTH} levels; refusing")
+    seen.add(name)
+    found = {name}
+    try:
+        sysnode = ops.realpath(f"{_SYS_BLOCK}/{name}")
+    except (OSError, OpsError) as exc:
+        raise _Refusal(f"cannot resolve {name}: no sysfs entry ({type(exc).__name__}); refusing") from None
+    if _is_partition(ops, name):
+        return found | _ancestors(ops, posixpath.basename(posixpath.dirname(sysnode)), depth + 1, seen)
+    try:
+        slaves = ops.listdir(f"{_SYS_BLOCK}/{name}/slaves")
+    except (OSError, OpsError) as exc:
+        raise _Refusal(f"cannot resolve {name}: slaves unreadable ({type(exc).__name__}); refusing") from None
+    for slave in slaves:
+        found |= _ancestors(ops, slave, depth + 1, seen)
+    return found
+
+
+def _backs_target(ops: Ops, source: str, target_name: str, what: str) -> bool:
+    return target_name in _ancestors(ops, _resolve_name(ops, source, what), 0, set())
+
+
+def _probe_source(ops: Ops, what: str, path: str) -> str | None:
+    """Mount source of ``path``, or None for a source with no block device behind it (tmpfs, overlay, nfs)."""
+    res = ops.run_read(["findmnt", "-no", "SOURCE", "-T", path], check=False)
+    lines = [ln for ln in res.text.splitlines() if ln.strip()]
+    if res.rc != 0 or len(lines) != 1:
+        why = f"rc={res.rc}" if res.rc != 0 else ("no output" if not lines else "more than one source")
+        raise _Refusal(f"cannot tell what backs the {what}: findmnt probe for {path} failed ({why}); refusing")
+    source = _SUBVOL_RE.sub("", lines[0].strip())
+    return source if source.startswith("/") else None
+
+
 def _check_not_in_use(ops: Ops, profile, staging_dir: str) -> None:
     dev = profile.target.device
+    target_name = _resolve_name(ops, dev, "target")
     for what, path in (
         ("running root", "/"),
         ("staging directory", staging_dir),
         ("SSH path", "/etc/ssh"),
     ):
-        res = ops.run_read(["findmnt", "-no", "SOURCE", "-T", path], check=False)
-        if res.rc != 0:
-            continue
-        source = res.text.strip()
-        if source and _parent_disk(source) == dev:
+        source = _probe_source(ops, what, path)
+        if source is not None and _backs_target(ops, source, target_name, what):
             raise _Refusal(f"{dev} backs the {what} ({path} is on {source}); refusing")
     for source in ops.findmnt_source():
-        if _parent_disk(source.strip()) == dev:
-            raise _Refusal(f"{dev} or one of its partitions is mounted ({source.strip()})")
+        source = _SUBVOL_RE.sub("", source.strip())
+        if source.startswith("/dev/") and _backs_target(ops, source, target_name, "mounted source"):
+            raise _Refusal(f"{dev} or one of its partitions is mounted ({source})")
 
 
 def _check_empty(ops: Ops, profile) -> None:

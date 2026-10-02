@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -91,6 +92,26 @@ def _scan_images(profile, staging_dir: str, scanner: Callable) -> dict:
         except OSError as exc:
             raise _Refusal(f"staged image {role} {img.file} cannot be read in {staging_dir}: {exc}") from None
     return scans
+
+
+def _stat_identity(path) -> tuple:
+    """Stat signature (device, inode, size, mtime_ns) of a file, in the same shape the scan records."""
+    return images._identity(os.stat(path))
+
+
+def _recheck_staged(profile, scans: dict, staging_dir: str, stat_fn: Callable) -> None:
+    """Refuse when any staged image no longer has the stat signature it had when it was scanned."""
+    for role, img in profile.images.items():
+        scan = scans[img.file]
+        try:
+            now = stat_fn(f"{staging_dir}/{img.file}")
+        except OSError as exc:
+            raise _Refusal(f"staged image {role} {img.file} cannot be stat in {staging_dir}: {exc}") from None
+        if tuple(now) != tuple(scan.identity):
+            raise _Refusal(
+                f"staged image {role} {img.file} changed after it was scanned "
+                "(size, mtime, inode or device differ); stage again, then plan and write"
+            )
 
 
 def _authorise(plan: dict, profile, profile_hash: str, ro: Ops, scans: dict, sfdisk_text: str) -> None:
@@ -292,6 +313,7 @@ def run_write(
     out: Callable = print,
     scanner: Callable = images.scan,
     reverifier: Callable = images.reverify,
+    stat_fn: Callable = _stat_identity,
     file_reader: Callable | None = None,
 ) -> WriteResult:
     """Write the planned images to the target. See the module docstring."""
@@ -348,7 +370,7 @@ def run_write(
             return _locked(
                 result, say, refuse, ops, ro, profile, profile_hash, plan, scans, sfdisk_text,
                 staging_dir, state_dir, run_dir, writer, confirm, assume_yes, expected_boot_order,
-                efivars_dir, ack_run_id, reverifier,
+                efivars_dir, ack_run_id, reverifier, stat_fn,
             )  # fmt: skip
     except LockHeld as exc:
         return refuse(f"another run holds the lock: {exc}")
@@ -359,7 +381,7 @@ def run_write(
 def _locked(
     result, say, refuse, ops, ro, profile, profile_hash, plan, scans, sfdisk_text,
     staging_dir, state_dir, run_dir, writer, confirm, assume_yes, expected_boot_order,
-    efivars_dir, ack_run_id, reverifier,
+    efivars_dir, ack_run_id, reverifier, stat_fn,
 ):  # fmt: skip
     dev = profile.target.device
     run_id = result.run_id
@@ -408,6 +430,12 @@ def _locked(
         return refuse(f"pre-check could not complete ({type(exc).__name__}: {exc})")
 
     # ---- 8: from here on every step is recorded; first mutation follows
+    # The scan ran before the lock, the preflight and the operator's confirmation; an image replaced
+    # since then must refuse here, before the table is destroyed rather than at that image's re-verify.
+    try:
+        _recheck_staged(profile, scans, staging_dir, stat_fn)
+    except _Refusal as exc:
+        return refuse(exc)
     plan_hash = hashlib.sha256((json.dumps(plan, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
     try:
         st = create_run(

@@ -11,6 +11,7 @@ import hashlib
 import json
 import pathlib
 
+import devgraph
 import pytest
 
 from avocado_flash_remote import cmd_write, layout
@@ -18,6 +19,7 @@ from avocado_flash_remote import profile as prof
 from avocado_flash_remote import state as statemod
 from avocado_flash_remote.images import ImageChanged, ScanResult
 from avocado_flash_remote.ops import (
+    FS_READ_KINDS,
     OpFailed,
     OpResult,
     RecordingOps,
@@ -139,11 +141,12 @@ class Env:
             s[self.readback_key(role)] = OpResult(digest=self.plan["image_hashes"][role])
         for name in ("A_kernel", "B_kernel"):
             s[self.guard_key(name)] = boot_header()
+        s.update(devgraph.standard_script())
         s.update(over)
         return s
 
     def run(self, ops=None, *, script=None, plan="default", confirm=None, assume_yes=False, scanner=None,
-            reverifier=None, **kw):  # fmt: skip
+            reverifier=None, stat_fn=None, **kw):  # fmt: skip
         ops = ops if ops is not None else RecordingOps(script if script is not None else self.script())
         plan_obj = self.plan if plan == "default" else plan
         recs = []
@@ -165,6 +168,7 @@ class Env:
             out=lines.append,
             scanner=scanner or default_scanner,
             reverifier=reverifier or (lambda path, scan: None),
+            stat_fn=stat_fn or (lambda path: self.scans[path.rsplit("/", 1)[-1]].identity),
             **kw,
         )  # fmt: skip
         assert res.lines == lines
@@ -178,7 +182,7 @@ def env(tmp_path):
 
 
 def mutations(ops):
-    return [c for c in ops.calls if (c.kind == "exec" and vector_mutates(c.vector)) or (c.kind == "fs" and c.vector[0] != "read_file")]
+    return [c for c in ops.calls if (c.kind == "exec" and vector_mutates(c.vector)) or (c.kind == "fs" and c.vector[0] not in FS_READ_KINDS)]
 
 
 def assert_clean_refusal(res, ops, *needles):
@@ -719,6 +723,7 @@ def test_unrecordable_evidence_does_not_change_the_outcome(env):
         ops, env.profile, env.phash, staging_dir=STAGE, state_dir=env.state_dir, run_dir="/x",
         plan_loader=lambda: env.plan, record_writer=writer, assume_yes=True, efivars_dir=str(env.efivars),
         scanner=lambda p: env.scans[p.rsplit("/", 1)[-1]], reverifier=lambda p, s: None,
+        stat_fn=lambda p: env.scans[p.rsplit("/", 1)[-1]].identity,
     )  # fmt: skip
     assert res.exit_code == 0
     assert "cannot write write.json" in "\n".join(res.lines)
@@ -972,3 +977,48 @@ def test_progress_write_failure_inside_the_arm_step_stays_arming_and_says_unknow
     assert st.phase == "arming"
     assert "no space left on device" in st.data["error"]
     lock_is_free(env)
+
+
+# ------------------------------------------- stat signature before the first mutation
+
+
+def _drift(env, change):
+    """A stat function that reports every staged file as scanned except the first, which ``change`` alters."""
+    first = sorted({i.file for i in env.profile.images.values()})[0]
+
+    def stat_fn(path):
+        name = path.rsplit("/", 1)[-1]
+        ident = env.scans[name].identity
+        return change(ident) if name == first else ident
+
+    return first, stat_fn
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda i: (i[0], i[1], i[2] + 1, i[3]),  # size
+        lambda i: (i[0], i[1], i[2], i[3] + 1),  # mtime_ns
+        lambda i: (i[0], i[1] + 1, i[2], i[3]),  # replaced inode
+        lambda i: (i[0] + 1, i[1], i[2], i[3]),  # another device
+    ],
+    ids=["size", "mtime", "inode", "device"],
+)
+def test_staged_image_stat_change_refuses_before_any_mutation_and_creates_no_state(env, change):
+    first, stat_fn = _drift(env, change)
+    res, ops = env.run(stat_fn=stat_fn)
+    assert_clean_refusal(res, ops, first, "changed after it was scanned")
+    assert not env.state_dir.exists() or not (env.state_dir / RUN_ID).exists()
+
+
+def test_stat_failure_on_a_staged_image_refuses_before_any_mutation(env):
+    def stat_fn(path):
+        raise FileNotFoundError(path)
+
+    res, ops = env.run(stat_fn=stat_fn)
+    assert_clean_refusal(res, ops, "cannot be stat", sorted({i.file for i in env.profile.images.values()})[0])
+
+
+def test_unchanged_stat_signature_proceeds(env):
+    res, ops = env.run()
+    assert res.exit_code == 0, res.lines
