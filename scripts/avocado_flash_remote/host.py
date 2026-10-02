@@ -361,6 +361,8 @@ def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_passwo
     Root login: privileged commands run as given, no sudo, no prompt. Otherwise
     sudo -n if possible, else a prompted password.
     """
+    # SSH transport sudo password setter, not a Django account password; never stored.
+    # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password
     transport.set_password(None)
     transport.set_root_direct(False)
     if remote_is_root(transport):
@@ -371,9 +373,13 @@ def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_passwo
     password = ask_password()
     if not password:
         raise HostError("empty sudo password")
+    # SSH transport sudo password setter, not a Django account password; never stored.
+    # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password
     transport.set_password(Secret(password))
     res = transport.run(["true"], None, sudo=True, timeout=60)
     if res.rc != 0:
+        # SSH transport sudo password setter, not a Django account password; never stored.
+        # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password
         transport.set_password(None)
         raise HostError("sudo authentication failed on the board")
     return PRIVILEGE_SUDO_PASSWORD

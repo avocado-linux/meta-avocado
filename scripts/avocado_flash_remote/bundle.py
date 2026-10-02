@@ -179,6 +179,8 @@ def build_bundle(profile_bytes: bytes, out_path, tool_version: str, modules_dir=
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_name(out_path.name + ".tmp")
     tmp.write_bytes(blob)
+    # The runner bundle is a stdlib-only archive that must be executable and holds no secret.
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
     os.chmod(tmp, 0o755)
     os.replace(tmp, out_path)
     return BundleInfo(out_path, _sha(blob), sorted(sources), profile_sha)

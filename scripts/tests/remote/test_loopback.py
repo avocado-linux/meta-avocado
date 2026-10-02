@@ -171,6 +171,8 @@ def test_the_loopback_never_runs_sudo_or_touches_a_path_outside_its_root(board):
 
 
 def test_the_loopback_refuses_a_sudo_password_stream(board):
+    # SSH transport sudo password setter, not a Django account password; never stored.
+    # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password
     board.transport.set_password(host.Secret("x"))
     with pytest.raises(host.HostError, match="password sudo"):
         board.transport.run(["true"], None, sudo=True)
