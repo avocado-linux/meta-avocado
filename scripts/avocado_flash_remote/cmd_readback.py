@@ -25,6 +25,7 @@ import os
 import posixpath
 import re
 import shutil
+import stat
 from dataclasses import dataclass, field
 
 from .arm import boot_next_of, boot_order_of
@@ -33,6 +34,7 @@ from .ops import OpsError
 DATA_ROLE = "var"
 NO_JOURNAL_LINE = "the test image wrote no persistent journal"
 RAM_FSTYPES = ("tmpfs", "ramfs")
+_ABSENT_RE = re.compile(r"No such file or directory", re.IGNORECASE)
 
 
 class ReadbackError(Exception):
@@ -61,25 +63,82 @@ def resolve_data_partition(profile, data_partition_name=None) -> str:
     raise ReadbackError(f"partition {image.partition} is not in the layout table")
 
 
-def make_guarded_copier(out_dir):
-    """Default copier: copy a file or tree, refusing any destination outside out_dir."""
+def _under(path, root) -> bool:
+    return path == root or path.startswith(root + os.sep)
+
+
+def make_guarded_copier(out_dir, mount_dir=None, note=None):
+    """Default copier: copy a file or tree, never following a symlink.
+
+    The mounted image is untrusted and this runs privileged, so a symlink in it must not pull a file
+    from the live system into ``out_dir``. Symlinks and special files are skipped and noted; a source
+    that is not under ``mount_dir`` (after resolving its parent directory) is refused; the destination
+    must stay under ``out_dir``.
+    """
     root = os.path.realpath(out_dir)
+    mount_root = os.path.realpath(mount_dir) if mount_dir is not None else None
+    say = note or (lambda line: None)
+
+    def check_dst(dst):
+        real = os.path.realpath(dst)
+        if not _under(real, root):
+            raise ReadbackError(f"refusing to copy outside {out_dir}: {dst}")
+
+    def copy_file(src, dst):
+        try:
+            fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as exc:
+            say(f"skipped {src}: cannot open without following symlinks ({exc.strerror})")
+            return
+        with os.fdopen(fd, "rb") as fin:
+            if not stat.S_ISREG(os.fstat(fin.fileno()).st_mode):
+                say(f"skipped {src}: not a regular file")
+                return
+            with open(dst, "wb") as fout:
+                shutil.copyfileobj(fin, fout)
+        
+    def copy_tree(src, dst):
+        os.makedirs(dst, exist_ok=True)
+        with os.scandir(src) as it:
+            entries = sorted(it, key=lambda e: e.name)
+        for entry in entries:
+            child, target = os.path.join(src, entry.name), os.path.join(dst, entry.name)
+            mode = entry.stat(follow_symlinks=False).st_mode
+            if stat.S_ISLNK(mode):
+                say(f"skipped {child}: symlink")
+            elif stat.S_ISDIR(mode):
+                copy_tree(child, target)
+            elif stat.S_ISREG(mode):
+                copy_file(child, target)
+            else:
+                say(f"skipped {child}: not a regular file")
 
     def copy(src, dst):
-        real = os.path.realpath(dst)
-        if real != root and not real.startswith(root + os.sep):
-            raise ReadbackError(f"refusing to copy outside {out_dir}: {dst}")
-        if os.path.isdir(src):
-            shutil.copytree(src, dst, copy_function=shutil.copy2, dirs_exist_ok=True)
+        check_dst(dst)
+        if mount_root is not None and not _under(os.path.realpath(os.path.dirname(src)), mount_root):
+            raise ReadbackError(f"refusing to read outside {mount_dir}: {src}")
+        mode = os.lstat(src).st_mode
+        if stat.S_ISLNK(mode):
+            say(f"skipped {src}: symlink")
+        elif stat.S_ISDIR(mode):
+            copy_tree(src, dst)
         else:
-            shutil.copy2(src, dst)
+            copy_file(src, dst)
 
     return copy
 
 
 def _default_logs(mnt):
     found = glob.glob(os.path.join(mnt, "log", "*")) + glob.glob(os.path.join(mnt, "emmc-test*"))
-    return sorted(p for p in found if os.path.isfile(p))
+    return sorted(p for p in found if os.path.isfile(p) and not os.path.islink(p))
+
+
+def _nearest_existing(path) -> str:
+    """The path itself, or its closest existing ancestor: the filesystem a new directory would land on."""
+    p = os.path.abspath(path)
+    while not os.path.lexists(p) and p != os.path.dirname(p):
+        p = os.path.dirname(p)
+    return p
 
 
 def run_readback(
@@ -95,6 +154,7 @@ def run_readback(
     copier=None,
     list_logs=None,
     makedirs=os.makedirs,
+    nearest_existing=None,
     require_ram_out=True,
     out=print,
 ) -> ReadbackResult:
@@ -104,7 +164,7 @@ def run_readback(
         result.lines.append(line)
         out(line)
 
-    copier = copier or make_guarded_copier(out_dir)
+    copier = copier or make_guarded_copier(out_dir, mount_dir, lambda line: say(line))
     list_logs = list_logs or _default_logs
     disk = profile.target.device
     label = resolve_data_partition(profile, data_partition_name)
@@ -160,10 +220,9 @@ def run_readback(
         return result
     part = cands[0]
 
-    makedirs(mount_dir, exist_ok=True)
-    makedirs(out_dir, exist_ok=True)
+    # Ask what the output lands on BEFORE creating anything: a refused run leaves no directory behind.
     try:
-        fs = ops.findmnt_fstype(out_dir).text.strip().splitlines()
+        fs = ops.findmnt_fstype((nearest_existing or _nearest_existing)(out_dir)).text.strip().splitlines()
     except OpsError as e:
         return _not_examined(result, say, f"findmnt failed: {e}")
     outfs = fs[0] if fs else ""
@@ -173,6 +232,8 @@ def run_readback(
         _cleanup_hints(say, mount_dir)
         return result
 
+    makedirs(mount_dir, exist_ok=True)
+    makedirs(out_dir, exist_ok=True)
     mounted = False
     try:
         ops.mount(part, mount_dir, options="ro", fstype=fstype)
@@ -185,8 +246,14 @@ def run_readback(
             result.found_journal = True
             copier(journal, os.path.join(out_dir, "journal"))
             say(f"copied journal to {out_dir}/journal")
-        else:
+        elif _ABSENT_RE.search(listing.stderr or ""):
             say(NO_JOURNAL_LINE)
+        else:
+            # Permission denied, an I/O error or an unrecognised message is not a confirmed absence.
+            first = (listing.stderr or "").strip().splitlines()[:1]
+            say(f"TARGET NOT EXAMINED: listing {journal} failed (rc={listing.rc}): {first[0] if first else 'no message'}")
+            result.exit_code = 2
+            return result
         copied = 0
         for f in list_logs(mount_dir):
             copier(f, os.path.join(out_dir, os.path.basename(f)))
@@ -200,7 +267,8 @@ def run_readback(
             try:
                 ops.umount(mount_dir)
             except OpsError as e:
-                say(f"WARNING: umount {mount_dir} failed ({e}); unmount it by hand")
+                say(f"ERROR: umount {mount_dir} failed ({e}); the mount is still active: unmount it by hand")
+                result.exit_code = result.exit_code or 1
     _cleanup_hints(say, mount_dir)
     return result
 

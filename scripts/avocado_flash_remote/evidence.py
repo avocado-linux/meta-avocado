@@ -108,6 +108,11 @@ def _parse_utc(text: str) -> _dt.datetime:
     return parsed
 
 
+def _clock_text(value: Any) -> str:
+    """The clock as recorded: a non-empty string, or "unavailable". Never a guess at the time."""
+    return value if isinstance(value, str) and value else "unavailable"
+
+
 def _skew_or_none(host_utc: Any, board_utc: Any) -> float | None:
     """Clocks are evidence only: a malformed or missing one yields no skew, never a failure."""
     try:
@@ -155,8 +160,8 @@ class RecordSet:
             "transition_log": list(self.transition_log),
             # Evidence only: nothing reads these to authorise anything.
             "clocks": {
-                "host_utc": self.host_utc,
-                "board_utc": self.board_utc,
+                "host_utc": _clock_text(self.host_utc),
+                "board_utc": _clock_text(self.board_utc),
                 "skew_seconds": _skew_or_none(self.host_utc, self.board_utc),
             },
             "run_status": run_status,
@@ -198,6 +203,9 @@ def _manifest_problems(manifest: Any) -> list[str]:
     if not isinstance(clocks, dict):
         out.append("manifest field clocks is missing or not an object")
     else:
+        for k in ("host_utc", "board_utc"):
+            if not isinstance(clocks.get(k), str) or not clocks[k]:
+                out.append(f"manifest clocks.{k} is missing or not a non-empty string")
         skew = clocks.get("skew_seconds")
         if skew is not None and (isinstance(skew, bool) or not isinstance(skew, (int, float))):
             out.append("manifest clocks.skew_seconds is not a number or null")

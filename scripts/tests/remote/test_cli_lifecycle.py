@@ -1026,3 +1026,28 @@ def test_record_producing_requests_carry_the_tool_version_and_a_host_clock(image
         req = [r for r in board.runs if r[0] == sub][0][1]
         assert req["tool_version"] == cli.TOOL_VERSION
         assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", req["host_utc"])
+
+
+def test_collect_is_retried_when_the_outcome_is_published_before_the_manifest_lists_it(images, tmp_path, board):
+    """The runner writes the outcome marker, then the manifest that lists it; a collect between the two
+    sees the marker unlisted. The marker is final, so only the verification problem says to look again."""
+    _stage_and_plan(images, tmp_path, board)
+    rid = plan_run_id(tmp_path)
+    board.outcome = f"finished\nrun={rid}\nnonce=@NONCE@\n".encode()
+    real_handle = board.handle
+    state = {"collects": 0}
+
+    def handle(argv, stdin, sudo):
+        plain = _plain(argv)
+        if plain[:2] == ["tar", "-C"] and "-cf" in plain and board.wrote:
+            state["collects"] += 1
+            if state["collects"] == 1:
+                board._records("early", True)
+                (board.tmp / "early" / "outcome").write_bytes(b"finished\n")
+                return RunResult(0, _tar_of(board.tmp / "early"))
+        return real_handle(argv, stdin, sudo)
+
+    board.stub.handler = handle
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid, "--ack-run", rid), board)
+    assert state["collects"] >= 2
+    assert rc == 0 and "write COMPLETE" in text

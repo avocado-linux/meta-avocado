@@ -642,7 +642,7 @@ def test_incomplete_manifest_on_nonzero_with_empty_identity_and_no_host_clock(tm
     assert m["run_status"] == "incomplete"
     assert m["board_identity"] == {} and m["image_hashes"] == {}
     # no host_utc in the request: the board clock is not passed off as the host's, so there is no skew
-    assert m["clocks"]["host_utc"] is None and m["clocks"]["skew_seconds"] is None
+    assert m["clocks"]["host_utc"] == "unavailable" and m["clocks"]["skew_seconds"] is None
 
 
 @pytest.mark.parametrize("bad", [None, "", "  ", 3])
@@ -1115,3 +1115,76 @@ def test_verify_bundle_reports_a_corrupt_member(tmp_path):
     (tmp_path / "c.pyz").write_bytes(bytes(raw))
     problems = bundle.verify_bundle(tmp_path / "c.pyz")
     assert isinstance(problems, list) and problems
+
+
+# ---- 5.33: the archive must match the fixed module contract ----
+
+
+def _rewrite_zip(src, dst, edit):
+    with zipfile.ZipFile(src) as zin:
+        members = [(i.filename, zin.read(i.filename)) for i in zin.infolist()]
+    members = edit(members)
+    with open(src, "rb") as fh:
+        head = fh.read(len(bundle.SHEBANG))
+    with open(dst, "wb") as out:
+        out.write(head)
+    with zipfile.ZipFile(dst, "a") as zf:
+        for name, data in members:
+            zf.writestr(name, data)
+    return dst
+
+
+def _meta_with(members, fn):
+    out = []
+    for name, data in members:
+        if name == "BUNDLE.json":
+            m = json.loads(data)
+            fn(m)
+            data = json.dumps(m).encode()
+        out.append((name, data))
+    return out
+
+
+def test_a_built_bundle_verifies_clean(tmp_path):
+    bundle.build_bundle(FIXTURE.read_bytes(), tmp_path / "b.pyz", "t")
+    assert bundle.verify_bundle(tmp_path / "b.pyz") == []
+
+
+def test_a_module_dropped_from_both_archive_and_metadata_is_reported_missing(tmp_path):
+    bundle.build_bundle(FIXTURE.read_bytes(), tmp_path / "b.pyz", "t")
+    gone = f"{bundle.PACKAGE}/arm.py"
+
+    def edit(members):
+        members = [(n, d) for n, d in members if n != gone]
+        return _meta_with(members, lambda m: m["modules"].pop(gone))
+
+    out = _rewrite_zip(tmp_path / "b.pyz", tmp_path / "c.pyz", edit)
+    problems = bundle.verify_bundle(out)
+    assert any("arm.py" in p and "required" in p for p in problems)
+
+
+def test_an_extra_declared_module_is_rejected(tmp_path):
+    bundle.build_bundle(FIXTURE.read_bytes(), tmp_path / "b.pyz", "t")
+    extra = f"{bundle.PACKAGE}/evil.py"
+    import hashlib
+
+    def edit(members):
+        members = members + [(extra, b"x = 1\n")]
+        return _meta_with(members, lambda m: m["modules"].__setitem__(extra, hashlib.sha256(b"x = 1\n").hexdigest()))
+
+    out = _rewrite_zip(tmp_path / "b.pyz", tmp_path / "c.pyz", edit)
+    assert any("evil.py" in p and "not part of" in p for p in bundle.verify_bundle(out))
+
+
+def test_a_duplicate_member_name_is_rejected(tmp_path):
+    bundle.build_bundle(FIXTURE.read_bytes(), tmp_path / "b.pyz", "t")
+
+    def edit(members):
+        return members + [members[0]]
+
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        out = _rewrite_zip(tmp_path / "b.pyz", tmp_path / "c.pyz", edit)
+    assert any("duplicate" in p for p in bundle.verify_bundle(out))

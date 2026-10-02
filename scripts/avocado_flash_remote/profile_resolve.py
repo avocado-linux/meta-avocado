@@ -16,16 +16,14 @@ Standard library only.
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from .profile import Profile, ProfileError, load_profile_bytes, profile_hash
+from .profile import _BOARD_RE, Profile, ProfileError, load_profile_bytes, profile_hash
 
 SHIPPED_DIR = Path(__file__).resolve().parent / "profiles"
 
-_BOARD_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 class InvalidBoard(ValueError):

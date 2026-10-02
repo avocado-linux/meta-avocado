@@ -82,10 +82,11 @@ def test_missing_file_unreadable(tmp_path):
     assert efi.secure_boot_state(tmp_path / "nope") == "unreadable"
 
 
-def test_multi_byte_data_uses_final_byte(tmp_path):
+@pytest.mark.parametrize("data", [b"\x01\x00", b"\x00\x00", b"\x00\x01", b"\x02", b"\xff", b"\x00\x00\x00\x00"])
+def test_secure_boot_needs_exactly_one_data_byte_of_zero_or_one(tmp_path, data):
     p = tmp_path / "v"
-    p.write_bytes(ATTR + b"\x01\x00")
-    assert efi.secure_boot_state(p) == "disabled"
+    p.write_bytes(ATTR + data)
+    assert efi.secure_boot_state(p) == "unreadable"
 
 
 def test_efi_source_has_no_seek_tell_pread_mmap():

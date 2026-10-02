@@ -34,6 +34,8 @@ def profile():
 
 @pytest.fixture
 def dirs(tmp_path):
+    # The output directory exists: readback asks what it lands on before creating anything.
+    (tmp_path / "out").mkdir()
     return tmp_path / "mnt", tmp_path / "out"
 
 
@@ -46,7 +48,7 @@ def script(dirs, *, journal=True, efi=EFI, outfs="tmpfs\n", mount=None):
         f"lsblk -rn -o NAME,PARTLABEL {DISK}": "mmcblk0 \nmmcblk0p15 esp\nmmcblk0p16 DATAPART_EXPAND\n",
         f"findmnt -no FSTYPE -T {out}": outfs,
         f"ls -la {mnt}": "total 0\n",
-        f"ls -laR {mnt}/log/journal": "ok\n" if journal else OpResult(rc=2, stderr="No such file"),
+        f"ls -laR {mnt}/log/journal": "ok\n" if journal else OpResult(rc=2, stderr="ls: cannot access: No such file or directory"),
     }
     if mount is not None:
         s[f"mount -o ro -t btrfs {PART} {mnt}"] = mount
