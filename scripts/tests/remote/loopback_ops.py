@@ -169,10 +169,38 @@ class LoopOps(RecordingOps):
         if kind == "read_file" and path.startswith(str(self.root)):
             self.calls.append(_call([kind, path], None, kind="fs"))
             return pathlib.Path(path).read_bytes()
+        graph = self._block_graph(kind, path)
+        if graph is not None:
+            self.calls.append(_call([kind, path], None, kind="fs"))
+            if isinstance(graph, BaseException):
+                raise graph
+            return graph
         if kind == "read_file" and path == "/etc/machine-id":
             self.calls.append(_call([kind, path], None, kind="fs"))
             return (MACHINE_ID + "\n").encode()
         return super()._fs(kind, path, data)
+
+
+    def _block_graph(self, kind, path):
+        """The sysfs reads the root-backing guard makes, for this board's two disks (the target and a foreign sda)."""
+        disks = {DEVICE.rsplit("/", 1)[1]: (), "sda": ()}
+        parts = {"sda1": "sda"}
+        if kind == "realpath" and path.startswith("/dev/"):
+            name = path[len("/dev/"):]
+            return path if name in disks or name in parts else FileNotFoundError(path)
+        if kind == "realpath" and path.startswith("/sys/class/block/"):
+            name = path[len("/sys/class/block/"):]
+            if name in disks:
+                return f"/sys/devices/virtual/block/{name}"
+            if name in parts:
+                return f"/sys/devices/virtual/block/{parts[name]}/{name}"
+            return FileNotFoundError(path)
+        if kind == "read_file" and path.startswith("/sys/class/block/") and path.endswith("/partition"):
+            name = path[len("/sys/class/block/"):-len("/partition")]
+            return b"1\n" if name in parts else FileNotFoundError(path)
+        if kind == "listdir" and path.startswith("/sys/class/block/") and path.endswith("/slaves"):
+            return [] if path[len("/sys/class/block/"):-len("/slaves")] in disks else FileNotFoundError(path)
+        return None
 
 
 def _call(vec, stdin, kind="exec"):

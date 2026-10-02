@@ -98,6 +98,8 @@ _SFDISK_WRITE = {
     "--wipe-partitions", "-W", "--append", "-N", "--move-data", "--backup", "-O",
 }  # fmt: skip
 _EFIBOOTMGR_READ = {"-v", "--verbose", "-h", "--help", "-V", "--version"}
+# Filesystem seam kinds that only read; everything else through ``_fs`` mutates.
+FS_READ_KINDS = ("read_file", "realpath", "listdir")
 _PLAIN_READ_TOOLS = {"findmnt", "lsblk", "sha256sum", "stat", "od", "df", "uname", "ls"}
 
 
@@ -381,6 +383,14 @@ class Ops:
     def read_file(self, path) -> bytes:
         return self._fs("read_file", path)
 
+    def realpath(self, path) -> str:
+        """Canonical path with every symlink resolved; raises OSError when the path does not exist."""
+        return self._fs("realpath", path)
+
+    def listdir(self, path) -> list:
+        """Entry names of a directory (sysfs ``slaves``), sorted; raises OSError when unreadable."""
+        return self._fs("listdir", path)
+
     def run_read(self, vec, check=True, **kw) -> OpResult:
         """Run any other read tool; a vector that could mutate is refused."""
         vec = list(vec)
@@ -468,7 +478,7 @@ class ReadOnlyOps(Ops):
         return self._inner._exec(vec, **kw)
 
     def _fs(self, kind, path, data=None):
-        if kind != "read_file":
+        if kind not in FS_READ_KINDS:
             raise MutationRefused(f"read-only ops refuse {kind}")
         return self._inner._fs(kind, path, data)
 
@@ -538,13 +548,17 @@ class RecordingOps(Ops):
         return self._coerce(val)
 
     def _fs(self, kind, path, data=None):
-        if kind == "read_file":
+        if kind in FS_READ_KINDS:
             line = f"{kind} {path}"
             self.calls.append(Call([kind, path], kind="fs"))
             val = self._scripted(self._norm(line))
             if val is None:
                 raise UnscriptedCall(f"no scripted result for read: {self._norm(line)}")
             res = self._coerce(val)
+            if kind == "realpath":
+                return res.text.strip()
+            if kind == "listdir":
+                return sorted(res.text.split())
             return res.stdout
         vec = [kind, path] + ([data] if kind == "sysfs_write" else [])
         self.calls.append(Call(vec, kind="fs"))
@@ -663,6 +677,10 @@ class RealOps(Ops):
         if kind == "read_file":
             with open(path, "rb") as f:
                 return f.read()
+        if kind == "realpath":
+            return os.path.realpath(path, strict=True)
+        if kind == "listdir":
+            return sorted(os.listdir(path))
         if kind == "sysfs_write":
             with open(path, "w") as f:
                 f.write(data)
@@ -673,7 +691,7 @@ class RealOps(Ops):
 
 
 __all__ = [
-    "Call", "MutationRefused", "OpFailed", "OpResult", "Ops", "OpsError", "ReadOnlyOps",
+    "FS_READ_KINDS", "Call", "MutationRefused", "OpFailed", "OpResult", "Ops", "OpsError", "ReadOnlyOps",
     "RealOps", "RecordingOps", "UnscriptedCall", "vector_mutates",
 ]  # fmt: skip
 

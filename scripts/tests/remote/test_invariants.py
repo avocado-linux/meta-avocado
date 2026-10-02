@@ -26,6 +26,7 @@ import textwrap
 import time
 from types import SimpleNamespace as NS
 
+import devgraph
 import pytest
 
 from avocado_flash_remote import bundle, cli, cmd_check, cmd_plan, cmd_restore, cmd_write, host, layout, runner
@@ -33,7 +34,7 @@ from avocado_flash_remote import profile as prof
 from avocado_flash_remote import state as statemod
 from avocado_flash_remote.host import HostError, HostTimeout, RunResult, StubTransport
 from avocado_flash_remote.images import ScanResult
-from avocado_flash_remote.ops import OpFailed, OpResult, RealOps, RecordingOps, vector_mutates
+from avocado_flash_remote.ops import FS_READ_KINDS, OpFailed, OpResult, RealOps, RecordingOps, vector_mutates
 
 HERE = pathlib.Path(__file__).resolve().parent
 PKG = HERE.parent.parent / "avocado_flash_remote"
@@ -317,6 +318,7 @@ class Env:
             s[self.readback_key(role)] = OpResult(digest=self.plan["image_hashes"][role])
         for name in ("A_kernel", "B_kernel"):
             s[self.guard_key(name)] = boot_header()
+        s.update(devgraph.standard_script())
         s.update(over)
         return s
 
@@ -333,6 +335,7 @@ class Env:
             assume_yes=assume_yes, efivars_dir=str(self.efivars), out=lines.append,
             scanner=scanner or (lambda path: self.scans[path.rsplit("/", 1)[-1]]),
             reverifier=reverifier or (lambda path, scan: None),
+            stat_fn=lambda path: self.scans[path.rsplit("/", 1)[-1]].identity,
             **kw,
         )  # fmt: skip
         return res, ops
@@ -344,7 +347,7 @@ def env(tmp_path):
 
 
 def mutations(ops):
-    return [c for c in ops.calls if (c.kind == "exec" and vector_mutates(c.vector)) or (c.kind == "fs" and c.vector[0] != "read_file")]
+    return [c for c in ops.calls if (c.kind == "exec" and vector_mutates(c.vector)) or (c.kind == "fs" and c.vector[0] not in FS_READ_KINDS)]
 
 
 def lock_is_free(env):
@@ -847,6 +850,7 @@ def _runner_signal_setup(tmp_path):
         def wrapper(real, profile, phash, **kw):
             kw["scanner"] = lambda p: env.scans[p.rsplit("/", 1)[-1]]
             kw["reverifier"] = lambda p, s: None
+            kw["stat_fn"] = lambda p: env.scans[p.rsplit("/", 1)[-1]].identity
             kw["file_reader"] = lambda p: T.boot_header()
             return cmd_write.run_write(ops, profile, phash, **kw)
 
