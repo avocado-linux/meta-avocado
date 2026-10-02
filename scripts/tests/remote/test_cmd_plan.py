@@ -496,3 +496,36 @@ def test_non_trailing_p_device_naming():
     assert "DRY-RUN would run: sfdisk /dev/sdb" in text
     expect = layout.sfdisk_input(profile.layout.params, "/dev/sdb")
     assert res.plan_record["table_hash"] == sha(expect)
+
+
+# ---- 5.17: serial identity pinned by a board-support extension -----------------------
+
+PINNED = "0x0badc0de"
+
+
+def serial_profile_bytes():
+    doc = json.loads(PROFILE_PATH.read_text())
+    doc["target"]["identity"] = {"kind": "serial", "value": PINNED, "sysfs_attr": "serial"}
+    return json.dumps(doc).encode()
+
+
+def test_matching_pinned_serial_plans_and_records_it():
+    profile, phash = load(serial_profile_bytes())
+    scans = scans_for(profile)
+    res, ops, rec = plan(profile, phash, script=script_for(profile, scans, serial=PINNED), scans=scans)
+    assert res.exit_code == 0, res.lines
+    assert res.plan_record["board_identity"]["device_serial"] == PINNED
+
+
+def test_different_serial_refuses_the_plan():
+    profile, phash = load(serial_profile_bytes())
+    scans = scans_for(profile)
+    res, ops, rec = plan(profile, phash, script=script_for(profile, scans, serial="0x00000001"), scans=scans)
+    assert_clean_refusal(res, ops, rec, "identity mismatch", "0x00000001")
+
+
+def test_missing_serial_attribute_refuses_the_plan():
+    profile, phash = load(serial_profile_bytes())
+    scans = scans_for(profile)
+    res, ops, rec = plan(profile, phash, script=script_for(profile, scans), scans=scans)
+    assert_clean_refusal(res, ops, rec, "cannot be verified")

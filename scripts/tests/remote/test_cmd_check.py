@@ -402,3 +402,40 @@ def test_efibootmgr_help_without_dash_c_is_still_a_verdict(efivars):
     assert res.exit_code == 1
     assert verdict(res, "efibootmgr supports -C") == "FAIL"
     assert not any("not examined" in ln for ln in res.lines)
+
+
+# ---- 5.17: a board-support extension pins the eMMC serial ------------------------
+
+PINNED = "0x0badc0de"
+SERIAL_IDENTITY = {"kind": "serial", "value": PINNED, "sysfs_attr": "serial"}
+SERIAL_PATH = "read_file /sys/block/mmcblk0/device/serial"
+
+
+def serial_profile():
+    return profile_with(["emmc-exists", "target-identity"], identity=SERIAL_IDENTITY)
+
+
+def test_shipped_identity_is_the_device_name_compared_with_itself():
+    # Why a BSP extension must pin a serial: this identity can never differ.
+    assert shipped().target.identity.kind == "sysfs-name"
+    assert shipped().target.identity.value == "mmcblk0" == shipped().target.device.rsplit("/", 1)[-1]
+
+
+def test_matching_serial_passes_the_identity_check(efivars):
+    res, _ = run(efivars, profile=serial_profile(), **{SERIAL_PATH: PINNED + "\n"})
+    assert res.exit_code == 0
+    assert verdict(res, "target hardware identity") == "PASS"
+
+
+def test_different_serial_fails_the_identity_check(efivars):
+    res, _ = run(efivars, profile=serial_profile(), **{SERIAL_PATH: "0x00000001\n"})
+    assert res.exit_code == 1
+    assert verdict(res, "target hardware identity") == "FAIL"
+    assert "not examined" not in "\n".join(res.lines)
+
+
+def test_missing_serial_attribute_is_not_examined_and_does_not_pass(efivars):
+    res, _ = run(efivars, profile=serial_profile(), **{SERIAL_PATH: OpFailed(["cat"], 1, "No such file")})
+    assert res.exit_code == 2
+    assert verdict(res, "target hardware identity") == "FAIL"
+    assert any("target hardware identity" in ln and "not examined" in ln for ln in res.lines)

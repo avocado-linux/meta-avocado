@@ -284,3 +284,20 @@ def test_recheck_detects_removed_file(dirs):
     path.unlink()
     with pytest.raises(pr.ProfileChanged):
         r.recheck()
+
+
+def test_extension_can_pin_a_serial_over_the_shipped_generic_profile(tmp_path):
+    import pathlib
+
+    shipped_dir = pr.SHIPPED_DIR
+    doc = json.loads((shipped_dir / "jetson-agx-orin-j5012.json").read_text())
+    doc["target"]["identity"] = {"kind": "serial", "value": "0x0badc0de", "sysfs_attr": "serial"}
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "jetson-agx-orin-j5012.json").write_text(json.dumps(doc))
+    got = pr.resolve_profile("jetson-agx-orin-j5012", ext)
+    assert got.source == "extension"
+    assert (got.profile.target.identity.kind, got.profile.target.identity.value) == ("serial", "0x0badc0de")
+    assert got.other_path == shipped_dir / "jetson-agx-orin-j5012.json"
+    plain = pr.resolve_profile("jetson-agx-orin-j5012", None)
+    assert plain.profile.target.identity.kind == "sysfs-name"

@@ -839,3 +839,35 @@ def test_existing_state_json_refuses_whatever_current_says(env):
     (env.state_dir / RUN_ID / "state.json").write_text("{}")
     res, ops = env.run()
     assert_clean_refusal(res, ops, "state record")
+
+
+# ---------------------------------------------------------------- 5.17
+
+PINNED = "0x0badc0de"
+SERIAL_PATH = "read_file /sys/block/mmcblk0/device/serial"
+
+
+def _pinned_env(tmp_path):
+    doc = json.loads(PROFILE_PATH.read_text())
+    doc["target"]["identity"] = {"kind": "serial", "value": PINNED, "sysfs_attr": "serial"}
+    e = Env(tmp_path, json.dumps(doc).encode())
+    e.plan["board_identity"] = {"machine_id": MACHINE_ID, "device_serial": PINNED}
+    return e
+
+
+def test_pinned_serial_matches_and_the_write_proceeds(tmp_path):
+    e = _pinned_env(tmp_path)
+    res, ops = e.run(script=e.script(**{SERIAL_PATH: PINNED + "\n"}))
+    assert res.exit_code == 0, res.lines
+
+
+def test_different_serial_refuses_the_write_before_any_write_call(tmp_path):
+    e = _pinned_env(tmp_path)
+    res, ops = e.run(script=e.script(**{SERIAL_PATH: "0x00000001\n"}))
+    assert_clean_refusal(res, ops, "identity mismatch")
+
+
+def test_missing_serial_attribute_refuses_the_write_before_any_write_call(tmp_path):
+    e = _pinned_env(tmp_path)
+    res, ops = e.run(script=e.script(**{SERIAL_PATH: OpFailed(["cat"], 1, "No such file")}))
+    assert_clean_refusal(res, ops, "cannot be verified")
