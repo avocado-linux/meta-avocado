@@ -644,6 +644,11 @@ def _do_restore(ctx: _Ctx) -> int:
         return _exit_code("restore", res.rc)
 
 
+# The runner refuses a readback whose output is not on tmpfs; /run is tmpfs on every target and the state
+# directory is not, so the logs and the mount point live here and vanish at reboot.
+READBACK_RUN_BASE = "/run/avocado-flash"
+
+
 def _do_readback(ctx: _Ctx) -> int:
     args = ctx.args
     arm_none = ctx.profile.arm.strategy == "none"
@@ -653,8 +658,8 @@ def _do_readback(ctx: _Ctx) -> int:
     request = {
         "staging_dir": ctx.staging_dir,
         "state_dir": ctx.state_dir,
-        "mount_dir": f"{ctx.state_dir}/readback-mnt",
-        "out_dir": f"{ctx.state_dir}/{run_id}/readback",
+        "mount_dir": f"{READBACK_RUN_BASE}/readback-mnt",
+        "out_dir": f"{READBACK_RUN_BASE}/{run_id}/readback",
     }
     if arm_none:
         if args.reference_boot_order:

@@ -1079,6 +1079,61 @@ def test_readback_still_accepts_a_plain_run_id(images, tmp_path):
     assert req["out_dir"].endswith("/rb-1/readback")
 
 
+# --- task 5.38: readback output and mount point live on tmpfs under /run -------
+
+
+def _readback_request(images, tmp_path, *extra):
+    board, _rid = _prepared(images, tmp_path)
+    rc, _ = run(args(images, tmp_path, "readback", *extra), board)
+    assert rc == 0
+    return [r for sub, r, _d in board.runs if sub == "readback"][0]
+
+
+def test_readback_request_puts_mount_and_output_under_run_not_the_state_dir(images, tmp_path):
+    req = _readback_request(images, tmp_path, "--run-id", "rb-1")
+    assert req["out_dir"] == "/run/avocado-flash/rb-1/readback"
+    assert req["mount_dir"] == "/run/avocado-flash/readback-mnt"
+    assert not req["out_dir"].startswith(req["state_dir"])
+    assert not req["mount_dir"].startswith(req["state_dir"])
+
+
+def test_readback_generated_run_id_also_lands_under_run(images, tmp_path):
+    req = _readback_request(images, tmp_path)
+    assert re.fullmatch(r"/run/avocado-flash/readback-[0-9a-f]{8}/readback", req["out_dir"])
+
+
+def test_readback_with_a_disk_state_dir_still_reaches_the_mount_step(images, tmp_path):
+    """The gate asks findmnt about the output directory; with the state dir on btrfs and /run on tmpfs the
+    request the CLI builds must pass it (unit tests that fake the fstype globally could not see this)."""
+    import posixpath
+    from avocado_flash_remote import profile as prof
+    from avocado_flash_remote.cmd_readback import run_readback
+    from avocado_flash_remote.ops import RecordingOps
+
+    req = _readback_request(images, tmp_path, "--run-id", "rb-1")
+    profile = prof.load_profile_bytes((PROFILES / "jetson-agx-orin-j5012.json").read_bytes())
+    disk, part = profile.target.device, "/dev/mmcblk0p16"
+    mnt, out = req["mount_dir"], req["out_dir"]
+    probe = posixpath.dirname(out)
+    fstype = "btrfs\n" if probe.startswith(req["state_dir"]) else "tmpfs\n"
+    script = {
+        "efibootmgr -v": "BootCurrent: 0001\nBootOrder: 0001\nBoot0001* UEFI\n",
+        "lsblk -dn -o NAME": "mmcblk0\n",
+        f"lsblk {disk}": "NAME SIZE\nmmcblk0 58G\n",
+        f"lsblk -rn -o NAME,PARTLABEL {disk}": "mmcblk0p16 DATAPART_EXPAND\n",
+        f"findmnt -no FSTYPE -T {probe}": fstype,
+        f"ls -la {mnt}": "total 0\n",
+        f"ls -laR {mnt}/log/journal": "ok\n",
+    }
+    ops = RecordingOps(script)
+    res = run_readback(
+        ops, profile, mount_dir=mnt, out_dir=out, reference_boot_order="0001",
+        copier=lambda s, d: None, list_logs=lambda m: [], out=lambda line: None,
+        makedirs=lambda *a, **k: None, nearest_existing=posixpath.dirname,
+    )
+    assert any(x.startswith("mount") for x in ops.log), res.lines
+
+
 def test_write_does_not_print_complete_when_write_json_is_not_in_the_record_set(images, tmp_path, capsys):
     board = Board(tmp_path)
     rid = _stage_and_plan(images, tmp_path, board)
