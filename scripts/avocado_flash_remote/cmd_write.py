@@ -99,7 +99,12 @@ def _stat_identity(path) -> tuple:
     return images._identity(os.stat(path))
 
 
-def _recheck_staged(profile, scans: dict, staging_dir: str, stat_fn: Callable) -> None:
+def _stream_sha256(path) -> str:
+    """Full streaming sha256 of a staged file (chunk-bounded memory, the scanner's own helper)."""
+    return images.scan(path).sha256
+
+
+def _recheck_staged(profile, scans: dict, staging_dir: str, stat_fn: Callable, plan: dict, hash_fn: Callable) -> None:
     """Refuse when any staged image no longer has the stat signature it had when it was scanned."""
     for role, img in profile.images.items():
         scan = scans[img.file]
@@ -111,6 +116,18 @@ def _recheck_staged(profile, scans: dict, staging_dir: str, stat_fn: Callable) -
             raise _Refusal(
                 f"staged image {role} {img.file} changed after it was scanned "
                 "(size, mtime, inode or device differ); stage again, then plan and write"
+            )
+    # Cheap pass done: an in-place edit that restored size and mtime keeps its signature, so hash too.
+    planned = plan.get("image_hashes") if isinstance(plan.get("image_hashes"), dict) else {}
+    for role, img in profile.images.items():
+        try:
+            digest = hash_fn(f"{staging_dir}/{img.file}")
+        except OSError as exc:
+            raise _Refusal(f"staged image {role} {img.file} cannot be hashed in {staging_dir}: {exc}") from None
+        if digest != scans[img.file].sha256 or digest != planned.get(role):
+            raise _Refusal(
+                f"staged image {role} {img.file} content changed after it was scanned "
+                "(sha256 differs from the plan); stage again, then plan and write"
             )
 
 
@@ -314,6 +331,7 @@ def run_write(
     scanner: Callable = images.scan,
     reverifier: Callable = images.reverify,
     stat_fn: Callable = _stat_identity,
+    hash_fn: Callable = _stream_sha256,
     file_reader: Callable | None = None,
 ) -> WriteResult:
     """Write the planned images to the target. See the module docstring."""
@@ -370,7 +388,7 @@ def run_write(
             return _locked(
                 result, say, refuse, ops, ro, profile, profile_hash, plan, scans, sfdisk_text,
                 staging_dir, state_dir, run_dir, writer, confirm, assume_yes, expected_boot_order,
-                efivars_dir, ack_run_id, reverifier, stat_fn,
+                efivars_dir, ack_run_id, reverifier, stat_fn, hash_fn,
             )  # fmt: skip
     except LockHeld as exc:
         return refuse(f"another run holds the lock: {exc}")
@@ -381,7 +399,7 @@ def run_write(
 def _locked(
     result, say, refuse, ops, ro, profile, profile_hash, plan, scans, sfdisk_text,
     staging_dir, state_dir, run_dir, writer, confirm, assume_yes, expected_boot_order,
-    efivars_dir, ack_run_id, reverifier, stat_fn,
+    efivars_dir, ack_run_id, reverifier, stat_fn, hash_fn,
 ):  # fmt: skip
     dev = profile.target.device
     run_id = result.run_id
@@ -432,10 +450,15 @@ def _locked(
     # ---- 8: from here on every step is recorded; first mutation follows
     # The scan ran before the lock, the preflight and the operator's confirmation; an image replaced
     # since then must refuse here, before the table is destroyed rather than at that image's re-verify.
+    # The topology test goes last, after the hash pass and the confirmation, so no slow step sits
+    # between it and the first mutation.
     try:
-        _recheck_staged(profile, scans, staging_dir, stat_fn)
-    except _Refusal as exc:
+        _recheck_staged(profile, scans, staging_dir, stat_fn, plan, hash_fn)
+        cmd_plan._check_not_in_use(ro, profile, staging_dir)
+    except (_Refusal, cmd_plan._Refusal) as exc:
         return refuse(exc)
+    except Exception as exc:  # noqa: BLE001 - any doubt before mutation is a refusal
+        return refuse(f"pre-mutation re-check could not complete ({type(exc).__name__}: {exc})")
     plan_hash = hashlib.sha256((json.dumps(plan, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
     try:
         st = create_run(

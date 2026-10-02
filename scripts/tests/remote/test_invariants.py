@@ -336,6 +336,7 @@ class Env:
             scanner=scanner or (lambda path: self.scans[path.rsplit("/", 1)[-1]]),
             reverifier=reverifier or (lambda path, scan: None),
             stat_fn=lambda path: self.scans[path.rsplit("/", 1)[-1]].identity,
+            hash_fn=lambda path: self.scans[path.rsplit("/", 1)[-1]].sha256,
             **kw,
         )  # fmt: skip
         return res, ops
@@ -851,6 +852,7 @@ def _runner_signal_setup(tmp_path):
             kw["scanner"] = lambda p: env.scans[p.rsplit("/", 1)[-1]]
             kw["reverifier"] = lambda p, s: None
             kw["stat_fn"] = lambda p: env.scans[p.rsplit("/", 1)[-1]].identity
+            kw["hash_fn"] = lambda p: env.scans[p.rsplit("/", 1)[-1]].sha256
             kw["file_reader"] = lambda p: T.boot_header()
             return cmd_write.run_write(ops, profile, phash, **kw)
 

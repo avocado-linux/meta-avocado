@@ -146,7 +146,7 @@ class Env:
         return s
 
     def run(self, ops=None, *, script=None, plan="default", confirm=None, assume_yes=False, scanner=None,
-            reverifier=None, stat_fn=None, **kw):  # fmt: skip
+            reverifier=None, stat_fn=None, hash_fn=None, **kw):  # fmt: skip
         ops = ops if ops is not None else RecordingOps(script if script is not None else self.script())
         plan_obj = self.plan if plan == "default" else plan
         recs = []
@@ -169,6 +169,7 @@ class Env:
             scanner=scanner or default_scanner,
             reverifier=reverifier or (lambda path, scan: None),
             stat_fn=stat_fn or (lambda path: self.scans[path.rsplit("/", 1)[-1]].identity),
+            hash_fn=hash_fn or (lambda path: self.scans[path.rsplit("/", 1)[-1]].sha256),
             **kw,
         )  # fmt: skip
         assert res.lines == lines
@@ -724,6 +725,7 @@ def test_unrecordable_evidence_does_not_change_the_outcome(env):
         plan_loader=lambda: env.plan, record_writer=writer, assume_yes=True, efivars_dir=str(env.efivars),
         scanner=lambda p: env.scans[p.rsplit("/", 1)[-1]], reverifier=lambda p, s: None,
         stat_fn=lambda p: env.scans[p.rsplit("/", 1)[-1]].identity,
+        hash_fn=lambda p: env.scans[p.rsplit("/", 1)[-1]].sha256,
     )  # fmt: skip
     assert res.exit_code == 0
     assert "cannot write write.json" in "\n".join(res.lines)
@@ -1022,3 +1024,55 @@ def test_stat_failure_on_a_staged_image_refuses_before_any_mutation(env):
 def test_unchanged_stat_signature_proceeds(env):
     res, ops = env.run()
     assert res.exit_code == 0, res.lines
+
+
+# ------------------------------- content hash and topology, last checks before the first mutation
+
+
+def test_in_place_edit_with_size_and_mtime_restored_refuses_before_any_mutation(env):
+    first = sorted({i.file for i in env.profile.images.values()})[0]
+
+    def hash_fn(path):  # same inode, size and mtime (stat_fn is unchanged), different bytes
+        name = path.rsplit("/", 1)[-1]
+        return "f" * 64 if name == first else env.scans[name].sha256
+
+    res, ops = env.run(hash_fn=hash_fn)
+    assert_clean_refusal(res, ops, first, "content changed after it was scanned")
+    assert not (env.state_dir / RUN_ID).exists()
+
+
+def test_unreadable_staged_image_at_the_hash_pass_refuses(env):
+    def hash_fn(path):
+        raise OSError("input/output error")
+
+    res, ops = env.run(hash_fn=hash_fn)
+    assert_clean_refusal(res, ops, "cannot be hashed")
+
+
+def test_the_hash_pass_runs_after_the_stat_pass_and_each_file_is_hashed_once(env):
+    seen = []
+    res, _ = env.run(hash_fn=lambda p: (seen.append(p), env.scans[p.rsplit("/", 1)[-1]].sha256)[1])
+    assert res.exit_code == 0, res.lines
+    assert sorted(seen) == sorted(f"{STAGE}/{i.file}" for i in env.profile.images.values())
+
+
+def test_topology_change_during_confirmation_refuses_before_any_mutation(env):
+    ops = RecordingOps(env.script())
+
+    def confirm(dev):  # the operator is slow; meanwhile root moves onto the target
+        ops.script["findmnt -no SOURCE -T /"] = "/dev/mmcblk0p1\n"
+        return dev
+
+    res, _ = env.run(ops, confirm=confirm)
+    assert_clean_refusal(res, ops, "running root", "/dev/mmcblk0")
+    assert not (env.state_dir / RUN_ID).exists()
+
+
+def test_topology_is_the_last_read_before_the_first_mutation(env):
+    ops = RecordingOps(env.script())
+    res, _ = env.run(ops)
+    assert res.exit_code == 0, res.lines
+    log = ops.log
+    first_mut = next(i for i, c in enumerate(ops.calls) if c.kind == "exec" and vector_mutates(c.vector))
+    last_probe = max(i for i, line in enumerate(log[:first_mut]) if line.startswith("findmnt -no SOURCE -T"))
+    assert not [c for c in ops.calls[last_probe + 1 : first_mut] if c.kind == "exec" and c.vector[0] in ("efibootmgr", "sfdisk", "blkid")]
