@@ -31,6 +31,9 @@ class Board:
         self.runner_alive = False
         self.hidden_polls = 0  # status answers "no run recorded" this many times after write
         self.write_rc = 0
+        self.recovery = "none-recorded"
+        self.advance_after = None  # status answers write_phase, then 'complete' after this many polls
+        self.status_calls = 0
         self.cat_calls = []
         self.missing = set(missing)
         self.interp_rc = interp_rc
@@ -141,7 +144,10 @@ class Board:
                 return RunResult(0, b"status: no run recorded\n")
             if self.phase is None:
                 return RunResult(0, b"status: no run recorded\n")
-            return RunResult(0, f"status: {self.phase} run={self.run_id} recovery=none-recorded\n".encode())
+            self.status_calls += 1
+            if self.advance_after is not None and self.status_calls > self.advance_after:
+                self.phase = "complete"
+            return RunResult(0, f"status: {self.phase} run={self.run_id} recovery={self.recovery}\n".encode())
         return RunResult(0)
 
     def factory(self, host_arg, ssh_opts, batch):
@@ -376,6 +382,44 @@ def test_never_started_run_is_reported_and_points_at_status(images, tmp_path, ca
     assert "did not start" in text
     assert "status" in text
     assert "before assuming nothing happened" in text
+
+
+ARMING_RECOVERY = (
+    "restore-unknown-arm: the arm step started: a boot entry may already exist. DO NOT REBOOT. "
+    "Run restore with --ack-run RUN_ID"
+)
+
+
+def test_runner_exited_in_arming_stops_the_host_follow_loop(images, tmp_path, capsys):
+    board = Board(tmp_path, write_phase="arming")
+    board.recovery = ARMING_RECOVERY
+    board.runner_alive = False  # accepted marker names a pid that is gone
+    rc, text = _write(images, tmp_path, board, "--wait-seconds", "100000")
+    assert rc == 1
+    assert "still in progress" not in text
+    assert "arming" in text
+    assert "DO NOT REBOOT" in text
+    assert "write COMPLETE" not in text
+    assert board.status_calls <= 5  # stopped within the poll window, not after 100000 s of polls
+
+
+def test_live_runner_in_non_terminal_phase_keeps_being_followed(images, tmp_path, capsys):
+    board = Board(tmp_path, write_phase="image-writing")
+    board.runner_alive = True
+    board.advance_after = 8  # same phase for eight polls, then the run completes
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text
+    assert "write COMPLETE" in text
+    assert board.status_calls > 8
+
+
+def test_live_runner_that_never_finishes_ends_at_wait_seconds_not_as_exited(images, tmp_path):
+    board = Board(tmp_path, write_phase="arming")
+    board.runner_alive = True
+    rc, text = _write(images, tmp_path, board, "--wait-seconds", "50")
+    assert rc == 1
+    assert "still in progress" in text
+    assert "exited" not in text
 
 
 def test_dropped_connection_after_detach_reconciles_and_reports_true_phase(images, tmp_path, capsys):
