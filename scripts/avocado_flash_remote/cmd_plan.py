@@ -145,15 +145,65 @@ def _backs_target(ops: Ops, source: str, target_name: str, what: str) -> bool:
     return target_name in _ancestors(ops, _resolve_name(ops, source, what), 0, set())
 
 
-def _probe_source(ops: Ops, what: str, path: str) -> str | None:
-    """Mount source of ``path``, or None for a source with no block device behind it (tmpfs, overlay, nfs)."""
-    res = ops.run_read(["findmnt", "-no", "SOURCE", "-T", path], check=False)
+# Sources the kernel serves from RAM or itself; nothing on a block device can sit behind them.
+_KERNEL_SOURCES = frozenset({
+    "tmpfs", "ramfs", "devtmpfs", "proc", "sysfs", "cgroup", "cgroup2", "devpts", "securityfs", "debugfs",
+    "tracefs", "configfs", "pstore", "mqueue", "hugetlbfs", "bpf", "fusectl", "binfmt_misc", "autofs",
+    "efivarfs", "selinuxfs",
+})  # fmt: skip
+
+
+def _findmnt_one(ops: Ops, what: str, column: str, path: str) -> str:
+    res = ops.run_read(["findmnt", "-no", column, "-T", path], check=False)
     lines = [ln for ln in res.text.splitlines() if ln.strip()]
     if res.rc != 0 or len(lines) != 1:
-        why = f"rc={res.rc}" if res.rc != 0 else ("no output" if not lines else "more than one source")
-        raise _Refusal(f"cannot tell what backs the {what}: findmnt probe for {path} failed ({why}); refusing")
-    source = _SUBVOL_RE.sub("", lines[0].strip())
-    return source if source.startswith("/") else None
+        why = f"rc={res.rc}" if res.rc != 0 else ("no output" if not lines else "more than one value")
+        raise _Refusal(f"cannot tell what backs the {what}: findmnt {column} probe for {path} failed ({why}); refusing")
+    return lines[0].strip()
+
+
+def _overlay_dirs(options: str, path: str, what: str) -> list:
+    """lowerdir entries, then upperdir and workdir, from an overlay mount's options; refuses what it cannot read."""
+    lower: list = []
+    upper = work = None
+    for opt in options.split(","):
+        key, _, val = opt.partition("=")
+        if key == "lowerdir":
+            lower = val.split(":")
+        elif key == "upperdir":
+            upper = val
+        elif key == "workdir":
+            work = val
+    extra = [d for d in (upper, work) if d is not None]
+    if (upper is None) != (work is None) or not lower or any(not d.startswith("/") for d in lower + extra):
+        raise _Refusal(
+            f"cannot tell what backs the {what}: overlay options of {path} are missing or unparseable "
+            f"(need lowerdir, and upperdir with workdir); refusing"
+        )
+    return lower + extra
+
+
+def _path_backs_target(ops: Ops, what: str, path: str, target_name: str, depth: int = 0) -> str | None:
+    """Name of the block device that is or sits under the target and backs ``path``, else None.
+
+    A block-device source is walked through sysfs. An overlay is followed into every lower, upper and work
+    directory with the same probe, so a stack on the target cannot hide behind the overlay's own name.
+    Other non-block sources (nfs and the like) stay the documented limit.
+    """
+    if depth > MAX_STACK_DEPTH:
+        raise _Refusal(f"overlay stack under the {what} is deeper than {MAX_STACK_DEPTH} levels; refusing")
+    source = _SUBVOL_RE.sub("", _findmnt_one(ops, what, "SOURCE", path))
+    if source.startswith("/"):
+        return source if _backs_target(ops, source, target_name, what) else None
+    if source in _KERNEL_SOURCES:
+        return None
+    if _findmnt_one(ops, what, "FSTYPE", path) != "overlay":
+        return None
+    for directory in _overlay_dirs(_findmnt_one(ops, what, "OPTIONS", path), path, what):
+        hit = _path_backs_target(ops, what, directory, target_name, depth + 1)
+        if hit is not None:
+            return hit
+    return None
 
 
 def _check_not_in_use(ops: Ops, profile, staging_dir: str) -> None:
@@ -164,8 +214,8 @@ def _check_not_in_use(ops: Ops, profile, staging_dir: str) -> None:
         ("staging directory", staging_dir),
         ("SSH path", "/etc/ssh"),
     ):
-        source = _probe_source(ops, what, path)
-        if source is not None and _backs_target(ops, source, target_name, what):
+        source = _path_backs_target(ops, what, path, target_name)
+        if source is not None:
             raise _Refusal(f"{dev} backs the {what} ({path} is on {source}); refusing")
     for source in ops.findmnt_source():
         source = _SUBVOL_RE.sub("", source.strip())

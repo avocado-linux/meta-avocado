@@ -135,8 +135,142 @@ def test_unrelated_stacked_disk_passes():
 
 
 def test_tmpfs_and_other_pseudo_sources_pass():
-    res, ops, rec = run(standard(), root="tmpfs", ssh="overlay")
+    res, ops, rec = run(standard(), root="tmpfs", ssh="devtmpfs")
     assert res.exit_code == 0, res.lines
+
+
+def test_ram_backed_sources_cost_no_extra_probe():
+    res, ops, rec = run(standard(), root="tmpfs", stage="tmpfs", ssh="tmpfs")
+    assert res.exit_code == 0, res.lines
+    assert not [c for c in ops.log if c.startswith(("findmnt -no FSTYPE", "findmnt -no OPTIONS"))]
+
+
+# ------------------------------------------------------------------ overlay
+
+ROOT_OPTS = "findmnt -no OPTIONS -T /"
+ROOT_FST = "findmnt -no FSTYPE -T /"
+
+
+def overlay(path, options, fstype="overlay"):
+    return {f"findmnt -no FSTYPE -T {path}": fstype + "\n", f"findmnt -no OPTIONS -T {path}": options + "\n"}
+
+
+def src(path, source):
+    return {f"findmnt -no SOURCE -T {path}": source + "\n"}
+
+
+def run_overlay_root(options, dirs, graph=None):
+    over = {}
+    over.update(overlay("/", options))
+    for path, source in dirs.items():
+        over.update(src(path, source))
+    return run(graph or standard(), root="overlay", ssh="tmpfs", over=over)
+
+
+OPTS = "rw,relatime,lowerdir=/lower,upperdir=/upper,workdir=/work"
+SAFE = {"/lower": "/dev/nvme0n1p2", "/upper": "/dev/nvme0n1p2", "/work": "/dev/nvme0n1p2"}
+
+
+def test_overlay_on_an_unrelated_disk_passes():
+    res, ops, rec = run_overlay_root(OPTS, SAFE)
+    assert res.exit_code == 0, res.lines
+
+
+@pytest.mark.parametrize("which", ["/lower", "/upper", "/work"])
+def test_overlay_directory_on_the_target_refuses(which):
+    res, ops, rec = run_overlay_root(OPTS, {**SAFE, which: "/dev/mmcblk0p3"})
+    refused(res, ops, rec, "/dev/mmcblk0", "running root")
+
+
+def test_multi_entry_lowerdir_with_only_the_last_on_the_target_refuses():
+    res, ops, rec = run_overlay_root(
+        "rw,lowerdir=/l1:/l2:/l3,upperdir=/upper,workdir=/work",
+        {**SAFE, "/l1": "/dev/nvme0n1p2", "/l2": "/dev/nvme0n1p1", "/l3": "/dev/mmcblk0p1"},
+    )
+    refused(res, ops, rec, "/dev/mmcblk0")
+
+
+def test_read_only_overlay_with_lowerdir_only_is_walked():
+    res, ops, rec = run_overlay_root("ro,lowerdir=/l1:/l2", {"/l1": "/dev/nvme0n1p2", "/l2": "/dev/mmcblk0p2"})
+    refused(res, ops, rec, "/dev/mmcblk0")
+    res, ops, rec = run_overlay_root("ro,lowerdir=/l1:/l2", {"/l1": "/dev/nvme0n1p2", "/l2": "/dev/nvme0n1p1"})
+    assert res.exit_code == 0, res.lines
+
+
+def test_overlay_directory_probe_failure_refuses():
+    over = dict(overlay("/", OPTS), **src("/lower", "/dev/nvme0n1p2"), **src("/work", "/dev/nvme0n1p2"))
+    over["findmnt -no SOURCE -T /upper"] = OpResult(rc=1, stderr="no")
+    res, ops, rec = run(standard(), root="overlay", ssh="tmpfs", over=over)
+    refused(res, ops, rec, "probe")
+
+
+def test_overlay_directory_that_does_not_resolve_refuses():
+    res, ops, rec = run_overlay_root(OPTS, {**SAFE, "/lower": "/dev/ghost"},
+                                     graph=None)
+    refused(res, ops, rec, "cannot resolve")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        "rw,relatime",  # no lowerdir
+        "rw,lowerdir=,upperdir=/upper,workdir=/work",  # empty lowerdir
+        "rw,lowerdir=/l1::/l2,upperdir=/upper,workdir=/work",  # empty entry
+        "rw,lowerdir=/lower,upperdir=/upper",  # upperdir without workdir
+        "rw,lowerdir=/lower,workdir=/work",  # workdir without upperdir
+        "rw,lowerdir=/lower,upperdir=,workdir=/work",  # empty upperdir
+        "",
+    ],
+)
+def test_overlay_with_missing_or_unparseable_options_refuses(options):
+    res, ops, rec = run_overlay_root(options, {**SAFE, "/l1": "/dev/nvme0n1p2", "/l2": "/dev/nvme0n1p2"})
+    refused(res, ops, rec, "cannot tell what backs")
+
+
+def test_overlay_options_probe_failure_refuses():
+    over = dict(src("/lower", "/dev/nvme0n1p2"))
+    over[ROOT_FST] = "overlay\n"
+    over[ROOT_OPTS] = OpResult(rc=1, stderr="no")
+    res, ops, rec = run(standard(), root="overlay", ssh="tmpfs", over=over)
+    refused(res, ops, rec, "probe")
+
+
+def test_fstype_probe_failure_on_an_unknown_non_block_source_refuses():
+    res, ops, rec = run(standard(), root="mystery", ssh="tmpfs", over={ROOT_FST: OpResult(rc=1, stderr="no")})
+    refused(res, ops, rec, "probe")
+
+
+def test_unknown_non_block_source_that_is_not_overlay_still_passes():
+    res, ops, rec = run(standard(), root="host:/export", ssh="tmpfs", over={ROOT_FST: "nfs4\n"})
+    assert res.exit_code == 0, res.lines
+
+
+def test_overlay_named_anything_is_found_by_its_fstype():
+    over = overlay("/", OPTS) | src("/lower", "/dev/mmcblk0p1") | SAFE_SRC
+    res, ops, rec = run(standard(), root="none", ssh="tmpfs", over=over)
+    refused(res, ops, rec, "/dev/mmcblk0")
+
+
+SAFE_SRC = src("/upper", "/dev/nvme0n1p2") | src("/work", "/dev/nvme0n1p2")
+
+
+def test_nested_overlay_resolves_to_the_target():
+    over = overlay("/", OPTS) | overlay("/lower", "ro,lowerdir=/inner") | src("/inner", "/dev/mmcblk0p2")
+    over |= src("/lower", "overlay") | SAFE_SRC
+    res, ops, rec = run(standard(), root="overlay", ssh="tmpfs", over=over)
+    refused(res, ops, rec, "/dev/mmcblk0")
+
+
+def test_overlay_over_itself_hits_the_depth_bound():
+    over = overlay("/", "rw,lowerdir=/", ) | src("/", "overlay")
+    res, ops, rec = run(standard(), root="overlay", ssh="tmpfs", over=over)
+    refused(res, ops, rec, "deeper than")
+
+
+def test_overlay_reads_add_only_findmnt_and_no_other_command():
+    res, ops, rec = run_overlay_root(OPTS, SAFE)
+    assert res.exit_code == 0, res.lines
+    assert {c.vector[0] for c in ops.calls if c.kind == "exec"} <= tcp_reads()
 
 
 def test_btrfs_subvolume_suffix_is_stripped():
