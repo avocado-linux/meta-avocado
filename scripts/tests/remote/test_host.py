@@ -1069,3 +1069,40 @@ def test_a_failed_request_put_removes_the_half_written_temp_file_too():
     put, rm = t.calls
     path = put.argv[-1]
     assert rm.argv == ["rm", "-f", "--", path, path + ".tmp"]
+
+
+def test_remote_df_runs_under_the_c_locale():
+    from types import SimpleNamespace as NS
+
+    seen = []
+
+    class T:
+        def run(self, argv, stdin, sudo=False, timeout=None):
+            seen.append(argv)
+            return NS(rc=0, out="Filesystem 1K-blocks Used Available Use% Mounted on\ntmpfs 100 1 99999 1% /x\n")
+
+    host.check_staging_space(T(), NS(staging=NS(dir="/x", min_free_kib=1)))
+    assert "LC_ALL=C df -Pk" in " ".join(seen[0])
+
+
+def test_collected_files_are_written_through_an_owner_only_atomic_path(tmp_path):
+    raw = _record_tar(tmp_path)
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, raw, b""))
+    dest = tmp_path / "local"
+    assert host.collect(t, "r1", dest, remote_run_dir="/var/s/run-1").ok
+    assert all(p.stat().st_mode & 0o777 == 0o600 for p in dest.iterdir())
+    assert not [p for p in dest.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_a_failure_while_writing_an_extracted_file_leaves_no_partial_file(tmp_path, monkeypatch):
+    raw = _record_tar(tmp_path)
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, raw, b""))
+    dest = tmp_path / "local"
+
+    def boom(*a, **k):
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(evidence.os, "rename", boom)
+    with pytest.raises(OSError):
+        host.collect(t, "r1", dest, remote_run_dir="/var/s/run-1")
+    assert list(dest.iterdir()) == []

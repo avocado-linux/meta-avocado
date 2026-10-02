@@ -757,7 +757,7 @@ def test_detached_runner_grandchild_outlives_its_parent(tmp_path):
     req = tmp_path / "req.json"
     req.write_text(json.dumps({
         "staging_dir": "/stage", "state_dir": str(tmp_path / "state"), "run_dir": str(tmp_path / "state" / "r1" / "records"),
-        "run_id": "r1", "plan_path": str(tmp_path / "plan.json"), "invocation_nonce": "f6" * 8,
+        "run_id": "r1", "plan_path": str(tmp_path / "plan.json"), "invocation_nonce": "f6" * 8, "tool_version": "t",
     }))  # fmt: skip
     started, done = tmp_path / "started.json", tmp_path / "done"
     driver = tmp_path / "driver.py"
@@ -834,7 +834,7 @@ def _runner_signal_setup(tmp_path):
     req.write_text(json.dumps({
         "staging_dir": STAGE, "state_dir": str(e.state_dir), "run_dir": str(e.state_dir / "r1" / "records"),
         "run_id": RUN_ID, "plan_path": str(plan), "assume_yes": True, "efivars_dir": str(e.efivars),
-        "profile_hash": e.phash,
+        "profile_hash": e.phash, "tool_version": "t",
     }))  # fmt: skip
     marker, logp = tmp_path / "blocking", tmp_path / "ops-log.json"
     driver = tmp_path / "sigdriver.py"

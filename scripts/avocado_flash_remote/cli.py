@@ -16,6 +16,7 @@ mismatch; 64 usage; 70 unexpected error; 130 interrupted.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import math
 import re
 import secrets
@@ -165,6 +166,11 @@ class _Ctx:
     def invoke(self, sub: str, request: dict, detach: bool = False):
         request = dict(request)
         request["profile_hash"] = self.resolved.sha256
+        if "run_dir" in request:
+            # Evidence provenance: the tool that asked, and the host clock read just before the call, so the
+            # record set computes skew from two real observations.
+            request["tool_version"] = TOOL_VERSION
+            request["host_utc"] = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         res = host.run_remote(self.transport, sub, request, self.bundle_remote, detach=detach, python=self.remote_python)
         if res.out.strip():
             self.out(res.out.rstrip("\n"))
@@ -388,6 +394,7 @@ def _reconcile_phase(ctx: _Ctx, run_id: str):
 
 
 OWNER_PROBE_TRIES = 6
+COLLECT_RETRIES = 4
 
 
 def _confirm_owner(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str, polls: int) -> str:
@@ -516,6 +523,15 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     local = _unique_dir(ctx.evidence_dir / f"{run_id}-write")
     verify = ctx.collect(run_id, remote_dir, local)
     outcome = host.final_outcome(phase, verify)
+    # The phase turns complete a moment before the runner writes its manifest and outcome marker: a
+    # collection in that window is retried while the runner has not recorded its own end.
+    for _ in range(COLLECT_RETRIES):
+        if outcome != "not-verified" or host.runner_outcome(ctx.transport, remote_dir, run_id, nonce)[0] != "none":
+            break
+        ctx.sleep(ctx.poll_interval)
+        local = _unique_dir(ctx.evidence_dir / f"{run_id}-write")
+        verify = ctx.collect(run_id, remote_dir, local)
+        outcome = host.final_outcome(phase, verify)
     if outcome == "complete":
         owner = _confirm_owner(ctx, run_id, remote_dir, nonce, polls)
         if owner != "ours":

@@ -439,3 +439,16 @@ def test_missing_serial_attribute_is_not_examined_and_does_not_pass(efivars):
     assert res.exit_code == 2
     assert verdict(res, "target hardware identity") == "FAIL"
     assert any("target hardware identity" in ln and "not examined" in ln for ln in res.lines)
+
+
+
+@pytest.mark.parametrize("tail", [f"{LABEL} old\tHD(1)\n", f"{LABEL}x\tHD(1)\n", f"{LABEL} old\n"])
+def test_a_longer_labelled_entry_is_not_a_stale_one_shot_entry(efivars, tail):
+    res, _ = run(efivars, **{"efibootmgr -v": EFI_OK + f"Boot0007* {tail}"})
+    assert verdict(res, "no stale avocado-emmc-oneshot entry") == "PASS"
+
+
+@pytest.mark.parametrize("tail", [f"{LABEL}\n", f"{LABEL}  \n", f"{LABEL}\tHD(1)\n"])
+def test_the_exact_label_is_still_stale(efivars, tail):
+    res, _ = run(efivars, **{"efibootmgr -v": EFI_OK + f"Boot0005* {tail}"})
+    assert verdict(res, "no stale avocado-emmc-oneshot entry") == "FAIL"

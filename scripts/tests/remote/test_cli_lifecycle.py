@@ -962,3 +962,67 @@ def test_restore_without_run_id_sends_none(images, tmp_path, board):
     rc, _ = run(args(images, tmp_path, "restore", "--emergency-disarm"), board)
     assert rc == 0
     assert "run_id" not in board.runs[-1][1]
+
+
+def test_collect_in_the_marker_window_is_retried_until_the_records_verify(images, tmp_path, board, monkeypatch):
+    """The board's phase turns complete a moment before the manifest and outcome marker land."""
+    _stage_and_plan(images, tmp_path, board)
+    good = {}
+    real_handle = board.handle
+    state = {"collects": 0}
+
+    def handle(argv, stdin, sudo):
+        plain = _plain(argv)
+        if plain[:2] == ["tar", "-C"] and "-cf" in plain and board.wrote:
+            state["collects"] += 1
+            good.setdefault("raw", board.records[plain[2]])
+            if state["collects"] == 1:
+                board._records("window", True)
+                return RunResult(0, _tar_of(board.tmp / "window", drop="MANIFEST.json"))
+        return real_handle(argv, stdin, sudo)
+
+    board.stub.handler = handle
+    rid = plan_run_id(tmp_path)
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid, "--ack-run", rid), board)
+    assert state["collects"] >= 2
+    assert rc == 0 and "write COMPLETE" in text
+
+
+def test_collect_is_not_retried_once_the_runner_outcome_is_final(images, tmp_path, board):
+    board.corrupt_write = True
+    _stage_and_plan(images, tmp_path, board)
+    rid = plan_run_id(tmp_path)
+    board.outcome = f"finished\nrun={rid}\nnonce=@NONCE@\n".encode()
+    collects = []
+    real_handle = board.handle
+
+    def handle(argv, stdin, sudo):
+        plain = _plain(argv)
+        if plain[:2] == ["tar", "-C"] and "-cf" in plain and board.wrote:
+            collects.append(1)
+        return real_handle(argv, stdin, sudo)
+
+    board.stub.handler = handle
+    rc, _ = run(args(images, tmp_path, "write", "--run-id", rid, "--ack-run", rid), board)
+    assert rc == 1
+    assert len(collects) == 1
+
+
+def _tar_of(directory, drop=None):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        for p in sorted(directory.iterdir()):
+            if p.name != drop:
+                tf.add(str(p), arcname="./" + p.name)
+    return buf.getvalue()
+
+
+def test_record_producing_requests_carry_the_tool_version_and_a_host_clock(images, tmp_path, board):
+    _stage_and_plan(images, tmp_path, board)
+    rid = plan_run_id(tmp_path)
+    rc, _ = run(args(images, tmp_path, "write", "--run-id", rid, "--ack-run", rid), board)
+    assert rc == 0
+    for sub in ("plan", "write"):
+        req = [r for r in board.runs if r[0] == sub][0][1]
+        assert req["tool_version"] == cli.TOOL_VERSION
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", req["host_utc"])

@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .state import LoadResult, RunState, _validate, describe_recovery, load_state
+from .state import _RUN_ID_RE, LoadResult, RunState, _validate, describe_recovery, load_state
 
 
 @dataclass
@@ -26,9 +26,11 @@ class StatusResult:
 
 def _load_run(state_dir, run_id):
     """One run's own record, whatever ``current`` names now. No state.json for it is 'absent'."""
-    if not isinstance(run_id, str) or not run_id or "/" in run_id or run_id in (".", ".."):
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
         return LoadResult("unparseable", reason=f"bad run id {run_id!r}")
     path = Path(state_dir) / run_id / "state.json"
+    if path.parent.is_symlink() or path.is_symlink() or path.parent.resolve().parent != Path(state_dir).resolve():
+        return LoadResult("unparseable", reason=f"{path} is a symlink or leaves the state directory", run_id=run_id)
     try:
         data = json.loads(path.read_text())
     except FileNotFoundError:

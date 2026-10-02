@@ -311,7 +311,7 @@ def _finalize_records(sub, profile, phash, req, rc, refused_early=False):
         loaded = runstate.load_state(profile.state_dir) if rid is None else _load_run(profile.state_dir, rid)
         if loaded.status == "ok" and rid in (None, loaded.state.run_id):
             st = loaded.state.data
-        identity = plan.get("board_identity") or st.get("board_identity")
+        identity = plan.get("board_identity") or st.get("board_identity") or {}
         hashes = plan.get("image_hashes")
         if not isinstance(hashes, dict):
             hashes = {
@@ -322,13 +322,13 @@ def _finalize_records(sub, profile, phash, req, rc, refused_early=False):
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         rs = evidence.RecordSet(
             run_dir=run_dir,
-            host_tool_version=str(req.get("tool_version") or "unknown"),
+            host_tool_version=req["tool_version"],
             runner_version=RUNNER_VERSION,
             profile_hash=phash,
             image_hashes=hashes,
             board_identity=identity,
             transition_log=list(st.get("phases_done") or []),
-            host_utc=str(req.get("host_utc") or now),
+            host_utc=req.get("host_utc"),  # the host's own observation; absent means no skew, never the board's
             board_utc=now,
         )
         for name in sorted(os.listdir(run_dir)):
@@ -587,6 +587,10 @@ def main(argv, *, archive=None):
         if detach:
             run_dir, run_id = _need(req, "run_dir", "run_id")
             nonce = _invocation_nonce(req)
+        if sub in _RUN_DIR_SUBS and req.get("run_dir") is not None:
+            tv = req.get("tool_version")
+            if not isinstance(tv, str) or not tv.strip():
+                raise _Exit(EXIT_USAGE, "runner error: the request carries no tool_version; refusing to record evidence", sys.stderr)
         _prepare_run_dir(sub, profile, req)
         if detach:
             # The lock comes before the replay check and before any marker is cleared: while a runner

@@ -19,7 +19,9 @@ import io
 import json
 import os
 import sys
+import tempfile
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -177,21 +179,41 @@ def build_bundle(profile_bytes: bytes, out_path, tool_version: str, modules_dir=
     blob = buf.getvalue()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out_path.with_name(out_path.name + ".tmp")
-    tmp.write_bytes(blob)
-    # The runner bundle is a stdlib-only archive that must be executable and holds no secret.
-    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
-    os.chmod(tmp, 0o755)
-    os.replace(tmp, out_path)
+    # A unique temporary file in the destination directory: two builds, or a stale name, never share one.
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{out_path.name}.", suffix=".tmp", dir=str(out_path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(blob)
+            fh.flush()
+            os.fsync(fh.fileno())
+        # The runner bundle is a stdlib-only archive that must be executable and holds no secret.
+        # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+        os.chmod(tmp_name, 0o755)
+        os.replace(tmp_name, out_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     return BundleInfo(out_path, _sha(blob), sorted(sources), profile_sha)
 
 
 def verify_bundle(path) -> list:
-    """Re-hash every member against BUNDLE.json; return the problems found."""
+    """Re-hash every member against BUNDLE.json; return the problems found. Never raises on a bad archive."""
+    try:
+        return _verify_bundle(path)
+    except (TypeError, OSError, zipfile.BadZipFile, ValueError, KeyError, EOFError, RuntimeError, zlib.error) as e:
+        return [f"bundle unusable: {type(e).__name__}: {e}"]
+
+
+def _verify_bundle(path) -> list:
     problems = []
+    if not isinstance(path, (str, os.PathLike)):
+        return [f"cannot open archive: {path!r} is not a path"]
     try:
         zf = zipfile.ZipFile(path)
-    except (OSError, zipfile.BadZipFile) as e:
+    except (OSError, zipfile.BadZipFile, TypeError) as e:
         return [f"cannot open archive: {e}"]
     with zf:
         names = set(zf.namelist())
@@ -199,7 +221,12 @@ def verify_bundle(path) -> list:
             meta = json.loads(zf.read("BUNDLE.json").decode("utf-8"))
         except (KeyError, ValueError) as e:
             return [f"BUNDLE.json unusable: {e}"]
-        expected = dict(meta.get("modules", {}))
+        if not isinstance(meta, dict):
+            return ["BUNDLE.json unusable: not an object"]
+        modules = meta.get("modules", {})
+        if not isinstance(modules, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in modules.items()):
+            return ["BUNDLE.json unusable: modules is not a mapping of name to sha256"]
+        expected = dict(modules)
         for name, digest in sorted(expected.items()):
             if name not in names:
                 problems.append(f"{name}: missing from archive")

@@ -139,6 +139,10 @@ def _authorise(plan: dict, profile, profile_hash: str, ro: Ops, scans: dict, sfd
     planned_images = plan["image_hashes"]
     if not isinstance(planned_images, dict):
         raise _Refusal("plan record is malformed: image_hashes is not an object; run plan again")
+    try:
+        cmd_plan.check_image_limits(profile, scans)
+    except cmd_plan._Refusal as exc:
+        raise _Refusal(f"{exc} (the plan record may have been altered); run plan again") from None
     roles = sorted(set(planned_images) | set(current_images))
     changed = [r for r in roles if planned_images.get(r) != current_images.get(r)]
     if changed:

@@ -293,6 +293,24 @@ def _parse_manifest(text: str) -> dict:
     return out
 
 
+def check_image_limits(profile, scans: dict) -> None:
+    """Size, populated and partition-capacity limits for every image; write re-applies them to its own scans."""
+    parts = {p["number"]: p for p in profile.layout.params["table"]}
+    sector = profile.layout.params.get("sector_size", 512)
+    for role, img in profile.images.items():
+        scan = scans[img.file]
+        if scan.size > img.max_bytes:
+            raise _Refusal(f"image {role} {img.file} is {scan.size} bytes, limit {img.max_bytes}")
+        if img.must_be_populated and scan.all_zero:
+            raise _Refusal(f"image {role} {img.file} is all zero ({scan.size} bytes) but must be populated")
+        cap = parts[img.partition]["size"] * sector
+        if scan.size > cap:
+            raise _Refusal(
+                f"image {role} {img.file} is {scan.size} bytes, larger than partition "
+                f"{parts[img.partition]['name']} ({cap} bytes)"
+            )
+
+
 def _check_images(ops: Ops, profile, staging_dir: str, scanner) -> tuple[dict, int]:
     manifest_path = f"{staging_dir}/{MANIFEST_NAME}"
     try:
@@ -315,20 +333,7 @@ def _check_images(ops: Ops, profile, staging_dir: str, scanner) -> tuple[dict, i
             raise _Refusal(f"staged image {role} {img.file} not found in {staging_dir}") from None
         if scans[img.file].sha256 != manifest[img.file]:
             raise _Refusal(f"checksum verification failed for {img.file} ({role}); nothing was written")
-    parts = {p["number"]: p for p in profile.layout.params["table"]}
-    sector = profile.layout.params.get("sector_size", 512)
-    for role, img in profile.images.items():
-        scan = scans[img.file]
-        if scan.size > img.max_bytes:
-            raise _Refusal(f"image {role} {img.file} is {scan.size} bytes, limit {img.max_bytes}")
-        if img.must_be_populated and scan.all_zero:
-            raise _Refusal(f"image {role} {img.file} is all zero ({scan.size} bytes) but must be populated")
-        cap = parts[img.partition]["size"] * sector
-        if scan.size > cap:
-            raise _Refusal(
-                f"image {role} {img.file} is {scan.size} bytes, larger than partition "
-                f"{parts[img.partition]['name']} ({cap} bytes)"
-            )
+    check_image_limits(profile, scans)
     return scans, len(manifest)
 
 

@@ -67,7 +67,10 @@ def sfdisk_input(layout_params, device_path: str, uuids=None) -> str:
     for n in uuids:
         if n not in numbers:
             raise LayoutError(f"uuid given for unknown partition {n}")
-    check_fits(layout_params, layout_params["last_lba"] + GPT_SECONDARY_SECTORS)
+    sectors = layout_params.get("device_sectors")
+    if isinstance(sectors, bool) or not isinstance(sectors, int) or sectors <= 0:
+        raise LayoutError(f"device_sectors {sectors!r} must be a positive integer")
+    check_fits(layout_params, sectors)
 
     out = [
         "label: gpt",

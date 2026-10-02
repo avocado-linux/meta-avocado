@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import efi
+from .arm import entries_with_label
 from .ops import OpFailed, Ops, OpsError
 
 DEFAULT_EFIVARS_DIR = "/sys/firmware/efi/efivars"
@@ -210,8 +211,7 @@ def _oneshot_label(c: _Ctx):
     label = params.get("label") if hasattr(params, "get") else None
     if not label:
         raise NotExamined("profile arm declares no one-shot label")
-    rx = re.compile(rf"^Boot([0-9A-Fa-f]{{4}})\*?\s+{re.escape(label)}(\s|$)")
-    stale = [m.group(1) for m in (rx.match(ln) for ln in c.efi_list().splitlines()) if m]
+    stale = entries_with_label(c.efi_list(), label)
     if stale:
         return False, f"entry Boot{' '.join(stale)} is labelled {label} already"
     return True, "none"
