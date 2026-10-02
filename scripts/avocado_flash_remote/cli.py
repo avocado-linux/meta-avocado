@@ -355,6 +355,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
     unstarted = 0
+    last_phase = None
     for _ in range(polls):
         rec = None
         try:
@@ -371,6 +372,18 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
                 unstarted = 0
         if phase in TERMINAL:
             break
+        if phase is not None and phase == last_phase:
+            # A non-terminal phase that did not move: a runner that ended normally is always
+            # terminal, so an exited runner here died (or stopped on a handled failure) mid-run.
+            if host.runner_presence(ctx.transport, remote_dir) == "exited":
+                ctx.out(
+                    f"the runner exited while the board is still recorded in the non-terminal phase {phase}; "
+                    "it will not advance"
+                )
+                ctx.out(f"recovery: {rec.recovery}")
+                _tail_log(ctx, remote_dir)
+                return 1
+        last_phase = phase
         if unstarted >= 3:
             presence = host.runner_presence(ctx.transport, remote_dir)
             if presence in ("alive", "unknown"):

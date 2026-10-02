@@ -59,14 +59,19 @@ written from.
 |------|---------|
 | 0 | ok |
 | 1 | refusal or failure |
-| 2 | not examined (a check or readback could not look at its target) |
+| 2 | not examined (a check or readback could not look at its target), or the SSH connection dropped during `check`, `status`, `readback` or `restore` |
 | 3 | profile mismatch (the bundled profile hash disagrees with the request) |
 | 64 | usage error |
 | 70 | unexpected error |
 | 130 | interrupted |
 
 Exit 2 is a separate answer from exit 1: a run that could not look has not
-passed, and has not found a fault either.
+passed, and has not found a fault either. The same exit code is used when the
+connection to the board dropped (ssh status 255) during `check`, `status`,
+`readback` or `restore`: the runner may have acted before the drop, so run
+`status` to see the recorded phase before doing anything else. A dropped
+connection during `write` is not exit 2; the host reconciles with the board and
+reports the recorded phase (see "Detached writes").
 
 ## Subcommands and their gates
 
@@ -190,6 +195,35 @@ The preflight check names the runner implements are `emmc-exists`,
 `staged-image-checksums` and `staging-space-free`. `boot-order-unchanged` is not
 examined unless `--expected-boot-order` is given.
 
+### Pinning the eMMC serial in an extension profile
+
+A shipped profile cannot know your board's eMMC serial, so it identifies the
+target by device name and sector count only, and that name check can never
+differ. Pin the serial in a profile you supply through `--extension-dir`:
+
+1. Copy the shipped profile for your board into the extension directory under
+   the same file name (`<board>.json`); it then shadows the shipped one.
+2. Set `target.identity` to `{"kind": "serial", "value": "<serial>", "sysfs_attr": "serial"}`.
+   The runner reads `/sys/block/<device>/device/<sysfs_attr>` and compares it
+   with `value`. Read your own board's value with
+   `cat /sys/block/mmcblk0/device/serial` on the board. The examples here use
+   the synthetic value `0x0badc0de`; never commit a real serial.
+3. Add `target-identity` to the profile's `checks` list. The shipped profile does
+   not list it, so without this `check` never examines identity at all and
+   cannot report a wrong board. `plan` verifies a pinned serial on its own, but
+   `check` only runs what `checks` names.
+
+```json
+"target": {
+  "identity": {"kind": "serial", "value": "0x0badc0de", "sysfs_attr": "serial"}
+},
+"checks": ["emmc-exists", "target-identity"]
+```
+
+(The `checks` list shown is abbreviated; keep the shipped entries and add
+`target-identity` to them.) Then run `check --extension-dir DIR`: it prints a
+`PASS` line for `target-identity` only when the serial matches.
+
 ### Adding a board
 
 Adding a board is a profile-only change. There is no code to write and none to
@@ -236,11 +270,13 @@ leaves either the previous complete file or the new complete file. Decisions use
 the phase and a monotonic sequence number, never wall time.
 
 Phases, in order: `planned`, `table-writing`, `table-written`, `image-writing`,
-`image-written`, `verified`, `armed`, `complete`. `failed` can follow any
-non-terminal phase. `restored` is written by a successful `restore` and can
-follow any phase. `complete`, `failed` and `restored` are terminal. `image-writing` and
-`image-written` repeat once per image, in the profile's image order. `armed`
-is skipped when the profile's arm strategy is `none`.
+`image-written`, `verified`, `arming`, `armed`, `complete`. `failed` can follow
+any non-terminal phase. `restored` is written by a successful `restore` and can
+follow any phase. `complete`, `failed` and `restored` are terminal.
+`image-writing` and `image-written` repeat once per image, in the profile's
+image order. `arming` and `armed` are skipped when the profile's arm strategy
+is `none`. `arming` is recorded before the first boot-entry change, so a run
+that dies or fails inside the arm step is left in `arming`, not in `verified`.
 
 A run that ends normally is in a terminal phase. A non-terminal phase on the
 board means the runner was killed or lost power mid-run. While one is recorded,
@@ -251,6 +287,9 @@ is allowed through for recovery only: `write` still refuses and tells you to run
 
 Find the phase with `avocado-flash ssh-emmc status --board NAME --host HOST`.
 
+The recovery actions are `none-recorded`, `restore-then-restart`, `restore` and
+`restore-unknown-arm`; `status` prints the action followed by its full text.
+
 | Phase on the board | What it means | Operator action |
 |--------------------|---------------|-----------------|
 | `planned` | The state file was created and no board change is recorded. The run never reached the first mutation. | None recorded (`none-recorded`). Safe to discard only if the run never took the on-board lock; check the lock before rerunning after acknowledging the run. |
@@ -259,6 +298,7 @@ Find the phase with `avocado-flash ssh-emmc status --board NAME --host HOST`.
 | `image-writing` | Killed while an image was being written. That partition holds partial data. | `restore-then-restart`, as above. |
 | `image-written` | At least one image is written and verified by read-back; more remain. | `restore-then-restart`, as above. |
 | `verified` | All images are written and read back correctly, but the guard or arming did not finish. | `restore --ack-run RUN_ID`. Do not rewrite the images. |
+| `arming` | The arm step started and did not finish (the runner was killed, or the arm step failed and was handled). A boot entry and `BootNext` may already exist even though the record does not name them. | `restore-unknown-arm`: DO NOT REBOOT. Run `restore --ack-run RUN_ID`; it finds the entry by its label when the number was never recorded. |
 | `armed` | The boot entry exists and `BootNext` may be set. The board will boot the test image on the next reboot. | `restore --ack-run RUN_ID`. Do not reboot first unless you want to boot the test image. |
 | `complete` | Terminal. | No recovery needed. |
 | `failed` | Terminal. | The recovery text names what is left: whether the table was possibly rewritten, which images are written, partial or not started, and whether a boot entry was armed ("DO NOT REBOOT" until `restore` removes it). Run `restore` (no acknowledgement needed for a finished run), then plan and write again. |
@@ -366,6 +406,19 @@ no state for the run after three polls, the host reports that the write did not
 start and prints the tail of `runner.log`. If `--wait-seconds` runs out the
 write keeps going on the board; follow it with `status`. Ctrl-C on the host has
 the same effect: a started write is not stopped.
+
+When the host stops following a run: a detached runner writes its pid to an
+`accepted` marker file in the run directory before it does any check or
+hashing. If the recorded phase is non-terminal and has not moved between two
+polls, the host looks at that pid. A runner that is gone cannot advance the
+phase, so the host stops at once instead of polling until `--wait-seconds`,
+prints the recorded phase and its recovery text (for `arming`: the arm state is
+unknown, DO NOT REBOOT, run `restore --ack-run RUN_ID`), and exits 1. A runner
+that is still alive in a non-terminal phase keeps being followed. The `accepted`
+marker is also what separates "slow" from "never started" when the board
+records no state at all: marker present with a live or unreadable pid means keep
+waiting, marker present with a dead pid means the runner exited without
+recording state, no marker and no state means the write did not start.
 
 ## Evidence records
 
