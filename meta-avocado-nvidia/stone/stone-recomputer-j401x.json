@@ -56,6 +56,10 @@
         "script": "stone-provision-tegraflash.sh",
         "envs": ["flash_options"]
       },
+      "tegraflash-usb": {
+        "script": "stone-provision-tegraflash.sh",
+        "envs": ["flash_options"]
+      },
       "noop": {
         "script": "stone-provision-noop.sh"
       }
