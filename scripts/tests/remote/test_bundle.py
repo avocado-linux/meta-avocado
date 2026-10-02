@@ -314,6 +314,7 @@ def test_restore_wiring(tmp_path, recs):
         "staging_dir": "/stage",
         "ack_run_id": "ack1",
         "emergency_disarm": True,
+        "run_id": "r1",
     }
 
 

@@ -6,6 +6,8 @@ import hashlib
 import json
 import threading
 
+import pytest
+
 from avocado_flash_remote import evidence as ev
 
 
@@ -133,3 +135,27 @@ def test_clock_skew_recorded_not_authorising(tmp_path):
     assert ev.authorise(plan, cur)
     cur["profile_hash"] = "other"
     assert not ev.authorise(plan, cur)
+
+
+_GOOD = {"image_hashes": {"boot": "a"}, "profile_hash": "p", "board_identity": {"s": 1}, "run_id": "r"}
+
+
+@pytest.mark.parametrize("key", ["image_hashes", "profile_hash", "board_identity", "run_id"])
+@pytest.mark.parametrize("empty", ["absent", {}, "", None])
+def test_authorise_refuses_when_a_mandatory_key_is_absent_or_empty_in_either_record(key, empty):
+    broken = dict(_GOOD)
+    if empty == "absent":
+        del broken[key]
+    else:
+        broken[key] = empty
+    assert not ev.authorise(broken, broken)
+    assert not ev.authorise(dict(_GOOD), broken)
+    assert not ev.authorise(broken, dict(_GOOD))
+
+
+def test_authorise_two_empty_records_is_false():
+    assert not ev.authorise({}, {})
+
+
+def test_authorise_complete_equal_records_is_true():
+    assert ev.authorise(dict(_GOOD), json.loads(json.dumps(_GOOD)))

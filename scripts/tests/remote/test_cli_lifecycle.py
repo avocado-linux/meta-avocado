@@ -947,3 +947,18 @@ def test_an_unreadable_record_with_a_live_runner_still_never_reads_as_in_progres
     assert rc == 1
     assert "still in progress" not in text
     assert f"record for run {rid} is unreadable" in text
+
+
+def test_restore_names_the_run_it_was_asked_for(images, tmp_path, board):
+    _stage_and_plan(images, tmp_path, board)
+    rid = plan_run_id(tmp_path)
+    rc, _ = run(args(images, tmp_path, "restore", "--run-id", rid, "--ack-run", rid), board)
+    assert rc == 0
+    assert board.runs[-1][1]["run_id"] == rid
+
+
+def test_restore_without_run_id_sends_none(images, tmp_path, board):
+    _stage_and_plan(images, tmp_path, board)
+    rc, _ = run(args(images, tmp_path, "restore", "--emergency-disarm"), board)
+    assert rc == 0
+    assert "run_id" not in board.runs[-1][1]

@@ -29,9 +29,10 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .arm import Arm, ArmRecord, _field, boot_next_of, boot_order_of, entries_with_label
+from .arm import Arm, ArmError, ArmRecord, _field, bootable_entries, boot_next_of, boot_order_of, entries_with_label
 from .ops import OpsError
-from .state import LOCK_NAME, TERMINAL, LockHeld, OnBoardLock, describe_recovery, load_state, transition
+from .cmd_status import _load_run
+from .state import LOCK_NAME, TERMINAL, LoadResult, LockHeld, OnBoardLock, describe_recovery, load_state, transition
 
 NOTE_LINE = "note: restore does not roll back partition table or image changes"
 # How long --emergency-disarm waits for a holder of the flash lock before it prints
@@ -73,17 +74,7 @@ def make_guarded_rmtree(expected):
     return remove
 
 
-def _bootable(live, ours) -> dict:
-    """Labelled entries that the firmware may boot: in BootOrder, or the one just booted."""
-    order = {e.strip().upper() for e in boot_order_of(live).split(",") if e.strip()}
-    current = _field(live, "BootCurrent").upper()
-    why = {}
-    for num in ours:
-        if num in order:
-            why[num] = "is in BootOrder"
-        elif current and num == current:
-            why[num] = "is BootCurrent (the board booted it)"
-    return why
+_bootable = bootable_entries
 
 
 def _refuse_bootable(say, bootable) -> None:
@@ -160,6 +151,7 @@ def run_restore(
     remove_tree=None,
     out=print,
     lock_wait=EMERGENCY_LOCK_WAIT,
+    run_id=None,
 ) -> RestoreResult:
     """Take the on-board lock, then restore. Refuses while a writer holds it.
 
@@ -174,7 +166,7 @@ def run_restore(
         with OnBoardLock(Path(state_dir) / LOCK_NAME, run_id=ack_run_id or "", wait_seconds=wait):
             return _restore_locked(
                 ops, profile, state_dir=state_dir, staging_dir=staging_dir, ack_run_id=ack_run_id,
-                emergency_disarm=emergency_disarm, remove_tree=remove_tree, out=out,
+                emergency_disarm=emergency_disarm, remove_tree=remove_tree, out=out, run_id=run_id,
             )  # fmt: skip
     except (LockHeld, OSError) as exc:
         if isinstance(exc, LockHeld):
@@ -193,6 +185,21 @@ def run_restore(
         return result
 
 
+def _load_requested(state_dir, run_id) -> LoadResult:
+    """The run restore acts on: the named run's own record, else whichever run ``current`` names.
+
+    A named run whose loaded record carries a different run id is unreadable, never a stand-in.
+    """
+    if run_id is None:
+        return load_state(state_dir)
+    loaded = _load_run(state_dir, run_id)
+    if loaded.status == "ok" and loaded.state.run_id != run_id:
+        return LoadResult(
+            "unparseable", reason=f"the record under {run_id!r} names run {loaded.state.run_id!r}", run_id=run_id
+        )
+    return loaded
+
+
 def _restore_locked(
     ops,
     profile,
@@ -203,6 +210,7 @@ def _restore_locked(
     emergency_disarm=False,
     remove_tree=None,
     out=print,
+    run_id=None,
 ) -> RestoreResult:
     result = RestoreResult(0)
     expected_staging = profile.staging.dir
@@ -247,7 +255,7 @@ def _restore_locked(
         say(f"removed staging {staging_dir}")
         return True
 
-    loaded = load_state(state_dir)
+    loaded = _load_requested(state_dir, run_id)
     label = profile.arm.params.get("label", "") if profile.arm.params else ""
 
     if emergency_disarm:
@@ -267,12 +275,18 @@ def _restore_locked(
         )
         return finish(1, True)
 
+    if loaded.status == "absent" and run_id is not None:
+        say(f"refusing: no state is recorded for run {run_id}; no boot entry or staging was touched")
+        say("name a run that exists, or omit --run-id to restore the current run")
+        return finish(1, False)
+
     if loaded.status == "absent":
         say("no run state found: nothing to restore for boot entries")
         ok = clean_staging()
         return finish(0 if ok else 1, True)
 
     state = loaded.state
+    say(f"restoring run {state.run_id}" + (" (the current run)" if run_id is None else " (named by --run-id)"))
     if state.phase not in TERMINAL and ack_run_id != state.run_id:
         say(f"refusing: run {state.run_id} is in phase {state.phase}, not finished")
         say(f"recovery: {describe_recovery(state)}")
@@ -308,7 +322,12 @@ def _restore_locked(
             ok = clean_staging()
             return finish(0 if ok else 1, note)
 
-        notes = Arm().disarm(ops, record)
+        try:
+            notes = Arm().disarm(ops, record)
+        except ArmError as e:
+            say(str(e))
+            say("staging kept")
+            return finish(1, note)
         for n in notes:
             result.actions.append(n)
             say(n)

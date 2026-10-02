@@ -584,3 +584,88 @@ def test_a_record_that_changes_while_it_is_read_is_reported_as_an_unknown_holder
     finally:
         holder_fh.close()
     assert e.value.holder == ""  # the stale dead pid is not offered as the holder
+
+
+# ---- schema-level validation: a state that parses but is inconsistent is unparseable ----
+
+
+def _mutate(tmp_path, fn):
+    s = _new(tmp_path)
+    s = st.transition(s, "table-writing")
+    path = tmp_path / "run-1" / "state.json"
+    data = json.loads(path.read_text())
+    fn(data)
+    path.write_text(json.dumps(data))
+    return path
+
+
+def _set(key, value):
+    def fn(d):
+        d[key] = value
+
+    return fn
+
+
+def _drop(key):
+    def fn(d):
+        del d[key]
+
+    return fn
+
+
+BAD_STATES = {
+    "run id other than the directory": _set("run_id", "run-2"),
+    "run id with a separator": _set("run_id", "a/b"),
+    "run id not a string": _set("run_id", 7),
+    "seq zero": _set("seq", 0),
+    "seq negative": _set("seq", -3),
+    "seq a string": _set("seq", "2"),
+    "seq a bool": _set("seq", True),
+    "seq a float": _set("seq", 2.0),
+    "arm_enabled not bool": _set("arm_enabled", "yes"),
+    "image_order not a list": _set("image_order", "boot"),
+    "image_order with a non-string": _set("image_order", ["boot", 3]),
+    "phases_done not a list": _set("phases_done", {}),
+    "phases_done entry not an object": _set("phases_done", ["planned"]),
+    "phases_done unknown phase": _set("phases_done", [{"seq": 1, "phase": "bogus"}]),
+    "images not a mapping": _set("images", []),
+    "image state not an object": _set("images", {"boot": "pending", "rootfs": {"state": "pending"}}),
+    "image with an unknown state": _set("images", {"boot": {"state": "done"}, "rootfs": {"state": "pending"}}),
+    "ordered image missing from images": _set("images", {"boot": {"state": "pending"}}),
+    "armed a string": _set("armed", "0005"),
+    "armed with a non-string entry number": _set("armed", {"entry_number": 5}),
+    "armed with a non-bool next_armed": _set("armed", {"next_armed": "true"}),
+    "armed with an unknown key": _set("armed", {"entry_number": "0005", "evil": 1}),
+    "missing phases_done": _drop("phases_done"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(BAD_STATES))
+def test_inconsistent_state_is_unparseable(tmp_path, name):
+    _mutate(tmp_path, BAD_STATES[name])
+    r = st.load_state(tmp_path)
+    assert r.status == "unparseable", name
+    assert r.reason
+
+
+@pytest.mark.parametrize("name", sorted(BAD_STATES))
+def test_inconsistent_state_blocks_rerun_without_ack(tmp_path, name):
+    _mutate(tmp_path, BAD_STATES[name])
+    with pytest.raises(st.RerunRefused):
+        st.check_rerun_allowed(tmp_path)
+
+
+def test_a_state_under_a_named_run_must_carry_that_run_id(tmp_path):
+    from avocado_flash_remote.cmd_status import _load_run
+
+    _mutate(tmp_path, _set("run_id", "run-2"))
+    assert _load_run(tmp_path, "run-1").status == "unparseable"
+
+
+def test_a_well_formed_armed_state_still_parses(tmp_path):
+    s = _walk_to_verified(_new(tmp_path))
+    s = st.transition(s, "arming", armed={"entry_number": "", "label": "x", "preexisting_boot_order": "0001",
+                                          "preexisting_next": "", "next_armed": False})
+    s = st.transition(s, "armed", armed={"entry_number": "0005", "label": "x", "preexisting_boot_order": "0001",
+                                         "preexisting_next": "", "next_armed": True})
+    assert st.load_state(tmp_path).status == "ok"

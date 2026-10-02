@@ -229,6 +229,9 @@ def _do_write(real, profile, phash, req):
 
 def _do_restore(real, profile, phash, req):
     state_dir, staging = _need(req, "state_dir", "staging_dir")
+    run_id = req.get("run_id")
+    if run_id is not None and (not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id)):
+        raise _Exit(EXIT_USAGE, f"runner error: invalid run id {run_id!r}", sys.stderr)
     return run_restore(
         real,
         profile,
@@ -236,6 +239,7 @@ def _do_restore(real, profile, phash, req):
         staging_dir=staging,
         ack_run_id=req.get("ack_run_id"),
         emergency_disarm=bool(req.get("emergency_disarm", False)),
+        run_id=run_id,
     )
 
 

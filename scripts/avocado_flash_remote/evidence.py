@@ -178,4 +178,9 @@ def final_status(runner_reported_phase: str, verify: VerifyResult) -> str:
 def authorise(plan_record: dict[str, Any], current: dict[str, Any]) -> bool:
     """Compare hashes and ids only. No time input: clock skew is irrelevant."""
     keys = ("image_hashes", "profile_hash", "board_identity", "run_id")
-    return all(plan_record.get(k) == current.get(k) for k in keys)
+    if not isinstance(plan_record, dict) or not isinstance(current, dict):
+        return False
+    # Two records that both lack a key, or both carry it empty, are equal by dict.get and prove nothing.
+    if not all(plan_record.get(k) and current.get(k) for k in keys):
+        return False
+    return all(plan_record[k] == current[k] for k in keys)

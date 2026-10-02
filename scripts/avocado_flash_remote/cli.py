@@ -553,15 +553,15 @@ def _do_restore(ctx: _Ctx) -> int:
         rc = ctx.connect(need_staged=True)
         if rc is not None:
             return rc
-        res = ctx.invoke(
-            "restore",
-            {
-                "staging_dir": ctx.staging_dir,
-                "state_dir": ctx.state_dir,
-                "ack_run_id": args.ack_run,
-                "emergency_disarm": bool(args.emergency_disarm),
-            },
-        )
+        request = {
+            "staging_dir": ctx.staging_dir,
+            "state_dir": ctx.state_dir,
+            "ack_run_id": args.ack_run,
+            "emergency_disarm": bool(args.emergency_disarm),
+        }
+        if args.run_id:
+            request["run_id"] = _need_run_id(ctx)
+        res = ctx.invoke("restore", request)
         return _exit_code("restore", res.rc)
 
 

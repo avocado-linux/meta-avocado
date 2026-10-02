@@ -676,3 +676,76 @@ def test_emergency_disarm_leaves_a_longer_label_with_our_label_as_its_prefix(env
     assert r.exit_code == 0
     assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
     assert_safe(ops)
+
+
+# --- restore names a run: --run-id must not restore whichever run `current` names ---
+
+
+def _two_runs(env):
+    """Run r1 armed and complete, then run r2 which moved `current` to itself."""
+    mk_state(env, "armed", rec())
+    st.create_run(
+        env.state_dir, run_id="r2", profile_hash="p", plan_hash="q", board_identity={}, image_roles=[], arm=True
+    )
+
+
+def test_run_id_naming_a_non_current_run_does_not_restore_current(env):
+    _two_runs(env)
+    ops = RecordingOps({LIST: [efi(nxt="0005", extra=[NEW]), efi(nxt="0005", extra=[NEW]), efi()]})
+    r, removed, out = go(env, ops, run_id="r1", ack_run_id="r1")
+    # r1 is the armed run: it is disarmed, and the closed run is r1, not the current r2
+    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert st.load_state(env.state_dir).state.phase == "planned"
+    assert any("run r1" in ln for ln in out)
+
+
+def test_run_id_that_is_current_run_restores_it(env):
+    mk_state(env, "failed")
+    ops = RecordingOps({})
+    r, removed, out = go(env, ops, run_id="r1")
+    assert r.exit_code == 0
+    assert any("restoring run r1" in ln for ln in out)
+
+
+def test_run_id_of_unrecorded_run_refuses_without_touching_current_run(env):
+    _two_runs(env)
+    ops = RecordingOps({})
+    r, removed, out = go(env, ops, run_id="r9", ack_run_id="r9")
+    assert r.exit_code == 1
+    assert ops.log == [] and removed == []
+    assert st.load_state(env.state_dir).state.run_id == "r2"
+
+
+def test_run_id_whose_record_names_another_run_refuses(env):
+    mk_state(env, "armed", rec())
+    path = env.state_dir / "r1" / "state.json"
+    data = json.loads(path.read_text())
+    data["run_id"] = "other"
+    path.write_text(json.dumps(data))
+    ops = RecordingOps({})
+    r, removed, out = go(env, ops, run_id="r1")
+    assert r.exit_code == 1
+    assert mutations(ops) == [] and removed == []
+
+
+def test_no_run_id_names_the_run_being_restored(env):
+    mk_state(env, "failed")
+    r, removed, out = go(env, RecordingOps({}))
+    assert any("restoring run r1 (the current run)" in ln for ln in out)
+
+
+def test_bad_run_id_refuses(env):
+    mk_state(env, "failed")
+    ops = RecordingOps({})
+    r, removed, out = go(env, ops, run_id="../x")
+    assert r.exit_code == 1 and removed == [] and mutations(ops) == []
+
+
+def test_restore_by_recorded_number_refuses_an_entry_in_boot_order_and_keeps_staging(env):
+    mk_state(env, "armed", rec())
+    live = efi(order="0001,0005,0002", nxt="0005", extra=[NEW])
+    ops = RecordingOps({LIST: [live, live, live]})
+    r, removed, out = go(env, ops)
+    assert r.exit_code == 1
+    assert mutations(ops) == [] and removed == []
+    assert "BootOrder" in "\n".join(out)
