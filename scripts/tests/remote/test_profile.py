@@ -301,3 +301,51 @@ def test_module_is_stdlib_only():
             assert all(a.name.split(".")[0] in allowed for a in node.names)
         elif isinstance(node, ast.ImportFrom):
             assert (node.module or "").split(".")[0] in allowed or node.level
+
+
+# ---- 5.33: trust-boundary validation ----
+
+
+@pytest.mark.parametrize("board", ["-foo", "foo\n", "Foo", "foo_bar", "", "foo bar"])
+def test_board_name_pattern_is_strict(board):
+    with pytest.raises(ProfileError, match="board"):
+        load_profile_bytes(mutated(lambda d: d.update(board=board)))
+
+
+def test_loader_and_resolver_share_one_board_pattern():
+    from avocado_flash_remote import profile as profile_mod
+    from avocado_flash_remote import profile_resolve
+
+    assert profile_resolve._BOARD_RE is profile_mod._BOARD_RE
+    with pytest.raises(profile_resolve.InvalidBoard):
+        profile_resolve._check_board("-foo")
+
+
+def test_two_image_roles_may_not_target_the_same_partition():
+    def m(d):
+        d["images"]["root"]["partition"] = 1
+
+    with pytest.raises(ProfileError, match="boot.*root|root.*boot"):
+        load_profile_bytes(mutated(m))
+
+
+@pytest.mark.parametrize("key", ["state_dir"])
+@pytest.mark.parametrize("value", ["/", "//", "/."])
+def test_state_dir_may_not_be_the_filesystem_root(key, value):
+    with pytest.raises(ProfileError, match=key):
+        load_profile_bytes(mutated(lambda d: d.update({key: value})))
+
+
+@pytest.mark.parametrize("value", ["/", "//", "/."])
+def test_staging_dir_may_not_be_the_filesystem_root(value):
+    with pytest.raises(ProfileError, match="staging.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=value)))
+
+
+@pytest.mark.parametrize("first", [0, 33])
+def test_first_lba_below_the_gpt_header_is_refused(first):
+    def m(d):
+        d["layout"]["params"]["first_lba"] = first
+
+    with pytest.raises(ProfileError, match="first_lba"):
+        load_profile_bytes(mutated(m))

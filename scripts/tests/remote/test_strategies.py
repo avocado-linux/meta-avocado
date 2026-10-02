@@ -414,3 +414,48 @@ def test_jetson_profile_sfdisk_input_equals_golden_without_uuids_argument():
             break
         block.append(line[4:])
     assert got == "\n".join(block) + "\n"
+
+
+# ---- 5.33: partition names and UUIDs are interpolated into an sfdisk script ----
+
+
+@pytest.mark.parametrize("name", ['a"b', "a b", "a\nb", "a;b", "a$b", "x" * 37, "", "a/b", "ünï"])
+def test_layout_partition_name_charset_is_strict(name):
+    def m(p):
+        p["table"][0]["name"] = name
+
+    with pytest.raises(StrategyError, match="name"):
+        validate("layout", "explicit-table", _layout_with(m))
+
+
+def test_layout_shipped_style_names_still_pass():
+    def m(p):
+        p["table"][0]["name"] = "A_kernel.v+2-x"
+
+    validate("layout", "explicit-table", _layout_with(m))
+
+
+@pytest.mark.parametrize("first", [-1, 0, 33])
+def test_layout_first_lba_must_clear_the_gpt_header(first):
+    def m(p):
+        p["first_lba"] = first
+
+    with pytest.raises(StrategyError, match="first_lba"):
+        validate("layout", "explicit-table", _layout_with(m))
+
+
+def test_layout_last_lba_must_exceed_first_lba():
+    def m(p):
+        p["first_lba"] = p["last_lba"]
+        p["table"] = [dict(p["table"][0], start=p["last_lba"], size=1)]
+
+    with pytest.raises(StrategyError, match="first_lba|last_lba"):
+        validate("layout", "explicit-table", _layout_with(m))
+
+
+def test_layout_guid_with_a_trailing_newline_is_refused():
+    def m(p):
+        p["table"][0]["uuid"] = "4D21B016-B534-45C2-A9FB-5C16E091FD2D\n"
+
+    with pytest.raises(StrategyError, match="uuid"):
+        validate("layout", "explicit-table", _layout_with(m))

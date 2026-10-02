@@ -425,6 +425,18 @@ def _unreadable_text(run_id: str, runner: str) -> str:
     )
 
 
+def _in_marker_window(ctx: _Ctx, verify, remote_dir: str, run_id: str, nonce: str) -> bool:
+    """True when a failed verification may only be the runner's last two writes landing apart.
+
+    The runner publishes its outcome marker and then the manifest that lists it. A collect before the
+    marker sees no outcome; a collect between the two sees the marker present but unlisted, or a
+    manifest that is not there yet. Any other problem (a changed or missing artifact) is not waited out.
+    """
+    if host.runner_outcome(ctx.transport, remote_dir, run_id, nonce)[0] == "none":
+        return True
+    return any(p == "unlisted file: outcome" or p.startswith("manifest unreadable") for p in verify.problems)
+
+
 def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
@@ -526,7 +538,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     # The phase turns complete a moment before the runner writes its manifest and outcome marker: a
     # collection in that window is retried while the runner has not recorded its own end.
     for _ in range(COLLECT_RETRIES):
-        if outcome != "not-verified" or host.runner_outcome(ctx.transport, remote_dir, run_id, nonce)[0] != "none":
+        if outcome != "not-verified" or not _in_marker_window(ctx, verify, remote_dir, run_id, nonce):
             break
         ctx.sleep(ctx.poll_interval)
         local = _unique_dir(ctx.evidence_dir / f"{run_id}-write")

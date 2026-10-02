@@ -516,6 +516,10 @@ def _rb(tmp, *, journal=True, efi=tcrb.EFI, reference=tcrb.ORDER, outfs="tmpfs\n
     res = run_readback(
         ops, shipped_profile(), mount_dir=MNT, out_dir=OUT, reference_boot_order=reference,
         copier=lambda s, d: None, list_logs=lambda m: [], makedirs=lambda *a, **k: None,
+        # The kit asked about the output directory itself; the port asks about its nearest existing
+        # ancestor when the directory is not there yet. The literal "<TMP>" paths never exist, so
+        # hand the probe the path as is to keep the pinned call sequence.
+        nearest_existing=lambda p: p,
         out=lines.append,
     )  # fmt: skip
     return PortRun(res.exit_code, ops.log, lines, extra={"res": res})

@@ -25,7 +25,7 @@ from . import strategies
 
 SCHEMA_VERSION = 1
 IDENTITY_KINDS = ("by-path", "serial", "sysfs-name")
-_BOARD_RE = re.compile(r"^[a-z0-9-]+$")
+_BOARD_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # used with fullmatch: no leading dash, no trailing newline
 _FORBIDDEN_ROOTS = ("/dev", "/sys", "/proc")
 
 
@@ -182,6 +182,8 @@ def _abs_path(path, value):
     parts = value.split("/")
     if ".." in parts:
         raise ProfileError(path, "must not contain '..'")
+    if not [c for c in parts if c not in ("", ".")]:
+        raise ProfileError(path, "must not be the filesystem root")
     for root in _FORBIDDEN_ROOTS:
         if value == root or value.startswith(root + "/"):
             raise ProfileError(path, f"must not be under {root}")
@@ -289,8 +291,8 @@ def load_profile_bytes(data: bytes) -> Profile:
             "schema_version", f"unsupported version {version!r} (supported: {SCHEMA_VERSION})"
         )
     board = _str("board", top["board"])
-    if not _BOARD_RE.match(board):
-        raise ProfileError("board", "must be kebab-case [a-z0-9-]+")
+    if not _BOARD_RE.fullmatch(board):
+        raise ProfileError("board", "must be kebab-case [a-z0-9-]+ without a leading dash")
     description = None
     if "description" in top:
         description = _str("description", top["description"], nonempty=False)
@@ -323,7 +325,14 @@ def load_profile_bytes(data: bytes) -> Profile:
             )
         numbers = {p["number"] for p in lp["table"]}
         names = {p["name"] for p in lp["table"]}
+        owner = {}
         for role, img in images.items():
+            if img.partition in owner:
+                raise ProfileError(
+                    f"images.{role}.partition",
+                    f"roles {owner[img.partition]} and {role} both target partition {img.partition}",
+                )
+            owner[img.partition] = role
             if img.partition not in numbers:
                 raise ProfileError(
                     f"images.{role}.partition",

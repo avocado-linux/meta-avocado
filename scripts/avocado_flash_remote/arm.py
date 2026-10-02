@@ -246,8 +246,9 @@ def parse_boot_header(hdr, where):
     version = int.from_bytes(hdr[40:44], "little")
     if version not in (0, 1, 2):
         raise GuardError(f"{where}: boot image header_version {version} is not understood (0, 1, 2)")
-    a = hdr[64:576].replace(b"\0", b"").decode("utf-8", errors="replace")
-    b = hdr[608:1632].replace(b"\0", b"").decode("utf-8", errors="replace")
+    # The kernel reads each fixed-width field as a C string: it ends at the first NUL.
+    a = hdr[64:576].split(b"\0", 1)[0].decode("utf-8", errors="replace")
+    b = hdr[608:1632].split(b"\0", 1)[0].decode("utf-8", errors="replace")
     return a, b
 
 

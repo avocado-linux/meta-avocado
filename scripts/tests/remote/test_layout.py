@@ -190,3 +190,24 @@ def test_sfdisk_input_with_a_bad_device_sectors_refuses(bad):
     p["device_sectors"] = bad
     with pytest.raises(LayoutError):
         sfdisk_input(p, "/dev/mmcblk0")
+
+
+@pytest.mark.parametrize("name", ['a"b', "a b", "a\nb", "x" * 37, ""])
+def test_sfdisk_input_refuses_a_name_that_would_break_the_script(name):
+    p = params()
+    p["table"][0]["name"] = name
+    with pytest.raises(LayoutError, match="name"):
+        sfdisk_input(p, "/dev/mmcblk0")
+
+
+@pytest.mark.parametrize("uuid", ['x"y', "not-a-guid", "4D21B016-B534-45C2-A9FB-5C16E091FD2D\n", "", 5])
+def test_sfdisk_input_validates_a_legacy_uuid_argument(uuid):
+    with pytest.raises(LayoutError, match="uuid"):
+        sfdisk_input(params(), "/dev/mmcblk0", uuids={16: uuid})
+
+
+def test_sfdisk_input_validates_a_uuid_carried_in_the_table():
+    p = params()
+    p["table"][0]["uuid"] = 'x", name="evil'
+    with pytest.raises(LayoutError, match="uuid"):
+        sfdisk_input(p, "/dev/mmcblk0")

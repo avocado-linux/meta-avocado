@@ -14,12 +14,8 @@ Standard library only (ships to a board running Python 3.10).
 from __future__ import annotations
 
 import copy
-import re
 
-GPT_SECONDARY_SECTORS = 34
-_GUID_RE = re.compile(
-    r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
-)
+from .layout import GPT_MIN_FIRST_LBA, GPT_SECONDARY_SECTORS, GUID_RE as _GUID_RE, PART_NAME_RE
 
 
 class StrategyError(ValueError):
@@ -100,16 +96,16 @@ def _validate_explicit_table(where, params):
 
     if out["sector_size"] <= 0:
         raise StrategyError(f"{where}: sector_size must be positive")
-    if out["first_lba"] < 0:
-        raise StrategyError(f"{where}: first_lba must not be negative")
+    if out["first_lba"] < GPT_MIN_FIRST_LBA:
+        raise StrategyError(f"{where}: first_lba {out['first_lba']} must be at least {GPT_MIN_FIRST_LBA} (GPT header)")
     expected_last = out["device_sectors"] - GPT_SECONDARY_SECTORS
     if out["last_lba"] != expected_last:
         raise StrategyError(
             f"{where}: last_lba {out['last_lba']} must equal device_sectors - "
             f"{GPT_SECONDARY_SECTORS} (the GPT secondary table) = {expected_last}"
         )
-    if out["first_lba"] > out["last_lba"]:
-        raise StrategyError(f"{where}: first_lba is after last_lba")
+    if out["first_lba"] >= out["last_lba"]:
+        raise StrategyError(f"{where}: last_lba must be greater than first_lba")
 
     table = out["table"]
     if not table:
@@ -129,19 +125,19 @@ def _validate_explicit_table(where, params):
         if part["number"] in numbers:
             raise StrategyError(f"{pw}: duplicate partition number {part['number']}")
         numbers.add(part["number"])
-        if not part["name"]:
-            raise StrategyError(f"{pw}: name must not be empty")
+        if not PART_NAME_RE.fullmatch(part["name"]):
+            raise StrategyError(f"{pw}: name {part['name']!r} must be 1-36 of letters, digits, _ . + -")
         if part["name"] in names:
             raise StrategyError(f"{pw}: duplicate partition name '{part['name']}'")
         names.add(part["name"])
         if part["size"] <= 0:
             raise StrategyError(f"{pw}: size must be positive")
-        if not _GUID_RE.match(part["type_guid"]):
+        if not _GUID_RE.fullmatch(part["type_guid"]):
             raise StrategyError(
                 f"{pw}: type_guid '{part['type_guid']}' is not an 8-4-4-4-12 hex GUID"
             )
         if "uuid" in part:
-            if not _GUID_RE.match(part["uuid"]):
+            if not _GUID_RE.fullmatch(part["uuid"]):
                 raise StrategyError(
                     f"{pw}: uuid '{part['uuid']}' is not an 8-4-4-4-12 hex GUID"
                 )

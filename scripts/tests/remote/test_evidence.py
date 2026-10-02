@@ -253,3 +253,35 @@ def test_malformed_or_missing_clock_still_writes_the_manifest_with_null_skew(tmp
     m = _manifest(d)
     assert m["clocks"]["skew_seconds"] is None
     assert ev.verify_record_set(d).ok
+
+
+# ---- 5.33: the clock record is evidence, but its two timestamps must be present ----
+
+
+@pytest.mark.parametrize("key", ["host_utc", "board_utc"])
+@pytest.mark.parametrize("bad", ["absent", None, "", 5])
+def test_manifest_clocks_need_both_timestamps_as_non_empty_strings(tmp_path, key, bad):
+    d = _build(tmp_path)
+
+    def fn(m):
+        if bad == "absent":
+            del m["clocks"][key]
+        else:
+            m["clocks"][key] = bad
+
+    _rewrite(d, fn)
+    res = ev.verify_record_set(d)
+    assert not res.ok and any(key in p for p in res.problems)
+
+
+def test_a_null_skew_alone_still_verifies(tmp_path):
+    d = _build(tmp_path)
+    _rewrite(d, lambda m: m["clocks"].__setitem__("skew_seconds", None))
+    assert ev.verify_record_set(d).ok
+
+
+def test_a_missing_clock_is_recorded_as_unavailable_and_verifies(tmp_path):
+    d = _build(tmp_path, board_utc=None)
+    clocks = _manifest(d)["clocks"]
+    assert clocks["board_utc"] == "unavailable" and clocks["skew_seconds"] is None
+    assert ev.verify_record_set(d).ok

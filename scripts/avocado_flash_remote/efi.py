@@ -36,8 +36,8 @@ def read_variable(path: str | os.PathLike, opener: Callable = open) -> EfiVar:
 
 
 def secure_boot_state(path: str | os.PathLike, opener: Callable = open) -> str:
-    """Return 'disabled', 'enabled' or 'unreadable' from the final data byte."""
+    """Return 'disabled', 'enabled' or 'unreadable'. SecureBoot is one data byte, 0 or 1; anything else is unreadable."""
     var = read_variable(path, opener)
-    if not var.ok:
+    if not var.ok or len(var.data) != 1 or var.data[0] not in (0, 1):
         return "unreadable"
-    return "disabled" if var.data[-1] == 0 else "enabled"
+    return "disabled" if var.data[0] == 0 else "enabled"

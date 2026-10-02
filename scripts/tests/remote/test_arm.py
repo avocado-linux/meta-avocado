@@ -498,3 +498,33 @@ def test_disarm_refuses_a_recorded_entry_that_is_boot_current():
     with pytest.raises(ArmError, match="BootCurrent"):
         get_arm("uefi-bootnext").disarm(ops, rec)
     assert ops.log == [LIST]
+
+
+# ---- 5.33: each command-line field ends at its first NUL, like the kernel's ----
+
+
+def _after_nul(field_after):
+    return header("root=/dev/x \0 " + field_after)
+
+
+def test_parse_boot_header_stops_each_field_at_its_first_nul():
+    a, b = armmod.parse_boot_header(header("one\0two", extra="three\0four"), "n")
+    assert (a, b) == ("one", "three")
+
+
+def test_guard_refuses_an_argument_that_only_appears_after_a_nul():
+    ops = guard_ops(_after_nul(ARG), header(ARG))
+    with pytest.raises(GuardError, match="A_kernel"):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_refuses_an_argument_after_a_nul_in_the_extra_field():
+    ops = guard_ops(header("root=/dev/x", extra="a \0 " + ARG), header(ARG))
+    with pytest.raises(GuardError):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_staged_guard_refuses_an_argument_that_only_appears_after_a_nul():
+    rd = reader({f"{STAGE}/boot.img": _after_nul(ARG), f"{STAGE}/boot-b.img": header(ARG)})
+    with pytest.raises(GuardError, match="boot.img"):
+        get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)

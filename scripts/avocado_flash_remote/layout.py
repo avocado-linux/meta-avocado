@@ -6,7 +6,14 @@ strategy (see strategies.py). Standard library only.
 
 from __future__ import annotations
 
+import re
+
 GPT_SECONDARY_SECTORS = 34
+# One GPT header and its protective MBR sit before the first usable sector.
+GPT_MIN_FIRST_LBA = 34
+# Partition names and UUIDs are interpolated into a quoted sfdisk script field, so the charset is closed.
+PART_NAME_RE = re.compile(r"[A-Za-z0-9_.+-]{1,36}")
+GUID_RE = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
 
 
 class LayoutError(ValueError):
@@ -56,6 +63,16 @@ def check_fits(layout_params, device_sectors: int) -> None:
         prev_end, prev_num = end, part["number"]
 
 
+def _check_script_fields(part, mapped_uuid) -> None:
+    name = part.get("name")
+    if not isinstance(name, str) or not PART_NAME_RE.fullmatch(name):
+        raise LayoutError(f"partition {part.get('number')}: name {name!r} must be 1-36 of letters, digits, _ . + -")
+    for field in ("uuid", "type_guid"):
+        value = part.get(field)
+        if value is not None and (not isinstance(value, str) or not GUID_RE.fullmatch(value)):
+            raise LayoutError(f"partition {part.get('number')}: {field} {value!r} is not an 8-4-4-4-12 hex GUID")
+
+
 def sfdisk_input(layout_params, device_path: str, uuids=None) -> str:
     """Return the sfdisk script (no indentation) for the table.
 
@@ -63,8 +80,12 @@ def sfdisk_input(layout_params, device_path: str, uuids=None) -> str:
     the uuids mapping (number -> UUID); the mapping wins when both are given.
     """
     uuids = dict(uuids or {})
+    for part in layout_params["table"]:
+        _check_script_fields(part, uuids.get(part["number"]))
     numbers = {p["number"] for p in layout_params["table"]}
-    for n in uuids:
+    for n, u in uuids.items():
+        if not isinstance(u, str) or not GUID_RE.fullmatch(u):
+            raise LayoutError(f"uuid {u!r} for partition {n} is not an 8-4-4-4-12 hex GUID")
         if n not in numbers:
             raise LayoutError(f"uuid given for unknown partition {n}")
     sectors = layout_params.get("device_sectors")

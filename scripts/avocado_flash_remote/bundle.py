@@ -216,7 +216,10 @@ def _verify_bundle(path) -> list:
     except (OSError, zipfile.BadZipFile, TypeError) as e:
         return [f"cannot open archive: {e}"]
     with zf:
-        names = set(zf.namelist())
+        listed_names = zf.namelist()
+        names = set(listed_names)
+        for name in sorted({n for n in listed_names if listed_names.count(n) > 1}):
+            problems.append(f"{name}: duplicate member in archive")
         try:
             meta = json.loads(zf.read("BUNDLE.json").decode("utf-8"))
         except (KeyError, ValueError) as e:
@@ -227,6 +230,11 @@ def _verify_bundle(path) -> list:
         if not isinstance(modules, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in modules.items()):
             return ["BUNDLE.json unusable: modules is not a mapping of name to sha256"]
         expected = dict(modules)
+        required = {f"{PACKAGE}/{m}.py" for m in ARCHIVE_MODULES}
+        for name in sorted(required - set(expected)):
+            problems.append(f"{name}: required module is not declared in BUNDLE.json")
+        for name in sorted(set(expected) - required):
+            problems.append(f"{name}: declared in BUNDLE.json but not part of the module contract")
         for name, digest in sorted(expected.items()):
             if name not in names:
                 problems.append(f"{name}: missing from archive")
