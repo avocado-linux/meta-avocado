@@ -21,7 +21,7 @@ KIT_CHECKS = (
     "efibootmgr-supports-create",
     "boot-order-unchanged",
     "boot-next-unset",
-    "no-stale-oneshot-entry",
+    "arm-entry-unique",
     "efivarfs-rw",
     "secure-boot-disabled",
     "staged-images-present",
@@ -135,9 +135,7 @@ def test_jetson_var_must_be_populated(jetson):
 
 def test_jetson_arm_guard(jetson):
     assert jetson.arm.strategy == "uefi-bootnext"
-    assert jetson.arm.params["label"] == "avocado-emmc-oneshot"
-    assert jetson.arm.params["loader_path"] == "\\EFI\\BOOT\\BOOTAA64.EFI"
-    assert jetson.arm.params["boot_args"] == "bootmode=bootimg"
+    assert jetson.arm.params == {"entry_label": "UEFI eMMC Device"}
     assert jetson.guard.strategy == "boot-arg"
     assert jetson.guard.params["argument"] == "module_blacklist=nvme,nvme_core,pcie_tegra194"
     names = {p["name"] for p in jetson.layout.params["table"]}

@@ -192,21 +192,24 @@ def _validate_boot_arg(where, params):
     return out
 
 
+# --- arm: uefi-bootnext -----------------------------------------------------
+
+
+def _validate_bootnext(where, params):
+    """``entry_label`` is the firmware's own description of the storage entry to arm."""
+    out = _check_fields(where, {"entry_label": ("str", True, None)}, params)
+    if not out["entry_label"].strip():
+        raise StrategyError(f"{where}: parameter 'entry_label' must not be empty")
+    return out
+
+
 # --- registry ---------------------------------------------------------------
 
 _STR_LIST = ("list", "str")
 
 # (kind, name) -> validator(where, params) -> params
 _REGISTRY = {
-    ("arm", "uefi-bootnext"): lambda w, p: _check_fields(
-        w,
-        {
-            "label": ("str", True, None),
-            "loader_path": ("str", True, None),
-            "boot_args": ("str", False, None),
-        },
-        p,
-    ),
+    ("arm", "uefi-bootnext"): lambda w, p: _validate_bootnext(w, p),
     ("arm", "none"): lambda w, p: _check_fields(w, {}, p),
     ("guard", "boot-arg"): lambda w, p: _validate_boot_arg(w, p),
     ("guard", "none"): lambda w, p: _check_fields(w, {}, p),

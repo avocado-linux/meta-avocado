@@ -280,22 +280,14 @@ class Ops:
         return ["dd", f"if={src}", f"of={dst}", f"bs={bs}", "conv=fsync", "status=none"]
 
     @staticmethod
-    def vec_efibootmgr_create(disk, part, label, loader, opts):  # install.sh:657
-        return ["efibootmgr", "-C", "-d", disk, "-p", str(part), "-L", label, "-l", loader, "-u", opts]
-
-    @staticmethod
     def vec_efibootmgr_next(entry):  # install.sh:672
+        if not _BOOT_ENTRY_RE.match(str(entry)):
+            raise ValueError(f"boot entry must be four hex digits, got {entry!r}")
         return ["efibootmgr", "-n", str(entry)]
 
     @staticmethod
     def vec_efibootmgr_delete_next():  # install.sh:739, readback.sh:126
         return ["efibootmgr", "-N"]
-
-    @staticmethod
-    def vec_efibootmgr_delete(entry):  # install.sh:747, readback.sh:132
-        if not _BOOT_ENTRY_RE.match(str(entry)):
-            raise ValueError(f"boot entry must be four hex digits, got {entry!r}")
-        return ["efibootmgr", "-B", "-b", str(entry)]
 
     @staticmethod
     def vec_mount(src, target, options="ro", fstype=None):  # readback.sh:226
@@ -421,10 +413,6 @@ class Ops:
         self._gate("dd_write", True)
         return self._run(self.vec_dd_write(src, dst, bs), timeout=timeout, **kw)
 
-    def efibootmgr_create(self, disk, part, label, loader, opts, **kw) -> OpResult:
-        self._gate("efibootmgr_create", True)
-        return self._run(self.vec_efibootmgr_create(disk, part, label, loader, opts), **kw)
-
     def efibootmgr_next(self, entry, **kw) -> OpResult:
         self._gate("efibootmgr_next", True)
         return self._run(self.vec_efibootmgr_next(entry), **kw)
@@ -432,10 +420,6 @@ class Ops:
     def efibootmgr_delete_next(self, **kw) -> OpResult:
         self._gate("efibootmgr_delete_next", True)
         return self._run(self.vec_efibootmgr_delete_next(), **kw)
-
-    def efibootmgr_delete(self, entry, **kw) -> OpResult:
-        self._gate("efibootmgr_delete", True)
-        return self._run(self.vec_efibootmgr_delete(entry), **kw)
 
     def mount(self, src, target, options="ro", fstype=None, **kw) -> OpResult:
         self._gate("mount", True)

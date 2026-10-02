@@ -71,7 +71,18 @@ def test_readme_has_a_recovery_section_naming_the_manual_wipe_and_restage():
 
 def test_readme_documents_the_emergency_disarm_lock_wait():
     text = _section("Restore scope")
-    assert "emergency-disarm" in text and "waits" in text and "efibootmgr -B" in text
+    # The manual steps used to include `efibootmgr -B -b XXXX`; the tool deletes no entry now (task 5.36).
+    assert "emergency-disarm" in text and "waits" in text and "efibootmgr -N" in text
+    assert "efibootmgr -B" not in text
+
+
+def test_readme_documents_the_firmware_entry_arm():
+    flat = _flat(README)
+    for needle in ("entry_label", "UEFI eMMC Device", "arm-entry-unique", "efibootmgr -n <entry>",
+                   "no longer passes `bootmode=bootimg`", "deletes no boot entry"):
+        assert needle in flat, needle
+    for gone in ("loader_path", "boot_args", "no-stale-oneshot-entry", "efibootmgr -C` and sets"):
+        assert gone not in flat, gone
 
 
 def test_readme_documents_the_outcome_marker():

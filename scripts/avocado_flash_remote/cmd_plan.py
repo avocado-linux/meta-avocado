@@ -364,7 +364,11 @@ def _check_images(ops: Ops, profile, staging_dir: str, scanner) -> tuple[dict, i
 # -------------------------------------------------------------- rendering
 
 
-def _body(profile, staging_dir: str, sfdisk_text: str, n_manifest: int) -> list:
+def _next_text(entry_number: str) -> str:
+    return " ".join(_q(a) for a in Ops.vec_efibootmgr_next(entry_number))
+
+
+def _body(profile, staging_dir: str, sfdisk_text: str, n_manifest: int, entry_number: str = "") -> list:
     dev = profile.target.device
     params = profile.layout.params
     ordered = sorted(params["table"], key=lambda p: (p["start"], p["number"]))
@@ -393,9 +397,9 @@ def _body(profile, staging_dir: str, sfdisk_text: str, n_manifest: int) -> list:
     if arming:
         lines += [
             "== boot entry (BootNext only, BootOrder untouched) ==",
-            f"  create : efibootmgr -C -d {dev} -p {esp.partition} -L {arm_params['label']} "
-            f"-l '{arm_params['loader_path']}' -u '{arm_params.get('boot_args', '')}'",
-            "  arm    : efibootmgr -n <new entry number>",
+            f"  select : the firmware's existing entry {arm_params['entry_label']!r} (Boot{entry_number}); "
+            "no entry is created or deleted",
+            f"  arm    : {_next_text(entry_number)}",
         ]
     lines += ["== dry run ==", "  would create the table from this sfdisk input:"]
     lines += ["    " + ln for ln in sfdisk_text.splitlines()]
@@ -410,11 +414,7 @@ def _body(profile, staging_dir: str, sfdisk_text: str, n_manifest: int) -> list:
             "and refuse BootNext unless the NVMe-hiding argument is present"
         )
     if arming:
-        vec = Ops.vec_efibootmgr_create(
-            dev, esp.partition, arm_params["label"], arm_params["loader_path"], arm_params.get("boot_args", "")
-        )
-        lines.append("DRY-RUN would run: " + " ".join(_q(a) for a in vec))
-        lines.append("DRY-RUN would run: efibootmgr -n NNNN")
+        lines.append(f"DRY-RUN would run: {_next_text(entry_number)}")
     lines.append(DONE_LINE)
     return lines
 
@@ -500,7 +500,7 @@ def run_plan(
         f"plan record: {run_dir}/{RECORD_NAME}",
         BODY_MARKER,
     ]
-    lines = header + _body(profile, staging_dir, sfdisk_text, n_manifest)
+    lines = header + _body(profile, staging_dir, sfdisk_text, n_manifest, record.entry_number)
     for ln in lines:
         out(ln)
     return PlanResult(0, plan_record, lines)

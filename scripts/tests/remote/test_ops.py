@@ -28,10 +28,8 @@ MUTATING_CALLS = [
     lambda o: o.wipefs(DISK),
     lambda o: o.udevadm_settle(),
     lambda o: o.dd_write("/run/x/boot.img", f"{DISK}p3"),
-    lambda o: o.efibootmgr_create(DISK, 11, "lbl", "\\EFI\\BOOT\\BOOTAA64.EFI", "bootmode=bootimg"),
     lambda o: o.efibootmgr_next("0003"),
     lambda o: o.efibootmgr_delete_next(),
-    lambda o: o.efibootmgr_delete("0003"),
     lambda o: o.mount(f"{DISK}p16", "/mnt/x", "ro", "btrfs"),
     lambda o: o.umount("/mnt/x"),
     lambda o: o.write_file("/tmp/never", b"x"),
@@ -194,20 +192,28 @@ def test_vectors_match_kit_argument_lists():
     assert V.vec_udevadm_settle() == ["udevadm", "settle"]
     assert V.vec_dd_write("/i/boot.img", DISK + "p3") == [
         "dd", "if=/i/boot.img", "of=/dev/mmcblk0p3", "bs=1M", "conv=fsync", "status=none"]  # fmt: skip
-    assert V.vec_efibootmgr_create(DISK, 11, "avocado-emmc-oneshot", "\\EFI\\BOOT\\BOOTAA64.EFI", "bootmode=bootimg") == [
-        "efibootmgr", "-C", "-d", DISK, "-p", "11", "-L", "avocado-emmc-oneshot",
-        "-l", "\\EFI\\BOOT\\BOOTAA64.EFI", "-u", "bootmode=bootimg"]  # fmt: skip
     assert V.vec_efibootmgr_next("0004") == ["efibootmgr", "-n", "0004"]
     assert V.vec_efibootmgr_delete_next() == ["efibootmgr", "-N"]
-    assert V.vec_efibootmgr_delete("0004") == ["efibootmgr", "-B", "-b", "0004"]
     assert V.vec_mount(DISK + "p16", "/m", "ro", "btrfs") == [
         "mount", "-o", "ro", "-t", "btrfs", DISK + "p16", "/m"]  # fmt: skip
     assert V.vec_umount("/m") == ["umount", "/m"]
 
 
-def test_efibootmgr_delete_rejects_non_hex_entry():
+def test_ops_has_no_boot_entry_create_or_delete_verb():
+    # The arm selects the firmware's own entry; nothing may create or delete one.
+    for name in ("efibootmgr_create", "efibootmgr_delete", "vec_efibootmgr_create", "vec_efibootmgr_delete"):
+        assert not hasattr(O.Ops, name), name
+        assert not hasattr(O.RecordingOps, name), name
+
+
+def test_efibootmgr_next_rejects_a_non_hex_entry():
     with pytest.raises(ValueError):
-        O.Ops.vec_efibootmgr_delete("0004; reboot")
+        O.Ops.vec_efibootmgr_next("0004; reboot")
+
+
+@pytest.mark.parametrize("opt", ["-C", "-B", "-b", "-o", "-O", "-c"])
+def test_every_creating_or_deleting_efibootmgr_option_is_classed_as_mutating(opt):
+    assert O.vector_mutates(["efibootmgr", opt, "0001"]) is True
 
 
 def test_every_install_and_window_golden_line_is_buildable():

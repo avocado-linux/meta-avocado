@@ -189,7 +189,7 @@
     "efibootmgr-supports-create",
     "boot-order-unchanged",
     "boot-next-unset",
-    "no-stale-oneshot-entry",
+    "arm-entry-unique",
     "efivarfs-rw",
     "secure-boot-disabled",
     "staged-images-present",
@@ -199,9 +199,7 @@
   "arm": {
     "strategy": "uefi-bootnext",
     "params": {
-      "label": "avocado-emmc-oneshot",
-      "loader_path": "\\EFI\\BOOT\\BOOTAA64.EFI",
-      "boot_args": "bootmode=bootimg"
+      "entry_label": "UEFI eMMC Device"
     }
   },
   "guard": {

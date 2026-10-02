@@ -124,7 +124,7 @@ A profile is a JSON file named `<board>.json`. Two ship with the tool, in
 `profiles/`:
 
 - `jetson-agx-orin-j5012.json`: a real board. Writes the internal eMMC from the
-  running NVMe system, arms a one-shot UEFI boot entry and guards against
+  running NVMe system, arms the firmware's own eMMC boot entry once and guards against
   booting a kernel that would see the NVMe disk.
 - `fixture-none.json`: a stub device for the generic lifecycle tests. It arms
   nothing and guards nothing. Its `checks` list names `device-exists` and
@@ -190,10 +190,12 @@ partition named by a `boot-arg` guard must exist in the table by name.
 The preflight check names the runner implements are `emmc-exists`,
 `target-identity`, `emmc-not-read-only`, `emmc-sector-count`,
 `emmc-no-partition-table`, `emmc-not-mounted`, `efibootmgr-supports-create`,
-`boot-order-unchanged`, `boot-next-unset`, `no-stale-oneshot-entry`,
+`boot-order-unchanged`, `boot-next-unset`, `arm-entry-unique`,
 `efivarfs-rw`, `secure-boot-disabled`, `staged-images-present`,
 `staged-image-checksums` and `staging-space-free`. `boot-order-unchanged` is not
-examined unless `--expected-boot-order` is given.
+examined unless `--expected-boot-order` is given. `arm-entry-unique` passes when
+exactly one boot entry carries the profile's `arm.params.entry_label` (zero or
+several fail, naming the count and the label).
 
 ### Pinning the eMMC serial in an extension profile
 
@@ -235,7 +237,7 @@ among them and supplies declarative parameters.
 
 | Kind | Allowed strategies | Parameters |
 |------|--------------------|------------|
-| `arm` | `uefi-bootnext` | `label`, `loader_path`, optional `boot_args` (all strings). Creates one entry with `efibootmgr -C` and sets `BootNext` only. Never writes the boot order. |
+| `arm` | `uefi-bootnext` | `entry_label` (non-empty string): the firmware's own description of the storage entry to boot once, `UEFI eMMC Device` for the Jetson AGX profile. `prepare` and `arm` require exactly one entry with that label, `BootNext` unset and a `BootOrder`; `arm` runs `efibootmgr -n <entry>` and nothing else, then checks that `BootNext` reads back as the entry and `BootOrder` is identical. The tool never creates, deletes or reorders a boot entry. |
 | `arm` | `none` | None. Nothing is armed. |
 | `guard` | `boot-arg` | `argument` (string) and `partitions` (list of layout partition names). Reads the boot image header and refuses to arm unless the argument is in its command line. |
 | `guard` | `none` | None. |
@@ -278,7 +280,7 @@ any non-terminal phase. `restored` is written by a successful `restore` and can
 follow any phase. `complete`, `failed` and `restored` are terminal.
 `image-writing` and `image-written` repeat once per image, in the profile's
 image order. `arming` and `armed` are skipped when the profile's arm strategy
-is `none`. `arming` is recorded before the first boot-entry change, so a run
+is `none`. `arming` is recorded before the `BootNext` change, so a run
 that dies or fails inside the arm step is left in `arming`, not in `verified`.
 
 A run that ends normally is in a terminal phase. A non-terminal phase on the
@@ -302,10 +304,10 @@ The recovery actions are `none-recorded`, `restore-then-restart`, `restore` and
 | `image-writing` | Killed while an image was being written. That partition holds partial data. | `restore-then-restart`, as above. |
 | `image-written` | At least one image is written and verified by read-back; more remain. | `restore-then-restart`, as above. |
 | `verified` | All images are written and read back correctly, but the guard or arming did not finish. | `restore --ack-run RUN_ID`. Do not rewrite the images. |
-| `arming` | The arm step started and did not finish (the runner was killed, or the arm step failed and was handled). A boot entry and `BootNext` may already exist even though the record does not name them. | `restore-unknown-arm`: DO NOT REBOOT. Run `restore --ack-run RUN_ID`; it finds the entry by its label when the number was never recorded. |
-| `armed` | The boot entry exists and `BootNext` may be set. The board will boot the test image on the next reboot. | `restore --ack-run RUN_ID`. Do not reboot first unless you want to boot the test image. |
+| `arming` | The arm step started and did not finish (the runner was killed, or the arm step failed and was handled). `BootNext` may already be set even though the record does not say so. | `restore-unknown-arm`: DO NOT REBOOT. Run `restore --ack-run RUN_ID`; it clears `BootNext` only if it names the entry carrying the profile's label. |
+| `armed` | `BootNext` names the firmware's eMMC entry and may still be set. The board will boot the test image on the next reboot. | `restore --ack-run RUN_ID`. Do not reboot first unless you want to boot the test image. |
 | `complete` | Terminal. | No recovery needed. |
-| `failed` | Terminal. | The recovery text names what is left: whether the table was possibly rewritten, which images are written, partial or not started, and whether a boot entry was armed ("DO NOT REBOOT" until `restore` removes it). Run `restore` (no acknowledgement needed for a finished run). If the table was possibly rewritten, follow [Starting over after a failed write](#starting-over-after-a-failed-write) before planning again; otherwise stage the images again, then plan and write. |
+| `failed` | Terminal. | The recovery text names what is left: whether the table was possibly rewritten, which images are written, partial or not started, and whether `BootNext` was armed ("DO NOT REBOOT" until `restore` clears it). Run `restore` (no acknowledgement needed for a finished run). If the table was possibly rewritten, follow [Starting over after a failed write](#starting-over-after-a-failed-write) before planning again; otherwise stage the images again, then plan and write. |
 | `restored` | Terminal. Written by a successful `restore`. | No recovery needed. The state gate accepts a new plan and write, but `plan` still refuses a target that has a partition table when the profile sets `require_empty`. |
 | state unreadable | The state file or `current` pointer is missing or malformed. | Manual: inspect the state directory and the board's `efibootmgr -v`, then use `restore --emergency-disarm`. |
 
@@ -315,7 +317,7 @@ listed next.
 
 ## Starting over after a failed write
 
-`restore` closes the run, disarms the boot entry and deletes the staging
+`restore` closes the run, clears `BootNext` and deletes the staging
 directory. It does not touch the partition table, and the shipped profiles set
 `require_empty`, so `plan` refuses a disk that already carries a table. After a
 run that reached `table-writing` (the phases `table-writing`, `table-written`,
@@ -349,8 +351,11 @@ and 3.
 
 What it does, per `cmd_restore.py`:
 
-- Removes the boot entry this tool created, matched by both its recorded entry
-  number and its label, and clears `BootNext`.
+- Clears `BootNext` when it equals the recorded entry number, and only when that
+  number still carries the recorded label. It deletes no boot entry, ever: the
+  entry is the firmware's own. If a boot already consumed `BootNext` it prints a
+  note and exits 0. If the recorded number now carries another label it changes
+  nothing and says so.
 - Checks that `BootOrder` still equals the value recorded before any mutation,
   and reports a difference without changing it.
 - Removes the profile's staging directory, only when the path is exactly the
@@ -360,9 +365,9 @@ What it does, per `cmd_restore.py`:
 - If no entry was armed, makes no `efibootmgr` calls and cleans staging only.
 - If the state file is unreadable, refuses and touches nothing.
 - When the arm step started but no entry number was recorded, finds the entry by
-  its label. It deletes nothing if any labelled entry is in `BootOrder` or is
-  `BootCurrent` (the board booted it): it names the entry and leaves the decision
-  to you, with `efibootmgr -v` as the place to look.
+  its label and clears `BootNext` only if exactly one entry carries it and
+  `BootNext` names it. With zero or several labelled entries it changes nothing,
+  keeps staging and exits 1, with `efibootmgr -v` as the place to look.
 
 What it does not do: it does not restore the partition table and it does not
 restore any image content. Its output says so
@@ -377,11 +382,9 @@ run still in a non-terminal phase is restored only with `--ack-run RUN_ID`
 naming that run.
 
 `restore --emergency-disarm --ack-run TEXT` is for a missing or unreadable state
-file. It requires a non-empty acknowledgement and removes only boot entries whose
-label equals the profile's `arm.params.label`, plus `BootNext` if it points at
-one of them. `BootOrder`, all other entries and staging are left alone. Like the
-label-based path above, it deletes nothing when a labelled entry is in `BootOrder`
-or is `BootCurrent`.
+file. It requires a non-empty acknowledgement and clears `BootNext` only if it
+points at an entry whose label equals the profile's `arm.params.entry_label`.
+`BootOrder`, every boot entry and staging are left alone; it deletes no entry.
 
 `--emergency-disarm` does not depend on the run state, so a holder that never
 releases the flash lock must not block it for good. It waits up to 15 seconds for
@@ -393,9 +396,9 @@ record `status` still shows the previous run's terminal phase). A live holder, o
 lock record that cannot be read, gets no manual commands: wait for it and run
 `status` again. Only a holder whose pid is gone gets the manual commands, after a
 reminder to check that no tool it started is still running:
-`efibootmgr -v`, `efibootmgr -N`, and `efibootmgr -B -b XXXX` for one labelled
-entry that is not in `BootOrder` and is not `BootCurrent`. The normal `restore`
-keeps refusing at once while the lock is held.
+`efibootmgr -v` and `efibootmgr -N` (only if `BootNext` names the labelled entry);
+deleting a boot entry is never suggested. The normal `restore` keeps refusing at
+once while the lock is held.
 
 ## Privilege and sudo
 
@@ -577,6 +580,24 @@ marker to carry a ceiling and an upgrade trigger.
 | Root executes `runner.pyz` and `request-*.json` from the SSH user's staging directory and honours the request's `tool_dir` | `host.py` install, `runner.py` `_run_sub` | any process running as that user can replace the runner after the hash check, or point `tool_dir` at its own binaries, and gain root; most relevant in sudo-password mode; `write` compares every staged image's stat signature (size, mtime, inode, device) and then re-hashes every staged image in full under the on-board lock just before its first mutation, which refuses an image replaced or edited in place since the scan; the re-hash narrows the window but does not close it, because a same-user replacement after the hash and before the `dd` is still only caught by the per-image re-verify, which stays | a board where the SSH user is not trusted as root, or before the tool is offered outside a lab; stage root-owned and drop the `tool_dir` request key |
 | `dd_sha256` read-back spools each full partition to a temporary file | `ops.py` `_exec` | images larger than free `/tmp` (a tmpfs `/tmp` fails after the image was written) | the first ENOSPC at read-back; hash the stream |
 | The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
+
+### The one-shot boot and its limits
+
+The profile arms the firmware's own `UEFI eMMC Device` entry with
+`efibootmgr -n <entry>`. It no longer creates an entry, so the one-shot no longer
+passes `bootmode=bootimg`: the firmware's own loader runs the ESP loader on the
+eMMC, as `UEFI SD Device` did on the Orin Nano rehearsal. The earlier design
+created a short-form `HD(...)` entry with `efibootmgr -C`, which that firmware
+neither listed nor used for `BootNext`, while `efibootmgr -n` on its
+auto-created full-path entry booted that device once with `BootOrder`
+unchanged. The `plan` output states the exact `efibootmgr -n <entry>` it would
+run.
+
+The bash kit's parity goldens still show `efibootmgr -C`; they are not edited.
+The parity suite records the deviation as D9 in `tests/remote/test_parity.py`:
+the kit's create line has no counterpart, the kit's `-n` names the firmware's
+entry, restore runs `-N` but never `-B -b`, and the plan body is compared against
+the golden with only those lines rewritten.
 
 ## Tests and hygiene gate
 

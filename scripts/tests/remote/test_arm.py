@@ -16,33 +16,34 @@ from avocado_flash_remote.arm import (
 )
 from avocado_flash_remote.ops import MutationRefused, OpResult, ReadOnlyOps, RecordingOps
 
-LABEL = "avocado-emmc-oneshot"
-LOADER = "\\EFI\\BOOT\\BOOTAA64.EFI"
+# The firmware's own description of the storage entry the tool arms (never creates).
+LABEL = "UEFI eMMC Device"
 ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
 LIST = "efibootmgr -v"
+ENTRY = "0002"
+ENTRY_LINE = f"Boot{ENTRY}* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)"
+NEXT = f"efibootmgr -n {ENTRY}"
+# Every option that would create, delete or reorder boot entries.
+FORBIDDEN_OPTIONS = ("-C", "-B", "-b", "-o", "-O", "-c")
 
 
-def efi(order="0001,0002,0003", nxt=None, extra=()):
+def efi(order="0001,0002,0003", nxt=None, extra=(), entry=True):
     lines = []
     if nxt:
         lines.append(f"BootNext: {nxt}")
     lines += ["BootCurrent: 0001", "Timeout: 5 seconds", f"BootOrder: {order}"]
-    lines += ["Boot0001* UEFI NVMe", "Boot0002* UEFI eMMC"]
+    lines += ["Boot0001* UEFI NVMe"]
+    if entry:
+        lines.append(ENTRY_LINE)
     lines += list(extra)
     return "\n".join(lines) + "\n"
-
-
-NEW = f"Boot0005* {LABEL}\tHD(11,GPT,1,0x0,0x0)/File({LOADER})"
 
 
 def profile(arm_name="uefi-bootnext"):
     return NS(
         target=NS(device="/dev/mmcblk0"),
         images={"esp": NS(partition=11)},
-        arm=NS(
-            strategy=arm_name,
-            params={"label": LABEL, "loader_path": LOADER, "boot_args": "bootmode=bootimg"},
-        ),
+        arm=NS(strategy=arm_name, params={"entry_label": LABEL}),
         guard=NS(
             strategy="boot-arg",
             params={"argument": ARG, "partitions": ["A_kernel", "B_kernel"]},
@@ -54,50 +55,48 @@ def calls(ops):
     return ops.log
 
 
-def assert_no_order_edits(ops):
+def assert_no_boot_entry_edits(ops):
     for line in ops.log:
         parts = line.split()
         if parts and parts[0] == "efibootmgr":
-            assert "-o" not in parts and "-O" not in parts and "-c" not in parts, line
+            for opt in FORBIDDEN_OPTIONS:
+                assert opt not in parts, line
 
 
-def happy_ops(after_order="0001,0002,0003", **kw):
-    return RecordingOps(
-        {
-            LIST: [
-                efi(),
-                efi(),
-                efi(extra=[NEW], order=after_order),
-                efi(extra=[NEW], order=after_order, nxt="0005"),
-            ],
-            f"efibootmgr -C -d /dev/mmcblk0 -p 11 -L {LABEL} -l {LOADER} -u bootmode=bootimg": efi(
-                extra=[NEW]
-            ),
-        }
-    )
+def happy_ops(**kw):
+    return RecordingOps({LIST: [efi(), efi(), efi(nxt=ENTRY)]})
 
 
 # ------------------------------------------------------------------- arm
 
 
-def test_prepare_records_boot_order_and_next():
+def test_prepare_records_entry_label_boot_order_and_next():
     ops = RecordingOps({LIST: efi()})
     rec = get_arm("uefi-bootnext").prepare(ops, profile(), None)
     assert rec.preexisting_boot_order == "0001,0002,0003"
     assert rec.preexisting_next == ""
     assert rec.label == LABEL
-    assert rec.entry_number == ""
+    assert rec.entry_number == ENTRY
     assert ops.log == [LIST]
 
 
-def test_prepare_refuses_stale_entry_with_label():
-    ops = RecordingOps({LIST: efi(extra=[NEW])})
-    with pytest.raises(ArmError, match="already exists"):
+def test_prepare_refuses_when_the_firmware_has_no_entry_with_the_label():
+    ops = RecordingOps({LIST: efi(entry=False)})
+    with pytest.raises(ArmError) as ei:
         get_arm("uefi-bootnext").prepare(ops, profile(), None)
+    assert f"found 0 boot entries labelled {LABEL!r}" in str(ei.value)
+    assert ops.log == [LIST]
+
+
+def test_prepare_refuses_two_entries_with_the_label():
+    ops = RecordingOps({LIST: efi(extra=[f"Boot0007* {LABEL}\tHD(1,GPT)"])})
+    with pytest.raises(ArmError) as ei:
+        get_arm("uefi-bootnext").prepare(ops, profile(), None)
+    assert f"found 2 boot entries labelled {LABEL!r}" in str(ei.value)
 
 
 def test_prepare_refuses_existing_bootnext_like_the_kit():
-    ops = RecordingOps({LIST: efi(nxt="0002")})
+    ops = RecordingOps({LIST: efi(nxt="0003")})
     with pytest.raises(ArmError, match="BootNext is already set"):
         get_arm("uefi-bootnext").prepare(ops, profile(), None)
 
@@ -108,119 +107,150 @@ def test_prepare_refuses_missing_boot_order():
         get_arm("uefi-bootnext").prepare(ops, profile(), None)
 
 
-def test_arm_happy_path_exact_vectors_next_only():
+def test_arm_selects_the_single_labelled_entry_with_one_mutating_call():
     ops = happy_ops()
     a = get_arm("uefi-bootnext")
     rec = a.prepare(ops, profile(), None)
     rec = a.arm(ops, profile(), rec)
-    assert rec.entry_number == "0005"
+    assert rec.entry_number == ENTRY
+    assert rec.label == LABEL
     assert rec.next_armed is True
-    assert ops.log == [
-        LIST,
-        LIST,
-        f"efibootmgr -C -d /dev/mmcblk0 -p 11 -L {LABEL} -l {LOADER} -u bootmode=bootimg",
-        LIST,
-        "efibootmgr -n 0005",
-        LIST,
-    ]
-    assert_no_order_edits(ops)
+    assert ops.log == [LIST, LIST, NEXT, LIST]
+    mutating = [ln for ln in ops.log if ln != LIST]
+    assert mutating == [NEXT]
+    assert_no_boot_entry_edits(ops)
 
 
-def test_arm_entry_number_falls_back_to_relisting():
-    ops = happy_ops()
-    key = f"efibootmgr -C -d /dev/mmcblk0 -p 11 -L {LABEL} -l {LOADER} -u bootmode=bootimg"
-    ops.script[key] = ""
-    a = get_arm("uefi-bootnext")
-    rec = a.arm(ops, profile(), a.prepare(ops, profile(), None))
-    assert rec.entry_number == "0005"
-
-
-def test_firmware_rewriting_boot_order_after_create_fails_do_not_reboot():
-    ops = happy_ops(after_order="0005,0001,0002,0003")
+def test_arm_refuses_zero_entries_before_any_mutation():
+    ops = RecordingOps({LIST: [efi(), efi(entry=False)]})
     a = get_arm("uefi-bootnext")
     rec = a.prepare(ops, profile(), None)
     with pytest.raises(ArmError) as ei:
         a.arm(ops, profile(), rec)
-    msg = str(ei.value)
-    assert "DO NOT REBOOT" in msg and "restore" in msg
-    assert ei.value.record.entry_number == "0005"
-    assert "efibootmgr -n 0005" not in ops.log  # never armed
-    assert_no_order_edits(ops)
+    assert f"found 0 boot entries labelled {LABEL!r}" in str(ei.value)
+    assert ops.log == [LIST, LIST]
 
 
-def test_firmware_rewriting_boot_order_after_next_fails():
-    ops = RecordingOps(
-        {
-            LIST: [
-                efi(),
-                efi(),
-                efi(extra=[NEW]),
-                efi(extra=[NEW], order="0005,0001,0002,0003", nxt="0005"),
-            ],
-        }
-    )
+def test_arm_refuses_two_entries_before_any_mutation():
+    ops = RecordingOps({LIST: [efi(), efi(extra=[f"Boot0007* {LABEL}\tHD(1,GPT)"])]})
     a = get_arm("uefi-bootnext")
     rec = a.prepare(ops, profile(), None)
-    with pytest.raises(ArmError, match="DO NOT REBOOT") as ei:
+    with pytest.raises(ArmError) as ei:
         a.arm(ops, profile(), rec)
-    assert ei.value.record.next_armed is True
-    assert_no_order_edits(ops)
+    assert f"found 2 boot entries labelled {LABEL!r}" in str(ei.value)
+    assert ops.log == [LIST, LIST]
 
 
-def test_boot_order_changed_before_create_stops_before_any_mutation():
+def test_arm_refuses_when_the_label_moved_to_another_entry_number():
+    moved = efi(entry=False, extra=[f"Boot0009* {LABEL}\tHD(1,GPT)"])
+    ops = RecordingOps({LIST: [efi(), moved]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="0009"):
+        a.arm(ops, profile(), rec)
+    assert ops.log == [LIST, LIST]
+
+
+def test_arm_refuses_a_bootnext_set_after_prepare_before_any_mutation():
+    ops = RecordingOps({LIST: [efi(), efi(nxt="0003")]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="BootNext"):
+        a.arm(ops, profile(), rec)
+    assert ops.log == [LIST, LIST]
+
+
+def test_boot_order_changed_between_prepare_and_arm_stops_before_any_mutation():
     ops = RecordingOps({LIST: [efi(), efi(order="0002,0001")]})
     a = get_arm("uefi-bootnext")
     rec = a.prepare(ops, profile(), None)
     with pytest.raises(ArmError, match="changed"):
         a.arm(ops, profile(), rec)
-    assert not any("-C" in line.split() for line in ops.log)
+    assert ops.log == [LIST, LIST]
 
 
-def test_bootnext_not_reading_back_fails():
-    ops = RecordingOps(
-        {LIST: [efi(), efi(), efi(extra=[NEW]), efi(extra=[NEW])]},
-    )
+def test_firmware_rewriting_boot_order_after_next_fails_do_not_reboot():
+    ops = RecordingOps({LIST: [efi(), efi(), efi(order="0002,0001,0003", nxt=ENTRY)]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="DO NOT REBOOT") as ei:
+        a.arm(ops, profile(), rec)
+    assert ei.value.record.next_armed is True
+    assert_no_boot_entry_edits(ops)
+
+
+def test_bootnext_not_reading_back_fails_and_says_do_not_reboot():
+    ops = RecordingOps({LIST: [efi(), efi(), efi()]})
+    a = get_arm("uefi-bootnext")
+    rec = a.prepare(ops, profile(), None)
+    with pytest.raises(ArmError, match="DO NOT REBOOT") as ei:
+        a.arm(ops, profile(), rec)
+    assert "does not read back" in str(ei.value)
+    assert ei.value.record.next_armed is True
+
+
+def test_bootnext_reading_back_as_another_entry_fails():
+    ops = RecordingOps({LIST: [efi(), efi(), efi(nxt="0003")]})
     a = get_arm("uefi-bootnext")
     rec = a.prepare(ops, profile(), None)
     with pytest.raises(ArmError, match="DO NOT REBOOT"):
         a.arm(ops, profile(), rec)
 
 
-def test_disarm_clears_next_and_deletes_only_recorded_entry():
-    ops = RecordingOps({LIST: efi(extra=[NEW], nxt="0005")})
-    rec = ArmRecord(
-        entry_number="0005",
-        label=LABEL,
-        preexisting_boot_order="0001,0002,0003",
-        preexisting_next="",
-        next_armed=True,
-    )
-    get_arm("uefi-bootnext").disarm(ops, rec)
-    assert ops.log == [LIST, "efibootmgr -N", "efibootmgr -B -b 0005"]
-    assert_no_order_edits(ops)
+def test_arm_works_on_crlf_listings():
+    ops = RecordingOps({LIST: [_crlf(efi()), _crlf(efi()), _crlf(efi(nxt=ENTRY))]})
+    a = get_arm("uefi-bootnext")
+    rec = a.arm(ops, profile(), a.prepare(ops, profile(), None))
+    assert rec.entry_number == ENTRY and rec.next_armed is True
+    assert ops.log == [LIST, LIST, NEXT, LIST]
 
 
-def test_disarm_refuses_entry_with_different_label():
-    other = "Boot0005* something-else\tHD(1,GPT)"
-    ops = RecordingOps({LIST: efi(extra=[other])})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", False)
+def test_disarm_clears_bootnext_pointing_at_the_entry_and_deletes_nothing():
+    ops = RecordingOps({LIST: efi(nxt=ENTRY)})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
     notes = get_arm("uefi-bootnext").disarm(ops, rec)
-    assert not any("-B" in line.split() for line in ops.log)
+    assert ops.log == [LIST, "efibootmgr -N"]
+    assert any("cleared BootNext" in n for n in notes)
+    assert_no_boot_entry_edits(ops)
+
+
+def test_disarm_after_the_boot_consumed_bootnext_is_a_noop_note():
+    ops = RecordingOps({LIST: efi()})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST]
+    assert any("already consumed" in n for n in notes)
+
+
+def test_disarm_refuses_to_touch_anything_when_the_number_carries_another_label():
+    other = f"Boot{ENTRY}* something-else\tHD(1,GPT)"
+    ops = RecordingOps({LIST: efi(entry=False, extra=[other], nxt=ENTRY)})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST]
     assert any("leaving" in n for n in notes)
 
 
 def test_disarm_leaves_foreign_bootnext_alone():
-    ops = RecordingOps({LIST: efi(extra=[NEW], nxt="0002")})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    ops = RecordingOps({LIST: efi(nxt="0003")})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
     get_arm("uefi-bootnext").disarm(ops, rec)
-    assert "efibootmgr -N" not in ops.log
-    assert "efibootmgr -B -b 0005" in ops.log
+    assert ops.log == [LIST]
 
 
 def test_disarm_without_entry_does_nothing():
     ops = RecordingOps()
     get_arm("uefi-bootnext").disarm(ops, ArmRecord("", LABEL, "0001", "", False))
     assert ops.log == []
+
+
+def test_whole_lifecycle_never_emits_a_creating_or_deleting_option():
+    ops = RecordingOps({LIST: [efi(), efi(), efi(nxt=ENTRY), efi(nxt=ENTRY), efi()]})
+    a = get_arm("uefi-bootnext")
+    rec = a.arm(ops, profile(), a.prepare(ops, profile(), None))
+    a.disarm(ops, rec)
+    assert_no_boot_entry_edits(ops)
+    assert [ln for ln in ops.log if ln != LIST] == [NEXT, "efibootmgr -N"]
 
 
 def test_none_arm_does_nothing():
@@ -241,7 +271,7 @@ def test_unknown_names():
 
 
 def test_record_round_trips():
-    rec = ArmRecord("0005", LABEL, "0001,0002", "", True)
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002", "", True)
     assert ArmRecord.from_dict(rec.to_dict()) == rec
 
 
@@ -437,7 +467,7 @@ def test_read_staged_header_is_bounded(tmp_path):
     ],
 )
 def test_entries_with_label_does_not_match_a_longer_label(line):
-    assert entries_with_label(efi(extra=[line]), LABEL) == []
+    assert entries_with_label(efi(entry=False, extra=[line]), LABEL) == []
 
 
 @pytest.mark.parametrize(
@@ -453,51 +483,36 @@ def test_entries_with_label_does_not_match_a_longer_label(line):
     ],
 )
 def test_entries_with_label_matches_the_exact_label(line):
-    assert entries_with_label(efi(extra=[line]), LABEL) == ["0007"]
+    assert entries_with_label(efi(entry=False, extra=[line]), LABEL) == ["0007"]
 
 
 def test_entries_with_label_still_refuses_a_longer_label_with_a_cr_ending():
-    assert entries_with_label(efi(extra=[f"Boot0007* {LABEL} old\r"]), LABEL) == []
+    assert entries_with_label(efi(entry=False, extra=[f"Boot0007* {LABEL} old\r"]), LABEL) == []
 
 
 def test_entries_with_label_is_found_in_the_middle_of_a_listing():
-    text = efi(extra=[f"Boot0007* {LABEL} old\tx", NEW, "Boot0009* UEFI Shell"])
-    assert entries_with_label(text, LABEL) == ["0005"]
+    text = efi(entry=False, extra=[f"Boot0007* {LABEL} old\tx", ENTRY_LINE, "Boot0009* UEFI Shell"])
+    assert entries_with_label(text, LABEL) == [ENTRY]
 
 
-def test_disarm_does_not_delete_a_longer_labelled_entry_with_the_recorded_number():
-    longer = f"Boot0005* {LABEL} old\tHD(1,GPT)"
-    ops = RecordingOps({LIST: efi(extra=[longer])})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", False)
-    notes = get_arm("uefi-bootnext").disarm(ops, rec)
-    assert not any("-B" in line.split() for line in ops.log)
-    assert any("leaving" in n for n in notes)
-
-
-def test_disarm_with_a_foreign_label_under_the_recorded_number_makes_no_efi_change_even_with_bootnext():
-    foreign = "Boot0005* something-else\tHD(1,GPT)"
-    ops = RecordingOps({LIST: efi(extra=[foreign], nxt="0005")})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+def test_disarm_does_not_touch_a_longer_labelled_entry_with_the_recorded_number():
+    longer = f"Boot{ENTRY}* {LABEL} old\tHD(1,GPT)"
+    ops = RecordingOps({LIST: efi(entry=False, extra=[longer], nxt=ENTRY)})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", False)
     notes = get_arm("uefi-bootnext").disarm(ops, rec)
     assert ops.log == [LIST]
     assert any("leaving" in n for n in notes)
 
 
-def test_disarm_refuses_a_recorded_entry_that_is_in_boot_order():
-    ops = RecordingOps({LIST: efi(order="0001,0005,0002", extra=[NEW], nxt="0005")})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
-    with pytest.raises(ArmError, match="BootOrder"):
-        get_arm("uefi-bootnext").disarm(ops, rec)
-    assert ops.log == [LIST]
-
-
-def test_disarm_refuses_a_recorded_entry_that_is_boot_current():
-    live = efi(extra=[NEW], nxt="0005").replace("BootCurrent: 0001", "BootCurrent: 0005")
+def test_disarm_keeps_working_when_the_recorded_entry_is_in_boot_order_and_boot_current():
+    # Deliberate change: the entry is the firmware's own, so it normally sits in BootOrder and may be
+    # the entry the board just booted. The old refusal protected a created entry from being deleted.
+    live = efi(order="0001,0002,0003", nxt=ENTRY).replace("BootCurrent: 0001", f"BootCurrent: {ENTRY}")
     ops = RecordingOps({LIST: live})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
-    with pytest.raises(ArmError, match="BootCurrent"):
-        get_arm("uefi-bootnext").disarm(ops, rec)
-    assert ops.log == [LIST]
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert ops.log == [LIST, "efibootmgr -N"]
+    assert any("cleared BootNext" in n for n in notes)
 
 
 # ---- 5.33: each command-line field ends at its first NUL, like the kernel's ----
@@ -544,25 +559,7 @@ def test_boot_order_and_next_strip_a_trailing_carriage_return():
 
 
 def test_disarm_clears_bootnext_when_efibootmgr_output_is_crlf():
-    ops = RecordingOps({LIST: _crlf(efi(extra=[NEW], nxt="0005"))})
-    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", True)
+    ops = RecordingOps({LIST: _crlf(efi(nxt=ENTRY))})
+    rec = ArmRecord(ENTRY, LABEL, "0001,0002,0003", "", True)
     get_arm("uefi-bootnext").disarm(ops, rec)
-    assert ops.log == [LIST, "efibootmgr -N", "efibootmgr -B -b 0005"]
-
-
-def test_arm_refuses_a_bootnext_set_after_prepare_before_any_mutation():
-    ops = RecordingOps({LIST: [efi(), efi(nxt="0002")]})
-    a = get_arm("uefi-bootnext")
-    rec = a.prepare(ops, profile(), None)
-    with pytest.raises(ArmError, match="BootNext"):
-        a.arm(ops, profile(), rec)
-    assert ops.log == [LIST, LIST]
-
-
-def test_arm_refuses_a_labelled_entry_that_appeared_after_prepare_before_any_mutation():
-    ops = RecordingOps({LIST: [efi(), efi(extra=[NEW])]})
-    a = get_arm("uefi-bootnext")
-    rec = a.prepare(ops, profile(), None)
-    with pytest.raises(ArmError, match="already exists"):
-        a.arm(ops, profile(), rec)
-    assert ops.log == [LIST, LIST]
+    assert ops.log == [LIST, "efibootmgr -N"]

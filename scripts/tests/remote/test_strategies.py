@@ -102,49 +102,60 @@ def test_module_has_no_dynamic_code_loading():
 
 # --- arm --------------------------------------------------------------------
 
-
 def test_arm_uefi_bootnext_valid():
-    p = {"label": "avocado-emmc-oneshot", "loader_path": "\\EFI\\BOOT\\BOOTAA64.EFI"}
+    p = {"entry_label": "UEFI eMMC Device"}
     assert validate("arm", "uefi-bootnext", p) == p
-    p2 = dict(p, boot_args="bootmode=bootimg")
-    assert validate("arm", "uefi-bootnext", p2) == p2
 
 
 def test_arm_uefi_bootnext_missing_required():
     with pytest.raises(StrategyError) as exc:
-        validate("arm", "uefi-bootnext", {"label": "x"})
-    assert "loader_path" in str(exc.value)
+        validate("arm", "uefi-bootnext", {})
+    assert "entry_label" in str(exc.value)
+
+
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_arm_uefi_bootnext_rejects_an_empty_entry_label(empty):
+    with pytest.raises(StrategyError) as exc:
+        validate("arm", "uefi-bootnext", {"entry_label": empty})
+    assert "entry_label" in str(exc.value)
+
+
+@pytest.mark.parametrize("gone", ["label", "loader_path", "boot_args"])
+def test_arm_uefi_bootnext_rejects_the_removed_create_parameters(gone):
+    with pytest.raises(StrategyError) as exc:
+        validate("arm", "uefi-bootnext", {"entry_label": "x", gone: "y"})
+    assert gone in str(exc.value)
 
 
 def test_arm_wrong_type():
     with pytest.raises(StrategyError) as exc:
-        validate("arm", "uefi-bootnext", {"label": 5, "loader_path": "x"})
-    assert "label" in str(exc.value)
+        validate("arm", "uefi-bootnext", {"entry_label": 5})
+    assert "entry_label" in str(exc.value)
 
 
 def test_arm_bool_is_not_str_or_int():
     with pytest.raises(StrategyError) as exc:
-        validate("arm", "uefi-bootnext", {"label": True, "loader_path": "x"})
-    assert "label" in str(exc.value)
+        validate("arm", "uefi-bootnext", {"entry_label": True})
+    assert "entry_label" in str(exc.value)
 
 
 def test_unknown_param():
     with pytest.raises(StrategyError) as exc:
-        validate("arm", "uefi-bootnext", {"label": "x", "loader_path": "y", "zzz": 1})
+        validate("arm", "uefi-bootnext", {"entry_label": "x", "zzz": 1})
     assert "zzz" in str(exc.value)
 
 
 def test_arm_none_takes_no_params():
     assert validate("arm", "none", {}) == {}
     with pytest.raises(StrategyError) as exc:
-        validate("arm", "none", {"label": "x"})
-    assert "label" in str(exc.value)
+        validate("arm", "none", {"entry_label": "x"})
+    assert "entry_label" in str(exc.value)
 
 
 def test_params_must_be_plain_json_values():
     with pytest.raises(StrategyError) as exc:
-        validate("arm", "uefi-bootnext", {"label": object(), "loader_path": "y"})
-    assert "label" in str(exc.value)
+        validate("arm", "uefi-bootnext", {"entry_label": object()})
+    assert "entry_label" in str(exc.value)
 
 
 def test_params_must_be_mapping():

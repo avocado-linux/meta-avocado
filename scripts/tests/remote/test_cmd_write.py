@@ -33,12 +33,15 @@ DEV = "/dev/mmcblk0"
 STAGE = "/run/emmc-test-images"
 RUN_ID = "run-0001"
 MACHINE_ID = "0123456789abcdef0123456789abcdef"
-LABEL = "avocado-emmc-oneshot"
+LABEL = "UEFI eMMC Device"
 ORDER = "0001,0002,0000,0003,0004"
-ENTRY = "0005"
-EFI_PRE = f"BootCurrent: 0001\nTimeout: 5 seconds\nBootOrder: {ORDER}\nBoot0000* UEFI Shell\nBoot0001* UEFI NVMe\n"
-EFI_AFTER = EFI_PRE + f"Boot{ENTRY}* {LABEL}\n"
-EFI_FINAL = EFI_AFTER + f"BootNext: {ENTRY}\n"
+ENTRY = "0002"
+# The firmware's own storage entry (full device path) is already in the listing; nothing creates it.
+EFI_PRE = (
+    f"BootCurrent: 0001\nTimeout: 5 seconds\nBootOrder: {ORDER}\nBoot0000* UEFI Shell\nBoot0001* UEFI NVMe\n"
+    f"Boot{ENTRY}* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)\n"
+)
+EFI_FINAL = EFI_PRE + f"BootNext: {ENTRY}\n"
 NVME_ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
 BLANK = OpResult(rc=1, stderr=f"sfdisk: {DEV}: does not contain a recognized partition table\n")
 RAW_SHIPPED_BYTES = PROFILE_PATH.read_bytes()
@@ -102,7 +105,7 @@ class Env:
             "image_sizes": {r: self.scans[i.file].size for r, i in self.profile.images.items()},
             "table_hash": hashlib.sha256(self.table.encode()).hexdigest(),
             "arm": {"strategy": "uefi-bootnext", "label": LABEL, "preexisting_boot_order": ORDER,
-                    "preexisting_next": "", "entry_number": "", "next_armed": False},
+                    "preexisting_next": "", "entry_number": ENTRY, "next_armed": False},
             "created_utc": "2026-01-01T00:00:00Z",
         }  # fmt: skip
 
@@ -136,8 +139,8 @@ class Env:
             f"findmnt -no SOURCE -T {STAGE}": "tmpfs\n",
             "findmnt -no SOURCE -T /etc/ssh": "/dev/nvme0n1p2\n",
             "efibootmgr --help": "Usage: efibootmgr [-c|-C] [-d DISK]\n  -C | --create-only\n",
-            # check, prepare (pre-flight), arm: pre / after-create / final
-            "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_AFTER, EFI_FINAL],
+            # check, prepare (pre-flight), arm: pre / final
+            "efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_FINAL],
             f"findmnt -no OPTIONS {self.efivars}": "rw,nosuid,nodev,noexec,relatime\n",
             f"read_file {STAGE}/MANIFEST.hashes": "".join(f"{'a' * 64}  {n}\n" for n in names),
             "sha256sum --strict -c MANIFEST.hashes": "".join(f"{n}: OK\n" for n in names),
@@ -285,6 +288,20 @@ def _golden_mutating():
     return lines
 
 
+def _port_arm_lines(golden):
+    """The kit's mutating lines with the arm lines this tool deliberately does differently.
+
+    The kit creates an entry with `efibootmgr -C` and arms the number it got (0005). This tool never
+    creates an entry: it arms the firmware's own storage entry, so the `-C` line has no counterpart and
+    the `-n` line names that entry (task 5.36). The golden file is not edited; the assertions below fail
+    if it stops carrying exactly the lines this mapping replaces.
+    """
+    create = [ln for ln in golden if ln.startswith("efibootmgr -C ")]
+    nxt = [ln for ln in golden if ln.startswith("efibootmgr -n ")]
+    assert len(create) == 1 and nxt == ["efibootmgr -n 0005"], (create, nxt)
+    return [f"efibootmgr -n {ENTRY}" if ln == nxt[0] else ln for ln in golden if ln != create[0]]
+
+
 def _norm_dd(line):
     # The kit's test used its own file names under <TMP>/images; the source
     # path is asserted separately against the profile, so only the rest of a
@@ -304,7 +321,7 @@ def test_mutating_calls_match_the_golden_good_run(env):
     # header with `dd of=<file>` scratch copies, this tool reads it straight
     # from the partition. Both are reads. The mutating verbs and their order
     # are the contract, and are identical.
-    assert [_norm_dd(x) for x in ours] == [_norm_dd(x) for x in golden]
+    assert [_norm_dd(x) for x in ours] == [_norm_dd(x) for x in _port_arm_lines(golden)]
     dd_sources = [c.vector[1][3:] for c in mutations(ops) if c.vector[0] == "dd"]
     assert dd_sources == [env.src(r) for r in env.profile.images]
 
@@ -320,7 +337,7 @@ def test_hard_rules_over_the_call_log(env):
         if v[0] == "sfdisk":
             assert v[-1] == DEV
         if v[0] == "efibootmgr":
-            assert not {"-o", "-O", "-c", "-B", "-N"} & set(v[1:])
+            assert not {"-C", "-o", "-O", "-c", "-B", "-b", "-N"} & set(v[1:])
     sf = [c for c in ops.calls if c.vector == ["sfdisk", DEV]]
     assert len(sf) == 1 and sf[0].stdin.decode() == env.table
     # reads: the table verification and every per-image read-back come after their write
@@ -367,7 +384,7 @@ def test_no_arm_strategy_completes_without_efibootmgr_writes(tmp_path):
     doc["arm"] = {"strategy": "none", "params": {}}
     doc["guard"] = {"strategy": "none", "params": {}}
     doc["checks"] = [c for c in doc["checks"] if c not in ("boot-order-unchanged", "boot-next-unset",
-                     "no-stale-oneshot-entry", "efibootmgr-supports-create")]  # fmt: skip
+                     "arm-entry-unique", "efibootmgr-supports-create")]  # fmt: skip
     e = Env(tmp_path, json.dumps(doc).encode())
     e.plan["arm"] = {"strategy": "none"}
     res, ops = e.run()
@@ -779,14 +796,14 @@ def test_arm_never_attempted_after_a_guard_failure(env):
     assert ops.log.count("efibootmgr -v") == 2  # check and pre-flight only; the arm step never ran
 
 
-def test_arm_failure_after_entry_creation_says_do_not_reboot_and_keeps_the_record(env):
-    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_AFTER, EFI_AFTER]}))
+def test_arm_failure_when_bootnext_does_not_read_back_says_do_not_reboot_and_keeps_the_record(env):
+    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_PRE]}))
     assert res.exit_code == 1
     err = statemod.load_state(env.state_dir).state.data["error"]
     assert "DO NOT REBOOT" in err
-    assert ENTRY in err
+    assert ENTRY in err and "does not read back" in err
     st = statemod.load_state(env.state_dir).state
-    # The entry and the BootNext that were set are in the state, so restore undoes them.
+    # The BootNext that was set is in the state, so restore clears it.
     assert st.phase == "arming"
     assert st.data["armed"]["entry_number"] == ENTRY and st.data["armed"]["next_armed"] is True
     assert len([c for c in ops.calls if c.vector[:2] == ["efibootmgr", "-n"]]) == 1
@@ -833,24 +850,19 @@ class _PhaseSpy(RecordingOps):
         st = r.state
         self.seen.append((what, st.phase, dict(st.data.get("armed") or {})))
 
-    def efibootmgr_create(self, *a, **kw):
-        self._peek("create")
-        return super().efibootmgr_create(*a, **kw)
-
     def efibootmgr_next(self, *a, **kw):
         self._peek("next")
         return super().efibootmgr_next(*a, **kw)
 
 
-def test_arming_is_durable_before_the_first_efibootmgr_mutation(env):
+def test_arming_and_the_entry_are_durable_before_the_efibootmgr_mutation(env):
     spy = _PhaseSpy(env.script(), env.state_dir)
     res, ops = env.run(ops=spy)
     assert res.exit_code == 0, res.lines
-    assert [w for w, _, _ in spy.seen] == ["create", "next"]
-    assert spy.seen[0][1] == "arming"  # never "verified" while efibootmgr -C runs
-    assert spy.seen[0][2]["label"] == LABEL and spy.seen[0][2]["entry_number"] == ""
-    assert spy.seen[1][1] == "arming"
-    assert spy.seen[1][2]["entry_number"] == ENTRY  # recorded as soon as it was known
+    assert [w for w, _, _ in spy.seen] == ["next"]
+    assert spy.seen[0][1] == "arming"  # never "verified" while efibootmgr -n runs
+    assert spy.seen[0][2]["label"] == LABEL and spy.seen[0][2]["entry_number"] == ENTRY
+    assert spy.seen[0][2]["next_armed"] is False  # BootNext is recorded only after -n returned
     phases = [p["phase"] for p in statemod.load_state(env.state_dir).state.data["phases_done"]]
     assert phases[-3:] == ["arming", "armed", "complete"]
 
@@ -866,21 +878,20 @@ def _restore_for(env, ops, ack=RUN_ID):
     return res, removed
 
 
-def test_kill_between_create_and_armed_leaves_arming_and_restore_disarms_the_entry(env):
-    # efibootmgr -C ran; the process dies on the very next read, before any state update
+def test_kill_between_next_and_armed_leaves_arming_and_restore_clears_bootnext(env):
+    # efibootmgr -n ran; the process dies on the very next read, before any state update
     script = env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, KeyboardInterrupt()]})
     with pytest.raises(KeyboardInterrupt):
         env.run(script=script)
     st = statemod.load_state(env.state_dir).state
     assert st.phase == "arming"
-    assert st.data["armed"]["entry_number"] == ""
-    # restore treats arming as possibly armed and finds the entry by its label
-    live = EFI_AFTER + f"BootNext: {ENTRY}\n"
-    rops = RecordingOps({"efibootmgr -v": [live, live, live, EFI_PRE]})
+    assert st.data["armed"]["entry_number"] == ENTRY
+    # restore treats arming as possibly armed, clears BootNext and deletes no entry
+    rops = RecordingOps({"efibootmgr -v": [EFI_FINAL, EFI_FINAL, EFI_PRE]})
     res, removed = _restore_for(env, rops)
     assert res.exit_code == 0, res.lines
     muts = [c.line for c in mutations(rops)]
-    assert f"efibootmgr -B -b {ENTRY}" in muts and "efibootmgr -N" in muts
+    assert muts == ["efibootmgr -N"]
     assert statemod.load_state(env.state_dir).state.phase == "restored"
 
 
@@ -892,23 +903,25 @@ def test_restore_of_arming_without_ack_refuses(env):
     assert res.exit_code == 1 and removed == [] and rops.calls == []
 
 
-def test_arm_error_with_no_entry_number_says_state_unknown_and_not_to_reboot(env):
-    # the entry is created but efibootmgr lists none carrying the label
-    res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE, EFI_PRE]}))
+def test_a_failing_efibootmgr_n_says_state_unknown_and_not_to_reboot(env):
+    # the -n call itself fails: BootNext may or may not be set, so the state stays arming
+    res, ops = env.run(
+        script=env.script(**{f"efibootmgr -n {ENTRY}": OpFailed(["efibootmgr", "-n", ENTRY], 1, "x")})
+    )
     assert res.exit_code == 1
     text = "\n".join(res.lines)
     assert "UNKNOWN" in text and "DO NOT REBOOT" in text
+    assert f"boot entry {ENTRY}" in text
     assert "the board was not armed" not in text
     st = statemod.load_state(env.state_dir).state
     assert st.phase == "arming"
-    assert "cannot find the new boot entry number" in st.data["error"]
     assert res.final_phase == "arming"
 
 
 def test_arm_failure_before_any_efibootmgr_mutation_is_failed_and_not_armed(env):
     res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE.replace(ORDER, "0002,0001")]}))
     assert res.exit_code == 1
-    assert not [c for c in ops.calls if c.vector[:2] in (["efibootmgr", "-C"], ["efibootmgr", "-n"])]
+    assert not [c for c in ops.calls if c.vector[:2] == ["efibootmgr", "-n"]]
     assert statemod.load_state(env.state_dir).state.phase == "failed"
     assert "the board was not armed" in "\n".join(res.lines)
 
@@ -1003,47 +1016,47 @@ def test_armed_record_never_goes_back_in_sequence_number(env, monkeypatch):
     assert armed_seq > max(q for ph, q in seen if ph == "arming")
 
 
-class _CrashAroundCreate(RecordingOps):
+class _CrashAroundNext(RecordingOps):
     def __init__(self, script, *, after):
         super().__init__(script)
         self.after = after
 
-    def efibootmgr_create(self, *a, **kw):
+    def efibootmgr_next(self, *a, **kw):
         if not self.after:
-            raise KeyboardInterrupt  # dies after the arming record, before -C runs
-        super().efibootmgr_create(*a, **kw)
-        raise KeyboardInterrupt  # dies after -C ran, before anything was recorded about it
+            raise KeyboardInterrupt  # dies after the arming record, before -n runs
+        super().efibootmgr_next(*a, **kw)
+        raise KeyboardInterrupt  # dies after -n ran, before anything was recorded about it
 
 
-def test_crash_between_the_arming_write_and_efibootmgr_create_restores_cleanly(env):
-    ops = _CrashAroundCreate(env.script(), after=False)
+def test_crash_between_the_arming_write_and_efibootmgr_next_restores_cleanly(env):
+    ops = _CrashAroundNext(env.script(), after=False)
     with pytest.raises(KeyboardInterrupt):
         env.run(ops=ops)
     st = statemod.load_state(env.state_dir).state
-    assert st.phase == "arming" and st.data["armed"]["entry_number"] == ""
+    assert st.phase == "arming" and st.data["armed"]["entry_number"] == ENTRY
     assert not [c for c in mutations(ops) if c.vector[0] == "efibootmgr"]
-    rops = RecordingOps({"efibootmgr -v": [EFI_PRE, EFI_PRE]})
+    rops = RecordingOps({"efibootmgr -v": [EFI_PRE, EFI_PRE, EFI_PRE]})
     res, removed = _restore_for(env, rops)
     assert res.exit_code == 0, res.lines
-    assert not [c for c in mutations(rops)], "nothing was created, so nothing may be deleted"
-    assert "nothing removed" in "\n".join(res.lines)
+    assert not [c for c in mutations(rops)], "BootNext was never set, so nothing may be changed"
+    assert "already consumed" in "\n".join(res.lines)
     assert statemod.load_state(env.state_dir).state.phase == "restored"
 
 
-def test_crash_right_after_efibootmgr_create_is_found_and_removed_by_label(env):
-    ops = _CrashAroundCreate(env.script(), after=True)
+def test_crash_right_after_efibootmgr_next_is_cleared_by_restore(env):
+    ops = _CrashAroundNext(env.script(), after=True)
     with pytest.raises(KeyboardInterrupt):
         env.run(ops=ops)
     st = statemod.load_state(env.state_dir).state
-    assert st.phase == "arming" and st.data["armed"]["entry_number"] == ""
-    rops = RecordingOps({"efibootmgr -v": [EFI_AFTER, EFI_PRE]})
+    assert st.phase == "arming" and st.data["armed"]["entry_number"] == ENTRY
+    rops = RecordingOps({"efibootmgr -v": [EFI_FINAL, EFI_FINAL, EFI_PRE]})
     res, removed = _restore_for(env, rops)
     assert res.exit_code == 0, res.lines
-    assert [c.line for c in mutations(rops)] == [f"efibootmgr -B -b {ENTRY}"]
+    assert [c.line for c in mutations(rops)] == ["efibootmgr -N"]
     assert statemod.load_state(env.state_dir).state.phase == "restored"
 
 
-@pytest.mark.parametrize("fail_on", [1, 2], ids=["after-create", "after-next"])
+@pytest.mark.parametrize("fail_on", [2], ids=["after-next"])
 def test_progress_write_failure_inside_the_arm_step_stays_arming_and_says_unknown(env, monkeypatch, fail_on):
     real = cmd_write.transition
     count = {"n": 0}
@@ -1066,6 +1079,27 @@ def test_progress_write_failure_inside_the_arm_step_stays_arming_and_says_unknow
     assert st.phase == "arming"
     assert "no space left on device" in st.data["error"]
     lock_is_free(env)
+
+
+def test_progress_write_failure_before_efibootmgr_n_is_failed_and_not_armed(env, monkeypatch):
+    # The first progress write records the entry number, before any boot variable call. Failing it
+    # changed nothing on the board, so the run is an ordinary failure and says it was not armed.
+    real = cmd_write.transition
+    count = {"n": 0}
+
+    def flaky(state, phase, **kw):
+        if phase == "arming" and state.data["phase"] == "arming" and "error" not in kw:
+            count["n"] += 1
+            if count["n"] == 1:
+                raise OSError("no space left on device")
+        return real(state, phase, **kw)
+
+    monkeypatch.setattr(cmd_write, "transition", flaky)
+    res, ops = env.run()
+    assert res.exit_code == 1
+    assert not [c for c in ops.calls if c.vector[:2] == ["efibootmgr", "-n"]]
+    assert statemod.load_state(env.state_dir).state.phase == "failed"
+    assert "the board was not armed" in "\n".join(res.lines)
 
 
 # ------------------------------------------- stat signature before the first mutation

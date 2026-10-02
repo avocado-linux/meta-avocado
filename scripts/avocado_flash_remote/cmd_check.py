@@ -206,15 +206,20 @@ def _boot_next(c: _Ctx):
     return True, "unset"
 
 
-def _oneshot_label(c: _Ctx):
+def _entry_label(c: _Ctx):
     params = c.profile.arm.params
-    label = params.get("label") if hasattr(params, "get") else None
+    return params.get("entry_label") if hasattr(params, "get") else None
+
+
+def _arm_entry_unique(c: _Ctx):
+    label = _entry_label(c)
     if not label:
-        raise NotExamined("profile arm declares no one-shot label")
-    stale = entries_with_label(c.efi_list(), label)
-    if stale:
-        return False, f"entry Boot{' '.join(stale)} is labelled {label} already"
-    return True, "none"
+        raise NotExamined("profile arm declares no entry_label")
+    found = entries_with_label(c.efi_list(), label)
+    if len(found) == 1:
+        return True, f"Boot{found[0]}"
+    names = f" ({', '.join('Boot' + n for n in found)})" if found else ""
+    return False, f"{len(found)} boot entries labelled {label!r}{names}, expected exactly one"
 
 
 def _efivarfs_rw(c: _Ctx):
@@ -286,7 +291,7 @@ CHECKS: dict[str, tuple[str, Callable]] = {
     "efibootmgr-supports-create": ("efibootmgr supports -C", _supports_create),
     "boot-order-unchanged": ("BootOrder unchanged", _boot_order),
     "boot-next-unset": ("BootNext unset", _boot_next),
-    "no-stale-oneshot-entry": ("no stale {label} entry", _oneshot_label),
+    "arm-entry-unique": ("exactly one {label} entry", _arm_entry_unique),
     "efivarfs-rw": ("efivarfs mounted read-write", _efivarfs_rw),
     "secure-boot-disabled": ("SecureBoot disabled", _secure_boot),
     "staged-images-present": ("staged images present", _images_present),
@@ -301,8 +306,7 @@ def _label(c: _Ctx, name: str) -> str:
         return name
     label = entry[0]
     if "{label}" in label:
-        params = c.profile.arm.params
-        label = label.replace("{label}", (params.get("label") if hasattr(params, "get") else None) or "one-shot")
+        label = label.replace("{label}", _entry_label(c) or "arm")
     return label
 
 

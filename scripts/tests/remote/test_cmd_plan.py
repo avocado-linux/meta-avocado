@@ -30,8 +30,36 @@ RUN_ID = "run-0001"
 MACHINE_ID = "0123456789abcdef0123456789abcdef"
 EFI = (
     "BootCurrent: 0001\nTimeout: 5 seconds\nBootOrder: 0001,0002\n"
-    "Boot0001* UEFI NVMe\nBoot0002* UEFI eMMC\n"
+    "Boot0001* UEFI NVMe\nBoot0002* UEFI eMMC Device\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)\n"
 )
+
+# Deliberate parity deviation (task 5.36): the kit's golden dry run creates a boot entry with
+# `efibootmgr -C` and arms the new number. This tool arms the firmware's own storage entry, so
+# exactly these golden lines differ. Each maps to the replacement text (None drops the line).
+# The golden file is never edited; kit_to_port_arm_lines() asserts every key is still in it.
+ARM_DEVIATION = {
+    "  create : efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l '\\EFI\\BOOT\\BOOTAA64.EFI' -u 'bootmode=bootimg'":
+        "  select : the firmware's existing entry 'UEFI eMMC Device' (Boot0002); no entry is created or deleted",
+    "  arm    : efibootmgr -n <new entry number>": "  arm    : efibootmgr -n 0002",
+    "DRY-RUN would run: efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \\\\EFI\\\\BOOT\\\\BOOTAA64.EFI -u bootmode=bootimg": None,
+    "DRY-RUN would run: efibootmgr -n NNNN": "DRY-RUN would run: efibootmgr -n 0002",
+}
+
+
+def kit_to_port_arm_lines(golden_lines):
+    """The kit golden with only the ARM_DEVIATION lines rewritten to this tool's arm text."""
+    missing = [k for k in ARM_DEVIATION if k not in golden_lines]
+    assert not missing, f"golden no longer carries the deviating lines: {missing}"
+    out = []
+    for ln in golden_lines:
+        if ln in ARM_DEVIATION:
+            if ARM_DEVIATION[ln] is not None:
+                out.append(ARM_DEVIATION[ln])
+        else:
+            out.append(ln)
+    return out
+
+
 BLANK = OpResult(rc=1, stderr="sfdisk: /dev/mmcblk0: does not contain a recognized partition table")
 
 
@@ -169,11 +197,19 @@ def test_plan_body_matches_real_board_golden_byte_for_byte():
     assert golden[0] == kit_line
     assert body[0] == kit_line + ".hashes"
     body = [kit_line] + body[1:]
-    assert body == golden[:-1]
+    assert body == kit_to_port_arm_lines(golden[:-1])
     joined = "\n".join(header)
     assert prof.profile_hash(PROFILE_PATH.read_bytes()) in joined
     assert "/dev/mmcblk0" in joined
     assert f"{RUN_DIR}/plan.json" in joined
+
+
+def test_plan_states_the_exact_efibootmgr_n_and_no_creating_option():
+    res, _, _ = plan()
+    text = "\n".join(res.lines)
+    assert "DRY-RUN would run: efibootmgr -n 0002" in res.lines
+    assert "  arm    : efibootmgr -n 0002" in res.lines
+    assert "efibootmgr -C" not in text and "-L " not in text and "NNNN" not in text
 
 
 def test_ends_with_no_mutating_tool_statement():
@@ -224,7 +260,8 @@ def test_plan_record_fields():
     assert data["image_sizes"] == {r: 4096 for r in profile.images}
     expect = layout.sfdisk_input(profile.layout.params, profile.target.device)
     assert data["table_hash"] == sha(expect)
-    assert data["arm"]["label"] == "avocado-emmc-oneshot"
+    assert data["arm"]["label"] == "UEFI eMMC Device"
+    assert data["arm"]["entry_number"] == "0002"
     assert data["arm"]["preexisting_boot_order"] == "0001,0002"
     assert data["created_utc"] == "2026-01-01T00:00:00Z"
 

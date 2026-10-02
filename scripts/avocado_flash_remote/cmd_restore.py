@@ -1,9 +1,10 @@
 """The ``restore`` subcommand: disarm and clean up, never a rollback.
 
-Scope: remove the boot entry this tool created (matched by its recorded
-number AND label) and the one-shot BootNext, verify the boot order still
+Scope: clear the one-shot BootNext when it names the firmware entry this run
+armed (matched by its recorded number AND label), verify the boot order still
 equals the value recorded before any mutation, then remove the staging
-directory. Partition table and image changes are NOT rolled back, and the
+directory. No boot entry is ever deleted: the entry is the firmware's own.
+A BootNext already consumed by a boot is a note, not a failure. Partition table and image changes are NOT rolled back, and the
 output says so. After a reboot into the test entry only staging is cleaned.
 
 It takes the on-board flash lock first and refuses while another holder is
@@ -14,8 +15,8 @@ are accepted by the state gate (plan itself still refuses a target that has a
 partition table when the profile sets ``require_empty``: restore wipes nothing).
 
 With missing or unparseable state it refuses; ``--emergency-disarm`` (plus an
-acknowledgement) removes only entries carrying the profile's arm label and a
-BootNext that points at one of them.
+acknowledgement) clears only a BootNext that points at the entry carrying the
+profile's entry label, and deletes nothing.
 
 Standard library only (ships to a board running Python 3.10).
 """
@@ -29,7 +30,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .arm import Arm, ArmError, ArmRecord, _field, bootable_entries, boot_next_of, boot_order_of, entries_with_label
+from .arm import Arm, ArmError, ArmRecord, _field, boot_next_of, boot_order_of, entries_with_label
 from .ops import OpsError
 from .cmd_status import _load_run
 from .state import LOCK_NAME, TERMINAL, LoadResult, LockHeld, OnBoardLock, describe_recovery, load_state, transition
@@ -72,15 +73,6 @@ def make_guarded_rmtree(expected):
         shutil.rmtree(path)
 
     return remove
-
-
-_bootable = bootable_entries
-
-
-def _refuse_bootable(say, bootable) -> None:
-    for num, why in sorted(bootable.items()):
-        say(f"refusing: boot entry {num} carries this tool's label but {why}")
-    say("no boot entry was deleted; inspect `efibootmgr -v` and remove the entry by hand if it is really ours")
 
 
 def _entry_present(text, number) -> bool:
@@ -133,10 +125,10 @@ def _manual_disarm_lines(label, holder) -> list:
         "check first on the board (ps -ef | grep -E 'dd|sfdisk|efibootmgr') and stop here if any is alive",
         "no boot entry or staging was touched",
         "only if nothing is running, disarm by hand as root on the board:",
-        "  efibootmgr -v    (find the entries labelled "
+        "  efibootmgr -v    (find the entry labelled "
         f"{label!r}; note BootNext, BootOrder and BootCurrent)",
-        f"  efibootmgr -N    (only if BootNext names an entry labelled {label!r}; leave any other BootNext alone)",
-        "  efibootmgr -B -b XXXX    (delete one labelled entry that is not in BootOrder and is not BootCurrent)",
+        f"  efibootmgr -N    (only if BootNext names the entry labelled {label!r}; leave any other BootNext alone)",
+        "  delete no boot entry: it is the firmware's own",
     ]
 
 
@@ -161,7 +153,7 @@ def run_restore(
     path refuses at once.
     """
     wait = lock_wait if emergency_disarm else 0.0
-    label = profile.arm.params.get("label", "") if getattr(profile.arm, "params", None) else ""
+    label = profile.arm.params.get("entry_label", "") if getattr(profile.arm, "params", None) else ""
     try:
         with OnBoardLock(Path(state_dir) / LOCK_NAME, run_id=ack_run_id or "", wait_seconds=wait):
             return _restore_locked(
@@ -256,7 +248,7 @@ def _restore_locked(
         return True
 
     loaded = _load_requested(state_dir, run_id)
-    label = profile.arm.params.get("label", "") if profile.arm.params else ""
+    label = profile.arm.params.get("entry_label", "") if profile.arm.params else ""
 
     if emergency_disarm:
         # The lock being free does not mean nothing is running: a dd in its own session can outlive a
@@ -270,8 +262,8 @@ def _restore_locked(
         say("no boot entry or staging was touched")
         say(
             "inspect `efibootmgr -v` by hand, or run `restore --emergency-disarm "
-            "--ack-run <text>` to remove only entries labelled "
-            f"{label!r} and the one-shot setting"
+            "--ack-run <text>` to clear only a one-shot "
+            f"setting that names the entry labelled {label!r}"
         )
         return finish(1, True)
 
@@ -359,33 +351,22 @@ def _restore_locked(
 
 
 def _disarm_by_label(ops, record, say, result, finish, clean_staging, note):
-    """arming with no recorded entry number: remove only entries with the recorded label."""
-    label = record.label
-    if not label:
+    """arming with no recorded entry number: clear BootNext only if it names the one entry with the label."""
+    if not record.label:
         say("refusing: the arming record has no label to match; use --emergency-disarm with an acknowledgement")
         return finish(1, True)
     try:
-        live = ops.efibootmgr_list()
-        ours = entries_with_label(live, label)
-        bootable = _bootable(live, ours)
-        if bootable:
-            _refuse_bootable(say, bootable)
-            say("staging kept")
-            return finish(1, note)
-        nxt = boot_next_of(live).upper()
-        if nxt and nxt in ours:
-            ops.efibootmgr_delete_next()
-            result.actions.append(f"cleared BootNext {nxt}")
-            say(f"cleared BootNext {nxt}")
-        for num in ours:
-            ops.efibootmgr_delete(num)
-            result.actions.append(f"deleted boot entry {num}")
-            say(f"deleted boot entry {num}")
-        if not ours:
-            say(f"no boot entry labelled {label!r} found; nothing removed")
+        for n in Arm().disarm(ops, record):
+            result.actions.append(n)
+            say(n)
         after = ops.efibootmgr_list()
     except OpsError as e:
         say(f"restore FAILED: {e}; staging kept, rerun `restore` after inspecting efibootmgr -v")
+        return finish(1, note)
+    still = boot_next_of(after).upper()
+    if still and still in entries_with_label(after, record.label):
+        say(f"BootNext {still} still names an entry labelled {record.label!r}; it was not cleared")
+        say("staging kept")
         return finish(1, note)
     now = boot_order_of(after)
     if record.preexisting_boot_order and now != record.preexisting_boot_order:
@@ -401,7 +382,7 @@ def _disarm_by_label(ops, record, say, result, finish, clean_staging, note):
 def _emergency(ops, label, ack, loaded, say, result, finish):
     if not ack:
         say("refusing: --emergency-disarm needs an acknowledgement (--ack-run <text>)")
-        say(f"it removes only boot entries labelled {label!r} and BootNext if it points at one")
+        say(f"it clears BootNext only if it names the entry labelled {label!r}; it deletes no boot entry")
         return finish(1, True)
     if not label:
         say("refusing: the profile has no arm label to match")
@@ -410,25 +391,19 @@ def _emergency(ops, label, ack, loaded, say, result, finish):
     try:
         live = ops.efibootmgr_list()
         ours = entries_with_label(live, label)
-        bootable = _bootable(live, ours)
-        if bootable:
-            _refuse_bootable(say, bootable)
-            return finish(1, True)
         nxt = boot_next_of(live).upper()
         if nxt and nxt in ours:
             ops.efibootmgr_delete_next()
             result.actions.append(f"cleared BootNext {nxt}")
             say(f"cleared BootNext {nxt}")
-        for num in ours:
-            ops.efibootmgr_delete(num)
-            result.actions.append(f"deleted boot entry {num}")
-            say(f"deleted boot entry {num}")
+        elif not ours:
+            say(f"no boot entry labelled {label!r}; BootNext left alone")
+        else:
+            say(f"BootNext {nxt or '(none)'} does not name the entry labelled {label!r}; nothing cleared")
     except OpsError as e:
         say(f"emergency disarm FAILED: {e}")
         return finish(1, True)
-    if not ours:
-        say(f"no boot entry labelled {label!r}; nothing removed")
-    say("BootOrder and all other entries were not touched; staging was not touched")
+    say("BootOrder and all boot entries were not touched; staging was not touched")
     return finish(0, True)
 
 
