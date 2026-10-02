@@ -61,3 +61,18 @@ def test_extension_pinning_instructions():
 
 def test_readme_has_no_em_or_en_dashes():
     assert "—" not in README and "–" not in README
+
+
+def test_readme_has_a_recovery_section_naming_the_manual_wipe_and_restage():
+    text = _section("Starting over after a failed write")
+    for needle in ("require_empty", "wipefs", "stage", "restore", "identity"):
+        assert needle in text, needle
+
+
+def test_readme_documents_the_emergency_disarm_lock_wait():
+    text = _section("Restore scope")
+    assert "emergency-disarm" in text and "waits" in text and "efibootmgr -B" in text
+
+
+def test_readme_documents_the_outcome_marker():
+    assert "`outcome`" in README and "`refused`" in README

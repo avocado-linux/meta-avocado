@@ -494,3 +494,64 @@ def test_arming_is_described_as_possibly_armed(tmp_path):
     text = st.describe_recovery(s)
     assert "DO NOT REBOOT" in text and "--ack-run run-1" in text
     assert "no recovery needed" not in text
+
+
+# ---- 5.20: the recovery text must not promise a plan the shipped profile refuses ----
+
+
+def _at_phase(tmp_path, phase):
+    s = st.transition(_new(tmp_path), "table-writing")
+    if phase == "table-writing":
+        return s
+    s = st.transition(s, "table-written")
+    if phase == "table-written":
+        return s
+    s = st.transition(s, "image-writing", image="boot")
+    if phase == "image-writing":
+        return s
+    return st.transition(
+        s, "image-written", image="boot", bytes_written=1, expected_sha256="a", readback_sha256="a"
+    )
+
+
+@pytest.mark.parametrize("phase", ["table-writing", "table-written", "image-writing", "image-written"])
+def test_restore_then_restart_names_the_manual_wipe_and_the_restage(tmp_path, phase):
+    text = st.describe_recovery(_at_phase(tmp_path, phase))
+    assert "from the start" not in text, text
+    assert "wipe" in text and "stage" in text, text
+    assert "require_empty" in text, text
+
+
+def test_failed_after_table_write_names_the_wipe_and_the_restage(tmp_path):
+    s = st.transition(_new(tmp_path), "table-writing")
+    s = st.transition(s, "failed", error="boom")
+    text = st.describe_recovery(s)
+    assert "wipe" in text and "stage" in text and "require_empty" in text, text
+
+
+def test_failed_before_the_table_was_touched_needs_no_wipe_but_still_a_restage(tmp_path):
+    s = st.transition(_new(tmp_path), "failed", error="boom")
+    text = st.describe_recovery(s)
+    assert "by hand" not in text
+    assert "stage" in text, text
+
+
+def test_lock_wait_is_bounded_and_holder_is_reported(tmp_path):
+    path = tmp_path / "lock"
+    with st.OnBoardLock(path, run_id="holder"):
+        t0 = time.monotonic()
+        with pytest.raises(st.LockHeld) as ei:
+            with st.OnBoardLock(path, run_id="waiter", wait_seconds=0.3):
+                pass
+        assert 0.25 <= time.monotonic() - t0 < 5
+    assert json.loads(ei.value.holder)["pid"] == os.getpid()
+
+
+def test_lock_wait_zero_refuses_without_waiting(tmp_path):
+    path = tmp_path / "lock"
+    with st.OnBoardLock(path, run_id="holder"):
+        t0 = time.monotonic()
+        with pytest.raises(st.LockHeld):
+            with st.OnBoardLock(path, run_id="waiter"):
+                pass
+        assert time.monotonic() - t0 < 1

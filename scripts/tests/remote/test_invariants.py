@@ -1183,3 +1183,24 @@ def test_status_unreadable_state_is_exit_1(tmp_path):
 
     (tmp_path / "current").write_text("zz\n")
     assert run_status(tmp_path, out=lambda x: None).exit_code == 1
+
+
+# ---------------------------------------------------------------- 5.20: recovery promises
+
+
+def test_no_recovery_text_promises_a_new_plan_without_naming_the_wipe_the_profile_needs(tmp_path):
+    """The shipped profile sets require_empty, so plan refuses a disk that already has a table."""
+    assert prof.load_profile_bytes(SHIPPED_BYTES).target.require_empty is True
+    texts = []
+    for action in set(statemod.RECOVERY.values()):
+        texts.append(statemod._RECOVERY_TEXT[action])
+    s = statemod.create_run(
+        tmp_path, run_id="r1", profile_hash="p", plan_hash="q", board_identity={}, image_roles=["boot"], arm=True
+    )
+    s = statemod.transition(s, "table-writing")
+    texts.append(statemod.describe_recovery(statemod.transition(s, "failed", error="boom")))
+    for text in texts:
+        low = text.lower()
+        promises_replan = "plan and write again" in low or "plan again" in low or "from the start" in low
+        if promises_replan:
+            assert "wipe" in low and "stage" in low, text

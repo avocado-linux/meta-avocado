@@ -66,7 +66,11 @@ _RECOVERY_TEXT = {
         "the partition table may be partly or fully rewritten and an image may be partial: "
         "re-inspect the target, run restore with --ack-run {run_id} (it removes any boot entry "
         "this run created and the staging directory; it does NOT roll back the partition table "
-        "or any image), then plan and write again from the start"
+        "or any image, and it wipes nothing). To start over, wipe the target's partition table "
+        "by hand after re-checking that it is the profile's target device (plan refuses a disk "
+        "that already has a table when the profile sets require_empty), stage the images again "
+        "(restore deleted the staging directory), then plan and write. The README section "
+        "'Starting over after a failed write' lists the steps"
     ),
     "restore-unknown-arm": (
         "the arm step started: a boot entry and the next-boot setting may already exist even if "
@@ -91,7 +95,11 @@ class RerunRefused(Exception):
 
 
 class LockHeld(Exception):
-    pass
+    """Another process holds the lock; ``holder`` is what its lock file says (may be empty)."""
+
+    def __init__(self, message: str, holder: str = "") -> None:
+        super().__init__(message)
+        self.holder = holder
 
 
 def _fault(point: str) -> None:
@@ -299,9 +307,18 @@ def _describe_failed(state: RunState) -> str:
     else:
         parts.append("No boot entry is recorded as armed.")
     parts.append(
-        "Run restore to disarm and clean staging (no acknowledgement is needed for a finished run), "
-        "then plan and write again; restore does not roll back the table or images."
+        "Run restore to disarm and clean staging (no acknowledgement is needed for a finished run); "
+        "restore does not roll back the table or images and wipes nothing."
     )
+    if "table-writing" in phases:
+        parts.append(
+            "To start over, wipe the target's partition table by hand after re-checking that it is the "
+            "profile's target device (plan refuses a disk that already has a table when the profile sets "
+            "require_empty), stage the images again (restore deleted the staging directory), then plan and "
+            "write. See the README section 'Starting over after a failed write'."
+        )
+    else:
+        parts.append("To try again, stage the images again (restore deletes the staging directory), then plan and write.")
     return " ".join(parts)
 
 
@@ -391,9 +408,10 @@ def check_rerun_allowed(state_dir, ack_run_id: str | None = None) -> RerunDecisi
 class _FlockBase:
     label = "lock"
 
-    def __init__(self, path, run_id: str = "") -> None:
+    def __init__(self, path, run_id: str = "", wait_seconds: float = 0.0) -> None:
         self.path = Path(path)
         self.run_id = run_id
+        self.wait_seconds = wait_seconds
         self._fh = None
 
     def _describe(self) -> str:
@@ -402,13 +420,18 @@ class _FlockBase:
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fh = open(self.path, "a+")
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            fh.seek(0)
-            holder = fh.read().strip() or "unknown holder"
-            fh.close()
-            raise LockHeld(f"{self._describe()} is held by {holder}") from None
+        deadline = time.monotonic() + max(0.0, self.wait_seconds)
+        while True:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    fh.seek(0)
+                    raw = fh.read().strip()
+                    fh.close()
+                    raise LockHeld(f"{self._describe()} is held by {raw or 'unknown holder'}", raw) from None
+                time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
         fh.seek(0)
         fh.truncate()
         fh.write(json.dumps({"pid": os.getpid(), "run_id": self.run_id}))
@@ -424,6 +447,8 @@ class _FlockBase:
 
 
 class OnBoardLock(_FlockBase):
+    """The flash lock. ``wait_seconds`` bounds a wait for a holder; 0 refuses at once."""
+
     label = "on-board flash lock"
 
     def _describe(self) -> str:

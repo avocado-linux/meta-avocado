@@ -374,7 +374,7 @@ def test_restore_while_another_holder_has_the_lock_refuses_and_deletes_nothing(e
 def test_emergency_disarm_also_needs_the_lock(env):
     ops = RecordingOps({LIST: [efi(extra=[NEW])]})
     with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="writer"):
-        r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="because")
+        r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
     assert r.exit_code == 1
     assert mutations(ops) == []
 
@@ -455,3 +455,116 @@ def test_emergency_hint_names_the_real_flag(env):
     assert r.exit_code == 1
     assert "--ack-run" in text
     assert not re.search(r"--ack(?!-run)", text)
+
+
+# ---- 5.20: label-based disarm never deletes a bootable entry; emergency lock wait ----
+
+
+def arming_state(env):
+    s = mk_state(env, "verified")
+    return st.transition(s, "arming", armed=rec(entry_number="", next_armed=False))
+
+
+def test_label_disarm_deletes_a_labelled_entry_that_is_not_in_boot_order(env):
+    arming_state(env)
+    live = efi(nxt="0005", extra=[NEW])
+    ops = RecordingOps({LIST: [live, efi()]})
+    r, removed, out = go(env, ops)
+    assert r.exit_code == 0, out
+    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+
+
+def test_label_disarm_refuses_an_entry_that_is_in_boot_order(env):
+    arming_state(env)
+    ops = RecordingOps({LIST: [efi(order="0001,0005,0002", extra=[NEW]), efi(order="0001,0005,0002", extra=[NEW])]})
+    r, removed, out = go(env, ops)
+    text = "\n".join(out)
+    assert r.exit_code == 1
+    assert mutations(ops) == []
+    assert removed == []
+    assert "0005" in text and "BootOrder" in text
+    assert "efibootmgr -v" in text  # the operator is told where to look
+    assert st.load_state(env.state_dir).state.phase == "arming"
+
+
+def test_label_disarm_refuses_the_entry_the_board_booted_from(env):
+    arming_state(env)
+    ops = RecordingOps({LIST: [efi(current="0005", extra=[NEW]), efi(current="0005", extra=[NEW])]})
+    r, removed, out = go(env, ops)
+    assert r.exit_code == 1
+    assert mutations(ops) == []
+    assert removed == []
+    assert "0005" in "\n".join(out) and "BootCurrent" in "\n".join(out)
+    assert st.load_state(env.state_dir).state.phase == "arming"
+
+
+def test_label_disarm_refuses_everything_when_any_labelled_entry_is_bootable(env):
+    arming_state(env)
+    two = [NEW, f"Boot0006* {LABEL}\tHD(1,GPT,2,0x0,0x0)/File(\\EFI\\BOOT\\BOOTAA64.EFI)"]
+    live = efi(order="0001,0006,0002", nxt="0005", extra=two)
+    ops = RecordingOps({LIST: [live, live]})
+    r, _, out = go(env, ops)
+    assert r.exit_code == 1
+    assert mutations(ops) == []  # not even the safe sibling or BootNext: ambiguity refuses
+
+
+def test_emergency_disarm_also_refuses_a_labelled_entry_in_boot_order(env):
+    (env.state_dir / "current").write_text("r1\n")
+    ops = RecordingOps({LIST: efi(order="0001,0005,0002", extra=[NEW])})
+    r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
+    assert r.exit_code == 1
+    assert mutations(ops) == []
+    assert "0005" in "\n".join(out) and "BootOrder" in "\n".join(out)
+
+
+def test_emergency_disarm_also_refuses_the_booted_entry(env):
+    (env.state_dir / "current").write_text("r1\n")
+    ops = RecordingOps({LIST: efi(current="0005", extra=[NEW])})
+    r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
+    assert r.exit_code == 1
+    assert mutations(ops) == []
+
+
+def test_emergency_disarm_on_a_held_lock_is_bounded_and_prints_the_holder_and_manual_steps(env):
+    import time
+
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="hung-writer"):
+        t0 = time.monotonic()
+        r, removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.3)
+        elapsed = time.monotonic() - t0
+    text = "\n".join(out)
+    assert r.exit_code == 1
+    assert 0.25 <= elapsed < 5
+    assert ops.log == [] and removed == []
+    assert f'"pid": {os.getpid()}' in text or f"pid {os.getpid()}" in text
+    assert "hung-writer" in text
+    assert "efibootmgr -v" in text and "efibootmgr -N" in text and "efibootmgr -B -b" in text
+    assert LABEL in text
+
+
+def test_emergency_disarm_proceeds_when_the_lock_is_released_during_the_wait(env):
+    import threading
+    import time
+
+    (env.state_dir / "current").write_text("r1\n")
+    ops = RecordingOps({LIST: efi(nxt="0005", extra=[NEW])})
+    lock = OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="slow-writer")
+    lock.__enter__()
+    threading.Timer(0.2, lambda: lock.__exit__(None, None, None)).start()
+    t0 = time.monotonic()
+    r, _, out = go(env, ops, emergency_disarm=True, ack_run_id="yes", lock_wait=5)
+    assert r.exit_code == 0, out
+    assert time.monotonic() - t0 < 4
+    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+
+
+def test_normal_restore_still_refuses_at_once_on_a_held_lock_whatever_the_wait(env):
+    import time
+
+    image_writing_state(env)
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="writer"):
+        t0 = time.monotonic()
+        r, removed, out = go(env, RecordingOps(), lock_wait=5)
+        assert time.monotonic() - t0 < 2
+    assert r.exit_code == 1 and removed == []
