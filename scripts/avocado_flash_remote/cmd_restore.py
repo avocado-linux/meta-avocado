@@ -251,6 +251,10 @@ def _restore_locked(
     label = profile.arm.params.get("label", "") if profile.arm.params else ""
 
     if emergency_disarm:
+        # The lock being free does not mean nothing is running: a dd in its own session can outlive a
+        # killed runner without holding the lock.
+        say("before relying on this disarm, check on the board that no dd, sfdisk or efibootmgr is still "
+            "running (ps -ef | grep -E 'dd|sfdisk|efibootmgr')")
         return _emergency(ops, label, ack_run_id, loaded, say, result, finish)
 
     if loaded.status == "unparseable":

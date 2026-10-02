@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import pathlib
@@ -555,3 +556,31 @@ def test_lock_wait_zero_refuses_without_waiting(tmp_path):
             with st.OnBoardLock(path, run_id="waiter"):
                 pass
         assert time.monotonic() - t0 < 1
+
+
+# ---- 5.25: a stale holder record is never shown as the holder
+
+
+def test_a_released_on_board_lock_leaves_no_holder_record(tmp_path):
+    path = tmp_path / "flash.lock"
+    with st.OnBoardLock(path, run_id="a"):
+        assert json.loads(path.read_text())["run_id"] == "a"
+    assert path.read_text() == ""  # the last holder's pid must not outlive its hold
+
+
+def test_a_record_that_changes_while_it_is_read_is_reported_as_an_unknown_holder(tmp_path, monkeypatch):
+    path = tmp_path / "flash.lock"
+    path.write_text(json.dumps({"pid": 999999999, "run_id": "old"}))
+    holder_fh = open(path, "a+")
+    fcntl.flock(holder_fh.fileno(), fcntl.LOCK_EX)  # a new writer already holds the lock but has not rewritten the record
+
+    def new_writer_rewrites(_s):
+        path.write_text(json.dumps({"pid": os.getpid(), "run_id": "new"}))
+
+    monkeypatch.setattr(st.time, "sleep", new_writer_rewrites)
+    try:
+        with pytest.raises(st.LockHeld) as e:
+            st.OnBoardLock(path, run_id="x").__enter__()
+    finally:
+        holder_fh.close()
+    assert e.value.holder == ""  # the stale dead pid is not offered as the holder

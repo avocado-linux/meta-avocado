@@ -417,6 +417,21 @@ class _FlockBase:
     def _describe(self) -> str:
         return self.label
 
+    @staticmethod
+    def _stable_record(fh) -> str:
+        """The holder record, or "" when it is not the same on two reads a moment apart.
+
+        A new holder takes the flock before it rewrites the record, so a single read can name the
+        previous holder. An unstable record is reported as an unknown holder, which callers treat
+        as alive.
+        """
+        fh.seek(0)
+        first = fh.read().strip()
+        time.sleep(0.05)
+        fh.seek(0)
+        second = fh.read().strip()
+        return first if first == second else ""
+
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fh = open(self.path, "a+")
@@ -427,8 +442,7 @@ class _FlockBase:
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    fh.seek(0)
-                    raw = fh.read().strip()
+                    raw = self._stable_record(fh)
                     fh.close()
                     raise LockHeld(f"{self._describe()} is held by {raw or 'unknown holder'}", raw) from None
                 time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
@@ -442,6 +456,11 @@ class _FlockBase:
     def __exit__(self, *exc) -> None:
         fh, self._fh = self._fh, None
         if fh is not None:
+            try:
+                fh.truncate(0)  # the last holder's pid must not outlive its hold
+                fh.flush()
+            except OSError:
+                pass
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
             fh.close()
 

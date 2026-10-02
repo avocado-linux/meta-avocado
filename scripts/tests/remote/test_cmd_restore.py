@@ -573,6 +573,16 @@ def test_emergency_disarm_on_a_held_lock_is_bounded_and_prints_the_holder(env):
     assert "hung-writer" in text
 
 
+def test_the_lock_acquired_emergency_path_also_warns_to_check_for_running_tools(env):
+    # An orphaned dd (own session) can outlive a SIGKILLed runner while the lock is free, so the
+    # ps warning cannot live only on the lock-held path.
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    r, _removed, out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
+    text = "\n".join(out)
+    assert "no dd, sfdisk or efibootmgr is still running" in text
+    assert "ps -ef" in text
+
+
 def test_a_live_holder_gets_no_manual_steps_only_wait_and_status(env):
     # image-writing is one phase for the whole dd, and between the lock and the first state record the
     # status still shows the previous run's terminal phase: "the phase has stopped moving" proves nothing.

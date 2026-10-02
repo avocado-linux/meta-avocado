@@ -233,7 +233,11 @@ def _do_check(ctx: _Ctx) -> int:
 
 
 def _do_status(ctx: _Ctx) -> int:
-    return _do_simple(ctx, "status", {"staging_dir": ctx.staging_dir, "state_dir": ctx.state_dir})
+    request = {"staging_dir": ctx.staging_dir, "state_dir": ctx.state_dir}
+    if ctx.args.run_id:
+        # That run's own record, whichever run `current` names now.
+        request["run_id"] = _need_run_id(ctx)
+    return _do_simple(ctx, "status", request)
 
 
 def _do_plan(ctx: _Ctx) -> int:
@@ -403,16 +407,37 @@ def _confirm_owner(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str, polls: i
     return owner
 
 
+_VERDICT_WORDS = {"exited": "gone", "absent": "not present", "finished": "gone"}
+
+
+def _unreadable_text(run_id: str, runner: str) -> str:
+    return (
+        f"the board's state record for run {run_id} is unreadable and {runner}; the board may have been "
+        f"changed and this is not a finished write. Run the status subcommand with --run-id {run_id} and read "
+        "the runner log before anything else"
+    )
+
+
 def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
     unstarted = 0
     last_phase = None
     noted_unknown = False
+    unreadable = 0  # consecutive polls where the board said this run's record cannot be read
     for _ in range(polls):
         rec, phase = _reconcile_phase(ctx, run_id)
         if rec is not None and rec.ok:
             unstarted = unstarted + 1 if phase is None else 0
+            unreadable = 0
+        elif rec is not None and "state unreadable" in rec.raw:
+            unreadable += 1
+            if unreadable >= 2:
+                verdict, _reason = _judge_runner(ctx, run_id, remote_dir, nonce)
+                if verdict not in ("alive", "unknown"):
+                    ctx.out(_unreadable_text(run_id, f"the runner is {_VERDICT_WORDS.get(verdict, verdict)}"))
+                    _tail_log(ctx, remote_dir)
+                    return 1
         if phase in TERMINAL:
             break
         if phase is None and rec is not None and rec.ok:
@@ -466,20 +491,26 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
                 else:
                     ctx.out(
                         "the runner accepted the write and exited without recording state; the board may have "
-                        "been changed: run the status subcommand and read the runner log before anything else"
+                        f"been changed: run the status subcommand with --run-id {run_id} and read the runner log before anything else"
                     )
                     _tail_log(ctx, remote_dir)
                     return 1
             else:
                 ctx.out(
                     "the board has no marker, no state and no runner process for this run: the write did not "
-                    "start. Run the status subcommand before assuming nothing happened"
+                    f"start. Run the status subcommand with --run-id {run_id} before assuming nothing happened"
                 )
                 _tail_log(ctx, remote_dir)
                 return 1
         ctx.sleep(ctx.poll_interval)
     else:
-        ctx.out(f"write still in progress after {ctx.args.wait_seconds}s; follow it with the status subcommand")
+        if unreadable >= 2:
+            ctx.out(_unreadable_text(run_id, "the runner is still running"))
+            return 1
+        ctx.out(
+            f"write still in progress after {ctx.args.wait_seconds}s; follow it with the status subcommand "
+            f"with --run-id {run_id}"
+        )
         return 1
 
     local = _unique_dir(ctx.evidence_dir / f"{run_id}-write")
@@ -502,7 +533,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
                 )
             ctx.out(
                 f"the board records run {run_id} in phase {phase}; {who}. Records collected in {local}. "
-                "Run the status subcommand and read the runner log before anything else"
+                f"Run the status subcommand with --run-id {run_id} and read the runner log before anything else"
             )
             _tail_log(ctx, remote_dir)
             return 1
