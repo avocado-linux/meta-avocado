@@ -448,3 +448,17 @@ def test_plan_and_check_modules_do_not_reach_the_system_directly(name):
 def test_ast_checker_flags_forbidden_constructs():
     src = "import subprocess\nimport os\nfrom os import remove\nos.system('x')\nos.path.join('a')\n"
     assert sorted(_violations(ast.parse(src))) == ["from os import remove", "import subprocess", "os.system"]
+
+
+def test_version_probes_are_reads_and_install_is_otherwise_a_mutation():
+    for tool in ("install", "sha256sum", "dd"):
+        assert O.vector_mutates([tool, "--version"]) is False
+        assert O.Ops.vec_tool_version(tool) == [tool, "--version"]
+    assert O.vector_mutates(["install", "-d", "/x"]) is True
+    assert O.vector_mutates(["install", "--version", "-d", "/x"]) is True
+    assert O.vector_mutates(["install"]) is True
+
+
+def test_tool_version_refuses_a_tool_outside_the_prerequisite_set():
+    with pytest.raises(ValueError):
+        O.Ops.vec_tool_version("rm")

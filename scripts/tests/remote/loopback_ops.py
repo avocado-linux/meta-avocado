@@ -119,6 +119,8 @@ class LoopOps(RecordingOps):
             return OpResult(stdout=b"0\n")
         if line == f"blockdev --getsz {DEVICE}":
             return OpResult(stdout=f"{self.sectors}\n".encode())
+        if len(vec) == 2 and vec[1] == "--version" and vec[0] in ("install", "sha256sum", "dd"):
+            return OpResult(stdout=f"{vec[0]} (GNU coreutils) 9.4\n".encode())
         if vec[:3] == ["sha256sum", "--strict", "-c"]:
             return OpResult(stdout=self._check_manifest().encode())
         if vec[:2] == ["df", "-Pk"]:

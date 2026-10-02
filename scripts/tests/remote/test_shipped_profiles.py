@@ -142,10 +142,16 @@ def test_jetson_arm_guard(jetson):
     assert set(jetson.guard.params["partitions"]) == {"A_kernel", "B_kernel"} <= names
 
 
-def test_jetson_checks_are_the_kits_fourteen(jetson):
-    assert len(jetson.checks) == 14
-    assert len(set(jetson.checks)) == 14
-    assert jetson.checks == KIT_CHECKS
+def test_jetson_checks_are_the_kits_fourteen_plus_board_prerequisites(jetson):
+    assert len(jetson.checks) == 15
+    assert len(set(jetson.checks)) == 15
+    assert jetson.checks[:14] == KIT_CHECKS
+    assert jetson.checks[14:] == ("board-prerequisites",)
+
+
+@pytest.mark.parametrize("name", ["jetson-agx-orin-j5012.json", "fixture-none.json"])
+def test_every_shipped_profile_lists_the_board_prerequisites_check(name):
+    assert "board-prerequisites" in _load(name).checks
 
 
 def test_jetson_staging_and_state(jetson):

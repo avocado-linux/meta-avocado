@@ -5,7 +5,7 @@ import re
 
 PKG = pathlib.Path(__file__).resolve().parents[2] / "avocado_flash_remote"
 MARKER = "devtool-debt:"
-EXPECTED_MARKERS = 6
+EXPECTED_MARKERS = 7
 
 
 def markers():

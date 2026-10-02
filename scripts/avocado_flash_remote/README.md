@@ -192,7 +192,9 @@ The preflight check names the runner implements are `emmc-exists`,
 `emmc-no-partition-table`, `emmc-not-mounted`, `efibootmgr-supports-create`,
 `boot-order-unchanged`, `boot-next-unset`, `arm-entry-unique`,
 `efivarfs-rw`, `secure-boot-disabled`, `staged-images-present`,
-`staged-image-checksums` and `staging-space-free`. `boot-order-unchanged` is not
+`staged-image-checksums`, `staging-space-free` and `board-prerequisites`
+(GNU `install`, `sha256sum` and `dd` plus the Python standard library; see
+[Board prerequisites](#board-prerequisites)). `boot-order-unchanged` is not
 examined unless `--expected-boot-order` is given. `arm-entry-unique` passes when
 exactly one boot entry carries the profile's `arm.params.entry_label` (zero or
 several fail, naming the count and the label).
@@ -424,6 +426,35 @@ ssh itself runs with `BatchMode=no` by default so you can type an ssh password
 through your own agent. Pass `--batch` for key-only setups where a prompt must
 fail instead of waiting.
 
+## Board prerequisites
+
+The tool assumes a board with a GNU userland and a full Python 3. It does not
+work around a busybox userland. Specifically it relies on:
+
+- GNU `install -d -o USER -m 0755` to create the staging directory;
+- GNU `sha256sum --strict -c` to verify staged images against `MANIFEST.hashes`;
+- `dd conv=fsync status=none` to write each image;
+- a complete Python 3 standard library (the modules listed in `BUNDLE.json` as
+  `required_stdlib`; see [The remote interpreter](#the-remote-interpreter)).
+
+A busybox image lacked all four and failed part-way through staging, so the
+assumption is checked before any write phase, read-only:
+
+- `stage` runs one unprivileged `sh` probe as its first board call, before the
+  space check and before anything is created. It runs `install --version`,
+  `sha256sum --version` and `dd --version`, and refuses naming each tool that
+  fails to start or announces BusyBox.
+- `check` (and so the pre-flight inside `plan` and `write`) lists
+  `board-prerequisites` in the profile checks. It runs the same three
+  `--version` reads through the read-only operations layer, imports each
+  standard-library module the runner needs, and prints `FAIL  board
+  prerequisites: ...` naming every missing tool or module. It counts in the
+  `checks: N/M` total like any other check, and `--version` is the only form of
+  `install` the read-only layer accepts.
+
+Busybox portability is a deliberate limit, recorded under
+[Known limits](#known-limits).
+
 ## The remote interpreter
 
 The runner needs a `python3` on the board with the standard-library modules it
@@ -568,7 +599,7 @@ behaviour on a real board has to be exercised by hand with `check`, `plan` and
 
 ## Known limits
 
-Six debts were found and deliberately left unfixed. Each has a
+Seven debts were found and deliberately left unfixed. Each has a
 `devtool-debt:` marker at the code it describes, and a test requires every
 marker to carry a ceiling and an upgrade trigger.
 
@@ -579,6 +610,7 @@ marker to carry a ceiling and an upgrade trigger.
 | `_no_partition_table` and the lsblk sibling checks treat a tool failure as a verdict | `cmd_check.py` | a board whose lsblk or sfdisk fails for an unrelated reason reports the wrong cause | the first false verdict seen on a board |
 | Root executes `runner.pyz` and `request-*.json` from the SSH user's staging directory and honours the request's `tool_dir` | `host.py` install, `runner.py` `_run_sub` | any process running as that user can replace the runner after the hash check, or point `tool_dir` at its own binaries, and gain root; most relevant in sudo-password mode; `write` compares every staged image's stat signature (size, mtime, inode, device) and then re-hashes every staged image in full under the on-board lock just before its first mutation, which refuses an image replaced or edited in place since the scan; the re-hash narrows the window but does not close it, because a same-user replacement after the hash and before the `dd` is still only caught by the per-image re-verify, which stays | a board where the SSH user is not trusted as root, or before the tool is offered outside a lab; stage root-owned and drop the `tool_dir` request key |
 | `dd_sha256` read-back spools each full partition to a temporary file | `ops.py` `_exec` | images larger than free `/tmp` (a tmpfs `/tmp` fails after the image was written) | the first ENOSPC at read-back; hash the stream |
+| Busybox portability is not provided: the runner assumes GNU `install -d`, GNU `sha256sum --strict`, `dd conv=fsync status=none` and a full Python 3 standard library, and `board-prerequisites` only reports their absence | `cmd_check.py` `_board_prerequisites`, `host.py` `probe_board_tools` | boards with GNU coreutils and a full Python 3 | a busybox-userland board becomes a real target |
 | The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
 
 ### The one-shot boot and its limits

@@ -26,6 +26,7 @@ Standard library only (ships to a board running Python 3.10).
 from __future__ import annotations
 
 import glob
+import importlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -33,7 +34,7 @@ from typing import Callable
 
 from . import efi
 from .arm import entries_with_label
-from .ops import OpFailed, Ops, OpsError
+from .ops import PREREQUISITE_TOOLS, OpFailed, Ops, OpsError
 
 DEFAULT_EFIVARS_DIR = "/sys/firmware/efi/efivars"
 HEADER = "== read-only pre-flight; informational lines are marked INFO and are not counted =="
@@ -43,6 +44,14 @@ _SUM_RE = re.compile(r"^([0-9a-fA-F]{64})[ \t][ *](.+)$")
 _NO_TABLE_RE = re.compile(r"recognized partition table|no partition table")
 _CREATE_ONLY_RE = re.compile(r"(^|\s)-C([\s,|]|$)|--create-only")
 _READ_ERRORS = (OpsError, OSError, ValueError)
+
+# The standard-library modules the archived runner imports; a test keeps this a superset of what
+# ``bundle.required_stdlib`` computes, so it cannot drift from the code it describes.
+RUNNER_STDLIB = (
+    "__future__", "copy", "dataclasses", "datetime", "fcntl", "glob", "hashlib", "importlib", "json", "os", "pathlib",
+    "posixpath", "re", "secrets", "shutil", "signal", "stat", "subprocess", "sys", "tempfile", "time",
+    "typing", "zipfile",
+)  # fmt: skip
 
 
 @dataclass
@@ -60,8 +69,9 @@ class NotExamined(Exception):
 class _Ctx:
     """Inputs shared by checks, with each expensive read done once."""
 
-    def __init__(self, ops: Ops, profile, staging_dir, efivars_dir, expected_boot_order):
+    def __init__(self, ops: Ops, profile, staging_dir, efivars_dir, expected_boot_order, importer=None):
         self.ops = ops
+        self.importer = importer or importlib.import_module
         self.profile = profile
         self.staging_dir = str(staging_dir)
         self.efivars_dir = str(efivars_dir)
@@ -280,6 +290,36 @@ def _staging_space(c: _Ctx):
     )
 
 
+def _tool_is_gnu(c: _Ctx, tool: str) -> bool:
+    """True when ``<tool> --version`` runs and does not announce BusyBox; a tool that cannot start is absent."""
+    try:
+        res = c.ops.tool_version(tool)
+    except OpFailed:
+        return False
+    return res.rc == 0 and "busybox" not in (res.text + res.stderr).lower()
+
+
+# devtool-debt: the runner assumes GNU install -d, GNU sha256sum --strict, dd conv=fsync status=none and a full Python 3
+# standard library; busybox portability is deliberately not provided and this check only reports its absence.
+# Ceiling: boards with GNU coreutils and a full Python 3. Upgrade trigger: a busybox-userland board becomes a real target.
+def _board_prerequisites(c: _Ctx):
+    bad = [t for t in PREREQUISITE_TOOLS if not _tool_is_gnu(c, t)]
+    missing = []
+    for mod in RUNNER_STDLIB:
+        try:
+            c.importer(mod)
+        except Exception:  # noqa: BLE001 - any import failure means the module is unusable on this board
+            missing.append(mod)
+    if not bad and not missing:
+        return True, f"GNU {', '.join(PREREQUISITE_TOOLS)} and {len(RUNNER_STDLIB)} standard-library modules present"
+    parts = []
+    if bad:
+        parts.append(f"missing or not GNU: {', '.join(bad)}")
+    if missing:
+        parts.append(f"python modules missing: {', '.join(missing)}")
+    return False, "; ".join(parts) + " (this tool needs GNU coreutils and a full Python 3)"
+
+
 # name -> (display label, function). The labels follow the kit's wording.
 CHECKS: dict[str, tuple[str, Callable]] = {
     "emmc-exists": ("eMMC device exists", _emmc_exists),
@@ -297,6 +337,7 @@ CHECKS: dict[str, tuple[str, Callable]] = {
     "staged-images-present": ("staged images present", _images_present),
     "staged-image-checksums": ("staged image checksums", _image_checksums),
     "staging-space-free": ("staging space free", _staging_space),
+    "board-prerequisites": ("board prerequisites", _board_prerequisites),
 }
 
 
@@ -369,12 +410,14 @@ def run_check(
     efivars_dir=DEFAULT_EFIVARS_DIR,
     expected_boot_order: str | None = None,
     out: Callable = print,
+    importer: Callable | None = None,
 ) -> CheckResult:
     """Run every assertion the profile lists; see the module docstring.
 
     ``expected_boot_order`` is the comma-separated BootOrder the board must
     still have (the profile does not carry one); without it the
     ``boot-order-unchanged`` check is not examined.
+    ``importer`` replaces ``importlib.import_module`` for the ``board-prerequisites`` check (tests).
     """
     lines: list = []
 
@@ -382,7 +425,7 @@ def run_check(
         lines.append(text)
         out(text)
 
-    c = _Ctx(ops, profile, staging_dir, efivars_dir, expected_boot_order)
+    c = _Ctx(ops, profile, staging_dir, efivars_dir, expected_boot_order, importer)
     names = list(profile.checks)
     total = len(names)
     examined = 0

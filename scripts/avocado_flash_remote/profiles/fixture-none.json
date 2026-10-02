@@ -69,7 +69,8 @@
     "device-exists",
     "device-empty",
     "staged-images-present",
-    "target-identity"
+    "target-identity",
+    "board-prerequisites"
   ],
   "arm": {
     "strategy": "none",

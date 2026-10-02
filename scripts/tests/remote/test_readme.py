@@ -125,3 +125,24 @@ def test_readme_emergency_disarm_decides_on_the_holder_pid_not_the_phase():
     flat = _flat(_section("Restore scope"))
     assert "whose pid is gone" in flat and "/proc" in flat
     assert "A live holder" in flat and "no manual commands" in flat
+
+
+def test_board_prerequisites_section_names_every_tool_and_the_busybox_limit():
+    text = _section("Board prerequisites")
+    for needle in ("install -d", "sha256sum --strict", "dd conv=fsync", "status=none", "Python 3", "board-prerequisites", "busybox"):
+        assert needle in text, needle
+
+
+def test_the_preflight_check_list_names_board_prerequisites():
+    assert "`board-prerequisites`" in _section("Schema version 1")
+
+
+def test_known_limits_count_matches_the_debt_markers_in_the_code():
+    import test_debt_markers as dm
+
+    words = {6: "Six", 7: "Seven"}
+    found = len(list(dm.markers()))
+    text = _section("Known limits")
+    assert f"{words[found]} debts were found" in text
+    rows = [ln for ln in text.splitlines() if ln.startswith("| ") and not ln.startswith(("| Limit", "|---"))]
+    assert len(rows) == found

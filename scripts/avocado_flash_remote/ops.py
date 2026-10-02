@@ -100,6 +100,8 @@ _SFDISK_WRITE = {
 _EFIBOOTMGR_READ = {"-v", "--verbose", "-h", "--help", "-V", "--version"}
 # Filesystem seam kinds that only read; everything else through ``_fs`` mutates.
 FS_READ_KINDS = ("read_file", "realpath", "listdir")
+# Tools whose GNU behaviour the stage and write paths rely on (install -d, sha256sum --strict, dd conv=fsync).
+PREREQUISITE_TOOLS = ("install", "sha256sum", "dd")
 _PLAIN_READ_TOOLS = {"findmnt", "lsblk", "sha256sum", "stat", "od", "df", "uname", "ls"}
 
 
@@ -121,6 +123,8 @@ def vector_mutates(vec) -> bool:
         return any(a.startswith("of=") for a in args)
     if tool == "docker":
         return args[:1] != ["ps"]
+    if tool == "install":
+        return args != ["--version"]
     if tool in _PLAIN_READ_TOOLS:
         return False
     return True
@@ -209,6 +213,12 @@ class Ops:
     @staticmethod
     def vec_sha256sum_check(manifest="MANIFEST.hashes"):  # preflight.sh:253 (run with cwd=stage dir)
         return ["sha256sum", "--strict", "-c", manifest]
+
+    @staticmethod
+    def vec_tool_version(tool):  # board prerequisites: the runner needs GNU coreutils behaviour from these
+        if tool not in PREREQUISITE_TOOLS:
+            raise ValueError(f"not a prerequisite tool: {tool!r}")
+        return [tool, "--version"]
 
     @staticmethod
     def vec_stat_size(path):  # install.sh:412
@@ -340,6 +350,10 @@ class Ops:
 
     def sha256sum_check(self, cwd, manifest="MANIFEST.hashes", check=False, **kw) -> OpResult:
         return self._run(self.vec_sha256sum_check(manifest), cwd=cwd, check=check, **kw)
+
+    def tool_version(self, tool, check=False, **kw) -> OpResult:
+        """``<tool> --version``; read-only. Only the prerequisite tools may be asked."""
+        return self._run(self.vec_tool_version(tool), check=check, **kw)
 
     def stat_size(self, path, **kw) -> int:
         return int(self._run(self.vec_stat_size(path), **kw).text.strip())

@@ -34,6 +34,12 @@ EFI_OK = (
 )
 MANIFEST = "".join(f"{'a' * 64}  img{i}.bin\n" for i in range(5))
 MIN_KIB = 716800
+GNU_TOOLS = {
+    "install --version": "install (GNU coreutils) 9.4\n",
+    "sha256sum --version": "sha256sum (GNU coreutils) 9.4\n",
+    "dd --version": "dd (GNU coreutils) 9.4\n",
+}
+BUSYBOX_REFUSAL = OpResult(rc=1, stderr="unrecognized option: version\nBusyBox v1.36.1 multi-call binary.\n")
 
 
 def shipped():
@@ -72,6 +78,7 @@ def script(efivars, **over):
         f"findmnt -no FSTYPE -T {STAGE}": "tmpfs\n",
         "uname -r": "5.15.148-tegra\n",
         "docker ps -q": "a\nb\nc\n",
+        **GNU_TOOLS,
         "read_file /sys/block/mmcblk0/device/life_time": "0x01 0x01\n",
         "read_file /sys/block/mmcblk0/device/pre_eol_info": "0x01\n",
     }
@@ -133,15 +140,15 @@ def test_all_pass_matches_golden(efivars):
     assert "INFO  running containers: 3 (they stop at reboot)" in infos
     assert "INFO  kernel: 5.15.148-tegra" in infos
     assert "INFO  eMMC life time: 0x01 0x01 (pre_eol_info 0x01)" in infos
-    assert res.lines[-2:] == ["checks: 14/14", "PREFLIGHT PASS"]
-    assert (res.exit_code, res.examined, res.total) == (0, 14, 14)
+    assert res.lines[-2:] == ["checks: 15/15", "PREFLIGHT PASS"]
+    assert (res.exit_code, res.examined, res.total) == (0, 15, 15)
     assert not any(vector_mutates(c.vector) for c in rec.calls if c.kind == "exec")
 
 
 def test_info_lines_not_counted(efivars):
     res, _ = run(efivars)
-    assert res.total == 14
-    assert sum(ln.startswith(("PASS", "FAIL")) for ln in res.lines) == 14
+    assert res.total == 15
+    assert sum(ln.startswith(("PASS", "FAIL")) for ln in res.lines) == 15
 
 
 FAULTS = [
@@ -175,7 +182,7 @@ def test_single_fault_fails_but_still_counts_as_examined(efivars, label, over):
     assert res.lines[-1].startswith("PREFLIGHT FAIL:")
     assert f"[{label}]" in res.lines[-1]
     if label != "eMMC device exists":  # an absent device leaves its dependents unexamined
-        assert res.examined == 14 and res.total == 14
+        assert res.examined == 15 and res.total == 15
 
 
 def test_secure_boot_enabled_fails(efivars):
@@ -207,9 +214,9 @@ def test_unrunnable_check_is_not_examined_exit_2(efivars):
     assert verdict(res, "efibootmgr supports -C") == "FAIL"
     line = [ln for ln in res.lines if "efibootmgr supports -C" in ln][0]
     assert "not examined" in line
-    assert res.lines[-2:][0] == "checks: 13/14"
+    assert res.lines[-2:][0] == "checks: 14/15"
     assert res.exit_code == 2
-    assert res.examined == 13 and res.total == 14
+    assert res.examined == 14 and res.total == 15
     assert res.lines[-1].startswith("PREFLIGHT FAIL:")
 
 
@@ -218,14 +225,14 @@ def test_fail_beats_not_examined_for_exit_code(efivars):
     del rec.script["efibootmgr --help"]
     res, _ = run(efivars, ops=rec)
     assert res.exit_code == 1
-    assert res.lines[-2] == "checks: 13/14"
+    assert res.lines[-2] == "checks: 14/15"
 
 
 def test_efibootmgr_list_failure_not_examines_dependents(efivars):
     res, _ = run(efivars, **{"efibootmgr -v": OpFailed(["efibootmgr", "-v"], 1, "no efi")})
     assert res.exit_code == 2
-    assert res.examined == 11
-    assert res.lines[-2] == "checks: 11/14"
+    assert res.examined == 12
+    assert res.lines[-2] == "checks: 12/15"
 
 
 def test_missing_manifest_not_examined(efivars):
@@ -233,14 +240,14 @@ def test_missing_manifest_not_examined(efivars):
     del rec.script[f"read_file {STAGE}/MANIFEST.hashes"]
     res, _ = run(efivars, ops=rec)
     assert res.exit_code == 2
-    assert res.examined == 13  # checksums run sha256sum, which reads the manifest itself
+    assert res.examined == 14  # checksums run sha256sum, which reads the manifest itself
 
 
 def test_device_absent_makes_dependents_not_examined(efivars):
     res, _ = run(efivars, **{f"lsblk -rn -o TYPE {DISK}": OpResult(rc=32)})
     assert res.exit_code == 1
     assert verdict(res, "eMMC device exists") == "FAIL"
-    assert res.examined == 10 and res.total == 14
+    assert res.examined == 11 and res.total == 15
 
 
 def test_expected_boot_order_missing_is_not_examined(efivars):
@@ -253,7 +260,7 @@ def test_expected_boot_order_missing_is_not_examined(efivars):
         out=lines.append,
     )
     assert res.exit_code == 2
-    assert res.examined == 13
+    assert res.examined == 14
 
 
 def test_unknown_check_name_is_not_examined(efivars):
@@ -326,7 +333,7 @@ def test_life_time_unavailable_is_info_only(efivars):
     del rec.script["read_file /sys/block/mmcblk0/device/life_time"]
     res, _ = run(efivars, ops=rec)
     assert "INFO  eMMC life time: unavailable" in res.lines
-    assert res.exit_code == 0 and res.total == 14
+    assert res.exit_code == 0 and res.total == 15
 
 
 def test_info_failures_never_change_verdict(efivars):
@@ -462,3 +469,104 @@ def test_zero_entries_fail_and_name_the_count_and_label(efivars):
     res, _ = run(efivars, **{"efibootmgr -v": EFI_OK.replace(ENTRY_LINE, "")})
     assert verdict(res, "exactly one UEFI eMMC Device entry") == "FAIL"
     assert any(f"0 boot entries labelled {LABEL!r}" in ln for ln in res.lines)
+
+
+# ------------------------------------------------- board prerequisites (task 5.37)
+
+PREREQ_LABEL = "board prerequisites"
+
+
+def prereq_run(efivars, importer=None, **over):
+    lines = []
+    ops = ReadOnlyOps(RecordingOps(script(efivars, **over)))
+    kw = {} if importer is None else {"importer": importer}
+    res = run_check(
+        ops,
+        profile_with(["board-prerequisites"]),
+        staging_dir=STAGE,
+        efivars_dir=str(efivars),
+        out=lines.append,
+        **kw,
+    )
+    return res, ops._inner
+
+
+def test_board_prerequisites_pass_with_gnu_tools_and_full_stdlib(efivars):
+    res, rec = prereq_run(efivars)
+    assert res.exit_code == 0 and (res.examined, res.total) == (1, 1)
+    assert verdict(res, PREREQ_LABEL) == "PASS"
+    assert [c.line for c in rec.calls if c.kind == "exec"][:3] == [
+        "install --version",
+        "sha256sum --version",
+        "dd --version",
+    ]
+
+
+@pytest.mark.parametrize("tool", ["install", "sha256sum", "dd"])
+def test_busybox_style_tool_fails_naming_it_and_only_it(efivars, tool):
+    res, _ = prereq_run(efivars, **{f"{tool} --version": BUSYBOX_REFUSAL})
+    assert res.exit_code == 1
+    assert (res.examined, res.total) == (1, 1)
+    line = [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
+    assert tool in line
+    assert all(other not in line for other in {"install", "sha256sum", "dd"} - {tool}), line
+    assert "not examined" not in line
+
+
+def test_a_tool_absent_from_the_board_fails_naming_it(efivars):
+    gone = OpFailed(["dd", "--version"], None, "tool 'dd' not found")
+    res, _ = prereq_run(efivars, **{"dd --version": gone})
+    assert res.exit_code == 1
+    assert "dd" in [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
+
+
+def test_all_three_missing_are_all_named(efivars):
+    over = {f"{t} --version": BUSYBOX_REFUSAL for t in ("install", "sha256sum", "dd")}
+    res, _ = prereq_run(efivars, **over)
+    line = [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
+    assert all(t in line for t in ("install", "sha256sum", "dd")), line
+
+
+def test_a_busybox_banner_with_rc_zero_is_not_gnu(efivars):
+    res, _ = prereq_run(efivars, **{"install --version": "BusyBox v1.36.1 (2024) multi-call binary.\n"})
+    assert res.exit_code == 1
+    assert "install" in [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
+
+
+def test_missing_stdlib_module_fails_naming_it(efivars):
+    def importer(name):
+        if name in ("hashlib", "tempfile"):
+            raise ImportError(name)
+
+    res, _ = prereq_run(efivars, importer=importer)
+    assert res.exit_code == 1
+    line = [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
+    assert "hashlib" in line and "tempfile" in line and "json" not in line
+
+
+def test_prerequisite_module_list_covers_every_module_the_runner_imports():
+    from avocado_flash_remote.bundle import required_stdlib
+
+    assert set(required_stdlib()) <= set(cmd_check.RUNNER_STDLIB)
+
+
+def test_prerequisites_issue_only_read_vectors_and_call_no_mutating_verb(efivars):
+    over = {f"{t} --version": BUSYBOX_REFUSAL for t in ("install", "sha256sum", "dd")}
+    for extra in ({}, over):
+        res, rec = prereq_run(efivars, **extra)
+        execs = [c for c in rec.calls if c.kind == "exec"]
+        assert {"install --version", "sha256sum --version", "dd --version"} <= {c.line for c in execs}
+        assert not any(vector_mutates(c.vector) for c in execs)
+
+
+def test_prerequisites_count_in_the_examined_out_of_declared_total(efivars):
+    res, _ = run(efivars)
+    assert (res.examined, res.total) == (15, 15)
+    assert res.lines[-2:] == ["checks: 15/15", "PREFLIGHT PASS"]
+    assert verdict(res, PREREQ_LABEL) == "PASS"
+
+
+def test_failed_prerequisites_still_count_as_examined(efivars):
+    res, _ = run(efivars, **{"install --version": BUSYBOX_REFUSAL})
+    assert res.exit_code == 1 and (res.examined, res.total) == (15, 15)
+    assert f"[{PREREQ_LABEL}]" in res.lines[-1]

@@ -54,9 +54,9 @@ RECOVERY = {
     "armed": "restore",
 }
 
-# {run_id} is filled in by describe_recovery. `restore` only disarms a boot
-# entry this tool created and removes staging; it never rolls the partition
-# table or any image back, so the text must not promise that.
+# {run_id} is filled in by describe_recovery. `restore` only clears BootNext
+# and removes staging; it deletes no boot entry (the entry is the firmware's own)
+# and never rolls the partition table or any image back, so the text must not promise that.
 _RECOVERY_TEXT = {
     "none-recorded": (
         "no board change has been recorded; the run never reached the first "
@@ -65,9 +65,9 @@ _RECOVERY_TEXT = {
     ),
     "restore-then-restart": (
         "the partition table may be partly or fully rewritten and an image may be partial: "
-        "re-inspect the target, run restore with --ack-run {run_id} (it removes any boot entry "
-        "this run created and the staging directory; it does NOT roll back the partition table "
-        "or any image, and it wipes nothing). To start over, wipe the target's partition table "
+        "re-inspect the target, run restore with --ack-run {run_id} (it clears the next-boot "
+        "setting if this run set it and removes the staging directory; it deletes no boot entry, "
+        "does NOT roll back the partition table or any image, and wipes nothing). To start over, wipe the target's partition table "
         "by hand after re-checking that it is the profile's target device (plan refuses a disk "
         "that already has a table when the profile sets require_empty), stage the images again "
         "(restore deleted the staging directory), then plan and write. The README section "
@@ -76,12 +76,12 @@ _RECOVERY_TEXT = {
     "restore-unknown-arm": (
         "the arm step started: a boot entry and the next-boot setting may already exist even if "
         "this record does not name them. DO NOT REBOOT. Run restore with --ack-run {run_id}: it "
-        "removes the entry (found by its label when the number is unrecorded) and the next-boot "
-        "setting, and the staging directory; it does NOT roll back the partition table or any image"
+        "clears the next-boot setting if it names the entry carrying the profile's label, and removes "
+        "the staging directory; it deletes no boot entry and does NOT roll back the partition table or any image"
     ),
     "restore": (
-        "run restore with --ack-run {run_id} to remove the boot entry and the next-boot "
-        "setting this run created, and the staging directory; it does NOT roll back the "
+        "run restore with --ack-run {run_id} to clear the next-boot setting this run set and "
+        "remove the staging directory; it deletes no boot entry and does NOT roll back the "
         "partition table or any image, and the images need no rewrite"
     ),
 }

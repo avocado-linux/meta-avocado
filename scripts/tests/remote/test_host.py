@@ -71,9 +71,17 @@ def df_ok(avail_kib: int) -> RunResult:
     return RunResult(0, out.encode(), b"")
 
 
-def handler_for(avail_kib: int):
+def _is_tool_probe(argv) -> bool:
+    return argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]
+
+
+def handler_for(avail_kib: int, missing_tools=()):
     def h(argv, stdin, sudo):
         joined = " ".join(argv)
+        if _is_tool_probe(argv):
+            if missing_tools:
+                return RunResult(0, ("MISSING " + " ".join(missing_tools) + "\n").encode(), b"")
+            return RunResult(0, b"OK\n", b"")
         if "df" in argv or "df -Pk" in joined:
             return df_ok(avail_kib)
         if argv[:2] == ["id", "-un"]:
@@ -242,6 +250,8 @@ def test_acquire_sudo_prompts_and_password_hygiene(tmp_path, kit, resolved, caps
     def h(argv, stdin, sudo):
         if argv == ["sudo", "-n", "true"]:
             return RunResult(1, b"", b"password required")
+        if _is_tool_probe(argv):
+            return RunResult(0, b"OK\n", b"")
         if "df" in argv or any("df -Pk" in a for a in argv):
             return df_ok(10_000_000)
         if argv[:2] == ["id", "-un"]:
@@ -342,8 +352,9 @@ def test_real_stage_call_order_and_modes(kit, resolved):
     t = StubTransport(handler=handler_for(10_000_000))
     host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
     kinds = [c.kind for c in t.calls]
-    # space check first, then user lookup / mkdir, then tar, then verification
-    assert kinds[0] == "run" and ("df" in t.calls[0].argv or any("df" in a for a in t.calls[0].argv))
+    # board-tool probe first, then the space check, then user lookup / mkdir, then tar, then verification
+    assert _is_tool_probe(t.calls[0].argv)
+    assert kinds[1] == "run" and ("df" in t.calls[1].argv or any("df" in a for a in t.calls[1].argv))
     assert not any(c.kind == "put_tar" for c in t.calls[:1])
     tar_i = kinds.index("put_tar")
     mk_i = next(i for i, c in enumerate(t.calls) if "install" in c.argv)
@@ -1127,3 +1138,52 @@ def test_a_failure_while_writing_an_extracted_file_leaves_no_partial_file(tmp_pa
     with pytest.raises(OSError):
         host.collect(t, "r1", dest, remote_run_dir="/var/s/run-1")
     assert list(dest.iterdir()) == []
+
+
+# --- board prerequisites at stage (task 5.37) ------------------------------
+
+
+@pytest.mark.parametrize("missing", [("install",), ("sha256sum",), ("dd",), ("install", "sha256sum", "dd")])
+def test_stage_refuses_a_board_missing_gnu_tools_naming_them_before_any_write(kit, resolved, missing):
+    images, bundle_path, _ = kit
+    t = StubTransport(handler=handler_for(10_000_000, missing_tools=missing))
+    with pytest.raises(HostError) as ei:
+        host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
+    msg = str(ei.value)
+    assert all(name in msg for name in missing), msg
+    assert "busybox" in msg.lower() or "GNU" in msg
+    assert not any(c.kind == "put_tar" for c in t.calls)
+    assert not any("install" in c.argv for c in t.calls)
+    assert not any(c.sudo for c in t.calls)
+
+
+def test_stage_tool_probe_is_the_first_remote_call_and_is_unprivileged(kit, resolved):
+    images, bundle_path, _ = kit
+    t = StubTransport(handler=handler_for(10_000_000))
+    host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
+    first = t.calls[0]
+    assert _is_tool_probe(first.argv) and first.sudo is False
+    for tool in ("install", "sha256sum", "dd"):
+        assert f"{tool}" in first.argv[2]
+    for verb in ("-d ", "of=", "rm ", "mv ", "chmod"):
+        assert verb not in first.argv[2]
+
+
+@pytest.mark.parametrize("garbage", [b"", b"banana\n"])
+def test_stage_refuses_when_the_tool_probe_answer_is_unintelligible(kit, resolved, garbage):
+    images, bundle_path, _ = kit
+
+    def h(argv, stdin, sudo):
+        if _is_tool_probe(argv):
+            return RunResult(0, garbage, b"")
+        return handler_for(10_000_000)(argv, stdin, sudo)
+
+    t = StubTransport(handler=h)
+    with pytest.raises(HostError):
+        host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
+    assert not any(c.kind == "put_tar" for c in t.calls)
+
+
+def test_stage_dry_run_still_opens_no_connection_with_the_probe_added(kit, resolved):
+    images, bundle_path, _ = kit
+    host.stage(None, resolved.profile, resolved, images, bundle_path, dry_run=True)
