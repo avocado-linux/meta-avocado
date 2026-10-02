@@ -457,20 +457,35 @@ A write whose run id already has a state record (or whose run directory holds
 and the refusal on stderr, never follows it, and the finished records are left as
 they were.
 
+Each `write` invocation sends a fresh random nonce (`invocation_nonce`). Before
+it touches any marker the detached runner takes a per-run lock
+(`<state_dir>/.invocation-<run_id>.lock`) that the detached process holds for as
+long as it lives, so a second invocation of the same run id while the first is
+still working (even while it is only hashing and has no state record yet) is
+refused with exit 1 and "already in progress". That refusal changes nothing: the
+running runner's markers, verdict and manifest are left alone, no `outcome` is
+written for the run, and the refusal text never says the board is unchanged,
+because it is not. A crashed runner releases the lock with its process.
+
 When the host stops following a run: at the start of every invocation the runner
 deletes the previous `accepted` and `outcome` markers, then a detached runner
-writes its pid to an `accepted` marker file in the run directory before it does
-any check or hashing, and, when it ends, an `outcome` marker: `finished`, or
+writes its pid and the invocation's nonce to an `accepted` marker file in the run
+directory before it does any check or hashing, and, when it ends, an `outcome`
+marker (also carrying the run id and the nonce): `finished`, or
 `refused` followed by the board's own refusal text for a write turned away before
 the lock (an unfinished prior run, a failed check, a changed `BootOrder`, a
 confirmation mismatch). A runner that crashed writes no `outcome`. The host reads
 `outcome` first and prints a `refused` text verbatim with exit 1. Anything the
 host cannot read (a dropped ssh, a sudo failure, an unrecognised answer, an
-`outcome` written for another run) is unknown, and an unknown never ends the
+`outcome` written for another run or another invocation) is unknown, and an unknown never ends the
 follow or produces a "did not start" or "exited" verdict; the host keeps waiting
 until `--wait-seconds` runs out. When a run reaches `complete`, the host also
-checks that no refused write left a log newer than the run's records, and does not
-print `COMPLETE` if one did or if the board could not confirm it. Before declaring
+checks that the run's `accepted` marker carries this invocation's nonce and that no
+refusal is recorded for it, and does not print `COMPLETE` otherwise (a replay that
+was turned away, followed after a dropped connection, lands here: the host reports
+the run's phase and says this invocation did not write it) or if the board could not
+confirm it. The marker probes decide absence by their own exit code, never by the
+wording of a localised error message. Before declaring
 a runner dead the host reconciles once more, so a run that finished between the
 poll and the probe is reported as complete. If the recorded phase is non-terminal and has not moved between two
 polls, the host looks at that pid. A runner that is gone cannot advance the
@@ -494,8 +509,8 @@ records are written under `<state_dir>/<run_id>/records`.
 | `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time. |
 | `write.json` | `write`: final phase, error, per-image state, arm record, transition log. |
 | `runner.log` | A detached `write`: the runner's output. |
-| `accepted` | A detached `write`: the runner's pid, written before any check. Rewritten on every invocation. |
-| `outcome` | A detached `write` that ended: `finished`, or `refused` with the board's refusal text. Listed in `MANIFEST.json` like the other files; absent when the runner crashed. |
+| `accepted` | A detached `write`: the runner's pid and the invocation nonce, written before any check. Rewritten on every invocation. |
+| `outcome` | A detached `write` that ended: `finished`, or `refused` with the board's refusal text, after the run id and nonce lines. Listed in `MANIFEST.json` like the other files; absent when the runner crashed. |
 | `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
 
 The host collects the on-board records after `plan` and after `write`, into

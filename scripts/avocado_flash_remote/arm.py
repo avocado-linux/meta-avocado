@@ -65,8 +65,14 @@ def boot_next_of(text: str) -> str:
 
 
 def entries_with_label(text: str, label: str) -> list:
-    """Upper-case entry numbers whose label is exactly ``label`` (kit regex)."""
-    rx = re.compile(rf"^Boot([0-9A-Fa-f]{{4}})\*?\s+{re.escape(label)}(\s|$)", re.MULTILINE)
+    """Upper-case entry numbers whose label is exactly ``label``.
+
+    The label ends where the description ends: at the tab ``efibootmgr -v``
+    prints before the device path, or at the end of the line (plus trailing
+    blanks) in the plain listing. A space does not end it, so ``label old`` is
+    another entry's longer label and is never ours.
+    """
+    rx = re.compile(rf"^Boot([0-9A-Fa-f]{{4}})\*?[ \t]+{re.escape(label)}(\t|[ \t]*$)", re.MULTILINE)
     return [m.group(1).upper() for m in rx.finditer(text)]
 
 

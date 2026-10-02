@@ -543,6 +543,32 @@ def test_emergency_disarm_on_a_held_lock_is_bounded_and_prints_the_holder_and_ma
     assert LABEL in text
 
 
+def test_held_lock_text_first_says_to_stop_when_the_holder_is_alive_and_never_calls_it_hung(env):
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="long-writer"):
+        r, _removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
+    lines = [ln for ln in out]
+    text = "\n".join(lines)
+    assert "hung" not in text.lower()
+    stop = next(i for i, ln in enumerate(lines) if "STOP" in ln)
+    first_manual = next(i for i, ln in enumerate(lines) if "efibootmgr" in ln)
+    assert stop < first_manual, "the stop condition must come before any manual command"
+    stop_line = lines[stop]
+    assert "alive" in stop_line and "phase" in stop_line and "moving" in stop_line
+    assert "healthy" in text and "status" in text
+
+
+def test_held_lock_manual_steps_clear_bootnext_only_when_it_points_at_the_labelled_entry(env):
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="w"):
+        _r, _removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
+    clear = next(ln for ln in out if "efibootmgr -N" in ln)
+    assert "only if BootNext" in clear and LABEL in clear
+    assert "unconditional" not in clear
+    # every line that runs the clear mentions its condition on the same line
+    assert all("only if" in ln for ln in out if "efibootmgr -N" in ln)
+
+
 def test_emergency_disarm_proceeds_when_the_lock_is_released_during_the_wait(env):
     import threading
     import time
@@ -568,3 +594,13 @@ def test_normal_restore_still_refuses_at_once_on_a_held_lock_whatever_the_wait(e
         r, removed, out = go(env, RecordingOps(), lock_wait=5)
         assert time.monotonic() - t0 < 2
     assert r.exit_code == 1 and removed == []
+
+
+def test_emergency_disarm_leaves_a_longer_label_with_our_label_as_its_prefix(env):
+    (env.state_dir / "current").write_text("r1\n")
+    extra = [NEW, f"Boot0007* {LABEL} old\tHD(1,GPT)", f"Boot0008* {LABEL}x\tHD(1,GPT)"]
+    ops = RecordingOps({LIST: efi(nxt="0005", extra=extra)})
+    r, _removed, _out = go(env, ops, emergency_disarm=True, ack_run_id="yes")
+    assert r.exit_code == 0
+    assert mutations(ops) == ["efibootmgr -N", "efibootmgr -B -b 0005"]
+    assert_safe(ops)

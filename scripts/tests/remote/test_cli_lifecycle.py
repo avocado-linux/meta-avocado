@@ -31,7 +31,7 @@ class Board:
         self.runner_alive = False
         self.outcome = None  # the runner's `outcome` marker body (bytes) once it has ended
         self.probe_fail = None  # a RunResult every presence probe (markers, /proc) answers with
-        self.refusal_probe = b"CLEAR\n"
+        self.accepted_nonce = None  # override the nonce the accepted marker carries (another invocation's)
         self.write_err = b""
         self.complete_on_proc_probe = False  # the write finishes between the poll and the probe
         self.hidden_polls = 0  # status answers "no run recorded" this many times after write
@@ -79,6 +79,13 @@ class Board:
                 tf.add(str(p), arcname="./" + p.name)
         return buf.getvalue()
 
+    def _nonce(self):
+        """The nonce of the write request this board last received."""
+        for sub, req, _detach in reversed(self.runs):
+            if sub == "write":
+                return req["invocation_nonce"]
+        return "0" * 16
+
     # -- handler -------------------------------------------------------------
     def handle(self, argv, stdin, sudo):
         argv = list(argv)
@@ -106,21 +113,19 @@ class Board:
             if self.complete_on_proc_probe:
                 self.phase = "complete"
             return RunResult(0, b"alive\n" if self.runner_alive else b"gone\n")
-        if argv[0] == "sh" and "refused-" in argv[2]:
-            return RunResult(0, self.refusal_probe)
-        if argv[0] == "cat" and argv[1].endswith("/outcome"):
+        if argv[0] == "sh" and "exit 3" in argv[2] and argv[-1].endswith("/outcome"):
             if self.probe_fail is not None:
                 return self.probe_fail
             if self.outcome is not None:
-                return RunResult(0, self.outcome)
-            return RunResult(1, b"", b"cat: x: No such file or directory")
-        if argv[0] == "cat" and argv[1].endswith("/accepted"):
-            self.cat_calls.append(argv[1])
+                return RunResult(0, self.outcome.replace(b"@NONCE@", self._nonce().encode()))
+            return RunResult(3)
+        if argv[0] == "sh" and "exit 3" in argv[2] and argv[-1].endswith("/accepted"):
+            self.cat_calls.append(argv[-1])
             if self.probe_fail is not None:
                 return self.probe_fail
             if self.accepted and self.wrote:
-                return RunResult(0, b"4242\n")
-            return RunResult(1, b"", b"cat: x: No such file or directory")
+                return RunResult(0, f"4242\nnonce={self.accepted_nonce or self._nonce()}\n".encode())
+            return RunResult(3)
         if argv[0] == "test":
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":
@@ -695,15 +700,18 @@ def test_unreadable_markers_never_produce_a_not_started_or_exited_verdict(images
 
 
 @pytest.mark.parametrize("fail", [SSH_DROP, SUDO_FAIL], ids=["ssh-drop", "sudo-failure"])
-def test_failed_proc_probe_does_not_end_the_follow_of_a_live_runner(images, tmp_path, fail):
+def test_failed_proc_probe_does_not_end_the_follow_but_withholds_complete(images, tmp_path, fail):
     board = Board(tmp_path, write_phase="image-writing")
     board.runner_alive = True  # it is alive, but the probe cannot say so
     board.probe_fail = fail
     board.advance_after = 8
     rc, text = _write(images, tmp_path, board)
-    assert rc == 0, text
-    assert "write COMPLETE" in text
-    assert "exited" not in text
+    assert "exited" not in text  # the follow went on to the board's terminal phase
+    assert board.status_calls > 8
+    # Whose runner finished the run cannot be read either, so COMPLETE is withheld rather than guessed.
+    assert rc == 1
+    assert "write COMPLETE" not in text
+    assert "could not confirm whose runner" in text
 
 
 def test_proc_probe_and_marker_read_run_with_the_same_privilege(images, tmp_path):
@@ -719,7 +727,7 @@ def test_pre_lock_refusal_is_printed_verbatim_and_not_called_a_possible_change(i
     board = Board(tmp_path)
     board.hidden_polls = 10**6
     board.runner_alive = False  # the marker names a pid that is gone
-    board.outcome = ("refused\nrun=%s\n%s\n" % ("RID", REFUSAL)).encode()
+    board.outcome = ("refused\nrun=%s\nnonce=@NONCE@\n%s\n" % ("RID", REFUSAL)).encode()
     rid = _stage_and_plan(images, tmp_path, board)
     board.outcome = board.outcome.replace(b"RID", rid.encode())
     rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
@@ -735,7 +743,7 @@ def test_refusal_from_another_run_is_not_trusted(images, tmp_path, capsys):
     board = Board(tmp_path)
     board.hidden_polls = 10**6
     board.runner_alive = True  # a recycled pid would read as alive
-    board.outcome = ("refused\nrun=SOMEONE-ELSE\n%s\n" % REFUSAL).encode()
+    board.outcome = ("refused\nrun=SOMEONE-ELSE\nnonce=@NONCE@\n%s\n" % REFUSAL).encode()
     rc, text = _write(images, tmp_path, board, "--wait-seconds", "50")
     all_text = text + capsys.readouterr().err
     assert rc == 1
@@ -755,15 +763,79 @@ def test_refused_replay_exits_nonzero_with_the_refusal_and_never_prints_complete
     assert board.status_calls == 0  # the host never followed a run that was never started
 
 
-@pytest.mark.parametrize("probe", [b"NEWER\n", b"", b"garbage\n"], ids=["newer", "empty", "garbage"])
-def test_complete_phase_is_not_printed_as_complete_when_a_refusal_postdates_the_manifest(images, tmp_path, capsys, probe):
+def _write_nonces(board):
+    return [req["invocation_nonce"] for sub, req, _d in board.runs if sub == "write"]
+
+
+def test_every_write_invocation_sends_a_fresh_nonce(images, tmp_path):
+    seen = []
+    for n in range(2):
+        (tmp_path / f"b{n}").mkdir()
+        board = Board(tmp_path / f"b{n}")
+        rc, _ = _write(images, tmp_path / f"b{n}", board)
+        assert rc == 0
+        seen += _write_nonces(board)
+    assert len(seen) == 2 and seen[0] != seen[1]
+    assert all(re.fullmatch(r"[0-9a-f]{16,64}", n) for n in seen)
+
+
+def test_complete_phase_of_another_invocations_run_is_not_this_invocations_complete(images, tmp_path, capsys):
+    # The refused replay's connection dropped: the follow sees the earlier run's complete phase.
     board = Board(tmp_path)
-    board.refusal_probe = probe
+    board.write_rc = 255
+    board.accepted_nonce = "e5" * 8
     rc, text = _write(images, tmp_path, board)
     all_text = text + capsys.readouterr().err
     assert rc == 1
     assert "write COMPLETE" not in all_text
-    assert "refus" in all_text
+    assert "this invocation did not write" in all_text
+    assert "complete" in all_text  # the run's own phase is still reported
+
+
+def test_complete_phase_with_no_accepted_marker_is_not_this_invocations_complete(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.write_rc = 255
+    board.accepted = False
+    rc, text = _write(images, tmp_path, board)
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert "write COMPLETE" not in all_text
+    assert "this invocation did not write" in all_text
+
+
+def test_complete_phase_with_an_unreadable_accepted_marker_is_not_reported_as_complete(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.probe_fail = SUDO_FAIL
+    rc, text = _write(images, tmp_path, board)
+    all_text = text + capsys.readouterr().err
+    assert rc == 1
+    assert "write COMPLETE" not in all_text
+
+
+def test_complete_phase_with_our_refusal_recorded_is_not_complete(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    rid = _stage_and_plan(images, tmp_path, board)
+    board.outcome = f"refused\nrun={rid}\nnonce=@NONCE@\nwhy\n".encode()
+    rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
+    assert rc == 1
+    assert "write COMPLETE" not in text + capsys.readouterr().err
+
+
+def test_second_host_refused_by_a_running_write_never_says_nothing_changed(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    board.write_rc = 1
+    board.write_err = (
+        "write refused: run RID is already in progress under another invocation; this invocation did not "
+        "start and left the running one as it was. The board may be changing: follow the running write "
+        "with the status subcommand and do not start another"
+    ).encode()
+    rc, text = _write(images, tmp_path, board)
+    all_text = (text + capsys.readouterr().err).lower()
+    assert rc == 1
+    assert "already in progress" in all_text
+    assert "nothing" not in all_text and "unchanged" not in all_text
+    assert "write complete" not in all_text
+    assert board.status_calls == 0
 
 
 def test_completion_between_the_poll_and_the_presence_probe_is_reported_as_complete(images, tmp_path, capsys):
