@@ -533,6 +533,21 @@ transport and in-process fakes, with no ssh and no network, and the end-to-end
 behaviour on a real board has to be exercised by hand with `check`, `plan` and
 `write` against a spare board.
 
+## Known limits
+
+Six debts were found and deliberately left unfixed. Each has a
+`devtool-debt:` marker at the code it describes, and a test requires every
+marker to carry a ceiling and an upgrade trigger.
+
+| Limit | Where | Ceiling | Upgrade trigger |
+|-------|-------|---------|-----------------|
+| SIGTERM to the runner is unhandled: state stays parseable but no failed record is written | `runner.py` `main` | an operator or init system that terminates the runner mid-write | any deployment that stops the runner on a timeout, or the first lost record in the field |
+| `host.collect` holds every collected record in memory | `host.py` `collect` | a run whose records total more than a few tens of MiB | readback logs copied by default, or a larger record set |
+| `_no_partition_table` and the lsblk sibling checks treat a tool failure as a verdict | `cmd_check.py` | a board whose lsblk or sfdisk fails for an unrelated reason reports the wrong cause | the first false verdict seen on a board |
+| Root executes `runner.pyz` and `request-*.json` from the SSH user's staging directory and honours the request's `tool_dir` | `host.py` install, `runner.py` `_run_sub` | any process running as that user can replace the runner after the hash check, or point `tool_dir` at its own binaries, and gain root; most relevant in sudo-password mode | a board where the SSH user is not trusted as root, or before the tool is offered outside a lab; stage root-owned and drop the `tool_dir` request key |
+| `dd_sha256` read-back spools each full partition to a temporary file | `ops.py` `_exec` | images larger than free `/tmp` (a tmpfs `/tmp` fails after the image was written) | the first ENOSPC at read-back; hash the stream |
+| The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
+
 ## Tests and hygiene gate
 
 ```text

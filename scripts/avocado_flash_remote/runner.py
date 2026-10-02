@@ -203,6 +203,10 @@ def _do_write(real, profile, phash, req):
         with open(plan_path, "rb") as f:
             return json.loads(f.read().decode("utf-8"))
 
+    # devtool-debt: this replays the string the host already matched, so the operator confirms before
+    # seeing the board identity, and --assume-yes skips a prompt that does not exist in remote mode
+    # (see cli.py, cmd_write.py). Ceiling: an operator who relies on the on-board confirmation as a second check.
+    # Upgrade trigger: a second human-facing prompt on the board, or any flow that skips the host retype.
     def confirm(_device):
         return confirmed
 
@@ -360,6 +364,11 @@ def _run_sub(sub, profile, phash, req):
     host never reads a verdict the runner did not reach.
     """
     try:
+        # devtool-debt: root executes runner.pyz and request-*.json from the SSH user's staging directory
+        # (host.py installs it with -o user) and honours the request's tool_dir. Ceiling: any process running as
+        # that user can replace the runner after the hash check, or point tool_dir at its own binaries, and gain
+        # root; this matters most in sudo-password mode. Upgrade trigger: a board where the SSH user is not trusted
+        # as root, or before the tool is offered outside a lab; stage root-owned and drop the tool_dir request key.
         real = RealOps(req.get("tool_dir"))
         result = _HANDLERS[sub](real, profile, phash, req)
         sys.stdout.flush()
@@ -586,6 +595,9 @@ def main(argv, *, archive=None):
         if e.message:
             print(e.message, file=e.stream or sys.stderr)
         return e.code
+    # devtool-debt: SIGTERM to the runner is unhandled. The state stays parseable but no failed
+    # record is written. Ceiling: an operator or init system that terminates the runner mid-write.
+    # Upgrade trigger: any deployment that stops the runner on a timeout, or the first lost record in the field.
     except KeyboardInterrupt:
         return EXIT_INTERRUPTED
     except Exception as e:  # noqa: BLE001
