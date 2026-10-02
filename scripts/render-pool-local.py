@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local content-addressed-pool render — the dev mirror of the production render.
 
-Production renders the public 2026 feed with `render_pool.py` (avocado-package),
+Production renders the public 2026 feed with `render_pool.py` (internal avocado-repo service),
 reading a Pulp publication and doing S3->S3 pooling. Locally we don't run Pulp —
 that's overkill — but the dev repo must serve the SAME shape so `avocado-cli` and
 dnf exercise the real layout:
