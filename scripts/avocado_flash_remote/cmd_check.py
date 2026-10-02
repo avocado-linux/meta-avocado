@@ -158,6 +158,9 @@ def _sector_count(c: _Ctx):
     return sectors == expect, f"{sectors} (expected {expect})"
 
 
+# devtool-debt: this check and the lsblk sibling checks (device_present) treat a tool failure as a verdict.
+# Ceiling: a board whose lsblk or sfdisk fails for an unrelated reason reports the wrong cause.
+# Upgrade trigger: the first false verdict seen on a board.
 def _no_partition_table(c: _Ctx):
     c.require_device()
     res = c.ops.sfdisk_dump(c.device)

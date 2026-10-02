@@ -729,9 +729,9 @@ def final_outcome(phase: Optional[str], verify: evidence.VerifyResult) -> str:
     return evidence.final_status(phase or "", verify)
 
 
-# devtool-debt: the collected tar is held in memory. Ceiling: record sets
-# well under the host's free RAM (readback payloads of several GiB break it).
-# Upgrade trigger: a profile whose readback records exceed a few hundred MiB.
+# devtool-debt: collect holds every collected record in memory (the whole tar). Ceiling: a run whose
+# records total more than a few tens of MiB. Upgrade trigger: readback logs copied by default, or a
+# larger record set; stream the tar to disk instead.
 def collect(transport, run_id: str, local_run_dir, *, remote_run_dir: str) -> evidence.VerifyResult:
     """Fetch the on-board record directory and verify it. Raises on a bad stream."""
     if not _NAME_RE.match(run_id or ""):

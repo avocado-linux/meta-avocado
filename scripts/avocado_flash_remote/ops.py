@@ -615,6 +615,9 @@ class RealOps(Ops):
         if exe is None:
             raise OpFailed(vec, None, f"tool {vec[0]!r} not found in {self.tool_dirs}")
         timeout = self.default_timeout if timeout is None else timeout
+        # devtool-debt: dd_sha256 read-back spools each full partition to a TemporaryFile in the default temp
+        # directory before hashing, so a tmpfs /tmp smaller than the biggest image fails after the image was written.
+        # Ceiling: images larger than free /tmp. Upgrade trigger: the first ENOSPC at read-back; hash the stream instead.
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
             inp = None
             try:
