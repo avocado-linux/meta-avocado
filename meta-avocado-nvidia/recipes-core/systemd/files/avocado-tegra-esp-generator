@@ -1,0 +1,87 @@
+#!/bin/sh
+# Point boot-efi.mount at the ESP on the disk this system booted from.
+#
+# setup-nv-boot-control ships the unit with What=/dev/disk/by-partlabel/esp. A
+# PARTLABEL names a role rather than a disk, so on a board provisioned to more
+# than one medium every disk carries an `esp` and udev gives the symlink to
+# whichever partition it processed. Measured on a Jetson Orin Nano running from
+# NVMe: the symlink resolved to the SD card's ESP. Anything that later writes
+# the ESP - a bootloader update - would write the disk the firmware did not
+# boot, which is the same class of defect as the rootfs and OTA slot ones.
+#
+# LoaderDevicePartUUID would be the better source and is what
+# avocado-slot-root-generator uses, but L4TLauncher does not set it: this
+# platform exposes no Loader* EFI variables at all. The booted rootfs names its
+# disk, and the ESP that belongs to this install is the one on that disk.
+#
+# A generator must not break the boot. Every path that cannot answer the
+# question leaves the unit alone and exits 0, which restores exactly the
+# previous behaviour rather than failing closed on a board where the old
+# ambiguous mount happened to be right.
+
+normal_dir="${1:-}"
+[ -n "$normal_dir" ] || exit 0
+[ -d /sys/block ] || exit 0
+
+log() {
+  echo "avocado-tegra-esp-generator: $*" >&2
+}
+
+# GPT name for one partition, read from the kernel. blkid is not usable here:
+# the rootfs ships busybox's, which reports no PARTLABEL and silently ignores
+# the flags that would ask for one.
+partname_of() {
+  [ -f "$1/uevent" ] || return 1
+  while IFS='=' read -r key val; do
+    if [ "$key" = "PARTNAME" ]; then
+      printf '%s\n' "$val"
+      return 0
+    fi
+  done <"$1/uevent"
+  return 1
+}
+
+root_dev=$(awk '$2 == "/" { print $1; exit }' /proc/mounts 2>/dev/null)
+[ -n "$root_dev" ] || exit 0
+
+case "$root_dev" in
+  /dev/nvme* | /dev/mmcblk*) boot_disk="${root_dev%p*}" ;;
+  /dev/sd*) boot_disk="${root_dev%%[0-9]*}" ;;
+  *) exit 0 ;;
+esac
+
+disk_name="${boot_disk#/dev/}"
+[ -d "/sys/block/$disk_name" ] || exit 0
+
+esp_dev=""
+esp_count=0
+for partdir in "/sys/block/$disk_name/$disk_name"*; do
+  [ "$(partname_of "$partdir" || true)" = "esp" ] || continue
+  candidate="/dev/$(basename "$partdir")"
+  [ -b "$candidate" ] || continue
+  esp_dev="$candidate"
+  esp_count=$((esp_count + 1))
+done
+
+if [ "$esp_count" -eq 0 ]; then
+  log "no esp partition on $boot_disk; leaving boot-efi.mount as shipped"
+  exit 0
+fi
+
+# More than one would mean the booted disk itself carries an ambiguous layout,
+# which is not something to resolve by picking. Say so and change nothing.
+if [ "$esp_count" -gt 1 ]; then
+  log "$esp_count esp partitions on $boot_disk; refusing to choose"
+  exit 0
+fi
+
+mkdir -p "$normal_dir/boot-efi.mount.d" || exit 0
+cat >"$normal_dir/boot-efi.mount.d/10-avocado-booted-disk.conf" <<EOF
+# Written by avocado-tegra-esp-generator. See that script for why the shipped
+# What=/dev/disk/by-partlabel/esp cannot be trusted on a multi-disk board.
+[Mount]
+What=$esp_dev
+EOF
+
+log "boot-efi.mount -> $esp_dev (booted disk $boot_disk)"
+exit 0
