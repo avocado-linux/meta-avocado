@@ -691,3 +691,13 @@ def test_load_run_refuses_a_malformed_run_id(tmp_path, bad):
     from avocado_flash_remote.cmd_status import _load_run
 
     assert _load_run(tmp_path, bad).status == "unparseable"
+
+
+def test_no_recovery_text_claims_restore_removes_a_boot_entry():
+    """Restore only clears BootNext and removes staging; the boot entry is the firmware's own."""
+    for action, text in st._RECOVERY_TEXT.items():
+        low = text.lower()
+        for stale in ("removes any boot entry", "remove the boot entry", "removes the entry", "entry this run created"):
+            assert stale not in low, (action, stale)
+    for action in ("restore-unknown-arm", "restore", "restore-then-restart"):
+        assert "deletes no boot entry" in st._RECOVERY_TEXT[action].lower(), action

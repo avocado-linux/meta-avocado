@@ -288,3 +288,8 @@ def test_negative_plan_calling_mutator_flagged():
     assert readonly_violations("import subprocess\n", verbs)
     assert readonly_violations("import os\nos.remove('x')\n", verbs)
     assert readonly_violations("def f(ops):\n    return ops.lsblk('x')\n", verbs) == []
+
+
+def test_prerequisite_probe_verb_is_not_a_mutating_verb_and_check_uses_it():
+    assert "tool_version" not in mutating_verbs()
+    assert "tool_version" in (PKG / "cmd_check.py").read_text()

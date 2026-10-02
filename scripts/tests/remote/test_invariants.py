@@ -321,6 +321,9 @@ class Env:
             f"findmnt -no FSTYPE -T {STAGE}": "tmpfs\n",
             "uname -r": "5.15.148-tegra\n",
             "docker ps -q": "a\n",
+            "install --version": "install (GNU coreutils) 9.4\n",
+            "sha256sum --version": "sha256sum (GNU coreutils) 9.4\n",
+            "dd --version": "dd (GNU coreutils) 9.4\n",
             "read_file /sys/block/mmcblk0/device/life_time": "0x01 0x01\n",
             "read_file /sys/block/mmcblk0/device/pre_eol_info": "0x01\n",
             "read_file /etc/machine-id": MACHINE_ID + "\n",
@@ -622,6 +625,8 @@ class Board:
             return RunResult(0)
         if argv[:2] == ["tar", "-C"] and "-cf" in argv:
             return RunResult(0, self.records[argv[2]])
+        if argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]:
+            return RunResult(0, b"OK\n")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n")
         if argv[0] == "sh" and argv[2:3] and argv[2].startswith("d="):

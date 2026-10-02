@@ -194,7 +194,8 @@
     "secure-boot-disabled",
     "staged-images-present",
     "staged-image-checksums",
-    "staging-space-free"
+    "staging-space-free",
+    "board-prerequisites"
   ],
   "arm": {
     "strategy": "uefi-bootnext",

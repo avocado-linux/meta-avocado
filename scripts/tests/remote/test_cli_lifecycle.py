@@ -107,6 +107,8 @@ class Board:
             return RunResult(0)
         if argv[:2] == ["tar", "-C"] and "-cf" in argv:
             return RunResult(0, self.records[argv[2]])
+        if argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]:
+            return RunResult(0, b"OK\n")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n")
         if argv[0] == "sh" and argv[2:3] and argv[2].startswith("d="):

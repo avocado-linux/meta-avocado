@@ -698,9 +698,9 @@ CASES = {
     "install:nocfb": na("the kit's --fallback-bootnext-0002 option; the port has no fallback arming"),
     "install:devimages": outcome("staging directory under /dev: the profile loader refuses, no call at all", exit_class=True),
     "install:nondevimages": differs("D5+D6+D9", "staging directory outside /dev: " + OK_MUT),
-    "window:pf-good": outcome("check: exit 0, 14/14, no mutating call", reads=PF_REF),
+    "window:pf-good": outcome("check: exit 0, 15/15 (the kit's 14 plus board-prerequisites), no mutating call", reads=PF_REF),
     **{
-        f"window:pf-{k}": differs("D1", f"{k}: FAIL line and exit 1, but checks: 14/14 (examined) instead of 13/14")
+        f"window:pf-{k}": differs("D1", f"{k}: FAIL line and exit 1, but checks: 15/15 (examined; the kit's 14 plus board-prerequisites) instead of 13/14")
         for k in PF_FAULTS
     },
     "window:pf-sb-absent": differs("D2", "missing SecureBoot variable is a FAIL (exit 1); the kit passed with a warning"),
@@ -869,7 +869,7 @@ def check_outcome(name, g, run, e):
 # The documented deliberate differences. Each is asserted from both sides.
 
 DIFFERENCES = {
-    "D1": "cmd_check counts a FAIL as examined: a single-fault preflight prints `checks: 14/14`, the FAIL line and exits 1; the kit printed `checks: 13/14`.",
+    "D1": "cmd_check counts a FAIL as examined: a single-fault preflight prints `checks: 15/15` (the kit's 14 plus board-prerequisites), the FAIL line and exits 1; the kit printed `checks: 13/14`.",
     "D2": "a missing SecureBoot variable is a FAIL in the port (Secure Boot state NOT VERIFIED); the kit passed it with a warning.",
     "D3": "device-dependent checks are `not examined` when emmc-exists fails (the kit's pf-* cases force the device to exist).",
     "D4": "cmd_readback always runs `ls -laR` on the journal directory; the kit tested for the directory first.",
@@ -902,7 +902,7 @@ def d1(name, g, run):
     assert g.exit == 1, "the kit failed this case"
     assert run.exit == 1, run.text
     assert run.muts == [] and g.muts == []
-    assert "checks: 14/14" in run.out, run.text
+    assert "checks: 15/15" in run.out, run.text
     assert any(ln.startswith("FAIL  ") for ln in run.out)
     assert any(ln.startswith("PREFLIGHT FAIL") for ln in run.out)
     assert_reads(g, run, PF_REF)
@@ -1025,10 +1025,10 @@ def test_every_difference_id_is_documented_and_used():
 def test_d1_single_fault_preflight_counts_failures_as_examined(golden, runs):
     run = runs["window:pf-readonly"]
     assert golden["window:pf-readonly"].exit == 1
-    assert run.exit == 1 and "checks: 14/14" in run.out
+    assert run.exit == 1 and "checks: 15/15" in run.out
     assert "FAIL  eMMC not read-only: blockdev --getro: 1 (rc=0)" in run.out
     res = run.extra["res"]
-    assert (res.examined, res.total) == (14, 14)
+    assert (res.examined, res.total) == (15, 15)
 
 
 def test_d2_missing_secureboot_is_a_failure(golden, runs):
@@ -1047,7 +1047,7 @@ def test_d3_device_dependent_checks_are_not_examined_when_emmc_is_absent(tmp_pat
     assert res.exit_code == 1
     for label in ("eMMC not read-only", "eMMC sector count", "eMMC has no partition table", "eMMC not mounted"):
         assert f"FAIL  {label}: not examined: {tcc.DISK} is absent" in lines
-    assert (res.examined, res.total) == (10, 14)
+    assert (res.examined, res.total) == (11, 15)
     seen = [c.line for c in ops.calls if c.kind == "exec"]
     assert not any(ln.startswith(("blockdev", "sfdisk")) for ln in seen)
     # the kit's pf-good forced the device to exist and ran those reads
@@ -1307,6 +1307,8 @@ def _stage_handler(fail_on=None, fail_all=False):
             return RunResult(1, b"x: FAILED", b"")
         if "df -Pk" in joined or "df" in argv:
             return _df_ok()
+        if argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]:
+            return RunResult(0, b"OK\n", b"")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n", b"")
         return RunResult(0, b"", b"")

@@ -427,6 +427,33 @@ def probe_interpreter(transport, python: str, modules) -> str:
     raise HostError(f"unexpected output from the interpreter probe on the board; {hint}")
 
 
+# --- board tools ------------------------------------------------------------
+
+# Runs with plain sh before the runner exists. Each tool must start under ``--version`` and not announce
+# BusyBox; the loop prints what it cannot confirm. Read-only: it names no path and no write verb.
+_TOOL_PROBE = (
+    'm=""; for t in install sha256sum dd; do '
+    'o=$("$t" --version 2>&1) && case "$o" in *[Bb]usy[Bb]ox*) false;; esac || m="$m $t"; done; '
+    '[ -z "$m" ] && echo OK || echo "MISSING$m"'
+)
+_PROBE_TOOLS = ("install", "sha256sum", "dd")
+
+
+def probe_board_tools(transport) -> None:
+    """Refuse a board whose install, sha256sum or dd is missing or not GNU, naming what is wrong."""
+    res = transport.run(["sh", "-c", _TOOL_PROBE], None, sudo=False, timeout=60)
+    last = (res.out.strip().splitlines() or [""])[-1].strip()
+    if res.rc == 0 and last == "OK":
+        return
+    parts = last.split()
+    if res.rc == 0 and parts[:1] == ["MISSING"] and parts[1:] and set(parts[1:]) <= set(_PROBE_TOOLS):
+        raise HostError(
+            f"the board lacks GNU {', '.join(parts[1:])}: this tool needs GNU coreutils "
+            "(install -d, sha256sum --strict, dd conv=fsync), not a busybox userland"
+        )
+    raise HostError("could not confirm GNU install, sha256sum and dd on the board; this tool needs GNU coreutils")
+
+
 # --- staging --------------------------------------------------------------
 
 
@@ -527,6 +554,7 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
 
     resolved.recheck()
     total = sum(r[2] for r in rows)
+    probe_board_tools(transport)
     check_staging_space(transport, profile, total)
 
     who = transport.run(["id", "-un"], None, sudo=False, timeout=60)
