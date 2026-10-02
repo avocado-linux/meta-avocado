@@ -1,5 +1,6 @@
 """Tests for the restore subcommand: disarm and cleanup only, never a rollback."""
 
+import json
 import os
 from types import SimpleNamespace as NS
 
@@ -525,7 +526,38 @@ def test_emergency_disarm_also_refuses_the_booted_entry(env):
     assert mutations(ops) == []
 
 
-def test_emergency_disarm_on_a_held_lock_is_bounded_and_prints_the_holder_and_manual_steps(env):
+def _gone_pid():
+    """A pid that belonged to a process which has exited and been reaped."""
+    import subprocess
+    import sys
+
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    assert not os.path.exists(f"/proc/{child.pid}")
+    return child.pid
+
+
+class _HeldBy:
+    """Holds the on-board lock, then rewrites its holder record to name ``pid`` (a live or gone process)."""
+
+    def __init__(self, env, pid, run_id="writer"):
+        self.lock = OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id=run_id)
+        self.pid, self.run_id = pid, run_id
+
+    def __enter__(self):
+        self.lock.__enter__()
+        fh = self.lock._fh
+        fh.seek(0)
+        fh.truncate()
+        fh.write(json.dumps({"pid": self.pid, "run_id": self.run_id}))
+        fh.flush()
+        return self
+
+    def __exit__(self, *exc):
+        self.lock.__exit__(*exc)
+
+
+def test_emergency_disarm_on_a_held_lock_is_bounded_and_prints_the_holder(env):
     import time
 
     ops = RecordingOps({LIST: [efi(extra=[NEW])]})
@@ -539,28 +571,58 @@ def test_emergency_disarm_on_a_held_lock_is_bounded_and_prints_the_holder_and_ma
     assert ops.log == [] and removed == []
     assert f'"pid": {os.getpid()}' in text or f"pid {os.getpid()}" in text
     assert "hung-writer" in text
-    assert "efibootmgr -v" in text and "efibootmgr -N" in text and "efibootmgr -B -b" in text
-    assert LABEL in text
 
 
-def test_held_lock_text_first_says_to_stop_when_the_holder_is_alive_and_never_calls_it_hung(env):
+def test_a_live_holder_gets_no_manual_steps_only_wait_and_status(env):
+    # image-writing is one phase for the whole dd, and between the lock and the first state record the
+    # status still shows the previous run's terminal phase: "the phase has stopped moving" proves nothing.
     ops = RecordingOps({LIST: [efi(extra=[NEW])]})
     with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="long-writer"):
-        r, _removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
-    lines = [ln for ln in out]
+        r, removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
+    text = "\n".join(out)
+    assert r.exit_code == 1 and removed == [] and ops.log == []
+    assert "efibootmgr" not in text
+    assert "hung" not in text.lower() and "stopped moving" not in text
+    assert "alive" in text and "wait" in text and "status" in text
+    assert "no boot entry or staging was touched" in text
+
+
+def test_an_unreadable_holder_record_is_treated_as_a_live_holder(env):
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    for raw in ('{"pid": "not-a-number", "run_id": "x"}', "garbage", ""):
+        with _HeldBy(env, 1) as held:
+            fh = held.lock._fh
+            fh.seek(0)
+            fh.truncate()
+            fh.write(raw)
+            fh.flush()
+            r, _removed, out = go(env, RecordingOps({LIST: [efi(extra=[NEW])]}), emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
+        text = "\n".join(out)
+        assert r.exit_code == 1 and "efibootmgr" not in text, raw
+        assert "wait" in text and "status" in text, raw
+
+
+def test_a_gone_holder_gets_the_manual_steps_with_the_stop_check_first(env):
+    ops = RecordingOps({LIST: [efi(extra=[NEW])]})
+    pid = _gone_pid()
+    with _HeldBy(env, pid, "dead-writer"):
+        r, removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
+    lines = list(out)
     text = "\n".join(lines)
-    assert "hung" not in text.lower()
-    stop = next(i for i, ln in enumerate(lines) if "STOP" in ln)
-    first_manual = next(i for i, ln in enumerate(lines) if "efibootmgr" in ln)
-    assert stop < first_manual, "the stop condition must come before any manual command"
-    stop_line = lines[stop]
-    assert "alive" in stop_line and "phase" in stop_line and "moving" in stop_line
-    assert "healthy" in text and "status" in text
+    assert r.exit_code == 1 and removed == [] and ops.log == []
+    assert f"pid {pid}" in text and "dead-writer" in text
+    assert "is gone" in text
+    assert "efibootmgr -v" in text and "efibootmgr -N" in text and "efibootmgr -B -b" in text
+    assert LABEL in text
+    # The tool a dead runner started may still hold the lock: say to look before touching anything.
+    check = next(i for i, ln in enumerate(lines) if "ps" in ln and "dd" in ln)
+    first_manual = next(i for i, ln in enumerate(lines) if ln.startswith("  efibootmgr"))
+    assert check < first_manual
 
 
 def test_held_lock_manual_steps_clear_bootnext_only_when_it_points_at_the_labelled_entry(env):
     ops = RecordingOps({LIST: [efi(extra=[NEW])]})
-    with OnBoardLock(env.state_dir / cmd_write.LOCK_NAME, run_id="w"):
+    with _HeldBy(env, _gone_pid(), "w"):
         _r, _removed, out = go(env, ops, emergency_disarm=True, ack_run_id="because", lock_wait=0.1)
     clear = next(ln for ln in out if "efibootmgr -N" in ln)
     assert "only if BootNext" in clear and LABEL in clear

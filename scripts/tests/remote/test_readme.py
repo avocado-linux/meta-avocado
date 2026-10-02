@@ -76,3 +76,41 @@ def test_readme_documents_the_emergency_disarm_lock_wait():
 
 def test_readme_documents_the_outcome_marker():
     assert "`outcome`" in README and "`refused`" in README
+
+
+def _flat(text):
+    return re.sub(r"\s+", " ", text)
+
+
+def test_readme_markers_are_deleted_only_for_an_accepted_invocation():
+    flat = _flat(README)
+    assert "only for an accepted invocation" in flat
+    assert "at the start of every invocation the runner" not in flat
+    assert "A refused invocation (a replay, a held lock, a bad nonce) deletes and writes no marker" in flat
+
+
+def test_readme_says_did_not_write_it_never_goes_with_an_unknown():
+    flat = _flat(README)
+    assert 'it never says "did not write it" for an unknown' in flat
+    assert 'could not confirm which invocation wrote the run' in flat
+
+
+def test_readme_refusal_phrases_match_the_runner():
+    from avocado_flash_remote import runner
+
+    src = _flat(pathlib.Path(runner.__file__).read_text())
+    for phrase in ("already in progress, a runner holds this run", "the board may be changing"):
+        assert phrase in src
+        assert phrase in _flat(README)
+
+
+def test_readme_names_the_per_invocation_request_file_and_the_status_run_id():
+    flat = _flat(README)
+    assert "request-write-<nonce>.json" in flat
+    assert "asks `status` for its own run id" in flat
+
+
+def test_readme_emergency_disarm_decides_on_the_holder_pid_not_the_phase():
+    flat = _flat(_section("Restore scope"))
+    assert "whose pid is gone" in flat and "/proc" in flat
+    assert "A live holder" in flat and "no manual commands" in flat

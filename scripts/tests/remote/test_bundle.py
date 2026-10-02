@@ -334,7 +334,19 @@ def test_status_wiring(tmp_path, recs):
     info = _archive_for_runner(tmp_path)
     assert runner.main(["status", "--request", str(_request(tmp_path))], archive=info.path) == 0
     (args, kw), = recs["status"].calls
-    assert args == (str(tmp_path / "state"),) and kw == {}
+    # The request's run_id now reaches run_status (the host asks for its own run); it was dropped before.
+    assert args == (str(tmp_path / "state"),) and kw == {"run_id": "r1"}
+
+
+def test_status_wiring_without_a_run_id_asks_for_the_current_run(tmp_path, recs):
+    info = _archive_for_runner(tmp_path)
+    req = _request(tmp_path)
+    data = json.loads(req.read_text())
+    del data["run_id"]
+    req.write_text(json.dumps(data))
+    assert runner.main(["status", "--request", str(req)], archive=info.path) == 0
+    (args, kw), = recs["status"].calls
+    assert kw == {"run_id": None}
 
 
 def test_unexpected_exception_exit_70(tmp_path, monkeypatch, capsys):
@@ -759,7 +771,7 @@ def test_detached_replay_of_a_written_run_is_refused_before_the_fork(tmp_path, m
     cap = capsys.readouterr()
     assert rc == 1
     assert forks == []
-    assert "already has a state record" in cap.err and "nothing was written to the board" in cap.err
+    assert "already has a state record" in cap.err and "nothing was written to the board" not in cap.err
     assert "detached:" not in cap.out
     assert {p.name: p.read_bytes() for p in run_dir.iterdir()} == before
     assert not list((tmp_path / "state" / "r1").glob("refused-*.log"))
@@ -922,6 +934,26 @@ def _second_invocation(tmp_path, monkeypatch, info, nonce):
     monkeypatch.setattr(runner, "run_write", lambda *a, **k: pytest.fail("must not reach the write"))
     req = _request(tmp_path, invocation_nonce=nonce)
     return runner.main(["write", "--request", str(req), "--detach"], archive=info.path)
+
+
+def test_a_symlinked_invocation_lock_path_is_refused_without_following_it(tmp_path, monkeypatch, capsys):
+    state = tmp_path / "state"
+    state.mkdir()
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    (state / ".invocation-r1.lock").symlink_to(victim)
+    forks = []
+    monkeypatch.setattr(runner.os, "fork", lambda: forks.append(1) or 0)
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: pytest.fail("must not reach the write"))
+    real = runner.load_profile_bytes
+    monkeypatch.setattr(runner, "load_profile_bytes", lambda b: dataclasses.replace(real(b), state_dir=str(state)))
+    info = _archive_for_runner(tmp_path)
+    rc = runner.main(["write", "--request", str(_request(tmp_path, invocation_nonce=NONCE_A)), "--detach"], archive=info.path)
+    cap = capsys.readouterr()
+    assert rc == 1 and forks == []
+    assert "invocation lock" in cap.err and "refused" in cap.err
+    assert victim.read_text() == "keep"
+    assert "detached:" not in cap.out
 
 
 def test_second_invocation_while_the_first_runs_touches_nothing_of_the_first(tmp_path, monkeypatch, capsys):

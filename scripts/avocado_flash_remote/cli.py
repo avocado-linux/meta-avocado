@@ -374,13 +374,33 @@ def _judge_runner(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> tuple:
 def _reconcile_phase(ctx: _Ctx, run_id: str):
     """(reconciled record or None, this run's phase or None)."""
     try:
-        rec = host.reconcile(ctx.transport, ctx.state_dir, ctx.bundle_remote, ctx.staging_dir, python=ctx.remote_python)
+        rec = host.reconcile(ctx.transport, ctx.state_dir, ctx.bundle_remote, ctx.staging_dir, python=ctx.remote_python, run_id=run_id)
     except host.HostError as exc:
         ctx.out(f"connection problem, will retry: {exc}")
         return None, None
     if rec.ok and rec.run_id == run_id:
         return rec, rec.phase
     return rec, None
+
+
+OWNER_PROBE_TRIES = 6
+
+
+def _confirm_owner(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str, polls: int) -> str:
+    """Whose runner holds the run's records. One dropped ssh must not read as "not ours".
+
+    'unknown' is retried, up to the polls --wait-seconds allows (at most OWNER_PROBE_TRIES), and only
+    firm answers ('ours', 'other', 'none') end it early.
+    """
+    tries = max(1, min(polls, OWNER_PROBE_TRIES))
+    owner = "unknown"
+    for attempt in range(tries):
+        owner = host.invocation_owner(ctx.transport, remote_dir, run_id, nonce)
+        if owner != "unknown":
+            break
+        if attempt + 1 < tries:
+            ctx.sleep(ctx.poll_interval)
+    return owner
 
 
 def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
@@ -466,18 +486,22 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     verify = ctx.collect(run_id, remote_dir, local)
     outcome = host.final_outcome(phase, verify)
     if outcome == "complete":
-        owner = host.invocation_owner(ctx.transport, remote_dir, run_id, nonce)
+        owner = _confirm_owner(ctx, run_id, remote_dir, nonce, polls)
         if owner != "ours":
             # A terminal phase on the board is the run's, not necessarily this invocation's: a replay
             # that was turned away and then followed after a dropped connection lands here.
-            ctx.out(
-                f"the board records run {run_id} in phase {phase}, but this invocation did not write it "
-                + (
-                    "(another invocation's runner holds the run's records)"
-                    if owner in ("other", "none")
-                    else "(the board could not confirm whose runner it was)"
+            if owner == "unknown":
+                who = (
+                    f"could not confirm which invocation wrote it (the board's markers stayed unreadable); "
+                    "not reporting COMPLETE"
                 )
-                + f"; not reporting COMPLETE. Records collected in {local}. "
+            else:
+                who = (
+                    "this invocation did not write it (another invocation's runner holds the run's records, "
+                    "or this invocation's runner never recorded itself); not reporting COMPLETE"
+                )
+            ctx.out(
+                f"the board records run {run_id} in phase {phase}; {who}. Records collected in {local}. "
                 "Run the status subcommand and read the runner log before anything else"
             )
             _tail_log(ctx, remote_dir)

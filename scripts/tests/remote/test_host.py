@@ -376,9 +376,9 @@ def test_remote_verify_failure_refuses(kit, resolved):
 
 def test_run_remote_writes_request_atomically_then_runs_bundle():
     t = StubTransport(handler=lambda a, s, u: RunResult(0, b"", b""))
-    req = {"staging_dir": "/run/s", "state_dir": "/var/s", "run_id": "r1"}
+    req = {"staging_dir": "/run/s", "state_dir": "/var/s", "run_id": "r1", "invocation_nonce": "ab" * 8}
     host.run_remote(t, "write", req, "/run/s/b.pyz")
-    put, run = t.calls
+    put, run, rm = t.calls
     assert put.sudo is False
     assert json.loads(put.stdin_bytes) == req
     assert "mv" in " ".join(put.argv)
@@ -386,12 +386,63 @@ def test_run_remote_writes_request_atomically_then_runs_bundle():
     assert run.argv[:2] == ["sudo", "-n"]
     assert run.argv[2:4] == ["python3", "/run/s/b.pyz"]
     assert "--detach" in run.argv
+    # The host removes the request it wrote once the runner call returned (the runner has read it by then).
+    assert rm.argv == ["rm", "-f", "--", put.argv[-1]] and rm.sudo is False
+
+
+def test_the_request_file_and_its_temp_name_carry_the_invocation_nonce():
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, b"", b""))
+    host.run_remote(t, "write", {"staging_dir": "/run/s", "invocation_nonce": "ab" * 8}, "/run/s/b.pyz")
+    put = t.calls[0]
+    path = put.argv[-1]
+    assert path == "/run/s/request-write-" + "ab" * 8 + ".json"
+    assert '"$1.tmp"' in put.argv[2]  # the temp file is derived from the same name
+
+
+def test_two_invocations_never_share_a_request_path_and_each_removes_only_its_own():
+    t1 = StubTransport(handler=lambda a, s, u: RunResult(0, b"", b""))
+    t2 = StubTransport(handler=lambda a, s, u: RunResult(0, b"", b""))
+    for t, nonce in ((t1, "aa" * 8), (t2, "bb" * 8)):
+        host.run_remote(t, "write", {"staging_dir": "/run/s", "invocation_nonce": nonce}, "/run/s/b.pyz")
+    p1, p2 = t1.calls[0].argv[-1], t2.calls[0].argv[-1]
+    assert p1 != p2
+    assert t1.calls[-1].argv[-1] == p1 and t2.calls[-1].argv[-1] == p2
+
+
+def test_a_request_without_a_nonce_still_gets_a_unique_path():
+    paths = []
+    for _ in range(2):
+        t = StubTransport(handler=lambda a, s, u: RunResult(0, b"", b""))
+        host.run_remote(t, "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz")
+        paths.append(t.calls[0].argv[-1])
+    assert paths[0] != paths[1]
+    assert all(p.startswith("/run/s/request-check-") and p.endswith(".json") for p in paths)
+
+
+def test_the_request_is_removed_even_when_the_runner_call_raises():
+    def handler(argv, stdin, sudo):
+        if "python3" in argv:
+            raise host.HostTimeout("timed out")
+        return RunResult(0, b"", b"")
+
+    t = StubTransport(handler=handler)
+    with pytest.raises(host.HostTimeout):
+        host.run_remote(t, "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz")
+    assert t.calls[-1].argv[:2] == ["rm", "-f"]
+
+
+def test_a_failed_request_removal_is_not_an_error():
+    def handler(argv, stdin, sudo):
+        return RunResult(1) if argv[0] == "rm" else RunResult(0, b"ok", b"")
+
+    res = host.run_remote(StubTransport(handler=handler), "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz")
+    assert res.rc == 0
 
 
 def test_run_remote_check_has_no_detach():
     t = StubTransport(handler=lambda a, s, u: RunResult(0, b"", b""))
     host.run_remote(t, "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz")
-    assert "--detach" not in t.calls[-1].argv
+    assert "--detach" not in t.calls[-2].argv and "b.pyz" in " ".join(t.calls[-2].argv)
 
 
 def test_run_remote_unknown_subcommand():
@@ -415,6 +466,21 @@ def test_reconcile_after_drop_reports_remote_phase():
     # not complete without verified records
     v = evidence.VerifyResult(True)
     assert evidence.final_status(rec.phase, v) == "incomplete"
+
+
+def test_reconcile_asks_for_the_hosts_own_run_when_given_a_run_id():
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, b"status: complete run=rA recovery=none\n", b""))
+    rec = host.reconcile(t, "/s", "/run/s/b.pyz", "/run/s", run_id="rA")
+    put = next(c for c in t.calls if c.argv[:2] == ["sh", "-c"] and "request-status" in c.argv[-1])
+    assert json.loads(put.stdin_bytes)["run_id"] == "rA"
+    assert (rec.ok, rec.phase, rec.run_id) == (True, "complete", "rA")
+
+
+def test_reconcile_without_a_run_id_sends_none():
+    t = StubTransport(handler=lambda a, s, u: RunResult(0, b"status: no run recorded\n", b""))
+    host.reconcile(t, "/s", "/run/s/b.pyz", "/run/s")
+    put = next(c for c in t.calls if c.argv[:2] == ["sh", "-c"] and "request-status" in c.argv[-1])
+    assert "run_id" not in json.loads(put.stdin_bytes)
 
 
 def test_reconcile_no_run_and_unreadable():
@@ -682,9 +748,10 @@ def test_probe_code_needs_only_sys_and_builtins():
 def test_run_remote_and_reconcile_use_given_interpreter():
     t = StubTransport(handler=lambda a, s, u: RunResult(0, b"status: no run recorded\n", b""))
     host.run_remote(t, "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz", python="/opt/p/python3")
-    assert t.calls[-1].argv[2:4] == ["/opt/p/python3", "/run/s/b.pyz"]
+    # The request removal now follows the runner call, so the runner call is the one before it.
+    assert t.calls[-2].argv[2:4] == ["/opt/p/python3", "/run/s/b.pyz"]
     host.reconcile(t, "/s", "/run/s/b.pyz", "/run/s", python="/opt/p/python3")
-    assert t.calls[-1].argv[2:4] == ["/opt/p/python3", "/run/s/b.pyz"]
+    assert t.calls[-2].argv[2:4] == ["/opt/p/python3", "/run/s/b.pyz"]
 
 
 def test_stage_verifies_bundle_with_given_interpreter(kit, resolved):

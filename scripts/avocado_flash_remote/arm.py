@@ -69,10 +69,10 @@ def entries_with_label(text: str, label: str) -> list:
 
     The label ends where the description ends: at the tab ``efibootmgr -v``
     prints before the device path, or at the end of the line (plus trailing
-    blanks) in the plain listing. A space does not end it, so ``label old`` is
+    blanks) in the plain listing (a CR before the newline is part of the line ending). A space does not end it, so ``label old`` is
     another entry's longer label and is never ours.
     """
-    rx = re.compile(rf"^Boot([0-9A-Fa-f]{{4}})\*?[ \t]+{re.escape(label)}(\t|[ \t]*$)", re.MULTILINE)
+    rx = re.compile(rf"^Boot([0-9A-Fa-f]{{4}})\*?[ \t]+{re.escape(label)}(\t|[ \t]*\r?$)", re.MULTILINE)
     return [m.group(1).upper() for m in rx.finditer(text)]
 
 

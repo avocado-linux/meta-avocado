@@ -9,6 +9,7 @@ shows up here and nowhere in the stub-board suites.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 
@@ -88,6 +89,10 @@ def test_a_second_write_started_while_the_first_is_inside_its_write_is_refused(b
     assert seen["rc"] != 0
     both = seen["text"] + seen["err"]
     assert "write COMPLETE" not in both
+    # While the first runner is inside dd the board IS changing: the refusal must say so, and must
+    # never claim that nothing was written.
+    assert "nothing was written to the board" not in both
+    assert "already in progress" in both and "the board may be changing" in both and "status" in both
     assert seen["before"] == seen["after"], "the refused invocation touched the first runner's records"
     assert seen["before"]["accepted"] and seen["before"]["MANIFEST.json"]
     # The first write is unaffected and still finishes by itself.
@@ -102,6 +107,9 @@ def test_a_replayed_completed_run_exits_nonzero_without_complete(board):
     assert rc != 0
     assert "write COMPLETE" not in text + err
     assert board.snapshot(rid) == before
+    # The run already wrote to the board; the refusal never calls the board unchanged.
+    assert "nothing was written to the board" not in text + err
+    assert "already has a state record" in text + err
 
 
 def test_a_runner_killed_after_accepted_is_a_dead_runner_not_complete(board):
@@ -138,3 +146,51 @@ def test_the_loopback_refuses_a_sudo_password_stream(board):
     board.transport.set_password(host.Secret("x"))
     with pytest.raises(host.HostError, match="password sudo"):
         board.transport.run(["true"], None, sudo=True)
+
+
+def test_the_request_files_are_named_by_nonce_and_none_is_left_behind(board):
+    rid = _planned(board)
+    assert board.cli("write", "--run-id", rid)[0] == 0
+    nonce = board.last_request("write")["invocation_nonce"]
+    sent = [p for p, _body in board.transport.requests if "request-write" in p]
+    assert sent == [f"{board.stage}/request-write-{nonce}.json"]
+    assert sorted(p.name for p in board.stage.glob("request-*")) == []
+
+
+def test_a_runner_that_cannot_record_acceptance_does_no_work_and_the_host_does_not_complete(board):
+    rid = _planned(board)
+    board.fail_accepted_writes()
+    rc, text, err = board.cli("write", "--run-id", rid)
+    assert rc == 1
+    assert "write COMPLETE" not in text + err
+    # COMPLETE depends on the marker, so the runner stops before any work: no state, no write, no outcome.
+    assert not (board.state / rid / "state.json").exists()
+    assert not (board.run_dir(rid) / "accepted").exists()
+    assert "cannot write accepted marker" in (board.run_dir(rid) / "runner.log").read_text()
+    assert "the write did not start" in text
+
+
+def test_a_completed_write_is_judged_by_its_own_state_even_after_another_run_moved_current(board):
+    rid = _planned(board)
+    board.hold()
+    moved = {}
+
+    def another_run_creates_its_state(_secs):
+        if moved:
+            return
+        assert board.wait_in_dd()
+        board.release()
+        assert loopback.wait_until(lambda: (board.run_dir(rid) / "outcome").exists())
+        # Run B's create_run lands after A completed and before A's host polls again.
+        other = board.state / "run-B"
+        other.mkdir()
+        data = json.loads((board.state / rid / "state.json").read_text())
+        data.update(run_id="run-B", phase="planned")
+        (other / "state.json").write_text(json.dumps(data))
+        (board.state / "current").write_text("run-B\n")
+        moved["done"] = True
+
+    rc, text, err = board.cli("write", "--run-id", rid, sleep=another_run_creates_its_state)
+    assert moved
+    assert "the board may have been changed" not in text + err
+    assert rc == 0 and f"write COMPLETE (run {rid})" in text
