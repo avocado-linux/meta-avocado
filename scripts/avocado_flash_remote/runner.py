@@ -333,35 +333,81 @@ def _finalize_records(sub, profile, phash, req, rc, refused_early=False):
         print(f"runner error: cannot write {evidence.MANIFEST}: {type(e).__name__}: {e}", file=sys.stderr)
 
 
-def _run_guarded(sub, profile, phash, req):
-    rc, refused_early = _run_sub(sub, profile, phash, req)
+def _run_guarded(sub, profile, phash, req, detached=False):
+    rc, refused_early, outcome = _run_sub(sub, profile, phash, req)
+    if detached and sub == "write":
+        # Before the manifest, so the marker is listed in it like every other file.
+        _write_outcome(req.get("run_dir"), req.get("run_id"), outcome)
     _finalize_records(sub, profile, phash, req, rc, refused_early)
     return rc
 
 
+def _refusal_text(result):
+    """The board's own words for a write it turned away, as the log printed them."""
+    lines = [ln for ln in (getattr(result, "lines", None) or []) if isinstance(ln, str)]
+    return "\n".join(lines).strip() or "write refused (no reason recorded)"
+
+
 def _run_sub(sub, profile, phash, req):
-    """Return (exit code, refused_early); refused_early is only ever true for a write
-    that returned without creating any run state (it did no work)."""
+    """Return (exit code, refused_early, outcome).
+
+    refused_early is only ever true for a write that returned without creating
+    any run state (it did no work). outcome is ``("refused", text)`` for that
+    case, ``("finished", "")`` for any other handler that returned, and None
+    when the handler did not return normally: a crash records nothing, so the
+    host never reads a verdict the runner did not reach.
+    """
     try:
         real = RealOps(req.get("tool_dir"))
         result = _HANDLERS[sub](real, profile, phash, req)
         sys.stdout.flush()
         rc = int(result.exit_code)
-        return rc, sub == "write" and rc != 0 and getattr(result, "final_phase", "unset") is None
+        refused = sub == "write" and rc != 0 and getattr(result, "final_phase", "unset") is None
+        if refused:
+            return rc, True, ("refused", _refusal_text(result))
+        return rc, False, ("finished", "")
     except _Exit as e:
         if e.message:
             print(e.message, file=e.stream or sys.stderr)
-        return e.code, False
+        return e.code, False, None
     except KeyboardInterrupt:
-        return EXIT_INTERRUPTED, False
+        return EXIT_INTERRUPTED, False, None
     except Exception as e:  # noqa: BLE001 - last line of defence, reported plainly
         print(f"runner error: {type(e).__name__}: {e}", file=sys.stderr)
-        return EXIT_ERROR, False
+        return EXIT_ERROR, False, None
 
 
 # ------------------------------------------------------------------ detach
 
 ACCEPTED_MARKER = "accepted"
+OUTCOME_MARKER = "outcome"
+
+
+def _atomic_marker(final, text):
+    tmp = final + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, final)
+
+
+def _clear_markers(run_dir):
+    """Drop the previous invocation's markers, in the parent, before the fork.
+
+    A run_dir outlives an attempt that was refused, and its pid and verdict
+    belong to that attempt: the host must read an absent marker, never a stale
+    one, until this invocation writes its own.
+    """
+    for name in (ACCEPTED_MARKER, OUTCOME_MARKER):
+        for suffix in ("", ".tmp"):
+            try:
+                os.unlink(os.path.join(run_dir, name + suffix))
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                print(f"runner error: cannot clear the {name} marker: {e}", file=sys.stderr)
 
 
 def _write_accepted(run_dir):
@@ -371,34 +417,50 @@ def _write_accepted(run_dir):
     yet) from one that never started. Written atomically; advisory, so a
     failure is logged and does not stop the write.
     """
-    final = os.path.join(run_dir, ACCEPTED_MARKER)
-    tmp = final + ".tmp"
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(f"{os.getpid()}\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, final)
+        _atomic_marker(os.path.join(run_dir, ACCEPTED_MARKER), f"{os.getpid()}\n")
     except OSError as e:
         print(f"runner error: cannot write {ACCEPTED_MARKER} marker: {e}", file=sys.stderr)
 
 
-def _already_written(run_dir):
-    """A run_dir that holds write.json belongs to a write that already finished."""
-    return os.path.isfile(os.path.join(run_dir, "write.json"))
+def _write_outcome(run_dir, run_id, outcome):
+    """Record how a detached write ended: ``refused`` with its reason, or ``finished``.
 
-
-def _detach(run_dir, run_id, replay=False):
-    """Classic double fork. Returns True in the grandchild, False in the parent.
-
-    ``replay`` sends the log outside run_dir: appending to the log of a write
-    that already finished would invalidate that run's manifest.
+    The first line is the verdict and the second names the run, so the host
+    can tell this attempt's verdict from one left by another run. A runner that
+    did not reach a verdict writes nothing. Advisory: a failure is logged.
     """
+    if outcome is None or not isinstance(run_dir, str) or not os.path.isdir(run_dir):
+        return
+    kind, text = outcome
+    body = f"{kind}\nrun={run_id}\n" + (text + "\n" if text else "")
+    try:
+        _atomic_marker(os.path.join(run_dir, OUTCOME_MARKER), body)
+    except OSError as e:
+        print(f"runner error: cannot write {OUTCOME_MARKER} marker: {e}", file=sys.stderr)
+
+
+def _replay_refusal(profile, run_dir, run_id):
+    """The refusal for a detached write whose run id was already used, or None.
+
+    Decided before the fork so the host never detaches for it: a run that has a
+    state record, or whose run_dir holds write.json, is never written again, and
+    its finished records stay exactly as they are.
+    """
+    state_json = os.path.join(profile.state_dir, str(run_id), "state.json")
+    if not (os.path.isfile(state_json) or os.path.isfile(os.path.join(run_dir, "write.json"))):
+        return None
+    return (
+        f"write refused: run {run_id} already has a state record under {profile.state_dir}; "
+        "it is never overwritten: run plan again for a new run id\n"
+        "nothing was written to the board"
+    )
+
+
+def _detach(run_dir, run_id):
+    """Classic double fork. Returns True in the grandchild, False in the parent."""
     os.makedirs(run_dir, mode=0o700, exist_ok=True)
     log = os.path.join(run_dir, "runner.log")
-    if replay:
-        log = os.path.join(os.path.dirname(os.path.normpath(run_dir)), f"refused-{os.getpid()}.log")
     sys.stdout.flush()
     sys.stderr.flush()
     pid = os.fork()
@@ -448,15 +510,18 @@ def main(argv, *, archive=None):
             profile = load_profile_bytes(profile_bytes)
         except ProfileError as e:
             raise _Exit(EXIT_PROFILE, f"runner error: bundled profile invalid: {e}", sys.stderr)
-        _prepare_run_dir(sub, profile, req)
         if detach:
             run_dir, run_id = _need(req, "run_dir", "run_id")
-            replay = _already_written(run_dir)
-            if not _detach(run_dir, run_id, replay=replay):
+            refusal = _replay_refusal(profile, run_dir, run_id)
+            if refusal is not None:
+                raise _Exit(1, refusal, sys.stderr)
+        _prepare_run_dir(sub, profile, req)
+        if detach:
+            _clear_markers(run_dir)
+            if not _detach(run_dir, run_id):
                 return 0
-            if not replay:
-                _write_accepted(run_dir)
-            rc = _run_guarded(sub, profile, phash, req)
+            _write_accepted(run_dir)
+            rc = _run_guarded(sub, profile, phash, req, detached=True)
             sys.stdout.flush()
             sys.stderr.flush()
             os._exit(rc)
