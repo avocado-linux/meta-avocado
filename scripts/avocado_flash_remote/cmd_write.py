@@ -186,7 +186,9 @@ def _prior_state_gate(state_dir, plan_run_id: str, ack_run_id) -> None:
         raise _Refusal(f"a previous run is not finished: {exc}") from None
     if decision.recovery_only:
         raise _Refusal(
-            f"run {ack_run_id} is acknowledged for recovery only; run restore, then plan and write again"
+            f"run {ack_run_id} is acknowledged for recovery only; run restore, wipe the target's partition "
+            "table by hand if it has one (plan refuses it when the profile sets require_empty), stage the "
+            "images again, then plan and write"
         )
     prior = load_state(state_dir)
     if prior.status == "ok" and prior.state is not None and prior.state.run_id == plan_run_id:
@@ -463,7 +465,7 @@ def _locked(
             except BaseException:
                 box["arm_attempted"] = watch.attempted
                 raise
-            st = advance(st, "armed", armed=record.to_dict())
+            st = advance(box["st"], "armed", armed=record.to_dict())
         st = advance(st, "complete")
     except BaseException as exc:  # noqa: BLE001 - record failed, then let non-Exception propagate
         text = str(exc) if isinstance(exc, (_Failed, Exception)) and str(exc) else type(exc).__name__

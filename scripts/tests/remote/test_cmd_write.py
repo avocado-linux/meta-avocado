@@ -871,3 +871,104 @@ def test_missing_serial_attribute_refuses_the_write_before_any_write_call(tmp_pa
     e = _pinned_env(tmp_path)
     res, ops = e.run(script=e.script(**{SERIAL_PATH: OpFailed(["cat"], 1, "No such file")}))
     assert_clean_refusal(res, ops, "cannot be verified")
+
+
+# ---------------------------------------------------------------- 5.20
+
+
+def test_acknowledged_recovery_refusal_does_not_promise_a_plan_the_profile_refuses(env):
+    res, _ = env.run(script=env.script(**{env.dd_key("dtb"): OpFailed(["dd"], 1, "io error")}))
+    st = statemod.load_state(env.state_dir).state
+    st.data["phase"] = "image-writing"
+    (st.run_dir / "state.json").write_text(json.dumps(st.data))
+    env.plan = dict(env.plan, run_id="run-0002")
+    res2, ops2 = env.run(ack_run_id=RUN_ID)
+    text = "\n".join(res2.lines)
+    assert "recovery only" in text
+    assert "wipe" in text and "stage" in text
+
+
+def test_armed_record_never_goes_back_in_sequence_number(env, monkeypatch):
+    seen = []
+    real = cmd_write.transition
+
+    def spy(state, phase, **kw):
+        new = real(state, phase, **kw)
+        seen.append((phase, new.data["seq"]))
+        return new
+
+    monkeypatch.setattr(cmd_write, "transition", spy)
+    res, _ = env.run()
+    assert res.exit_code == 0, res.lines
+    seqs = [q for _, q in seen]
+    assert seqs == sorted(set(seqs)), seen  # strictly increasing: no repeat, no step back
+    assert [ph for ph, _ in seen].count("arming") >= 3  # write-ahead plus the two progress writes
+    final = statemod.load_state(env.state_dir).state
+    assert final.data["seq"] == seqs[-1] == max(seqs)
+    armed_seq = next(q for ph, q in seen if ph == "armed")
+    assert armed_seq > max(q for ph, q in seen if ph == "arming")
+
+
+class _CrashAroundCreate(RecordingOps):
+    def __init__(self, script, *, after):
+        super().__init__(script)
+        self.after = after
+
+    def efibootmgr_create(self, *a, **kw):
+        if not self.after:
+            raise KeyboardInterrupt  # dies after the arming record, before -C runs
+        super().efibootmgr_create(*a, **kw)
+        raise KeyboardInterrupt  # dies after -C ran, before anything was recorded about it
+
+
+def test_crash_between_the_arming_write_and_efibootmgr_create_restores_cleanly(env):
+    ops = _CrashAroundCreate(env.script(), after=False)
+    with pytest.raises(KeyboardInterrupt):
+        env.run(ops=ops)
+    st = statemod.load_state(env.state_dir).state
+    assert st.phase == "arming" and st.data["armed"]["entry_number"] == ""
+    assert not [c for c in mutations(ops) if c.vector[0] == "efibootmgr"]
+    rops = RecordingOps({"efibootmgr -v": [EFI_PRE, EFI_PRE]})
+    res, removed = _restore_for(env, rops)
+    assert res.exit_code == 0, res.lines
+    assert not [c for c in mutations(rops)], "nothing was created, so nothing may be deleted"
+    assert "nothing removed" in "\n".join(res.lines)
+    assert statemod.load_state(env.state_dir).state.phase == "restored"
+
+
+def test_crash_right_after_efibootmgr_create_is_found_and_removed_by_label(env):
+    ops = _CrashAroundCreate(env.script(), after=True)
+    with pytest.raises(KeyboardInterrupt):
+        env.run(ops=ops)
+    st = statemod.load_state(env.state_dir).state
+    assert st.phase == "arming" and st.data["armed"]["entry_number"] == ""
+    rops = RecordingOps({"efibootmgr -v": [EFI_AFTER, EFI_PRE]})
+    res, removed = _restore_for(env, rops)
+    assert res.exit_code == 0, res.lines
+    assert [c.line for c in mutations(rops)] == [f"efibootmgr -B -b {ENTRY}"]
+    assert statemod.load_state(env.state_dir).state.phase == "restored"
+
+
+@pytest.mark.parametrize("fail_on", [1, 2], ids=["after-create", "after-next"])
+def test_progress_write_failure_inside_the_arm_step_stays_arming_and_says_unknown(env, monkeypatch, fail_on):
+    real = cmd_write.transition
+    count = {"n": 0}
+
+    def flaky(state, phase, **kw):
+        if phase == "arming" and state.data["phase"] == "arming" and "error" not in kw:
+            count["n"] += 1
+            if count["n"] == fail_on:
+                raise OSError("no space left on device")
+        return real(state, phase, **kw)
+
+    monkeypatch.setattr(cmd_write, "transition", flaky)
+    res, ops = env.run()  # nothing may raise past the arm step
+    assert res.exit_code == 1
+    assert res.final_phase == "arming"
+    text = "\n".join(res.lines)
+    assert "UNKNOWN" in text and "DO NOT REBOOT" in text
+    assert "the board was not armed" not in text
+    st = statemod.load_state(env.state_dir).state
+    assert st.phase == "arming"
+    assert "no space left on device" in st.data["error"]
+    lock_is_free(env)

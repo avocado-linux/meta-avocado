@@ -10,7 +10,8 @@ It takes the on-board flash lock first and refuses while another holder is
 live, so it can never run against a write in progress. A run in a non-terminal
 phase needs ``--ack-run RUN_ID`` naming that run. After a successful restore the
 run's state is advanced to the terminal ``restored`` so a new plan and write
-are accepted.
+are accepted by the state gate (plan itself still refuses a target that has a
+partition table when the profile sets ``require_empty``: restore wipes nothing).
 
 With missing or unparseable state it refuses; ``--emergency-disarm`` (plus an
 acknowledgement) removes only entries carrying the profile's arm label and a
@@ -21,6 +22,7 @@ Standard library only (ships to a board running Python 3.10).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -32,6 +34,9 @@ from .ops import OpsError
 from .state import LOCK_NAME, TERMINAL, LockHeld, OnBoardLock, describe_recovery, load_state, transition
 
 NOTE_LINE = "note: restore does not roll back partition table or image changes"
+# How long --emergency-disarm waits for a holder of the flash lock before it prints
+# the manual steps instead. The normal restore path never waits.
+EMERGENCY_LOCK_WAIT = 15.0
 _ROLLED_PHASES = (
     "table-writing", "table-written", "image-writing", "image-written", "verified", "arming", "armed", "complete",
 )  # fmt: skip
@@ -68,8 +73,49 @@ def make_guarded_rmtree(expected):
     return remove
 
 
+def _bootable(live, ours) -> dict:
+    """Labelled entries that the firmware may boot: in BootOrder, or the one just booted."""
+    order = {e.strip().upper() for e in boot_order_of(live).split(",") if e.strip()}
+    current = _field(live, "BootCurrent").upper()
+    why = {}
+    for num in ours:
+        if num in order:
+            why[num] = "is in BootOrder"
+        elif current and num == current:
+            why[num] = "is BootCurrent (the board booted it)"
+    return why
+
+
+def _refuse_bootable(say, bootable) -> None:
+    for num, why in sorted(bootable.items()):
+        say(f"refusing: boot entry {num} carries this tool's label but {why}")
+    say("no boot entry was deleted; inspect `efibootmgr -v` and remove the entry by hand if it is really ours")
+
+
 def _entry_present(text, number) -> bool:
     return re.search(rf"^Boot{re.escape(number)}\b", text, re.IGNORECASE | re.MULTILINE) is not None
+
+
+def _lock_holder(exc) -> str:
+    raw = getattr(exc, "holder", "") or ""
+    try:
+        data = json.loads(raw)
+        return f"pid {data.get('pid')} (run {data.get('run_id') or 'none'})"
+    except (ValueError, AttributeError, TypeError):
+        return raw or "an unknown holder"
+
+
+def _manual_disarm_lines(label, holder) -> list:
+    return [
+        f"the on-board flash lock is held by {holder} and did not clear in time",
+        "no boot entry or staging was touched; the lock is held by a write that may be hung",
+        "if that process is gone, the lock is free; check with: ps -p <pid>",
+        "to disarm by hand, as root on the board:",
+        "  efibootmgr -v    (find the entries labelled "
+        f"{label!r}; note BootOrder and BootCurrent)",
+        "  efibootmgr -N    (clear BootNext)",
+        "  efibootmgr -B -b XXXX    (delete one labelled entry that is not in BootOrder and is not BootCurrent)",
+    ]
 
 
 def run_restore(
@@ -82,10 +128,19 @@ def run_restore(
     emergency_disarm=False,
     remove_tree=None,
     out=print,
+    lock_wait=EMERGENCY_LOCK_WAIT,
 ) -> RestoreResult:
-    """Take the on-board lock, then restore. Refuses while a writer holds it."""
+    """Take the on-board lock, then restore. Refuses while a writer holds it.
+
+    ``--emergency-disarm`` is the one disarm that does not depend on the run
+    state, so it waits up to ``lock_wait`` seconds for a holder to finish and,
+    if the lock stays held, prints the holder and the manual steps. The normal
+    path refuses at once.
+    """
+    wait = lock_wait if emergency_disarm else 0.0
+    label = profile.arm.params.get("label", "") if getattr(profile.arm, "params", None) else ""
     try:
-        with OnBoardLock(Path(state_dir) / LOCK_NAME, run_id=ack_run_id or ""):
+        with OnBoardLock(Path(state_dir) / LOCK_NAME, run_id=ack_run_id or "", wait_seconds=wait):
             return _restore_locked(
                 ops, profile, state_dir=state_dir, staging_dir=staging_dir, ack_run_id=ack_run_id,
                 emergency_disarm=emergency_disarm, remove_tree=remove_tree, out=out,
@@ -96,7 +151,10 @@ def run_restore(
         else:
             why = f"cannot take the on-board lock: {exc}"
         result = RestoreResult(1)
-        for line in (f"refusing: {why}", "no boot entry or staging was touched"):
+        lines = [f"refusing: {why}", "no boot entry or staging was touched"]
+        if emergency_disarm and isinstance(exc, LockHeld):
+            lines = [f"refusing: {why}"] + _manual_disarm_lines(label, _lock_holder(exc))
+        for line in lines:
             result.lines.append(line)
             out(line)
         return result
@@ -135,7 +193,10 @@ def _restore_locked(
                 say(f"restore done but the run state could not be advanced: {e}; a new write stays blocked")
                 code = 1
             else:
-                say(f"run {st.run_id} state advanced to restored: a new plan and write are allowed")
+                say(
+                    f"run {st.run_id} state advanced to restored: the run is closed. A new plan needs an empty "
+                    "target when the profile sets require_empty (restore wipes nothing)"
+                )
         result.exit_code = code
         return result
 
@@ -250,6 +311,11 @@ def _disarm_by_label(ops, record, say, result, finish, clean_staging, note):
     try:
         live = ops.efibootmgr_list()
         ours = entries_with_label(live, label)
+        bootable = _bootable(live, ours)
+        if bootable:
+            _refuse_bootable(say, bootable)
+            say("staging kept")
+            return finish(1, note)
         nxt = boot_next_of(live).upper()
         if nxt and nxt in ours:
             ops.efibootmgr_delete_next()
@@ -288,6 +354,10 @@ def _emergency(ops, label, ack, loaded, say, result, finish):
     try:
         live = ops.efibootmgr_list()
         ours = entries_with_label(live, label)
+        bootable = _bootable(live, ours)
+        if bootable:
+            _refuse_bootable(say, bootable)
+            return finish(1, True)
         nxt = boot_next_of(live).upper()
         if nxt and nxt in ours:
             ops.efibootmgr_delete_next()

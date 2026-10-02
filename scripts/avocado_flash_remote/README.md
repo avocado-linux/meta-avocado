@@ -283,7 +283,8 @@ board means the runner was killed or lost power mid-run. While one is recorded,
 a new `write` is refused with a message beginning "a previous run is not
 finished" and naming the permitted recovery. A run acknowledged with `--ack-run`
 is allowed through for recovery only: `write` still refuses and tells you to run
-`restore`, then `plan` and `write` again.
+`restore`, wipe the target by hand if it has a table, stage the images again, then
+`plan` and `write`.
 
 Find the phase with `avocado-flash ssh-emmc status --board NAME --host HOST`.
 
@@ -293,7 +294,7 @@ The recovery actions are `none-recorded`, `restore-then-restart`, `restore` and
 | Phase on the board | What it means | Operator action |
 |--------------------|---------------|-----------------|
 | `planned` | The state file was created and no board change is recorded. The run never reached the first mutation. | None recorded (`none-recorded`). Safe to discard only if the run never took the on-board lock; check the lock before rerunning after acknowledging the run. |
-| `table-writing` | Killed during the partition table write. The table may be partly or fully rewritten. | `restore-then-restart`: re-inspect the target, run `restore --ack-run RUN_ID` (disarms and cleans staging; it does not roll back the table), then plan and write again from the start. |
+| `table-writing` | Killed during the partition table write. The table may be partly or fully rewritten. | `restore-then-restart`: re-inspect the target, run `restore --ack-run RUN_ID` (disarms and cleans staging; it does not roll back the table and wipes nothing), then follow [Starting over after a failed write](#starting-over-after-a-failed-write): wipe the table by hand, stage again, plan and write. |
 | `table-written` | The table is written; no image has started. | `restore-then-restart`, as above. |
 | `image-writing` | Killed while an image was being written. That partition holds partial data. | `restore-then-restart`, as above. |
 | `image-written` | At least one image is written and verified by read-back; more remain. | `restore-then-restart`, as above. |
@@ -301,13 +302,43 @@ The recovery actions are `none-recorded`, `restore-then-restart`, `restore` and
 | `arming` | The arm step started and did not finish (the runner was killed, or the arm step failed and was handled). A boot entry and `BootNext` may already exist even though the record does not name them. | `restore-unknown-arm`: DO NOT REBOOT. Run `restore --ack-run RUN_ID`; it finds the entry by its label when the number was never recorded. |
 | `armed` | The boot entry exists and `BootNext` may be set. The board will boot the test image on the next reboot. | `restore --ack-run RUN_ID`. Do not reboot first unless you want to boot the test image. |
 | `complete` | Terminal. | No recovery needed. |
-| `failed` | Terminal. | The recovery text names what is left: whether the table was possibly rewritten, which images are written, partial or not started, and whether a boot entry was armed ("DO NOT REBOOT" until `restore` removes it). Run `restore` (no acknowledgement needed for a finished run), then plan and write again. |
-| `restored` | Terminal. Written by a successful `restore`. | No recovery needed; a new plan and write are accepted. |
+| `failed` | Terminal. | The recovery text names what is left: whether the table was possibly rewritten, which images are written, partial or not started, and whether a boot entry was armed ("DO NOT REBOOT" until `restore` removes it). Run `restore` (no acknowledgement needed for a finished run). If the table was possibly rewritten, follow [Starting over after a failed write](#starting-over-after-a-failed-write) before planning again; otherwise stage the images again, then plan and write. |
+| `restored` | Terminal. Written by a successful `restore`. | No recovery needed. The state gate accepts a new plan and write, but `plan` still refuses a target that has a partition table when the profile sets `require_empty`. |
 | state unreadable | The state file or `current` pointer is missing or malformed. | Manual: inspect the state directory and the board's `efibootmgr -v`, then use `restore --emergency-disarm`. |
 
 The recovery column is the text `status` and the write refusal print. It is
 advice about what state the target may be in; what `restore` actually changes is
 listed next.
+
+## Starting over after a failed write
+
+`restore` closes the run, disarms the boot entry and deletes the staging
+directory. It does not touch the partition table, and the shipped profiles set
+`require_empty`, so `plan` refuses a disk that already carries a table. After a
+run that reached `table-writing` (the phases `table-writing`, `table-written`,
+`image-writing`, `image-written`, or a `failed` run whose recovery text says the
+table was possibly rewritten) a fresh attempt therefore needs these steps, in
+this order:
+
+1. Run `restore --ack-run RUN_ID` and read what it printed. Do not reboot while
+   a boot entry is armed.
+2. Re-check the device identity yourself, on the board: the device name, its
+   size and its serial must match the profile's `target` and `identity`
+   (`lsblk -o NAME,SIZE,SERIAL,MOUNTPOINTS DEVICE`). If they do not, stop: this
+   is not the disk the profile names.
+3. Wipe the partition table of that device by hand, for example
+   `wipefs --all DEVICE` as root, then confirm `lsblk DEVICE` shows no
+   partitions.
+4. Run `stage` again: `restore` deleted the staging directory, and the images
+   must be copied and hash-checked afresh.
+5. Run `plan`, then `write`.
+
+The tool does not do step 3 for you. A wipe inside `restore` would give a command
+that is meant to disarm and clean up the reach to erase a disk, so it stays a
+manual step with the identity check in front of it.
+
+A run that failed before `table-writing` never touched the table: skip steps 2
+and 3.
 
 ## Restore scope
 
@@ -325,6 +356,10 @@ What it does, per `cmd_restore.py`:
   entry), leaves the boot entries alone and cleans staging only.
 - If no entry was armed, makes no `efibootmgr` calls and cleans staging only.
 - If the state file is unreadable, refuses and touches nothing.
+- When the arm step started but no entry number was recorded, finds the entry by
+  its label. It deletes nothing if any labelled entry is in `BootOrder` or is
+  `BootCurrent` (the board booted it): it names the entry and leaves the decision
+  to you, with `efibootmgr -v` as the place to look.
 
 What it does not do: it does not restore the partition table and it does not
 restore any image content. Its output says so
@@ -333,15 +368,25 @@ not touch `state.json` until it has succeeded; then it advances the run to the
 terminal `restored` phase so that a new plan and write are accepted. A failed
 restore leaves the phase as it was.
 
-Before doing anything `restore` takes the on-board flash lock and refuses while
-another holder is live, so it cannot delete staging under a running write. A
+Before doing anything `restore` takes the on-board flash lock and refuses at once
+while another holder is live, so it cannot delete staging under a running write. A
 run still in a non-terminal phase is restored only with `--ack-run RUN_ID`
 naming that run.
 
 `restore --emergency-disarm --ack-run TEXT` is for a missing or unreadable state
 file. It requires a non-empty acknowledgement and removes only boot entries whose
 label equals the profile's `arm.params.label`, plus `BootNext` if it points at
-one of them. `BootOrder`, all other entries and staging are left alone.
+one of them. `BootOrder`, all other entries and staging are left alone. Like the
+label-based path above, it deletes nothing when a labelled entry is in `BootOrder`
+or is `BootCurrent`.
+
+`--emergency-disarm` does not depend on the run state, so a hung write that still
+holds the flash lock must not block it for good. It waits up to 15 seconds for the
+lock. If the lock stays held it exits 1 having touched nothing, prints the holder
+(the pid and run id from the lock file) and the manual commands:
+`efibootmgr -v`, `efibootmgr -N`, and `efibootmgr -B -b XXXX` for one labelled
+entry that is not in `BootOrder` and is not `BootCurrent`. The normal `restore`
+keeps refusing at once while the lock is held.
 
 ## Privilege and sudo
 
@@ -407,9 +452,27 @@ start and prints the tail of `runner.log`. If `--wait-seconds` runs out the
 write keeps going on the board; follow it with `status`. Ctrl-C on the host has
 the same effect: a started write is not stopped.
 
-When the host stops following a run: a detached runner writes its pid to an
-`accepted` marker file in the run directory before it does any check or
-hashing. If the recorded phase is non-terminal and has not moved between two
+A write whose run id already has a state record (or whose run directory holds
+`write.json`) is refused by the runner before it detaches: the host gets exit 1
+and the refusal on stderr, never follows it, and the finished records are left as
+they were.
+
+When the host stops following a run: at the start of every invocation the runner
+deletes the previous `accepted` and `outcome` markers, then a detached runner
+writes its pid to an `accepted` marker file in the run directory before it does
+any check or hashing, and, when it ends, an `outcome` marker: `finished`, or
+`refused` followed by the board's own refusal text for a write turned away before
+the lock (an unfinished prior run, a failed check, a changed `BootOrder`, a
+confirmation mismatch). A runner that crashed writes no `outcome`. The host reads
+`outcome` first and prints a `refused` text verbatim with exit 1. Anything the
+host cannot read (a dropped ssh, a sudo failure, an unrecognised answer, an
+`outcome` written for another run) is unknown, and an unknown never ends the
+follow or produces a "did not start" or "exited" verdict; the host keeps waiting
+until `--wait-seconds` runs out. When a run reaches `complete`, the host also
+checks that no refused write left a log newer than the run's records, and does not
+print `COMPLETE` if one did or if the board could not confirm it. Before declaring
+a runner dead the host reconciles once more, so a run that finished between the
+poll and the probe is reported as complete. If the recorded phase is non-terminal and has not moved between two
 polls, the host looks at that pid. A runner that is gone cannot advance the
 phase, so the host stops at once instead of polling until `--wait-seconds`,
 prints the recorded phase and its recovery text (for `arming`: the arm state is
@@ -431,6 +494,8 @@ records are written under `<state_dir>/<run_id>/records`.
 | `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time. |
 | `write.json` | `write`: final phase, error, per-image state, arm record, transition log. |
 | `runner.log` | A detached `write`: the runner's output. |
+| `accepted` | A detached `write`: the runner's pid, written before any check. Rewritten on every invocation. |
+| `outcome` | A detached `write` that ended: `finished`, or `refused` with the board's refusal text. Listed in `MANIFEST.json` like the other files; absent when the runner crashed. |
 | `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
 
 The host collects the on-board records after `plan` and after `write`, into
