@@ -1076,3 +1076,45 @@ def test_topology_is_the_last_read_before_the_first_mutation(env):
     first_mut = next(i for i, c in enumerate(ops.calls) if c.kind == "exec" and vector_mutates(c.vector))
     last_probe = max(i for i, line in enumerate(log[:first_mut]) if line.startswith("findmnt -no SOURCE -T"))
     assert not [c for c in ops.calls[last_probe + 1 : first_mut] if c.kind == "exec" and c.vector[0] in ("efibootmgr", "sfdisk", "blkid")]
+
+
+# ---- 5.31: write re-applies the image limits plan enforces, against a tampered plan record ----
+
+
+def _with_scan(env, role, **over):
+    file = env.profile.images[role].file
+    old = env.scans[file]
+    new = ScanResult(over.get("size", old.size), old.sha256, over.get("all_zero", old.all_zero), old.identity)
+
+    def scanner(path):
+        name = path.rsplit("/", 1)[-1]
+        return new if name == file else env.scans[name]
+
+    return scanner
+
+
+def test_write_refuses_an_all_zero_image_that_must_be_populated(env):
+    role = next(r for r, i in env.profile.images.items() if i.must_be_populated)
+    res, ops = env.run(scanner=_with_scan(env, role, all_zero=True))
+    assert_clean_refusal(res, ops, env.profile.images[role].file, "all zero")
+    assert statemod.load_state(env.state_dir).status == "absent"
+
+
+def test_write_refuses_an_image_over_max_bytes(env):
+    role = next(iter(env.profile.images))
+    big = env.profile.images[role].max_bytes + 1
+    res, ops = env.run(scanner=_with_scan(env, role, size=big))
+    assert_clean_refusal(res, ops, env.profile.images[role].file, "limit")
+
+
+def test_image_limits_check_names_the_partition_when_an_image_outgrows_it(env):
+    from avocado_flash_remote import cmd_plan
+
+    role = next(iter(env.profile.images))
+    img = env.profile.images[role]
+    part = next(p for p in env.profile.layout.params["table"] if p["number"] == img.partition)
+    cap = part["size"] * env.profile.layout.params.get("sector_size", 512)
+    scans = dict(env.scans)
+    scans[img.file] = ScanResult(cap + 1, "0" * 64, False, (1, 1, cap + 1, 1))
+    with pytest.raises(cmd_plan._Refusal, match="partition|limit"):
+        cmd_plan.check_image_limits(env.profile, scans)

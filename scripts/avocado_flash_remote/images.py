@@ -31,6 +31,8 @@ def _identity(st: os.stat_result) -> Identity:
 
 
 def _stream(path, chunk: int) -> tuple[int, str, bool, Identity]:
+    if isinstance(chunk, bool) or not isinstance(chunk, int) or chunk <= 0:
+        raise ValueError(f"chunk must be a positive integer, got {chunk!r}")
     h = hashlib.sha256()
     size = 0
     all_zero = True

@@ -478,7 +478,7 @@ def _plan_files(image_dir, bundle_path, resolved):
     return rows
 
 
-_DF_SCRIPT = 'd="$1"; while [ ! -d "$d" ]; do d=$(dirname "$d"); done; df -Pk "$d"'
+_DF_SCRIPT = 'd="$1"; while [ ! -d "$d" ]; do d=$(dirname "$d"); done; LC_ALL=C df -Pk "$d"'
 
 
 def check_staging_space(transport, profile, payload_bytes: int = 0) -> int:
@@ -789,5 +789,5 @@ def collect(transport, run_id: str, local_run_dir, *, remote_run_dir: str) -> ev
         raise HostError(f"record stream unreadable: {type(exc).__name__}") from None
     dest.mkdir(parents=True, exist_ok=True)
     for name, data in members.items():
-        (dest / name).write_bytes(data)
+        evidence.write_record(dest, name, data)
     return evidence.verify_record_set(dest)

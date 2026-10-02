@@ -669,3 +669,25 @@ def test_a_well_formed_armed_state_still_parses(tmp_path):
     s = st.transition(s, "armed", armed={"entry_number": "0005", "label": "x", "preexisting_boot_order": "0001",
                                          "preexisting_next": "", "next_armed": True})
     assert st.load_state(tmp_path).status == "ok"
+
+
+def test_load_run_refuses_a_symlinked_run_directory_or_state_file(tmp_path):
+    from avocado_flash_remote.cmd_status import _load_run
+
+    _new(tmp_path)
+    real = tmp_path / "run-1"
+    link = tmp_path / "run-9"
+    link.symlink_to(real)
+    assert _load_run(tmp_path, "run-9").status == "unparseable"
+    other = tmp_path / "other.json"
+    other.write_text((real / "state.json").read_text())
+    (real / "state.json").unlink()
+    (real / "state.json").symlink_to(other)
+    assert _load_run(tmp_path, "run-1").status == "unparseable"
+
+
+@pytest.mark.parametrize("bad", ["a b", "-x", "a\nb", "..", "a/b"])
+def test_load_run_refuses_a_malformed_run_id(tmp_path, bad):
+    from avocado_flash_remote.cmd_status import _load_run
+
+    assert _load_run(tmp_path, bad).status == "unparseable"

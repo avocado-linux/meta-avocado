@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import secrets
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,17 +65,35 @@ def _encode(data: bytes | dict | list) -> bytes:
 def _atomic_write(path: Path, payload: bytes) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(payload)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.rename(str(tmp), str(path))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.rename(str(tmp), str(path))
+    except BaseException:
+        try:
+            os.unlink(str(tmp))
+        except OSError:
+            pass
+        raise
     _fsync_dir(path.parent)
+
+
+def _bad_name(name: Any) -> bool:
+    """True for anything but a bare file name: no separator, no NUL, not empty, not a dot entry."""
+    return (
+        not isinstance(name, str)
+        or name in ("", ".", "..")
+        or "/" in name
+        or "\x00" in name
+        or os.path.isabs(name)
+    )
 
 
 def write_record(run_dir, name: str, data: bytes | dict | list) -> str:
     """Atomically write a record file; return its sha256."""
-    if "/" in name or name in ("", ".", ".."):
+    if _bad_name(name):
         raise ValueError(f"bad record name: {name!r}")
     payload = _encode(data)
     _atomic_write(Path(run_dir) / name, payload)
@@ -82,7 +101,19 @@ def write_record(run_dir, name: str, data: bytes | dict | list) -> str:
 
 
 def _parse_utc(text: str) -> _dt.datetime:
-    return _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    """Parse an ISO timestamp; one without a zone is read as UTC."""
+    parsed = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+    return parsed
+
+
+def _skew_or_none(host_utc: Any, board_utc: Any) -> float | None:
+    """Clocks are evidence only: a malformed or missing one yields no skew, never a failure."""
+    try:
+        return clock_skew_seconds(host_utc, board_utc)
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return None
 
 
 def clock_skew_seconds(host_utc: str, board_utc: str) -> float:
@@ -126,7 +157,7 @@ class RecordSet:
             "clocks": {
                 "host_utc": self.host_utc,
                 "board_utc": self.board_utc,
-                "skew_seconds": clock_skew_seconds(self.host_utc, self.board_utc),
+                "skew_seconds": _skew_or_none(self.host_utc, self.board_utc),
             },
             "run_status": run_status,
             "artifacts": sorted(self.artifacts, key=lambda a: a["name"]),
@@ -144,23 +175,80 @@ class VerifyResult:
     problems: list[str] = field(default_factory=list)
 
 
+_STR_FIELDS = ("host_tool_version", "runner_version", "profile_hash")
+
+
+def _manifest_problems(manifest: Any) -> list[str]:
+    """Type and presence problems in the manifest's own fields, before any artifact is touched."""
+    if not isinstance(manifest, dict):
+        return ["manifest is not an object"]
+    out: list[str] = []
+    for k in _STR_FIELDS:
+        v = manifest.get(k)
+        if not isinstance(v, str) or not v:
+            out.append(f"manifest field {k} is missing or not a non-empty string")
+    hashes = manifest.get("image_hashes")
+    if not isinstance(hashes, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in hashes.items()):
+        out.append("manifest field image_hashes is missing or not a mapping of role to hash")
+    if not isinstance(manifest.get("board_identity"), dict):
+        out.append("manifest field board_identity is missing or not an object")
+    if not isinstance(manifest.get("transition_log"), list):
+        out.append("manifest field transition_log is missing or not a list")
+    clocks = manifest.get("clocks")
+    if not isinstance(clocks, dict):
+        out.append("manifest field clocks is missing or not an object")
+    else:
+        skew = clocks.get("skew_seconds")
+        if skew is not None and (isinstance(skew, bool) or not isinstance(skew, (int, float))):
+            out.append("manifest clocks.skew_seconds is not a number or null")
+    if manifest.get("run_status") not in STATUSES:
+        out.append(f"manifest run_status {manifest.get('run_status')!r} is not one of {STATUSES}")
+    return out
+
+
 def verify_record_set(run_dir) -> VerifyResult:
     run_dir = Path(run_dir)
     problems: list[str] = []
     try:
         manifest = json.loads((run_dir / MANIFEST).read_bytes())
-        arts = manifest["artifacts"]
-        listed = {a["name"]: a for a in arts}
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError) as exc:
         return VerifyResult(False, [f"manifest unreadable: {exc}"])
+    problems.extend(_manifest_problems(manifest))
+    if not isinstance(manifest, dict):
+        return VerifyResult(False, problems)
+    arts = manifest.get("artifacts")
+    if not isinstance(arts, list) or not all(isinstance(a, dict) for a in arts):
+        return VerifyResult(False, problems + ["manifest field artifacts is missing or not a list of objects"])
+    listed: dict[str, dict] = {}
+    for a in arts:
+        name = a.get("name")
+        if _bad_name(name):
+            problems.append(f"bad artifact name: {name!r}")
+        elif name in listed:
+            problems.append(f"duplicate artifact: {name}")
+        else:
+            listed[name] = a
     for name, a in listed.items():
         path = run_dir / name
-        if not path.is_file():
+        try:
+            st = os.lstat(str(path))
+        except FileNotFoundError:
             problems.append(f"missing: {name}")
             continue
-        if path.stat().st_size != a.get("size"):
+        except OSError as exc:
+            problems.append(f"unreadable: {name}: {exc}")
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            problems.append(f"not a regular file: {name}")
+            continue
+        if st.st_size != a.get("size"):
             problems.append(f"size mismatch: {name}")
-        if _file_sha256(path) != a.get("sha256"):
+        try:
+            digest = _file_sha256(path)
+        except OSError as exc:
+            problems.append(f"unreadable: {name}: {exc}")
+            continue
+        if digest != a.get("sha256"):
             problems.append(f"hash mismatch: {name}")
     for p in run_dir.iterdir():
         if p.name != MANIFEST and p.name not in listed:

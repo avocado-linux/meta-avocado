@@ -211,3 +211,14 @@ def test_reverify_missing(tmp_path):
     p.unlink()
     with pytest.raises(images.ImageChanged):
         images.reverify(p, r)
+
+
+@pytest.mark.parametrize("bad", [0, -4, 1.5, "4096", None, True])
+def test_scan_and_reverify_refuse_a_chunk_that_is_not_a_positive_integer(tmp_path, bad):
+    f = tmp_path / "i.img"
+    f.write_bytes(b"abc")
+    good = images.scan(f)
+    with pytest.raises(ValueError, match="chunk"):
+        images.scan(f, chunk=bad)
+    with pytest.raises(ValueError, match="chunk"):
+        images.reverify(f, good, chunk=bad)

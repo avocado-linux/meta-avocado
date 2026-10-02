@@ -168,3 +168,25 @@ def test_does_not_mutate_input():
 def test_unknown_uuid_number_refused():
     with pytest.raises(LayoutError, match="uuid"):
         sfdisk_input(params(), "/dev/mmcblk0", uuids={99: DATA_UUID})
+
+
+def test_sfdisk_input_uses_device_sectors_not_last_lba_for_the_size():
+    p = params()
+    p["device_sectors"] = DEVICE_SECTORS + 1
+    with pytest.raises(LayoutError, match="last_lba"):
+        sfdisk_input(p, "/dev/mmcblk0")
+
+
+def test_sfdisk_input_without_device_sectors_refuses():
+    p = params()
+    del p["device_sectors"]
+    with pytest.raises(LayoutError, match="device_sectors"):
+        sfdisk_input(p, "/dev/mmcblk0")
+
+
+@pytest.mark.parametrize("bad", [0, -1, "20480", True, None])
+def test_sfdisk_input_with_a_bad_device_sectors_refuses(bad):
+    p = params()
+    p["device_sectors"] = bad
+    with pytest.raises(LayoutError):
+        sfdisk_input(p, "/dev/mmcblk0")

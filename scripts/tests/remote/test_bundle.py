@@ -207,6 +207,7 @@ def _request(tmp_path, **extra):
         "efivars_dir": "/efi",
         "plan_path": str(tmp_path / "plan.json"),
         "invocation_nonce": NONCE_A,
+        "tool_version": "t-1",
     }
     req.update(extra)
     p = tmp_path / "req.json"
@@ -633,13 +634,30 @@ def test_manifest_written_after_plan_and_verifies(tmp_path, monkeypatch):
     assert not [p for p in rd.iterdir() if p.name.endswith(".tmp")]
 
 
-def test_manifest_defaults_and_incomplete_on_nonzero(tmp_path, monkeypatch):
+def test_incomplete_manifest_on_nonzero_with_empty_identity_and_no_host_clock(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path, code=4, write=False))
     assert _main("plan", tmp_path) == 4
     m = _manifest(tmp_path / "state" / "r1" / "records")
-    assert m["host_tool_version"] == "unknown"
+    assert m["host_tool_version"] == "t-1"
     assert m["run_status"] == "incomplete"
-    assert m["board_identity"] is None and m["image_hashes"] == {}
+    assert m["board_identity"] == {} and m["image_hashes"] == {}
+    # no host_utc in the request: the board clock is not passed off as the host's, so there is no skew
+    assert m["clocks"]["host_utc"] is None and m["clocks"]["skew_seconds"] is None
+
+
+@pytest.mark.parametrize("bad", [None, "", "  ", 3])
+def test_request_without_a_tool_version_is_refused_before_any_record_is_written(tmp_path, monkeypatch, bad):
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path, code=0, write=False))
+    assert _main("plan", tmp_path, tool_version=bad) == 64
+    assert not (tmp_path / "state" / "r1" / "records" / "MANIFEST.json").exists()
+
+
+def test_host_clock_in_the_request_gives_a_real_skew(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "run_plan", _plan_stub(tmp_path, code=0, write=False))
+    assert _main("plan", tmp_path, host_utc="2000-01-01T00:00:00Z") == 0
+    m = _manifest(tmp_path / "state" / "r1" / "records")
+    assert m["clocks"]["host_utc"] == "2000-01-01T00:00:00Z"
+    assert m["clocks"]["skew_seconds"] > 20 * 365 * 86400
 
 
 def test_manifest_for_refusal_without_records_lists_nothing_and_verifies(tmp_path, monkeypatch):
@@ -1034,3 +1052,66 @@ def test_detached_write_without_a_valid_nonce_is_refused_before_the_fork(tmp_pat
     assert rc != 0
     assert "invocation_nonce" in capsys.readouterr().err
     assert not (tmp_path / "state" / "r1" / "records" / "accepted").exists()
+
+
+# ---- 5.31: unique temporary file, and verify_bundle reports instead of raising ----
+
+
+def test_build_does_not_touch_a_neighbouring_tmp_file_and_leaves_none_behind(tmp_path):
+    out = tmp_path / "b.pyz"
+    neighbour = tmp_path / "b.pyz.tmp"
+    neighbour.write_bytes(b"someone else")
+    bundle.build_bundle(FIXTURE.read_bytes(), out, "t")
+    assert neighbour.read_bytes() == b"someone else"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["b.pyz", "b.pyz.tmp"]
+    assert os.stat(out).st_mode & 0o777 == 0o755
+
+
+def test_failed_build_removes_only_its_own_temporary_file(tmp_path, monkeypatch):
+    out = tmp_path / "b.pyz"
+    neighbour = tmp_path / "b.pyz.tmp"
+    neighbour.write_bytes(b"someone else")
+
+    def boom(*a, **k):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(bundle.os, "replace", boom)
+    with pytest.raises(OSError):
+        bundle.build_bundle(FIXTURE.read_bytes(), out, "t")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["b.pyz.tmp"]
+    assert neighbour.read_bytes() == b"someone else"
+
+
+def _zip_with(path, members):
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return path
+
+
+@pytest.mark.parametrize(
+    "meta",
+    ["[]", "null", '{"modules": []}', '{"modules": {"a": 1}}', '{"modules": 5}', '{"profile_sha256": []}',
+     "\xff\xfe", "{"],
+)
+def test_verify_bundle_reports_malformed_metadata_as_problems(tmp_path, meta):
+    p = _zip_with(tmp_path / "x.pyz", {"BUNDLE.json": meta, "profile.json": "{}", "__main__.py": "x"})
+    problems = bundle.verify_bundle(p)
+    assert isinstance(problems, list) and problems
+
+
+def test_verify_bundle_reports_a_missing_or_non_archive_path(tmp_path):
+    assert bundle.verify_bundle(tmp_path / "absent.pyz")
+    (tmp_path / "junk").write_bytes(b"not a zip")
+    assert bundle.verify_bundle(tmp_path / "junk")
+    assert bundle.verify_bundle(None)
+    assert bundle.verify_bundle(tmp_path)
+
+
+def test_verify_bundle_reports_a_corrupt_member(tmp_path):
+    info = bundle.build_bundle(FIXTURE.read_bytes(), tmp_path / "b.pyz", "t")
+    raw = bytearray((tmp_path / "b.pyz").read_bytes())
+    raw[len(bundle.SHEBANG) + 60] ^= 0xFF  # inside the first member's data
+    (tmp_path / "c.pyz").write_bytes(bytes(raw))
+    problems = bundle.verify_bundle(tmp_path / "c.pyz")
+    assert isinstance(problems, list) and problems

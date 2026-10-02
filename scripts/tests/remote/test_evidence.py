@@ -159,3 +159,97 @@ def test_authorise_two_empty_records_is_false():
 
 def test_authorise_complete_equal_records_is_true():
     assert ev.authorise(dict(_GOOD), json.loads(json.dumps(_GOOD)))
+
+
+# ---- 5.31: manifest verification, clocks ----
+
+
+def _manifest(run_dir):
+    return json.loads((run_dir / "MANIFEST.json").read_text())
+
+
+def _rewrite(run_dir, fn):
+    m = _manifest(run_dir)
+    fn(m)
+    (run_dir / "MANIFEST.json").write_text(json.dumps(m))
+
+
+def test_good_record_set_still_verifies(tmp_path):
+    assert ev.verify_record_set(_build(tmp_path)).ok
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["host_tool_version", "runner_version", "profile_hash", "image_hashes", "board_identity",
+     "transition_log", "clocks", "run_status"],
+)
+def test_manifest_missing_a_required_field_fails_verification(tmp_path, key):
+    d = _build(tmp_path)
+    _rewrite(d, lambda m: m.pop(key))
+    res = ev.verify_record_set(d)
+    assert not res.ok and any(key in p for p in res.problems)
+
+
+@pytest.mark.parametrize(
+    "key,bad",
+    [("host_tool_version", 3), ("runner_version", ""), ("profile_hash", None), ("image_hashes", []),
+     ("image_hashes", {"boot": 1}), ("board_identity", "x"), ("transition_log", {}), ("clocks", []),
+     ("run_status", "bogus"), ("run_status", 5)],
+)
+def test_manifest_field_of_the_wrong_type_fails_verification(tmp_path, key, bad):
+    d = _build(tmp_path)
+    _rewrite(d, lambda m: m.__setitem__(key, bad))
+    assert not ev.verify_record_set(d).ok
+
+
+def test_duplicate_artifact_names_fail_verification(tmp_path):
+    d = _build(tmp_path)
+    _rewrite(d, lambda m: m["artifacts"].append(dict(m["artifacts"][0])))
+    res = ev.verify_record_set(d)
+    assert not res.ok and any("duplicate" in p for p in res.problems)
+
+
+@pytest.mark.parametrize("name", ["../x", "/etc/passwd", "a/b", "..", ".", "", "a\x00b"])
+def test_artifact_names_outside_the_run_directory_fail_without_being_opened(tmp_path, name):
+    d = _build(tmp_path)
+    secret = tmp_path / "outside"
+    secret.write_bytes(b"s")
+    art = {"name": name, "size": 1, "sha256": _sha(b"s")}
+    _rewrite(d, lambda m: m["artifacts"].append(art))
+    res = ev.verify_record_set(d)
+    assert not res.ok and any("bad artifact name" in p for p in res.problems)
+
+
+def test_symlinked_artifact_fails_verification(tmp_path):
+    d = _build(tmp_path)
+    target = tmp_path / "elsewhere"
+    target.write_bytes(b"line1\nline2\n")
+    (d / "runner.log").unlink()
+    (d / "runner.log").symlink_to(target)
+    res = ev.verify_record_set(d)
+    assert not res.ok and any("not a regular file" in p for p in res.problems)
+
+
+def test_directory_artifact_fails_verification(tmp_path):
+    d = _build(tmp_path)
+    (d / "runner.log").unlink()
+    (d / "runner.log").mkdir()
+    assert not ev.verify_record_set(d).ok
+
+
+def test_manifest_that_is_not_an_object_fails(tmp_path):
+    d = _build(tmp_path)
+    (d / "MANIFEST.json").write_text("[]")
+    assert not ev.verify_record_set(d).ok
+
+
+def test_zoneless_timestamp_is_utc():
+    assert ev.clock_skew_seconds("2026-10-01T00:00:00", "2026-10-01T00:00:10Z") == 10
+
+
+@pytest.mark.parametrize("bad", ["garbage", "", None, 5])
+def test_malformed_or_missing_clock_still_writes_the_manifest_with_null_skew(tmp_path, bad):
+    d = _build(tmp_path, board_utc=bad)
+    m = _manifest(d)
+    assert m["clocks"]["skew_seconds"] is None
+    assert ev.verify_record_set(d).ok
