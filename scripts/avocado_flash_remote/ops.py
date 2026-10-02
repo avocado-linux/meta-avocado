@@ -658,6 +658,10 @@ class RealOps(Ops):
                     timed_out = True
                     self._kill_group(child)
                     rc = child.returncode
+                except BaseException:
+                    # An interrupt must not leave a writer alive in its own session.
+                    self._kill_group(child)
+                    raise
             finally:
                 if inp is not None:
                     inp.close()

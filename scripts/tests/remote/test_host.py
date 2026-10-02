@@ -182,6 +182,27 @@ def test_ssh_run_uses_own_session_and_files(monkeypatch, tmp_path):
     assert "env" not in kw or PASSWORD not in str(kw["env"])
 
 
+def test_ssh_run_terminates_the_ssh_child_when_the_wait_is_interrupted(monkeypatch):
+    from avocado_flash_remote import host as hostmod
+
+    terminated = []
+
+    class FakeProc:
+        pid = 4243
+
+        def __init__(self, cmd, **kw):
+            self.stdin = None
+
+        def wait(self, timeout=None):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(hostmod, "_terminate", lambda proc: terminated.append(proc))
+    with pytest.raises(KeyboardInterrupt):
+        SshTransport("h").run(["true"], None, timeout=5)
+    assert len(terminated) == 1 and terminated[0].pid == 4243
+
+
 # --- secret hygiene -------------------------------------------------------
 
 

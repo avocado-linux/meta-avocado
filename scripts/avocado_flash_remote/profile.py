@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
 from dataclasses import dataclass
 from typing import Any, Tuple
@@ -27,6 +28,7 @@ SCHEMA_VERSION = 1
 IDENTITY_KINDS = ("by-path", "serial", "sysfs-name")
 _BOARD_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # used with fullmatch: no leading dash, no trailing newline
 _FORBIDDEN_ROOTS = ("/dev", "/sys", "/proc")
+_SYSFS_ATTR_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 class ProfileError(ValueError):
@@ -184,8 +186,10 @@ def _abs_path(path, value):
         raise ProfileError(path, "must not contain '..'")
     if not [c for c in parts if c not in ("", ".")]:
         raise ProfileError(path, "must not be the filesystem root")
+    # posixpath keeps a leading "//" and "/." forms would slip past a plain prefix test.
+    norm = "/" + posixpath.normpath(value).lstrip("/")
     for root in _FORBIDDEN_ROOTS:
-        if value == root or value.startswith(root + "/"):
+        if norm == root or norm.startswith(root + "/"):
             raise ProfileError(path, f"must not be under {root}")
     return value
 
@@ -225,6 +229,10 @@ def _target(value):
     attr = None
     if "sysfs_attr" in ident:
         attr = _str("target.identity.sysfs_attr", ident["sysfs_attr"])
+        if not _SYSFS_ATTR_RE.fullmatch(attr):
+            raise ProfileError(
+                "target.identity.sysfs_attr", "must be a bare attribute name (letters, digits, underscore)"
+            )
     identity = Identity(kind, _str("target.identity.value", ident["value"]), attr)
     return Target(
         device=_str("target.device", value["device"]),

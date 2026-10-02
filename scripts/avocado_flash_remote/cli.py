@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import json
 import math
 import re
 import secrets
@@ -212,6 +213,16 @@ def _do_stage(ctx: _Ctx) -> int:
     return 0
 
 
+def _dropped(sub: str, exc: Exception) -> int:
+    """A runner call whose ssh wait expired: the runner may have acted before the host gave up."""
+    _err(f"{PREFIX}: {exc}")
+    _err(
+        f"{PREFIX}: the connection to the board timed out during {sub}; the runner may have acted "
+        "before the timeout: run the status subcommand to see the recorded phase"
+    )
+    return EXIT_DROPPED
+
+
 def _exit_code(sub: str, rc: int) -> int:
     """Map a runner call's exit status; ssh's 255 (transport failure) becomes 2."""
     if rc != SSH_FAILURE:
@@ -227,7 +238,11 @@ def _do_simple(ctx: _Ctx, sub: str, request: dict) -> int:
     rc = ctx.connect(need_staged=True)
     if rc is not None:
         return rc
-    return _exit_code(sub, ctx.invoke(sub, request).rc)
+    try:
+        res = ctx.invoke(sub, request)
+    except host.HostTimeout as exc:
+        return _dropped(sub, exc)
+    return _exit_code(sub, res.rc)
 
 
 def _do_check(ctx: _Ctx) -> int:
@@ -254,10 +269,14 @@ def _do_plan(ctx: _Ctx) -> int:
         _rmdir(local)
         return rc
     remote_dir = ctx.remote_run_dir(run_id)
-    res = ctx.invoke(
-        "plan",
-        {"staging_dir": ctx.staging_dir, "run_dir": remote_dir, "run_id": run_id},
-    )
+    try:
+        res = ctx.invoke(
+            "plan",
+            {"staging_dir": ctx.staging_dir, "run_dir": remote_dir, "run_id": run_id},
+        )
+    except host.HostTimeout as exc:
+        # The plan dir stays: the runner may have written records into it.
+        return _dropped("plan", exc)
     if res.rc != 0:
         _rmdir(local)
         return res.rc
@@ -437,6 +456,30 @@ def _in_marker_window(ctx: _Ctx, verify, remote_dir: str, run_id: str, nonce: st
     return any(p == "unlisted file: outcome" or p.startswith("manifest unreadable") for p in verify.problems)
 
 
+WRITE_ARTIFACTS = ("plan.json", "write.json")
+
+
+def _collect_write(ctx: _Ctx, run_id: str, remote_dir: str, local: Path) -> evidence.VerifyResult:
+    """Collect a write's records; a set that verifies but is not a finished write's does not count.
+
+    verify_record_set only proves the files agree with their manifest, so a set that lacks write.json or
+    that the runner never marked runner-complete would otherwise read as a completed write.
+    """
+    verify = ctx.collect(run_id, remote_dir, local)
+    if not verify.ok:
+        return verify
+    try:
+        manifest = json.loads((local / evidence.MANIFEST).read_bytes())
+        listed = {a.get("name") for a in manifest["artifacts"]}
+        status = manifest.get("run_status")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return evidence.VerifyResult(False, [f"manifest unreadable after verification: {exc}"])
+    problems = [f"verified record set does not list {n}" for n in WRITE_ARTIFACTS if n not in listed]
+    if status != "runner-complete":
+        problems.append(f"manifest run_status is {status!r}, not 'runner-complete'")
+    return evidence.VerifyResult(not problems, problems)
+
+
 def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
@@ -533,7 +576,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
         return 1
 
     local = _unique_dir(ctx.evidence_dir / f"{run_id}-write")
-    verify = ctx.collect(run_id, remote_dir, local)
+    verify = _collect_write(ctx, run_id, remote_dir, local)
     outcome = host.final_outcome(phase, verify)
     # The phase turns complete a moment before the runner writes its manifest and outcome marker: a
     # collection in that window is retried while the runner has not recorded its own end.
@@ -542,7 +585,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
             break
         ctx.sleep(ctx.poll_interval)
         local = _unique_dir(ctx.evidence_dir / f"{run_id}-write")
-        verify = ctx.collect(run_id, remote_dir, local)
+        verify = _collect_write(ctx, run_id, remote_dir, local)
         outcome = host.final_outcome(phase, verify)
     if outcome == "complete":
         owner = _confirm_owner(ctx, run_id, remote_dir, nonce, polls)
@@ -589,7 +632,10 @@ def _do_restore(ctx: _Ctx) -> int:
         }
         if args.run_id:
             request["run_id"] = _need_run_id(ctx)
-        res = ctx.invoke("restore", request)
+        try:
+            res = ctx.invoke("restore", request)
+        except host.HostTimeout as exc:
+            return _dropped("restore", exc)
         return _exit_code("restore", res.rc)
 
 
@@ -598,7 +644,7 @@ def _do_readback(ctx: _Ctx) -> int:
     arm_none = ctx.profile.arm.strategy == "none"
     if not arm_none and not args.reference_boot_order:
         raise _Usage("readback needs --reference-boot-order")
-    run_id = args.run_id or f"readback-{secrets.token_hex(4)}"
+    run_id = _need_run_id(ctx) if args.run_id else f"readback-{secrets.token_hex(4)}"
     request = {
         "staging_dir": ctx.staging_dir,
         "state_dir": ctx.state_dir,

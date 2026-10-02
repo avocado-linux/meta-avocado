@@ -263,6 +263,21 @@ def test_staging_dir_forbidden(bad):
         load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
 
 
+@pytest.mark.parametrize("bad", ["//dev/x", "/./proc/x", "/./dev", "///sys/x", "/dev//x", "//proc"])
+def test_staging_dir_forbidden_after_normalisation(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+@pytest.mark.parametrize("bad", ["a/b", "../x", "", "a b", "a.b", "a-b", "name\n", "/x"])
+def test_identity_sysfs_attr_must_be_a_bare_attribute_name(bad):
+    def mutate(d):
+        d["target"]["identity"] = {"kind": "sysfs-name", "value": "x", "sysfs_attr": bad}
+
+    with pytest.raises(ProfileError, match="sysfs_attr"):
+        load_profile_bytes(mutated(mutate))
+
+
 def test_checks_duplicates():
     with pytest.raises(ProfileError, match="checks"):
         load_profile_bytes(
@@ -294,7 +309,7 @@ def test_module_is_stdlib_only():
     import pathlib
 
     tree = ast.parse(pathlib.Path(profile.__file__).read_text())
-    allowed = {"__future__", "dataclasses", "hashlib", "json", "re", "typing",
+    allowed = {"__future__", "dataclasses", "hashlib", "json", "posixpath", "re", "typing",
                "avocado_flash_remote", "copy", "types"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

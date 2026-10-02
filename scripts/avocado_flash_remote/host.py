@@ -253,6 +253,10 @@ class SshTransport(_TransportBase):
                 except subprocess.TimeoutExpired:
                     _terminate(proc)
                     raise HostTimeout(f"ssh to {self.host} timed out after {timeout}s") from None
+                except BaseException:
+                    # An interrupted wait must not leave the ssh child (and the remote command) running.
+                    _terminate(proc)
+                    raise
                 if writer is not None:
                     writer.join(timeout=_KILL_GRACE)
             finally:

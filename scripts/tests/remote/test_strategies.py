@@ -172,6 +172,20 @@ def test_guard_boot_arg_missing_partitions():
     assert "partitions" in str(exc.value)
 
 
+@pytest.mark.parametrize("argument", ["", " ", "a b", "a\tb", "a\nb", " a"])
+def test_guard_boot_arg_rejects_an_argument_that_is_not_one_token(argument):
+    with pytest.raises(StrategyError, match="argument"):
+        validate("guard", "boot-arg", {"argument": argument, "partitions": ["A_kernel"]})
+
+
+@pytest.mark.parametrize(
+    "partitions", [[], [""], ["A_kernel", ""], ["A_kernel", "A_kernel"]]
+)
+def test_guard_boot_arg_rejects_an_empty_or_duplicated_partition_list(partitions):
+    with pytest.raises(StrategyError, match="partitions"):
+        validate("guard", "boot-arg", {"argument": "a=b", "partitions": partitions})
+
+
 def test_guard_none():
     assert validate("guard", "none", {}) == {}
 
