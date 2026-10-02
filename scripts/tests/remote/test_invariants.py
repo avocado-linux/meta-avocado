@@ -568,6 +568,7 @@ class Board:
         self.records = {}
         self.status_script = None  # phases or exceptions consumed by status polls
         self.write_exc = None
+        self.nonce = "0" * 16
         self.stub = StubTransport(self.handle)
 
     def _records(self, name, with_write):
@@ -611,8 +612,11 @@ class Board:
         if argv[0] == "sh" and "cat >" in argv[2]:
             self.requests[argv[-1]] = json.loads(stdin)
             return RunResult(0)
-        if argv[0] == "sh" and "refused-" in argv[2]:
-            return RunResult(0, b"CLEAR\n")
+        if argv[0] == "sh" and "exit 3" in argv[2]:
+            # The runner's marker probe: `accepted` carries this invocation's nonce, there is no verdict yet.
+            if argv[-1].endswith("/accepted"):
+                return RunResult(0, f"4242\nnonce={self.nonce}\n".encode())
+            return RunResult(3)
         if argv[0] == "test":
             return RunResult(0 if self.staged else 1)
         if argv[0] == "tail":
@@ -633,6 +637,7 @@ class Board:
             self.phase = "planned"
             return RunResult(0, b"plan: ok\n")
         if sub == "write":
+            self.nonce = req["invocation_nonce"]
             if self.write_exc is not None:
                 raise self.write_exc
             self.records[req["run_dir"]] = self._records("write", True)
@@ -748,7 +753,7 @@ def test_detached_runner_grandchild_outlives_its_parent(tmp_path):
     req = tmp_path / "req.json"
     req.write_text(json.dumps({
         "staging_dir": "/stage", "state_dir": str(tmp_path / "state"), "run_dir": str(tmp_path / "state" / "r1" / "records"),
-        "run_id": "r1", "plan_path": str(tmp_path / "plan.json"),
+        "run_id": "r1", "plan_path": str(tmp_path / "plan.json"), "invocation_nonce": "f6" * 8,
     }))  # fmt: skip
     started, done = tmp_path / "started.json", tmp_path / "done"
     driver = tmp_path / "driver.py"

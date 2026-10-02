@@ -18,6 +18,8 @@ from avocado_flash_remote import bundle, ops, runner
 
 PKG = Path(bundle.__file__).resolve().parent
 FIXTURE = PKG / "profiles" / "fixture-none.json"
+NONCE_A = "a1" * 8
+NONCE_B = "b2" * 8
 
 
 def _run(cmd, tmp_path, name, timeout=60, stdin=subprocess.DEVNULL):
@@ -204,6 +206,7 @@ def _request(tmp_path, **extra):
         "out_dir": "/run/out",
         "efivars_dir": "/efi",
         "plan_path": str(tmp_path / "plan.json"),
+        "invocation_nonce": NONCE_A,
     }
     req.update(extra)
     p = tmp_path / "req.json"
@@ -449,7 +452,7 @@ def test_detach_writes_accepted_marker_before_the_subcommand_runs(tmp_path):
     while time.monotonic() < deadline and not seen.exists():
         time.sleep(0.05)
     m = json.loads(seen.read_text())
-    assert m["body"] == f"{m['pid']}\n"
+    assert m["body"] == f"{m['pid']}\nnonce={NONCE_A}\n"
     assert m["tmp"] is False
 
 
@@ -824,20 +827,20 @@ def test_detached_refused_write_leaves_a_refused_outcome_with_the_reason(tmp_pat
     )
     rd = _detached_write(tmp_path, body)
     assert (rd / "outcome").read_text() == (
-        "refused\nrun=r1\nwrite refused: BootOrder changed since the plan\nnothing was written to the board\n"
+        f"refused\nrun=r1\nnonce={NONCE_A}\nwrite refused: BootOrder changed since the plan\nnothing was written to the board\n"
     )
 
 
 def test_detached_write_that_did_work_leaves_a_finished_outcome(tmp_path):
     body = 'return type("R", (), {"exit_code": 0, "final_phase": "complete", "lines": []})()'
     rd = _detached_write(tmp_path, body)
-    assert (rd / "outcome").read_text() == "finished\nrun=r1\n"
+    assert (rd / "outcome").read_text() == f"finished\nrun=r1\nnonce={NONCE_A}\n"
 
 
 def test_detached_write_that_failed_after_work_is_finished_not_refused(tmp_path):
     body = 'return type("R", (), {"exit_code": 1, "final_phase": "failed", "lines": ["write FAILED"]})()'
     rd = _detached_write(tmp_path, body)
-    assert (rd / "outcome").read_text() == "finished\nrun=r1\n"
+    assert (rd / "outcome").read_text() == f"finished\nrun=r1\nnonce={NONCE_A}\n"
 
 
 def test_detached_runner_that_crashes_leaves_no_outcome(tmp_path):
@@ -852,6 +855,135 @@ def test_every_invocation_rewrites_the_marker_set_and_drops_a_stale_outcome(tmp_
     rd = _detached_write(tmp_path, body, pre=pre)
     seen = (tmp_path / "seen.txt").read_text()
     assert seen.startswith("{'outcome': False}"), seen  # the old verdict was gone before the new run began
-    pid = seen.split("}", 1)[1].strip()
+    pid = seen.split("}", 1)[1].split()[0]
     assert pid.isdigit() and pid != "99999"
-    assert (rd / "accepted").read_text() == pid + "\n"
+    assert (rd / "accepted").read_text() == f"{pid}\nnonce={NONCE_A}\n"
+
+
+# ------------------------------------------- 5.21: a second invocation of a running run
+
+
+_HOLDER_DRIVER = """
+import dataclasses, os, sys, time
+sys.path.insert(0, {pkg!r})
+from avocado_flash_remote import runner
+
+def stub(*a, **k):
+    while not os.path.exists({release!r}):
+        time.sleep(0.02)
+    return type("R", (), {{"exit_code": 0, "final_phase": "complete", "lines": []}})()
+
+_real = runner.load_profile_bytes
+runner.load_profile_bytes = lambda b: dataclasses.replace(_real(b), state_dir={state!r})
+runner.run_write = stub
+sys.exit(runner.main(["write", "--request", {req!r}, "--detach"], archive={archive!r}))
+"""
+
+
+def _start_holder(tmp_path):
+    """Detach a first runner that stays inside its write until the test releases it."""
+    info = _archive_for_runner(tmp_path)
+    run_dir = tmp_path / "state" / "r1" / "records"
+    release = tmp_path / "release"
+    req = _request(tmp_path)
+    driver = tmp_path / "holder.py"
+    driver.write_text(
+        _HOLDER_DRIVER.format(
+            pkg=str(PKG.parent), release=str(release), state=str(tmp_path / "state"),
+            req=str(req), archive=str(info.path),
+        )
+    )
+    rc, _out, err = _run([sys.executable, str(driver)], tmp_path, "holder", timeout=20)
+    assert rc == 0, err
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (run_dir / "accepted").exists():
+        time.sleep(0.02)
+    assert (run_dir / "accepted").exists(), "the first runner never accepted"
+    return info, run_dir, release
+
+
+def _release_and_wait(run_dir, release):
+    release.write_text("go")
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (run_dir / "MANIFEST.json").exists():
+        time.sleep(0.02)
+    assert (run_dir / "MANIFEST.json").exists(), "the first runner never finished"
+
+
+def _snapshot(run_dir):
+    return {p.name: p.read_bytes() for p in sorted(run_dir.iterdir())}
+
+
+def _second_invocation(tmp_path, monkeypatch, info, nonce):
+    state = tmp_path / "state"
+    real = runner.load_profile_bytes
+    monkeypatch.setattr(runner, "load_profile_bytes", lambda b: dataclasses.replace(real(b), state_dir=str(state)))
+    monkeypatch.setattr(runner.os, "fork", lambda: pytest.fail("a refused second invocation must not fork"))
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: pytest.fail("must not reach the write"))
+    req = _request(tmp_path, invocation_nonce=nonce)
+    return runner.main(["write", "--request", str(req), "--detach"], archive=info.path)
+
+
+def test_second_invocation_while_the_first_runs_touches_nothing_of_the_first(tmp_path, monkeypatch, capsys):
+    info, run_dir, release = _start_holder(tmp_path)
+    before = _snapshot(run_dir)
+    assert before["accepted"].decode().endswith(f"nonce={NONCE_A}\n")
+    capsys.readouterr()
+    rc = _second_invocation(tmp_path, monkeypatch, info, NONCE_B)
+    cap = capsys.readouterr()
+    after = _snapshot(run_dir)
+    try:
+        assert rc == 1
+        assert after == before, "the second invocation changed the running runner's records"
+        assert "outcome" not in after and "MANIFEST.json" not in after
+        assert "already in progress" in cap.err
+        # The board IS changing: the refusal must never tell the host nothing changed.
+        text = (cap.out + cap.err).lower()
+        assert "nothing was written" not in text and "changed nothing" not in text
+        assert "detached:" not in cap.out
+    finally:
+        _release_and_wait(run_dir, release)
+    # The first runner finished as itself: its verdict names its own nonce and its manifest is whole.
+    assert (run_dir / "outcome").read_text() == f"finished\nrun=r1\nnonce={NONCE_A}\n"
+    assert (run_dir / "accepted").read_text().endswith(f"nonce={NONCE_A}\n")
+    from avocado_flash_remote import evidence
+
+    assert json.loads((run_dir / "MANIFEST.json").read_text())["run_status"] == "runner-complete"
+    assert evidence.verify_record_set(run_dir).ok
+
+
+def test_second_invocation_does_not_write_a_refused_outcome_even_when_the_first_has_no_state_yet(tmp_path, monkeypatch):
+    info, run_dir, release = _start_holder(tmp_path)
+    assert not (tmp_path / "state" / "r1" / "state.json").exists()  # still hashing/checking: no state record
+    try:
+        assert _second_invocation(tmp_path, monkeypatch, info, NONCE_B) == 1
+        assert not (run_dir / "outcome").exists()
+    finally:
+        _release_and_wait(run_dir, release)
+
+
+def test_after_the_first_runner_is_gone_a_new_invocation_takes_over(tmp_path):
+    # A crashed runner releases its lock with its process: the next invocation is not locked out.
+    pre = {"accepted": "99999\nnonce=" + NONCE_B + "\n"}
+    body = 'return type("R", (), {"exit_code": 0, "final_phase": "complete", "lines": []})()'
+    rd = _detached_write(tmp_path, body, pre=pre)
+    assert (rd / "outcome").read_text() == f"finished\nrun=r1\nnonce={NONCE_A}\n"
+
+
+@pytest.mark.parametrize("bad", [None, "", "xyz", "A" * 16, "a" * 7, "a" * 65, 12345])
+def test_detached_write_without_a_valid_nonce_is_refused_before_the_fork(tmp_path, monkeypatch, capsys, bad):
+    info = _archive_for_runner(tmp_path)
+    real = runner.load_profile_bytes
+    monkeypatch.setattr(runner, "load_profile_bytes", lambda b: dataclasses.replace(real(b), state_dir=str(tmp_path / "state")))
+    monkeypatch.setattr(runner.os, "fork", lambda: pytest.fail("must refuse before forking"))
+    req = _request(tmp_path)
+    data = json.loads(req.read_text())
+    if bad is None:
+        del data["invocation_nonce"]
+    else:
+        data["invocation_nonce"] = bad
+    req.write_text(json.dumps(data))
+    rc = runner.main(["write", "--request", str(req), "--detach"], archive=info.path)
+    assert rc != 0
+    assert "invocation_nonce" in capsys.readouterr().err
+    assert not (tmp_path / "state" / "r1" / "records" / "accepted").exists()

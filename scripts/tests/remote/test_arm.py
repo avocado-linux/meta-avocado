@@ -10,6 +10,7 @@ from avocado_flash_remote.arm import (
     ArmError,
     ArmRecord,
     GuardError,
+    entries_with_label,
     get_arm,
     get_guard,
 )
@@ -419,3 +420,48 @@ def test_read_staged_header_is_bounded(tmp_path):
     f = tmp_path / "x.img"
     f.write_bytes(b"A" * 10000)
     assert len(armmod.read_staged_header(str(f))) == 2048
+
+
+# --- 5.21: the label match is anchored to the end of the description ----------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Boot0007* {LABEL} old\tHD(1,GPT)",  # a longer label that starts with ours
+        f"Boot0007* {LABEL} old",  # same, without -v's device path
+        f"Boot0007* {LABEL}-old\tHD(1,GPT)",
+        f"Boot0007* {LABEL}x\tHD(1,GPT)",  # ours as a prefix of another word
+        f"Boot0007* {LABEL}_2",
+        f"Boot0007* {LABEL}.efi\tHD(1,GPT)",
+    ],
+)
+def test_entries_with_label_does_not_match_a_longer_label(line):
+    assert entries_with_label(efi(extra=[line]), LABEL) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Boot0007* {LABEL}\tHD(1,GPT)/File(x)",  # -v: label, tab, device path
+        f"Boot0007* {LABEL}",  # no -v: end of line
+        f"Boot0007* {LABEL}  ",  # trailing blanks at the end of the line
+        f"Boot0007  {LABEL}\tHD(1,GPT)",  # inactive entry (no asterisk)
+    ],
+)
+def test_entries_with_label_matches_the_exact_label(line):
+    assert entries_with_label(efi(extra=[line]), LABEL) == ["0007"]
+
+
+def test_entries_with_label_is_found_in_the_middle_of_a_listing():
+    text = efi(extra=[f"Boot0007* {LABEL} old\tx", NEW, "Boot0009* UEFI Shell"])
+    assert entries_with_label(text, LABEL) == ["0005"]
+
+
+def test_disarm_does_not_delete_a_longer_labelled_entry_with_the_recorded_number():
+    longer = f"Boot0005* {LABEL} old\tHD(1,GPT)"
+    ops = RecordingOps({LIST: efi(extra=[longer])})
+    rec = ArmRecord("0005", LABEL, "0001,0002,0003", "", False)
+    notes = get_arm("uefi-bootnext").disarm(ops, rec)
+    assert not any("-B" in line.split() for line in ops.log)
+    assert any("leaving" in n for n in notes)

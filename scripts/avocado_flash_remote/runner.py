@@ -17,9 +17,11 @@ Exit codes: the subcommand's own code; 3 profile/request mismatch; 64 usage;
 """
 
 import datetime
+import fcntl
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 import zipfile
@@ -337,7 +339,7 @@ def _run_guarded(sub, profile, phash, req, detached=False):
     rc, refused_early, outcome = _run_sub(sub, profile, phash, req)
     if detached and sub == "write":
         # Before the manifest, so the marker is listed in it like every other file.
-        _write_outcome(req.get("run_dir"), req.get("run_id"), outcome)
+        _write_outcome(req.get("run_dir"), req.get("run_id"), req.get("invocation_nonce"), outcome)
     _finalize_records(sub, profile, phash, req, rc, refused_early)
     return rc
 
@@ -410,30 +412,76 @@ def _clear_markers(run_dir):
                 print(f"runner error: cannot clear the {name} marker: {e}", file=sys.stderr)
 
 
-def _write_accepted(run_dir):
+_NONCE_RE = re.compile(r"^[0-9a-f]{16,64}\Z")
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_+][A-Za-z0-9._+-]*\Z")
+
+
+def _invocation_nonce(req):
+    """The host's per-invocation tag, or a refusal: a detached write without one is ambiguous."""
+    nonce = req.get("invocation_nonce")
+    if not isinstance(nonce, str) or not _NONCE_RE.match(nonce):
+        raise _Exit(
+            EXIT_USAGE,
+            "runner error: a detached write needs a valid invocation_nonce (16 to 64 lowercase hex digits)",
+            sys.stderr,
+        )
+    return nonce
+
+
+def _take_run_lock(state_dir, run_id):
+    """Hold the per-run invocation lock for as long as the detached runner lives.
+
+    Taken in the parent before any marker is touched and inherited across the
+    fork: the grandchild keeps the descriptor (and so the lock) until it exits,
+    and a crashed runner releases it with its process. A second invocation of
+    the same run id therefore finds the lock held and is refused having changed
+    nothing, instead of clearing the running runner's markers. The descriptor is
+    non-inheritable, so a tool the runner starts never carries the lock past it.
+    """
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        raise _Exit(EXIT_USAGE, f"runner error: invalid run id {run_id!r}", sys.stderr)
+    path = os.path.join(state_dir, f".invocation-{run_id}.lock")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise _Exit(
+            1,
+            f"write refused: run {run_id} is already in progress under another invocation; "
+            "this invocation did not start and left the running one as it was. The board may be changing: "
+            "follow the running write with the status subcommand and do not start another",
+            sys.stderr,
+        ) from None
+    return fd
+
+
+def _write_accepted(run_dir, nonce):
     """Record that the detached runner took the request, before any real work.
 
     The host reads this to tell a runner that is still hashing (no state.json
-    yet) from one that never started. Written atomically; advisory, so a
-    failure is logged and does not stop the write.
+    yet) from one that never started, and the nonce on its second line to tell
+    its own invocation's runner from another's. Written atomically; advisory, so
+    a failure is logged and does not stop the write.
     """
     try:
-        _atomic_marker(os.path.join(run_dir, ACCEPTED_MARKER), f"{os.getpid()}\n")
+        _atomic_marker(os.path.join(run_dir, ACCEPTED_MARKER), f"{os.getpid()}\nnonce={nonce}\n")
     except OSError as e:
         print(f"runner error: cannot write {ACCEPTED_MARKER} marker: {e}", file=sys.stderr)
 
 
-def _write_outcome(run_dir, run_id, outcome):
+def _write_outcome(run_dir, run_id, nonce, outcome):
     """Record how a detached write ended: ``refused`` with its reason, or ``finished``.
 
-    The first line is the verdict and the second names the run, so the host
-    can tell this attempt's verdict from one left by another run. A runner that
+    The first line is the verdict, the second names the run and the third the
+    invocation, so the host can tell this attempt's verdict from one left by
+    another run or another invocation. A runner that
     did not reach a verdict writes nothing. Advisory: a failure is logged.
     """
     if outcome is None or not isinstance(run_dir, str) or not os.path.isdir(run_dir):
         return
     kind, text = outcome
-    body = f"{kind}\nrun={run_id}\n" + (text + "\n" if text else "")
+    body = f"{kind}\nrun={run_id}\nnonce={nonce}\n" + (text + "\n" if text else "")
     try:
         _atomic_marker(os.path.join(run_dir, OUTCOME_MARKER), body)
     except OSError as e:
@@ -512,15 +560,23 @@ def main(argv, *, archive=None):
             raise _Exit(EXIT_PROFILE, f"runner error: bundled profile invalid: {e}", sys.stderr)
         if detach:
             run_dir, run_id = _need(req, "run_dir", "run_id")
+            nonce = _invocation_nonce(req)
             refusal = _replay_refusal(profile, run_dir, run_id)
             if refusal is not None:
                 raise _Exit(1, refusal, sys.stderr)
         _prepare_run_dir(sub, profile, req)
         if detach:
+            # The lock comes before any marker is cleared: a runner already working on this
+            # run id keeps its markers, its manifest and its verdict.
+            lock_fd = _take_run_lock(profile.state_dir, run_id)
+            refusal = _replay_refusal(profile, run_dir, run_id)
+            if refusal is not None:
+                os.close(lock_fd)
+                raise _Exit(1, refusal, sys.stderr)
             _clear_markers(run_dir)
             if not _detach(run_dir, run_id):
                 return 0
-            _write_accepted(run_dir)
+            _write_accepted(run_dir, nonce)
             rc = _run_guarded(sub, profile, phash, req, detached=True)
             sys.stdout.flush()
             sys.stderr.flush()

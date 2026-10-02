@@ -108,12 +108,13 @@ def _lock_holder(exc) -> str:
 def _manual_disarm_lines(label, holder) -> list:
     return [
         f"the on-board flash lock is held by {holder} and did not clear in time",
-        "no boot entry or staging was touched; the lock is held by a write that may be hung",
-        "if that process is gone, the lock is free; check with: ps -p <pid>",
-        "to disarm by hand, as root on the board:",
+        "STOP if that process is alive (ps -p <pid>) and the write's phase is still moving "
+        "(run the status subcommand twice): it is a healthy write still working, so wait for it and do nothing below",
+        "no boot entry or staging was touched",
+        "only if the holder is gone, or its phase has stopped moving, disarm by hand as root on the board:",
         "  efibootmgr -v    (find the entries labelled "
-        f"{label!r}; note BootOrder and BootCurrent)",
-        "  efibootmgr -N    (clear BootNext)",
+        f"{label!r}; note BootNext, BootOrder and BootCurrent)",
+        f"  efibootmgr -N    (only if BootNext names an entry labelled {label!r}; leave any other BootNext alone)",
         "  efibootmgr -B -b XXXX    (delete one labelled entry that is not in BootOrder and is not BootCurrent)",
     ]
 

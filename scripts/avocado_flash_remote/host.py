@@ -612,19 +612,28 @@ ACCEPTED_MARKER = "accepted"
 OUTCOME_MARKER = "outcome"
 
 _ALIVE_PROBE = 'if test -d "/proc/$1"; then echo alive; else echo gone; fi'
-_REFUSAL_PROBE = (
-    'for f in "$1"/refused-*.log; do '
-    'if test -e "$f" && test "$f" -nt "$2"; then echo NEWER; exit 0; fi; done; echo CLEAR'
-)
+# Exit 3 is this probe's own "the marker is not there": the verdict rides on the exit code,
+# never on the wording of a localised error message.
+_ABSENT_RC = 3
+_MARKER_READ = 'test -e "$1" || exit 3; exec cat -- "$1"'
 
 
-def _no_such_file(res) -> bool:
-    """A clean 'the file is not there': rc 1 and the system's own words for it.
+def _read_marker(transport, remote_run_dir: str, name: str):
+    """(state, text): state is 'ok', 'absent' or 'unknown'. Only the probe's own exit code means absent."""
+    res = transport.run(["sh", "-c", _MARKER_READ, "sh", f"{remote_run_dir}/{name}"], None, sudo=True, timeout=60)
+    if res.rc == _ABSENT_RC:
+        return "absent", ""
+    if res.rc != 0:
+        return "unknown", ""
+    return "ok", res.out
 
-    rc 255 (ssh dropped), a sudo refusal and every other failure carry other
-    text, so they are never mistaken for an absent file.
-    """
-    return res.rc == 1 and "no such file" in res.err.lower()
+
+def _accepted_parts(text: str):
+    """(pid, nonce) from an ``accepted`` marker; either is None when absent or malformed."""
+    lines = text.split("\n")
+    pid = lines[0].strip()
+    nonce = lines[1][len("nonce="):] if len(lines) > 1 and lines[1].startswith("nonce=") else ""
+    return (pid if pid.isdigit() else None), (nonce or None)
 
 
 def runner_presence(transport, remote_run_dir: str) -> str:
@@ -638,13 +647,13 @@ def runner_presence(transport, remote_run_dir: str) -> str:
     callers must treat as possibly started and possibly alive.
     """
     try:
-        res = transport.run(["cat", f"{remote_run_dir}/{ACCEPTED_MARKER}"], None, sudo=True, timeout=60)
-        if _no_such_file(res):
+        state, text = _read_marker(transport, remote_run_dir, ACCEPTED_MARKER)
+        if state == "absent":
             return "absent"
-        if res.rc != 0:
+        if state != "ok":
             return "unknown"
-        pid = res.out.strip()
-        if not pid.isdigit():
+        pid, _nonce = _accepted_parts(text)
+        if pid is None:
             return "unknown"
         alive = transport.run(["sh", "-c", _ALIVE_PROBE, "sh", pid], None, sudo=True, timeout=60)
     except HostError:
@@ -659,50 +668,60 @@ def runner_presence(transport, remote_run_dir: str) -> str:
     return "unknown"
 
 
-def runner_outcome(transport, remote_run_dir: str, run_id: str) -> tuple:
+def runner_outcome(transport, remote_run_dir: str, run_id: str, nonce: str) -> tuple:
     """What the runner recorded when it ended: (kind, text).
 
     kind is 'refused' (text is the board's refusal, verbatim), 'finished',
     'none' (no marker: the runner has not ended, or died before recording) or
-    'unknown' (unreadable, unrecognised, or written for another run id). Only
-    'none' is a firm absence.
+    'unknown' (unreadable, unrecognised, or written for another run id or by
+    another invocation). Only a marker naming both this run id and this
+    invocation's nonce is honoured; only 'none' is a firm absence.
     """
     try:
-        res = transport.run(["cat", f"{remote_run_dir}/{OUTCOME_MARKER}"], None, sudo=True, timeout=60)
+        state, text = _read_marker(transport, remote_run_dir, OUTCOME_MARKER)
     except HostError:
         return ("unknown", "")
-    if _no_such_file(res):
+    if state == "absent":
         return ("none", "")
-    if res.rc != 0:
+    if state != "ok":
         return ("unknown", "")
-    lines = res.out.split("\n")
-    if len(lines) < 2 or lines[1] != f"run={run_id}":
+    lines = text.split("\n")
+    if len(lines) < 3 or lines[1] != f"run={run_id}" or not nonce or lines[2] != f"nonce={nonce}":
         return ("unknown", "")
     if lines[0] == "finished":
         return ("finished", "")
     if lines[0] == "refused":
-        return ("refused", "\n".join(lines[2:]).strip("\n"))
+        return ("refused", "\n".join(lines[3:]).strip("\n"))
     return ("unknown", "")
 
 
-def refusal_newer_than_manifest(transport, remote_run_dir: str) -> str:
-    """'newer' when a refused-*.log beside the run's records postdates its manifest.
+def invocation_owner(transport, remote_run_dir: str, run_id: str, nonce: str) -> str:
+    """Whose runner holds this run's records: 'ours', 'other', 'none' or 'unknown'.
 
-    A completed run whose records were followed by a refusal must not read as a
-    clean completion. 'clear' needs the probe to say so; anything else is 'unknown'.
+    'ours' needs the ``accepted`` marker to carry this invocation's nonce and
+    the outcome to be absent or finished, never refused or unreadable. A run another invocation (or an earlier
+    attempt) wrote, or that this invocation never started, is 'other' or 'none';
+    anything unreadable is 'unknown'. Only 'ours' may be reported as this
+    invocation's own completed write.
     """
-    parent = remote_run_dir.rstrip("/").rsplit("/", 1)[0] or "/"
     try:
-        res = transport.run(
-            ["sh", "-c", _REFUSAL_PROBE, "sh", parent, f"{remote_run_dir}/{evidence.MANIFEST}"],
-            None, sudo=True, timeout=60,
-        )
+        state, text = _read_marker(transport, remote_run_dir, ACCEPTED_MARKER)
+        if state == "absent":
+            return "none"
+        if state != "ok":
+            return "unknown"
+        _pid, found = _accepted_parts(text)
+        if found is None or not nonce:
+            return "unknown"
+        if found != nonce:
+            return "other"
+        kind, _ = runner_outcome(transport, remote_run_dir, run_id, nonce)
     except HostError:
         return "unknown"
-    if res.rc != 0:
-        return "unknown"
-    word = res.out.strip()
-    return {"NEWER": "newer", "CLEAR": "clear"}.get(word, "unknown")
+    if kind == "refused":
+        return "other"
+    # 'none' is expected: the phase turns complete a moment before the runner writes its verdict.
+    return "ours" if kind in ("none", "finished") else "unknown"
 
 
 def final_outcome(phase: Optional[str], verify: evidence.VerifyResult) -> str:

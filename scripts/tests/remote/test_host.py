@@ -695,21 +695,32 @@ def test_stage_verifies_bundle_with_given_interpreter(kit, resolved):
     assert len(py) == 1 and bundle_path.name in py[0].argv[-1]
 
 
-# --- 5.14 / 5.19: has the detached runner accepted the write ---------------
+# --- 5.14 / 5.19 / 5.21: has the detached runner accepted the write ----------
 
-NOFILE = b"cat: /var/lib/x/r1/records/accepted: No such file or directory"
+RUN_DIR = "/var/lib/x/r1/records"
+NONCE = "c3" * 8
+OTHER_NONCE = "d4" * 8
 SUDO_FAIL = b"sudo: a password is required"
+ABSENT = RunResult(3)  # the marker probe's own exit code for "no such file": no words involved
 
 
-def _presence(handler, calls=None):
+def _unwrapped(handler):
     def unwrapped(argv, stdin, sudo):
         argv = list(argv)
         if argv[:2] == ["sudo", "-n"]:
             argv = argv[2:]
         return handler(argv, stdin, sudo)
 
-    t = StubTransport(unwrapped)
-    out = host.runner_presence(t, "/var/lib/x/r1/records")
+    return unwrapped
+
+
+def _is_read(argv, name):
+    return argv[0] == "sh" and "exit 3" in argv[2] and argv[-1] == f"{RUN_DIR}/{name}"
+
+
+def _presence(handler, calls=None):
+    t = StubTransport(_unwrapped(handler))
+    out = host.runner_presence(t, RUN_DIR)
     if calls is not None:
         calls.extend(t.calls)
     return out
@@ -719,14 +730,18 @@ def _proc_answer(word: bytes):
     return RunResult(0, word + b"\n")
 
 
+def _accepted(pid=b"4242", nonce=NONCE):
+    return RunResult(0, pid + b"\nnonce=" + nonce.encode() + b"\n")
+
+
 def test_runner_presence_absent_without_marker():
-    assert _presence(lambda a, s, u: RunResult(1, b"", NOFILE)) == "absent"
+    assert _presence(lambda a, s, u: ABSENT) == "absent"
 
 
 def test_runner_presence_alive_when_pid_visible():
     def h(argv, stdin, sudo):
-        if argv[0] == "cat":
-            return RunResult(0, b"4242\n")
+        if _is_read(argv, "accepted"):
+            return _accepted()
         assert "/proc/" in " ".join(argv) and argv[-1] == "4242"
         return _proc_answer(b"alive")
 
@@ -735,8 +750,8 @@ def test_runner_presence_alive_when_pid_visible():
 
 def test_runner_presence_exited_when_pid_gone():
     def h(argv, stdin, sudo):
-        if argv[0] == "cat":
-            return RunResult(0, b"4242\n")
+        if _is_read(argv, "accepted"):
+            return _accepted()
         return _proc_answer(b"gone")
 
     assert _presence(h) == "exited"
@@ -758,6 +773,7 @@ def test_runner_presence_unknown_for_unparsable_marker_or_transport_error():
         RunResult(255, b"", b"ssh: connection reset"),
         RunResult(1, b"", SUDO_FAIL),
         RunResult(2, b"", b"cat: read error"),
+        RunResult(1, b"", b"cat: /x: No such file or directory"),  # words never decide: only the exit code does
     ],
 )
 def test_marker_read_failure_other_than_not_found_is_unknown_not_absent(res):
@@ -775,8 +791,8 @@ def test_marker_read_failure_other_than_not_found_is_unknown_not_absent(res):
 )
 def test_proc_probe_failure_is_unknown_not_exited(res):
     def h(argv, stdin, sudo):
-        if argv[0] == "cat":
-            return RunResult(0, b"4242\n")
+        if _is_read(argv, "accepted"):
+            return _accepted()
         return res
 
     assert _presence(h) == "unknown"
@@ -786,8 +802,8 @@ def test_proc_probe_runs_with_the_privilege_of_the_marker_read():
     calls = []
 
     def h(argv, stdin, sudo):
-        if argv[0] == "cat":
-            return RunResult(0, b"4242\n")
+        if _is_read(argv, "accepted"):
+            return _accepted()
         return _proc_answer(b"alive")
 
     _presence(h, calls)
@@ -795,37 +811,86 @@ def test_proc_probe_runs_with_the_privilege_of_the_marker_read():
     assert all(c.sudo for c in calls), [(c.argv, c.sudo) for c in calls]
 
 
-# --- 5.19: the runner's outcome marker --------------------------------------
+# --- 5.21: a localised board must not change a verdict -----------------------
 
 
-def _outcome(handler):
-    def unwrapped(argv, stdin, sudo):
+class _LocalShell:
+    """Runs the host's argv for real, under a given locale, against a local directory."""
+
+    def __init__(self, env_extra):
+        self.env_extra = env_extra
+        self.calls = []
+
+    def run(self, argv, stdin, *, sudo=False, timeout=60):
         argv = list(argv)
         if argv[:2] == ["sudo", "-n"]:
             argv = argv[2:]
-        return handler(argv, stdin, sudo)
+        self.calls.append(argv)
+        env = {"PATH": "/usr/bin:/bin", **self.env_extra}
+        p = subprocess.run(argv, input=stdin, capture_output=True, env=env, timeout=30)
+        return RunResult(p.returncode, p.stdout, p.stderr)
 
-    return host.runner_outcome(StubTransport(unwrapped), "/var/lib/x/r1/records", "r1")
+
+@pytest.mark.parametrize("loc", ["C", "de_DE.UTF-8", "fr_FR.UTF-8", "ja_JP.UTF-8", "xx_YY.invalid"])
+def test_absent_marker_is_absent_under_any_locale_with_the_real_shell(tmp_path, loc):
+    t = _LocalShell({"LANG": loc, "LC_ALL": loc, "LANGUAGE": loc.split(".")[0]})
+    run_dir = tmp_path / "records"
+    run_dir.mkdir()
+    assert host.runner_presence(t, str(run_dir)) == "absent"
+    assert host.runner_outcome(t, str(run_dir), "r1", NONCE) == ("none", "")
+    assert host.invocation_owner(t, str(run_dir), "r1", NONCE) == "none"
+
+
+def test_present_marker_is_read_by_the_real_shell(tmp_path):
+    t = _LocalShell({})
+    run_dir = tmp_path / "records"
+    run_dir.mkdir()
+    (run_dir / "outcome").write_text(f"finished\nrun=r1\nnonce={NONCE}\n")
+    assert host.runner_outcome(t, str(run_dir), "r1", NONCE) == ("finished", "")
+
+
+def test_a_localised_no_such_file_words_with_a_nonabsent_code_never_decide():
+    # The same German words a localised cat prints, but the exit code is not the probe's "absent" code.
+    de = b"cat: /x: Datei oder Verzeichnis nicht gefunden"
+    assert _presence(lambda a, s, u: RunResult(1, b"", de)) == "unknown"
+    assert host.runner_outcome(StubTransport(_unwrapped(lambda a, s, u: RunResult(1, b"", de))), RUN_DIR, "r1", NONCE)[0] == "unknown"
+
+
+# --- 5.19 / 5.21: the runner's outcome marker --------------------------------
+
+
+def _outcome(handler, nonce=NONCE):
+    return host.runner_outcome(StubTransport(_unwrapped(handler)), RUN_DIR, "r1", nonce)
 
 
 def test_outcome_refused_carries_the_reason_verbatim():
-    body = b"refused\nrun=r1\nwrite refused: BootOrder changed\nnothing was written to the board\n"
+    body = f"refused\nrun=r1\nnonce={NONCE}\nwrite refused: BootOrder changed\nnothing was written to the board\n".encode()
     kind, text = _outcome(lambda a, s, u: RunResult(0, body))
     assert kind == "refused"
     assert text == "write refused: BootOrder changed\nnothing was written to the board"
 
 
 def test_outcome_finished():
-    assert _outcome(lambda a, s, u: RunResult(0, b"finished\nrun=r1\n")) == ("finished", "")
+    assert _outcome(lambda a, s, u: RunResult(0, f"finished\nrun=r1\nnonce={NONCE}\n".encode())) == ("finished", "")
 
 
 def test_outcome_missing_file_is_none():
-    assert _outcome(lambda a, s, u: RunResult(1, b"", b"cat: x: No such file or directory"))[0] == "none"
+    assert _outcome(lambda a, s, u: ABSENT)[0] == "none"
 
 
 def test_outcome_from_another_run_is_not_trusted():
-    kind, _ = _outcome(lambda a, s, u: RunResult(0, b"refused\nrun=OTHER\nwrite refused: x\n"))
+    kind, _ = _outcome(lambda a, s, u: RunResult(0, f"refused\nrun=OTHER\nnonce={NONCE}\nwrite refused: x\n".encode()))
     assert kind == "unknown"
+
+
+@pytest.mark.parametrize("kind", ["refused", "finished"])
+def test_outcome_from_another_invocation_is_not_trusted(kind):
+    body = f"{kind}\nrun=r1\nnonce={OTHER_NONCE}\nwrite refused: x\n".encode()
+    assert _outcome(lambda a, s, u: RunResult(0, body))[0] == "unknown"
+
+
+def test_outcome_without_a_nonce_line_is_not_trusted():
+    assert _outcome(lambda a, s, u: RunResult(0, b"finished\nrun=r1\n"))[0] == "unknown"
 
 
 @pytest.mark.parametrize(
@@ -834,7 +899,7 @@ def test_outcome_from_another_run_is_not_trusted():
         RunResult(255, b"", b"ssh: connection reset"),
         RunResult(1, b"", SUDO_FAIL),
         RunResult(0, b"", b""),
-        RunResult(0, b"weird\nrun=r1\n", b""),
+        RunResult(0, f"weird\nrun=r1\nnonce={NONCE}\n".encode(), b""),
     ],
 )
 def test_outcome_unreadable_or_unrecognised_is_unknown(res):
@@ -848,21 +913,74 @@ def test_outcome_transport_error_is_unknown():
     assert _outcome(boom)[0] == "unknown"
 
 
-# --- 5.19: a refusal log newer than the manifest ----------------------------
+# --- 5.21: whose runner is it -------------------------------------------------
 
 
-def _newer(res_or_exc):
+def _owner(handler, nonce=NONCE):
+    return host.invocation_owner(StubTransport(_unwrapped(handler)), RUN_DIR, "r1", nonce)
+
+
+def test_owner_is_ours_when_the_accepted_marker_carries_our_nonce():
+    assert _owner(lambda a, s, u: _accepted() if _is_read(a, "accepted") else ABSENT) == "ours"
+
+
+def test_owner_is_other_when_the_accepted_marker_carries_another_nonce():
+    assert _owner(lambda a, s, u: _accepted(nonce=OTHER_NONCE)) == "other"
+
+
+def test_owner_is_none_when_no_runner_accepted_anything():
+    assert _owner(lambda a, s, u: ABSENT) == "none"
+
+
+@pytest.mark.parametrize(
+    "res",
+    [
+        RunResult(0, b"4242\n"),  # a marker without a nonce line
+        RunResult(0, b"4242\nnonce=\n"),
+        RunResult(0, b""),
+        RunResult(255, b"", b"ssh: connection reset"),
+        RunResult(1, b"", SUDO_FAIL),
+    ],
+)
+def test_owner_unreadable_or_without_a_nonce_is_unknown(res):
+    assert _owner(lambda a, s, u: res) == "unknown"
+
+
+def test_owner_transport_error_is_unknown():
+    def boom(a, s, u):
+        raise host.HostError("reset")
+
+    assert _owner(boom) == "unknown"
+
+
+def test_owner_is_other_when_our_nonce_is_recorded_as_refused():
     def h(argv, stdin, sudo):
-        if isinstance(res_or_exc, Exception):
-            raise res_or_exc
-        return res_or_exc
+        if _is_read(argv, "accepted"):
+            return _accepted()
+        return RunResult(0, f"refused\nrun=r1\nnonce={NONCE}\nwhy\n".encode())
 
-    return host.refusal_newer_than_manifest(StubTransport(h), "/var/lib/x/r1/records")
+    assert _owner(h) == "other"
 
 
-def test_refusal_newer_than_manifest_verdicts():
-    assert _newer(RunResult(0, b"NEWER\n")) == "newer"
-    assert _newer(RunResult(0, b"CLEAR\n")) == "clear"
-    assert _newer(RunResult(255, b"", b"")) == "unknown"
-    assert _newer(RunResult(0, b"", b"")) == "unknown"
-    assert _newer(host.HostError("x")) == "unknown"
+def test_owner_with_an_unreadable_outcome_is_unknown_not_ours():
+    def h(argv, stdin, sudo):
+        if _is_read(argv, "accepted"):
+            return _accepted()
+        return RunResult(1, b"", SUDO_FAIL)
+
+    assert _owner(h) == "unknown"
+
+
+def test_owner_with_a_finished_outcome_is_ours():
+    def h(argv, stdin, sudo):
+        if _is_read(argv, "accepted"):
+            return _accepted()
+        return RunResult(0, f"finished\nrun=r1\nnonce={NONCE}\n".encode())
+
+    assert _owner(h) == "ours"
+
+
+def test_the_dead_refusal_log_probe_is_gone():
+    assert not hasattr(host, "refusal_newer_than_manifest")
+    assert not hasattr(host, "_REFUSAL_PROBE")
+    assert not hasattr(host, "_no_such_file")

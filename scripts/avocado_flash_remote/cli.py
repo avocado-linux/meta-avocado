@@ -314,6 +314,9 @@ def _do_write(ctx: _Ctx) -> int:
         if rc is not None:
             return rc
         remote_dir = ctx.remote_run_dir(run_id)
+        # One tag per invocation: the board's markers carry it, so this host never mistakes another
+        # invocation's verdict or finished run for its own.
+        nonce = secrets.token_hex(8)
         request = {
             "staging_dir": ctx.staging_dir,
             "state_dir": ctx.state_dir,
@@ -324,6 +327,7 @@ def _do_write(ctx: _Ctx) -> int:
             "assume_yes": bool(args.assume_yes),
             "expected_boot_order": args.expected_boot_order,
             "ack_run_id": args.ack_run,
+            "invocation_nonce": nonce,
         }
         try:
             res = ctx.invoke("write", request, detach=True)
@@ -332,13 +336,13 @@ def _do_write(ctx: _Ctx) -> int:
             # timeout: never assume nothing happened.
             _err(f"{PREFIX}: {exc}")
             ctx.out("connection lost after the write request was sent; reconciling with the board")
-            return _follow_write(ctx, run_id, remote_dir)
+            return _follow_write(ctx, run_id, remote_dir, nonce)
         if res.rc == SSH_FAILURE:
             ctx.out("connection dropped after the write request was sent; reconciling with the board")
-            return _follow_write(ctx, run_id, remote_dir)
+            return _follow_write(ctx, run_id, remote_dir, nonce)
         if res.rc != 0:
             return res.rc
-        return _follow_write(ctx, run_id, remote_dir)
+        return _follow_write(ctx, run_id, remote_dir, nonce)
 
 
 def _tail_log(ctx: _Ctx, remote_dir: str) -> None:
@@ -351,7 +355,7 @@ def _tail_log(ctx: _Ctx, remote_dir: str) -> None:
         ctx.out(res.out.rstrip("\n"))
 
 
-def _judge_runner(ctx: _Ctx, run_id: str, remote_dir: str) -> tuple:
+def _judge_runner(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> tuple:
     """What the board says about the detached runner: (verdict, refusal text).
 
     verdict is 'refused' (the runner recorded a refusal for THIS run), 'finished',
@@ -359,7 +363,7 @@ def _judge_runner(ctx: _Ctx, run_id: str, remote_dir: str) -> tuple:
     read before the pid is judged, and anything the host could not read is
     'unknown': a dropped ssh or a sudo failure never becomes a firm verdict.
     """
-    kind, text = host.runner_outcome(ctx.transport, remote_dir, run_id)
+    kind, text = host.runner_outcome(ctx.transport, remote_dir, run_id, nonce)
     if kind in ("refused", "finished"):
         return kind, text
     if kind == "unknown":
@@ -379,7 +383,7 @@ def _reconcile_phase(ctx: _Ctx, run_id: str):
     return rec, None
 
 
-def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
+def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
     unstarted = 0
@@ -394,7 +398,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
         if phase is None and rec is not None and rec.ok:
             # No state for this run yet: a refusal before the lock leaves exactly this picture,
             # and the board's own words for it beat any guess from a pid.
-            verdict, reason = _judge_runner(ctx, run_id, remote_dir)
+            verdict, reason = _judge_runner(ctx, run_id, remote_dir, nonce)
             if verdict == "refused":
                 ctx.out("the board refused the write and changed nothing:")
                 ctx.out(reason)
@@ -402,7 +406,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
         elif phase is not None and phase == last_phase:
             # A non-terminal phase that did not move: a runner that ended normally is always
             # terminal, so an exited runner here died (or stopped on a handled failure) mid-run.
-            verdict, _reason = _judge_runner(ctx, run_id, remote_dir)
+            verdict, _reason = _judge_runner(ctx, run_id, remote_dir, nonce)
             if verdict in ("exited", "finished"):
                 # The run may have finished between the poll and the probe: ask once more.
                 rec, now = _reconcile_phase(ctx, run_id)
@@ -423,7 +427,7 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
                 ctx.out("cannot read the runner's state from the board; still following (this is not a failure)")
         last_phase = phase
         if unstarted >= 3:
-            verdict, reason = _judge_runner(ctx, run_id, remote_dir)
+            verdict, reason = _judge_runner(ctx, run_id, remote_dir, nonce)
             if verdict == "refused":
                 ctx.out("the board refused the write and changed nothing:")
                 ctx.out(reason)
@@ -462,16 +466,19 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str) -> int:
     verify = ctx.collect(run_id, remote_dir, local)
     outcome = host.final_outcome(phase, verify)
     if outcome == "complete":
-        newer = host.refusal_newer_than_manifest(ctx.transport, remote_dir)
-        if newer != "clear":
+        owner = host.invocation_owner(ctx.transport, remote_dir, run_id, nonce)
+        if owner != "ours":
+            # A terminal phase on the board is the run's, not necessarily this invocation's: a replay
+            # that was turned away and then followed after a dropped connection lands here.
             ctx.out(
-                "not reporting COMPLETE: "
+                f"the board records run {run_id} in phase {phase}, but this invocation did not write it "
                 + (
-                    "a refused write left a log newer than this run's records"
-                    if newer == "newer"
-                    else "the board could not confirm that no refused write followed this run's records"
+                    "(another invocation's runner holds the run's records)"
+                    if owner in ("other", "none")
+                    else "(the board could not confirm whose runner it was)"
                 )
-                + f"; the records are in {local}. Run the status subcommand and read the runner logs"
+                + f"; not reporting COMPLETE. Records collected in {local}. "
+                "Run the status subcommand and read the runner log before anything else"
             )
             _tail_log(ctx, remote_dir)
             return 1
