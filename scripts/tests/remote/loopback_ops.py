@@ -27,10 +27,10 @@ def loopback_profile(stage, state):
     """The fixture-none profile retargeted at a virtio-style node and at paths under the board root."""
     prof = json.loads(FIXTURE_PROFILE.read_text())
     prof["target"]["device"] = DEVICE
-    prof["target"]["identity"]["value"] = DEVICE.rsplit("/", 1)[1]
     prof["checks"] = [
         "emmc-exists", "emmc-not-read-only", "emmc-sector-count", "emmc-no-partition-table",
         "emmc-not-mounted", "staged-images-present", "staged-image-checksums", "staging-space-free",
+        "target-identity",
     ]  # the fixture's own names have no implementation behind them
     prof["staging"]["dir"] = str(stage)
     prof["state_dir"] = str(state)
@@ -175,6 +175,9 @@ class LoopOps(RecordingOps):
             if isinstance(graph, BaseException):
                 raise graph
             return graph
+        if kind == "read_file" and path == f"/sys/block/{DEVICE.rsplit('/', 1)[1]}/device/serial":
+            self.calls.append(_call([kind, path], None, kind="fs"))
+            return b"0x0fixture\n"
         if kind == "read_file" and path == "/etc/machine-id":
             self.calls.append(_call([kind, path], None, kind="fs"))
             return (MACHINE_ID + "\n").encode()

@@ -41,7 +41,25 @@ EFI_AFTER = EFI_PRE + f"Boot{ENTRY}* {LABEL}\n"
 EFI_FINAL = EFI_AFTER + f"BootNext: {ENTRY}\n"
 NVME_ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
 BLANK = OpResult(rc=1, stderr=f"sfdisk: {DEV}: does not contain a recognized partition table\n")
-SHIPPED_BYTES = PROFILE_PATH.read_bytes()
+RAW_SHIPPED_BYTES = PROFILE_PATH.read_bytes()
+_BASE_SERIAL = "0x0badc0de"
+
+
+def _pin_serial(raw):
+    """The shipped profile as an extension would pin it: a serial identity listed in checks."""
+    doc = json.loads(raw)
+    doc["target"]["identity"] = {"kind": "serial", "value": _BASE_SERIAL, "sysfs_attr": "serial"}
+    doc["checks"] = list(doc["checks"]) + ["target-identity"]
+    return json.dumps(doc).encode()
+
+
+# Writes need a pinned identity, so the generic good-run profile is the shipped one with a serial.
+SHIPPED_BYTES = _pin_serial(RAW_SHIPPED_BYTES)
+
+
+def serial_of(profile):
+    ident = profile.target.identity
+    return ident.value if ident.kind == "serial" else "unavailable"
 
 
 def sha(text):
@@ -78,7 +96,7 @@ class Env:
             "schema_version": 1,
             "run_id": RUN_ID,
             "profile_hash": self.phash,
-            "board_identity": {"machine_id": MACHINE_ID, "device_serial": "unavailable"},
+            "board_identity": {"machine_id": MACHINE_ID, "device_serial": serial_of(self.profile)},
             "device": DEV,
             "image_hashes": {r: self.scans[i.file].sha256 for r, i in self.profile.images.items()},
             "image_sizes": {r: self.scans[i.file].size for r, i in self.profile.images.items()},
@@ -130,6 +148,7 @@ class Env:
             "read_file /sys/block/mmcblk0/device/life_time": "0x01 0x01\n",
             "read_file /sys/block/mmcblk0/device/pre_eol_info": "0x01\n",
             "read_file /etc/machine-id": MACHINE_ID + "\n",
+            "read_file /sys/block/mmcblk0/device/serial": _BASE_SERIAL + "\n",
             f"blkid -p -s TYPE -o value {self.node('esp')}": "vfat\n",
             f"efibootmgr -n {ENTRY}": 0,
         }
@@ -408,6 +427,73 @@ def test_device_serial_changed_names_board_identity(env):
     env.plan["board_identity"] = {"machine_id": MACHINE_ID, "device_serial": "0xDEADBEEF"}
     res, ops = env.run()
     assert_clean_refusal(res, ops, "board identity changed")
+
+
+def _identity_bytes(identity, *, with_check=True):
+    doc = json.loads(RAW_SHIPPED_BYTES)
+    doc["target"]["identity"] = identity
+    if with_check:
+        doc["checks"] = list(doc["checks"]) + ["target-identity"]
+    return json.dumps(doc).encode()
+
+
+PINNED_IDENTITY = {"kind": "serial", "value": "0x0badc0de", "sysfs_attr": "serial"}
+
+
+def _identity_env(tmp_path, identity=PINNED_IDENTITY, **kw):
+    e = Env(tmp_path, _identity_bytes(identity, **kw))
+    if identity["kind"] == "serial" or identity.get("sysfs_attr"):
+        e.plan["board_identity"] = {"machine_id": MACHINE_ID, "device_serial": identity["value"] if identity["kind"] == "serial" else "0x0badc0de"}
+    return e
+
+
+def test_shipped_jetson_profile_write_refuses_name_only_identity_before_any_call(tmp_path):
+    env = Env(tmp_path, RAW_SHIPPED_BYTES)
+    res, ops = env.run()
+    assert_clean_refusal(res, ops, "target-identity", "serial")
+    assert ops.calls == []
+    lock_is_free(env)
+
+
+def test_name_only_identity_refusal_names_the_cure(tmp_path):
+    res, _ = Env(tmp_path, RAW_SHIPPED_BYTES).run()
+    text = "\n".join(res.lines)
+    assert "extension" in text and "serial" in text and "by-path" in text and "target-identity" in text
+
+
+def test_pinned_serial_listing_target_identity_is_not_refused_by_the_gate(tmp_path):
+    e = _identity_env(tmp_path)
+    res, ops = e.run(script=e.script(**{SERIAL_PATH: "0x0badc0de\n"}))
+    assert res.exit_code == 0, res.lines
+
+
+def test_pinned_serial_without_target_identity_check_refuses(tmp_path):
+    e = _identity_env(tmp_path, with_check=False)
+    res, ops = e.run(script=e.script(**{SERIAL_PATH: "0x0badc0de\n"}))
+    assert_clean_refusal(res, ops, "target-identity")
+    assert ops.calls == []
+
+
+def test_sysfs_name_with_a_serial_attribute_is_still_name_only_and_refuses(tmp_path):
+    ident = {"kind": "sysfs-name", "value": "mmcblk0", "sysfs_attr": "serial"}
+    e = _identity_env(tmp_path, ident)
+    res, ops = e.run(script=e.script(**{SERIAL_PATH: "0x0badc0de\n"}))
+    assert_clean_refusal(res, ops, "name-only", "target-identity")
+    assert ops.calls == []
+
+
+def test_by_path_identity_listing_target_identity_is_not_refused_by_the_gate(tmp_path):
+    ident = {"kind": "by-path", "value": "platform-3460000.mmc"}
+    e = _identity_env(tmp_path, ident)
+    res, ops = e.run()
+    assert "name-only" not in "\n".join(res.lines)
+
+
+def test_sysfs_name_identity_that_is_not_the_target_basename_is_not_this_gates_business(tmp_path):
+    ident = {"kind": "sysfs-name", "value": "mmcblk9"}
+    e = _identity_env(tmp_path, ident)
+    res, ops = e.run()
+    assert "name-only" not in "\n".join(res.lines)
 
 
 def test_stale_plan_from_another_profile_refuses(env):
@@ -857,6 +943,7 @@ SERIAL_PATH = "read_file /sys/block/mmcblk0/device/serial"
 def _pinned_env(tmp_path):
     doc = json.loads(PROFILE_PATH.read_text())
     doc["target"]["identity"] = {"kind": "serial", "value": PINNED, "sysfs_attr": "serial"}
+    doc["checks"] = list(doc["checks"]) + ["target-identity"]
     e = Env(tmp_path, json.dumps(doc).encode())
     e.plan["board_identity"] = {"machine_id": MACHINE_ID, "device_serial": PINNED}
     return e

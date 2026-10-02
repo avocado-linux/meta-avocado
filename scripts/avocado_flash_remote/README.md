@@ -199,7 +199,10 @@ examined unless `--expected-boot-order` is given.
 
 A shipped profile cannot know your board's eMMC serial, so it identifies the
 target by device name and sector count only, and that name check can never
-differ. Pin the serial in a profile you supply through `--extension-dir`:
+differ. `write` therefore refuses on the shipped profile, before it takes the
+on-board lock and before the retype prompt, until an extension profile pins a
+serial (or a by-path identity) and lists `target-identity`; `check` and `plan`
+still run. Pin the serial in a profile you supply through `--extension-dir`:
 
 1. Copy the shipped profile for your board into the extension directory under
    the same file name (`<board>.json`); it then shadows the shipped one.
@@ -210,8 +213,8 @@ differ. Pin the serial in a profile you supply through `--extension-dir`:
    the synthetic value `0x0badc0de`; never commit a real serial.
 3. Add `target-identity` to the profile's `checks` list. The shipped profile does
    not list it, so without this `check` never examines identity at all and
-   cannot report a wrong board. `plan` verifies a pinned serial on its own, but
-   `check` only runs what `checks` names.
+   cannot report a wrong board, and `write` refuses. `plan` verifies a pinned
+   serial on its own, but `check` only runs what `checks` names.
 
 ```json
 "target": {

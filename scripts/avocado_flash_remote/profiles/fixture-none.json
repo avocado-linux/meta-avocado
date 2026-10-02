@@ -8,8 +8,9 @@
     "sectors": 20480,
     "require_empty": true,
     "identity": {
-      "kind": "sysfs-name",
-      "value": "loop-fixture"
+      "kind": "serial",
+      "value": "0x0fixture",
+      "sysfs_attr": "serial"
     }
   },
   "layout": {
@@ -67,7 +68,8 @@
   "checks": [
     "device-exists",
     "device-empty",
-    "staged-images-present"
+    "staged-images-present",
+    "target-identity"
   ],
   "arm": {
     "strategy": "none",
