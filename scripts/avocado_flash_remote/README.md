@@ -631,6 +631,18 @@ the kit's create line has no counterpart, the kit's `-n` names the firmware's
 entry, restore runs `-N` but never `-B -b`, and the plan body is compared against
 the golden with only those lines rewritten.
 
+### Readback and a duplicate filesystem UUID
+
+`readback` mounts the profile's data partition read-only on the board while the
+live system runs. Linux refuses a second btrfs mount whose filesystem UUID equals
+that of one already mounted (`BTRFS warning: duplicate device`), so when the var
+image written to the target carries the same UUID as the live system's `/var`
+(for example the same image written to both disks) the mount fails with rc 32.
+The refusal is safe: nothing is mounted and the cleanup lines name only the empty
+mount point. Before a window, compare `blkid` for the live `/var` with the UUID of
+the var image about to be written; when they are equal, `readback` cannot read the
+target while that system runs.
+
 ## Tests and hygiene gate
 
 ```text
