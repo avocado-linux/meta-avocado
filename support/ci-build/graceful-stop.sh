@@ -45,11 +45,11 @@ graceful_stop() {
     log.notice "Waiting for RUNNER_GRACEFUL_STOP_TIMEOUT=$RUNNER_GRACEFUL_STOP_TIMEOUT seconds until the runner agent to stop by itself."
     while [[ $i -lt $RUNNER_GRACEFUL_STOP_TIMEOUT ]]; do
       sleep 1
-      if ! pgrep Runner.Listener > /dev/null; then
+      if ! pgrep Runner.Listener >/dev/null; then
         log.notice "The runner agent stopped before RUNNER_GRACEFUL_STOP_TIMEOUT=$RUNNER_GRACEFUL_STOP_TIMEOUT"
         break
       fi
-      i=$((i+1))
+      i=$((i + 1))
     done
   fi
 
@@ -58,7 +58,7 @@ graceful_stop() {
     exit 1
   fi
 
-  if pgrep Runner.Listener > /dev/null; then
+  if pgrep Runner.Listener >/dev/null; then
     # The below procedure fixes the runner to correctly notify the Actions service for the cancellation of this runner.
     # It enables you to see `Error: The operation was canceled.` in the worklow job log, in case a job was still running on this runner when the
     # termination is requested.
@@ -76,7 +76,7 @@ graceful_stop() {
 
     log.notice "SIGTERM sent. If the runner is still running a job, you'll probably see \"Error: The operation was canceled.\" in its log."
     log.notice "Waiting for the actions runner agent to stop."
-    while pgrep Runner.Listener > /dev/null; do
+    while pgrep Runner.Listener >/dev/null; do
       sleep 1
     done
   fi
@@ -88,12 +88,12 @@ graceful_stop() {
   # At the times we didn't have this logic, the runner agent was even unable to output the Cancelled message hence
   # unable to gracefully stop, hence the workflow job hanged like forever.
   log.notice "The actions runner process exited."
-  
+
   if [ "$RUNNER_INIT_PID" != "" ]; then
     log.notice "Holding on until runner init (pid $RUNNER_INIT_PID) exits, so that there will hopefully be no zombie processes remaining."
     # We don't need to kill -TERM $RUNNER_INIT_PID as the init is supposed to exit by itself once the foreground process(=the runner agent) exists.
     wait "$RUNNER_INIT_PID" || :
   fi
-  
+
   log.notice "Graceful stop completed."
 }

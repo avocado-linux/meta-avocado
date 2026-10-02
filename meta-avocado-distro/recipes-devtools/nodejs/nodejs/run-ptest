@@ -1,7 +1,6 @@
 #!/bin/sh
 
-./cctest
-if [ $? = 0 ]; then
+if ./cctest; then
   echo "PASS: nodejs"
 else
   echo "FAIL: nodejs"

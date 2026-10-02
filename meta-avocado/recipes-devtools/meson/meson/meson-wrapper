@@ -1,11 +1,11 @@
 #!/bin/sh
 
 if [ -z "$OECORE_NATIVE_SYSROOT" ]; then
-    exec "meson.real" "$@"
+  exec "meson.real" "$@"
 fi
 
 if [ -z "$SSL_CERT_DIR" ]; then
-    export SSL_CERT_DIR="$OECORE_NATIVE_SYSROOT/etc/ssl/certs/"
+  export SSL_CERT_DIR="$OECORE_NATIVE_SYSROOT/etc/ssl/certs/"
 fi
 
 # If these are set to a cross-compile path, meson will get confused and try to
@@ -14,18 +14,30 @@ fi
 unset CC CXX CPP LD AR NM STRIP
 
 case "$1" in
-setup|configure|dist|install|introspect|init|test|wrap|subprojects|rewrite|compile|devenv|env2mfile|help) MESON_CMD="$1" ;;
-*) echo meson-wrapper: Implicit setup command assumed; MESON_CMD=setup ;;
+  setup | configure | dist | install | introspect | init | test | wrap | subprojects | rewrite | compile | devenv | env2mfile | help) MESON_CMD="$1" ;;
+  *)
+    echo meson-wrapper: Implicit setup command assumed
+    MESON_CMD=setup
+    ;;
 esac
 
 if [ "$MESON_CMD" = "setup" ]; then
-    MESON_SETUP_OPTS=" \
+  MESON_SETUP_OPTS=" \
         --cross-file="$OECORE_NATIVE_SYSROOT/usr/share/meson/${TARGET_PREFIX}meson.cross" \
         --native-file="$OECORE_NATIVE_SYSROOT/usr/share/meson/meson.native" \
         "
-    echo meson-wrapper: Running meson with setup options: \"$MESON_SETUP_OPTS\"
+  # Left unquoted so the line-continuation padding baked into
+  # MESON_SETUP_OPTS collapses to single spaces in this message; quoting it
+  # would print the padding verbatim.
+  # shellcheck disable=SC2086
+  echo meson-wrapper: Running meson with setup options: \"$MESON_SETUP_OPTS\"
 fi
 
+# MESON_SETUP_OPTS carries two --cross-file/--native-file flags in one string
+# and must word-split into separate arguments; quoting it would hand meson.real
+# a single argument it cannot parse. Empty for non-setup commands, where the
+# split correctly yields no arguments at all.
+# shellcheck disable=SC2086
 exec "$OECORE_NATIVE_SYSROOT/usr/bin/meson.real" \
-    "$@" \
-    $MESON_SETUP_OPTS
+  "$@" \
+  $MESON_SETUP_OPTS

@@ -8,42 +8,46 @@ target="qemux86-64"
 RUNTIME_NAME="$1"
 
 input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+# Unused by the provision step, which takes its paths from $include_flags, but
+# kept to document that this hook family recognises AVOCADO_STONE_MANIFEST and
+# to stay identical to the avocado-build sibling that does consume it.
+# shellcheck disable=SC2034
 manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 build_include_flags() {
-    local main_input_dir="$1"
-    local include_flags=""
-    
-    if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
-        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
-        for path in "${PATHS[@]}"; do
-            if [ -n "$path" ]; then
-                include_flags="$include_flags -i \"$path\""
-            fi
-        done
-    fi
-    
-    include_flags="$include_flags -i \"$main_input_dir\""
-    echo "$include_flags"
+  local main_input_dir="$1"
+  local include_flags=""
+
+  if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
+    IFS=':' read -ra PATHS <<<"$AVOCADO_STONE_INCLUDE_PATHS"
+    for path in "${PATHS[@]}"; do
+      if [ -n "$path" ]; then
+        include_flags="$include_flags -i \"$path\""
+      fi
+    done
+  fi
+
+  include_flags="$include_flags -i \"$main_input_dir\""
+  echo "$include_flags"
 }
 
 # Build display string of all include paths
 build_include_display() {
-    local main_input_dir="$1"
-    local display=""
-    
-    if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
-        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
-        for path in "${PATHS[@]}"; do
-            if [ -n "$path" ]; then
-                display="${display}\n    - ${path}"
-            fi
-        done
-    fi
-    
-    display="${display}\n    - ${main_input_dir}"
-    echo -e "$display"
+  local main_input_dir="$1"
+  local display=""
+
+  if [ -n "$AVOCADO_STONE_INCLUDE_PATHS" ]; then
+    IFS=':' read -ra PATHS <<<"$AVOCADO_STONE_INCLUDE_PATHS"
+    for path in "${PATHS[@]}"; do
+      if [ -n "$path" ]; then
+        display="${display}\n    - ${path}"
+      fi
+    done
+  fi
+
+  display="${display}\n    - ${main_input_dir}"
+  echo -e "$display"
 }
 
 echo -e "\033[94m[INFO]\033[0m Running stone provision.
@@ -57,7 +61,11 @@ include_flags=$(build_include_flags "$input_dir")
 var_image="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/avocado-image-var-${target}.btrfs"
 var_image_bytes=$(stat -c%s "$var_image")
 
-eval stone provision $include_flags --partition-size \"var=$var_image_bytes\"
+# $include_flags holds a pre-built list of -i "path" pairs and must stay
+# unquoted so it word-splits into separate arguments; the escaped quotes inside
+# it re-quote each path at eval time. Quoting it would hand stone one argument.
+# shellcheck disable=SC2086
+eval stone provision $include_flags --partition-size "\"var=$var_image_bytes\""
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
