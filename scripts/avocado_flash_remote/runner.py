@@ -30,7 +30,7 @@ from .cmd_check import run_check
 from .cmd_plan import run_plan
 from .cmd_readback import run_readback
 from .cmd_restore import run_restore
-from .cmd_status import run_status
+from .cmd_status import _load_run, run_status
 from .cmd_write import run_write
 from . import evidence, state as runstate
 from .ops import ReadOnlyOps, RealOps
@@ -300,8 +300,10 @@ def _finalize_records(sub, profile, phash, req, rc, refused_early=False):
     try:
         plan = _read_json(os.path.join(run_dir, "plan.json")) or {}
         st = {}
-        loaded = runstate.load_state(profile.state_dir)
-        if loaded.status == "ok" and req.get("run_id") in (None, loaded.state.run_id):
+        # The run's own record, not whichever run `current` names now: a later run moves that pointer.
+        rid = req.get("run_id")
+        loaded = runstate.load_state(profile.state_dir) if rid is None else _load_run(profile.state_dir, rid)
+        if loaded.status == "ok" and rid in (None, loaded.state.run_id):
             st = loaded.state.data
         identity = plan.get("board_identity") or st.get("board_identity")
         hashes = plan.get("image_hashes")

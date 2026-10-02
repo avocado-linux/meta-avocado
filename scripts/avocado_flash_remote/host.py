@@ -577,7 +577,7 @@ def run_remote(transport, subcommand: str, request: dict, bundle_remote_path: st
         body, sudo=False, timeout=60,
     )
     if put.rc != 0:
-        _remove_request(transport, req_path)
+        _remove_request(transport, req_path, req_path + ".tmp")  # the put may have died mid-write
         raise HostError("cannot write the request file on the board")
     argv = [validate_remote_python(python), bundle_remote_path, subcommand, "--request", req_path]
     if detach or subcommand == "write":
@@ -590,9 +590,9 @@ def run_remote(transport, subcommand: str, request: dict, bundle_remote_path: st
         _remove_request(transport, req_path)
 
 
-def _remove_request(transport, req_path: str) -> None:
+def _remove_request(transport, *paths: str) -> None:
     try:
-        transport.run(["rm", "-f", "--", req_path], None, sudo=False, timeout=60)
+        transport.run(["rm", "-f", "--", *paths], None, sudo=False, timeout=60)
     except HostError:
         pass
 
