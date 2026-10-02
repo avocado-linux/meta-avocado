@@ -169,6 +169,8 @@ def _prepare_run_dir(sub, profile, req):
             continue
         try:
             os.mkdir(path, 0o700)
+            # 0o700 is owner-only and stricter than the rule's advice; the chmod ignores umask.
+            # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
             os.chmod(path, 0o700)  # independent of umask
         except OSError as e:
             raise _Exit(EXIT_ERROR, f"runner error: cannot create {path}: {e}", sys.stderr)

@@ -126,6 +126,8 @@ def test_sudo_wrapping_forms():
     remote, payload = t._wrap(["install", "-d", "/x"], None, True)
     assert remote == ["sudo", "-n", "install", "-d", "/x"]
     assert payload is None
+    # SSH transport sudo password setter, not a Django account password; never stored.
+    # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password
     t.set_password(Secret(PASSWORD))
     remote, payload = t._wrap(["install", "-d", "/x"], b"data", True)
     assert remote == ["sudo", "-S", "-p", "", "install", "-d", "/x"]
@@ -168,6 +170,8 @@ def test_ssh_run_uses_own_session_and_files(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "Popen", FakeProc)
     t = SshTransport("h")
+    # SSH transport sudo password setter, not a Django account password; never stored.
+    # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password
     t.set_password(Secret(PASSWORD))
     res = t.run(["true"], b"payload", sudo=True, timeout=5)
     assert res.rc == 0 and res.stdout == b"out-bytes"
@@ -188,6 +192,8 @@ def test_secret_hides():
     with pytest.raises(TypeError):
         import pickle
 
+        # The test asserts Secret refuses pickling; nothing is unpickled.
+        # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
         pickle.dumps(s)
 
 
