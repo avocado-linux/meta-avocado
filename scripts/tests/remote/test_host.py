@@ -1051,3 +1051,15 @@ def test_the_dead_refusal_log_probe_is_gone():
     assert not hasattr(host, "refusal_newer_than_manifest")
     assert not hasattr(host, "_REFUSAL_PROBE")
     assert not hasattr(host, "_no_such_file")
+
+
+def test_a_failed_request_put_removes_the_half_written_temp_file_too():
+    def handler(argv, stdin, sudo):
+        return RunResult(1, b"", b"No space left") if argv[0] == "sh" else RunResult(0, b"", b"")
+
+    t = StubTransport(handler=handler)
+    with pytest.raises(host.HostError, match="cannot write the request"):
+        host.run_remote(t, "check", {"staging_dir": "/run/s"}, "/run/s/b.pyz")
+    put, rm = t.calls
+    path = put.argv[-1]
+    assert rm.argv == ["rm", "-f", "--", path, path + ".tmp"]

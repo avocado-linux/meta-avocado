@@ -700,6 +700,20 @@ def test_manifest_takes_transition_log_from_state_file(tmp_path, monkeypatch):
     assert m["board_identity"] == {"machine_id": "zz"}
 
 
+def test_manifest_is_built_from_the_runs_own_state_after_another_run_moves_current(tmp_path, monkeypatch):
+    from avocado_flash_remote import state
+
+    sd = tmp_path / "state"
+    state.create_run(sd, run_id="r1", profile_hash="p", plan_hash="h", board_identity={"machine_id": "zz"}, image_roles=["a"], arm=False)
+    state.create_run(sd, run_id="r2", profile_hash="p", plan_hash="h", board_identity={"machine_id": "other"}, image_roles=["a"], arm=False)
+    assert (sd / "current").read_text().strip() == "r2"  # a later run took the pointer before r1 finished
+    monkeypatch.setattr(runner, "run_write", lambda *a, **k: type("R", (), {"exit_code": 0})())
+    assert _main("write", tmp_path) == 0  # the request names run r1
+    m = _manifest(sd / "r1" / "records")
+    assert [t["phase"] for t in m["transition_log"]] == ["planned"]
+    assert m["board_identity"] == {"machine_id": "zz"}
+
+
 @pytest.mark.parametrize("sub", ["check", "status"])
 def test_check_status_write_no_manifest(tmp_path, recs, sub):
     assert _main(sub, tmp_path) == 0

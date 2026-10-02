@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 
 import pytest
@@ -133,11 +134,38 @@ def test_a_runner_killed_after_accepted_is_a_dead_runner_not_complete(board):
     assert "the runner exited while the board is still recorded in the non-terminal phase image-writing" in text
 
 
+def _assert_no_sudo_was_spawned(transport):
+    """Judge the argv command_line returned (what would be executed), and prove a wrapper was actually removed."""
+    assert transport.spawned
+    assert transport.stripped_sudo > 0, "no sudo wrapper was ever asked for, so 'never spawned' proves nothing"
+    assert all(c[0] != "sudo" for c in transport.spawned), [c for c in transport.spawned if c[0] == "sudo"]
+
+
+def test_the_sudo_assertion_fails_against_a_transport_that_forgets_to_strip_the_wrapper(board):
+    class Broken(loopback.LoopbackTransport):
+        def _command_line(self, remote_argv):
+            super()._command_line(remote_argv)
+            return list(remote_argv)  # hands the sudo wrapper straight to the spawn
+
+    broken = Broken(board.root)
+    broken.command_line(["sudo", "-n", "true"])
+    with pytest.raises(AssertionError):
+        _assert_no_sudo_was_spawned(broken)
+    assert broken.spawned == [["sudo", "-n", "true"]]
+
+
+def test_the_sudo_assertion_fails_when_no_wrapper_was_ever_requested(board):
+    unused = loopback.LoopbackTransport(board.root)
+    unused.command_line(["true"])
+    with pytest.raises(AssertionError, match="proves nothing"):
+        _assert_no_sudo_was_spawned(unused)
+
+
 def test_the_loopback_never_runs_sudo_or_touches_a_path_outside_its_root(board):
     rid = _planned(board)
     board.cli("write", "--run-id", rid)
     assert board.transport.calls
-    assert all(c[0] != "sudo" for c in board.transport.calls)
+    _assert_no_sudo_was_spawned(board.transport)
     with pytest.raises(host.HostError, match="outside the loopback root"):
         board.transport.run(["cat", "/etc/hostname"], None, sudo=False)
 
@@ -194,3 +222,112 @@ def test_a_completed_write_is_judged_by_its_own_state_even_after_another_run_mov
     assert moved
     assert "the board may have been changed" not in text + err
     assert rc == 0 and f"write COMPLETE (run {rid})" in text
+
+
+# ------------------------------------------------------- 5.25: the board must be able to catch a bad write
+
+
+def _loop_ops(board):
+    import loopback_ops
+
+    return loopback_ops.LoopOps(board.root)
+
+
+def _stage_image(board, number):
+    ops = _loop_ops(board)
+    # Stage the board root the way the host does so LoopOps can read the images it is asked to write.
+    board.stage.mkdir(exist_ok=True)
+    for name in loopback.IMAGE_NAMES:
+        shutil.copy(board.images / name, board.stage / name)
+    return ops, board.stage / ops.images[number]
+
+
+def test_loopops_answers_a_readback_from_what_was_written_to_that_partition(board):
+    import loopback_ops
+
+    ops, src = _stage_image(board, 1)
+    ops._exec(["sfdisk", loopback_ops.DEVICE], stdin=b"x")
+    ops._exec(["dd", f"if={src}", f"of={loopback_ops.DEVICE}1", "bs=1M", "conv=fsync", "status=none"])
+    good = ops._exec(["dd", f"if={loopback_ops.DEVICE}1", "bs=4M", "iflag=count_bytes", f"count={src.stat().st_size}", "status=none"], digest=True)
+    assert good.digest == ops._image_sha(1)
+
+
+def test_loopops_readback_of_an_unwritten_partition_is_not_the_images_hash(board):
+    import loopback_ops
+
+    ops, _src = _stage_image(board, 1)
+    got = ops._exec(["dd", f"if={loopback_ops.DEVICE}1", "bs=4M", "status=none"], digest=True)
+    assert got.digest != ops._image_sha(1)
+
+
+def test_loopops_readback_of_a_partition_given_another_partitions_image_differs(board):
+    import loopback_ops
+
+    ops, src = _stage_image(board, 1)
+    ops._exec(["sfdisk", loopback_ops.DEVICE], stdin=b"x")
+    ops._exec(["dd", f"if={src}", f"of={loopback_ops.DEVICE}2", "bs=1M", "conv=fsync", "status=none"])
+    got = ops._exec(["dd", f"if={loopback_ops.DEVICE}2", "bs=4M", "status=none"], digest=True)
+    assert got.digest != ops._image_sha(2)
+
+
+def test_loopops_refuses_a_dd_before_the_partition_table_exists(board):
+    import loopback_ops
+    from avocado_flash_remote.ops import UnscriptedCall
+
+    ops, src = _stage_image(board, 1)
+    with pytest.raises(UnscriptedCall, match="no partition table"):
+        ops._exec(["dd", f"if={src}", f"of={loopback_ops.DEVICE}1", "bs=1M", "conv=fsync", "status=none"])
+
+
+def test_loopops_refuses_a_dd_to_a_node_that_is_not_a_partition_of_the_table(board):
+    import loopback_ops
+    from avocado_flash_remote.ops import UnscriptedCall
+
+    ops, src = _stage_image(board, 1)
+    ops._exec(["sfdisk", loopback_ops.DEVICE], stdin=b"x")
+    for node in (loopback_ops.DEVICE, f"{loopback_ops.DEVICE}9"):
+        with pytest.raises(UnscriptedCall):
+            ops._exec(["dd", f"if={src}", f"of={node}", "bs=1M", "conv=fsync", "status=none"])
+
+
+def test_loopops_raises_on_an_unscripted_mutating_command(board):
+    from avocado_flash_remote.ops import UnscriptedCall
+
+    ops = _loop_ops(board)
+    with pytest.raises(UnscriptedCall):
+        ops._exec(["wipefs", "-a", "/dev/vdz"])
+
+
+def test_loopops_sfdisk_dump_returns_what_sfdisk_was_given_not_the_expected_layout(board):
+    import loopback_ops
+
+    ops = _loop_ops(board)
+    ops._exec(["sfdisk", loopback_ops.DEVICE], stdin=b"label: gpt\nother\n")
+    assert ops._exec(["sfdisk", "--dump", loopback_ops.DEVICE]).stdout == b"label: gpt\nother\n"
+
+
+def test_a_skipped_dd_is_caught_by_the_write(board):
+    rid = _planned(board)
+    board.inject("skip-dd", "2")  # the runner is told the dd succeeded; nothing reaches partition 2
+    rc, text, err = board.cli("write", "--run-id", rid)
+    assert rc != 0, text + err
+    assert "write COMPLETE" not in text
+    assert "does not match the planned checksum" in text, text
+
+
+def test_a_dd_sent_to_the_wrong_partition_is_caught_by_the_write(board):
+    rid = _planned(board)
+    board.inject("misdirect-dd", "1:2")  # the image for partition 1 lands on partition 2
+    rc, text, err = board.cli("write", "--run-id", rid)
+    assert rc != 0, text + err
+    assert "write COMPLETE" not in text
+    assert "readback of /dev/vdz1" in text and "does not match the planned checksum" in text, text
+
+
+def test_a_write_that_never_created_the_table_is_caught(board):
+    rid = _planned(board)
+    board.inject("skip-sfdisk", "1")
+    rc, text, err = board.cli("write", "--run-id", rid)
+    assert rc != 0, text + err
+    assert "write COMPLETE" not in text
+    assert "writing boot.img" not in text, text  # no image is written onto a disk with no table

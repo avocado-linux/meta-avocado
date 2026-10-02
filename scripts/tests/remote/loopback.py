@@ -92,7 +92,9 @@ class LoopbackTransport(SshTransport):
         self.root = pathlib.Path(root)
         self.entry = self.root / "entry.py"
         self.entry.write_text(ENTRY_SOURCE.format(tests=str(HERE), root=str(self.root)))
-        self.calls: list = []
+        self.calls: list = []  # remote argv after the privilege wrapper was removed
+        self.spawned: list = []  # the local argv command_line handed back, i.e. what would actually be executed
+        self.stripped_sudo = 0  # privilege wrappers removed, so "no sudo spawned" is not true merely because none was asked for
         self.requests: list = []
 
     def _confine(self, argv):
@@ -102,11 +104,17 @@ class LoopbackTransport(SshTransport):
                 raise HostError(f"loopback: {arg!r} is outside the loopback root")
 
     def command_line(self, remote_argv):
+        local = self._command_line(remote_argv)
+        self.spawned.append(list(local))
+        return local
+
+    def _command_line(self, remote_argv):
         argv = list(remote_argv)
         if argv[:1] == ["sudo"]:
             if argv[:2] != ["sudo", "-n"]:
                 raise HostError("loopback: password sudo is not supported")
             argv = argv[2:]
+            self.stripped_sudo += 1
             if argv == ["true"]:
                 argv = ["true"]  # the sudo -n probe: the wrapper is understood, never executed
         self._confine(argv)
@@ -205,6 +213,10 @@ class LoopbackBoard:
     def fail_accepted_writes(self):
         """From now on the runner's attempt to write its accepted marker fails (a full disk)."""
         (self.root / "fail-accepted").write_text("1")
+
+    def inject(self, fault, value="1"):
+        """Make the board misbehave in one named way from now on (read by LoopOps on every call)."""
+        (self.root / f"fault-{fault}").write_text(value)
 
     # -- holding a write inside dd -------------------------------------------
     def hold(self):
