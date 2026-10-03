@@ -1,5 +1,6 @@
 """Tests for the read-only ``check`` subcommand (pre-flight)."""
 
+import inspect
 import json
 import pathlib
 
@@ -472,22 +473,61 @@ def test_zero_entries_fail_and_name_the_count_and_label(efivars):
     assert any(f"0 boot entries labelled {LABEL!r}" in ln for ln in res.lines)
 
 
+# ------------------------------------------------- efivarfs-rw reads the topmost mount (task 5.42)
+
+EFIVARFS_LABEL = "efivarfs mounted read-write"
+
+
+def efivarfs_run(efivars, options, **kw):
+    lines = []
+    res = run_check(
+        ReadOnlyOps(RecordingOps(script(efivars, **{f"findmnt -no OPTIONS {efivars}": options}))),
+        profile_with(["efivarfs-rw"]),
+        staging_dir=STAGE,
+        efivars_dir=str(efivars),
+        out=lines.append,
+    )
+    return res
+
+
+def test_a_lower_rw_mount_under_an_ro_overmount_does_not_pass_efivarfs_rw(efivars):
+    res = efivarfs_run(efivars, "rw,nosuid,nodev\nro,nosuid,nodev\n")
+    assert verdict(res, EFIVARFS_LABEL) == "FAIL"
+    assert res.exit_code == 1
+
+
+def test_the_topmost_mount_decides_efivarfs_rw(efivars):
+    res = efivarfs_run(efivars, "ro,nosuid,nodev\nrw,nosuid,nodev\n")
+    assert verdict(res, EFIVARFS_LABEL) == "PASS"
+    assert res.exit_code == 0
+
+
+def test_a_single_rw_mount_still_passes_efivarfs_rw(efivars):
+    assert verdict(efivarfs_run(efivars, "rw,nosuid,nodev,noexec,relatime\n"), EFIVARFS_LABEL) == "PASS"
+
+
+@pytest.mark.parametrize("options", ["", "\n", "  \n"])
+def test_empty_findmnt_output_is_not_examined_for_efivarfs_rw(efivars, options):
+    res = efivarfs_run(efivars, options)
+    line = [ln for ln in res.lines if EFIVARFS_LABEL in ln][0]
+    assert "not examined" in line, line
+    assert res.exit_code == 2 and (res.examined, res.total) == (0, 1)
+
+
 # ------------------------------------------------- board prerequisites (task 5.37)
 
 PREREQ_LABEL = "board prerequisites"
 
 
-def prereq_run(efivars, importer=None, **over):
+def prereq_run(efivars, **over):
     lines = []
     ops = ReadOnlyOps(RecordingOps(script(efivars, **over)))
-    kw = {} if importer is None else {"importer": importer}
     res = run_check(
         ops,
         profile_with(["board-prerequisites"]),
         staging_dir=STAGE,
         efivars_dir=str(efivars),
         out=lines.append,
-        **kw,
     )
     return res, ops._inner
 
@@ -534,21 +574,37 @@ def test_a_busybox_banner_with_rc_zero_is_not_gnu(efivars):
     assert "install" in [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
 
 
-def test_missing_stdlib_module_fails_naming_it(efivars):
-    def importer(name):
-        if name in ("hashlib", "tempfile"):
-            raise ImportError(name)
+def test_the_dd_banner_that_omits_the_word_gnu_still_passes(efivars):
+    res, _ = prereq_run(efivars, **{"dd --version": "dd (coreutils) 9.12\n"})
+    assert res.exit_code == 0 and verdict(res, PREREQ_LABEL) == "PASS"
 
-    res, _ = prereq_run(efivars, importer=importer)
+
+@pytest.mark.parametrize(
+    "banner",
+    [
+        "install (uutils coreutils) 0.0.27\n",
+        "toybox 0.8.11\n",
+        "install (GNU findutils) 4.9\n",
+        "something unrecognised\n",
+        "",
+    ],
+    ids=["uutils", "toybox", "gnu-but-not-coreutils", "unrecognised", "empty"],
+)
+def test_only_a_gnu_coreutils_banner_passes_as_gnu(efivars, banner):
+    res, _ = prereq_run(efivars, **{"install --version": banner})
     assert res.exit_code == 1
     line = [ln for ln in res.lines if ln.startswith("FAIL  " + PREREQ_LABEL)][0]
-    assert "hashlib" in line and "tempfile" in line and "json" not in line
+    assert "install" in line and "sha256sum" not in line and "dd" not in line, line
 
 
-def test_prerequisite_module_list_covers_every_module_the_runner_imports():
-    from avocado_flash_remote.bundle import required_stdlib
-
-    assert set(required_stdlib()) <= set(cmd_check.RUNNER_STDLIB)
+def test_the_prerequisite_check_does_not_import_modules_it_cannot_judge(efivars):
+    # The runner imports every module at start-up, so a module loop here could never fail on a board.
+    assert not hasattr(cmd_check, "RUNNER_STDLIB")
+    assert "importer" not in inspect.signature(run_check).parameters
+    res, _ = prereq_run(efivars)
+    ok = [ln for ln in res.lines if ln.startswith("PASS  " + PREREQ_LABEL)][0]
+    assert "standard-library" not in ok and "module" not in ok, ok
+    assert ok == "PASS  board prerequisites: GNU install, sha256sum, dd present"
 
 
 def test_prerequisites_issue_only_read_vectors_and_call_no_mutating_verb(efivars):

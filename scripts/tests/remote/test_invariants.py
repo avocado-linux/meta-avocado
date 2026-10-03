@@ -391,16 +391,17 @@ ROLE_NAMES = list(prof.load_profile_bytes(SHIPPED_BYTES).images)
 def _point_ids():
     ids = ["sfdisk-write", "table-no-label", "table-partition-size-wrong", "table-partition-missing"]
     for r in ROLE_NAMES:
-        ids += [f"dd-{r}", f"readback-fails-{r}", f"readback-short-{r}"]
+        ids += [f"dd-{r}", f"flush-fails-{r}", f"readback-fails-{r}", f"readback-short-{r}"]
     ids += ["esp-not-vfat", "guard-A", "guard-B", "arm-bootorder-moved", "arm-next-fails"]
     return ids
 
 
 FAIL_POINTS = _point_ids()
 TOLERATED_POINTS = ["settle-fails", "evidence-write-fails"]
-# 4 table + 3 per image + 5 esp/guard/arm + 2 tolerated; a removed point fails here. 33 -> 32 in task 5.36:
-# the arm-create-fails point is gone because the tool no longer creates a boot entry.
-INJECTION_POINT_COUNT = 32
+# 4 table + 4 per image + 5 esp/guard/arm + 2 tolerated; a removed point fails here. 33 -> 32 in task 5.36:
+# the arm-create-fails point is gone because the tool no longer creates a boot entry. 32 -> 39 in task 5.42:
+# one flush-fails point per image, for the buffer-cache flush that now precedes each read-back.
+INJECTION_POINT_COUNT = 39
 
 
 def test_injection_point_count_is_pinned():
@@ -423,15 +424,19 @@ def make_point(env, pid, good):
         kept = [ln for ln in env.table.splitlines() if not ln.startswith(node + " ") and not ln.startswith(node + ":")]
         assert len(kept) == len(env.table.splitlines()) - 1
         return {f"sfdisk --dump {DEV}": [BLANK, BLANK, "\n".join(kept) + "\n"]}, 2
+    # Each image contributes two mutations (the dd write, then the cache flush) before its read-back.
     for j, r in enumerate(ROLE_NAMES):
         if pid == f"dd-{r}":
-            return {env.dd_key(r): OpFailed(["dd"], 1, "io error")}, 3 + j
+            return {env.dd_key(r): OpFailed(["dd"], 1, "io error")}, 3 + 2 * j
+        if pid == f"flush-fails-{r}":
+            flush = f"blockdev --flushbufs {env.node(r)}"
+            return {flush: OpFailed(["blockdev", "--flushbufs", env.node(r)], 1, "busy")}, 4 + 2 * j
         if pid == f"readback-fails-{r}":
-            return {env.readback_key(r): OpFailed(["dd"], 5, "i/o error")}, 3 + j
+            return {env.readback_key(r): OpFailed(["dd"], 5, "i/o error")}, 4 + 2 * j
         if pid == f"readback-short-{r}":
             short = OpResult(digest=sha("short"), stderr="0+1 records in\n0+1 records out\n")
-            return {env.readback_key(r): short}, 3 + j
-    n = 2 + N_ROLES
+            return {env.readback_key(r): short}, 4 + 2 * j
+    n = 2 + 2 * N_ROLES
     if pid == "esp-not-vfat":
         return {f"blkid -p -s TYPE -o value {env.node('esp')}": "ext4\n"}, n
     if pid == "guard-A":
@@ -565,7 +570,7 @@ def test_aggregate_no_arm_call_follows_any_earlier_failure(tmp_path, good_mutati
         if k < len(good_mutations):
             assert not [ln for ln in ops.log if ln.startswith("efibootmgr -n")], pid
         assert [c.line for c in mutations(ops)] == good_mutations[:k], pid
-    assert seen == len(FAIL_POINTS) == 30
+    assert seen == len(FAIL_POINTS) == 37
 
 
 # ======================================================================= 3

@@ -27,14 +27,12 @@ MUTATING_CALLS = [
     lambda o: o.sfdisk_delete(DISK, [1, 2]),
     lambda o: o.wipefs(DISK),
     lambda o: o.udevadm_settle(),
+    lambda o: o.blockdev_flushbufs(f"{DISK}p3"),
     lambda o: o.dd_write("/run/x/boot.img", f"{DISK}p3"),
     lambda o: o.efibootmgr_next("0003"),
     lambda o: o.efibootmgr_delete_next(),
     lambda o: o.mount(f"{DISK}p16", "/mnt/x", "ro", "btrfs"),
     lambda o: o.umount("/mnt/x"),
-    lambda o: o.write_file("/tmp/never", b"x"),
-    lambda o: o.efivar_write("/sys/firmware/efi/efivars/Foo", b"x"),
-    lambda o: o.sysfs_write("/sys/class/x/y", "1"),
     lambda o: o.dd_read("/dev/zero", "1", count=1, of="/tmp/never"),
     lambda o: o.run_read(["blockdev", "--setro", DISK]),
     lambda o: o.run_read(["efibootmgr", "-B", "-b", "0001"]),
@@ -143,13 +141,12 @@ def test_recording_replacements_normalise_temp_dirs():
     assert r.log == [f"dd if=<TMP>/images/boot.img of={DISK}p3 bs=1M conv=fsync status=none"]
 
 
-def test_recording_file_verbs():
+def test_recording_file_verbs_are_reads_only():
     r = O.RecordingOps({"read_file /x": b"hi"})
     assert r.read_file("/x") == b"hi"
-    r.efivar_write("/efivars/V", b"\x01")
-    r.sysfs_write("/sys/a", "1")
-    assert r.log == ["read_file /x", "efivar_write /efivars/V", "sysfs_write /sys/a 1"]
-    assert r.written["/efivars/V"] == b"\x01"
+    with pytest.raises(ValueError):
+        r._fs("efivar_write", "/efivars/V", b"\x01")
+    assert r.log == ["read_file /x"]
 
 
 # ------------------------------------------------------------ vectors
@@ -197,6 +194,7 @@ def test_vectors_match_kit_argument_lists():
     assert V.vec_mount(DISK + "p16", "/m", "ro", "btrfs") == [
         "mount", "-o", "ro", "-t", "btrfs", DISK + "p16", "/m"]  # fmt: skip
     assert V.vec_umount("/m") == ["umount", "/m"]
+    assert V.vec_blockdev_flushbufs(DISK + "p3") == ["blockdev", "--flushbufs", DISK + "p3"]
 
 
 def test_ops_has_no_boot_entry_create_or_delete_verb():
@@ -256,6 +254,8 @@ def test_every_install_and_window_golden_line_is_buildable():
         (["rm", "-rf", "/"], True),
         (["wipefs", "-a", DISK], True),
         (["blkid", "-p", DISK], False),
+        (["blockdev", "--flushbufs", DISK + "p3"], True),
+        (["blockdev", "--getsz", "--flushbufs", DISK + "p3"], True),
     ],
 )
 def test_vector_mutates(vec, mutates):
@@ -399,13 +399,14 @@ def test_real_child_runs_in_its_own_session(tmp_path):
     assert int(pgid) != os.getpgid(0)
 
 
-def test_real_file_verbs(tmp_path):
+def test_real_file_verbs_read_only(tmp_path):
     r = O.RealOps(tool_dir=tmp_path)
     p = tmp_path / "f"
-    r.write_file(str(p), b"abc")
+    p.write_bytes(b"abc")
     assert r.read_file(str(p)) == b"abc"
-    r.sysfs_write(str(p), "1")
-    assert p.read_text() == "1"
+    with pytest.raises(ValueError):
+        r._fs("write_file", str(p), b"x")
+    assert p.read_bytes() == b"abc"
 
 
 # ------------------------------------------------------- static ast check

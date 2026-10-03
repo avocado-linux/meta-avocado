@@ -469,18 +469,20 @@ def probe_interpreter(transport, python: str, modules) -> str:
 
 # --- board tools ------------------------------------------------------------
 
-# Runs with plain sh before the runner exists. Each tool must start under ``--version`` and not announce
-# BusyBox; the loop prints what it cannot confirm. Read-only: it names no path and no write verb.
+# Runs with plain sh before the runner exists. Each tool must start under ``--version`` and announce
+# GNU coreutils: "(GNU coreutils)", or "(coreutils)" which is how GNU dd words it. A BusyBox, toybox or uutils
+# ("(uutils coreutils)") banner is neither; the loop prints what it cannot confirm.
+# Read-only: it names no path and no write verb.
 _TOOL_PROBE = (
     'm=""; for t in install sha256sum dd; do '
-    'o=$("$t" --version 2>&1) && case "$o" in *[Bb]usy[Bb]ox*) false;; esac || m="$m $t"; done; '
+    'o=$("$t" --version 2>&1) && case "$o" in *"(GNU coreutils)"*|*"(coreutils)"*) true;; *) false;; esac || m="$m $t"; done; '
     '[ -z "$m" ] && echo OK || echo "MISSING$m"'
 )
 _PROBE_TOOLS = ("install", "sha256sum", "dd")
 
 
 def probe_board_tools(transport) -> None:
-    """Refuse a board whose install, sha256sum or dd is missing or not GNU, naming what is wrong."""
+    """Refuse a board whose install, sha256sum or dd is missing or does not announce GNU coreutils, naming what is wrong."""
     res = transport.run(["sh", "-c", _TOOL_PROBE], None, sudo=False, timeout=60)
     last = (res.out.strip().splitlines() or [""])[-1].strip()
     if res.rc == 0 and last == "OK":
@@ -488,8 +490,8 @@ def probe_board_tools(transport) -> None:
     parts = last.split()
     if res.rc == 0 and parts[:1] == ["MISSING"] and parts[1:] and set(parts[1:]) <= set(_PROBE_TOOLS):
         raise HostError(
-            f"the board lacks GNU {', '.join(parts[1:])}: this tool needs GNU coreutils "
-            "(install -d, sha256sum --strict, dd conv=fsync), not a busybox userland"
+            f"the board lacks GNU coreutils {', '.join(parts[1:])}: this tool needs a version banner naming "
+            "GNU coreutils (install -d, sha256sum --strict, dd conv=fsync); a busybox, toybox or uutils userland is refused"
         )
     raise HostError("could not confirm GNU install, sha256sum and dd on the board; this tool needs GNU coreutils")
 

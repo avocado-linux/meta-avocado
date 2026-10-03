@@ -150,6 +150,8 @@ class LoopOps(RecordingOps):
             return OpResult()
         if vec == ["udevadm", "settle"]:
             return OpResult()  # waits for device events; changes nothing on the board
+        if vec[:2] == ["blockdev", "--flushbufs"] and len(vec) == 3 and vec[2].startswith(DEVICE):
+            return OpResult()  # the fixture's read-back reads its backing files directly: no cache to drop
         if vec[0] == "dd" and any(a.startswith("of=") for a in vec):
             self._write_partition(vec)
             self._hold()

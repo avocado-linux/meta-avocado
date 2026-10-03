@@ -26,7 +26,6 @@ Standard library only (ships to a board running Python 3.10).
 from __future__ import annotations
 
 import glob
-import importlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -45,14 +44,7 @@ _NO_TABLE_RE = re.compile(r"recognized partition table|no partition table")
 _BOOTNEXT_RE = re.compile(r"(^|\s)-n([\s,|]|$)|--bootnext")
 _DELETE_BOOTNEXT_RE = re.compile(r"(^|\s)-N([\s,|]|$)|--delete-bootnext")
 _READ_ERRORS = (OpsError, OSError, ValueError)
-
-# The standard-library modules the archived runner imports; a test keeps this a superset of what
-# ``bundle.required_stdlib`` computes, so it cannot drift from the code it describes.
-RUNNER_STDLIB = (
-    "__future__", "copy", "dataclasses", "datetime", "fcntl", "glob", "hashlib", "importlib", "json", "os", "pathlib",
-    "posixpath", "re", "secrets", "shutil", "signal", "stat", "subprocess", "sys", "tempfile", "time",
-    "typing", "zipfile",
-)  # fmt: skip
+_GNU_BANNER_RE = re.compile(r"\((GNU )?coreutils\)")  # not "(uutils coreutils)"
 
 
 @dataclass
@@ -70,9 +62,8 @@ class NotExamined(Exception):
 class _Ctx:
     """Inputs shared by checks, with each expensive read done once."""
 
-    def __init__(self, ops: Ops, profile, staging_dir, efivars_dir, expected_boot_order, importer=None):
+    def __init__(self, ops: Ops, profile, staging_dir, efivars_dir, expected_boot_order):
         self.ops = ops
-        self.importer = importer or importlib.import_module
         self.profile = profile
         self.staging_dir = str(staging_dir)
         self.efivars_dir = str(efivars_dir)
@@ -256,10 +247,14 @@ def _arm_entry_after_current(c: _Ctx):
 
 def _efivarfs_rw(c: _Ctx):
     res = c.ops.findmnt_options(c.efivars_dir)
-    opts = res.text.strip()
+    mounts = [ln.strip() for ln in res.text.splitlines() if ln.strip()]
+    if not mounts:
+        raise NotExamined(f"findmnt printed no mount options for {c.efivars_dir} (rc={res.rc})")
+    # findmnt lists every mount at the target in mount order, so the last line is the one that is visible.
+    opts = mounts[-1]
     if res.rc == 0 and "rw" in opts.split(","):
         return True, f"efivarfs options: {opts}"
-    if res.rc != 0 or not opts:
+    if res.rc != 0:
         return False, f"{c.efivars_dir} is not mounted (findmnt rc={res.rc})"
     return False, f"efivarfs not mounted rw, options: {opts}"
 
@@ -313,33 +308,27 @@ def _staging_space(c: _Ctx):
 
 
 def _tool_is_gnu(c: _Ctx, tool: str) -> bool:
-    """True when ``<tool> --version`` runs and does not announce BusyBox; a tool that cannot start is absent."""
+    """True when ``<tool> --version`` runs and names GNU coreutils; a tool that cannot start is absent.
+
+    The match is positive: ``(GNU coreutils)``, or ``(coreutils)`` which is how GNU dd words its banner. A
+    uutils, toybox or BusyBox banner is not GNU, and neither is an empty one.
+    """
     try:
         res = c.ops.tool_version(tool)
     except OpFailed:
         return False
-    return res.rc == 0 and "busybox" not in (res.text + res.stderr).lower()
+    return res.rc == 0 and _GNU_BANNER_RE.search(res.text + res.stderr) is not None
 
 
-# devtool-debt: the runner assumes GNU install -d, GNU sha256sum --strict, dd conv=fsync status=none and a full Python 3
-# standard library; busybox portability is deliberately not provided and this check only reports its absence.
-# Ceiling: boards with GNU coreutils and a full Python 3. Upgrade trigger: a busybox-userland board becomes a real target.
+# devtool-debt: the runner assumes GNU install -d, GNU sha256sum --strict and dd conv=fsync status=none; busybox
+# portability is deliberately not provided and this check only reports its absence. The Python standard library is
+# not judged here: the runner imports every module at start-up, so only the host's interpreter probe can fail it.
+# Ceiling: boards with GNU coreutils. Upgrade trigger: a busybox-userland board becomes a real target.
 def _board_prerequisites(c: _Ctx):
     bad = [t for t in PREREQUISITE_TOOLS if not _tool_is_gnu(c, t)]
-    missing = []
-    for mod in RUNNER_STDLIB:
-        try:
-            c.importer(mod)
-        except Exception:  # noqa: BLE001 - any import failure means the module is unusable on this board
-            missing.append(mod)
-    if not bad and not missing:
-        return True, f"GNU {', '.join(PREREQUISITE_TOOLS)} and {len(RUNNER_STDLIB)} standard-library modules present"
-    parts = []
-    if bad:
-        parts.append(f"missing or not GNU: {', '.join(bad)}")
-    if missing:
-        parts.append(f"python modules missing: {', '.join(missing)}")
-    return False, "; ".join(parts) + " (this tool needs GNU coreutils and a full Python 3)"
+    if not bad:
+        return True, f"GNU {', '.join(PREREQUISITE_TOOLS)} present"
+    return False, f"missing or not GNU coreutils: {', '.join(bad)} (this tool needs GNU coreutils)"
 
 
 # name -> (display label, function). The labels follow the kit's wording.
@@ -444,14 +433,12 @@ def run_check(
     efivars_dir=DEFAULT_EFIVARS_DIR,
     expected_boot_order: str | None = None,
     out: Callable = print,
-    importer: Callable | None = None,
 ) -> CheckResult:
     """Run every assertion the profile lists; see the module docstring.
 
     ``expected_boot_order`` is the comma-separated BootOrder the board must
     still have (the profile does not carry one); without it the
     ``boot-order-unchanged`` check is not examined.
-    ``importer`` replaces ``importlib.import_module`` for the ``board-prerequisites`` check (tests).
     """
     lines: list = []
 
@@ -459,7 +446,7 @@ def run_check(
         lines.append(text)
         out(text)
 
-    c = _Ctx(ops, profile, staging_dir, efivars_dir, expected_boot_order, importer)
+    c = _Ctx(ops, profile, staging_dir, efivars_dir, expected_boot_order)
     names = list(profile.checks)
     total = len(names)
     examined = 0

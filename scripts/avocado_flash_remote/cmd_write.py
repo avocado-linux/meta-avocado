@@ -295,6 +295,11 @@ def _write_images(ops, profile, plan, st, scans, staging_dir, reverifier, say, a
         except images.ImageChanged as exc:
             raise _Failed(f"staged image {role} changed after the plan: {exc}") from None
         ops.dd_write(src, node)
+        # The read-back must come from the media, not from the page cache dd just filled.
+        try:
+            ops.blockdev_flushbufs(node)
+        except OpFailed as exc:
+            raise _Failed(f"could not flush the buffer cache of {node} before the read-back: {exc}") from None
         live = ops.dd_sha256(node, READBACK_BS, scan.size, timeout=DD_WRITE_TIMEOUT)
         if live != expected:
             raise _Failed(
@@ -302,8 +307,9 @@ def _write_images(ops, profile, plan, st, scans, staging_dir, reverifier, say, a
                 f"(expected {expected}, read {live}); nothing was armed"
             )
         st = advance(
-            st, "image-written", image=role, bytes_written=scan.size, expected_sha256=expected, readback_sha256=live
-        )
+            st, "image-written", image=role, bytes_written=scan.size, expected_sha256=expected, readback_sha256=live,
+            readback_after_cache_flush=True,
+        )  # fmt: skip
     return st
 
 

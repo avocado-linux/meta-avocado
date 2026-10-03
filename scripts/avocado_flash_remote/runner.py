@@ -179,6 +179,10 @@ def _prepare_run_dir(sub, profile, req):
 # ---------------------------------------------------------------- dispatch
 
 
+# Every handler takes the state directory from the profile, never from the request: the profile hash
+# binds the profile, so a request value could only point the runner somewhere the hash did not vouch for.
+
+
 def _do_check(real, profile, phash, req):
     (staging,) = _need(req, "staging_dir")
     kw = {"staging_dir": staging}
@@ -199,7 +203,7 @@ def _do_plan(real, profile, phash, req):
 
 
 def _do_write(real, profile, phash, req):
-    staging, state_dir, run_dir = _need(req, "staging_dir", "state_dir", "run_dir")
+    staging, run_dir = _need(req, "staging_dir", "run_dir")
     plan_path = req.get("plan_path") or os.path.join(run_dir, "plan.json")
     confirmed = req.get("confirmed_device")
 
@@ -216,7 +220,7 @@ def _do_write(real, profile, phash, req):
 
     kw = {
         "staging_dir": staging,
-        "state_dir": state_dir,
+        "state_dir": profile.state_dir,
         "run_dir": run_dir,
         "plan_loader": plan_loader,
         "confirm": confirm,
@@ -230,14 +234,14 @@ def _do_write(real, profile, phash, req):
 
 
 def _do_restore(real, profile, phash, req):
-    state_dir, staging = _need(req, "state_dir", "staging_dir")
+    (staging,) = _need(req, "staging_dir")
     run_id = req.get("run_id")
     if run_id is not None and (not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id)):
         raise _Exit(EXIT_USAGE, f"runner error: invalid run id {run_id!r}", sys.stderr)
     return run_restore(
         real,
         profile,
-        state_dir=state_dir,
+        state_dir=profile.state_dir,
         staging_dir=staging,
         ack_run_id=req.get("ack_run_id"),
         emergency_disarm=bool(req.get("emergency_disarm", False)),
@@ -246,12 +250,12 @@ def _do_restore(real, profile, phash, req):
 
 
 def _do_readback(real, profile, phash, req):
-    state_dir, mount_dir, out_dir = _need(req, "state_dir", "mount_dir", "out_dir")
+    mount_dir, out_dir = _need(req, "mount_dir", "out_dir")
     if profile.arm.strategy != "none":
         (ref,) = _need(req, "reference_boot_order")
     else:
         ref = req.get("reference_boot_order")
-    kw = {"state_dir": state_dir, "mount_dir": mount_dir, "out_dir": out_dir, "reference_boot_order": ref}
+    kw = {"state_dir": profile.state_dir, "mount_dir": mount_dir, "out_dir": out_dir, "reference_boot_order": ref}
     for key in ("data_partition_name", "fstype"):
         if req.get(key) is not None:
             kw[key] = req[key]
@@ -259,8 +263,7 @@ def _do_readback(real, profile, phash, req):
 
 
 def _do_status(real, profile, phash, req):
-    (state_dir,) = _need(req, "state_dir")
-    return run_status(state_dir, run_id=req.get("run_id"))
+    return run_status(profile.state_dir, run_id=req.get("run_id"))
 
 
 _HANDLERS = {

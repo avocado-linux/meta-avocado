@@ -226,6 +226,32 @@ def test_mutating_verb_list_is_not_vacuous():
     assert {"dd_write", "sfdisk_write", "efibootmgr_next"} <= verbs
 
 
+def test_cache_flush_is_a_gated_mutating_verb_reachable_only_from_the_write_path():
+    assert "blockdev_flushbufs" in mutating_verbs()
+    users = sorted(p.name for p in PKG.glob("*.py") if "blockdev_flushbufs" in p.read_text() and p.name != "ops.py")
+    assert users == ["cmd_write.py"]
+
+
+def _all_ops_classes():
+    from avocado_flash_remote import ops as ops_mod
+
+    return [c for c in vars(ops_mod).values() if isinstance(c, type) and issubclass(c, ops_mod.Ops)]
+
+
+def test_no_ops_class_exposes_an_efivarfs_or_arbitrary_file_write():
+    classes = _all_ops_classes()
+    assert len(classes) >= 4
+    for cls in classes:
+        for name in ("efivar_write", "write_file", "sysfs_write"):
+            assert not hasattr(cls, name), f"{cls.__name__}.{name}"
+
+
+def test_ops_source_has_no_efivar_write_kind():
+    src = (PKG / "ops.py").read_text()
+    for word in ("efivar_write", "write_file", "sysfs_write"):
+        assert word not in src, word
+
+
 @pytest.mark.parametrize("mod", ["cmd_plan", "cmd_check", "cmd_status"])
 def test_read_only_modules_do_not_mutate(mod):
     assert readonly_violations((PKG / f"{mod}.py").read_text(), mutating_verbs()) == []

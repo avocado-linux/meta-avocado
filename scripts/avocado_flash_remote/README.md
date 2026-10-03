@@ -88,7 +88,7 @@ the arming.
 | `stage` | Verifies the images against `MANIFEST.hashes`, builds `runner.pyz`, checks free space on the board, copies images, the exact profile and the bundle into the profile's staging directory, then re-verifies the hashes of the images, the manifest, the profile and the bundle on the board. | Refuses when `MANIFEST.hashes` is missing, unparseable, names a missing file or disagrees with a file's sha256; when the staging filesystem lacks room (`staging.min_free_kib` plus the payload); when the staging directory already exists and is not owned by the SSH user (it is created only when absent, never re-owned); and when the profile file changed after it was resolved. `--dry-run` lists files and sizes and makes no connection. |
 | `check` | Read-only preflight. Runs every assertion in the profile's `checks` list and prints one `PASS` or `FAIL` line each. | Exit 0 only when every check passed and every listed check was examined (`checks: N/M` with N equal to M). Exit 1 when any check failed. Exit 2 when nothing failed but a check could not run. |
 | `plan` | Looks, decides, and writes one plan record (`plan.json`). Changes nothing on the board. Creates the run id. | Refuses on a wrong device name, wrong sector count, a target that backs the running system or is mounted, a non-empty target when `require_empty` is set, a layout that does not fit, staged images that fail their checksums, a failing guard, or an arm pre-flight refusal. |
-| `write` | Writes the planned run: partition table, then each image, read-back verification, guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
+| `write` | Writes the planned run: partition table, then each image (a `blockdev --flushbufs` of its node, then read-back verification), guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
 | `readback` | After the test image has booted, mounts the profile's data partition read-only, copies the persistent journal and boot logs, compares BootOrder with the reference, and prints (never runs) cleanup commands. | Needs `--reference-boot-order` unless the profile's arm strategy is `none`. Refuses to mount when the output directory is not on tmpfs, so logs never land on the live system's disk. The logs are copied to `/run/avocado-flash/<run-id>/readback` and the partition is mounted on `/run/avocado-flash/<run-id>/mnt` (private, mode 0700, one per invocation; `--run-id` reuses the run's id so a repeat overwrites); both are on tmpfs and vanish at reboot, so read the logs before rebooting. The mount is `ro,nosuid,nodev,noexec`. Readback takes the per-host lock, and on the board it refuses (exit 1, nothing mounted) while a run is in a non-terminal phase, while the on-board flash lock is held, or when the mount directory is already a mount point. It refuses to copy a journal larger than the free space of the output filesystem minus a 64 MiB reserve, or larger than 256 MiB. A copy error exits 1 and removes the partial output. Boot logs keep their path relative to the mount (`log/<name>`, `<name>`). The cleanup commands it prints name the mount directory (`umount`, `rmdir`) and the output directory (`rm -r`). |
 | `restore` | Undoes the arming. See "Restore scope". | Takes the per-host lock and, on the board, the on-board flash lock: it refuses while another holder (a write in progress) is live. A run in a non-terminal phase needs `--ack-run RUN_ID` naming it. `--emergency-disarm` needs `--ack-run`. |
 | `status` | Prints the board's recorded phase: `status: PHASE run=RUN_ID recovery=TEXT`, or `status: no run recorded`. Strictly read-only. | None. Use it after a dropped connection. |
@@ -181,7 +181,7 @@ path. Numbers must be plain integers. Duplicate JSON keys are rejected.
 | `arm` | `{"strategy": "uefi-bootnext" or "none", "params": {...}}`. |
 | `guard` | `{"strategy": "boot-arg" or "none", "params": {...}}`. |
 | `staging` | `dir` (absolute) and `min_free_kib`. |
-| `state_dir` | Absolute directory for run state on the board. |
+| `state_dir` | Absolute directory for run state on the board. The profile hash binds this value, so the runner ignores a state directory in a request and uses the profile's for every subcommand. |
 
 `staging.dir` and `state_dir` must be absolute, must not contain `..`, and must
 not be under `/dev`, `/sys` or `/proc`. `stage` creates the staging directory
@@ -204,8 +204,8 @@ The preflight check names the runner implements are `emmc-exists`,
 `arm-entry-after-boot-current`,
 `efivarfs-rw`, `secure-boot-disabled`, `staged-images-present`,
 `staged-image-checksums`, `staging-space-free` and `board-prerequisites`
-(GNU `install`, `sha256sum` and `dd` plus the Python standard library; see
-[Board prerequisites](#board-prerequisites)). `boot-order-unchanged` is not
+(GNU `install`, `sha256sum` and `dd`; the Python modules are the host's
+interpreter probe, see [Board prerequisites](#board-prerequisites)). `boot-order-unchanged` is not
 examined unless `--expected-boot-order` is given. `arm-entry-unique` passes when
 exactly one boot entry carries the profile's `arm.params.entry_label` (zero or
 several fail, naming the count and the label). `efibootmgr-supports-bootnext`
@@ -291,7 +291,9 @@ The runner keeps one JSON document per run at
 `<state_dir>/<run_id>/state.json`, and `<state_dir>/current` names the active
 run. Every write is temp file, fsync, rename, directory fsync, so an interruption
 leaves either the previous complete file or the new complete file. Decisions use
-the phase and a monotonic sequence number, never wall time.
+the phase and a monotonic sequence number, never wall time. An image's entry
+carries `readback_after_cache_flush: true` once its read-back followed a flush
+of the partition's buffer cache.
 
 Phases, in order: `planned`, `table-writing`, `table-written`, `image-writing`,
 `image-written`, `verified`, `arming`, `armed`, `complete`. `failed` can follow
@@ -461,14 +463,21 @@ assumption is checked before any write phase, read-only:
   then the interpreter probe), and then runs one unprivileged `sh` tool probe
   before the space check and before anything is created. The tool probe runs
   `install --version`, `sha256sum --version` and `dd --version`, and refuses
-  naming each tool that fails to start or announces BusyBox.
+  naming each tool that fails to start or whose banner does not name GNU
+  coreutils. A BusyBox, toybox or uutils banner is refused, as is an empty one.
+  GNU `dd` prints `dd (coreutils) 9.x` without the word GNU, so the banner is
+  accepted as `(GNU coreutils)` or `(coreutils)`.
 - `check` (and so the pre-flight inside `plan` and `write`) lists
   `board-prerequisites` in the profile checks. It runs the same three
-  `--version` reads through the read-only operations layer, imports each
-  standard-library module the runner needs, and prints `FAIL  board
-  prerequisites: ...` naming every missing tool or module. It counts in the
-  `checks: N/M` total like any other check, and `--version` is the only form of
-  `install` the read-only layer accepts.
+  `--version` reads through the read-only operations layer, applies the same
+  banner rule, and prints `FAIL  board prerequisites: ...` naming every missing
+  or non-GNU tool. It counts in the `checks: N/M` total like any other check,
+  and `--version` is the only form of `install` the read-only layer accepts.
+
+The Python module check is not part of `board-prerequisites`: the runner imports
+every module at start-up, so a check that imports them inside the runner could
+never fail on a board. The module check is the host's interpreter probe, which
+runs before any runner call.
 
 Busybox portability is a deliberate limit, recorded under
 [Known limits](#known-limits).
@@ -640,7 +649,7 @@ marker to carry a ceiling and an upgrade trigger.
 | `_no_partition_table` and the lsblk sibling checks treat a tool failure as a verdict | `cmd_check.py` | a board whose lsblk or sfdisk fails for an unrelated reason reports the wrong cause | the first false verdict seen on a board |
 | Root executes `runner.pyz` and `request-*.json` from the SSH user's staging directory and honours the request's `tool_dir` | `host.py` install, `runner.py` `_run_sub` | any process running as that user can replace the runner after the hash check, or point `tool_dir` at its own binaries, and gain root; most relevant in sudo-password mode; `write` compares every staged image's stat signature (size, mtime, inode, device) and then re-hashes every staged image in full under the on-board lock just before its first mutation, which refuses an image replaced or edited in place since the scan; the re-hash narrows the window but does not close it, because a same-user replacement after the hash and before the `dd` is still only caught by the per-image re-verify, which stays | a board where the SSH user is not trusted as root, or before the tool is offered outside a lab; stage root-owned and drop the `tool_dir` request key |
 | `dd_sha256` read-back spools each full partition to a temporary file | `ops.py` `_exec` | images larger than free `/tmp` (a tmpfs `/tmp` fails after the image was written) | the first ENOSPC at read-back; hash the stream |
-| Busybox portability is not provided: the runner assumes GNU `install -d`, GNU `sha256sum --strict`, `dd conv=fsync status=none` and a full Python 3 standard library, and `board-prerequisites` only reports their absence | `cmd_check.py` `_board_prerequisites`, `host.py` `probe_board_tools` | boards with GNU coreutils and a full Python 3 | a busybox-userland board becomes a real target |
+| Busybox portability is not provided: the runner assumes GNU `install -d`, GNU `sha256sum --strict`, and `dd conv=fsync status=none`, and `board-prerequisites` only reports their absence (the Python modules are the host's interpreter probe's to check) | `cmd_check.py` `_board_prerequisites`, `host.py` `probe_board_tools` | boards with GNU coreutils and a full Python 3 | a busybox-userland board becomes a real target |
 | The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
 
 The arming record does not gain an `entry_preexisting` field and the state schema is not bumped, because no run record from before the firmware-entry change exists outside the bench.
@@ -683,6 +692,13 @@ the kit's create line has no counterpart, the kit's `-C` support check
 is replaced by `efibootmgr-supports-bootnext`, the kit's `-n` names the firmware's
 entry, restore runs `-N` but never `-B -b`, and the plan body is compared against
 the golden with only those lines rewritten.
+
+D11 records the one mutating call the kit does not make: `write` runs
+`blockdev --flushbufs <node>` between each `dd` and its read-back, so the
+read-back hashes the media and not the page cache `dd` just filled. The flush is
+gated and recorded like any other mutating verb, is reachable only from `write`,
+and a failed flush fails the run before the read-back. Every other mutating call
+and its order is the kit's.
 
 ### Readback and a duplicate filesystem UUID
 
