@@ -53,7 +53,7 @@ def base(board="example-board", description="an example"):
                 "params": {"entry_label": "UEFI eMMC Device"}},
         "guard": {"strategy": "boot-arg",
                   "params": {"argument": "avocado.flash=1", "partitions": ["boot"]}},
-        "staging": {"dir": "/var/tmp/avocado-flash", "min_free_kib": 1048576},
+        "staging": {"dir": "/var/lib/avocado-flash-staging", "min_free_kib": 1048576},
         "state_dir": "/var/lib/avocado-flash",
     }
 

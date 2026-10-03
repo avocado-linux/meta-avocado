@@ -34,7 +34,7 @@ from .cmd_status import _load_run, run_status
 from .cmd_write import run_write
 from . import evidence, state as runstate
 from .ops import ReadOnlyOps, RealOps
-from .profile import ProfileError, load_profile_bytes
+from .profile import READBACK_RUN_BASE, ProfileError, load_profile_bytes
 
 RUNNER_VERSION = "1"
 
@@ -249,8 +249,37 @@ def _do_restore(real, profile, phash, req):
     )
 
 
+def _readback_dirs(run_id):
+    """(mount_dir, out_dir) for a readback of ``run_id``, derived here and never taken from the request.
+
+    ``_discard`` runs a root rmtree on out_dir, so the request cannot name it. A symlink anywhere on the path
+    is refused, and so is an out_dir that already exists: its owner is an earlier readback of the same run id,
+    whose logs a failure of this one would otherwise delete.
+    """
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        raise _Exit(EXIT_USAGE, f"runner error: invalid run id {run_id!r}", sys.stderr)
+    run_dir = os.path.join(READBACK_RUN_BASE, run_id)
+    mount_dir, out_dir = os.path.join(run_dir, "mnt"), os.path.join(run_dir, "readback")
+    path = "/"
+    for part in [p for p in out_dir.split("/") if p]:
+        path = os.path.join(path, part)
+        if os.path.islink(path):
+            raise _Exit(EXIT_USAGE, f"runner error: readback path {path!r} is a symlink", sys.stderr)
+    if os.path.lexists(out_dir):
+        raise _Exit(
+            1,
+            f"runner error: {out_dir} already exists from an earlier readback of run {run_id}; "
+            "read and remove it, or name another run. Nothing mounted.",
+            sys.stderr,
+        )
+    if os.path.islink(mount_dir):
+        raise _Exit(EXIT_USAGE, f"runner error: readback path {mount_dir!r} is a symlink", sys.stderr)
+    return mount_dir, out_dir
+
+
 def _do_readback(real, profile, phash, req):
-    mount_dir, out_dir = _need(req, "mount_dir", "out_dir")
+    (run_id,) = _need(req, "run_id")
+    mount_dir, out_dir = _readback_dirs(run_id)
     if profile.arm.strategy != "none":
         (ref,) = _need(req, "reference_boot_order")
     else:

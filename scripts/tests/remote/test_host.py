@@ -22,7 +22,7 @@ from avocado_flash_remote.host import (
     SshTransport,
     StubTransport,
 )
-from avocado_flash_remote.profile import load_profile_bytes
+from avocado_flash_remote.profile import STAGING_MARKER, load_profile_bytes
 
 SHIPPED = pathlib.Path(host.__file__).resolve().parent / "profiles"
 PASSWORD = "hunter2-Zq9!"
@@ -377,10 +377,10 @@ def test_real_stage_call_order_and_modes(kit, resolved):
     tar = t.calls[tar_i]
     assert tar.dest_dir == resolved.profile.staging.dir
     names = set(tar.files)
-    assert names == {"boot.img", "rootfs.img", "MANIFEST.hashes", "profile.json", bundle_path.name}
+    assert names == {"boot.img", "rootfs.img", "MANIFEST.hashes", "profile.json", STAGING_MARKER, bundle_path.name}
     assert tar.files["profile.json"] == resolved.data
     assert tar.modes[bundle_path.name] == 0o755
-    for n in ("boot.img", "rootfs.img", "MANIFEST.hashes", "profile.json"):
+    for n in ("boot.img", "rootfs.img", "MANIFEST.hashes", "profile.json", STAGING_MARKER):
         assert tar.modes[n] == 0o644
     after = t.calls[tar_i + 1 :]
     assert any("sha256sum" in " ".join(c.argv) and "--strict" in " ".join(c.argv) for c in after)
@@ -1316,6 +1316,23 @@ def test_the_checksum_listing_sent_to_sha256sum_includes_the_manifest(kit, resol
     manifest_sha = hashlib.sha256((images / "MANIFEST.hashes").read_bytes()).hexdigest()
     assert f"{manifest_sha}  MANIFEST.hashes" in lines
     assert f"{_sha(resolved.data)}  profile.json" in lines
+
+
+def test_stage_writes_the_marker_restore_needs_and_lists_it_in_the_checksums(kit, resolved):
+    """Restore removes a staging directory only when stage left this file in it (5.43)."""
+    t, go = _stage(kit, resolved, handler_for(10_000_000))
+    go()
+    tar = next(c for c in t.calls if c.kind == "put_tar")
+    assert STAGING_MARKER in tar.files and tar.modes[STAGING_MARKER] == 0o644
+    data = tar.files[STAGING_MARKER]
+    listing = next(c.stdin_bytes for c in t.calls if c.stdin_bytes and b"profile.json" in c.stdin_bytes)
+    assert f"{_sha(data)}  {STAGING_MARKER}" in listing.decode().splitlines()
+
+
+def test_the_stage_dry_run_names_the_marker_too(kit, resolved, capsys):
+    images, bundle_path, _ = kit
+    host.stage(None, resolved.profile, resolved, images, bundle_path, dry_run=True)
+    assert STAGING_MARKER in capsys.readouterr().out
 
 
 def test_the_stage_zip_check_runs_privileged_like_the_runner(kit, resolved):

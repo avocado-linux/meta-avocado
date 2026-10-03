@@ -56,6 +56,7 @@ from avocado_flash_remote.arm import ArmRecord
 from avocado_flash_remote.cmd_check import run_check
 from avocado_flash_remote.cmd_readback import run_readback
 from avocado_flash_remote.cmd_restore import NOTE_LINE, run_restore
+from avocado_flash_remote.profile import STAGING_MARKER
 from avocado_flash_remote.host import HostError, RunResult, StubTransport
 from avocado_flash_remote.images import ScanResult
 from avocado_flash_remote.ops import OpFailed, OpResult, ReadOnlyOps, RecordingOps
@@ -581,6 +582,7 @@ def _efi(order=REF_ORDER, nxt=None, current="0001", extra=()):
 def _restore(tmp, *, armed=True, queue=None, phase="armed"):
     staging = tmp / "var" / "lib" / "staging"
     staging.mkdir(parents=True)
+    (staging / STAGING_MARKER).write_text("staged\n")  # restore removes only what the stage step marked
     state_dir = tmp / "state"
     state_dir.mkdir()
     profile = NS(arm=NS(strategy="uefi-bootnext", params={"entry_label": LABEL}), staging=NS(dir=str(staging)))
@@ -1288,8 +1290,8 @@ STAGE_TABLE = {
     "stage:dev-_dev_mmcblk0p1": _refused("/dev/mmcblk0p1"),
     "stage:dev-_dev_.._run_x": _refused("/dev/../run/x"),
     "stage:devmsg": _smap("profile_refuses_names_dev", "the refusal message names /dev"),
-    "stage:out-_tmp_x": _snone("n/a: the kit only allows /run and /var/tmp; the port's staging.dir is a profile field checked against /dev, /sys, /proc, '..', the shared system directories, a bare top-level directory and state_dir, so /tmp/x is accepted (pinned by test_stage_allow_list_is_not_ported)"),
-    "stage:out-_home_user_x": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /home/user/x is accepted"),
+    "stage:out-_tmp_x": _snone("n/a: the kit only allows /run and /var/tmp; the port's staging.dir is a profile field checked against /dev, /sys, /proc, '..', the shared system directories, a bare top-level directory, temporary directories, system trees and state_dir, so /tmp/x is refused by the loader (pinned by test_stage_allow_list_is_not_ported)"),
+    "stage:out-_home_user_x": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); the loader refuses /home/user/x as a system tree"),
     "stage:out-_etc": _snone("n/a: no /run|/var/tmp allow-list in the port; the loader refuses /etc as a shared system directory (5.41), so no stage is ever attempted"),
     "stage:out-_runx_y": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /runx/y is accepted"),
     "stage:out-_run": _snone("n/a: no /run|/var/tmp allow-list in the port; the loader refuses /run itself as a shared system directory (5.41), a dedicated /run/<name> is accepted"),
@@ -1387,7 +1389,7 @@ def run_stage_case(tmp, port):
             transport = StubTransport(_stage_handler())
             host.stage(transport, resolved.profile, resolved, tmp / "nonexistent", bpath, out=out.append)
             return NS(ok=True, calls=transport.calls, out=out, resolved=resolved, error=None)
-        staging = "/var/tmp/alt-stage" if port == "custom" else None
+        staging = "/var/lib/alt-stage" if port == "custom" else None
         resolved, images, bpath = _stage_kit(tmp, staging)
         if port == "corrupt_images":
             fail = lambda j, s: "MANIFEST.hashes" in j and "--strict -c" in j  # noqa: E731
@@ -1448,10 +1450,10 @@ def test_stage_case(name, tmp_path, golden):
         assert len(tars) == 1
         staging = r.resolved.profile.staging.dir
         if m.port == "custom":
-            assert staging == "/var/tmp/alt-stage"
+            assert staging == "/var/lib/alt-stage"
         t = tars[0]
         assert t.dest_dir == staging
-        assert set(t.files) == {"boot.img", "rootfs.img", "MANIFEST.hashes", "profile.json", r.bundle.name}
+        assert set(t.files) == {"boot.img", "rootfs.img", "MANIFEST.hashes", "profile.json", STAGING_MARKER, r.bundle.name}
         assert t.modes[r.bundle.name] == 0o755 and all(m_ == 0o644 for n, m_ in t.modes.items() if n != r.bundle.name)
         assert "NOTES.md" not in t.files
         for c in r.calls:
@@ -1479,13 +1481,14 @@ def test_stage_allow_list_is_not_ported():
     """Pins what the n/a stage:out-* rows rely on: no /run|/var/tmp allow-list, only the port's own rules.
 
     5.41 added those rules: stage re-owns what it creates as root, so a shared system directory or a bare
-    top-level one is refused by the loader. A dedicated subdirectory anywhere else is still accepted.
+    top-level one is refused by the loader, and 5.43 refuses temporary directories and system trees too. A
+    dedicated subdirectory anywhere else is still accepted.
     """
-    for d in ("/tmp/x", "/home/user/x", "/runx/y"):
+    for d in ("/srv/x", "/runx/y"):
         doc = json.loads(FIXTURE_NONE.read_text())
         doc["staging"]["dir"] = d
         assert load_profile_bytes(json.dumps(doc).encode()).staging.dir == d
-    for d in ("/etc", "/run", "/var/tmp"):
+    for d in ("/etc", "/run", "/var/tmp", "/tmp/x", "/home/user/x"):
         doc = json.loads(FIXTURE_NONE.read_text())
         doc["staging"]["dir"] = d
         with pytest.raises(ProfileError, match=r"staging\.dir"):

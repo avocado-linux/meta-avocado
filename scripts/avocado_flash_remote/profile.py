@@ -28,8 +28,17 @@ SCHEMA_VERSION = 1
 IDENTITY_KINDS = ("by-path", "serial", "sysfs-name")
 _BOARD_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # used with fullmatch: no leading dash, no trailing newline
 _FORBIDDEN_ROOTS = ("/dev", "/sys", "/proc")
-# Shared directories stage must never take over: it re-owns the directory it creates for the SSH user.
-_SHARED_DIRS = ("/tmp", "/var/tmp", "/run", "/var", "/etc", "/usr", "/home", "/root")
+# Staging is created for the SSH user and removed as root by restore, so it is a directory of its own: never
+# a temporary directory (world-writable, swept by others) and never a system tree.
+_STAGING_REFUSED_ROOTS = (
+    "/tmp", "/var/tmp", "/dev/shm",
+    "/usr", "/etc", "/opt", "/home", "/root", "/boot", "/lib", "/bin", "/sbin", "/var/lib/dpkg",
+)  # fmt: skip
+# Written by the host's stage into staging.dir and listed in the checksum listing: restore removes a staging
+# directory only when it carries this file, so a profile that names some other directory cannot make it a target.
+STAGING_MARKER = ".avocado-flash-staging"
+# Where readback mounts and copies, one directory per run id. The runner derives its paths below this.
+READBACK_RUN_BASE = "/run/avocado-flash"
 _SYSFS_ATTR_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
@@ -200,22 +209,33 @@ def _norm(value):
     return "/" + posixpath.normpath(value).lstrip("/")
 
 
-def _staging_dir(value, state_dir):
+def _staging_dir(value):
     """staging.dir, which stage creates (or fills) as root with ``install -d -o <ssh user>``.
 
-    It must be a directory of its own: not a shared system directory, not a bare top-level one, and not
-    the state directory or anything below it (the run records live there and are not the SSH user's).
+    It must be a directory of its own: not a bare top-level one, not a temporary directory and not a
+    system tree. How it relates to state_dir and the readback base is ``_check_disjoint``'s business.
     """
     _abs_path("staging.dir", value)
     norm = _norm(value)
     if len([c for c in norm.split("/") if c]) < 2:
         raise ProfileError("staging.dir", "must be a directory of its own below a top-level directory")
-    if norm in _SHARED_DIRS:
-        raise ProfileError("staging.dir", f"must not be the shared directory {norm}")
-    state = _norm(state_dir)
-    if norm == state or norm.startswith(state + "/"):
-        raise ProfileError("staging.dir", f"must not be or sit under state_dir {state}")
+    for root in _STAGING_REFUSED_ROOTS:
+        if norm == root or norm.startswith(root + "/"):
+            raise ProfileError("staging.dir", f"must not be or sit under {root}")
     return value
+
+
+def _nested(a, b) -> bool:
+    return posixpath.commonpath([a, b]) in (a, b)
+
+
+def _check_disjoint(named):
+    """Refuse two of the (label, path) pairs that are equal or nested: one root rmtree must not reach another's files."""
+    paths = [(label, _norm(path)) for label, path in named]
+    for i, (a_label, a) in enumerate(paths):
+        for b_label, b in paths[i + 1 :]:
+            if _nested(a, b):
+                raise ProfileError(a_label, f"must not be, contain or sit under {b_label} ({a} vs {b})")
 
 
 def _strategy(path, kind, value):
@@ -338,8 +358,11 @@ def load_profile_bytes(data: bytes) -> Profile:
     stg = _obj("staging", top["staging"], ("dir", "min_free_kib"))
     state_dir = _abs_path("state_dir", top["state_dir"])
     staging = Staging(
-        dir=_staging_dir(stg["dir"], state_dir),
+        dir=_staging_dir(stg["dir"]),
         min_free_kib=_int("staging.min_free_kib", stg["min_free_kib"], 1),
+    )
+    _check_disjoint(
+        [("staging.dir", staging.dir), ("state_dir", state_dir), ("the readback base", READBACK_RUN_BASE)]
     )
 
     # Cross-checks.

@@ -33,7 +33,10 @@ import os
 import pathlib
 import shutil
 import sys
+import tempfile
 import time
+
+import pytest
 
 from avocado_flash_remote import cli, host
 from avocado_flash_remote.host import HostError, SshTransport
@@ -141,8 +144,12 @@ IMAGE_NAMES = ("boot.img", "esp.img", "data.img")
 class LoopbackBoard:
     def __init__(self, tmp_path):
         self.tmp = pathlib.Path(tmp_path)
-        self.root = self.tmp / "board"
-        self.root.mkdir()
+        # The profile refuses a staging.dir under /tmp, /var/tmp or /home, where a pytest tmp_path lives; the
+        # per-user runtime directory is the one writable place outside them.
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if not runtime or not os.access(runtime, os.W_OK):
+            pytest.skip("the loopback board needs a writable XDG_RUNTIME_DIR: staging.dir may not sit under /tmp")
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix="avocado-flash-loopback-", dir=runtime))
         self.stage = self.root / "stage"
         self.state = self.root / "state"
         self.evidence = self.tmp / "ev"
@@ -252,6 +259,7 @@ class LoopbackBoard:
                     os.kill(pid, 9)  # only a runner this test started
                 except ProcessLookupError:
                     pass
+        shutil.rmtree(self.root, ignore_errors=True)
 
 
 class _capture_stderr:

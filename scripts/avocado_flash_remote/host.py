@@ -42,6 +42,7 @@ from typing import Any, Callable, Optional
 from . import evidence
 from .bundle import verify_bundle
 from .images import scan
+from .profile import STAGING_MARKER
 
 SUBCOMMANDS = ("check", "plan", "write", "restore", "readback", "status")
 
@@ -531,6 +532,9 @@ def _parse_manifest(images_dir: Path) -> list:
     return entries
 
 
+_MARKER_BODY = b"written by avocado-flash stage; restore removes this directory only while this file is present\n"
+
+
 def _plan_files(image_dir, bundle_path, resolved):
     image_dir = Path(image_dir)
     bundle_path = Path(bundle_path)
@@ -543,6 +547,8 @@ def _plan_files(image_dir, bundle_path, resolved):
     mh = image_dir / "MANIFEST.hashes"
     rows.append(("MANIFEST.hashes", mh, mh.stat().st_size, hashlib.sha256(mh.read_bytes()).hexdigest()))
     rows.append(("profile.json", bytes(resolved.data), len(resolved.data), resolved.sha256))
+    # What restore looks for before it removes this directory as root.
+    rows.append((STAGING_MARKER, _MARKER_BODY, len(_MARKER_BODY), hashlib.sha256(_MARKER_BODY).hexdigest()))
     problems = verify_bundle(bundle_path)
     if problems:
         raise HostError("bundle failed verification: " + "; ".join(problems[:3]))
@@ -663,7 +669,7 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     zcheck = transport.run([python, "-c", unzip, result.bundle_remote_path], None, sudo=True, timeout=120)
     if zcheck.rc != 0:
         raise HostError(f"the board's interpreter {python} cannot open the staged bundle (rc={zcheck.rc})")
-    sums = {n: h for n, _s, _z, h in rows if n in (bundle_name, "profile.json", "MANIFEST.hashes")}
+    sums = {n: h for n, _s, _z, h in rows if n in (bundle_name, "profile.json", "MANIFEST.hashes", STAGING_MARKER)}
     listing = "".join(f"{h}  {n}\n" for n, h in sorted(sums.items())).encode()
     check = transport.run(
         ["sh", "-c", 'cd "$1" && sha256sum --strict -c -', "sh", staging_dir],

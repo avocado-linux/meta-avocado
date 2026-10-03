@@ -13,6 +13,7 @@ import pytest
 
 from avocado_flash_remote import cli, evidence, host
 from avocado_flash_remote.host import RunResult, StubTransport
+from avocado_flash_remote.profile import READBACK_RUN_BASE
 from avocado_flash_remote.state import HostLock
 
 PASSWORD = "hunter2-Zq9!"
@@ -1111,10 +1112,11 @@ def test_readback_still_accepts_a_plain_run_id(images, tmp_path):
     rc, _ = run(args(images, tmp_path, "readback", "--run-id", "rb-1"), board)
     assert rc == 0
     req = [r for sub, r, _d in board.runs if sub == "readback"][0]
-    assert req["out_dir"].endswith("/rb-1/readback")
+    assert req["run_id"] == "rb-1"
 
 
 # --- task 5.38: readback output and mount point live on tmpfs under /run -------
+# (5.43: the runner derives both from the run id; the request names neither)
 
 
 def _readback_request(images, tmp_path, *extra):
@@ -1126,15 +1128,14 @@ def _readback_request(images, tmp_path, *extra):
 
 def test_readback_request_puts_mount_and_output_under_run_not_the_state_dir(images, tmp_path):
     req = _readback_request(images, tmp_path, "--run-id", "rb-1")
-    assert req["out_dir"] == "/run/avocado-flash/rb-1/readback"
-    assert req["mount_dir"] == "/run/avocado-flash/rb-1/mnt"  # per invocation (5.40), no longer one shared path
-    assert not req["out_dir"].startswith(req["state_dir"])
-    assert not req["mount_dir"].startswith(req["state_dir"])
+    assert req["run_id"] == "rb-1"
+    assert "out_dir" not in req and "mount_dir" not in req, "the board derives its own directories"
+    assert not READBACK_RUN_BASE.startswith(req["state_dir"])
 
 
-def test_readback_generated_run_id_also_lands_under_run(images, tmp_path):
+def test_readback_generated_run_id_is_a_plain_readback_id(images, tmp_path):
     req = _readback_request(images, tmp_path)
-    assert re.fullmatch(r"/run/avocado-flash/readback-[0-9a-f]{8}/readback", req["out_dir"])
+    assert re.fullmatch(r"readback-[0-9a-f]{8}", req["run_id"])
 
 
 def test_readback_with_a_disk_state_dir_still_reaches_the_mount_step(images, tmp_path):
@@ -1148,7 +1149,7 @@ def test_readback_with_a_disk_state_dir_still_reaches_the_mount_step(images, tmp
     req = _readback_request(images, tmp_path, "--run-id", "rb-1")
     profile = prof.load_profile_bytes((PROFILES / "jetson-agx-orin-j5012.json").read_bytes())
     disk, part = profile.target.device, "/dev/mmcblk0p16"
-    mnt, out = req["mount_dir"], req["out_dir"]
+    mnt, out = f"{READBACK_RUN_BASE}/rb-1/mnt", f"{READBACK_RUN_BASE}/rb-1/readback"
     probe = posixpath.dirname(out)
     fstype = "btrfs\n" if probe.startswith(req["state_dir"]) else "tmpfs\n"
     script = {
@@ -1169,13 +1170,13 @@ def test_readback_with_a_disk_state_dir_still_reaches_the_mount_step(images, tmp
     assert any(x.startswith("mount") for x in ops.log), res.lines
 
 
-def test_two_generated_readbacks_never_share_a_mount_directory(images, tmp_path):
+def test_two_generated_readbacks_never_share_a_run_id_and_so_never_a_mount_directory(images, tmp_path):
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     first = _readback_request(images, tmp_path / "a")
     second = _readback_request(images, tmp_path / "b")
-    assert first["mount_dir"] != second["mount_dir"]
-    assert re.fullmatch(r"/run/avocado-flash/readback-[0-9a-f]{8}/mnt", first["mount_dir"])
+    assert first["run_id"] != second["run_id"]
+    assert re.fullmatch(r"readback-[0-9a-f]{8}", first["run_id"])
 
 
 def test_readback_takes_the_per_host_lock_and_refuses_while_another_holds_it(images, tmp_path, board, capsys):

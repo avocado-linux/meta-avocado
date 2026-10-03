@@ -14,6 +14,7 @@ from avocado_flash_remote.cmd_restore import (
     check_staging_path,
     run_restore,
 )
+from avocado_flash_remote.profile import STAGING_MARKER
 from avocado_flash_remote.ops import RecordingOps
 
 LABEL = "UEFI eMMC Device"
@@ -47,6 +48,7 @@ def env(tmp_path):
     staging = tmp_path / "var" / "lib" / "staging"
     staging.mkdir(parents=True)
     (staging / "boot.img").write_bytes(b"x")
+    (staging / STAGING_MARKER).write_text("staged\n")
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     return NS(staging=staging, state_dir=state_dir, profile=make_profile(staging))
@@ -289,6 +291,38 @@ def test_default_remove_tree_deletes_staging(env):
     )  # fmt: skip
     assert r.exit_code == 0
     assert not env.staging.exists()
+
+
+def test_restore_leaves_a_staging_directory_the_stage_step_never_marked(env):
+    (env.staging / STAGING_MARKER).unlink()
+    mk_state(env, "failed")
+    out = []
+    r = run_restore(
+        RecordingOps(), env.profile, state_dir=env.state_dir,
+        staging_dir=str(env.staging), out=out.append,
+    )  # fmt: skip
+    assert r.exit_code == 1
+    assert (env.staging / "boot.img").exists(), "an unmarked directory is not ours to remove"
+    assert any("staging NOT removed" in ln and STAGING_MARKER in ln for ln in out), out
+
+
+def test_restore_without_state_also_leaves_an_unmarked_staging_directory(env):
+    (env.staging / STAGING_MARKER).unlink()
+    out = []
+    r = run_restore(
+        RecordingOps(), env.profile, state_dir=env.state_dir,
+        staging_dir=str(env.staging), out=out.append,
+    )  # fmt: skip
+    assert r.exit_code == 1 and env.staging.exists()
+
+
+def test_a_marker_that_is_a_symlink_does_not_authorise_removal(env, tmp_path):
+    (env.staging / STAGING_MARKER).unlink()
+    target = tmp_path / "elsewhere"
+    target.write_text("x")
+    os.symlink(target, env.staging / STAGING_MARKER)
+    with pytest.raises(StagingRefused, match="marker"):
+        check_staging_path(str(env.staging), str(env.staging))
 
 
 def test_staging_guard_rejects_wrong_path(env, tmp_path):
