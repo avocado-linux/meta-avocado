@@ -267,13 +267,14 @@ def test_plan_record_fields():
 
 
 def test_plan_record_names_the_bundle_that_wrote_it_when_the_runner_supplies_the_digest():
-    _res, _, rec = plan(bundle_sha256="c" * 64)
-    assert rec.calls[0][2]["bundle_sha256"] == "c" * 64
+    _res, _, rec = plan(bundle_json_sha256="c" * 64)
+    assert rec.calls[0][2]["bundle_json_sha256"] == "c" * 64
+    assert "bundle_sha256" not in rec.calls[0][2]
 
 
 def test_plan_record_has_no_bundle_field_without_a_digest():
     _res, _, rec = plan()
-    assert "bundle_sha256" not in rec.calls[0][2]
+    assert "bundle_json_sha256" not in rec.calls[0][2]
 
 
 def test_device_serial_recorded_when_available():

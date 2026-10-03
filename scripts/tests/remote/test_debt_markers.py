@@ -5,7 +5,7 @@ import re
 
 PKG = pathlib.Path(__file__).resolve().parents[2] / "avocado_flash_remote"
 MARKER = "devtool-debt:"
-EXPECTED_MARKERS = 7
+EXPECTED_MARKERS = 8
 
 
 def markers():
@@ -36,3 +36,11 @@ def test_every_marker_names_a_ceiling_and_an_upgrade_trigger():
         if not re.search(r"\bupgrade trigger:\s*\S", text, re.I):
             bad.append(f"{name}:{lineno} has no upgrade trigger")
     assert not bad, bad
+
+
+def test_the_status_build_match_exemption_is_marked_where_it_is_made():
+    lines = (PKG / "cli.py").read_text().splitlines()
+    at = next(i for i, l in enumerate(lines) if "match_build=sub != \"status\"" in l)
+    block = " ".join(l.strip() for l in lines[max(0, at - 4) : at])
+    assert MARKER in block
+    assert re.search(r"ceiling:.*only reads", block, re.I) and re.search(r"upgrade trigger:.*side effect", block, re.I)

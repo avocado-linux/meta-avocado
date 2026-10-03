@@ -10,6 +10,7 @@ import pytest
 from avocado_flash_remote import profile as prof
 from avocado_flash_remote import state as st
 from avocado_flash_remote.cmd_readback import (
+    MOUNT_OPTIONS,
     NO_JOURNAL_LINE,
     ReadbackError,
     make_guarded_copier,
@@ -101,7 +102,7 @@ def test_every_mount_is_read_only_and_only_mount_umount_mutate(profile, dirs):
     run(profile, dirs, ops)
     for call in ops.calls:
         if call.vector[0] == "mount":
-            assert call.vector[1] == "-o" and call.vector[2].split(",")[0] == "ro"
+            assert call.vector[1:3] == ["-o", MOUNT_OPTIONS]
         elif vector_mutates(call.vector):
             assert call.vector[0] == "umount"
     assert all(c.vector[0] in ("read_file", "realpath", "listdir") for c in ops.calls if c.kind == "fs")

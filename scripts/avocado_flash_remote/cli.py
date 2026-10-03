@@ -21,6 +21,7 @@ import json
 import math
 import re
 import secrets
+import shlex
 import sys
 import tempfile
 import time
@@ -70,11 +71,13 @@ gates:
 
 options:
   --board NAME             board profile name (required)
-  --images DIR             image directory with MANIFEST.hashes (stage)
+  --images DIR             image directory with MANIFEST.hashes (stage, except --runner-only)
   --host HOST              [user@]host, never starting with '-' (required except stage --dry-run)
   --extension-dir DIR      board-support extension profile directory
   --evidence-dir DIR       where per-run records are collected (default ./ssh-emmc-evidence)
   --dry-run                stage only: make no connection
+  --runner-only            stage only: re-stage just the runner bundle, profile and marker (no --images);
+                           the fix when a rebuilt tool refuses restore for a different staged build
   --assume-yes             let the runner skip its own interactive prompt
   --ack-run RUN_ID         acknowledge a run (write, restore)
   --emergency-disarm       restore: disarm without a run acknowledgement
@@ -109,6 +112,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--extension-dir")
     p.add_argument("--evidence-dir", default="./ssh-emmc-evidence")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--runner-only", action="store_true")
     p.add_argument("--assume-yes", action="store_true")
     p.add_argument("--ack-run")
     p.add_argument("--emergency-disarm", action="store_true")
@@ -146,10 +150,27 @@ class _Ctx:
         self.remote_python = args.remote_python
 
     # -- board access ------------------------------------------------------
-    def expected_bundle_sha(self) -> str:
-        """The sha256 of the runner bundle this tool builds for the profile (the build is deterministic)."""
+    def expected_runner_sha256(self) -> str:
+        """The sha256 of the runner.pyz file this tool builds for the profile (the build is deterministic).
+
+        The host's staged-build gate compares this; it is not the BUNDLE.json digest the records name.
+        """
         with tempfile.TemporaryDirectory(prefix="afr-bundle-") as tmp:
             return build_bundle(self.resolved.data, Path(tmp) / BUNDLE_NAME, TOOL_VERSION).sha256
+
+    def restage_command(self) -> str:
+        """The command that replaces the staged runner with this tool's build, images untouched."""
+        a = self.args
+        parts = ["stage", "--runner-only", "--board", a.board]
+        if a.extension_dir:
+            parts += ["--extension-dir", a.extension_dir]
+        parts += ["--host", a.host]
+        parts += [f"--ssh-opt={o}" for o in a.ssh_opt]
+        if a.batch:
+            parts.append("--batch")
+        if a.remote_python != host.DEFAULT_PYTHON:
+            parts += ["--remote-python", a.remote_python]
+        return f"{PREFIX} " + " ".join(shlex.quote(p) for p in parts)
 
     def connect(self, need_staged: bool, match_build: bool = True) -> Optional[int]:
         """Open the transport. Returns an exit code to stop with, else None.
@@ -174,9 +195,12 @@ class _Ctx:
                 return 1
             if match_build:
                 try:
-                    host.check_staged_build(self.transport, self.bundle_remote, self.expected_bundle_sha())
+                    host.check_staged_build(self.transport, self.bundle_remote, self.expected_runner_sha256())
                 except host.HostUnreachable:
                     raise
+                except host.StaleBuild as exc:
+                    _err(f"{PREFIX}: {exc}: run `{self.restage_command()}`")
+                    return 1
                 except host.HostError as exc:
                     _err(f"{PREFIX}: {exc}")
                     return 1
@@ -224,17 +248,23 @@ class _Ctx:
 
 def _do_stage(ctx: _Ctx) -> int:
     args = ctx.args
-    if not args.images:
+    if args.runner_only:
+        if args.images:
+            raise _Usage("stage --runner-only takes no --images: it leaves the staged images alone")
+    elif not args.images:
         raise _Usage("stage needs --images DIR")
     with tempfile.TemporaryDirectory(prefix="afr-bundle-") as tmp:
         info = build_bundle(ctx.resolved.data, Path(tmp) / BUNDLE_NAME, TOOL_VERSION)
         if args.dry_run:
-            host.stage(None, ctx.profile, ctx.resolved, args.images, info.path, dry_run=True, out=ctx.out)
+            host.stage(None, ctx.profile, ctx.resolved, args.images, info.path, dry_run=True, out=ctx.out, runner_only=args.runner_only)
             return 0
         rc = ctx.connect(need_staged=False)
         if rc is not None:
             return rc
-        result = host.stage(ctx.transport, ctx.profile, ctx.resolved, args.images, info.path, out=ctx.out, python=ctx.remote_python)
+        result = host.stage(
+            ctx.transport, ctx.profile, ctx.resolved, args.images, info.path,
+            out=ctx.out, python=ctx.remote_python, runner_only=args.runner_only,
+        )
     ctx.out(f"staged to {result.staging_dir}")
     return 0
 
@@ -261,6 +291,9 @@ def _exit_code(sub: str, rc: int) -> int:
 
 
 def _do_simple(ctx: _Ctx, sub: str, request: dict) -> int:
+    # devtool-debt: status is the one subcommand exempt from the staged-build match, by name. Ceiling: status
+    # only reads state_dir and writes nothing, so an older staged runner is safe to ask. Upgrade trigger:
+    # status gains a side effect, or the request schema changes; then match the build like every other sub.
     rc = ctx.connect(need_staged=True, match_build=sub != "status")
     if rc is not None:
         return rc
@@ -723,6 +756,8 @@ def _run(argv, factory, ask_password, confirm, sleep, out, poll_interval) -> int
         return 64
     args = _parser().parse_args(argv)
     sub = args.subcommand
+    if args.runner_only and sub != "stage":
+        raise _Usage("--runner-only is an option of stage only")
 
     if not (sub == "stage" and args.dry_run):
         if not args.host:

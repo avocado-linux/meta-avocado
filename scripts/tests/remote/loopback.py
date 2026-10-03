@@ -43,6 +43,7 @@ from avocado_flash_remote.host import HostError, SshTransport
 from loopback_ops import DEVICE, HOLD_FILE, IN_DD_FILE, loopback_profile
 
 HERE = pathlib.Path(__file__).resolve().parent
+TOOL_PATH = ":".join(host.DEFAULT_TOOL_DIRS)
 
 
 def wait_until(pred, timeout=15.0, step=0.02):
@@ -103,6 +104,8 @@ class LoopbackTransport(SshTransport):
     def _confine(self, argv):
         root = str(self.root)
         for arg in argv:
+            if arg == TOOL_PATH:  # the board-tool probe's search path: directories it looks in, never a path it touches
+                continue
             if arg.startswith("/") and not (arg == root or arg.startswith(root + "/") or arg.startswith("/proc/")):
                 raise HostError(f"loopback: {arg!r} is outside the loopback root")
 

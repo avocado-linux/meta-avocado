@@ -72,6 +72,11 @@ def df_ok(avail_kib: int) -> RunResult:
 
 
 def _is_tool_probe(argv) -> bool:
+    argv = list(argv)
+    if argv[:2] == ["sudo", "-n"]:  # the probe runs as root, on the runner's own tool path
+        argv = argv[2:]
+    elif argv[:4] == ["sudo", "-S", "-p", ""]:
+        argv = argv[4:]
     return argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]
 
 
@@ -722,14 +727,29 @@ def test_reacquire_resets_root_mode():
 MISSING_ON_TARGET = "hashlib _hashlib _sha2 json tempfile datetime socket getpass base64 random uuid secrets".split()
 
 
-def probe_handler(missing=(), rc=0, version="3.12.1"):
-    """A board whose interpreter lacks `missing` (names it was asked about)."""
+def _is_exists_probe(argv) -> bool:
+    argv = list(argv)
+    if argv[:2] == ["sudo", "-n"]:
+        argv = argv[2:]
+    return argv[:2] == ["sh", "-c"] and "command -v" in argv[2]
+
+
+def probe_handler(missing=(), rc=0, version="3.12.1", present=True):
+    """A board whose interpreter lacks `missing` (names it was asked about).
+
+    ``present=False`` is an interpreter that is not installed: the existence probe answers its own exit code
+    and a direct sudo exec answers what sudo does for a missing command (exit 1, not 127).
+    """
 
     def h(argv, stdin, sudo):
         argv = list(argv)
+        if _is_exists_probe(argv):
+            return RunResult(0 if present else 127)
         if argv[:2] == ["sudo", "-n"]:  # the probe runs the way the runner does: privileged
             argv = argv[2:]
         if len(argv) >= 3 and argv[1] == "-c":
+            if not present:
+                return RunResult(1, b"", f"sudo: {argv[0]}: command not found".encode())
             if rc != 0:
                 return RunResult(rc, b"", b"sh: not found")
             asked = set(re.findall(r"'([A-Za-z0-9_]+)'", argv[2]))
@@ -756,7 +776,9 @@ def test_probe_ok_returns_version_and_runs_list_form():
     t = StubTransport(handler=probe_handler())
     ver = host.probe_interpreter(t, "/opt/py/bin/python3", ["hashlib", "json", "sys"])
     assert ver == "3.12.1"
-    (c,) = t.calls
+    exists, c = t.calls
+    # Existence first, as root like the runner, because sudo exits 1 (not 127) for a missing command.
+    assert _is_exists_probe(exists.argv) and exists.sudo is True and exists.argv[-1] == "/opt/py/bin/python3"
     # 5.41: privileged, like the runner, so "remote python" is the interpreter that runs it.
     assert c.argv[:4] == ["sudo", "-n", "/opt/py/bin/python3", "-c"] and len(c.argv) == 5
     assert c.sudo is True
@@ -776,10 +798,34 @@ def test_probe_missing_modules_refuses_naming_them():
 
 
 def test_probe_interpreter_not_found():
-    t = StubTransport(handler=probe_handler(rc=127))
+    # What sudo returns for a missing command: exit 1 and its own words, never 127.
+    t = StubTransport(handler=probe_handler(present=False))
     with pytest.raises(HostError) as ei:
         host.probe_interpreter(t, "/nope/python", ["sys"])
-    assert "not found" in str(ei.value) and "/nope/python" in str(ei.value) and "--remote-python" in str(ei.value)
+    assert "interpreter not found" in str(ei.value) and "/nope/python" in str(ei.value) and "--remote-python" in str(ei.value)
+
+
+def test_a_failing_interpreter_that_exists_is_not_reported_as_missing():
+    t = StubTransport(handler=probe_handler(rc=1))
+    with pytest.raises(HostError) as ei:
+        host.probe_interpreter(t, "python3", ["sys"])
+    assert "failed on the board" in str(ei.value) and "not found" not in str(ei.value)
+
+
+def test_the_stage_zip_check_reports_a_missing_interpreter_not_an_unopenable_bundle(kit, resolved):
+    inner = handler_for(10_000_000)
+
+    def h(argv, stdin, sudo):
+        if _is_exists_probe(argv):
+            return RunResult(127)
+        if any("zipfile" in a for a in argv):
+            return RunResult(1, b"", b"sudo: python3: command not found")
+        return inner(argv, stdin, sudo)
+
+    t, go = _stage(kit, resolved, h)
+    with pytest.raises(HostError) as ei:
+        go()
+    assert "interpreter not found" in str(ei.value) and "cannot open the staged bundle" not in str(ei.value)
 
 
 def test_probe_garbled_output_refuses():
@@ -1169,19 +1215,23 @@ def test_stage_refuses_a_board_missing_gnu_tools_naming_them_before_any_write(ki
     assert "busybox" in msg.lower() or "GNU" in msg
     assert not any(c.kind == "put_tar" for c in t.calls)
     assert not any("install" in c.argv for c in t.calls)
-    assert not any(c.sudo for c in t.calls)
+    # Only the read-only tool probe itself runs as root before the refusal.
+    assert [c for c in t.calls if c.sudo] == [t.calls[0]]
 
 
-def test_stage_tool_probe_is_the_first_remote_call_and_is_unprivileged(kit, resolved):
+def test_stage_tool_probe_is_the_first_remote_call_and_runs_as_root_on_the_runners_tool_path(kit, resolved):
     images, bundle_path, _ = kit
     t = StubTransport(handler=handler_for(10_000_000))
     host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
     first = t.calls[0]
-    assert _is_tool_probe(first.argv) and first.sudo is False
+    assert _is_tool_probe(first.argv) and first.sudo is True
+    # The runner searches only DEFAULT_TOOL_DIRS, so the probe must resolve the tools the same way as root.
+    assert first.argv[:3] == ["sudo", "-n", "sh"] and first.argv[-1] == "/usr/sbin:/usr/bin:/sbin:/bin"
+    script = first.argv[4]
     for tool in ("install", "sha256sum", "dd"):
-        assert f"{tool}" in first.argv[2]
+        assert f"{tool}" in script
     for verb in ("-d ", "of=", "rm ", "mv ", "chmod"):
-        assert verb not in first.argv[2]
+        assert verb not in script
 
 
 @pytest.mark.parametrize("garbage", [b"", b"banana\n"])
@@ -1202,20 +1252,36 @@ def test_stage_refuses_when_the_tool_probe_answer_is_unintelligible(kit, resolve
 # --- the tool probe matches GNU coreutils positively (task 5.42) ------------
 
 
-def _run_probe_script(tmp_path, banners):
-    """Run the real probe shell text against stub tools that print ``banners`` (tool -> text or None for absent)."""
-    import subprocess
-
-    bindir = tmp_path / "probe-bin"
-    bindir.mkdir()
+def _make_tools(directory, banners):
+    directory.mkdir()
     for tool, banner in banners.items():
         if banner is not None:
-            p = bindir / tool
-            p.write_text(f"#!/bin/sh\necho '{banner}'\n")  # builtins only: PATH holds just this directory
+            p = directory / tool
+            p.write_text(f"#!/bin/sh\necho '{banner}'\n")  # builtins only: PATH holds just these directories
             p.chmod(0o755)
-    done = subprocess.run(["/bin/sh", "-c", host._TOOL_PROBE], capture_output=True, text=True,
-                          env={"PATH": str(bindir)}, check=False)  # fmt: skip
+    return directory
+
+
+def _run_probe_script(tmp_path, banners, login_banners=None):
+    """Run the real probe shell text. ``banners`` (tool -> text or None for absent) are the tools on the path
+    handed to the probe; ``login_banners`` are tools on the login PATH the process inherits."""
+    bindir = _make_tools(tmp_path / "probe-bin", banners)
+    login = _make_tools(tmp_path / "login-bin", login_banners or {})
+    done = subprocess.run(["/bin/sh", "-c", host._TOOL_PROBE, "sh", str(bindir)], capture_output=True, text=True,
+                          env={"PATH": str(login)}, check=False)  # fmt: skip
     return done.stdout.strip().splitlines()[-1]
+
+
+def test_a_gnu_tool_on_the_login_path_does_not_mask_a_busybox_one_on_the_system_path(tmp_path):
+    busybox = "BusyBox v1.36.1 multi-call binary."
+    got = _run_probe_script(
+        tmp_path, {**GNU_BANNERS, "dd": busybox}, login_banners={"dd": "dd (coreutils) 9.4"}
+    )
+    assert got == "MISSING dd"
+
+
+def test_a_tool_only_on_the_login_path_is_not_found(tmp_path):
+    assert _run_probe_script(tmp_path, {**GNU_BANNERS, "install": None}, login_banners={"install": "install (GNU coreutils) 9.4"}) == "MISSING install"
 
 
 GNU_BANNERS = {t: f"{t} (GNU coreutils) 9.4" for t in ("install", "sha256sum", "dd")}
@@ -1281,16 +1347,70 @@ def test_stage_creates_the_directory_only_when_it_is_absent_and_looks_first_as_r
 
 
 def test_stage_leaves_an_existing_directory_owned_by_the_ssh_user_as_it_is(kit, resolved):
-    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator\n"))
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator 755\n"))
     go()
     assert not any("install" in c.argv for c in t.calls)
+    assert not any("chmod" in c.argv for c in t.calls)
     assert any(c.kind == "put_tar" for c in t.calls)
+
+
+@pytest.mark.parametrize("mode", [b"777", b"775", b"757", b"1777", b"2775", b"770"], ids=lambda m: m.decode())
+def test_stage_tightens_a_group_or_other_writable_directory_the_ssh_user_owns_without_privilege(kit, resolved, mode):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator " + mode + b"\n"))
+    go()
+    (chmod,) = [c for c in t.calls if "chmod" in c.argv]
+    assert chmod.argv == ["chmod", "0755", resolved.profile.staging.dir] and chmod.sudo is False
+    first_copy = next(i for i, c in enumerate(t.calls) if c.kind == "put_tar")
+    assert t.calls.index(chmod) < first_copy
+
+
+@pytest.mark.parametrize("mode", [b"755", b"750", b"700", b"0755"], ids=lambda m: m.decode())
+def test_stage_accepts_a_directory_nobody_else_can_write_and_does_not_chmod_it(kit, resolved, mode):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator " + mode + b"\n"))
+    go()
+    assert not any("chmod" in c.argv for c in t.calls)
+
+
+def test_stage_refuses_when_the_tightening_chmod_fails(kit, resolved):
+    inner = handler_for(10_000_000, dir_answer=b"OWNER operator 777\n")
+
+    def h(argv, stdin, sudo):
+        if "chmod" in argv:
+            return RunResult(1, b"", b"Operation not permitted")
+        return inner(argv, stdin, sudo)
+
+    t, go = _stage(kit, resolved, h)
+    with pytest.raises(HostError, match="staging directory"):
+        go()
+    assert not any(c.kind == "put_tar" for c in t.calls)
+
+
+def test_stage_never_chmods_a_directory_another_user_owns_even_when_it_is_writable(kit, resolved):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER root 777\n"))
+    with pytest.raises(HostError, match="staging directory"):
+        go()
+    assert not any("chmod" in c.argv for c in t.calls)
+
+
+def test_the_directory_probe_prints_owner_and_mode_under_the_real_shell(tmp_path):
+    d = tmp_path / "staging"
+    d.mkdir()
+    d.chmod(0o775)
+    done = subprocess.run(["/bin/sh", "-c", host._DIR_PROBE, "sh", str(d)], capture_output=True, text=True, check=True)
+    owner = done.stdout.split()
+    assert owner[0] == "OWNER" and owner[2] == "775" and len(owner) == 3
 
 
 @pytest.mark.parametrize(
     "answer",
-    [b"OWNER root\n", b"OWNER UNKNOWN\n", b"SYMLINK\n", b"NOTDIR\n", b"", b"banana\n", b"OWNER operator extra\n"],
-    ids=["other-owner", "no-such-uid", "symlink", "not-a-directory", "empty", "garbage", "extra-fields"],
+    [
+        b"OWNER root 755\n", b"OWNER UNKNOWN 755\n", b"SYMLINK\n", b"NOTDIR\n", b"", b"banana\n",
+        b"OWNER operator extra\n", b"OWNER operator\n", b"OWNER operator 7x5\n", b"OWNER operator 755 extra\n",
+    ],
+    ids=[
+        "other-owner", "no-such-uid", "symlink", "not-a-directory", "empty", "garbage",
+        "extra-fields", "no-mode", "bad-mode", "too-many-fields",
+    ],
 )
 def test_stage_refuses_a_staging_directory_the_ssh_user_does_not_own_and_changes_nothing(kit, resolved, answer):
     t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=answer))
@@ -1341,3 +1461,43 @@ def test_the_stage_zip_check_runs_privileged_like_the_runner(kit, resolved):
     zcheck = next(c for c in t.calls if c.kind == "run" and any("zipfile" in a for a in c.argv))
     assert zcheck.sudo is True
     assert zcheck.argv[:3] == ["sudo", "-n", "python3"]
+
+
+# --- runner-only staging --------------------------------------------------
+
+
+def _stage_runner_only(kit, resolved, handler):
+    _images, bundle_path, _ = kit
+    t = StubTransport(handler=handler)
+    return t, lambda: host.stage(t, resolved.profile, resolved, None, bundle_path, dry_run=False, runner_only=True)
+
+
+def test_runner_only_stage_copies_the_bundle_profile_and_marker_with_the_same_modes(kit, resolved):
+    t, go = _stage_runner_only(kit, resolved, handler_for(10_000_000))
+    go()
+    (tar,) = [c for c in t.calls if c.kind == "put_tar"]
+    bundle_name = kit[1].name
+    assert sorted(tar.files) == sorted([bundle_name, "profile.json", STAGING_MARKER])
+    assert tar.modes == {bundle_name: 0o755, "profile.json": 0o644, STAGING_MARKER: 0o644}
+
+
+def test_runner_only_stage_verifies_the_bundle_marker_and_profile_on_the_board_but_not_the_images(kit, resolved):
+    t, go = _stage_runner_only(kit, resolved, handler_for(10_000_000))
+    go()
+    assert not any("MANIFEST.hashes" in " ".join(c.argv) for c in t.calls if c.kind == "run")
+    listing = next(c.stdin_bytes for c in t.calls if c.stdin_bytes and b"profile.json" in c.stdin_bytes)
+    names = [ln.split("  ", 1)[1] for ln in listing.decode().splitlines()]
+    assert sorted(names) == sorted([kit[1].name, "profile.json", STAGING_MARKER])
+
+
+def test_runner_only_stage_keeps_the_directory_ownership_rules(kit, resolved):
+    t, go = _stage_runner_only(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER root 755\n"))
+    with pytest.raises(HostError, match="staging directory"):
+        go()
+    assert not any(c.kind == "put_tar" for c in t.calls)
+
+
+def test_runner_only_dry_run_is_offline_and_names_only_the_runner_files(kit, resolved, capsys):
+    host.stage(None, resolved.profile, resolved, None, kit[1], dry_run=True, runner_only=True)
+    out = capsys.readouterr().out
+    assert kit[1].name in out and STAGING_MARKER in out and "boot.img" not in out

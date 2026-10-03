@@ -54,7 +54,9 @@ def test_archive_runs_version(built, tmp_path):
     rc, out, err = _run([sys.executable, str(info.path), "--version"], tmp_path, "v")
     assert rc == 0, err
     assert out.splitlines()[0] == f"avocado-flash-runner {runner.RUNNER_VERSION}"
-    assert any(ln.startswith("bundle sha256 ") for ln in out.splitlines())
+    # Says which digest it is: BUNDLE.json's, not the archive file's (that one is what the host gate compares).
+    digest = [ln for ln in out.splitlines() if ln.startswith("BUNDLE.json sha256 ")]
+    assert len(digest) == 1 and digest[0].split()[-1] == _bundle_json_sha(info.path)
 
 
 def test_archive_runs_under_python310(built, tmp_path):
@@ -285,7 +287,7 @@ def test_plan_wiring_and_exit_code(tmp_path, recs):
         "staging_dir": "/stage",
         "run_dir": str(tmp_path / "state" / "r1" / "records"),
         "run_id": "r1",
-        "bundle_sha256": _bundle_json_sha(info.path),
+        "bundle_json_sha256": _bundle_json_sha(info.path),
     }
 
 
@@ -300,16 +302,17 @@ def test_manifest_records_the_bundle_digest_the_runner_read(tmp_path, recs, sub)
     info = _archive_for_runner(tmp_path)
     runner.main([sub, "--request", str(_request(tmp_path))], archive=info.path)
     manifest = json.loads((tmp_path / "state" / "r1" / "records" / "MANIFEST.json").read_text())
-    assert manifest["bundle_sha256"] == _bundle_json_sha(info.path)
+    assert manifest["bundle_json_sha256"] == _bundle_json_sha(info.path)
+    assert "bundle_sha256" not in manifest
 
 
 def test_a_bundle_digest_in_the_request_is_ignored_in_favour_of_the_archive_s_own(tmp_path, recs):
     info = _archive_for_runner(tmp_path)
-    runner.main(["plan", "--request", str(_request(tmp_path, bundle_sha256="0" * 64))], archive=info.path)
+    runner.main(["plan", "--request", str(_request(tmp_path, bundle_json_sha256="0" * 64))], archive=info.path)
     (_args, kw), = recs["plan"].calls
-    assert kw["bundle_sha256"] == _bundle_json_sha(info.path)
+    assert kw["bundle_json_sha256"] == _bundle_json_sha(info.path)
     manifest = json.loads((tmp_path / "state" / "r1" / "records" / "MANIFEST.json").read_text())
-    assert manifest["bundle_sha256"] == _bundle_json_sha(info.path)
+    assert manifest["bundle_json_sha256"] == _bundle_json_sha(info.path)
 
 
 def test_write_wiring(tmp_path, recs):

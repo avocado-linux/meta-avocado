@@ -254,6 +254,21 @@ def test_loopops_answers_a_readback_from_what_was_written_to_that_partition(boar
     assert good.digest == ops._image_sha(1)
 
 
+@pytest.mark.parametrize(
+    "tail",
+    [["--delete", "{dev}", "1"], ["--force", "{dev}"], ["{dev}", "extra"], ["--wipe", "always", "{dev}"]],
+    ids=["delete", "force", "extra-arg", "wipe"],
+)
+def test_loopops_takes_only_the_exact_table_write_as_a_partition_table(board, tail):
+    import loopback_ops
+
+    ops = _loop_ops(board)
+    vec = ["sfdisk", *[a.format(dev=loopback_ops.DEVICE) for a in tail]]
+    with pytest.raises(loopback_ops.UnscriptedCall):
+        ops._exec(vec, stdin=b"x")
+    assert ops.partitioned is False and ops.sfdisk_input == b""
+
+
 def test_loopops_readback_of_an_unwritten_partition_is_not_the_images_hash(board):
     import loopback_ops
 

@@ -145,6 +145,8 @@ class Board:
         if argv[0] == "sh" and "cat >" in argv[2]:
             self.requests[argv[-1]] = json.loads(stdin)
             return RunResult(0)
+        if argv[0] == "sh" and "command -v" in argv[2]:  # the interpreter lookup, answering its own exit code
+            return RunResult(127 if self.interp_rc else 0)
         if argv[0] == "sh" and "/proc/" in argv[2]:
             if self.probe_fail is not None:
                 return self.probe_fail
@@ -181,7 +183,8 @@ class Board:
         if len(argv) >= 3 and argv[1] == "-c":
             self.probes.append(argv)
             if self.interp_rc:
-                return RunResult(self.interp_rc, b"", b"not found")
+                # What sudo returns for a missing command: exit 1 and its own words, never 127.
+                return RunResult(self.interp_rc, b"", f"sudo: {argv[0]}: command not found".encode())
             asked = set(re.findall(r"'([A-Za-z0-9_]+)'", argv[2]))
             gone = sorted(asked & self.missing)
             return RunResult(0, (("MISSING " + " ".join(gone)) if gone else "OK 3.12.1").encode() + b"\n")
@@ -702,10 +705,10 @@ def test_probe_runs_after_privilege_and_before_runner(images, tmp_path):
 
 
 def test_interpreter_not_found_message(images, tmp_path, capsys):
-    board = Board(tmp_path, interp_rc=127)
+    board = Board(tmp_path, interp_rc=1)
     rc, _ = run(args(images, tmp_path, "stage"), board)
     err = capsys.readouterr().err
-    assert rc == 1 and "not found" in err and "--remote-python" in err
+    assert rc == 1 and "interpreter not found" in err and "--remote-python" in err
 
 
 def test_remote_python_option_reaches_probe_and_runner(images, tmp_path):
@@ -1257,7 +1260,7 @@ def test_check_and_plan_keep_running_on_a_name_only_profile(images, tmp_path, bo
 
 # --- 5.41: the staged runner is this tool's build; a network failure is not a missing bundle ---------
 
-STALE_BUILD = "staged runner is from a different tool build: run stage again"
+STALE_BUILD = "staged runner is from a different tool build"
 
 
 @pytest.mark.parametrize("sub", ["check", "plan", "write", "readback", "restore"])
@@ -1341,3 +1344,70 @@ def test_plan_ssh_failure_exits_2_and_keeps_the_local_run_dir(images, tmp_path, 
     assert rc == 2
     assert "status" in capsys.readouterr().err
     assert [p for p in (tmp_path / "ev").iterdir() if p.is_dir()]
+
+
+# --- a rebuilt host tool can re-stage only the runner and then restore ---------------------
+
+RESTAGE_CMD = f"avocado-flash ssh-emmc stage --runner-only --board fixture-none --host {HOST}"
+
+
+def _runner_only_args(tmp_path, *extra):
+    return ["stage", "--runner-only", "--board", "fixture-none", "--host", HOST, "--evidence-dir", str(tmp_path / "ev"), *extra]
+
+
+@pytest.mark.parametrize("restore_extra", [["--ack-run", "run-x"], ["--emergency-disarm", "--ack-run", "run-x"]], ids=["restore", "disarm"])
+def test_a_rebuilt_tool_refuses_restore_naming_the_runner_only_restage_which_then_unblocks_it(
+    images, tmp_path, restore_extra, capsys
+):
+    board, _rid = _prepared(images, tmp_path)
+    board.bundle_sha = "f" * 64  # the staged runner is from an older tool build
+    board.runs.clear()
+    capsys.readouterr()
+    restore = ["restore", "--board", "fixture-none", "--host", HOST, "--evidence-dir", str(tmp_path / "ev"), *restore_extra]
+    rc, _ = run(restore, board)
+    assert rc == 1
+    assert "staged runner is from a different tool build" in capsys.readouterr().err
+    assert board.runs == []
+    board.bundle_sha = None  # the board now reports what the host copies
+    board.stub.calls.clear()
+    rc, text = run(_runner_only_args(tmp_path), board)
+    assert rc == 0, text
+    (tar,) = [c for c in board.stub.calls if c.kind == "put_tar"]
+    assert sorted(tar.files) == sorted([cli.BUNDLE_NAME, "profile.json", ".avocado-flash-staging"])
+    assert tar.modes[cli.BUNDLE_NAME] == 0o755 and tar.modes[".avocado-flash-staging"] == 0o644
+    rc, text = run(restore, board)
+    assert rc == 0, text
+    assert board.subs()[-1] == "restore"
+
+
+def test_the_stale_build_refusal_names_the_exact_runner_only_command(images, tmp_path, capsys):
+    board, rid = _prepared(images, tmp_path)
+    board.bundle_sha = "f" * 64
+    capsys.readouterr()
+    rc, _ = run(_sub_args(images, tmp_path, "restore", rid), board)
+    assert rc == 1
+    assert f"run `{RESTAGE_CMD}`" in capsys.readouterr().err
+
+
+def test_runner_only_needs_no_images_directory_and_copies_no_image(images, tmp_path):
+    board = Board(tmp_path)
+    rc, text = run(_runner_only_args(tmp_path), board)
+    assert rc == 0, text
+    (tar,) = [c for c in board.stub.calls if c.kind == "put_tar"]
+    assert not {"boot.img", "esp.img", "data.img", "MANIFEST.hashes"} & set(tar.files)
+
+
+def test_runner_only_dry_run_is_offline_and_lists_only_the_runner_files(tmp_path):
+    rc, text = run(["stage", "--runner-only", "--dry-run", "--board", "fixture-none", "--evidence-dir", str(tmp_path / "ev")])
+    assert rc == 0
+    assert cli.BUNDLE_NAME in text and "profile.json" in text and "boot.img" not in text
+
+
+def test_runner_only_is_a_stage_option_and_takes_no_images(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    rc, _ = run(args(images, tmp_path, "check", "--runner-only"), board)
+    assert rc == 64
+    assert "--runner-only" in capsys.readouterr().err
+    rc, _ = run(args(images, tmp_path, "stage", "--runner-only"), board)
+    assert rc == 64
+    assert "--images" in capsys.readouterr().err

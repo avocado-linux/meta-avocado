@@ -192,6 +192,11 @@ def _reread_target_tests(ro: Ops, profile, staging_dir: str) -> None:
         cmd_plan._check_empty(ro, profile)
 
 
+# The efibootmgr verbs that only read. Every other efibootmgr verb counts as a boot-variable mutation, so a
+# mutating verb added later is watched without anyone remembering to list it here.
+_EFIBOOTMGR_READS = ("efibootmgr_list", "efibootmgr_help")
+
+
 class _ArmWatch:
     """Pass-through to the ops that notes whether a boot-variable mutation was attempted."""
 
@@ -201,7 +206,7 @@ class _ArmWatch:
 
     def __getattr__(self, name):
         attr = getattr(self._ops, name)
-        if name == "efibootmgr_next":
+        if name.startswith("efibootmgr") and name not in _EFIBOOTMGR_READS:
 
             def watched(*a, **kw):
                 self.attempted = True
@@ -323,9 +328,14 @@ def _esp_is_vfat(ops, profile) -> None:
     esp_numbers = {
         p["number"] for p in profile.layout.params["table"] if p["type_guid"].upper() == _ESP_TYPE_GUID
     }
-    for img in profile.images.values():
-        if img.partition not in esp_numbers:
-            continue
+    esp_images = [img for img in profile.images.values() if img.partition in esp_numbers]
+    if not esp_images:
+        # Nothing to check would read as a pass: an arming profile must put an image on the ESP it boots from.
+        raise _Failed(
+            "the profile arms a boot entry but maps no image to an EFI System Partition "
+            f"(partition type {_ESP_TYPE_GUID}); refusing to write"
+        )
+    for img in esp_images:
         node = layout.partition_node(profile.target.device, img.partition)
         res = ops.blkid(node, check=False)
         if res.text.strip() != "vfat":
