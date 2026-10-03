@@ -284,7 +284,10 @@ def _do_readback(real, profile, phash, req):
         (ref,) = _need(req, "reference_boot_order")
     else:
         ref = req.get("reference_boot_order")
-    kw = {"state_dir": profile.state_dir, "mount_dir": mount_dir, "out_dir": out_dir, "reference_boot_order": ref}
+    kw = {
+        "state_dir": profile.state_dir, "mount_dir": mount_dir, "out_dir": out_dir, "reference_boot_order": ref,
+        "exclusive_out": True,
+    }  # fmt: skip
     for key in ("data_partition_name", "fstype"):
         if req.get(key) is not None:
             kw[key] = req[key]

@@ -6,6 +6,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
+from avocado_flash_remote import cmd_restore
 from avocado_flash_remote import state as st
 from avocado_flash_remote.arm import ArmRecord
 from avocado_flash_remote.cmd_restore import (
@@ -339,6 +340,52 @@ def test_staging_guard_rejects_symlink(tmp_path):
     os.symlink(real, link)
     with pytest.raises(StagingRefused):
         check_staging_path(str(link), str(link))
+
+
+def test_staging_guard_rejects_a_path_reached_through_a_symlinked_parent(tmp_path):
+    real = tmp_path / "a" / "b" / "real"
+    (real / "stage").mkdir(parents=True)
+    (real / "stage" / STAGING_MARKER).write_text("x")
+    link = tmp_path / "a" / "b" / "link"
+    os.symlink(real, link)
+    through = str(link / "stage")
+    with pytest.raises(StagingRefused, match="symlink"):
+        check_staging_path(through, through)
+
+
+def test_staging_guard_rejects_a_mountpoint(env, monkeypatch):
+    monkeypatch.setattr(cmd_restore, "_ismount", lambda p: str(p) == str(env.staging))
+    with pytest.raises(StagingRefused, match="mount"):
+        check_staging_path(str(env.staging), str(env.staging))
+
+
+@pytest.mark.parametrize("kind", ["dir", "file"])
+def test_staging_guard_rejects_an_entry_on_another_device(env, monkeypatch, kind):
+    other = env.staging / "inner"
+    if kind == "dir":
+        other.mkdir()
+        (other / "f").write_text("x")
+    else:
+        other.write_text("x")
+    real_dev = cmd_restore._device_of
+    monkeypatch.setattr(cmd_restore, "_device_of", lambda p: -1 if str(p) == str(other) else real_dev(p))
+    with pytest.raises(StagingRefused, match="device"):
+        check_staging_path(str(env.staging), str(env.staging))
+
+
+def test_restore_removes_nothing_when_an_entry_sits_on_another_device(env, monkeypatch):
+    mk_state(env, "failed")
+    other = env.staging / "inner"
+    other.mkdir()
+    real_dev = cmd_restore._device_of
+    monkeypatch.setattr(cmd_restore, "_device_of", lambda p: -1 if str(p) == str(other) else real_dev(p))
+    out = []
+    r = run_restore(
+        RecordingOps(), env.profile, state_dir=env.state_dir,
+        staging_dir=str(env.staging), out=out.append,
+    )  # fmt: skip
+    assert r.exit_code == 1 and (env.staging / "boot.img").exists() and other.exists()
+    assert any("staging NOT removed" in ln and "device" in ln for ln in out), out
 
 
 @pytest.mark.parametrize("bad", ["/", "/run", ""])
@@ -812,6 +859,19 @@ def test_restore_fails_when_bootnext_still_names_the_entry_after_clearing(env):
     assert "BootNext 0005 still set: DO NOT REBOOT" in text
     assert removed == []
     assert st.load_state(env.state_dir).state.phase == "armed"
+
+
+def test_restore_names_the_manual_next_step_when_bootnext_stays_because_the_label_changed(env):
+    mk_state(env, "armed", rec())
+    renamed = efi(nxt="0005", extra=["Boot0005* Renamed by firmware\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)"])
+    ops = RecordingOps({LIST: [renamed, renamed, renamed]})
+    r, removed, out = go_raw(env, ops, ack_run_id="r1")
+    text = "\n".join(out)
+    assert r.exit_code == 1 and removed == []
+    assert mutations(ops) == []
+    assert "BootNext 0005 still set: DO NOT REBOOT" in text
+    assert "efibootmgr -N" in text and "efibootmgr -v" in text, text
+    assert "delete no boot entry" in text
 
 
 def test_emergency_disarm_fails_when_bootnext_still_names_the_entry_after_clearing(env):

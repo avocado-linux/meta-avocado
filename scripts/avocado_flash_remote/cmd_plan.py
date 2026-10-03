@@ -77,6 +77,12 @@ def _read_text(ops: Ops, path: str) -> str | None:
 # ------------------------------------------------------------------ checks
 
 
+def _check_esp_image(profile) -> None:
+    """An arming profile must put an image on the ESP it boots from: write's last check would otherwise run after the writes."""
+    if profile.arm.strategy != "none" and not layout.esp_images(profile.layout.params, profile.images):
+        raise _Refusal(f"{layout.NO_ESP_IMAGE}; nothing was changed")
+
+
 def _check_device(device: str) -> None:
     if "nvme" in device:
         raise _Refusal(f"refusing {device}: this tool never touches an NVMe device")
@@ -441,6 +447,7 @@ def run_plan(
     writer = record_writer or evidence.write_record
     try:
         _check_device(profile.target.device)
+        _check_esp_image(profile)
         _check_sectors(ops, profile)
         _check_not_in_use(ops, profile, staging_dir)
         _, serial = _resolve_identity(ops, profile)

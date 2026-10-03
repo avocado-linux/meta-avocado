@@ -642,6 +642,8 @@ class Board:
             return RunResult(0, b"OK\n")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n")
+        if argv[:3] == ["sh", "-c", host._ALIAS_PROBE]:
+            return RunResult(0, b"PLAIN\n" * (len(argv) - 4))  # no symlink on the state or readback path
         if argv[0] == "sh" and "stat -c" in argv[2]:
             return RunResult(0, b"ABSENT\n")  # the staging directory does not exist yet
         if argv[0] == "sh" and argv[2:3] and argv[2].startswith("d="):

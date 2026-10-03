@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Tuple
 
 from . import strategies
+from .layout import NO_ESP_IMAGE, esp_images
 
 SCHEMA_VERSION = 1
 IDENTITY_KINDS = ("by-path", "serial", "sysfs-name")
@@ -393,6 +394,8 @@ def load_profile_bytes(data: bytes) -> Profile:
                     f"images.{role}.partition",
                     f"partition {img.partition} is not in the layout table",
                 )
+        if arm.strategy != "none" and not esp_images(lp, images):
+            raise ProfileError("images", f"{NO_ESP_IMAGE}: map one, or set arm.strategy to none")
         if guard.strategy == "boot-arg":
             for name in guard.params["partitions"]:
                 if name not in names:

@@ -138,6 +138,8 @@ class Board:
             return RunResult(0, b"OK\n")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n")
+        if argv[:3] == ["sh", "-c", host._ALIAS_PROBE]:
+            return RunResult(0, b"PLAIN\n" * (len(argv) - 4))  # no symlink on the state or readback path
         if argv[0] == "sh" and "stat -c" in argv[2]:
             return RunResult(0, b"ABSENT\n")  # the staging directory does not exist yet
         if argv[0] == "sh" and argv[2:3] and argv[2].startswith("d="):
@@ -413,6 +415,19 @@ def test_failed_phase_is_not_complete(images, tmp_path, capsys):
     rc, text = run(args(images, tmp_path, "write", "--run-id", rid), board)
     assert rc == 1
     assert "write COMPLETE" not in text
+
+
+@pytest.mark.parametrize("extra", [[], ["--runner-only"]], ids=["full", "runner-only"])
+def test_stage_takes_the_per_host_lock_and_copies_nothing_while_another_holds_it(images, tmp_path, board, capsys, extra):
+    (tmp_path / "ev").mkdir(exist_ok=True)
+    with HostLock(tmp_path / "ev" / ".lock-op_board.local", HOST, "other"):
+        a = args(images, tmp_path, "stage", *extra)
+        if extra:
+            a = [x for x in a if x != str(images) and x != "--images"]
+        rc, _ = run(a, board)
+    assert rc == 1
+    assert "held by" in capsys.readouterr().err
+    assert board.staged is False, "nothing may be copied while another invocation holds the host lock"
 
 
 def test_host_lock_contention_refuses(images, tmp_path, board, capsys):

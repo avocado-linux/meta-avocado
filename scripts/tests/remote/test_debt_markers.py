@@ -5,7 +5,7 @@ import re
 
 PKG = pathlib.Path(__file__).resolve().parents[2] / "avocado_flash_remote"
 MARKER = "devtool-debt:"
-EXPECTED_MARKERS = 8
+EXPECTED_MARKERS = 9
 
 
 def markers():
@@ -41,6 +41,16 @@ def test_every_marker_names_a_ceiling_and_an_upgrade_trigger():
 def test_the_status_build_match_exemption_is_marked_where_it_is_made():
     lines = (PKG / "cli.py").read_text().splitlines()
     at = next(i for i, l in enumerate(lines) if "match_build=sub != \"status\"" in l)
-    block = " ".join(l.strip() for l in lines[max(0, at - 4) : at])
+    block = " ".join(l.strip() for l in lines[max(0, at - 6) : at])
     assert MARKER in block
     assert re.search(r"ceiling:.*only reads", block, re.I) and re.search(r"upgrade trigger:.*side effect", block, re.I)
+    prose = " ".join(block.replace("#", " ").split())
+    assert re.search(r"any file at the staged (runner )?path runs as root", prose, re.I), prose
+
+
+def test_the_stage_restage_window_is_marked_where_stage_takes_the_host_lock():
+    text = (PKG / "cli.py").read_text()
+    at = text.index('with ctx.lock("stage")')
+    block = text[max(0, at - 700) : at]
+    assert MARKER in block and "detached runner" in block
+    assert re.search(r"ceiling:.*not re-read", block, re.I | re.S) and re.search(r"upgrade trigger:.*lazily", block, re.I | re.S)

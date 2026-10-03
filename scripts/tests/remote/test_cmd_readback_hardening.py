@@ -339,3 +339,48 @@ def test_a_copy_is_still_refused_when_free_space_is_below_the_reserve(profile, d
     res, copies, lines = run(profile, dirs, ops, free_bytes=lambda p: 10, reserve=1000, cap=10**9)
     assert res.exit_code == 1 and copies == []
     assert any("exceeds the 0 bytes allowed" in ln for ln in lines), lines
+
+
+# ----------------------------------------------------------------- task 5.45
+
+
+def test_an_exclusive_readback_leaves_an_output_directory_it_did_not_create_alone(profile, dirs):
+    """The second readback of one run id loses the mkdir race and must not touch the first one's logs."""
+    mnt, out = dirs
+    (out / "journal").write_text("first run's log")
+    ops = RecordingOps(script(dirs))
+    res, copies, lines = run(profile, dirs, ops, exclusive_out=True, free_bytes=lambda p: 1, reserve=10**9)
+    assert res.exit_code == 1 and copies == []
+    assert (out / "journal").read_text() == "first run's log"
+    assert not any(c.startswith("mount ") for c in ops.log), ops.log
+    assert any("already exists" in ln for ln in lines), lines
+
+
+def test_an_exclusive_readback_creates_the_output_directory_and_still_cleans_up_its_own_failure(profile, tmp_path):
+    out = tmp_path / "fresh"
+    dirs_ = (tmp_path / "mnt", out)
+    s = script(dirs_)
+    del s[f"findmnt -no FSTYPE -T {out}"]
+    s[f"findmnt -no FSTYPE -T {tmp_path}"] = "tmpfs\n"
+    ops = RecordingOps(s)
+
+    def copier(src, dst):
+        (out / "partial").write_text("half")
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    res = run_readback(
+        ops, profile, mount_dir=str(tmp_path / "mnt"), out_dir=str(out), reference_boot_order="0001,0002,0003",
+        copier=copier, list_logs=lambda m: [f"{m}/log/boot.log"], exclusive_out=True, out=lambda x: None,
+    )  # fmt: skip
+    assert res.exit_code == 1 and not out.exists(), "this invocation created it, so it removes it"
+
+
+def test_the_runner_asks_for_an_exclusive_output_directory(monkeypatch):
+    from avocado_flash_remote import runner
+
+    seen = {}
+    monkeypatch.setattr(runner, "run_readback", lambda real, profile, **kw: seen.update(kw))
+    monkeypatch.setattr(runner, "_readback_dirs", lambda run_id: ("/m", "/o"))
+    profile = type("P", (), {"arm": type("A", (), {"strategy": "none"}), "state_dir": "/s"})
+    runner._do_readback(None, profile, "h", {"run_id": "r1"})
+    assert seen["exclusive_out"] is True

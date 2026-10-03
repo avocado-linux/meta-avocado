@@ -370,6 +370,7 @@ def test_readback_wiring(tmp_path, recs, rbbase):
         "mount_dir": str(rbbase / "r1" / "mnt"),
         "out_dir": str(rbbase / "r1" / "readback"),
         "reference_boot_order": "0001",
+        "exclusive_out": True,
     }
 
 
