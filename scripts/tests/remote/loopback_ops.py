@@ -143,7 +143,7 @@ class LoopOps(RecordingOps):
             if self.partitioned:
                 return OpResult(stdout=self.sfdisk_input)
             return OpResult(rc=1, stderr=f"sfdisk: {DEVICE}: does not contain a recognized partition table\n")
-        if vec[0] == "sfdisk" and vec[1:2] != ["--dump"]:
+        if vec == ["sfdisk", DEVICE]:  # the table write; any other sfdisk (--delete, --force, ...) is not taught
             if self._fault("skip-sfdisk") is None:
                 self.partitioned = True
                 self.sfdisk_input = bytes(stdin or b"")

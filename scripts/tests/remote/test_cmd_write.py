@@ -1360,6 +1360,64 @@ def test_esp_vfat_check_does_not_depend_on_the_role_being_named_esp():
         cmd_write._esp_is_vfat(ops, profile)
 
 
+def test_esp_vfat_check_fails_when_an_arming_profile_maps_no_image_to_an_esp():
+    """The loop over ESP images used to pass with nothing to check; an arming profile must have one."""
+    doc = json.loads(SHIPPED_BYTES)
+    for part in doc["layout"]["params"]["table"]:
+        if part["type_guid"].upper() == cmd_write._ESP_TYPE_GUID:
+            part["type_guid"] = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+    profile = prof.load_profile_bytes(json.dumps(doc).encode())
+    ops = RecordingOps({})
+    with pytest.raises(cmd_write._Failed, match="EFI System Partition"):
+        cmd_write._esp_is_vfat(ops, profile)
+    assert ops.calls == []
+
+
+def test_esp_vfat_check_needs_no_esp_image_when_the_profile_does_not_arm():
+    doc = json.loads(SHIPPED_BYTES)
+    doc["arm"] = {"strategy": "none", "params": {}}
+    for part in doc["layout"]["params"]["table"]:
+        part["type_guid"] = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+    profile = prof.load_profile_bytes(json.dumps(doc).encode())
+    assert profile.arm.strategy == "none"
+    cmd_write._esp_is_vfat(RecordingOps({}), profile)
+
+
+class _FakeEfiOps:
+    def __init__(self):
+        self.called = []
+
+    def efibootmgr_list(self):
+        self.called.append("efibootmgr_list")
+
+    def efibootmgr_next(self, entry):
+        self.called.append("efibootmgr_next")
+
+    def efibootmgr_delete_next(self):
+        self.called.append("efibootmgr_delete_next")
+
+    def efibootmgr_create(self):  # a mutating verb nobody has taught the watch about yet
+        self.called.append("efibootmgr_create")
+
+    def blockdev_flushbufs(self):
+        self.called.append("blockdev_flushbufs")
+
+
+@pytest.mark.parametrize("verb", ["efibootmgr_next", "efibootmgr_delete_next", "efibootmgr_create"])
+def test_arm_watch_notes_every_mutating_efibootmgr_verb(verb):
+    watch = cmd_write._ArmWatch(_FakeEfiOps())
+    assert watch.attempted is False
+    getattr(watch, verb)(*([1] if verb == "efibootmgr_next" else []))
+    assert watch.attempted is True and watch._ops.called == [verb]
+
+
+@pytest.mark.parametrize("verb", ["efibootmgr_list", "blockdev_flushbufs"])
+def test_arm_watch_ignores_reads_and_other_tools(verb):
+    watch = cmd_write._ArmWatch(_FakeEfiOps())
+    getattr(watch, verb)()
+    assert watch.attempted is False and watch._ops.called == [verb]
+
+
 def test_write_refuses_when_the_entry_number_changed_since_the_plan(env):
     moved = EFI_PRE.replace(f"Boot{ENTRY}*", "Boot0003*")
     res, ops = env.run(script=env.script(**{"efibootmgr -v": [EFI_PRE, moved, moved, moved]}))

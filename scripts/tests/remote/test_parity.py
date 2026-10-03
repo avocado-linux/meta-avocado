@@ -960,6 +960,8 @@ def d10(name, g, run):
 def d4_d10(name, g, run):
     assert g.exit == run.exit
     extra = f"ls -laR {MNT}/log/journal"
+    # The rewrite below would be a silent no-op without a hardened mount line, and a second one would escape it.
+    assert sum(HARDENED in ln for ln in run.lines) == 1, run.lines
     plain = [ln.replace(HARDENED, "mount -o ro ", 1) for ln in run.lines]
     assert extra in plain and extra not in g.lines
     assert [ln for ln in plain if ln != extra] == g.lines
@@ -1358,7 +1360,7 @@ def _stage_handler(fail_on=None, fail_all=False):
             return RunResult(1, b"x: FAILED", b"")
         if "df -Pk" in joined or "df" in argv:
             return _df_ok()
-        if argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]:
+        if "--version" in joined and "sha256sum" in joined and "command -v" not in joined:  # the tool probe, now privileged
             return RunResult(0, b"OK\n", b"")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n", b"")
@@ -1459,7 +1461,8 @@ def test_stage_case(name, tmp_path, golden):
         for c in r.calls:
             for a in c.argv:
                 if a.startswith("/"):
-                    assert a == staging or a.startswith(staging + "/") or a in ("/dev/null",), (c.argv, staging)
+                    # the tool probe's search path lists the system tool directories; it touches none of them
+                    assert a == staging or a.startswith(staging + "/") or a in ("/dev/null", ":".join(host.DEFAULT_TOOL_DIRS)), (c.argv, staging)
             assert not any(".." in a for a in c.argv)
         verifies = [c for c in r.calls if "--strict" in " ".join(c.argv)]
         assert len(verifies) == 2

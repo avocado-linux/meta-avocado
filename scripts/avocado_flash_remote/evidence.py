@@ -138,8 +138,9 @@ class RecordSet:
     host_utc: str
     board_utc: str
     artifacts: list[dict[str, Any]] = field(default_factory=list)
-    # The digest of the runner bundle that produced these records: which tool build wrote the disk.
-    bundle_sha256: str | None = None
+    # sha256 of the BUNDLE.json inside the runner bundle that produced these records: which tool build wrote
+    # the disk. Not the digest of the archive file, which the host's staged-build check compares.
+    bundle_json_sha256: str | None = None
 
     def __post_init__(self) -> None:
         self.run_dir = Path(self.run_dir)
@@ -170,8 +171,8 @@ class RecordSet:
             "run_status": run_status,
             "artifacts": sorted(self.artifacts, key=lambda a: a["name"]),
         }
-        if self.bundle_sha256:
-            manifest["bundle_sha256"] = self.bundle_sha256
+        if self.bundle_json_sha256:
+            manifest["bundle_json_sha256"] = self.bundle_json_sha256
         return manifest
 
     def finalize(self, run_status: str) -> Path:
@@ -217,10 +218,10 @@ def _manifest_problems(manifest: Any) -> list[str]:
         if skew is not None and (isinstance(skew, bool) or not isinstance(skew, (int, float))):
             out.append("manifest clocks.skew_seconds is not a number or null")
     # Optional: record sets written before the field existed carry none and stay valid; a present value must be a digest.
-    if "bundle_sha256" in manifest:
-        digest = manifest["bundle_sha256"]
+    if "bundle_json_sha256" in manifest:
+        digest = manifest["bundle_json_sha256"]
         if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
-            out.append("manifest field bundle_sha256 is not a sha256 hex digest")
+            out.append("manifest field bundle_json_sha256 is not a sha256 hex digest")
     if manifest.get("run_status") not in STATUSES:
         out.append(f"manifest run_status {manifest.get('run_status')!r} is not one of {STATUSES}")
     return out

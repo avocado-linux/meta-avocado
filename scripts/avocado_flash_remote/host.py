@@ -42,6 +42,7 @@ from typing import Any, Callable, Optional
 from . import evidence
 from .bundle import verify_bundle
 from .images import scan
+from .ops import DEFAULT_TOOL_DIRS
 from .profile import STAGING_MARKER
 
 SUBCOMMANDS = ("check", "plan", "write", "restore", "readback", "status")
@@ -52,6 +53,7 @@ _HOST_RE = re.compile(
 _NAME_RE = re.compile(r"^[A-Za-z0-9_+][A-Za-z0-9._+-]*\Z")
 _USER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*\Z")
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{64}\Z")
+_MODE_RE = re.compile(r"^[0-7]{3,4}\Z")
 
 _PYTHON_RE = re.compile(r"^[A-Za-z0-9_./+-]+\Z")
 DEFAULT_PYTHON = "python3"
@@ -408,8 +410,12 @@ def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_passwo
 
 # --- staged runner identity ---------------------------------------------------
 
-STALE_BUILD = "staged runner is from a different tool build: run stage again"
+STALE_BUILD = "staged runner is from a different tool build"
 UNVERIFIED_BUILD = "the staged runner could not be verified against this tool build: run stage again"
+
+
+class StaleBuild(HostError):
+    """The staged runner is not this tool's build; the caller names the command that re-stages it."""
 
 
 def check_staged_build(transport, bundle_remote_path: str, expected_sha256: str) -> None:
@@ -426,7 +432,7 @@ def check_staged_build(transport, bundle_remote_path: str, expected_sha256: str)
     if res.rc != 0 or not fields or not _SHA_RE.match(fields[0]):
         raise HostError(UNVERIFIED_BUILD)
     if fields[0].lower() != expected_sha256.lower():
-        raise HostError(STALE_BUILD)
+        raise StaleBuild(STALE_BUILD)
 
 
 # --- remote interpreter -----------------------------------------------------
@@ -448,10 +454,27 @@ def _probe_code(modules) -> str:
     )
 
 
+_INTERPRETER_HINT = "install a full python3 on the board or name one with --remote-python (interpreter: {})"
+# sudo exits 1, not 127, for a command it cannot find, which is indistinguishable from any other failure of
+# the command. Look the interpreter up first, as root and on root's PATH, with this probe's own exit code.
+_EXISTS_RC = 127
+_EXISTS_PROBE = f'command -v "$1" >/dev/null 2>&1 || exit {_EXISTS_RC}'
+
+
+def require_interpreter(transport, python: str) -> None:
+    """Refuse with 'interpreter not found' unless root can find ``python`` on the board."""
+    res = transport.run(["sh", "-c", _EXISTS_PROBE, "sh", python], None, sudo=True, timeout=60)
+    if res.rc == SSH_FAILURE:
+        raise HostUnreachable("the interpreter lookup did not get through")
+    if res.rc == _EXISTS_RC:
+        raise HostError(f"interpreter not found on the board: {python}; {_INTERPRETER_HINT.format(python)}")
+
+
 def probe_interpreter(transport, python: str, modules) -> str:
     """Return the board interpreter's version, or refuse naming what is missing."""
     python = validate_remote_python(python)
-    hint = f"install a full python3 on the board or name one with --remote-python (interpreter: {python})"
+    hint = _INTERPRETER_HINT.format(python)
+    require_interpreter(transport, python)
     # Privileged like the runner, so the version and modules reported are those of the interpreter that runs it.
     res = transport.run([python, "-c", _probe_code(modules)], None, sudo=True, timeout=60)
     if res.rc == 127:
@@ -474,8 +497,12 @@ def probe_interpreter(transport, python: str, modules) -> str:
 # GNU coreutils: "(GNU coreutils)", or "(coreutils)" which is how GNU dd words it. A BusyBox, toybox or uutils
 # ("(uutils coreutils)") banner is neither; the loop prints what it cannot confirm.
 # Read-only: it names no path and no write verb.
+#
+# It runs as root with the runner's own fixed tool path ($1, DEFAULT_TOOL_DIRS), not the SSH user's login
+# PATH: the runner never consults the inherited PATH, so a GNU tool the login shell sees must not hide a
+# busybox one the runner would run.
 _TOOL_PROBE = (
-    'm=""; for t in install sha256sum dd; do '
+    'PATH="$1"; export PATH; m=""; for t in install sha256sum dd; do '
     'o=$("$t" --version 2>&1) && case "$o" in *"(GNU coreutils)"*|*"(coreutils)"*) true;; *) false;; esac || m="$m $t"; done; '
     '[ -z "$m" ] && echo OK || echo "MISSING$m"'
 )
@@ -484,7 +511,7 @@ _PROBE_TOOLS = ("install", "sha256sum", "dd")
 
 def probe_board_tools(transport) -> None:
     """Refuse a board whose install, sha256sum or dd is missing or does not announce GNU coreutils, naming what is wrong."""
-    res = transport.run(["sh", "-c", _TOOL_PROBE], None, sudo=False, timeout=60)
+    res = transport.run(["sh", "-c", _TOOL_PROBE, "sh", ":".join(DEFAULT_TOOL_DIRS)], None, sudo=True, timeout=60)
     last = (res.out.strip().splitlines() or [""])[-1].strip()
     if res.rc == 0 and last == "OK":
         return
@@ -536,16 +563,17 @@ _MARKER_BODY = b"written by avocado-flash stage; restore removes this directory 
 
 
 def _plan_files(image_dir, bundle_path, resolved):
-    image_dir = Path(image_dir)
-    bundle_path = Path(bundle_path)
     rows = []  # (name, path_or_bytes, size, sha)
-    for name, expected in _parse_manifest(image_dir):
-        res = scan(image_dir / name)
-        if res.sha256 != expected:
-            raise HostError(f"{name}: sha256 differs from MANIFEST.hashes")
-        rows.append((name, image_dir / name, res.size, res.sha256))
-    mh = image_dir / "MANIFEST.hashes"
-    rows.append(("MANIFEST.hashes", mh, mh.stat().st_size, hashlib.sha256(mh.read_bytes()).hexdigest()))
+    if image_dir is not None:
+        image_dir = Path(image_dir)
+        for name, expected in _parse_manifest(image_dir):
+            res = scan(image_dir / name)
+            if res.sha256 != expected:
+                raise HostError(f"{name}: sha256 differs from MANIFEST.hashes")
+            rows.append((name, image_dir / name, res.size, res.sha256))
+        mh = image_dir / "MANIFEST.hashes"
+        rows.append(("MANIFEST.hashes", mh, mh.stat().st_size, hashlib.sha256(mh.read_bytes()).hexdigest()))
+    bundle_path = Path(bundle_path)
     rows.append(("profile.json", bytes(resolved.data), len(resolved.data), resolved.sha256))
     # What restore looks for before it removes this directory as root.
     rows.append((STAGING_MARKER, _MARKER_BODY, len(_MARKER_BODY), hashlib.sha256(_MARKER_BODY).hexdigest()))
@@ -585,10 +613,10 @@ def check_staging_space(transport, profile, payload_bytes: int = 0) -> int:
 
 
 # Read as root, so a parent the SSH user cannot search never reads as "absent". The word on the first
-# line is the whole answer: OWNER <name>, SYMLINK, NOTDIR or ABSENT.
+# line is the whole answer: OWNER <name> <octal mode>, SYMLINK, NOTDIR or ABSENT.
 _DIR_PROBE = (
     'if [ -L "$1" ]; then echo SYMLINK; '
-    'elif [ -d "$1" ]; then echo "OWNER $(stat -c %U -- "$1")"; '
+    'elif [ -d "$1" ]; then echo "OWNER $(stat -c "%U %a" -- "$1")"; '
     'elif [ -e "$1" ]; then echo NOTDIR; '
     "else echo ABSENT; fi"
 )
@@ -598,7 +626,10 @@ def _staging_dir_state(transport, staging_dir: str, user: str) -> str:
     """'absent' when stage may create the directory, 'owned' when it is the SSH user's; anything else refuses.
 
     ``install -d -o USER`` runs as root and would re-own a directory that already exists, so an existing
-    directory is never touched: it must already belong to the SSH user.
+    directory is never re-owned: it must already belong to the SSH user. Its mode matters too, because the
+    runner executes the staged bundle as root: a group- or other-writable directory would let another
+    local user swap that file. The SSH user's own writable directory is tightened to 0755 without
+    privilege; a directory another user owns is refused.
     """
     res = transport.run(["sh", "-c", _DIR_PROBE, "sh", staging_dir], None, sudo=True, timeout=60)
     words = (res.out.strip().splitlines() or [""])[-1].split()
@@ -606,13 +637,20 @@ def _staging_dir_state(transport, staging_dir: str, user: str) -> str:
         raise HostError("cannot tell whether the staging directory exists on the board; refusing to stage")
     if words == ["ABSENT"]:
         return "absent"
-    if len(words) == 2 and words[0] == "OWNER":
-        if words[1] == user:
-            return "owned"
-        raise HostError(
-            f"the staging directory {staging_dir} exists on the board and is owned by {words[1]}, not {user}; "
-            "refusing to take it over: remove it or choose another staging.dir"
-        )
+    if len(words) == 3 and words[0] == "OWNER" and _MODE_RE.match(words[2]):
+        if words[1] != user:
+            raise HostError(
+                f"the staging directory {staging_dir} exists on the board and is owned by {words[1]}, not {user}; "
+                "refusing to take it over: remove it or choose another staging.dir"
+            )
+        if int(words[2], 8) & 0o022:
+            fix = transport.run(["chmod", "0755", staging_dir], None, sudo=False, timeout=60)
+            if fix.rc != 0:
+                raise HostError(
+                    f"the staging directory {staging_dir} is group- or other-writable (mode {words[2]}) and "
+                    "could not be tightened to 0755; refusing to stage"
+                )
+        return "owned"
     if words in (["SYMLINK"], ["NOTDIR"]):
         raise HostError(
             f"the staging directory {staging_dir} exists on the board and is not a plain directory ({words[0].lower()}); "
@@ -621,9 +659,14 @@ def _staging_dir_state(transport, staging_dir: str, user: str) -> str:
     raise HostError("unintelligible answer about the staging directory on the board; refusing to stage")
 
 
-def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = False, out=print, python: str = DEFAULT_PYTHON) -> StageResult:
+def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = False, out=print, python: str = DEFAULT_PYTHON, runner_only: bool = False) -> StageResult:
+    """Copy the images and the runner bundle to the board; ``runner_only`` copies just the runner files.
+
+    The runner-only form takes no image directory: it re-stages the bundle, profile.json and the marker
+    (same directory rules, modes and board-side checks as a full stage) and leaves the staged images alone.
+    """
     staging_dir = profile.staging.dir
-    rows = _plan_files(image_dir, bundle_path, resolved)
+    rows = _plan_files(None if runner_only else image_dir, bundle_path, resolved)
     result = StageResult(
         staging_dir,
         f"{staging_dir}/{Path(bundle_path).name}",
@@ -658,14 +701,16 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     if put.rc != 0:
         raise HostError(f"copy to the board failed (rc={put.rc})")
 
-    check = transport.run(
-        ["sh", "-c", 'cd "$1" && sha256sum --strict -c MANIFEST.hashes', "sh", staging_dir],
-        None, sudo=False, timeout=TAR_TIMEOUT,
-    )
-    if check.rc != 0:
-        raise HostError("remote hash verification of the images failed")
+    if not runner_only:
+        check = transport.run(
+            ["sh", "-c", 'cd "$1" && sha256sum --strict -c MANIFEST.hashes', "sh", staging_dir],
+            None, sudo=False, timeout=TAR_TIMEOUT,
+        )
+        if check.rc != 0:
+            raise HostError("remote hash verification of the images failed")
     unzip = "import sys, zipfile; sys.exit(1 if zipfile.ZipFile(sys.argv[1]).testzip() else 0)"
     # Privileged like the runner: the interpreter named here is the one that will run the bundle as root.
+    require_interpreter(transport, python)
     zcheck = transport.run([python, "-c", unzip, result.bundle_remote_path], None, sudo=True, timeout=120)
     if zcheck.rc != 0:
         raise HostError(f"the board's interpreter {python} cannot open the staged bundle (rc={zcheck.rc})")

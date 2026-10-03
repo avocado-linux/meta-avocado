@@ -147,6 +147,25 @@ def test_jetson_checks_are_the_kits_fourteen_plus_board_prerequisites(jetson):
     assert len(set(jetson.checks)) == 16
     assert [c for c in jetson.checks if c in KIT_CHECKS] == list(KIT_CHECKS)
     assert [c for c in jetson.checks if c not in KIT_CHECKS] == ["arm-entry-after-boot-current", "board-prerequisites"]
+    # The exact set, in profile order: a swapped, renamed or dropped check changes it, which the counts above would not.
+    assert tuple(jetson.checks) == (
+        "emmc-exists",
+        "emmc-not-read-only",
+        "emmc-sector-count",
+        "emmc-no-partition-table",
+        "emmc-not-mounted",
+        "efibootmgr-supports-bootnext",
+        "boot-order-unchanged",
+        "boot-next-unset",
+        "arm-entry-unique",
+        "arm-entry-after-boot-current",
+        "efivarfs-rw",
+        "secure-boot-disabled",
+        "staged-images-present",
+        "staged-image-checksums",
+        "staging-space-free",
+        "board-prerequisites",
+    )
 
 
 @pytest.mark.parametrize("name", ["jetson-agx-orin-j5012.json", "fixture-none.json"])

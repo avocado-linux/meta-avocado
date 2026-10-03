@@ -173,7 +173,7 @@ def test_the_preflight_check_list_names_board_prerequisites():
 def test_known_limits_count_matches_the_debt_markers_in_the_code():
     import test_debt_markers as dm
 
-    words = {6: "Six", 7: "Seven"}
+    words = {6: "Six", 7: "Seven", 8: "Eight"}
     found = len(list(dm.markers()))
     text = _section("Known limits")
     assert f"{words[found]} debts were found" in text
@@ -202,7 +202,7 @@ def test_known_limits_states_the_deliberate_non_fix_for_the_record_schema():
     text = _section("Known limits")
     assert "entry_preexisting" in text
     assert "state schema is not bumped" in text
-    assert "Seven debts" in text  # not a debt marker: the count stays seven
+    assert "Eight debts" in text  # not a debt marker: the count follows the markers in the code
 
 
 def test_boot_order_premise_is_documented():
@@ -235,9 +235,15 @@ def test_readme_states_the_real_order_of_the_board_calls_before_stage_creates_an
 
 
 def test_readme_documents_the_staged_build_match_and_the_staging_directory_rules():
-    assert "staged runner is from a different tool build: run stage again" in README
-    assert "bundle_sha256" in README
+    assert "staged runner is from a different tool build: run `avocado-flash ssh-emmc stage --runner-only" in README
+    assert "`--runner-only`" in _section("Options")
+    assert "bundle_json_sha256" in README
+    assert "bundle_sha256" not in README
+    assert "BUNDLE.json sha256" in README  # what `--version` prints
     assert "owned by the SSH user" in README
+    assert "group- or other-writable is tightened to" in README
+    assert "`sudo` exits 1, not 127" in README
+    assert "`/usr/sbin:/usr/bin:/sbin:/bin`" in README
     schema = _section("Schema version 1")
     assert "shared system director" in schema and "under `state_dir`" in schema
 

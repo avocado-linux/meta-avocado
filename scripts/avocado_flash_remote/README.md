@@ -42,6 +42,7 @@ written from.
 | `--extension-dir DIR` | Board-support extension profile directory. |
 | `--evidence-dir DIR` | Where per-run records are collected. Default `./ssh-emmc-evidence`. |
 | `--dry-run` | `stage` only: list what would be copied, make no connection. |
+| `--runner-only` | `stage` only: re-stage the runner bundle, `profile.json` and the staging marker without an images directory (no `--images`). Leaves the staged images alone. See [the staged-build match](#the-remote-interpreter). |
 | `--assume-yes` | Let the runner skip its own interactive prompt (see the retype gate below, which is separate). |
 | `--ack-run RUN_ID` | Acknowledge a run (`write`, `restore`). |
 | `--emergency-disarm` | `restore`: disarm without a run acknowledgement. |
@@ -194,7 +195,10 @@ readback base `/run/avocado-flash` must be pairwise non-nested and none equal to
 another (so `staging.dir` is never equal to or under `state_dir`, and the reverse),
 and `restore` removing staging can never reach the run records or a readback copy. `stage` creates
 the directory only when it is absent, and refuses an existing one that is not
-owned by the SSH user (or is a symlink or not a directory) without changing it.
+owned by the SSH user (or is a symlink or not a directory) without changing it. An
+existing directory the SSH user owns that is group- or other-writable is tightened to
+`0755` with an unprivileged `chmod` before anything is copied (the runner executes the
+staged bundle as root), and `stage` refuses if that `chmod` fails.
 
 Cross-checks applied when the layout is `explicit-table`: `target.sectors` and
 `target.sector_size` must equal the layout's `device_sectors` and `sector_size`;
@@ -467,7 +471,9 @@ A busybox image lacked all four and failed part-way through staging, so the
 assumption is checked before any write phase, read-only:
 
 - `stage` opens the connection first (the `connect` step: the privilege probe,
-  then the interpreter probe), and then runs one unprivileged `sh` tool probe
+  then the interpreter probe), and then runs one read-only `sh` tool probe as
+  root, with `PATH` set to the runner's own fixed tool directories
+  (`/usr/sbin:/usr/bin:/sbin:/bin`) rather than the SSH user's login `PATH`,
   before the space check and before anything is created. The tool probe runs
   `install --version`, `sha256sum --version` and `dd --version`, and refuses
   naming each tool that fails to start or whose banner does not name GNU
@@ -503,7 +509,8 @@ the runner bundle needs. It prints the interpreter version on success
 (`remote python: python3 3.x.y`) and refuses with a message that names the
 cause otherwise:
 
-- the interpreter was not found (exit status 127 from the board);
+- the interpreter was not found (a `command -v` lookup run as root before the probe and before
+  `stage`'s archive check, because `sudo` exits 1, not 127, for a missing command);
 - the interpreter failed to run;
 - the interpreter lacks named standard-library modules, which is typical of a
   stripped-down board python.
@@ -516,12 +523,22 @@ interpreter is the one that runs the bundle as root.
 The host builds the runner bundle deterministically, so it knows the sha256 it
 expects. Before `check`, `plan`, `write`, `readback` or `restore` runs anything,
 it asks the board for `sha256sum` of the staged bundle and compares the answer
-on the host. A mismatch is refused with this message:
+on the host. A mismatch is refused with this message, which names the exact
+command to run (your board, host and options filled in):
 
-    staged runner is from a different tool build: run stage again
+    staged runner is from a different tool build: run `avocado-flash ssh-emmc stage --runner-only --board NAME --host HOST`
+
+`stage --runner-only` needs no images directory. It copies only `runner.pyz`,
+`profile.json` and the staging marker, applies the same directory ownership and
+mode rules and the same board-side checks as a full `stage`, and leaves the staged images
+and `MANIFEST.hashes` as they are. It is the way back to `restore` and
+`restore --emergency-disarm` after the tool was rebuilt while a run was
+armed: the build match applies to `restore` too and has no bypass, so the
+runner has to be re-staged first. A full `stage` also does it but needs the
+images directory at hand.
 
 A missing tool, an unreadable or malformed hash is refused too, with a message
-that also says to run `stage` again. `status` skips this comparison so a
+that says to run `stage` again. `status` skips this comparison so a
 recorded phase can still be read after the tool changed.
 
 ## Detached writes
@@ -616,12 +633,12 @@ records are written under `<state_dir>/<run_id>/records`.
 
 | Record | Written by |
 |--------|------------|
-| `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time, and `bundle_sha256` (the runner bundle that planned it). |
+| `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time, and `bundle_json_sha256` (the sha256 of the `BUNDLE.json` inside the runner bundle that planned it). |
 | `write.json` | `write`: final phase, error, per-image state, arm record, transition log. |
 | `runner.log` | A detached `write`: the runner's output. |
 | `accepted` | A detached `write`: the runner's pid and the invocation nonce, written before any check. Rewritten on every invocation. |
 | `outcome` | A detached `write` that ended: `finished`, or `refused` with the board's refusal text, after the run id and nonce lines. Listed in `MANIFEST.json` like the other files; absent when the runner crashed. |
-| `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, `bundle_sha256` (the sha256 of the `BUNDLE.json` inside the runner bundle that ran, which names the tool build that wrote the disk; the verifier treats it as optional so record sets from before it existed still verify, and a present value must be a 64-digit hex digest), profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
+| `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, `bundle_json_sha256` (the sha256 of the `BUNDLE.json` inside the runner bundle that ran, which names the tool build that wrote the disk and is not the sha256 of the `runner.pyz` file the host compares before it runs anything; `runner.pyz --version` prints it as `BUNDLE.json sha256 ...`; the verifier treats it as optional so record sets from before it existed still verify, and a present value must be a 64-digit hex digest), profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
 
 The host collects the on-board records after `plan` and after `write`, into
 `<evidence-dir>/<run-id>` and `<evidence-dir>/<run-id>-write`, and verifies the
@@ -645,7 +662,7 @@ behaviour on a real board has to be exercised by hand with `check`, `plan` and
 
 ## Known limits
 
-Seven debts were found and deliberately left unfixed. Each has a
+Eight debts were found and deliberately left unfixed. Each has a
 `devtool-debt:` marker at the code it describes, and a test requires every
 marker to carry a ceiling and an upgrade trigger.
 
@@ -658,6 +675,7 @@ marker to carry a ceiling and an upgrade trigger.
 | `dd_sha256` read-back spools each full partition to a temporary file | `ops.py` `_exec` | images larger than free `/tmp` (a tmpfs `/tmp` fails after the image was written) | the first ENOSPC at read-back; hash the stream |
 | Busybox portability is not provided: the runner assumes GNU `install -d`, GNU `sha256sum --strict`, and `dd conv=fsync status=none`, and `board-prerequisites` only reports their absence (the Python modules are the host's interpreter probe's to check) | `cmd_check.py` `_board_prerequisites`, `host.py` `probe_board_tools` | boards with GNU coreutils and a full Python 3 | a busybox-userland board becomes a real target |
 | The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
+| `status` is exempt from the staged-build match by subcommand name, so it can read a recorded phase after the tool was rebuilt | `cli.py` `_do_simple` | `status` only reads `state_dir` and writes nothing | `status` gains a side effect, or the request schema changes |
 
 The arming record does not gain an `entry_preexisting` field and the state schema is not bumped, because no run record from before the firmware-entry change exists outside the bench.
 

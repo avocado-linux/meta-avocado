@@ -75,9 +75,9 @@ def _print_version(archive):
     try:
         _profile, _meta, digest = _read_bundle(archive)
     except _Exit:
-        print("bundle sha256 unavailable")
+        print("BUNDLE.json sha256 unavailable")
     else:
-        print(f"bundle sha256 {digest}")
+        print(f"BUNDLE.json sha256 {digest}")
     return 0
 
 
@@ -197,8 +197,8 @@ def _do_plan(real, profile, phash, req):
     kw = {"staging_dir": staging, "run_dir": run_dir, "run_id": run_id}
     if req.get("board_identity") is not None:
         kw["board_identity"] = req["board_identity"]
-    if req.get("bundle_sha256"):
-        kw["bundle_sha256"] = req["bundle_sha256"]
+    if req.get("bundle_json_sha256"):
+        kw["bundle_json_sha256"] = req["bundle_json_sha256"]
     return run_plan(ReadOnlyOps(real), profile, phash, **kw)
 
 
@@ -364,7 +364,7 @@ def _finalize_records(sub, profile, phash, req, rc, refused_early=False):
             transition_log=list(st.get("phases_done") or []),
             host_utc=req.get("host_utc"),  # the host's own observation; absent means no skew, never the board's
             board_utc=now,
-            bundle_sha256=req.get("bundle_sha256"),
+            bundle_json_sha256=req.get("bundle_json_sha256"),
         )
         for name in sorted(os.listdir(run_dir)):
             path = os.path.join(run_dir, name)
@@ -606,8 +606,9 @@ def main(argv, *, archive=None):
         sub, request_path, detach = _parse_args(list(argv))
         req = _load_request(request_path)
         profile_bytes, meta, digest = _read_bundle(archive)
-        # The archive's own digest, never the request's: records name the build that ran, not what the host claims.
-        req["bundle_sha256"] = digest
+        # The digest of the archive's own BUNDLE.json (not of the archive file), never the request's: records
+        # name the build that ran, not what the host claims.
+        req["bundle_json_sha256"] = digest
         phash = hashlib.sha256(profile_bytes).hexdigest()
         wanted = {meta.get("profile_sha256"), req.get("profile_hash")} - {None}
         if wanted != {phash}:

@@ -184,25 +184,25 @@ def test_good_record_set_still_verifies(tmp_path):
 def test_manifest_carries_the_bundle_digest_when_the_runner_knows_it(tmp_path):
     run_dir = ev.new_run_dir(tmp_path)
     rs = ev.RecordSet(run_dir, "1.0", "r2", "p" * 8, {"boot": "a" * 8}, {}, [], "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z")
-    rs.bundle_sha256 = "d" * 64
+    rs.bundle_json_sha256 = "d" * 64
     rs.add("plan.json", {"k": "v"})
     rs.finalize("runner-complete")
-    assert _manifest(run_dir)["bundle_sha256"] == "d" * 64
+    assert _manifest(run_dir)["bundle_json_sha256"] == "d" * 64
     assert ev.verify_record_set(run_dir).ok
 
 
 def test_a_record_set_from_before_the_field_existed_still_verifies(tmp_path):
     run_dir = _build(tmp_path)
-    assert "bundle_sha256" not in _manifest(run_dir)
+    assert "bundle_json_sha256" not in _manifest(run_dir)
     assert ev.verify_record_set(run_dir).ok
 
 
 @pytest.mark.parametrize("bad", ["", "xyz", "d" * 63, 7, None, ["d" * 64]])
 def test_a_malformed_bundle_digest_in_the_manifest_fails_verification(tmp_path, bad):
     d = _build(tmp_path)
-    _rewrite(d, lambda m: m.__setitem__("bundle_sha256", bad))
+    _rewrite(d, lambda m: m.__setitem__("bundle_json_sha256", bad))
     res = ev.verify_record_set(d)
-    assert not res.ok and any("bundle_sha256" in p for p in res.problems)
+    assert not res.ok and any("bundle_json_sha256" in p for p in res.problems)
 
 
 @pytest.mark.parametrize(
