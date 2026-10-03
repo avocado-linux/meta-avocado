@@ -27,3 +27,14 @@ RPROVIDES:packagegroup-avocado-initramfs-modules = "packagegroup-avocado-initram
 RDEPENDS:packagegroup-avocado-rootfs-modules = " \
     ${@bb.utils.contains('DISTRO_FEATURES','zram','kernel-module-zram-${KERNEL_VERSION}','',d)} \
 "
+
+# The Orin Nano developer kit carrier NIC is an RTL8111/8168. Both Jetson
+# kernels build r8169 as a module but the rootfs lists omit it, so no Ethernet
+# interface appeared. r8169 needs the realtek PHY module and the rtl8168
+# firmware. The override-style append applies after the per-kernel list
+# assignments, and keeps the AGX Orin machines untouched.
+RDEPENDS:packagegroup-avocado-rootfs-modules:append:jetson-orin-nano = " \
+    kernel-module-r8169-${KERNEL_VERSION} \
+    kernel-module-realtek-${KERNEL_VERSION} \
+    linux-firmware-rtl8168 \
+"
