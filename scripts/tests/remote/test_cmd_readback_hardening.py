@@ -319,3 +319,23 @@ def test_the_real_copier_creates_the_parent_of_a_nested_log(tree):
     copy = make_guarded_copier(str(out), str(mnt), lambda n: None)
     copy(str(mnt / "log" / "boot.log"), str(out / "log" / "boot.log"))
     assert (out / "log" / "boot.log").read_text() == "log"
+
+
+# ----------------------------------------------------------------- task 5.43
+
+
+def test_nothing_to_copy_is_not_refused_when_free_space_is_below_the_reserve(profile, dirs):
+    ops = RecordingOps(script(dirs, journal=False))
+    res, copies, lines = run(
+        profile, dirs, ops, list_logs=lambda m: [], free_bytes=lambda p: 10, reserve=1000, cap=10**9
+    )
+    assert res.exit_code == 0, lines
+    assert not any("exceeds" in ln for ln in lines), lines
+
+
+def test_a_copy_is_still_refused_when_free_space_is_below_the_reserve(profile, dirs):
+    _tree_with_journal(dirs, size=1)
+    ops = RecordingOps(script(dirs))
+    res, copies, lines = run(profile, dirs, ops, free_bytes=lambda p: 10, reserve=1000, cap=10**9)
+    assert res.exit_code == 1 and copies == []
+    assert any("exceeds the 0 bytes allowed" in ln for ln in lines), lines

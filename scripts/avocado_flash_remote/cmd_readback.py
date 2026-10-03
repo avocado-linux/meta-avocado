@@ -344,10 +344,10 @@ def _run_readback(
         logs = list_logs(mount_dir)
         need = tree_size(([journal] if result.found_journal else []) + list(logs))
         free = free_bytes(_nearest_existing(out_dir))
-        limit = min(cap, free - reserve)
-        if need > limit:
+        limit = max(min(cap, free - reserve), 0)
+        if need > 0 and need > limit:
             say(
-                f"ERROR: {need} bytes to copy exceeds the {max(limit, 0)} bytes allowed "
+                f"ERROR: {need} bytes to copy exceeds the {limit} bytes allowed "
                 f"(free {free}, reserve {reserve}, cap {cap}) on the filesystem holding {out_dir}: "
                 "the journal is too large to copy into RAM-backed storage; not copying"
             )

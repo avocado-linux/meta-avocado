@@ -27,11 +27,13 @@ import json
 import os
 import re
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .arm import Arm, ArmError, ArmRecord, _field, boot_next_of, boot_order_of, entries_with_label
 from .ops import OpsError
+from .profile import STAGING_MARKER
 from .cmd_status import _load_run
 from .state import LOCK_NAME, TERMINAL, LoadResult, LockHeld, OnBoardLock, describe_recovery, load_state, transition
 
@@ -57,7 +59,7 @@ class RestoreResult:
 
 
 def check_staging_path(path, expected) -> None:
-    """Refuse anything but the profile's own staging dir (no symlink, not shallow)."""
+    """Refuse anything but the profile's own staging dir (no symlink, not shallow, stage marker present)."""
     if not path or not expected or path != expected:
         raise StagingRefused(f"{path!r} is not the profile staging dir {expected!r}")
     p = Path(path)
@@ -65,6 +67,13 @@ def check_staging_path(path, expected) -> None:
         raise StagingRefused(f"{path!r} is too shallow to remove")
     if p.is_symlink():
         raise StagingRefused(f"{path!r} is a symlink")
+    # The profile names the directory, so it alone cannot make a directory removable: only the stage step marks one.
+    try:
+        marked = stat.S_ISREG(os.lstat(p / STAGING_MARKER).st_mode)
+    except OSError:
+        marked = False
+    if not marked:
+        raise StagingRefused(f"{path!r} has no {STAGING_MARKER} marker from the stage step; not removing it")
 
 
 def make_guarded_rmtree(expected):

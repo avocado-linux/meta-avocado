@@ -89,7 +89,7 @@ the arming.
 | `check` | Read-only preflight. Runs every assertion in the profile's `checks` list and prints one `PASS` or `FAIL` line each. | Exit 0 only when every check passed and every listed check was examined (`checks: N/M` with N equal to M). Exit 1 when any check failed. Exit 2 when nothing failed but a check could not run. |
 | `plan` | Looks, decides, and writes one plan record (`plan.json`). Changes nothing on the board. Creates the run id. | Refuses on a wrong device name, wrong sector count, a target that backs the running system or is mounted, a non-empty target when `require_empty` is set, a layout that does not fit, staged images that fail their checksums, a failing guard, or an arm pre-flight refusal. |
 | `write` | Writes the planned run: partition table, then each image (a `blockdev --flushbufs` of its node, then read-back verification), guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
-| `readback` | After the test image has booted, mounts the profile's data partition read-only, copies the persistent journal and boot logs, compares BootOrder with the reference, and prints (never runs) cleanup commands. | Needs `--reference-boot-order` unless the profile's arm strategy is `none`. Refuses to mount when the output directory is not on tmpfs, so logs never land on the live system's disk. The logs are copied to `/run/avocado-flash/<run-id>/readback` and the partition is mounted on `/run/avocado-flash/<run-id>/mnt` (private, mode 0700, one per invocation; `--run-id` reuses the run's id so a repeat overwrites); both are on tmpfs and vanish at reboot, so read the logs before rebooting. The mount is `ro,nosuid,nodev,noexec`. Readback takes the per-host lock, and on the board it refuses (exit 1, nothing mounted) while a run is in a non-terminal phase, while the on-board flash lock is held, or when the mount directory is already a mount point. It refuses to copy a journal larger than the free space of the output filesystem minus a 64 MiB reserve, or larger than 256 MiB. A copy error exits 1 and removes the partial output. Boot logs keep their path relative to the mount (`log/<name>`, `<name>`). The cleanup commands it prints name the mount directory (`umount`, `rmdir`) and the output directory (`rm -r`). |
+| `readback` | After the test image has booted, mounts the profile's data partition read-only, copies the persistent journal and boot logs, compares BootOrder with the reference, and prints (never runs) cleanup commands. | Needs `--reference-boot-order` unless the profile's arm strategy is `none`. Refuses to mount when the output directory is not on tmpfs, so logs never land on the live system's disk. The logs are copied to `/run/avocado-flash/<run-id>/readback` and the partition is mounted on `/run/avocado-flash/<run-id>/mnt` (private, mode 0700, one per run id). The board derives both paths from the run id alone, ignoring any directory in the request, and refuses a path with a symlink on it. A reused `--run-id` is refused (exit 1, nothing mounted) while its output directory already exists, so an earlier readback's logs are never deleted by a later failure: read and remove them first. Both are on tmpfs and vanish at reboot, so read the logs before rebooting. The mount is `ro,nosuid,nodev,noexec`. Readback takes the per-host lock, and on the board it refuses (exit 1, nothing mounted) while a run is in a non-terminal phase, while the on-board flash lock is held, or when the mount directory is already a mount point. It refuses to copy a journal larger than the free space of the output filesystem minus a 64 MiB reserve, or larger than 256 MiB. A copy error exits 1 and removes the partial output. Boot logs keep their path relative to the mount (`log/<name>`, `<name>`). The cleanup commands it prints name the mount directory (`umount`, `rmdir`) and the output directory (`rm -r`). |
 | `restore` | Undoes the arming. See "Restore scope". | Takes the per-host lock and, on the board, the on-board flash lock: it refuses while another holder (a write in progress) is live. A run in a non-terminal phase needs `--ack-run RUN_ID` naming it. `--emergency-disarm` needs `--ack-run`. |
 | `status` | Prints the board's recorded phase: `status: PHASE run=RUN_ID recovery=TEXT`, or `status: no run recorded`. Strictly read-only. | None. Use it after a dropped connection. |
 
@@ -187,8 +187,12 @@ path. Numbers must be plain integers. Duplicate JSON keys are rejected.
 not be under `/dev`, `/sys` or `/proc`. `stage` creates the staging directory
 as root and hands it to the SSH user, so `staging.dir` must also be a directory
 of its own: not a bare top-level directory (at least two path components), not
-one of the shared system directories (`/tmp`, `/var/tmp`, `/run`, `/var`, `/etc`,
-`/usr`, `/home`, `/root`), and not equal to or under `state_dir`. `stage` creates
+under a temporary directory (`/tmp`, `/var/tmp`, `/dev/shm`), and not under a
+shared system directory tree (`/usr`, `/etc`, `/opt`, `/home`, `/root`, `/boot`,
+`/lib`, `/bin`, `/sbin`, `/var/lib/dpkg`). `staging.dir`, `state_dir` and the
+readback base `/run/avocado-flash` must be pairwise non-nested and none equal to
+another (so `staging.dir` is never equal to or under `state_dir`, and the reverse),
+and `restore` removing staging can never reach the run records or a readback copy. `stage` creates
 the directory only when it is absent, and refuses an existing one that is not
 owned by the SSH user (or is a symlink or not a directory) without changing it.
 
@@ -380,7 +384,10 @@ What it does, per `cmd_restore.py`:
 - Checks that `BootOrder` still equals the value recorded before any mutation,
   and reports a difference without changing it.
 - Removes the profile's staging directory, only when the path is exactly the
-  profile's `staging.dir`, is deep enough, and is not a symlink.
+  profile's `staging.dir`, is deep enough, is not a symlink, and holds the
+  `.avocado-flash-staging` marker file. `stage` writes that marker (and lists it
+  in the checksum listing it verifies), so a directory `stage` never filled is
+  left alone and reported as not removed.
 - If the board already booted the test entry (`BootCurrent` equals the recorded
   entry), leaves the boot entries alone and cleans staging only.
 - If no entry was armed, makes no `efibootmgr` calls and cleans staging only.

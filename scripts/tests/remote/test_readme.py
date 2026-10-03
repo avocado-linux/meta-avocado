@@ -240,3 +240,20 @@ def test_readme_documents_the_staged_build_match_and_the_staging_directory_rules
     assert "owned by the SSH user" in README
     schema = _section("Schema version 1")
     assert "shared system director" in schema and "under `state_dir`" in schema
+
+
+# --- 5.43 ---
+
+
+def test_readme_documents_the_staging_containment_rules_and_the_restore_marker():
+    schema = _section("Schema version 1")
+    assert "pairwise" in schema and "/run/avocado-flash" in schema
+    assert "temporary director" in schema and "/usr" in schema and "/var/lib/dpkg" in schema
+    assert ".avocado-flash-staging" in README
+    assert "only when" in README[README.index(".avocado-flash-staging") - 400 : README.index(".avocado-flash-staging") + 400]
+
+
+def test_readme_readback_row_says_the_board_derives_the_directories_and_refuses_a_reused_id():
+    row = next(ln for ln in README.splitlines() if ln.startswith("| `readback` |"))
+    assert "derives" in row and "already exists" in row
+    assert "a repeat overwrites" not in row

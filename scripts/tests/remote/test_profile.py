@@ -53,7 +53,7 @@ def base():
                 "params": {"entry_label": "UEFI eMMC Device"}},
         "guard": {"strategy": "boot-arg",
                   "params": {"argument": "avocado.flash=1", "partitions": ["boot"]}},
-        "staging": {"dir": "/var/tmp/avocado-flash", "min_free_kib": 1048576},
+        "staging": {"dir": "/var/lib/avocado-flash-staging", "min_free_kib": 1048576},
         "state_dir": "/var/lib/avocado-flash",
     }
 
@@ -383,7 +383,7 @@ def test_staging_dir_may_not_be_or_sit_under_state_dir(bad):
         load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
 
 
-@pytest.mark.parametrize("ok", ["/var/lib/avocado-flash-staging", "/var/lib/avocado", "/run/avocado-flash", "/var/tmp/avocado-flash"])
+@pytest.mark.parametrize("ok", ["/var/lib/avocado-flash-staging", "/var/lib/avocado", "/run/avocado-flash-staging"])
 def test_staging_dir_beside_state_dir_or_in_a_dedicated_subdirectory_is_accepted(ok):
     assert load_profile_bytes(mutated(lambda d: d["staging"].update(dir=ok))).staging.dir == ok
 
@@ -395,3 +395,65 @@ def test_first_lba_below_the_gpt_header_is_refused(first):
 
     with pytest.raises(ProfileError, match="first_lba"):
         load_profile_bytes(mutated(m))
+
+
+# ---- 5.43: staging.dir, state_dir and the readback base are pairwise disjoint; system roots are refused ----
+
+
+@pytest.mark.parametrize("state", ["/var/lib/avocado-flash-staging/state", "/var/lib/avocado-flash-staging"])
+def test_state_dir_may_not_be_or_sit_under_staging_dir(state):
+    def m(d):
+        d["staging"]["dir"] = "/var/lib/avocado-flash-staging"
+        d["state_dir"] = state
+
+    with pytest.raises(ProfileError, match=r"state_dir|staging\.dir"):
+        load_profile_bytes(mutated(m))
+
+
+@pytest.mark.parametrize("bad", ["/run/avocado-flash", "/run/avocado-flash/stage", "/run/avocado-flash/", "/run//avocado-flash/./x"])
+def test_staging_dir_may_not_be_or_sit_under_the_readback_base(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+def test_the_readback_base_may_not_sit_under_staging_dir():
+    # /run is a single-component shared directory, so the reverse nesting needs a staging.dir above the base.
+    assert profile.READBACK_RUN_BASE == "/run/avocado-flash"
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        profile._check_disjoint([("staging.dir", "/run"), ("readback base", profile.READBACK_RUN_BASE)])
+
+
+@pytest.mark.parametrize("bad", ["/run/avocado-flash", "/run/avocado-flash/state", "/run"])
+def test_state_dir_may_not_be_or_sit_under_or_over_the_readback_base(bad):
+    with pytest.raises(ProfileError, match="state_dir"):
+        load_profile_bytes(mutated(lambda d: d.update(state_dir=bad)))
+
+
+def test_sibling_names_sharing_a_prefix_are_not_nested():
+    def m(d):
+        d["staging"]["dir"] = "/run/avocado-flash-staging"
+        d["state_dir"] = "/var/lib/avocado-flash-state"
+
+    p = load_profile_bytes(mutated(m))
+    assert p.staging.dir == "/run/avocado-flash-staging"
+
+
+@pytest.mark.parametrize("bad", ["/tmp/x", "/tmp/x/y", "/var/tmp/avocado-flash", "/var/tmp/x/y", "/dev/shm/x"])
+def test_staging_dir_may_not_be_under_a_temporary_directory(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["/usr/lib", "/etc/ssh", "/opt/x", "/home/user/x", "/root/x", "/boot/x", "/lib/x", "/bin/x", "/sbin/x",
+     "/var/lib/dpkg", "/var/lib/dpkg/info", "/usr//lib/./x"],
+)
+def test_staging_dir_may_not_be_a_system_root_or_under_one(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+@pytest.mark.parametrize("ok", ["/run/avocado-flash-staging", "/run/emmc-test-images", "/var/lib/avocado-flash-staging"])
+def test_dedicated_staging_dirs_are_still_accepted(ok):
+    assert load_profile_bytes(mutated(lambda d: d["staging"].update(dir=ok))).staging.dir == ok

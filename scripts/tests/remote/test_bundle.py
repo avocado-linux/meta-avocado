@@ -348,17 +348,93 @@ def test_restore_wiring(tmp_path, recs):
     }
 
 
-def test_readback_wiring(tmp_path, recs):
+@pytest.fixture
+def rbbase(tmp_path, monkeypatch):
+    """A readback base under tmp_path, so nothing here can touch the board's real /run."""
+    base = tmp_path / "rb-base"
+    base.mkdir()
+    monkeypatch.setattr(runner, "READBACK_RUN_BASE", str(base))
+    return base
+
+
+def test_readback_wiring(tmp_path, recs, rbbase):
     info = _archive_for_runner(tmp_path)
     assert runner.main(["readback", "--request", str(_request(tmp_path))], archive=info.path) == 0
     (args, kw), = recs["readback"].calls
     assert isinstance(args[0], ops.RealOps)
     assert kw == {
         "state_dir": str(tmp_path / "state"),
-        "mount_dir": "/mnt/x",
-        "out_dir": "/run/out",
+        "mount_dir": str(rbbase / "r1" / "mnt"),
+        "out_dir": str(rbbase / "r1" / "readback"),
         "reference_boot_order": "0001",
     }
+
+
+@pytest.mark.parametrize("mount_dir,out_dir", [("/etc", "/run"), ("/mnt/x", "/run/out"), ("/", "/var/lib")])
+def test_the_request_s_readback_directories_are_ignored(tmp_path, recs, rbbase, mount_dir, out_dir):
+    """The runner derives mount_dir and out_dir under its own base; _discard runs a root rmtree on out_dir (5.43)."""
+    info = _archive_for_runner(tmp_path)
+    req = _request(tmp_path, mount_dir=mount_dir, out_dir=out_dir)
+    assert runner.main(["readback", "--request", str(req)], archive=info.path) == 0
+    (args, kw), = recs["readback"].calls
+    assert kw["mount_dir"] == str(rbbase / "r1" / "mnt") and kw["out_dir"] == str(rbbase / "r1" / "readback")
+
+
+@pytest.mark.parametrize("bad", ["../x", "a/b", "..", "", ".hidden", "-x", "x\n", 7])
+def test_a_readback_run_id_that_is_not_a_plain_run_id_is_refused(tmp_path, recs, rbbase, bad, capsys):
+    info = _archive_for_runner(tmp_path)
+    assert runner.main(["readback", "--request", str(_request(tmp_path, run_id=bad))], archive=info.path) == 64
+    assert "invalid run id" in capsys.readouterr().err
+    assert not recs["readback"].calls
+
+
+def test_a_readback_request_without_a_run_id_is_refused(tmp_path, recs, rbbase, capsys):
+    info = _archive_for_runner(tmp_path)
+    req = _request(tmp_path)
+    data = json.loads(req.read_text())
+    del data["run_id"]
+    req.write_text(json.dumps(data))
+    assert runner.main(["readback", "--request", str(req)], archive=info.path) == 64
+    assert not recs["readback"].calls
+
+
+@pytest.mark.parametrize("link", ["run", "mnt", "readback"])
+def test_a_symlink_on_the_readback_path_is_refused(tmp_path, recs, rbbase, link, capsys):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    if link == "run":
+        (rbbase / "r1").symlink_to(elsewhere)
+    else:
+        (rbbase / "r1").mkdir()
+        (rbbase / "r1" / link).symlink_to(elsewhere)
+    info = _archive_for_runner(tmp_path)
+    assert runner.main(["readback", "--request", str(_request(tmp_path))], archive=info.path) == 64
+    assert "symlink" in capsys.readouterr().err
+    assert not recs["readback"].calls
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_a_symlinked_readback_base_is_refused(tmp_path, recs, monkeypatch, capsys):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "linked").symlink_to(real)
+    monkeypatch.setattr(runner, "READBACK_RUN_BASE", str(tmp_path / "linked"))
+    info = _archive_for_runner(tmp_path)
+    assert runner.main(["readback", "--request", str(_request(tmp_path))], archive=info.path) == 64
+    assert not recs["readback"].calls
+
+
+def test_a_second_readback_with_the_same_run_id_is_refused_and_keeps_the_first_logs(tmp_path, recs, rbbase, capsys):
+    """A reused id must not let the second run's failure path delete the first run's output (5.43)."""
+    first = rbbase / "r1" / "readback"
+    first.mkdir(parents=True)
+    (first / "journal").write_text("first run's journal")
+    info = _archive_for_runner(tmp_path)
+    assert runner.main(["readback", "--request", str(_request(tmp_path))], archive=info.path) == 1
+    err = capsys.readouterr().err
+    assert "already exists" in err and str(first) in err
+    assert not recs["readback"].calls, "nothing is mounted for a refused readback"
+    assert (first / "journal").read_text() == "first run's journal"
 
 
 def test_status_wiring(tmp_path, recs):
