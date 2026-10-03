@@ -266,6 +266,16 @@ def test_plan_record_fields():
     assert data["created_utc"] == "2026-01-01T00:00:00Z"
 
 
+def test_plan_record_names_the_bundle_that_wrote_it_when_the_runner_supplies_the_digest():
+    _res, _, rec = plan(bundle_sha256="c" * 64)
+    assert rec.calls[0][2]["bundle_sha256"] == "c" * 64
+
+
+def test_plan_record_has_no_bundle_field_without_a_digest():
+    _res, _, rec = plan()
+    assert "bundle_sha256" not in rec.calls[0][2]
+
+
 def test_device_serial_recorded_when_available():
     profile, phash = load()
     scans = scans_for(profile)

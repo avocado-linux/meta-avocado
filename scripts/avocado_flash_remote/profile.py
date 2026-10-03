@@ -28,6 +28,8 @@ SCHEMA_VERSION = 1
 IDENTITY_KINDS = ("by-path", "serial", "sysfs-name")
 _BOARD_RE = re.compile(r"[a-z0-9][a-z0-9-]*")  # used with fullmatch: no leading dash, no trailing newline
 _FORBIDDEN_ROOTS = ("/dev", "/sys", "/proc")
+# Shared directories stage must never take over: it re-owns the directory it creates for the SSH user.
+_SHARED_DIRS = ("/tmp", "/var/tmp", "/run", "/var", "/etc", "/usr", "/home", "/root")
 _SYSFS_ATTR_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
@@ -194,6 +196,28 @@ def _abs_path(path, value):
     return value
 
 
+def _norm(value):
+    return "/" + posixpath.normpath(value).lstrip("/")
+
+
+def _staging_dir(value, state_dir):
+    """staging.dir, which stage creates (or fills) as root with ``install -d -o <ssh user>``.
+
+    It must be a directory of its own: not a shared system directory, not a bare top-level one, and not
+    the state directory or anything below it (the run records live there and are not the SSH user's).
+    """
+    _abs_path("staging.dir", value)
+    norm = _norm(value)
+    if len([c for c in norm.split("/") if c]) < 2:
+        raise ProfileError("staging.dir", "must be a directory of its own below a top-level directory")
+    if norm in _SHARED_DIRS:
+        raise ProfileError("staging.dir", f"must not be the shared directory {norm}")
+    state = _norm(state_dir)
+    if norm == state or norm.startswith(state + "/"):
+        raise ProfileError("staging.dir", f"must not be or sit under state_dir {state}")
+    return value
+
+
 def _strategy(path, kind, value):
     _obj(path, value, ("strategy", "params"))
     name = _str(_join(path, "strategy"), value["strategy"])
@@ -312,11 +336,11 @@ def load_profile_bytes(data: bytes) -> Profile:
     arm = _strategy("arm", "arm", top["arm"])
     guard = _strategy("guard", "guard", top["guard"])
     stg = _obj("staging", top["staging"], ("dir", "min_free_kib"))
+    state_dir = _abs_path("state_dir", top["state_dir"])
     staging = Staging(
-        dir=_abs_path("staging.dir", stg["dir"]),
+        dir=_staging_dir(stg["dir"], state_dir),
         min_free_kib=_int("staging.min_free_kib", stg["min_free_kib"], 1),
     )
-    state_dir = _abs_path("state_dir", top["state_dir"])
 
     # Cross-checks.
     if layout.strategy == "explicit-table":

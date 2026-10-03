@@ -45,7 +45,7 @@ PREFIX = "avocado-flash ssh-emmc"
 TOOL_VERSION = "avocado-flash-ssh-emmc"
 BUNDLE_NAME = "runner.pyz"
 DEFAULT_WAIT_SECONDS = 7200
-SSH_FAILURE = 255
+SSH_FAILURE = host.SSH_FAILURE
 EXIT_DROPPED = 2
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_+][A-Za-z0-9._+-]*\Z")
 
@@ -146,14 +146,40 @@ class _Ctx:
         self.remote_python = args.remote_python
 
     # -- board access ------------------------------------------------------
-    def connect(self, need_staged: bool) -> Optional[int]:
-        """Open the transport. Returns an exit code to stop with, else None."""
+    def expected_bundle_sha(self) -> str:
+        """The sha256 of the runner bundle this tool builds for the profile (the build is deterministic)."""
+        with tempfile.TemporaryDirectory(prefix="afr-bundle-") as tmp:
+            return build_bundle(self.resolved.data, Path(tmp) / BUNDLE_NAME, TOOL_VERSION).sha256
+
+    def connect(self, need_staged: bool, match_build: bool = True) -> Optional[int]:
+        """Open the transport. Returns an exit code to stop with, else None.
+
+        ``match_build`` compares the staged runner with this tool's own build before anything runs: a
+        runner from another build is refused. status skips it, so a recorded phase can still be read.
+        """
         self.transport = self.factory(self.args.host, list(self.args.ssh_opt), self.args.batch)
+        try:
+            return self._connect(need_staged, match_build)
+        except host.HostUnreachable as exc:
+            _err(f"{PREFIX}: {exc}; nothing was started on the board")
+            return EXIT_DROPPED
+
+    def _connect(self, need_staged: bool, match_build: bool) -> Optional[int]:
         if need_staged:
             probe = self.transport.run(["test", "-f", self.bundle_remote], None, sudo=False, timeout=60)
+            if probe.rc == SSH_FAILURE:
+                raise host.HostUnreachable("the runner bundle could not be looked for")
             if probe.rc != 0:
                 _err(f"{PREFIX}: the runner bundle is not on the board: run stage first")
                 return 1
+            if match_build:
+                try:
+                    host.check_staged_build(self.transport, self.bundle_remote, self.expected_bundle_sha())
+                except host.HostUnreachable:
+                    raise
+                except host.HostError as exc:
+                    _err(f"{PREFIX}: {exc}")
+                    return 1
         mode = host.acquire_sudo(self.transport, self.ask_password or host.default_ask_password)
         self.out(f"privilege: {mode}")
         try:
@@ -235,7 +261,7 @@ def _exit_code(sub: str, rc: int) -> int:
 
 
 def _do_simple(ctx: _Ctx, sub: str, request: dict) -> int:
-    rc = ctx.connect(need_staged=True)
+    rc = ctx.connect(need_staged=True, match_build=sub != "status")
     if rc is not None:
         return rc
     try:
@@ -277,6 +303,9 @@ def _do_plan(ctx: _Ctx) -> int:
     except host.HostTimeout as exc:
         # The plan dir stays: the runner may have written records into it.
         return _dropped("plan", exc)
+    if res.rc == SSH_FAILURE:
+        # The runner may have written records before the drop: the local dir stays, as on a timeout.
+        return _exit_code("plan", res.rc)
     if res.rc != 0:
         _rmdir(local)
         return res.rc

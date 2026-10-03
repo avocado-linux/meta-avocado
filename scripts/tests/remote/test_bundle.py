@@ -280,7 +280,36 @@ def test_plan_wiring_and_exit_code(tmp_path, recs):
     (args, kw), = recs["plan"].calls
     assert isinstance(args[0], ops.ReadOnlyOps)
     assert args[2] == info.profile_sha256
-    assert kw == {"staging_dir": "/stage", "run_dir": str(tmp_path / "state" / "r1" / "records"), "run_id": "r1"}
+    # 5.41: the plan record names the bundle that wrote it, so the runner passes the digest it just read.
+    assert kw == {
+        "staging_dir": "/stage",
+        "run_dir": str(tmp_path / "state" / "r1" / "records"),
+        "run_id": "r1",
+        "bundle_sha256": _bundle_json_sha(info.path),
+    }
+
+
+def _bundle_json_sha(path):
+    with zipfile.ZipFile(path) as zf:
+        return hashlib.sha256(zf.read("BUNDLE.json")).hexdigest()
+
+
+@pytest.mark.parametrize("sub", ["plan", "write"])
+def test_manifest_records_the_bundle_digest_the_runner_read(tmp_path, recs, sub):
+    (tmp_path / "plan.json").write_text("{}")
+    info = _archive_for_runner(tmp_path)
+    runner.main([sub, "--request", str(_request(tmp_path))], archive=info.path)
+    manifest = json.loads((tmp_path / "state" / "r1" / "records" / "MANIFEST.json").read_text())
+    assert manifest["bundle_sha256"] == _bundle_json_sha(info.path)
+
+
+def test_a_bundle_digest_in_the_request_is_ignored_in_favour_of_the_archive_s_own(tmp_path, recs):
+    info = _archive_for_runner(tmp_path)
+    runner.main(["plan", "--request", str(_request(tmp_path, bundle_sha256="0" * 64))], archive=info.path)
+    (_args, kw), = recs["plan"].calls
+    assert kw["bundle_sha256"] == _bundle_json_sha(info.path)
+    manifest = json.loads((tmp_path / "state" / "r1" / "records" / "MANIFEST.json").read_text())
+    assert manifest["bundle_sha256"] == _bundle_json_sha(info.path)
 
 
 def test_write_wiring(tmp_path, recs):

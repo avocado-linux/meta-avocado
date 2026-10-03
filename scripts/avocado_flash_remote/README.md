@@ -59,7 +59,7 @@ written from.
 |------|---------|
 | 0 | ok |
 | 1 | refusal or failure |
-| 2 | not examined (a check or readback could not look at its target), or the SSH connection dropped during `check`, `status`, `readback` or `restore` |
+| 2 | not examined (a check or readback could not look at its target), or the SSH connection dropped: during `check`, `plan`, `status`, `readback` or `restore`, or while connecting for any subcommand (`cannot reach the board over ssh`) |
 | 3 | profile mismatch (the bundled profile hash disagrees with the request) |
 | 64 | usage error |
 | 70 | unexpected error |
@@ -67,11 +67,15 @@ written from.
 
 Exit 2 is a separate answer from exit 1: a run that could not look has not
 passed, and has not found a fault either. The same exit code is used when the
-connection to the board dropped (ssh status 255) during `check`, `status`,
-`readback` or `restore`: the runner may have acted before the drop, so run
-`status` to see the recorded phase before doing anything else. A dropped
-connection during `write` is not exit 2; the host reconciles with the board and
-reports the recorded phase (see "Detached writes").
+connection to the board dropped (ssh status 255) during `check`, `plan`,
+`status`, `readback` or `restore`: the runner may have acted before the drop,
+so run `status` to see the recorded phase before doing anything else. A `plan`
+that drops keeps its local run directory for the same reason. ssh status 255 while
+connecting (looking for the staged bundle, the privilege probe, the sudo probe)
+is also exit 2: nothing was started, and it is never reported as a missing
+bundle or answered with a sudo password prompt. A dropped connection during
+`write` is not exit 2; the host reconciles with the board and reports the
+recorded phase (see "Detached writes").
 
 ## Subcommands and their gates
 
@@ -81,7 +85,7 @@ the arming.
 
 | Subcommand | What it does | Gate |
 |------------|--------------|------|
-| `stage` | Verifies the images against `MANIFEST.hashes`, builds `runner.pyz`, checks free space on the board, copies images, the exact profile and the bundle into the profile's staging directory, then re-verifies the hashes on the board. | Refuses when `MANIFEST.hashes` is missing, unparseable, names a missing file or disagrees with a file's sha256; when the staging filesystem lacks room (`staging.min_free_kib` plus the payload); and when the profile file changed after it was resolved. `--dry-run` lists files and sizes and makes no connection. |
+| `stage` | Verifies the images against `MANIFEST.hashes`, builds `runner.pyz`, checks free space on the board, copies images, the exact profile and the bundle into the profile's staging directory, then re-verifies the hashes of the images, the manifest, the profile and the bundle on the board. | Refuses when `MANIFEST.hashes` is missing, unparseable, names a missing file or disagrees with a file's sha256; when the staging filesystem lacks room (`staging.min_free_kib` plus the payload); when the staging directory already exists and is not owned by the SSH user (it is created only when absent, never re-owned); and when the profile file changed after it was resolved. `--dry-run` lists files and sizes and makes no connection. |
 | `check` | Read-only preflight. Runs every assertion in the profile's `checks` list and prints one `PASS` or `FAIL` line each. | Exit 0 only when every check passed and every listed check was examined (`checks: N/M` with N equal to M). Exit 1 when any check failed. Exit 2 when nothing failed but a check could not run. |
 | `plan` | Looks, decides, and writes one plan record (`plan.json`). Changes nothing on the board. Creates the run id. | Refuses on a wrong device name, wrong sector count, a target that backs the running system or is mounted, a non-empty target when `require_empty` is set, a layout that does not fit, staged images that fail their checksums, a failing guard, or an arm pre-flight refusal. |
 | `write` | Writes the planned run: partition table, then each image, read-back verification, guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
@@ -180,7 +184,13 @@ path. Numbers must be plain integers. Duplicate JSON keys are rejected.
 | `state_dir` | Absolute directory for run state on the board. |
 
 `staging.dir` and `state_dir` must be absolute, must not contain `..`, and must
-not be under `/dev`, `/sys` or `/proc`.
+not be under `/dev`, `/sys` or `/proc`. `stage` creates the staging directory
+as root and hands it to the SSH user, so `staging.dir` must also be a directory
+of its own: not a bare top-level directory (at least two path components), not
+one of the shared system directories (`/tmp`, `/var/tmp`, `/run`, `/var`, `/etc`,
+`/usr`, `/home`, `/root`), and not equal to or under `state_dir`. `stage` creates
+the directory only when it is absent, and refuses an existing one that is not
+owned by the SSH user (or is a symlink or not a directory) without changing it.
 
 Cross-checks applied when the layout is `explicit-table`: `target.sectors` and
 `target.sector_size` must equal the layout's `device_sectors` and `sector_size`;
@@ -447,10 +457,11 @@ work around a busybox userland. Specifically it relies on:
 A busybox image lacked all four and failed part-way through staging, so the
 assumption is checked before any write phase, read-only:
 
-- `stage` runs one unprivileged `sh` probe as its first board call, before the
-  space check and before anything is created. It runs `install --version`,
-  `sha256sum --version` and `dd --version`, and refuses naming each tool that
-  fails to start or announces BusyBox.
+- `stage` opens the connection first (the `connect` step: the privilege probe,
+  then the interpreter probe), and then runs one unprivileged `sh` tool probe
+  before the space check and before anything is created. The tool probe runs
+  `install --version`, `sha256sum --version` and `dd --version`, and refuses
+  naming each tool that fails to start or announces BusyBox.
 - `check` (and so the pre-flight inside `plan` and `write`) lists
   `board-prerequisites` in the profile checks. It runs the same three
   `--version` reads through the read-only operations layer, imports each
@@ -482,8 +493,20 @@ cause otherwise:
   stripped-down board python.
 
 Each refusal tells you to install a full `python3` or pass `--remote-python`.
-After copying the bundle, `stage` also confirms that the board's interpreter can
-open the staged archive.
+The probe, and the check `stage` makes that the board's interpreter can open
+the staged archive, run privileged the way the runner does, so the reported
+interpreter is the one that runs the bundle as root.
+
+The host builds the runner bundle deterministically, so it knows the sha256 it
+expects. Before `check`, `plan`, `write`, `readback` or `restore` runs anything,
+it asks the board for `sha256sum` of the staged bundle and compares the answer
+on the host. A mismatch is refused with this message:
+
+    staged runner is from a different tool build: run stage again
+
+A missing tool, an unreadable or malformed hash is refused too, with a message
+that also says to run `stage` again. `status` skips this comparison so a
+recorded phase can still be read after the tool changed.
 
 ## Detached writes
 
@@ -577,12 +600,12 @@ records are written under `<state_dir>/<run_id>/records`.
 
 | Record | Written by |
 |--------|------------|
-| `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time. |
+| `plan.json` | `plan`: run id, profile hash, board identity, device, image hashes and sizes, partition table hash, arm summary, creation time, and `bundle_sha256` (the runner bundle that planned it). |
 | `write.json` | `write`: final phase, error, per-image state, arm record, transition log. |
 | `runner.log` | A detached `write`: the runner's output. |
 | `accepted` | A detached `write`: the runner's pid and the invocation nonce, written before any check. Rewritten on every invocation. |
 | `outcome` | A detached `write` that ended: `finished`, or `refused` with the board's refusal text, after the run id and nonce lines. Listed in `MANIFEST.json` like the other files; absent when the runner crashed. |
-| `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
+| `MANIFEST.json` | Written last by the runner for each run directory. Lists every record with size and sha256, plus host tool version, runner version, `bundle_sha256` (the sha256 of the `BUNDLE.json` inside the runner bundle that ran, which names the tool build that wrote the disk; the verifier treats it as optional so record sets from before it existed still verify, and a present value must be a 64-digit hex digest), profile hash, image hashes, board identity, transition log, clocks (including skew) and `run_status` (`runner-complete` when the subcommand exited 0, otherwise `incomplete`). |
 
 The host collects the on-board records after `plan` and after `write`, into
 `<evidence-dir>/<run-id>` and `<evidence-dir>/<run-id>-write`, and verifies the

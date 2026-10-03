@@ -11,6 +11,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import re
 import secrets
 import stat
 from dataclasses import dataclass, field
@@ -137,6 +138,8 @@ class RecordSet:
     host_utc: str
     board_utc: str
     artifacts: list[dict[str, Any]] = field(default_factory=list)
+    # The digest of the runner bundle that produced these records: which tool build wrote the disk.
+    bundle_sha256: str | None = None
 
     def __post_init__(self) -> None:
         self.run_dir = Path(self.run_dir)
@@ -151,7 +154,7 @@ class RecordSet:
     def manifest(self, run_status: str) -> dict[str, Any]:
         if run_status not in STATUSES:
             raise ValueError(f"bad run_status: {run_status!r}")
-        return {
+        manifest = {
             "host_tool_version": self.host_tool_version,
             "runner_version": self.runner_version,
             "profile_hash": self.profile_hash,
@@ -167,6 +170,9 @@ class RecordSet:
             "run_status": run_status,
             "artifacts": sorted(self.artifacts, key=lambda a: a["name"]),
         }
+        if self.bundle_sha256:
+            manifest["bundle_sha256"] = self.bundle_sha256
+        return manifest
 
     def finalize(self, run_status: str) -> Path:
         """Write MANIFEST.json atomically, last."""
@@ -181,6 +187,7 @@ class VerifyResult:
 
 
 _STR_FIELDS = ("host_tool_version", "runner_version", "profile_hash")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def _manifest_problems(manifest: Any) -> list[str]:
@@ -209,6 +216,11 @@ def _manifest_problems(manifest: Any) -> list[str]:
         skew = clocks.get("skew_seconds")
         if skew is not None and (isinstance(skew, bool) or not isinstance(skew, (int, float))):
             out.append("manifest clocks.skew_seconds is not a number or null")
+    # Optional: record sets written before the field existed carry none and stay valid; a present value must be a digest.
+    if "bundle_sha256" in manifest:
+        digest = manifest["bundle_sha256"]
+        if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+            out.append("manifest field bundle_sha256 is not a sha256 hex digest")
     if manifest.get("run_status") not in STATUSES:
         out.append(f"manifest run_status {manifest.get('run_status')!r} is not one of {STATUSES}")
     return out

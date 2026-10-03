@@ -357,6 +357,37 @@ def test_staging_dir_may_not_be_the_filesystem_root(value):
         load_profile_bytes(mutated(lambda d: d["staging"].update(dir=value)))
 
 
+# ---- 5.41: stage runs `install -d -o USER` as root, so the directory it names must be a dedicated one ----
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["/tmp", "/var/tmp", "/run", "/var", "/etc", "/usr", "/home", "/root", "/tmp/", "//tmp", "/./var/tmp", "/var/./tmp/", "/var//tmp"],
+)
+def test_staging_dir_may_not_be_a_shared_system_directory(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+@pytest.mark.parametrize("bad", ["/avocado", "/avocado/", "//avocado"])
+def test_staging_dir_needs_a_directory_of_its_own_below_a_top_level_one(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+@pytest.mark.parametrize(
+    "bad", ["/var/lib/avocado-flash", "/var/lib/avocado-flash/", "/var/lib/avocado-flash/stage", "/var/lib//avocado-flash/./x"]
+)
+def test_staging_dir_may_not_be_or_sit_under_state_dir(bad):
+    with pytest.raises(ProfileError, match=r"staging\.dir"):
+        load_profile_bytes(mutated(lambda d: d["staging"].update(dir=bad)))
+
+
+@pytest.mark.parametrize("ok", ["/var/lib/avocado-flash-staging", "/var/lib/avocado", "/run/avocado-flash", "/var/tmp/avocado-flash"])
+def test_staging_dir_beside_state_dir_or_in_a_dedicated_subdirectory_is_accepted(ok):
+    assert load_profile_bytes(mutated(lambda d: d["staging"].update(dir=ok))).staging.dir == ok
+
+
 @pytest.mark.parametrize("first", [0, 33])
 def test_first_lba_below_the_gpt_header_is_refused(first):
     def m(d):

@@ -24,11 +24,25 @@ SEVEN = "stage, check, plan, write, readback, restore, status"
 def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
+def expected_bundle_sha() -> str:
+    """The sha256 of the bundle this tool builds for the fixture profile (the build is deterministic)."""
+    import tempfile
+
+    from avocado_flash_remote.bundle import build_bundle
+    from avocado_flash_remote.profile_resolve import resolve_profile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        data = resolve_profile("fixture-none", None).data
+        return build_bundle(data, pathlib.Path(tmp) / "runner.pyz", cli.TOOL_VERSION).sha256
+
 
 class Board:
     """Scripted board: answers the host's calls the way the runner would."""
 
     def __init__(self, tmp_path, *, need_password=False, corrupt_write=False, write_phase="complete", missing=(), interp_rc=0):
+        self.bundle_sha = None  # what sha256sum says about the staged bundle; None means the tool's own build
+        self.bundle_hash_rc = 0  # a failing sha256sum of the staged bundle
+        self.unreachable_at = None  # 'test', 'id' or 'sudo': that connect probe answers ssh's 255
         self.omit_write_json = False  # the write record set lacks write.json (still a verifying set)
         self.write_run_status = "runner-complete"  # run_status of the write record set's manifest
         self.timeout_sub = None  # the runner call that times out on the host side (ssh wait expired)
@@ -64,6 +78,14 @@ class Board:
         self.runs = []  # (sub, request, detach)
         self.records = {}  # remote run dir -> tar bytes
         self.stub = StubTransport(self.handle)
+        self.staged_sha = None  # the sha256 of the bundle the host last copied here, as sha256sum would say
+        real_put_tar = self.stub.put_tar
+
+        def put_tar(files, dest_dir, modes=None, **kw):
+            self.staged_sha = _sha(pathlib.Path(files[cli.BUNDLE_NAME]).read_bytes())
+            return real_put_tar(files, dest_dir, modes, **kw)
+
+        self.stub.put_tar = put_tar
         self.log = b"runner log line\n"
 
     # -- record sets -------------------------------------------------------
@@ -97,7 +119,11 @@ class Board:
     def handle(self, argv, stdin, sudo):
         argv = list(argv)
         if argv[:3] == ["sudo", "-n", "true"] and not sudo:
+            if self.unreachable_at == "sudo":
+                return SSH_DROP
             return RunResult(0 if not self.need_password else 1)
+        if argv[:2] == ["id", "-u"] and self.unreachable_at == "id":
+            return SSH_DROP
         if argv[:2] == ["sudo", "-n"]:
             argv = argv[2:]
         elif argv[:4] == ["sudo", "-S", "-p", ""]:
@@ -111,6 +137,8 @@ class Board:
             return RunResult(0, b"OK\n")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n")
+        if argv[0] == "sh" and "stat -c" in argv[2]:
+            return RunResult(0, b"ABSENT\n")  # the staging directory does not exist yet
         if argv[0] == "sh" and argv[2:3] and argv[2].startswith("d="):
             return RunResult(0, b"Filesystem 1024-blocks Used Available Capacity Mounted on\ntmpfs 9 1 999999 1% /run\n")
         if argv[0] == "sh" and "cat >" in argv[2]:
@@ -139,7 +167,14 @@ class Board:
                 return RunResult(0, f"4242\nnonce={self.accepted_nonce or self._nonce()}\n".encode())
             return RunResult(3)
         if argv[0] == "test":
+            if self.unreachable_at == "test":
+                return SSH_DROP
             return RunResult(0 if self.staged else 1)
+        if argv[0] == "sha256sum":
+            if self.bundle_hash_rc:
+                return RunResult(self.bundle_hash_rc, b"", b"sha256sum: no such file")
+            digest = self.bundle_sha or self.staged_sha or expected_bundle_sha()
+            return RunResult(0, f"{digest}  {argv[-1]}\n".encode())
         if argv[0] == "tail":
             return RunResult(0, self.log)
         if len(argv) >= 3 and argv[1] == "-c":
@@ -479,7 +514,7 @@ def test_dropped_connection_after_detach_with_failed_phase_is_not_255(images, tm
     assert "write COMPLETE" not in text
 
 
-@pytest.mark.parametrize("sub", ["check", "status", "restore"])
+@pytest.mark.parametrize("sub", ["check", "status", "restore", "plan", "readback"])
 def test_exit_255_is_never_returned(images, tmp_path, sub, capsys):
     board = Board(tmp_path)
     assert run(args(images, tmp_path, "stage"), board)[0] == 0
@@ -1217,3 +1252,91 @@ def test_check_and_plan_keep_running_on_a_name_only_profile(images, tmp_path, bo
     assert run(args(images, tmp_path, "stage", "--extension-dir", str(ext)), board)[0] == 0
     assert run(args(images, tmp_path, "check", "--extension-dir", str(ext)), board)[0] == 0
     assert run(args(images, tmp_path, "plan", "--extension-dir", str(ext)), board)[0] == 0
+
+
+# --- 5.41: the staged runner is this tool's build; a network failure is not a missing bundle ---------
+
+STALE_BUILD = "staged runner is from a different tool build: run stage again"
+
+
+@pytest.mark.parametrize("sub", ["check", "plan", "write", "readback", "restore"])
+def test_a_staged_bundle_from_a_different_build_is_refused_before_any_runner_call(images, tmp_path, sub, capsys):
+    board, rid = _prepared(images, tmp_path)
+    board.bundle_sha = "f" * 64
+    board.runs.clear()
+    board.requests.clear()
+    capsys.readouterr()
+    rc, _ = run(_sub_args(images, tmp_path, sub, rid), board)
+    assert rc == 1
+    assert STALE_BUILD in capsys.readouterr().err
+    assert board.runs == [] and board.requests == {}
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [{"bundle_hash_rc": 1}, {"bundle_hash_rc": 127}, {"bundle_sha": "not-a-digest"}, {"bundle_sha": "F" * 63}],
+    ids=["sha256sum-fails", "sha256sum-absent", "unparseable", "too-short"],
+)
+def test_an_unreadable_staged_bundle_hash_fails_closed_with_the_stage_again_message(images, tmp_path, shape, capsys):
+    board, rid = _prepared(images, tmp_path)
+    for key, value in shape.items():
+        setattr(board, key, value)
+    board.runs.clear()
+    capsys.readouterr()
+    rc, _ = run(_sub_args(images, tmp_path, "check", rid), board)
+    assert rc == 1
+    assert "run stage again" in capsys.readouterr().err
+    assert board.runs == []
+
+
+def test_a_matching_staged_bundle_proceeds_and_the_hash_probe_is_unprivileged(images, tmp_path):
+    board, rid = _prepared(images, tmp_path)
+    board.stub.calls.clear()
+    rc, text = run(_sub_args(images, tmp_path, "check", rid), board)
+    assert rc == 0, text
+    probes = [c for c in board.stub.calls if c.argv[:1] == ["sha256sum"]]
+    assert len(probes) == 1 and probes[0].sudo is False
+    assert probes[0].argv[-1] == "/run/fixture-images/runner.pyz"
+
+
+def test_status_stays_available_when_the_staged_build_differs(images, tmp_path):
+    board, rid = _prepared(images, tmp_path)
+    board.bundle_sha = "f" * 64
+    rc, _ = run(_sub_args(images, tmp_path, "status", rid), board)
+    assert rc == 0
+    assert "status" in board.subs()
+
+
+@pytest.mark.parametrize("where", ["test", "id", "sudo"])
+def test_an_ssh_failure_while_connecting_is_a_dropped_connection_not_a_missing_bundle_or_a_prompt(
+    images, tmp_path, where, capsys
+):
+    board, rid = _prepared(images, tmp_path)
+    board.unreachable_at = where
+    asked = []
+    board.runs.clear()
+    capsys.readouterr()
+    rc, _ = run(args(images, tmp_path, "check"), board, ask_password=lambda: asked.append(1) or PASSWORD)
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "cannot reach the board over ssh" in err
+    assert "not on the board" not in err
+    assert asked == []
+    assert board.runs == []
+
+
+def test_plan_ssh_failure_exits_2_and_keeps_the_local_run_dir(images, tmp_path, capsys):
+    board = Board(tmp_path)
+    assert run(args(images, tmp_path, "stage"), board)[0] == 0
+    orig = board._runner
+
+    def dropped(argv):
+        if argv[2] == "plan":
+            return RunResult(255, b"", b"ssh: connection reset")
+        return orig(argv)
+
+    board._runner = dropped
+    rc, _ = run(args(images, tmp_path, "plan"), board)
+    assert rc == 2
+    assert "status" in capsys.readouterr().err
+    assert [p for p in (tmp_path / "ev").iterdir() if p.is_dir()]
