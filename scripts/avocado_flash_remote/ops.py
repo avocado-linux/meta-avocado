@@ -290,6 +290,10 @@ class Ops:
         return ["dd", f"if={src}", f"of={dst}", f"bs={bs}", "conv=fsync", "status=none"]
 
     @staticmethod
+    def vec_blockdev_flushbufs(dev):  # no kit counterpart (parity D11)
+        return ["blockdev", "--flushbufs", dev]
+
+    @staticmethod
     def vec_efibootmgr_next(entry):  # install.sh:672
         if not _BOOT_ENTRY_RE.match(str(entry)):
             raise ValueError(f"boot entry must be four hex digits, got {entry!r}")
@@ -443,17 +447,10 @@ class Ops:
         self._gate("umount", True)
         return self._run(self.vec_umount(target), **kw)
 
-    def write_file(self, path, data: bytes) -> None:
-        self._gate("write_file", True)
-        self._fs("write_file", path, data)
-
-    def efivar_write(self, path, data: bytes) -> None:
-        self._gate("efivar_write", True)
-        self._fs("efivar_write", path, data)
-
-    def sysfs_write(self, path, value: str) -> None:
-        self._gate("sysfs_write", True)
-        self._fs("sysfs_write", path, value)
+    def blockdev_flushbufs(self, dev, **kw) -> OpResult:
+        """Flush and invalidate ``dev``'s buffer cache so a following read comes from the media."""
+        self._gate("blockdev_flushbufs", True)
+        return self._run(self.vec_blockdev_flushbufs(dev), **kw)
 
 
 # ---------------------------------------------------------------- read-only
@@ -499,7 +496,6 @@ class RecordingOps(Ops):
         self.script = {k: (list(v) if isinstance(v, list) else v) for k, v in (script or {}).items()}
         self.replacements = list(replacements)
         self.calls: list = []
-        self.written: dict = {}
 
     def _norm(self, text: str) -> str:
         for old, new in self.replacements:
@@ -558,9 +554,7 @@ class RecordingOps(Ops):
             if kind == "listdir":
                 return sorted(res.text.split())
             return res.stdout
-        vec = [kind, path] + ([data] if kind == "sysfs_write" else [])
-        self.calls.append(Call(vec, kind="fs"))
-        self.written[path] = data
+        raise ValueError(f"unsupported filesystem verb: {kind}")
 
 
 # --------------------------------------------------------------------- real
@@ -683,13 +677,7 @@ class RealOps(Ops):
             return os.path.realpath(path, strict=True)
         if kind == "listdir":
             return sorted(os.listdir(path))
-        if kind == "sysfs_write":
-            with open(path, "w") as f:
-                f.write(data)
-            return None
-        with open(path, "wb") as f:  # write_file, efivar_write
-            f.write(data)
-        return None
+        raise ValueError(f"unsupported filesystem verb: {kind}")
 
 
 __all__ = [

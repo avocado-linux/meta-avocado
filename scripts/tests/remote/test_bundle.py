@@ -380,6 +380,31 @@ def test_status_wiring_without_a_run_id_asks_for_the_current_run(tmp_path, recs)
     assert kw == {"run_id": None}
 
 
+@pytest.mark.parametrize("spelling", ["elsewhere", "state/", "state/../state", "./state"])
+@pytest.mark.parametrize("sub", ["write", "restore", "readback", "status"])
+def test_the_request_s_state_dir_never_replaces_the_profile_s(tmp_path, recs, sub, spelling):
+    """The profile hash binds the profile the runner uses, so its state_dir is the only one in play (5.42)."""
+    (tmp_path / "plan.json").write_text('{"run_id": "r1"}')
+    info = _archive_for_runner(tmp_path)
+    other = str(tmp_path / spelling) if spelling != "./state" else str(tmp_path) + "/./state"
+    req = _request(tmp_path, state_dir=other)
+    assert runner.main([sub, "--request", str(req)], archive=info.path) == 0
+    (args, kw), = recs[sub].calls
+    used = args[0] if sub == "status" else kw["state_dir"]
+    assert used == str(tmp_path / "state")
+
+
+def test_a_request_without_a_state_dir_is_served_from_the_profile_s(tmp_path, recs):
+    info = _archive_for_runner(tmp_path)
+    req = _request(tmp_path)
+    data = json.loads(req.read_text())
+    del data["state_dir"]
+    req.write_text(json.dumps(data))
+    assert runner.main(["status", "--request", str(req)], archive=info.path) == 0
+    (args, _kw), = recs["status"].calls
+    assert args == (str(tmp_path / "state"),)
+
+
 def test_unexpected_exception_exit_70(tmp_path, monkeypatch, capsys):
     info = _archive_for_runner(tmp_path)
 

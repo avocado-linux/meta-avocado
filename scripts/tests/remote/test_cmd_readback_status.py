@@ -104,7 +104,7 @@ def test_every_mount_is_read_only_and_only_mount_umount_mutate(profile, dirs):
             assert call.vector[1] == "-o" and call.vector[2].split(",")[0] == "ro"
         elif vector_mutates(call.vector):
             assert call.vector[0] == "umount"
-    assert not ops.written
+    assert all(c.vector[0] in ("read_file", "realpath", "listdir") for c in ops.calls if c.kind == "fs")
 
 
 def test_missing_journal_is_a_recorded_result(profile, dirs):

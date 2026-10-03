@@ -133,6 +133,39 @@ def test_board_prerequisites_section_names_every_tool_and_the_busybox_limit():
         assert needle in text, needle
 
 
+def _flat_text(text):
+    return " ".join(text.split())
+
+
+def test_board_prerequisites_says_the_module_check_is_the_hosts_interpreter_probe():
+    flat = _flat_text(_section("Board prerequisites"))
+    assert "module check is the host's interpreter probe" in flat
+    assert "imports each standard-library module" not in flat
+    assert "or module" not in flat
+
+
+def test_board_prerequisites_says_the_tool_banner_must_name_gnu_coreutils():
+    flat = _flat_text(_section("Board prerequisites"))
+    assert "GNU coreutils" in flat and "toybox" in flat and "uutils" in flat
+
+
+def test_the_known_limit_for_busybox_no_longer_claims_a_python_check():
+    row = next(ln for ln in _section("Known limits").splitlines() if ln.startswith("| Busybox portability"))
+    assert "standard library" not in row
+
+
+def test_the_write_row_and_the_parity_section_record_the_read_back_cache_flush():
+    assert "blockdev --flushbufs" in _flat_text(_section("Subcommands and their gates"))
+    flat = _flat_text(_section("The one-shot boot and its limits"))
+    assert "D11" in flat and "blockdev --flushbufs" in flat
+    assert "readback_after_cache_flush" in _flat_text(_section("Run state and recovery"))
+
+
+def test_the_runner_takes_state_dir_from_the_profile_not_the_request():
+    flat = _flat_text(_section("Schema version 1"))
+    assert "the runner ignores a state directory in a request" in flat
+
+
 def test_the_preflight_check_list_names_board_prerequisites():
     assert "`board-prerequisites`" in _section("Schema version 1")
 

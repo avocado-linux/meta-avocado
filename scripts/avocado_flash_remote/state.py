@@ -259,7 +259,7 @@ def transition(state: RunState, new_phase: str, **fields: Any) -> RunState:
     elif new_phase == "image-written":
         rec = data["images"][image]
         rec["state"] = "written"
-        for k in ("bytes_written", "expected_sha256", "readback_sha256"):
+        for k in ("bytes_written", "expected_sha256", "readback_sha256", "readback_after_cache_flush"):
             if k in fields:
                 rec[k] = fields[k]
     elif new_phase == "arming":

@@ -688,7 +688,7 @@ CASES = {
     "install:mounted": outcome("a partition is mounted: plan refuses, no mutating call", reads=PLAN_REF),
     "install:badcmd": outcome("staged boot image without the NVMe-hiding argument: write refused before any mutation, exit 1"),
     "install:unseated": differs("D5+D6+D9", "guard-less profile (the kit's --nvme-unseated): " + OK_MUT),
-    "install:readback": outcome("cmdline read back from the partition lacks the argument: sfdisk, settle, 7 dd, nothing armed, exit 1"),
+    "install:readback": differs("D11", "cmdline read back from the partition lacks the argument: sfdisk, settle, 7 dd (each followed by the D11 cache flush), nothing armed, exit 1"),
     "install:extracmd": differs("D5+D6+D9", "argument in extra_cmdline (offset 608) accepted: " + OK_MUT),
     "install:nearmiss": outcome("staged near-miss token: write refused before any mutation, exit 1"),
     "install:hdrv3": outcome("staged header version 3: write refused before any mutation, exit 1"),
@@ -878,6 +878,7 @@ DIFFERENCES = {
     "D7": "the port refuses non-whole-disk and NVMe targets at plan, before any call, with the kit's zero-mutation outcome; the kit takes --disk and refuses in install.sh.",
     "D9": "the arm selects the firmware's own storage entry with `efibootmgr -n` and never creates or deletes a boot entry (task 5.36): the kit's `-C` has no counterpart (and its `-C` support check is replaced by `efibootmgr-supports-bootnext`, which asserts `-n` and `-N` in `efibootmgr --help`), restore runs `-N` but never `-B -b`, and a BootNext already consumed by a boot is a note, not a failure.",
     "D10": "cmd_readback mounts the untrusted data partition `-o ro,nosuid,nodev,noexec` (task 5.40); the kit mounted `-o ro`. Nothing else in the readback call sequence differs.",
+    "D11": "cmd_write flushes and invalidates the target partition's buffer cache with `blockdev --flushbufs <node>` between each `dd` write and its read-back (task 5.42), so the read-back reads the media and not the page cache the write just filled; the kit read back through the cache. The flush is a recorded mutating call, gated like the others, and the image-written state entry records `readback_after_cache_flush`. Every other mutating call and its order is the kit's.",
     "D8": "restore is driven by the recorded arm entry (number AND label), never rolls back the table, and cleans staging when there is no state (spec: 'Restore undoes the arming and removes staging', 'Restore does not claim a data rollback').",
 }  # fmt: skip
 
@@ -889,6 +890,24 @@ WRITE_SEQ = (
                      ("esp.img", 11), ("rootfs.erofs-lz4", 1), ("var.btrfs", 16))
     ]
 )  # fmt: skip
+
+
+FLUSH = "blockdev --flushbufs "
+
+
+def kit_view(muts):
+    """The port's mutating lines without the D11 cache flushes, comparable with the kit's."""
+    return [ln for ln in muts if not ln.startswith(FLUSH)]
+
+
+def with_flushes(seq):
+    """The kit's write sequence as the port runs it: each image write followed by the D11 flush of its node."""
+    out = []
+    for ln in seq:
+        out.append(ln)
+        if ln.startswith("dd ") and " of=/dev/" in ln:
+            out.append(FLUSH + next(t[3:] for t in ln.split() if t.startswith("of=")))
+    return out
 
 
 KIT_CREATE = f"efibootmgr -C -d {DEV} -p 11 -L avocado-emmc-oneshot -l \\EFI\\BOOT\\BOOTAA64.EFI -u bootmode=bootimg"
@@ -989,26 +1008,35 @@ def d56(name, g, run):
     assert g.exit == run.exit == 0, run.text
     # D9: the kit's `-C` (create) has no counterpart and its `-n <new number>` names the firmware's entry.
     assert g.muts == WRITE_SEQ + [KIT_CREATE, "efibootmgr -n 0005"], f"{name}: the golden changed: {g.muts}"
-    assert run.muts == port_arm_muts(g.muts), f"{name}: mutating sequence differs\nkit : {g.muts}\nport: {run.muts}"
-    assert run.muts == WRITE_SEQ + [f"efibootmgr -n {tcw.ENTRY}"]
+    assert kit_view(run.muts) == port_arm_muts(g.muts), f"{name}: mutating sequence differs\nkit : {g.muts}\nport: {run.muts}"
+    assert run.muts == with_flushes(WRITE_SEQ) + [f"efibootmgr -n {tcw.ENTRY}"]  # D11
     lines = run.lines
     for i, ln in enumerate(lines):
         if is_mut(ln) and ln.startswith("dd "):
             node = next(t[3:] for t in ln.split() if t.startswith("of="))
-            assert lines[i + 1].startswith(f"dd if={node} bs=4M iflag=count_bytes count="), lines[i : i + 2]
+            assert lines[i + 1] == FLUSH + node, lines[i : i + 2]
+            assert lines[i + 2].startswith(f"dd if={node} bs=4M iflag=count_bytes count="), lines[i : i + 3]
     assert not any("bhdr" in ln for ln in lines)
 
 
 def d9_bochange(name, g, run):
     """BootOrder moves before the arm: the kit had run -C by then, the port refuses with nothing armed."""
     assert g.exit == run.exit == 1, run.text
-    assert g.muts == WRITE_SEQ + [KIT_CREATE], f"the golden changed: {g.muts}"
-    assert run.muts == WRITE_SEQ == port_arm_muts(g.muts)
+    assert run.muts == with_flushes(WRITE_SEQ)  # D11
+    assert kit_view(run.muts) == WRITE_SEQ == port_arm_muts(g.muts)
     assert not any(ln.startswith("efibootmgr -n") for ln in run.lines)
     assert "the board was not armed" in run.text
 
 
-DIFF_CHECKS = {"D9": d9_bochange, "D5+D6+D9": d56, "D1": d1, "D2": d2, "D4": d4, "D4+D10": d4_d10, "D10": d10, "D7": d7, "D8": d8}
+def d11(name, g, run):
+    """A failure after the writes: the kit's mutating sequence once the cache flushes are taken out."""
+    assert g.exit == run.exit == 1, run.text
+    assert g.muts == WRITE_SEQ, f"the golden changed: {g.muts}"
+    assert run.muts == with_flushes(WRITE_SEQ), f"{name}: mutating sequence differs\nport: {run.muts}"
+    assert kit_view(run.muts) == g.muts
+
+
+DIFF_CHECKS = {"D9": d9_bochange, "D5+D6+D9": d56, "D11": d11, "D1": d1, "D2": d2, "D4": d4, "D4+D10": d4_d10, "D10": d10, "D7": d7, "D8": d8}
 
 
 # ---------------------------------------------------------------- per case
@@ -1093,7 +1121,8 @@ def test_d5_each_image_is_read_back_right_after_its_write_and_header_read_is_dir
     for role, img in env.profile.images.items():
         node = tcw.layout.partition_node(DEV, img.partition)
         w = next(i for i, ln in enumerate(lines) if f" of={node} " in ln)
-        assert lines[w + 1].startswith(f"dd if={node} bs=4M iflag=count_bytes count="), lines[w : w + 2]
+        assert lines[w + 1] == FLUSH + node, lines[w : w + 2]  # D11
+        assert lines[w + 2].startswith(f"dd if={node} bs=4M iflag=count_bytes count="), lines[w : w + 3]
     assert not any("bhdr" in ln or " of=<" in ln for ln in lines), "the port copies no header to a scratch file"
     assert any("bhdr" in ln for ln in kit)
     assert f"dd if={DEV}p3 bs=2048 count=1 status=none" in lines
@@ -1133,7 +1162,7 @@ def test_post_write_guard_still_catches_a_bad_written_header(golden, runs):
     """The staged file is fine, the header read back from the partition is not: the
     kit's install:readback. Sequence up to the failure, nothing armed."""
     g, run = golden["install:readback"], runs["install:readback"]
-    assert g.exit == run.exit == 1 and run.muts == g.muts == WRITE_SEQ
+    assert g.exit == run.exit == 1 and g.muts == WRITE_SEQ and run.muts == with_flushes(WRITE_SEQ)  # D11
     assert "guard refused to arm" in run.text and "the board was not armed" in run.text
 
 

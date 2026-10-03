@@ -1199,6 +1199,61 @@ def test_stage_refuses_when_the_tool_probe_answer_is_unintelligible(kit, resolve
     assert not any(c.kind == "put_tar" for c in t.calls)
 
 
+# --- the tool probe matches GNU coreutils positively (task 5.42) ------------
+
+
+def _run_probe_script(tmp_path, banners):
+    """Run the real probe shell text against stub tools that print ``banners`` (tool -> text or None for absent)."""
+    import subprocess
+
+    bindir = tmp_path / "probe-bin"
+    bindir.mkdir()
+    for tool, banner in banners.items():
+        if banner is not None:
+            p = bindir / tool
+            p.write_text(f"#!/bin/sh\necho '{banner}'\n")  # builtins only: PATH holds just this directory
+            p.chmod(0o755)
+    done = subprocess.run(["/bin/sh", "-c", host._TOOL_PROBE], capture_output=True, text=True,
+                          env={"PATH": str(bindir)}, check=False)  # fmt: skip
+    return done.stdout.strip().splitlines()[-1]
+
+
+GNU_BANNERS = {t: f"{t} (GNU coreutils) 9.4" for t in ("install", "sha256sum", "dd")}
+
+
+def test_probe_accepts_gnu_coreutils_banners(tmp_path):
+    assert _run_probe_script(tmp_path, GNU_BANNERS) == "OK"
+
+
+def test_probe_accepts_the_dd_banner_that_omits_the_word_gnu(tmp_path):
+    # GNU dd prints "dd (coreutils) 9.x"; refusing it would refuse every real GNU board.
+    assert _run_probe_script(tmp_path, {**GNU_BANNERS, "dd": "dd (coreutils) 9.12"}) == "OK"
+
+
+@pytest.mark.parametrize(
+    "banner",
+    ["install (uutils coreutils) 0.0.27", "toybox 0.8.11", "install (GNU findutils) 4.9", "no banner here"],
+    ids=["uutils", "toybox", "gnu-not-coreutils", "unrecognised"],
+)
+def test_probe_names_a_tool_whose_banner_is_not_gnu_coreutils(tmp_path, banner):
+    got = _run_probe_script(tmp_path, {**GNU_BANNERS, "install": banner})
+    assert got == "MISSING install"
+
+
+def test_probe_still_names_a_busybox_tool_and_an_absent_tool(tmp_path):
+    got = _run_probe_script(tmp_path, {**GNU_BANNERS, "dd": "BusyBox v1.36.1 multi-call binary.", "sha256sum": None})
+    assert got == "MISSING sha256sum dd"
+
+
+def test_refusal_text_says_which_userlands_are_refused():
+    t = StubTransport(handler=handler_for(10_000_000, missing_tools=("install",)))
+    with pytest.raises(HostError) as ei:
+        host.probe_board_tools(t)
+    msg = str(ei.value)
+    assert "GNU coreutils" in msg and "install" in msg
+    assert all(word in msg.lower() for word in ("busybox", "toybox", "uutils")), msg
+
+
 def test_stage_dry_run_still_opens_no_connection_with_the_probe_added(kit, resolved):
     images, bundle_path, _ = kit
     host.stage(None, resolved.profile, resolved, images, bundle_path, dry_run=True)

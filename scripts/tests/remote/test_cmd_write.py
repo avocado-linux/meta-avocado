@@ -315,7 +315,8 @@ def _norm_dd(line):
 def test_mutating_calls_match_the_golden_good_run(env):
     res, ops = env.run()
     assert res.exit_code == 0
-    ours = [c.line for c in mutations(ops)]
+    # D11: the buffer-cache flush after each write has no counterpart in the kit; every other mutation is compared.
+    ours = [c.line for c in mutations(ops) if not c.line.startswith("blockdev --flushbufs ")]
     golden = _golden_mutating()
     assert len(golden) == 1 + 1 + 7 + 2
     # Intentional differences from the kit, none of them in the mutating
@@ -327,6 +328,51 @@ def test_mutating_calls_match_the_golden_good_run(env):
     assert [_norm_dd(x) for x in ours] == [_norm_dd(x) for x in _port_arm_lines(golden)]
     dd_sources = [c.vector[1][3:] for c in mutations(ops) if c.vector[0] == "dd"]
     assert dd_sources == [env.src(r) for r in env.profile.images]
+
+
+# ------------------------------------------- read-back follows a cache invalidation (task 5.42)
+
+
+def flush_line(node):
+    return f"blockdev --flushbufs {node}"
+
+
+def test_readback_follows_a_buffer_cache_flush_of_the_same_node(env):
+    res, ops = env.run()
+    assert res.exit_code == 0, res.lines
+    log = ops.log
+    for role in env.profile.images:
+        flush = flush_line(env.node(role))
+        assert flush in log, f"no cache flush for {role}"
+        assert log.index(env.dd_key(role)) < log.index(flush) < log.index(env.readback_key(role))
+
+
+def test_flush_is_a_recorded_mutation_after_each_write(env):
+    res, ops = env.run()
+    assert res.exit_code == 0
+    muts = [c.line for c in mutations(ops)]
+    for role in env.profile.images:
+        i = muts.index(env.dd_key(role))
+        assert muts[i + 1] == flush_line(env.node(role))
+
+
+def test_flush_failure_stops_before_the_readback_and_arms_nothing(env):
+    role = next(iter(env.profile.images))
+    node = env.node(role)
+    script = env.script(**{flush_line(node): OpFailed(["blockdev", "--flushbufs", node], 1, "busy")})
+    res, ops = env.run(script=script)
+    assert res.exit_code == 1
+    assert env.readback_key(role) not in ops.log
+    assert not any(ln.startswith("efibootmgr -n") for ln in ops.log)
+    assert current_phase(env) == "failed"
+
+
+def test_image_written_entry_records_that_the_readback_followed_a_cache_flush(env):
+    res, _ = env.run()
+    assert res.exit_code == 0
+    st = statemod.load_state(env.state_dir).state
+    for role, img in st.data["images"].items():
+        assert img["readback_after_cache_flush"] is True, role
 
 
 def test_hard_rules_over_the_call_log(env):
