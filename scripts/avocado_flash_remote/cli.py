@@ -65,7 +65,7 @@ subcommands:
 gates:
   write refuses without a collected, verified plan record for --run-id
   write asks you to retype the target device and refuses on any mismatch
-  write and restore take a per-host lock and refuse while another holds it
+  write, restore and readback take a per-host lock and refuse while another holds it
   a run is COMPLETE only when the board says so and the collected records verify
 
 options:
@@ -658,7 +658,8 @@ def _do_readback(ctx: _Ctx) -> int:
     request = {
         "staging_dir": ctx.staging_dir,
         "state_dir": ctx.state_dir,
-        "mount_dir": f"{READBACK_RUN_BASE}/readback-mnt",
+        # One mount directory per invocation: two readbacks never stack a mount on a shared path.
+        "mount_dir": f"{READBACK_RUN_BASE}/{run_id}/mnt",
         "out_dir": f"{READBACK_RUN_BASE}/{run_id}/readback",
     }
     if arm_none:
@@ -666,7 +667,9 @@ def _do_readback(ctx: _Ctx) -> int:
             ctx.out("--reference-boot-order ignored (arm strategy none)")
     else:
         request["reference_boot_order"] = args.reference_boot_order
-    return _do_simple(ctx, "readback", request)
+    # The per-host lock keeps readback from mounting the data partition under a write or restore.
+    with ctx.lock(args.run_id or ""):
+        return _do_simple(ctx, "readback", request)
 
 
 _HANDLERS = {

@@ -548,7 +548,7 @@ def s_rb_notmpfs(tmp):
 def s_rb_mountfail(tmp):
     return _rb(
         tmp, journal=False,
-        mount=OpFailed(["mount", "-o", "ro", "-t", "btrfs", tcrb.PART, MNT], 32, "mount: wrong fs type"),
+        mount=OpFailed(["mount", "-o", "ro,nosuid,nodev,noexec", "-t", "btrfs", tcrb.PART, MNT], 32, "mount: wrong fs type"),
     )  # fmt: skip
 
 
@@ -709,12 +709,12 @@ CASES = {
     "window:pf-no-manifest": outcome("MANIFEST.hashes absent: not examined, exit 2"),
     "window:pf-efi-fail": outcome("efibootmgr failing: not examined, exit 2"),
     "window:pf-noroot": na("the kit's own root check; the port's check runs inside the bundle under the host layer's sudo and has no root self-check"),
-    "window:rb-default": exact("readback: identical call sequence, exit 0"),
-    "window:rb-entry": differs("D4", "readback always runs `ls -laR` on the journal path; the kit used a file test"),
-    "window:rb-fallback": differs("D4", "readback always runs `ls -laR` on the journal path; the kit used a file test"),
-    "window:rb-differs": differs("D4", "readback always runs `ls -laR` on the journal path; the kit used a file test"),
+    "window:rb-default": differs("D10", "readback: identical call sequence apart from the hardened mount options, exit 0"),
+    "window:rb-entry": differs("D4+D10", "readback always runs `ls -laR` on the journal path; the kit used a file test"),
+    "window:rb-fallback": differs("D4+D10", "readback always runs `ls -laR` on the journal path; the kit used a file test"),
+    "window:rb-differs": differs("D4+D10", "readback always runs `ls -laR` on the journal path; the kit used a file test"),
     "window:rb-notmpfs": exact("readback: out dir not on tmpfs, refuses before mounting"),
-    "window:rb-mountfail": exact("readback: failed ro mount is reported, exit 1, no umount"),
+    "window:rb-mountfail": differs("D10", "readback: failed ro mount is reported, exit 1, no umount (hardened mount options)"),
     "window:rb-missing-tool": outcome("lsblk missing: no mutating call, exit 2"),
     "window:rb-cleanup": differs("D8", "restore clears BootNext and deletes no entry (the kit also ran -B -b 0005), exit 0"),
     "window:rb-cleanup-two": differs("D8", "restore clears BootNext for the recorded entry and touches no other; the kit refused on two labelled entries"),
@@ -877,6 +877,7 @@ DIFFERENCES = {
     "D6": "write requires a plan record and consumes it (a kit install has none): install success cases compare the mutating sequence only.",
     "D7": "the port refuses non-whole-disk and NVMe targets at plan, before any call, with the kit's zero-mutation outcome; the kit takes --disk and refuses in install.sh.",
     "D9": "the arm selects the firmware's own storage entry with `efibootmgr -n` and never creates or deletes a boot entry (task 5.36): the kit's `-C` has no counterpart (and its `-C` support check is replaced by `efibootmgr-supports-bootnext`, which asserts `-n` and `-N` in `efibootmgr --help`), restore runs `-N` but never `-B -b`, and a BootNext already consumed by a boot is a note, not a failure.",
+    "D10": "cmd_readback mounts the untrusted data partition `-o ro,nosuid,nodev,noexec` (task 5.40); the kit mounted `-o ro`. Nothing else in the readback call sequence differs.",
     "D8": "restore is driven by the recorded arm entry (number AND label), never rolls back the table, and cleans staging when there is no state (spec: 'Restore undoes the arming and removes staging', 'Restore does not claim a data rollback').",
 }  # fmt: skip
 
@@ -922,6 +923,25 @@ def d4(name, g, run):
     extra = f"ls -laR {MNT}/log/journal"
     assert extra in run.lines and extra not in g.lines
     assert [ln for ln in run.lines if ln != extra] == g.lines
+
+
+HARDENED = "mount -o ro,nosuid,nodev,noexec "
+
+
+def d10(name, g, run):
+    """The readback sequence is the kit's once the mount options are put back."""
+    assert sum(ln.startswith(HARDENED) for ln in run.lines) == 1
+    plain = [ln.replace(HARDENED, "mount -o ro ", 1) for ln in run.lines]
+    assert plain == g.lines, f"{name}: call sequence differs\nkit : {g.lines}\nport: {plain}"
+    assert_exit(g, run)
+
+
+def d4_d10(name, g, run):
+    assert g.exit == run.exit
+    extra = f"ls -laR {MNT}/log/journal"
+    plain = [ln.replace(HARDENED, "mount -o ro ", 1) for ln in run.lines]
+    assert extra in plain and extra not in g.lines
+    assert [ln for ln in plain if ln != extra] == g.lines
 
 
 def d7(name, g, run):
@@ -988,7 +1008,7 @@ def d9_bochange(name, g, run):
     assert "the board was not armed" in run.text
 
 
-DIFF_CHECKS = {"D9": d9_bochange, "D5+D6+D9": d56, "D1": d1, "D2": d2, "D4": d4, "D7": d7, "D8": d8}
+DIFF_CHECKS = {"D9": d9_bochange, "D5+D6+D9": d56, "D1": d1, "D2": d2, "D4": d4, "D4+D10": d4_d10, "D10": d10, "D7": d7, "D8": d8}
 
 
 # ---------------------------------------------------------------- per case
@@ -1057,7 +1077,7 @@ def test_d3_device_dependent_checks_are_not_examined_when_emmc_is_absent(tmp_pat
 
 def test_d4_readback_always_lists_the_journal_directory(golden, runs):
     for name in ("window:rb-entry", "window:rb-fallback", "window:rb-differs"):
-        d4(name, golden[name], runs[name])
+        d4_d10(name, golden[name], runs[name])
     assert "ls -laR" in "\n".join(golden["window:rb-default"].lines)
     assert "ls -laR" not in "\n".join(golden["window:rb-entry"].lines)
 

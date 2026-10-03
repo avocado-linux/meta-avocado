@@ -1092,7 +1092,7 @@ def _readback_request(images, tmp_path, *extra):
 def test_readback_request_puts_mount_and_output_under_run_not_the_state_dir(images, tmp_path):
     req = _readback_request(images, tmp_path, "--run-id", "rb-1")
     assert req["out_dir"] == "/run/avocado-flash/rb-1/readback"
-    assert req["mount_dir"] == "/run/avocado-flash/readback-mnt"
+    assert req["mount_dir"] == "/run/avocado-flash/rb-1/mnt"  # per invocation (5.40), no longer one shared path
     assert not req["out_dir"].startswith(req["state_dir"])
     assert not req["mount_dir"].startswith(req["state_dir"])
 
@@ -1132,6 +1132,25 @@ def test_readback_with_a_disk_state_dir_still_reaches_the_mount_step(images, tmp
         makedirs=lambda *a, **k: None, nearest_existing=posixpath.dirname,
     )
     assert any(x.startswith("mount") for x in ops.log), res.lines
+
+
+def test_two_generated_readbacks_never_share_a_mount_directory(images, tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first = _readback_request(images, tmp_path / "a")
+    second = _readback_request(images, tmp_path / "b")
+    assert first["mount_dir"] != second["mount_dir"]
+    assert re.fullmatch(r"/run/avocado-flash/readback-[0-9a-f]{8}/mnt", first["mount_dir"])
+
+
+def test_readback_takes_the_per_host_lock_and_refuses_while_another_holds_it(images, tmp_path, board, capsys):
+    rid = _stage_and_plan(images, tmp_path, board)
+    lock_path = next((tmp_path / "ev").glob(".lock-*"), None)
+    with HostLock(lock_path or (tmp_path / "ev" / ".lock-op_board.local"), HOST, "other"):
+        rc, _ = run(args(images, tmp_path, "readback", "--reference-boot-order", "0001"), board)
+    assert rc == 1
+    assert "held by" in capsys.readouterr().err
+    assert "readback" not in board.subs()
 
 
 def test_write_does_not_print_complete_when_write_json_is_not_in_the_record_set(images, tmp_path, capsys):

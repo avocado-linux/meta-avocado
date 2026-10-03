@@ -30,10 +30,17 @@ from dataclasses import dataclass, field
 
 from .arm import boot_next_of, boot_order_of
 from .ops import OpsError
+from .state import LOCK_NAME, TERMINAL, LockHeld, OnBoardLock, load_state
 
 DATA_ROLE = "var"
 NO_JOURNAL_LINE = "the test image wrote no persistent journal"
 RAM_FSTYPES = ("tmpfs", "ramfs")
+# The target's own image is untrusted: nothing on it may be executed, honoured as a device node or run setuid.
+MOUNT_OPTIONS = "ro,nosuid,nodev,noexec"
+# The copy lands in RAM-backed /run beside the staged images. Refuse a source bigger than the free space
+# minus a reserve, or bigger than a fixed cap, whichever is smaller.
+COPY_RESERVE = 64 * 1024 * 1024
+COPY_CAP = 256 * 1024 * 1024
 _ABSENT_RE = re.compile(r"No such file or directory", re.IGNORECASE)
 
 
@@ -123,6 +130,7 @@ def make_guarded_copier(out_dir, mount_dir=None, note=None):
         elif stat.S_ISDIR(mode):
             copy_tree(src, dst)
         else:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
             copy_file(src, dst)
 
     return copy
@@ -133,6 +141,40 @@ def _default_logs(mnt):
     return sorted(p for p in found if os.path.isfile(p) and not os.path.islink(p))
 
 
+def _tree_size(paths) -> int:
+    """Bytes in the regular files under ``paths``: lstat only, a symlink counts for nothing and is never followed.
+
+    A path that is absent counts as zero; any other error propagates to the caller.
+    """
+    total = 0
+    stack = list(paths)
+    while stack:
+        path = stack.pop()
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(st.st_mode):
+            with os.scandir(path) as it:
+                stack.extend(e.path for e in it)
+        elif stat.S_ISREG(st.st_mode):
+            total += st.st_size
+    return total
+
+
+def _free_bytes(path) -> int:
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def _private_dir(makedirs, path):
+    """Create ``path`` mode 0700 regardless of umask (the injected makedirs may not create anything)."""
+    makedirs(path, mode=0o700, exist_ok=True)
+    if os.path.isdir(path):
+        # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+        os.chmod(path, 0o700)
+
+
 def _nearest_existing(path) -> str:
     """The path itself, or its closest existing ancestor: the filesystem a new directory would land on."""
     p = os.path.abspath(path)
@@ -141,11 +183,46 @@ def _nearest_existing(path) -> str:
     return p
 
 
-def run_readback(
+def run_readback(ops, profile, *, state_dir=None, out=print, **kw) -> ReadbackResult:
+    """Read back the data partition, but only while no write or restore can be running.
+
+    With a ``state_dir`` the on-board flash lock is taken first (a held lock refuses) and the current run's
+    state must be terminal or absent; a refusal returns exit 1 before any call touches the board, and an
+    unreadable state returns exit 2. Without a ``state_dir`` (unit use) no gate runs.
+    """
+    if state_dir is None:
+        return _run_readback(ops, profile, out=out, **kw)
+    result = ReadbackResult(0)
+
+    def say(line):
+        result.lines.append(line)
+        out(line)
+
+    try:
+        with OnBoardLock(os.path.join(state_dir, LOCK_NAME), run_id="readback", wait_seconds=0.0):
+            loaded = load_state(state_dir)
+            if loaded.status == "unparseable":
+                return _not_examined(result, say, f"the run state is unreadable ({loaded.reason}); not mounting")
+            if loaded.status == "ok" and loaded.state.phase not in TERMINAL:
+                say(
+                    f"ERROR: run {loaded.state.run_id} is in phase {loaded.state.phase}, not finished; "
+                    "refusing to mount the data partition under it. Nothing mounted."
+                )
+                result.exit_code = 1
+                return result
+            return _run_readback(ops, profile, out=out, **kw)
+    except LockHeld as e:
+        say(f"ERROR: the on-board flash lock is held ({e}): a write or restore may be running. Nothing mounted.")
+    except OSError as e:
+        say(f"ERROR: cannot take the on-board flash lock under {state_dir}: {e}. Nothing mounted.")
+    result.exit_code = 1
+    return result
+
+
+def _run_readback(
     ops,
     profile,
     *,
-    state_dir=None,
     mount_dir,
     out_dir,
     reference_boot_order,
@@ -156,6 +233,11 @@ def run_readback(
     makedirs=os.makedirs,
     nearest_existing=None,
     require_ram_out=True,
+    is_mountpoint=os.path.ismount,
+    free_bytes=_free_bytes,
+    tree_size=_tree_size,
+    reserve=COPY_RESERVE,
+    cap=COPY_CAP,
     out=print,
 ) -> ReadbackResult:
     result = ReadbackResult(0)
@@ -216,7 +298,7 @@ def run_readback(
     if len(cands) != 1:
         say(f"ERROR: expected exactly one {label} partition on {disk}, found {len(cands)}; not mounting")
         result.exit_code = 1
-        _cleanup_hints(say, mount_dir)
+        _cleanup_hints(say, mount_dir, out_dir)
         return result
     part = cands[0]
 
@@ -229,14 +311,21 @@ def run_readback(
     if require_ram_out and outfs not in RAM_FSTYPES:
         say(f"ERROR: {out_dir} is on '{outfs or 'unknown'}', not tmpfs; the logs must not land on the live system's disk. Not mounting.")
         result.exit_code = 1
-        _cleanup_hints(say, mount_dir)
+        _cleanup_hints(say, mount_dir, out_dir)
         return result
 
-    makedirs(mount_dir, exist_ok=True)
-    makedirs(out_dir, exist_ok=True)
+    if is_mountpoint(mount_dir):
+        say(f"ERROR: {mount_dir} is already a mount point; not stacking a second mount on it")
+        result.exit_code = 1
+        _cleanup_hints(say, mount_dir, out_dir)
+        return result
+
+    _private_dir(makedirs, mount_dir)
+    _private_dir(makedirs, out_dir)
     mounted = False
+    done = 0
     try:
-        ops.mount(part, mount_dir, options="ro", fstype=fstype)
+        ops.mount(part, mount_dir, options=MOUNT_OPTIONS, fstype=fstype)
         mounted = True
         say(f"mounted {part} read-only")
         ops.run_read(["ls", "-la", mount_dir])
@@ -244,8 +333,6 @@ def run_readback(
         listing = ops.run_read(["ls", "-laR", journal], check=False)
         if listing.rc == 0:
             result.found_journal = True
-            copier(journal, os.path.join(out_dir, "journal"))
-            say(f"copied journal to {out_dir}/journal")
         elif _ABSENT_RE.search(listing.stderr or ""):
             say(NO_JOURNAL_LINE)
         else:
@@ -254,14 +341,40 @@ def run_readback(
             say(f"TARGET NOT EXAMINED: listing {journal} failed (rc={listing.rc}): {first[0] if first else 'no message'}")
             result.exit_code = 2
             return result
-        copied = 0
-        for f in list_logs(mount_dir):
-            copier(f, os.path.join(out_dir, os.path.basename(f)))
-            copied += 1
-        say(f"copied {copied} boot log file(s) to {out_dir}")
+        logs = list_logs(mount_dir)
+        need = tree_size(([journal] if result.found_journal else []) + list(logs))
+        free = free_bytes(_nearest_existing(out_dir))
+        limit = min(cap, free - reserve)
+        if need > limit:
+            say(
+                f"ERROR: {need} bytes to copy exceeds the {max(limit, 0)} bytes allowed "
+                f"(free {free}, reserve {reserve}, cap {cap}) on the filesystem holding {out_dir}: "
+                "the journal is too large to copy into RAM-backed storage; not copying"
+            )
+            result.exit_code = 1
+            _discard(out_dir)
+        else:
+            if result.found_journal:
+                copier(journal, os.path.join(out_dir, "journal"))
+                done += 1
+                say(f"copied journal to {out_dir}/journal")
+            # Each log keeps its path relative to the mount, so log/<name> and <name> cannot overwrite each other.
+            dests = {"journal"}
+            for f in logs:
+                rel = os.path.relpath(f, mount_dir)
+                if rel in dests:
+                    raise ReadbackError(f"destination collision: {rel} would be written twice")
+                dests.add(rel)
+                copier(f, os.path.join(out_dir, rel))
+                done += 1
+            say(f"copied {len(dests) - 1} boot log file(s) to {out_dir}")
     except OpsError as e:
         say(f"ERROR: read-only mount or read of {part} failed: {e}")
         result.exit_code = 1
+    except (OSError, ReadbackError) as e:
+        say(f"ERROR: copy from {part} failed after {done} file(s): {e}")
+        result.exit_code = 1
+        _discard(out_dir)
     finally:
         if mounted:
             try:
@@ -269,7 +382,7 @@ def run_readback(
             except OpsError as e:
                 say(f"ERROR: umount {mount_dir} failed ({e}); the mount is still active: unmount it by hand")
                 result.exit_code = result.exit_code or 1
-    _cleanup_hints(say, mount_dir)
+    _cleanup_hints(say, mount_dir, out_dir)
     return result
 
 
@@ -279,11 +392,17 @@ def _not_examined(result, say, why):
     return result
 
 
-def _cleanup_hints(say, mount_dir):
+def _discard(path):
+    """Remove a partial output directory this run created."""
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _cleanup_hints(say, mount_dir, out_dir):
     say("")
     say("== cleanup commands (printed, NOT run) ==")
     say(f"  umount {mount_dir}     # only if still mounted")
     say(f"  rmdir {mount_dir}")
+    say(f"  rm -r {out_dir}     # the copied logs, once you have read them")
     say("  restore    # disarms the one-shot boot entry; it is not a rollback")
 
 
