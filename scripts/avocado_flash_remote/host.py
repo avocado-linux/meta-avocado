@@ -68,6 +68,17 @@ class HostTimeout(HostError):
     pass
 
 
+# ssh itself exits 255 when it cannot reach (or loses) the board; the remote command never ran or never reported.
+SSH_FAILURE = 255
+
+
+class HostUnreachable(HostError):
+    """ssh could not reach the board: a network failure, not a verdict about the board."""
+
+    def __init__(self, what: str = "the connection to the board failed"):
+        super().__init__(f"cannot reach the board over ssh: {what}")
+
+
 class Secret:
     """Holds a credential; every textual form is redacted."""
 
@@ -327,8 +338,11 @@ class StubTransport(_TransportBase):
 
 
 def sudo_probe(transport) -> bool:
-    """True when non-interactive sudo works on the board."""
-    return transport.run(["sudo", "-n", "true"], None, sudo=False, timeout=60).rc == 0
+    """True when non-interactive sudo works on the board; a dropped ssh is HostUnreachable, never a "no"."""
+    rc = transport.run(["sudo", "-n", "true"], None, sudo=False, timeout=60).rc
+    if rc == SSH_FAILURE:
+        raise HostUnreachable("the sudo probe did not get through")
+    return rc == 0
 
 
 def default_ask_password() -> str:
@@ -351,6 +365,8 @@ def remote_is_root(transport) -> bool:
     garbled answer is never guessed into root.
     """
     res = transport.run(["id", "-u"], None, sudo=False, timeout=60)
+    if res.rc == SSH_FAILURE:
+        raise HostUnreachable("the privilege probe did not get through")
     text = res.out.strip()
     if res.rc != 0 or not text:
         return False
@@ -389,6 +405,29 @@ def acquire_sudo(transport, ask_password: Callable[[], str] = default_ask_passwo
     return PRIVILEGE_SUDO_PASSWORD
 
 
+# --- staged runner identity ---------------------------------------------------
+
+STALE_BUILD = "staged runner is from a different tool build: run stage again"
+UNVERIFIED_BUILD = "the staged runner could not be verified against this tool build: run stage again"
+
+
+def check_staged_build(transport, bundle_remote_path: str, expected_sha256: str) -> None:
+    """Refuse unless the bundle staged on the board is byte-identical to the one this tool builds.
+
+    The host builds the bundle deterministically, so it knows the digest it expects; only the board's
+    ``sha256sum`` of the staged file is asked. The comparison stays here, on the host. A missing tool, an
+    unreadable or malformed answer all refuse: only an exact match proceeds.
+    """
+    res = transport.run(["sha256sum", "--", bundle_remote_path], None, sudo=False, timeout=120)
+    if res.rc == SSH_FAILURE:
+        raise HostUnreachable("the staged runner's hash could not be read")
+    fields = res.out.split()
+    if res.rc != 0 or not fields or not _SHA_RE.match(fields[0]):
+        raise HostError(UNVERIFIED_BUILD)
+    if fields[0].lower() != expected_sha256.lower():
+        raise HostError(STALE_BUILD)
+
+
 # --- remote interpreter -----------------------------------------------------
 
 # The probe uses only ``sys`` and ``__import__`` (present in every Python) so a
@@ -412,7 +451,8 @@ def probe_interpreter(transport, python: str, modules) -> str:
     """Return the board interpreter's version, or refuse naming what is missing."""
     python = validate_remote_python(python)
     hint = f"install a full python3 on the board or name one with --remote-python (interpreter: {python})"
-    res = transport.run([python, "-c", _probe_code(modules)], None, sudo=False, timeout=60)
+    # Privileged like the runner, so the version and modules reported are those of the interpreter that runs it.
+    res = transport.run([python, "-c", _probe_code(modules)], None, sudo=True, timeout=60)
     if res.rc == 127:
         raise HostError(f"interpreter not found on the board: {python}; {hint}")
     lines = res.out.strip().splitlines()
@@ -536,6 +576,43 @@ def check_staging_space(transport, profile, payload_bytes: int = 0) -> int:
     return avail
 
 
+# Read as root, so a parent the SSH user cannot search never reads as "absent". The word on the first
+# line is the whole answer: OWNER <name>, SYMLINK, NOTDIR or ABSENT.
+_DIR_PROBE = (
+    'if [ -L "$1" ]; then echo SYMLINK; '
+    'elif [ -d "$1" ]; then echo "OWNER $(stat -c %U -- "$1")"; '
+    'elif [ -e "$1" ]; then echo NOTDIR; '
+    "else echo ABSENT; fi"
+)
+
+
+def _staging_dir_state(transport, staging_dir: str, user: str) -> str:
+    """'absent' when stage may create the directory, 'owned' when it is the SSH user's; anything else refuses.
+
+    ``install -d -o USER`` runs as root and would re-own a directory that already exists, so an existing
+    directory is never touched: it must already belong to the SSH user.
+    """
+    res = transport.run(["sh", "-c", _DIR_PROBE, "sh", staging_dir], None, sudo=True, timeout=60)
+    words = (res.out.strip().splitlines() or [""])[-1].split()
+    if res.rc != 0 or not words:
+        raise HostError("cannot tell whether the staging directory exists on the board; refusing to stage")
+    if words == ["ABSENT"]:
+        return "absent"
+    if len(words) == 2 and words[0] == "OWNER":
+        if words[1] == user:
+            return "owned"
+        raise HostError(
+            f"the staging directory {staging_dir} exists on the board and is owned by {words[1]}, not {user}; "
+            "refusing to take it over: remove it or choose another staging.dir"
+        )
+    if words in (["SYMLINK"], ["NOTDIR"]):
+        raise HostError(
+            f"the staging directory {staging_dir} exists on the board and is not a plain directory ({words[0].lower()}); "
+            "refusing to stage"
+        )
+    raise HostError("unintelligible answer about the staging directory on the board; refusing to stage")
+
+
 def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = False, out=print, python: str = DEFAULT_PYTHON) -> StageResult:
     staging_dir = profile.staging.dir
     rows = _plan_files(image_dir, bundle_path, resolved)
@@ -561,9 +638,10 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     user = who.out.strip()
     if who.rc != 0 or not _USER_RE.match(user):
         raise HostError("cannot determine the remote user")
-    mk = transport.run(["install", "-d", "-o", user, "-m", "0755", staging_dir], None, sudo=True, timeout=60)
-    if mk.rc != 0:
-        raise HostError("cannot create the staging directory on the board")
+    if _staging_dir_state(transport, staging_dir, user) == "absent":
+        mk = transport.run(["install", "-d", "-o", user, "-m", "0755", staging_dir], None, sudo=True, timeout=60)
+        if mk.rc != 0:
+            raise HostError("cannot create the staging directory on the board")
 
     files = {name: src for name, src, _s, _h in rows}
     bundle_name = Path(bundle_path).name
@@ -579,10 +657,11 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     if check.rc != 0:
         raise HostError("remote hash verification of the images failed")
     unzip = "import sys, zipfile; sys.exit(1 if zipfile.ZipFile(sys.argv[1]).testzip() else 0)"
-    zcheck = transport.run([python, "-c", unzip, result.bundle_remote_path], None, sudo=False, timeout=120)
+    # Privileged like the runner: the interpreter named here is the one that will run the bundle as root.
+    zcheck = transport.run([python, "-c", unzip, result.bundle_remote_path], None, sudo=True, timeout=120)
     if zcheck.rc != 0:
         raise HostError(f"the board's interpreter {python} cannot open the staged bundle (rc={zcheck.rc})")
-    sums = {n: h for n, _s, _z, h in rows if n in (bundle_name, "profile.json")}
+    sums = {n: h for n, _s, _z, h in rows if n in (bundle_name, "profile.json", "MANIFEST.hashes")}
     listing = "".join(f"{h}  {n}\n" for n, h in sorted(sums.items())).encode()
     check = transport.run(
         ["sh", "-c", 'cd "$1" && sha256sum --strict -c -', "sh", staging_dir],

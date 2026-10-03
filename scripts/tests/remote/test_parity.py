@@ -1259,12 +1259,12 @@ STAGE_TABLE = {
     "stage:dev-_dev_mmcblk0p1": _refused("/dev/mmcblk0p1"),
     "stage:dev-_dev_.._run_x": _refused("/dev/../run/x"),
     "stage:devmsg": _smap("profile_refuses_names_dev", "the refusal message names /dev"),
-    "stage:out-_tmp_x": _snone("n/a: the kit only allows /run and /var/tmp; the port's staging.dir is a profile field checked only against /dev, /sys, /proc and '..', so /tmp/x is accepted (pinned by test_stage_allow_list_is_not_ported)"),
+    "stage:out-_tmp_x": _snone("n/a: the kit only allows /run and /var/tmp; the port's staging.dir is a profile field checked against /dev, /sys, /proc, '..', the shared system directories, a bare top-level directory and state_dir, so /tmp/x is accepted (pinned by test_stage_allow_list_is_not_ported)"),
     "stage:out-_home_user_x": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /home/user/x is accepted"),
-    "stage:out-_etc": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /etc is accepted by the loader"),
+    "stage:out-_etc": _snone("n/a: no /run|/var/tmp allow-list in the port; the loader refuses /etc as a shared system directory (5.41), so no stage is ever attempted"),
     "stage:out-_runx_y": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /runx/y is accepted"),
-    "stage:out-_run": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /run is accepted by the loader"),
-    "stage:out-_var_tmp": _snone("n/a: no /run|/var/tmp allow-list in the port (profile field); /var/tmp is accepted by the loader"),
+    "stage:out-_run": _snone("n/a: no /run|/var/tmp allow-list in the port; the loader refuses /run itself as a shared system directory (5.41), a dedicated /run/<name> is accepted"),
+    "stage:out-_var_tmp": _snone("n/a: no /run|/var/tmp allow-list in the port; the loader refuses /var/tmp itself as a shared system directory (5.41), a dedicated /var/tmp/<name> is accepted"),
     "stage:out-_run_.._etc_x": _refused("/run/../etc/x"),
     "stage:ok": _smap("ok", "host.stage: one tar of the manifest images + MANIFEST.hashes + profile.json + bundle, modes 644/755, everything verified"),
     "stage:custom": _smap("custom", "a profile staging.dir other than the default: files land there, remote paths stay inside it"),
@@ -1331,6 +1331,8 @@ def _stage_handler(fail_on=None, fail_all=False):
             return RunResult(0, b"OK\n", b"")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n", b"")
+        if "stat -c" in joined:  # the staging-directory probe (privileged, so sudo-prefixed)
+            return RunResult(0, b"ABSENT\n", b"")  # the staging directory does not exist yet
         return RunResult(0, b"", b"")
 
     return h
@@ -1445,11 +1447,20 @@ def test_stage_case(name, tmp_path, golden):
 
 
 def test_stage_allow_list_is_not_ported():
-    """Pins what the n/a stage:out-* rows rely on: the loader accepts these."""
-    for d in ("/tmp/x", "/home/user/x", "/etc", "/runx/y", "/run", "/var/tmp"):
+    """Pins what the n/a stage:out-* rows rely on: no /run|/var/tmp allow-list, only the port's own rules.
+
+    5.41 added those rules: stage re-owns what it creates as root, so a shared system directory or a bare
+    top-level one is refused by the loader. A dedicated subdirectory anywhere else is still accepted.
+    """
+    for d in ("/tmp/x", "/home/user/x", "/runx/y"):
         doc = json.loads(FIXTURE_NONE.read_text())
         doc["staging"]["dir"] = d
         assert load_profile_bytes(json.dumps(doc).encode()).staging.dir == d
+    for d in ("/etc", "/run", "/var/tmp"):
+        doc = json.loads(FIXTURE_NONE.read_text())
+        doc["staging"]["dir"] = d
+        with pytest.raises(ProfileError, match=r"staging\.dir"):
+            load_profile_bytes(json.dumps(doc).encode())
 
 
 def test_stage_kit_refusals_made_no_ssh_call(golden):

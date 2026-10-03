@@ -590,6 +590,14 @@ class Board:
         self.write_exc = None
         self.nonce = "0" * 16
         self.stub = StubTransport(self.handle)
+        self.staged_sha = ""  # what sha256sum says about the bundle the host last copied here
+        real_put_tar = self.stub.put_tar
+
+        def put_tar(files, dest_dir, modes=None, **kw):
+            self.staged_sha = hashlib.sha256(open(files["runner.pyz"], "rb").read()).hexdigest()
+            return real_put_tar(files, dest_dir, modes, **kw)
+
+        self.stub.put_tar = put_tar
 
     def _records(self, name, with_write):
         from avocado_flash_remote import evidence
@@ -629,6 +637,8 @@ class Board:
             return RunResult(0, b"OK\n")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n")
+        if argv[0] == "sh" and "stat -c" in argv[2]:
+            return RunResult(0, b"ABSENT\n")  # the staging directory does not exist yet
         if argv[0] == "sh" and argv[2:3] and argv[2].startswith("d="):
             return RunResult(0, b"Filesystem 1024-blocks Used Available Capacity Mounted on\ntmpfs 9 1 999999 1% /run\n")
         if argv[0] == "sh" and "cat >" in argv[2]:
@@ -641,6 +651,8 @@ class Board:
             return RunResult(3)
         if argv[0] == "test":
             return RunResult(0 if self.staged else 1)
+        if argv[0] == "sha256sum":
+            return RunResult(0, f"{self.staged_sha}  {argv[-1]}\n".encode())
         if argv[0] == "tail":
             return RunResult(0, b"runner log line\n")
         if len(argv) >= 3 and argv[1] == "-c":

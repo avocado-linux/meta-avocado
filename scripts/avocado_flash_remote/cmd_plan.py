@@ -435,6 +435,7 @@ def run_plan(
     scanner: Callable = images.scan,
     now: Callable = _utc_now,
     file_reader: Callable | None = None,
+    bundle_sha256: str | None = None,
 ) -> PlanResult:
     """Verify, decide and write the plan record. Mutates nothing on the board."""
     writer = record_writer or evidence.write_record
@@ -478,6 +479,8 @@ def run_plan(
             "arm": arm_summary,
             "created_utc": now(),  # evidence only; never compared or branched on
         }
+        if bundle_sha256:
+            plan_record["bundle_sha256"] = bundle_sha256  # which tool build planned this; evidence only
         try:
             writer(run_dir, RECORD_NAME, plan_record)
         except OSError as exc:

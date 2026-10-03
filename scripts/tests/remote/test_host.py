@@ -75,13 +75,22 @@ def _is_tool_probe(argv) -> bool:
     return argv[:2] == ["sh", "-c"] and "--version" in argv[2] and "sha256sum" in argv[2]
 
 
-def handler_for(avail_kib: int, missing_tools=()):
+def _is_dir_probe(argv) -> bool:
+    argv = list(argv)
+    if argv[:2] == ["sudo", "-n"]:  # the probe is privileged
+        argv = argv[2:]
+    return argv[:2] == ["sh", "-c"] and "stat -c" in argv[2]
+
+
+def handler_for(avail_kib: int, missing_tools=(), dir_answer=b"ABSENT\n", dir_rc=0):
     def h(argv, stdin, sudo):
         joined = " ".join(argv)
         if _is_tool_probe(argv):
             if missing_tools:
                 return RunResult(0, ("MISSING " + " ".join(missing_tools) + "\n").encode(), b"")
             return RunResult(0, b"OK\n", b"")
+        if _is_dir_probe(argv):
+            return RunResult(dir_rc, dir_answer, b"")
         if "df" in argv or "df -Pk" in joined:
             return df_ok(avail_kib)
         if argv[:2] == ["id", "-un"]:
@@ -252,6 +261,8 @@ def test_acquire_sudo_prompts_and_password_hygiene(tmp_path, kit, resolved, caps
             return RunResult(1, b"", b"password required")
         if _is_tool_probe(argv):
             return RunResult(0, b"OK\n", b"")
+        if any("stat -c" in a for a in argv):  # the staging-directory probe, sudo-prefixed in password mode
+            return RunResult(0, b"ABSENT\n", b"")
         if "df" in argv or any("df -Pk" in a for a in argv):
             return df_ok(10_000_000)
         if argv[:2] == ["id", "-un"]:
@@ -715,6 +726,9 @@ def probe_handler(missing=(), rc=0, version="3.12.1"):
     """A board whose interpreter lacks `missing` (names it was asked about)."""
 
     def h(argv, stdin, sudo):
+        argv = list(argv)
+        if argv[:2] == ["sudo", "-n"]:  # the probe runs the way the runner does: privileged
+            argv = argv[2:]
         if len(argv) >= 3 and argv[1] == "-c":
             if rc != 0:
                 return RunResult(rc, b"", b"sh: not found")
@@ -743,9 +757,10 @@ def test_probe_ok_returns_version_and_runs_list_form():
     ver = host.probe_interpreter(t, "/opt/py/bin/python3", ["hashlib", "json", "sys"])
     assert ver == "3.12.1"
     (c,) = t.calls
-    assert c.argv[:2] == ["/opt/py/bin/python3", "-c"] and len(c.argv) == 3
-    assert c.sudo is False
-    assert "hashlib" in c.argv[2]
+    # 5.41: privileged, like the runner, so "remote python" is the interpreter that runs it.
+    assert c.argv[:4] == ["sudo", "-n", "/opt/py/bin/python3", "-c"] and len(c.argv) == 5
+    assert c.sudo is True
+    assert "hashlib" in c.argv[4]
 
 
 def test_probe_missing_modules_refuses_naming_them():
@@ -776,7 +791,7 @@ def test_probe_garbled_output_refuses():
 def test_probe_code_needs_only_sys_and_builtins():
     t = StubTransport(handler=probe_handler())
     host.probe_interpreter(t, "python3", ["json"])
-    code = t.calls[0].argv[2]
+    code = t.calls[0].argv[-1]
     tree = ast.parse(code)
     imported = [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
     assert all(a.name == "sys" for n in imported if isinstance(n, ast.Import) for a in n.names)
@@ -796,7 +811,7 @@ def test_stage_verifies_bundle_with_given_interpreter(kit, resolved):
     images, bundle_path, files = kit
     t = StubTransport(handler=handler_for(10_000_000))
     host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False, python="/opt/p/python3")
-    py = [c for c in t.calls if c.kind == "run" and c.argv and c.argv[0] == "/opt/p/python3"]
+    py = [c for c in t.calls if c.kind == "run" and "/opt/p/python3" in c.argv[:3]]
     assert len(py) == 1 and bundle_path.name in py[0].argv[-1]
 
 
@@ -1187,3 +1202,70 @@ def test_stage_refuses_when_the_tool_probe_answer_is_unintelligible(kit, resolve
 def test_stage_dry_run_still_opens_no_connection_with_the_probe_added(kit, resolved):
     images, bundle_path, _ = kit
     host.stage(None, resolved.profile, resolved, images, bundle_path, dry_run=True)
+
+
+# --- 5.41: stage's directory, its checksum listing and the interpreter it checks with -----------
+
+
+def _stage(kit, resolved, handler):
+    images, bundle_path, _ = kit
+    t = StubTransport(handler=handler)
+    return t, lambda: host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
+
+
+def test_stage_creates_the_directory_only_when_it_is_absent_and_looks_first_as_root(kit, resolved):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"ABSENT\n"))
+    go()
+    probe_i = next(i for i, c in enumerate(t.calls) if _is_dir_probe(c.argv))
+    mk_i = next(i for i, c in enumerate(t.calls) if "install" in c.argv)
+    assert probe_i < mk_i
+    probe = t.calls[probe_i]
+    # Root's own view: a parent the SSH user cannot search must not read as "absent".
+    assert probe.sudo is True
+    assert probe.argv[-1] == resolved.profile.staging.dir
+
+
+def test_stage_leaves_an_existing_directory_owned_by_the_ssh_user_as_it_is(kit, resolved):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator\n"))
+    go()
+    assert not any("install" in c.argv for c in t.calls)
+    assert any(c.kind == "put_tar" for c in t.calls)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [b"OWNER root\n", b"OWNER UNKNOWN\n", b"SYMLINK\n", b"NOTDIR\n", b"", b"banana\n", b"OWNER operator extra\n"],
+    ids=["other-owner", "no-such-uid", "symlink", "not-a-directory", "empty", "garbage", "extra-fields"],
+)
+def test_stage_refuses_a_staging_directory_the_ssh_user_does_not_own_and_changes_nothing(kit, resolved, answer):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=answer))
+    with pytest.raises(HostError, match="staging directory"):
+        go()
+    assert not any("install" in c.argv for c in t.calls)
+    assert not any(c.kind == "put_tar" for c in t.calls)
+
+
+def test_stage_refuses_when_the_directory_probe_itself_fails(kit, resolved):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"ABSENT\n", dir_rc=1))
+    with pytest.raises(HostError, match="staging directory"):
+        go()
+    assert not any("install" in c.argv for c in t.calls)
+
+
+def test_the_checksum_listing_sent_to_sha256sum_includes_the_manifest(kit, resolved):
+    images, bundle_path, _ = kit
+    t, go = _stage(kit, resolved, handler_for(10_000_000))
+    go()
+    listing = next(c.stdin_bytes for c in t.calls if c.stdin_bytes and b"profile.json" in c.stdin_bytes)
+    lines = listing.decode().splitlines()
+    manifest_sha = hashlib.sha256((images / "MANIFEST.hashes").read_bytes()).hexdigest()
+    assert f"{manifest_sha}  MANIFEST.hashes" in lines
+    assert f"{_sha(resolved.data)}  profile.json" in lines
+
+
+def test_the_stage_zip_check_runs_privileged_like_the_runner(kit, resolved):
+    t, go = _stage(kit, resolved, handler_for(10_000_000))
+    go()
+    zcheck = next(c for c in t.calls if c.kind == "run" and any("zipfile" in a for a in c.argv))
+    assert zcheck.sudo is True
+    assert zcheck.argv[:3] == ["sudo", "-n", "python3"]

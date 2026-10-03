@@ -183,3 +183,27 @@ def test_readme_readback_cleanup_text_names_the_mount_and_output_dirs_and_the_ga
     assert "those paths" not in row
     assert "/run/avocado-flash/<run-id>/mnt" in row and "/run/avocado-flash/<run-id>/readback" in row
     assert "nosuid" in row and "flash lock" in row
+
+
+# --- 5.41 ---
+
+
+def test_exit_2_covers_a_dropped_connection_during_plan_and_connect_probes():
+    text = _section("Exit codes")
+    assert "`plan`" in text
+    assert "cannot reach the board over ssh" in text
+
+
+def test_readme_states_the_real_order_of_the_board_calls_before_stage_creates_anything():
+    assert "as its first board call" not in README
+    text = _section("Board prerequisites")
+    assert "connect" in text and "tool probe" in text
+    assert text.index("connect") < text.index("tool probe")
+
+
+def test_readme_documents_the_staged_build_match_and_the_staging_directory_rules():
+    assert "staged runner is from a different tool build: run stage again" in README
+    assert "bundle_sha256" in README
+    assert "owned by the SSH user" in README
+    schema = _section("Schema version 1")
+    assert "shared system director" in schema and "under `state_dir`" in schema
