@@ -51,7 +51,7 @@ def script(dirs, *, journal=True, efi=EFI, outfs="tmpfs\n", mount=None):
         f"ls -laR {mnt}/log/journal": "ok\n" if journal else OpResult(rc=2, stderr="ls: cannot access: No such file or directory"),
     }
     if mount is not None:
-        s[f"mount -o ro -t btrfs {PART} {mnt}"] = mount
+        s[f"mount -o ro,nosuid,nodev,noexec -t btrfs {PART} {mnt}"] = mount
     return s
 
 
@@ -66,7 +66,7 @@ def run(profile, dirs, ops, **kw):
         out_dir=str(out),
         reference_boot_order=kw.pop("reference", ORDER),
         copier=lambda s, d: copies.append((s, d)),
-        list_logs=lambda m: [f"{m}/log/boot.log", f"{m}/emmc-test.log"],
+        list_logs=kw.pop("list_logs", lambda m: [f"{m}/log/boot.log", f"{m}/emmc-test.log"]),
         out=lines.append,
         **kw,
     )
@@ -87,7 +87,7 @@ def test_golden_sequence_and_ro_mount(profile, dirs):
         f"lsblk {DISK}",
         f"lsblk -rn -o NAME,PARTLABEL {DISK}",
         f"findmnt -no FSTYPE -T {out}",
-        f"mount -o ro -t btrfs {PART} {mnt}",
+        f"mount -o ro,nosuid,nodev,noexec -t btrfs {PART} {mnt}",
         f"ls -la {mnt}",
         f"ls -laR {mnt}/log/journal",
         f"umount {mnt}",
@@ -101,7 +101,7 @@ def test_every_mount_is_read_only_and_only_mount_umount_mutate(profile, dirs):
     run(profile, dirs, ops)
     for call in ops.calls:
         if call.vector[0] == "mount":
-            assert call.vector[1:3] == ["-o", "ro"]
+            assert call.vector[1] == "-o" and call.vector[2].split(",")[0] == "ro"
         elif vector_mutates(call.vector):
             assert call.vector[0] == "umount"
     assert not ops.written

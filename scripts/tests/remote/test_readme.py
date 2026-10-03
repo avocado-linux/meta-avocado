@@ -175,3 +175,11 @@ def test_known_limits_states_the_deliberate_non_fix_for_the_record_schema():
 def test_boot_order_premise_is_documented():
     text = _section("The one-shot boot and its limits")
     assert "precedes `BootCurrent`" in text
+
+
+def test_readme_readback_cleanup_text_names_the_mount_and_output_dirs_and_the_gates():
+    text = README
+    row = next(ln for ln in text.splitlines() if ln.startswith("| `readback` |"))
+    assert "those paths" not in row
+    assert "/run/avocado-flash/<run-id>/mnt" in row and "/run/avocado-flash/<run-id>/readback" in row
+    assert "nosuid" in row and "flash lock" in row
