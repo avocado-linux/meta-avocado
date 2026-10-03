@@ -457,3 +457,22 @@ def test_staging_dir_may_not_be_a_system_root_or_under_one(bad):
 @pytest.mark.parametrize("ok", ["/run/avocado-flash-staging", "/run/emmc-test-images", "/var/lib/avocado-flash-staging"])
 def test_dedicated_staging_dirs_are_still_accepted(ok):
     assert load_profile_bytes(mutated(lambda d: d["staging"].update(dir=ok))).staging.dir == ok
+
+
+def _no_esp(d):
+    for part in d["layout"]["params"]["table"]:
+        part["type_guid"] = LINUX
+
+
+def test_an_arming_profile_must_map_an_image_to_an_efi_system_partition():
+    with pytest.raises(ProfileError, match="EFI System Partition"):
+        load_profile_bytes(mutated(_no_esp))
+
+
+def test_a_profile_that_does_not_arm_needs_no_esp_image():
+    def go(d):
+        _no_esp(d)
+        d["arm"] = {"strategy": "none", "params": {}}
+        d["guard"] = {"strategy": "none", "params": {}}
+
+    assert load_profile_bytes(mutated(go)).arm.strategy == "none"

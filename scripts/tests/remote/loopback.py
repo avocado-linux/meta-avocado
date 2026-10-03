@@ -134,6 +134,9 @@ class LoopbackTransport(SshTransport):
 
     def run(self, argv_remote, stdin=None, *, sudo=False, timeout=host.DEFAULT_TIMEOUT):
         argv = list(argv_remote)
+        if argv[:3] == ["sh", "-c", host._ALIAS_PROBE]:
+            # The profile's state_dir and the readback base live outside this board's root; answer instead of running.
+            return host.RunResult(0, b"PLAIN\n" * (len(argv) - 4), b"")
         if argv[:2] == ["sh", "-c"] and "cat >" in argv[2] and isinstance(stdin, (bytes, bytearray)):
             self.requests.append((argv[-1], json.loads(bytes(stdin))))
         return super().run(argv, stdin, sudo=sudo, timeout=timeout)
@@ -144,6 +147,9 @@ class LoopbackTransport(SshTransport):
 IMAGE_NAMES = ("boot.img", "esp.img", "data.img")
 
 
+SKIP_ENV = "AVOCADO_FLASH_SKIP_LOOPBACK"
+
+
 class LoopbackBoard:
     def __init__(self, tmp_path):
         self.tmp = pathlib.Path(tmp_path)
@@ -151,7 +157,13 @@ class LoopbackBoard:
         # per-user runtime directory is the one writable place outside them.
         runtime = os.environ.get("XDG_RUNTIME_DIR")
         if not runtime or not os.access(runtime, os.W_OK):
-            pytest.skip("the loopback board needs a writable XDG_RUNTIME_DIR: staging.dir may not sit under /tmp")
+            why = (
+                "the loopback board needs a writable XDG_RUNTIME_DIR (staging.dir may not sit under /tmp); "
+                f"set {SKIP_ENV}=1 to skip these tests knowingly"
+            )
+            if os.environ.get(SKIP_ENV) == "1":
+                pytest.skip(why)
+            pytest.fail(why, pytrace=False)  # a silent skip of the end-to-end tests reads as a pass
         self.root = pathlib.Path(tempfile.mkdtemp(prefix="avocado-flash-loopback-", dir=runtime))
         self.stage = self.root / "stage"
         self.state = self.root / "state"

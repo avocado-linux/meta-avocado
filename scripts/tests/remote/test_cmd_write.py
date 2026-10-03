@@ -1362,15 +1362,28 @@ def test_esp_vfat_check_does_not_depend_on_the_role_being_named_esp():
 
 def test_esp_vfat_check_fails_when_an_arming_profile_maps_no_image_to_an_esp():
     """The loop over ESP images used to pass with nothing to check; an arming profile must have one."""
-    doc = json.loads(SHIPPED_BYTES)
-    for part in doc["layout"]["params"]["table"]:
+    # The loader now refuses such a profile, so build a valid one and break it in memory: this guard is the
+    # second line of defence for a profile object that did not come through the loader.
+    profile = prof.load_profile_bytes(SHIPPED_BYTES)
+    for part in profile.layout.params["table"]:
         if part["type_guid"].upper() == cmd_write._ESP_TYPE_GUID:
             part["type_guid"] = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
-    profile = prof.load_profile_bytes(json.dumps(doc).encode())
     ops = RecordingOps({})
     with pytest.raises(cmd_write._Failed, match="EFI System Partition"):
         cmd_write._esp_is_vfat(ops, profile)
     assert ops.calls == []
+
+
+def test_write_refuses_an_arming_profile_with_no_esp_image_before_it_mutates_anything(tmp_path):
+    """The refusal used to run after sfdisk and the image writes, leaving a rewritten disk behind."""
+    e = Env(tmp_path)
+    for part in e.profile.layout.params["table"]:
+        if part["type_guid"].upper() == cmd_write._ESP_TYPE_GUID:
+            part["type_guid"] = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+    e.table = layout.sfdisk_input(e.profile.layout.params, DEV)
+    e.plan["table_hash"] = hashlib.sha256(e.table.encode()).hexdigest()
+    res, ops = e.run()
+    assert_clean_refusal(res, ops, "EFI System Partition")
 
 
 def test_esp_vfat_check_needs_no_esp_image_when_the_profile_does_not_arm():

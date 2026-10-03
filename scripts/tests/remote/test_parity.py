@@ -1364,6 +1364,8 @@ def _stage_handler(fail_on=None, fail_all=False):
             return RunResult(0, b"OK\n", b"")
         if argv[:2] == ["id", "-un"]:
             return RunResult(0, b"operator\n", b"")
+        if host._ALIAS_PROBE in argv:  # the state and readback paths carry no symlink
+            return RunResult(0, b"PLAIN\n" * (len(argv) - argv.index(host._ALIAS_PROBE) - 2), b"")
         if "stat -c" in joined:  # the staging-directory probe (privileged, so sudo-prefixed)
             return RunResult(0, b"ABSENT\n", b"")  # the staging directory does not exist yet
         return RunResult(0, b"", b"")
@@ -1459,6 +1461,8 @@ def test_stage_case(name, tmp_path, golden):
         assert t.modes[r.bundle.name] == 0o755 and all(m_ == 0o644 for n, m_ in t.modes.items() if n != r.bundle.name)
         assert "NOTES.md" not in t.files
         for c in r.calls:
+            if host._ALIAS_PROBE in c.argv:
+                continue  # the read-only symlink probe of state_dir and the readback base writes nothing
             for a in c.argv:
                 if a.startswith("/"):
                     # the tool probe's search path lists the system tool directories; it touches none of them

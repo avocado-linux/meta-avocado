@@ -233,6 +233,7 @@ def _run_readback(
     makedirs=os.makedirs,
     nearest_existing=None,
     require_ram_out=True,
+    exclusive_out=False,
     is_mountpoint=os.path.ismount,
     free_bytes=_free_bytes,
     tree_size=_tree_size,
@@ -320,8 +321,18 @@ def _run_readback(
         _cleanup_hints(say, mount_dir, out_dir)
         return result
 
+    # An exclusive create under the flash lock decides which of two readbacks of one run id owns out_dir: the
+    # loser stops here and never reaches _discard, which would delete the winner's logs.
+    if exclusive_out:
+        try:
+            makedirs(out_dir, mode=0o700, exist_ok=False)
+        except FileExistsError:
+            say(f"ERROR: {out_dir} already exists from another readback of this run; not touching it. Nothing mounted.")
+            result.exit_code = 1
+            return result
+    else:
+        _private_dir(makedirs, out_dir)
     _private_dir(makedirs, mount_dir)
-    _private_dir(makedirs, out_dir)
     mounted = False
     done = 0
     try:

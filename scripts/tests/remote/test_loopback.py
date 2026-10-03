@@ -348,3 +348,22 @@ def test_a_write_that_never_created_the_table_is_caught(board):
     assert rc != 0, text + err
     assert "write COMPLETE" not in text
     assert "writing boot.img" not in text, text  # no image is written onto a disk with no table
+
+
+# ---- a missing runtime directory is a failure, not a silent skip of the whole file ----
+
+
+def test_a_missing_runtime_directory_fails_loudly_and_names_the_opt_out(tmp_path, monkeypatch):
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv(loopback.SKIP_ENV, raising=False)
+    with pytest.raises(pytest.fail.Exception) as ei:
+        loopback.LoopbackBoard(tmp_path)
+    assert "XDG_RUNTIME_DIR" in str(ei.value) and loopback.SKIP_ENV in str(ei.value)
+
+
+def test_the_opt_out_variable_turns_the_missing_runtime_directory_into_a_skip(tmp_path, monkeypatch):
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv(loopback.SKIP_ENV, "1")
+    with pytest.raises(pytest.skip.Exception) as ei:
+        loopback.LoopbackBoard(tmp_path)
+    assert loopback.SKIP_ENV in str(ei.value)

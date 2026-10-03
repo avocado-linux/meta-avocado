@@ -523,8 +523,10 @@ interpreter is the one that runs the bundle as root.
 The host builds the runner bundle deterministically, so it knows the sha256 it
 expects. Before `check`, `plan`, `write`, `readback` or `restore` runs anything,
 it asks the board for `sha256sum` of the staged bundle and compares the answer
-on the host. A mismatch is refused with this message, which names the exact
-command to run (your board, host and options filled in):
+on the host. The expected digest is only reproducible with the same zlib build,
+because the archive's compressed bytes depend on it, so run `stage` and the
+later commands from one host. A mismatch is refused with this message, which
+names the exact command to run (your board, host and options filled in):
 
     staged runner is from a different tool build: run `avocado-flash ssh-emmc stage --runner-only --board NAME --host HOST`
 
@@ -662,7 +664,7 @@ behaviour on a real board has to be exercised by hand with `check`, `plan` and
 
 ## Known limits
 
-Eight debts were found and deliberately left unfixed. Each has a
+Nine debts were found and deliberately left unfixed. Each has a
 `devtool-debt:` marker at the code it describes, and a test requires every
 marker to carry a ceiling and an upgrade trigger.
 
@@ -675,7 +677,8 @@ marker to carry a ceiling and an upgrade trigger.
 | `dd_sha256` read-back spools each full partition to a temporary file | `ops.py` `_exec` | images larger than free `/tmp` (a tmpfs `/tmp` fails after the image was written) | the first ENOSPC at read-back; hash the stream |
 | Busybox portability is not provided: the runner assumes GNU `install -d`, GNU `sha256sum --strict`, and `dd conv=fsync status=none`, and `board-prerequisites` only reports their absence (the Python modules are the host's interpreter probe's to check) | `cmd_check.py` `_board_prerequisites`, `host.py` `probe_board_tools` | boards with GNU coreutils and a full Python 3 | a busybox-userland board becomes a real target |
 | The runner's confirmation replays the string the host already matched, so the operator confirms before seeing the board identity, and `--assume-yes` skips a prompt that does not exist in remote mode | `cli.py`, `runner.py` `_do_write`, `cmd_write.py` | an operator who relies on the on-board confirmation as a second check | a second human-facing prompt on the board, or any flow that skips the host retype |
-| `status` is exempt from the staged-build match by subcommand name, so it can read a recorded phase after the tool was rebuilt | `cli.py` `_do_simple` | `status` only reads `state_dir` and writes nothing | `status` gains a side effect, or the request schema changes |
+| `status` is exempt from the staged-build match by subcommand name, so it can read a recorded phase after the tool was rebuilt; any file at the staged runner path runs as root for it, with no hash match | `cli.py` `_do_simple` | `status` only reads `state_dir` and writes nothing, and the SSH user is trusted as root | `status` gains a side effect, the request schema changes, or the SSH user is not trusted as root |
+| `stage` holds the host lock, which serialises this workstation only: a restage can overwrite the staged runner under a detached runner another invocation started | `cli.py` `_do_stage` | the runner reads its code once at start; images and imports are not re-read from the staged files afterwards | the runner lazily loads code from its archive or re-reads staged files while running |
 
 The arming record does not gain an `entry_preexisting` field and the state schema is not bumped, because no run record from before the firmware-entry change exists outside the bench.
 

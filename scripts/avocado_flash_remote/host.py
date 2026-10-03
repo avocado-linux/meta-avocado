@@ -43,7 +43,7 @@ from . import evidence
 from .bundle import verify_bundle
 from .images import scan
 from .ops import DEFAULT_TOOL_DIRS
-from .profile import STAGING_MARKER
+from .profile import READBACK_RUN_BASE, STAGING_MARKER
 
 SUBCOMMANDS = ("check", "plan", "write", "restore", "readback", "status")
 
@@ -613,35 +613,61 @@ def check_staging_space(transport, profile, payload_bytes: int = 0) -> int:
 
 
 # Read as root, so a parent the SSH user cannot search never reads as "absent". The word on the first
-# line is the whole answer: OWNER <name> <octal mode>, SYMLINK, NOTDIR or ABSENT.
+# line is the whole answer: OWNER <name> <octal mode> MARKED|UNMARKED, SYMLINK, NOTDIR or ABSENT.
+# SYMLINK means the path is not its own realpath: a link anywhere along it, not only at the end.
+# $2 names the stage marker; a marker that is a link or not a regular file does not count.
 _DIR_PROBE = (
-    'if [ -L "$1" ]; then echo SYMLINK; '
-    'elif [ -d "$1" ]; then echo "OWNER $(stat -c "%U %a" -- "$1")"; '
+    'if [ "$(realpath -m -- "$1")" != "$1" ]; then echo SYMLINK; '
+    'elif [ -d "$1" ]; then '
+    'if [ -f "$1/$2" ] && [ ! -L "$1/$2" ]; then m=MARKED; else m=UNMARKED; fi; '
+    'echo "OWNER $(stat -c "%U %a" -- "$1") $m"; '
     'elif [ -e "$1" ]; then echo NOTDIR; '
     "else echo ABSENT; fi"
 )
 
+# One word per path: ALIAS when the path is not its own realpath, so a symlinked parent cannot make
+# state_dir or the readback base land inside (or outside) the tree the profile checks were done on.
+_ALIAS_PROBE = 'for p in "$@"; do if [ "$(realpath -m -- "$p")" = "$p" ]; then echo PLAIN; else echo ALIAS; fi; done'
+
+
+def _check_no_aliased_paths(transport, paths: list[str]) -> None:
+    res = transport.run(["sh", "-c", _ALIAS_PROBE, "sh", *paths], None, sudo=True, timeout=60)
+    answers = res.out.split()
+    if res.rc != 0 or len(answers) != len(paths) or any(a not in ("PLAIN", "ALIAS") for a in answers):
+        raise HostError("cannot check the state and readback paths for symlinks on the board; refusing to stage")
+    for path, answer in zip(paths, answers):
+        if answer == "ALIAS":
+            raise HostError(f"{path} reaches the board through a symlink; refusing to stage: name its real path")
+
 
 def _staging_dir_state(transport, staging_dir: str, user: str) -> str:
-    """'absent' when stage may create the directory, 'owned' when it is the SSH user's; anything else refuses.
+    """'absent' when stage may create the directory, 'owned' when it is the SSH user's and marked; anything else refuses.
 
     ``install -d -o USER`` runs as root and would re-own a directory that already exists, so an existing
-    directory is never re-owned: it must already belong to the SSH user. Its mode matters too, because the
-    runner executes the staged bundle as root: a group- or other-writable directory would let another
-    local user swap that file. The SSH user's own writable directory is tightened to 0755 without
-    privilege; a directory another user owns is refused.
+    directory is never re-owned: it must already belong to the SSH user. A directory without the stage
+    marker is refused whoever owns it: the marker is what lets restore remove it later as root, so writing
+    it into a directory this tool did not create would turn any directory the profile names (and a root
+    login owns) into one restore deletes. Its mode matters too, because the runner executes the staged
+    bundle as root: a group- or other-writable directory would let another local user swap that file. The
+    SSH user's own writable directory is tightened to 0755 without privilege.
     """
-    res = transport.run(["sh", "-c", _DIR_PROBE, "sh", staging_dir], None, sudo=True, timeout=60)
+    res = transport.run(["sh", "-c", _DIR_PROBE, "sh", staging_dir, STAGING_MARKER], None, sudo=True, timeout=60)
     words = (res.out.strip().splitlines() or [""])[-1].split()
     if res.rc != 0 or not words:
         raise HostError("cannot tell whether the staging directory exists on the board; refusing to stage")
     if words == ["ABSENT"]:
         return "absent"
-    if len(words) == 3 and words[0] == "OWNER" and _MODE_RE.match(words[2]):
+    if len(words) == 4 and words[0] == "OWNER" and _MODE_RE.match(words[2]) and words[3] in ("MARKED", "UNMARKED"):
         if words[1] != user:
             raise HostError(
                 f"the staging directory {staging_dir} exists on the board and is owned by {words[1]}, not {user}; "
                 "refusing to take it over: remove it or choose another staging.dir"
+            )
+        if words[3] != "MARKED":
+            raise HostError(
+                f"the staging directory {staging_dir} exists on the board and has no {STAGING_MARKER} marker from an "
+                "earlier stage; refusing to stage into a directory this tool did not create: remove it or choose "
+                "another staging.dir"
             )
         if int(words[2], 8) & 0o022:
             fix = transport.run(["chmod", "0755", staging_dir], None, sudo=False, timeout=60)
@@ -689,6 +715,7 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     user = who.out.strip()
     if who.rc != 0 or not _USER_RE.match(user):
         raise HostError("cannot determine the remote user")
+    _check_no_aliased_paths(transport, [profile.state_dir, READBACK_RUN_BASE])
     if _staging_dir_state(transport, staging_dir, user) == "absent":
         mk = transport.run(["install", "-d", "-o", user, "-m", "0755", staging_dir], None, sudo=True, timeout=60)
         if mk.rc != 0:

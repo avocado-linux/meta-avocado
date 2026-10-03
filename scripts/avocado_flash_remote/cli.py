@@ -258,13 +258,19 @@ def _do_stage(ctx: _Ctx) -> int:
         if args.dry_run:
             host.stage(None, ctx.profile, ctx.resolved, args.images, info.path, dry_run=True, out=ctx.out, runner_only=args.runner_only)
             return 0
-        rc = ctx.connect(need_staged=False)
-        if rc is not None:
-            return rc
-        result = host.stage(
-            ctx.transport, ctx.profile, ctx.resolved, args.images, info.path,
-            out=ctx.out, python=ctx.remote_python, runner_only=args.runner_only,
-        )
+        # devtool-debt: the host lock serialises this workstation's invocations only. A restage can still
+        # overwrite the staged runner under a detached runner started earlier from another invocation.
+        # Ceiling: the runner reads its code once at start (images and imports are not re-read from the
+        # staged files afterwards). Upgrade trigger: the runner lazily loads code from its archive or re-reads
+        # staged files while running; then refuse to stage while any run on the board is not terminal.
+        with ctx.lock("stage"):
+            rc = ctx.connect(need_staged=False)
+            if rc is not None:
+                return rc
+            result = host.stage(
+                ctx.transport, ctx.profile, ctx.resolved, args.images, info.path,
+                out=ctx.out, python=ctx.remote_python, runner_only=args.runner_only,
+            )
     ctx.out(f"staged to {result.staging_dir}")
     return 0
 
@@ -292,8 +298,10 @@ def _exit_code(sub: str, rc: int) -> int:
 
 def _do_simple(ctx: _Ctx, sub: str, request: dict) -> int:
     # devtool-debt: status is the one subcommand exempt from the staged-build match, by name. Ceiling: status
-    # only reads state_dir and writes nothing, so an older staged runner is safe to ask. Upgrade trigger:
-    # status gains a side effect, or the request schema changes; then match the build like every other sub.
+    # only reads state_dir and writes nothing, so an older staged runner is safe to ask; but any file at the
+    # staged runner path runs as root, since status skips the hash match that proves it is this tool's build.
+    # Upgrade trigger: status gains a side effect, or the request schema changes, or the SSH user is not
+    # trusted as root; then match the build like every other sub.
     rc = ctx.connect(need_staged=True, match_build=sub != "status")
     if rc is not None:
         return rc

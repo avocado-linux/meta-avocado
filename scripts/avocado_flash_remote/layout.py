@@ -20,6 +20,21 @@ class LayoutError(ValueError):
     """The partition table cannot be created on the target device."""
 
 
+ESP_TYPE_GUID = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+
+
+def esp_images(layout_params, images) -> list:
+    """The images whose partition carries the EFI System Partition type GUID, whatever their role is called."""
+    esp_numbers = {p["number"] for p in layout_params["table"] if p["type_guid"].upper() == ESP_TYPE_GUID}
+    return [img for img in images.values() if img.partition in esp_numbers]
+
+
+NO_ESP_IMAGE = (
+    "the profile arms a boot entry but maps no image to an EFI System Partition "
+    f"(partition type {ESP_TYPE_GUID})"
+)
+
+
 def partition_node(device_path: str, number: int) -> str:
     """Device node of partition number (mmcblk0 -> mmcblk0p3, sdb -> sdb3)."""
     sep = "p" if device_path[-1:].isdigit() else ""

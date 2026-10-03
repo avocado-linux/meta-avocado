@@ -58,6 +58,13 @@ class RestoreResult:
     lines: list = field(default_factory=list)
 
 
+_ismount = os.path.ismount  # seams: a test cannot mount anything
+
+
+def _device_of(path) -> int:
+    return os.lstat(path).st_dev
+
+
 def check_staging_path(path, expected) -> None:
     """Refuse anything but the profile's own staging dir (no symlink, not shallow, stage marker present)."""
     if not path or not expected or path != expected:
@@ -65,8 +72,8 @@ def check_staging_path(path, expected) -> None:
     p = Path(path)
     if not p.is_absolute() or len(p.parts) < _MIN_PARTS:
         raise StagingRefused(f"{path!r} is too shallow to remove")
-    if p.is_symlink():
-        raise StagingRefused(f"{path!r} is a symlink")
+    if p.is_symlink() or os.path.realpath(path) != path:
+        raise StagingRefused(f"{path!r} is a symlink or lies behind one")
     # The profile names the directory, so it alone cannot make a directory removable: only the stage step marks one.
     try:
         marked = stat.S_ISREG(os.lstat(p / STAGING_MARKER).st_mode)
@@ -74,6 +81,14 @@ def check_staging_path(path, expected) -> None:
         marked = False
     if not marked:
         raise StagingRefused(f"{path!r} has no {STAGING_MARKER} marker from the stage step; not removing it")
+    # rmtree follows no links but does cross mount points, so another filesystem mounted below is wiped too.
+    if _ismount(path):
+        raise StagingRefused(f"{path!r} is a mount point")
+    here = _device_of(path)
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            if _device_of(os.path.join(root, name)) != here:
+                raise StagingRefused(f"{os.path.join(root, name)!r} is on another device than {path!r}; not removing it")
 
 
 def make_guarded_rmtree(expected):
@@ -134,6 +149,12 @@ def _manual_disarm_lines(label, holder) -> list:
         "check first on the board (ps -ef | grep -E 'dd|sfdisk|efibootmgr') and stop here if any is alive",
         "no boot entry or staging was touched",
         "only if nothing is running, disarm by hand as root on the board:",
+        *_manual_clear_lines(label),
+    ]
+
+
+def _manual_clear_lines(label) -> list:
+    return [
         "  efibootmgr -v    (find the entry labelled "
         f"{label!r}; note BootNext, BootOrder and BootCurrent)",
         f"  efibootmgr -N    (only if BootNext names the entry labelled {label!r}; leave any other BootNext alone)",
@@ -340,6 +361,9 @@ def _restore_locked(
     still = boot_next_of(after).upper()
     if record.entry_number and still == record.entry_number.upper():
         say(f"BootNext {still} still set: DO NOT REBOOT; it did not clear")
+        say("clear it by hand as root on the board, after checking the entry is the one this run armed:")
+        for line in _manual_clear_lines(record.label):
+            say(line)
         say("staging kept")
         return finish(1, note)
     problem = False

@@ -173,7 +173,7 @@ def test_the_preflight_check_list_names_board_prerequisites():
 def test_known_limits_count_matches_the_debt_markers_in_the_code():
     import test_debt_markers as dm
 
-    words = {6: "Six", 7: "Seven", 8: "Eight"}
+    words = {6: "Six", 7: "Seven", 8: "Eight", 9: "Nine"}
     found = len(list(dm.markers()))
     text = _section("Known limits")
     assert f"{words[found]} debts were found" in text
@@ -202,7 +202,7 @@ def test_known_limits_states_the_deliberate_non_fix_for_the_record_schema():
     text = _section("Known limits")
     assert "entry_preexisting" in text
     assert "state schema is not bumped" in text
-    assert "Eight debts" in text  # not a debt marker: the count follows the markers in the code
+    assert "Nine debts" in text  # not a debt marker: the count follows the markers in the code
 
 
 def test_boot_order_premise_is_documented():
@@ -216,6 +216,10 @@ def test_readme_readback_cleanup_text_names_the_mount_and_output_dirs_and_the_ga
     assert "those paths" not in row
     assert "/run/avocado-flash/<run-id>/mnt" in row and "/run/avocado-flash/<run-id>/readback" in row
     assert "nosuid" in row and "flash lock" in row
+
+
+def test_readme_says_the_runner_digest_is_only_reproducible_with_the_same_zlib_build():
+    assert "same zlib build" in README and "one host" in README
 
 
 # --- 5.41 ---

@@ -22,7 +22,7 @@ from avocado_flash_remote.host import (
     SshTransport,
     StubTransport,
 )
-from avocado_flash_remote.profile import STAGING_MARKER, load_profile_bytes
+from avocado_flash_remote.profile import READBACK_RUN_BASE, STAGING_MARKER, load_profile_bytes
 
 SHIPPED = pathlib.Path(host.__file__).resolve().parent / "profiles"
 PASSWORD = "hunter2-Zq9!"
@@ -94,6 +94,8 @@ def handler_for(avail_kib: int, missing_tools=(), dir_answer=b"ABSENT\n", dir_rc
             if missing_tools:
                 return RunResult(0, ("MISSING " + " ".join(missing_tools) + "\n").encode(), b"")
             return RunResult(0, b"OK\n", b"")
+        if host._ALIAS_PROBE in argv:  # the state and readback paths carry no symlink
+            return RunResult(0, b"PLAIN\n" * (len(argv) - argv.index(host._ALIAS_PROBE) - 2), b"")
         if _is_dir_probe(argv):
             return RunResult(dir_rc, dir_answer, b"")
         if "df" in argv or "df -Pk" in joined:
@@ -266,6 +268,8 @@ def test_acquire_sudo_prompts_and_password_hygiene(tmp_path, kit, resolved, caps
             return RunResult(1, b"", b"password required")
         if _is_tool_probe(argv):
             return RunResult(0, b"OK\n", b"")
+        if host._ALIAS_PROBE in argv:
+            return RunResult(0, b"PLAIN\n" * (len(argv) - argv.index(host._ALIAS_PROBE) - 2), b"")
         if any("stat -c" in a for a in argv):  # the staging-directory probe, sudo-prefixed in password mode
             return RunResult(0, b"ABSENT\n", b"")
         if "df" in argv or any("df -Pk" in a for a in argv):
@@ -1343,11 +1347,11 @@ def test_stage_creates_the_directory_only_when_it_is_absent_and_looks_first_as_r
     probe = t.calls[probe_i]
     # Root's own view: a parent the SSH user cannot search must not read as "absent".
     assert probe.sudo is True
-    assert probe.argv[-1] == resolved.profile.staging.dir
+    assert probe.argv[-2:] == [resolved.profile.staging.dir, STAGING_MARKER]
 
 
 def test_stage_leaves_an_existing_directory_owned_by_the_ssh_user_as_it_is(kit, resolved):
-    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator 755\n"))
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator 755 MARKED\n"))
     go()
     assert not any("install" in c.argv for c in t.calls)
     assert not any("chmod" in c.argv for c in t.calls)
@@ -1356,7 +1360,7 @@ def test_stage_leaves_an_existing_directory_owned_by_the_ssh_user_as_it_is(kit, 
 
 @pytest.mark.parametrize("mode", [b"777", b"775", b"757", b"1777", b"2775", b"770"], ids=lambda m: m.decode())
 def test_stage_tightens_a_group_or_other_writable_directory_the_ssh_user_owns_without_privilege(kit, resolved, mode):
-    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator " + mode + b"\n"))
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator " + mode + b" MARKED\n"))
     go()
     (chmod,) = [c for c in t.calls if "chmod" in c.argv]
     assert chmod.argv == ["chmod", "0755", resolved.profile.staging.dir] and chmod.sudo is False
@@ -1366,13 +1370,13 @@ def test_stage_tightens_a_group_or_other_writable_directory_the_ssh_user_owns_wi
 
 @pytest.mark.parametrize("mode", [b"755", b"750", b"700", b"0755"], ids=lambda m: m.decode())
 def test_stage_accepts_a_directory_nobody_else_can_write_and_does_not_chmod_it(kit, resolved, mode):
-    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator " + mode + b"\n"))
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator " + mode + b" MARKED\n"))
     go()
     assert not any("chmod" in c.argv for c in t.calls)
 
 
 def test_stage_refuses_when_the_tightening_chmod_fails(kit, resolved):
-    inner = handler_for(10_000_000, dir_answer=b"OWNER operator 777\n")
+    inner = handler_for(10_000_000, dir_answer=b"OWNER operator 777 MARKED\n")
 
     def h(argv, stdin, sudo):
         if "chmod" in argv:
@@ -1386,30 +1390,62 @@ def test_stage_refuses_when_the_tightening_chmod_fails(kit, resolved):
 
 
 def test_stage_never_chmods_a_directory_another_user_owns_even_when_it_is_writable(kit, resolved):
-    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER root 777\n"))
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER root 777 MARKED\n"))
     with pytest.raises(HostError, match="staging directory"):
         go()
     assert not any("chmod" in c.argv for c in t.calls)
 
 
-def test_the_directory_probe_prints_owner_and_mode_under_the_real_shell(tmp_path):
-    d = tmp_path / "staging"
+def _real_probe(path, marker=STAGING_MARKER):
+    done = subprocess.run(
+        ["/bin/sh", "-c", host._DIR_PROBE, "sh", str(path), marker], capture_output=True, text=True, check=True
+    )
+    return done.stdout.split()
+
+
+def test_the_directory_probe_prints_owner_mode_and_marker_state_under_the_real_shell(tmp_path):
+    d = tmp_path.resolve() / "staging"
     d.mkdir()
     d.chmod(0o775)
-    done = subprocess.run(["/bin/sh", "-c", host._DIR_PROBE, "sh", str(d)], capture_output=True, text=True, check=True)
-    owner = done.stdout.split()
-    assert owner[0] == "OWNER" and owner[2] == "775" and len(owner) == 3
+    owner = _real_probe(d)
+    assert owner[0] == "OWNER" and owner[2] == "775" and owner[3] == "UNMARKED" and len(owner) == 4
+    (d / STAGING_MARKER).write_text("x")
+    assert _real_probe(d)[3] == "MARKED"
+
+
+def test_the_directory_probe_does_not_count_a_marker_that_is_not_a_regular_file(tmp_path):
+    d = tmp_path.resolve() / "staging"
+    d.mkdir()
+    (d / STAGING_MARKER).symlink_to("/etc/hostname")
+    assert _real_probe(d)[3] == "UNMARKED"
+
+
+def test_the_directory_probe_reports_absent_for_a_missing_path_under_a_plain_parent(tmp_path):
+    assert _real_probe(tmp_path.resolve() / "nope") == ["ABSENT"]
+
+
+@pytest.mark.parametrize("existing", [True, False], ids=["existing-dir", "absent-dir"])
+def test_the_directory_probe_refuses_a_path_reached_through_a_symlinked_parent(tmp_path, existing):
+    real = tmp_path.resolve() / "real"
+    real.mkdir()
+    if existing:
+        (real / "stage").mkdir()
+        (real / "stage" / STAGING_MARKER).write_text("x")
+    link = tmp_path.resolve() / "link"
+    link.symlink_to(real)
+    assert _real_probe(link / "stage") == ["SYMLINK"]
 
 
 @pytest.mark.parametrize(
     "answer",
     [
-        b"OWNER root 755\n", b"OWNER UNKNOWN 755\n", b"SYMLINK\n", b"NOTDIR\n", b"", b"banana\n",
-        b"OWNER operator extra\n", b"OWNER operator\n", b"OWNER operator 7x5\n", b"OWNER operator 755 extra\n",
+        b"OWNER root 755 MARKED\n", b"OWNER UNKNOWN 755 MARKED\n", b"SYMLINK\n", b"NOTDIR\n", b"", b"banana\n",
+        b"OWNER operator extra MARKED\n", b"OWNER operator\n", b"OWNER operator 7x5 MARKED\n",
+        b"OWNER operator 755 MARKED extra\n", b"OWNER operator 755\n", b"OWNER operator 755 MAYBE\n",
     ],
     ids=[
         "other-owner", "no-such-uid", "symlink", "not-a-directory", "empty", "garbage",
-        "extra-fields", "no-mode", "bad-mode", "too-many-fields",
+        "extra-fields", "no-mode", "bad-mode", "too-many-fields", "old-three-word-form", "unknown-marker-word",
     ],
 )
 def test_stage_refuses_a_staging_directory_the_ssh_user_does_not_own_and_changes_nothing(kit, resolved, answer):
@@ -1418,6 +1454,92 @@ def test_stage_refuses_a_staging_directory_the_ssh_user_does_not_own_and_changes
         go()
     assert not any("install" in c.argv for c in t.calls)
     assert not any(c.kind == "put_tar" for c in t.calls)
+
+
+def test_stage_refuses_an_existing_directory_without_the_marker_even_when_the_ssh_user_owns_it(kit, resolved):
+    t, go = _stage(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER operator 755 UNMARKED\n"))
+    with pytest.raises(HostError, match="no .* marker"):
+        go()
+    assert not any(c.kind == "put_tar" for c in t.calls)
+    assert not any("chmod" in c.argv or "install" in c.argv for c in t.calls)
+
+
+@pytest.mark.parametrize("answer", [b"OWNER root 755 UNMARKED\n", b"OWNER root 700 UNMARKED\n"], ids=["var-log-like", "tight"])
+def test_a_root_login_never_gets_a_marker_written_into_an_existing_system_directory(kit, resolved, answer):
+    inner = handler_for(10_000_000, dir_answer=answer)
+
+    def h(argv, stdin, sudo):
+        if argv[:2] == ["id", "-un"]:
+            return RunResult(0, b"root\n", b"")
+        return inner(argv, stdin, sudo)
+
+    t, go = _stage(kit, resolved, h)
+    with pytest.raises(HostError, match="no .* marker"):
+        go()
+    assert not any(c.kind == "put_tar" for c in t.calls)
+
+
+def test_stage_accepts_an_existing_directory_that_an_earlier_stage_marked_for_a_root_login(kit, resolved):
+    inner = handler_for(10_000_000, dir_answer=b"OWNER root 755 MARKED\n")
+
+    def h(argv, stdin, sudo):
+        if argv[:2] == ["id", "-un"]:
+            return RunResult(0, b"root\n", b"")
+        return inner(argv, stdin, sudo)
+
+    t, go = _stage(kit, resolved, h)
+    go()
+    assert any(c.kind == "put_tar" for c in t.calls)
+
+
+def _is_alias_probe(argv) -> bool:
+    argv = list(argv)
+    if argv[:2] == ["sudo", "-n"]:
+        argv = argv[2:]
+    return argv[:2] == ["sh", "-c"] and "ALIAS" in argv[2]
+
+
+def _alias_handler(answer: bytes, rc: int = 0):
+    inner = handler_for(10_000_000)
+
+    def h(argv, stdin, sudo):
+        if _is_alias_probe(argv):
+            return RunResult(rc, answer, b"")
+        return inner(argv, stdin, sudo)
+
+    return h
+
+
+def test_stage_asks_the_board_about_the_state_dir_and_the_readback_base_as_root(kit, resolved):
+    t, go = _stage(kit, resolved, _alias_handler(b"PLAIN\nPLAIN\n"))
+    go()
+    probe = next(c for c in t.calls if _is_alias_probe(c.argv))
+    assert probe.sudo is True
+    assert probe.argv[-2:] == [resolved.profile.state_dir, READBACK_RUN_BASE]
+
+
+@pytest.mark.parametrize(
+    "answer, rc",
+    [(b"ALIAS\nPLAIN\n", 0), (b"PLAIN\nALIAS\n", 0), (b"PLAIN\n", 0), (b"PLAIN\nPLAIN\n", 1), (b"PLAIN\nbanana\n", 0)],
+    ids=["state-dir-aliased", "readback-base-aliased", "short-answer", "probe-failed", "garbage"],
+)
+def test_stage_refuses_a_symlinked_state_dir_or_readback_base_before_it_copies_anything(kit, resolved, answer, rc):
+    t, go = _stage(kit, resolved, _alias_handler(answer, rc))
+    with pytest.raises(HostError, match="symlink"):
+        go()
+    assert not any(c.kind == "put_tar" for c in t.calls)
+    assert not any("install" in c.argv for c in t.calls)
+
+
+def test_the_alias_probe_names_a_path_behind_a_symlinked_parent_under_the_real_shell(tmp_path):
+    real = tmp_path.resolve() / "real"
+    real.mkdir()
+    (tmp_path.resolve() / "link").symlink_to(real)
+    plain, behind = str(real / "x"), str(tmp_path.resolve() / "link" / "x")
+    done = subprocess.run(
+        ["/bin/sh", "-c", host._ALIAS_PROBE, "sh", plain, behind], capture_output=True, text=True, check=True
+    )
+    assert done.stdout.split() == ["PLAIN", "ALIAS"]
 
 
 def test_stage_refuses_when_the_directory_probe_itself_fails(kit, resolved):
@@ -1491,7 +1613,7 @@ def test_runner_only_stage_verifies_the_bundle_marker_and_profile_on_the_board_b
 
 
 def test_runner_only_stage_keeps_the_directory_ownership_rules(kit, resolved):
-    t, go = _stage_runner_only(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER root 755\n"))
+    t, go = _stage_runner_only(kit, resolved, handler_for(10_000_000, dir_answer=b"OWNER root 755 MARKED\n"))
     with pytest.raises(HostError, match="staging directory"):
         go()
     assert not any(c.kind == "put_tar" for c in t.calls)
@@ -1501,3 +1623,41 @@ def test_runner_only_dry_run_is_offline_and_names_only_the_runner_files(kit, res
     host.stage(None, resolved.profile, resolved, None, kit[1], dry_run=True, runner_only=True)
     out = capsys.readouterr().out
     assert kit[1].name in out and STAGING_MARKER in out and "boot.img" not in out
+
+
+# --- check_staged_build: every failure branch refuses, only an exact digest proceeds ----------------
+
+_GOOD = "ab" * 32
+
+
+def _staged_build(res):
+    t = StubTransport(handler=lambda argv, stdin, sudo: res)
+    return host.check_staged_build(t, "/run/x/runner.pyz", _GOOD)
+
+
+@pytest.mark.parametrize(
+    "res, exc, text",
+    [
+        (RunResult(0, b"", b""), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(1, b"", b"sha256sum: /run/x/runner.pyz: No such file or directory"), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(127, b"", b"sh: sha256sum: not found"), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(0, b"sha256sum: /run/x/runner.pyz: No such file or directory\n", b""), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(0, f"\\{_GOOD}  /run/x/ru\\nner.pyz\n".encode(), b""), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(0, f"{_GOOD[:-1]}  /run/x/runner.pyz\n".encode(), b""), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(1, f"{_GOOD}  /run/x/runner.pyz\n".encode(), b""), host.HostError, host.UNVERIFIED_BUILD),
+        (RunResult(0, f"{'cd' * 32}  /run/x/runner.pyz\n".encode(), b""), host.StaleBuild, host.STALE_BUILD),
+        (RunResult(255, b"", b"ssh: connect failed"), host.HostUnreachable, "staged runner's hash"),
+    ],
+    ids=[
+        "empty-output", "rc-1", "rc-127", "error-text-rc-0", "escaped-hash", "short-hash", "digest-but-rc-1",
+        "different-digest", "ssh-failure",
+    ],
+)
+def test_check_staged_build_refuses_every_branch_but_an_exact_match(res, exc, text):
+    with pytest.raises(exc, match=re.escape(text)):
+        _staged_build(res)
+
+
+def test_check_staged_build_accepts_the_exact_digest_in_either_case():
+    assert _staged_build(RunResult(0, f"{_GOOD}  /run/x/runner.pyz\n".encode(), b"")) is None
+    assert _staged_build(RunResult(0, f"{_GOOD.upper()}  /run/x/runner.pyz\n".encode(), b"")) is None

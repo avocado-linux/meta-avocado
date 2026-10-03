@@ -644,3 +644,12 @@ def test_a_uefi_bootnext_profile_without_an_esp_role_still_shows_the_arm_line():
     assert res.exit_code == 0, res.lines
     assert "  arm    : efibootmgr -n 0002" in res.lines
     assert "DRY-RUN would run: efibootmgr -n 0002" in res.lines
+
+
+def test_plan_refuses_an_arming_profile_that_maps_no_image_to_an_esp():
+    profile, phash = load()
+    for part in profile.layout.params["table"]:
+        if part["type_guid"].upper() == "C12A7328-F81F-11D2-BA4B-00A0C93EC93B":
+            part["type_guid"] = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+    res, ops, rec = plan(profile, phash)
+    assert_clean_refusal(res, ops, rec, "EFI System Partition")

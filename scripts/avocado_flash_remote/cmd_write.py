@@ -318,23 +318,18 @@ def _write_images(ops, profile, plan, st, scans, staging_dir, reverifier, say, a
     return st
 
 
-_ESP_TYPE_GUID = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+_ESP_TYPE_GUID = layout.ESP_TYPE_GUID
 
 
 def _esp_is_vfat(ops, profile) -> None:
     """Every image written to an EFI System Partition (by type GUID, whatever its role is called) reads back as FAT."""
     if profile.arm.strategy == "none":
         return
-    esp_numbers = {
-        p["number"] for p in profile.layout.params["table"] if p["type_guid"].upper() == _ESP_TYPE_GUID
-    }
-    esp_images = [img for img in profile.images.values() if img.partition in esp_numbers]
+    esp_images = layout.esp_images(profile.layout.params, profile.images)
     if not esp_images:
-        # Nothing to check would read as a pass: an arming profile must put an image on the ESP it boots from.
-        raise _Failed(
-            "the profile arms a boot entry but maps no image to an EFI System Partition "
-            f"(partition type {_ESP_TYPE_GUID}); refusing to write"
-        )
+        # Nothing to check would read as a pass. Plan and the pre-checks refuse this before any write; this
+        # stays as the last guard for a profile object that skipped them.
+        raise _Failed(f"{layout.NO_ESP_IMAGE}; refusing to write")
     for img in esp_images:
         node = layout.partition_node(profile.target.device, img.partition)
         res = ops.blkid(node, check=False)
@@ -441,6 +436,7 @@ def _locked(
 
     # ---- 5-7: re-check, re-test, confirm (all still read-only)
     try:
+        cmd_plan._check_esp_image(profile)  # decided from the profile alone, so before anything is written
         # Re-read the state under the lock: another run may have finished in between.
         _prior_state_gate(state_dir, run_id, ack_run_id)
         planned_arm = plan.get("arm") if isinstance(plan.get("arm"), dict) else {}
