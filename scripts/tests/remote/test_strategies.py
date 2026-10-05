@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from golden_deviation import kit_to_port_data_size
 from avocado_flash_remote import strategies
 from avocado_flash_remote.strategies import StrategyError, validate
 
@@ -438,7 +439,8 @@ def test_jetson_profile_sfdisk_input_equals_golden_without_uuids_argument():
         if not line.startswith("    "):
             break
         block.append(line[4:])
-    assert got == "\n".join(block) + "\n"
+    # The data partition size is a deliberate deviation from the kit: see golden_deviation.
+    assert got == "\n".join(kit_to_port_data_size(block)) + "\n"
 
 
 # ---- 5.33: partition names and UUIDs are interpolated into an sfdisk script ----
