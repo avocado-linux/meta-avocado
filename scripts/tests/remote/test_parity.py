@@ -50,6 +50,7 @@ import test_cmd_check as tcc
 import test_cmd_plan as tcp
 import test_cmd_readback_status as tcrb
 import test_cmd_write as tcw
+from golden_deviation import kit_to_port_data_size
 from avocado_flash_remote import bundle, host, runner
 from avocado_flash_remote import state as statemod
 from avocado_flash_remote.arm import ArmRecord
@@ -1189,7 +1190,9 @@ def test_plan_body_equals_real_board_dry_run_byte_for_byte():
     assert body[0] == kit_line + ".hashes"
     body = [kit_line] + body[1:]
     # The arm lines are the second deliberate difference (task 5.36): see ARM_DEVIATION.
-    expected = tcp.kit_to_port_arm_lines(golden[:-1])
+    # The third is the data partition size (golden_deviation): the grow service relocates the
+    # backup GPT with sgdisk -e, which needs 6 sectors more room at the end of the last partition.
+    expected = kit_to_port_data_size(tcp.kit_to_port_arm_lines(golden[:-1]))
     assert body == expected
     assert "\n".join(body) + "\n" == "\n".join(expected) + "\n"
 

@@ -129,7 +129,7 @@
           "number": 16,
           "name": "DATAPART_EXPAND",
           "start": 3279424,
-          "size": 119035295,
+          "size": 119035289,
           "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
           "uuid": "4D21B016-B534-45C2-A9FB-5C16E091FD2D"
         }
@@ -175,7 +175,7 @@
     },
     "var": {
       "partition": 16,
-      "max_bytes": 60946071040,
+      "max_bytes": 60946067968,
       "must_be_populated": true,
       "file": "avocado-image-var-jetson-agx-orin-devkit.btrfs"
     }
