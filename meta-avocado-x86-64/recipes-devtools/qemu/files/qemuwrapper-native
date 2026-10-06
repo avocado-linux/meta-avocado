@@ -81,6 +81,22 @@ if [ -z "$LOADER" ]; then
     exit 1
 fi
 
+# Inside-the-rootfs tests compare resolved paths. A path that is lexically under
+# $ROOTFS can still be an absolute symlink (lib -> /usr/lib/libfoo.so.1.2), which
+# the kernel follows against the build host's /, not the rootfs.
+ROOTFS_REAL=$(realpath -e "$ROOTFS")
+in_rootfs() {
+    case "$(realpath -e "$1" 2>/dev/null)" in
+        "$ROOTFS_REAL"/*) return 0 ;;
+    esac
+    return 1
+}
+
+if ! in_rootfs "$LOADER"; then
+    echo "qemuwrapper(native): $LOADER resolves outside $ROOTFS" >&2
+    exit 1
+fi
+
 # qemu -L <rootfs> re-roots the binary's *absolute* RUNPATH/RPATH entries inside
 # the rootfs. The host loader instead resolves them against /, so a binary like
 # udevadm (RUNPATH=/usr/lib/systemd, NEEDED libsystemd-shared-NNN.so) fails with
@@ -91,8 +107,9 @@ fi
 # Unlike qemu -L this does not re-root the loader: anything not found on
 # --library-path still falls through to the build host's /lib and /usr/lib.
 # --inhibit-cache drops the host's ld.so.cache, and the --list check below
-# refuses to run a binary if any library would come from outside the rootfs,
-# so a host library can never silently stand in for a target one.
+# refuses to run a binary if any library would come from outside the rootfs once
+# symlinks are resolved, so a host library cannot silently stand in for a target
+# one.
 #
 # Ceiling: one level below each lib root, and only directories that actually hold
 # shared objects. That covers the private dirs OE produces (/usr/lib/systemd,
@@ -116,13 +133,17 @@ done
 LIBPATH=$(echo "$LIBPATH" | sed 's/^://')
 
 # The loader prints "name => path" for each resolved NEEDED entry, and
-# "name => not found" for a missing one; both must stay inside the rootfs.
+# "name => not found" for a missing one. The printed path is where the search
+# found the name, not where it points, so each one is resolved before the test;
+# "not found" never resolves and is refused with the rest.
 # --list takes the binary alone: anything after it is read as symbols to look up.
 libs=$("$LOADER" --inhibit-cache ${LIBPATH:+--library-path "$LIBPATH"} --list "$1") || {
     echo "qemuwrapper(native): cannot resolve the libraries of $1" >&2
     exit 1
 }
-escaped=$(printf '%s\n' "$libs" | awk -v r="$ROOTFS/" '$2 == "=>" && index($3, r) != 1')
+escaped=$(printf '%s\n' "$libs" | awk '$2 == "=>" { print $1, $3 }' | while read -r name path; do
+    in_rootfs "$path" || echo "$name => $path"
+done)
 if [ -n "$escaped" ]; then
     echo "qemuwrapper(native): libraries resolve outside $ROOTFS:" >&2
     echo "$escaped" >&2
