@@ -31,6 +31,22 @@ AVOCADO_YOCTO_SERIES ??= "unknown"
 DISTRO_CHANNEL ??= "local"
 DISTRO_CODENAME := "${@d.getVar('DISTRO_CODENAME') or '${AVOCADO_RELEASE_YEAR}-${AVOCADO_YOCTO_SERIES}/${DISTRO_CHANNEL}'}"
 
+# A release build is handed DISTRO_VERSION and BUILD_ID by the pipeline and those
+# win untouched. A local build composes them from the layer's history: the
+# commit count first, so two builds order the way the commits do, then the
+# revision, so they still differ when the counts tie. The revision alone orders
+# arbitrarily - rpm ranks "gf0000000" above "g10000000". "<year>.0+" keeps a
+# local build below any published "<year>.<build-id>". The identity goes in the
+# version rather than the codename because a per-build value in the codename
+# would give every build its own feed directory.
+#
+# Read once at config parse, so every commit changes it, and with it the PV of
+# the avocado-* recipes, os-release and the parse cache. Same ":=" over getVar
+# as the codename above, for the same reason.
+AVOCADO_LAYER_REV := "${@avocado_distro.revision_tag(d.getVar('AVOCADO_LAYER_DIR'))}"
+DISTRO_VERSION := "${@d.getVar('DISTRO_VERSION') or '${AVOCADO_RELEASE_YEAR}.0+${AVOCADO_LAYER_REV}'}"
+BUILD_ID := "${@d.getVar('BUILD_ID') or '${AVOCADO_LAYER_REV}'}"
+
 SDK_VENDOR = "-avocadosdk"
 SDK_VERSION := "${@'${DISTRO_VERSION}'.replace('snapshot-${METADATA_REVISION}','snapshot')}"
 SDK_VERSION[vardepvalue] = "${SDK_VERSION}"

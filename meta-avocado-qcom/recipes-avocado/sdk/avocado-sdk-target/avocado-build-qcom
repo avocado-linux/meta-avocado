@@ -23,6 +23,7 @@ output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
 manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
+# shellcheck disable=SC2329 # not called from this script
 build_include_flags() {
     local main_input_dir="$1"
     local include_flags=""
@@ -41,6 +42,7 @@ build_include_flags() {
 }
 
 # Build display string of all include paths
+# shellcheck disable=SC2329 # not called from this script
 build_include_display() {
     local main_input_dir="$1"
     local display=""
@@ -188,6 +190,7 @@ if [ -n "$esp_image" ]; then
         od="${CROSS_COMPILE:-}objdump"
         command -v "$oc" >/dev/null 2>&1 || {
             oc=$(echo "$AVOCADO_SDK_PREFIX"/usr/bin/*/[a-z]*-objcopy | cut -d' ' -f1)
+            # shellcheck disable=SC2034 # assigned, never read
             od=$(echo "$AVOCADO_SDK_PREFIX"/usr/bin/*/[a-z]*-objdump | cut -d' ' -f1)
         }
         [ -x "$oc" ] || command -v "$oc" >/dev/null 2>&1 || { echo "ERROR: no objcopy in the SDK" >&2; exit 1; }
@@ -277,6 +280,7 @@ if [ -n "$esp_image" ]; then
                     # boots fine and is missing the hardware the extension was
                     # installed for, which is the failure this whole path exists
                     # to remove.
+                    # shellcheck disable=SC2086 # dto_list is a space-separated list of paths; the split is intended
                     fdtoverlay -i "$uki_dir/dtb" -o "$uki_dir/dtb.merged" $dto_list || {
                         echo "ERROR: fdtoverlay failed merging$dto_list" >&2
                         echo "       Two overlays touching the same node, or one built against a different base tree." >&2
@@ -348,12 +352,14 @@ if [ -n "$esp_image" ]; then
         # the runtime changes.
         #
         #   IMAGE_VERSION  is what systemd-boot sorts entries by (its binary reads
-        #                  IMAGE_VERSION, then VERSION_ID). Every avocado build
-        #                  carries VERSION_ID=0.0.0 in a dev feed, so without this
-        #                  every entry ties and ordering falls back to the entry
-        #                  id -- which means a freshly installed update does NOT
-        #                  sort ahead of the entry it replaces, and would only be
-        #                  chosen by accident. Sorting is the whole selection
+        #                  IMAGE_VERSION, then VERSION_ID). VERSION_ID does not
+        #                  order across kinds of build - a release build carries
+        #                  <release>.<build-id>, a local one <year>.0-<count>.g<rev>
+        #                  - so without a build time ahead of it two entries can
+        #                  tie or sort the wrong way round, and a freshly
+        #                  installed update does NOT sort ahead of the entry it
+        #                  replaces, and would only be chosen by accident.
+        #                  Sorting is the whole selection
         #                  mechanism here: this board has no EFI variables (no
         #                  efivarfs at all), so a one-shot boot entry is not
         #                  available, and pinning `default` in loader.conf was
@@ -371,13 +377,15 @@ if [ -n "$esp_image" ]; then
         rootfs_osrel="$AVOCADO_PREFIX/rootfs/usr/lib/os-release"
         if [ -f "$rootfs_osrel" ]; then
             grep -vE '^(IMAGE_VERSION|IMAGE_ID)=' "$rootfs_osrel" > "$uki_dir/osrel"
-            # Monotonic, and ordered the way strverscmp orders: a build that
-            # happens later must sort ahead of one that happened earlier, or an
-            # update installs and is never selected. SOURCE_DATE_EPOCH when the
-            # build set one, so a reproducible build stays reproducible.
+            # The build time leads, so a later build sorts ahead of an earlier one
+            # whatever its VERSION_ID: a release build's <release>.<build-id> and
+            # a local build's <year>.0-<count>.g<rev> do not order against each
+            # other, and an update that installs but is never selected strands the
+            # board. SOURCE_DATE_EPOCH when the build set one, so a reproducible
+            # build stays reproducible.
             version_id=$(sed -n 's/^VERSION_ID=//p' "$rootfs_osrel" | tr -d '"')
             printf 'IMAGE_VERSION="%s+%s"\n' \
-                "${version_id:-0}" "${SOURCE_DATE_EPOCH:-$(date -u +%s)}" \
+                "${SOURCE_DATE_EPOCH:-$(date -u +%s)}" "${version_id:-0}" \
                 >> "$uki_dir/osrel"
         else
             echo "WARNING: no $rootfs_osrel; keeping the previous UKI's .osrel," >&2
