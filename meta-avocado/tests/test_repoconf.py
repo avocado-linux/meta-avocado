@@ -115,6 +115,97 @@ class RenderRepoSection(unittest.TestCase):
         self.assertEqual(parse(self._render(priority=11))["priority"], "11")
 
 
+class PriorityIsOmissibleButNotOptional(unittest.TestCase):
+    """A section can decline to rank itself; a caller cannot decline to say so.
+
+    dnf ranks priority globally across every repo it loads, defaulting to 99.
+    The per-target file ranks its own sections 1..N and breaks if one of them
+    silently lands at 99, so omitting the argument stays a TypeError while
+    passing None explicitly writes no line.
+    """
+
+    def test_passing_none_writes_no_priority_line(self):
+        text = repoconf.render_repo_section(
+            section="s", name="n", baseurl_path="p", priority=None
+        )
+
+        self.assertNotIn("priority", parse(text))
+
+    def test_omitting_the_argument_is_still_an_error(self):
+        # The guard the per-target file depends on: a section added there
+        # without a priority must not render, it must fail.
+        with self.assertRaises(TypeError):
+            repoconf.render_repo_section(section="s", name="n", baseurl_path="p")
+
+    def test_a_zero_priority_is_still_written(self):
+        # Only None omits the line. Zero is a real dnf priority and must not
+        # be swallowed by a falsy test.
+        text = repoconf.render_repo_section(
+            section="s", name="n", baseurl_path="p", priority=0
+        )
+
+        self.assertEqual(parse(text)["priority"], "0")
+
+    def test_the_separator_survives_the_missing_line(self):
+        # The priority line was last, so dropping it must not take the blank
+        # separator with it.
+        text = repoconf.render_repo_section(
+            section="s", name="n", baseurl_path="p", priority=None
+        )
+
+        self.assertTrue(text.endswith("\n\n"))
+
+
+class SdkRepoSection(unittest.TestCase):
+    """Pin the block the SDK container's own dnf reads.
+
+    These literals used to be a checked-in file a reviewer could diff. Now they
+    are code, so this is what stands between a typo in the section name or the
+    path and a container whose first dnf transaction 404s.
+    """
+
+    def test_the_whole_block_is_pinned(self):
+        self.assertEqual(
+            repoconf.render_sdk_repo_section(),
+            "[avocado-sdk]\n"
+            "name=Avocado SDK\n"
+            "baseurl=${repo_url}/$releasever/sdk/all\n"
+            "enabled=1\n"
+            "gpgcheck=0\n"
+            "repo_gpgcheck=0\n"
+            "\n",
+        )
+
+    def test_it_declines_to_rank_itself(self):
+        # avocado-cli merges this file with the per-target config in one
+        # transaction, where the target sections hold 1..N. Staying at dnf's
+        # default of 99 keeps this below them, as the static file it replaced
+        # effectively was.
+        self.assertNotIn("priority", parse(repoconf.render_sdk_repo_section()))
+
+    def test_metadata_verification_reaches_it(self):
+        # The whole point of routing this section through the renderer: the
+        # switch has to reach the one repo every SDK container reads.
+        parsed = parse(repoconf.render_sdk_repo_section(repo_gpgcheck="1"))
+
+        self.assertEqual(parsed["repo_gpgcheck"], "1")
+        self.assertEqual(
+            parsed["gpgkey"],
+            "${repo_url}/$releasever/sdk/all/repodata/repomd.xml.key",
+        )
+
+    def test_package_signature_checking_reaches_it_independently(self):
+        parsed = parse(repoconf.render_sdk_repo_section(gpgcheck="1"))
+
+        self.assertEqual(parsed["gpgcheck"], "1")
+        self.assertEqual(parsed["repo_gpgcheck"], "0")
+
+    def test_a_bad_switch_value_is_rejected_here_too(self):
+        # The wrapper must not become a way around the boolean check.
+        with self.assertRaises(ValueError):
+            repoconf.render_sdk_repo_section(repo_gpgcheck="yes")
+
+
 class RenderRepoSectionRejectsBadInput(unittest.TestCase):
     def test_an_empty_baseurl_path_is_rejected(self):
         # A section with no path silently points every client at the feed root.
