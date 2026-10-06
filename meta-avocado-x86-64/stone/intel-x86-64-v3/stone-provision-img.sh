@@ -128,13 +128,14 @@ for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
     offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
     expand=$(jq -r ".storage_devices.rootdisk.partitions[$i].expand // \"\"" "$MANIFEST")
 
-    # A partition marked "expand" (e.g. var) carries no explicit size in the
-    # manifest -- its size is dynamic, driven by whatever the build put into its
-    # image. Size it to hold its own image (rounded up to a whole MiB) for the
-    # flashed image; stone grows it to fill the disk on the target after flashing.
-    if [ "$expand" = "true" ] || [ "$size" = "null" ] || [ -z "$size" ]; then
+    # An explicit size always wins. Only a partition with no size (e.g. var) is
+    # sized from its own image, rounded up to a whole MiB. "expand" does not
+    # decide the flashed size: it tells stone to grow the partition to fill the
+    # disk on the target after flashing, so a manifest can give var headroom
+    # with both "size" and "expand".
+    if [ "$size" = "null" ] || [ -z "$size" ]; then
         if [ -z "$image" ] || [ "$image" = "null" ]; then
-            echo "ERROR: partition '${name}' is expand/sizeless but has no image to size from" >&2
+            echo "ERROR: partition '${name}' has no size and no image to size from" >&2
             exit 1
         fi
         img_filename=$(resolve_image_filename "$image")
