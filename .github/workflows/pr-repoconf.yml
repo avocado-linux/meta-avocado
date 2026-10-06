@@ -41,6 +41,10 @@ jobs:
       # Standard library only - no install step, so a dependency failure cannot
       # silently shrink the suite.
       - name: Run the repo-config renderer tests
+        # Every suite under tests/ imports from lib/; set it once here rather
+        # than relying on whichever test module discovery happens to load first.
+        env:
+          PYTHONPATH: meta-avocado/lib
         run: |
           python -m unittest discover -v \
             -s meta-avocado/tests -p 'test_*.py'
