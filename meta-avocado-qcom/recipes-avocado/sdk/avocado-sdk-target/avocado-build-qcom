@@ -23,6 +23,7 @@ output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
 manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
+# shellcheck disable=SC2329 # not called from this script
 build_include_flags() {
     local main_input_dir="$1"
     local include_flags=""
@@ -41,6 +42,7 @@ build_include_flags() {
 }
 
 # Build display string of all include paths
+# shellcheck disable=SC2329 # not called from this script
 build_include_display() {
     local main_input_dir="$1"
     local display=""
@@ -188,6 +190,7 @@ if [ -n "$esp_image" ]; then
         od="${CROSS_COMPILE:-}objdump"
         command -v "$oc" >/dev/null 2>&1 || {
             oc=$(echo "$AVOCADO_SDK_PREFIX"/usr/bin/*/[a-z]*-objcopy | cut -d' ' -f1)
+            # shellcheck disable=SC2034 # assigned, never read
             od=$(echo "$AVOCADO_SDK_PREFIX"/usr/bin/*/[a-z]*-objdump | cut -d' ' -f1)
         }
         [ -x "$oc" ] || command -v "$oc" >/dev/null 2>&1 || { echo "ERROR: no objcopy in the SDK" >&2; exit 1; }
@@ -277,6 +280,7 @@ if [ -n "$esp_image" ]; then
                     # boots fine and is missing the hardware the extension was
                     # installed for, which is the failure this whole path exists
                     # to remove.
+                    # shellcheck disable=SC2086 # dto_list is a space-separated list of paths; the split is intended
                     fdtoverlay -i "$uki_dir/dtb" -o "$uki_dir/dtb.merged" $dto_list || {
                         echo "ERROR: fdtoverlay failed merging$dto_list" >&2
                         echo "       Two overlays touching the same node, or one built against a different base tree." >&2
