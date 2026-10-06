@@ -8,7 +8,8 @@
 # and resolving it to a disk tells the class the device path left out.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
-here=$(cd "$(dirname "$0")" && pwd); script=$here/../files/avocado-set-boot-device
+here=$(cd "$(dirname "$0")" && pwd)
+script=$here/../../../../meta-avocado/recipes-avocado/boot-device/files/avocado-set-boot-device
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
 pass=0; fail=0; ok(){ echo "  ok   - $1"; pass=$((pass+1)); }; bad(){ echo "  FAIL - $1"; fail=$((fail+1)); }
 
@@ -34,8 +35,8 @@ for b in mmcblk0 mmcblk1; do ln -s ../.. "$w/sys/$b/device" 2>/dev/null || ln -s
 cat > "$w/bin/efibootmgr" <<S
 #!/bin/sh
 case "\$1" in
-  -o) echo "\$2" > "$w/order"; exit 0 ;;
-  -n) echo "\$2" > "$w/next"; exit 0 ;;
+  -o) [ -e "$w/discard" ] || echo "\$2" > "$w/order"; exit 0 ;;
+  -n) [ -e "$w/discard" ] || echo "\$2" > "$w/next"; exit 0 ;;
 esac
 echo "BootCurrent: 0003"; [ -s "$w/next" ] && echo "BootNext: \$(cat "$w/next")"
 echo "BootOrder: \$(cat "$w/order")"
@@ -84,4 +85,53 @@ echo 0005 > "$w/order"
 out=$(run --dry-run usb); rc=$?
 [ $rc -ne 0 ] && ok "an HD() GUID not present on this system is not guessed at" || bad "unknown guid matched: $out"
 
-echo; echo "passed: $pass  failed: $fail  (checks: $((pass+fail))/6 run)"; [ "$fail" -eq 0 ] && [ $((pass+fail)) -eq 6 ]
+# 7. The description fallback never outvotes a device path. The board has a USB
+# SSD with a firmware entry and an NVMe with none; `nvme` must refuse rather
+# than promote the USB disk because its description says "SSD".
+printf 'Boot0001* UEFI SD Device\tVenHw(x)/SD(0x0)\nBoot0002* UEFI Generic SSD\tPciRoot(0x0)/Pci(0x14,0x0)/USB(2,0)\n' > "$w/entries"
+echo 0001,0002 > "$w/order"
+out=$(run nvme); rc=$?
+{ [ $rc -ne 0 ] && [ "$(cat "$w/order")" = 0001,0002 ] && echo "$out" | grep -q "no UEFI boot entry refers to a nvme device"; } \
+  && ok "a USB SSD is not promoted by nvme, BootOrder untouched" || bad "usb ssd taken as nvme: rc=$rc order=$(cat "$w/order") $out"
+
+# 8. An entry that declares no class at all still answers to its description.
+printf 'Boot0001* UEFI SD Device\tVenHw(x)/SD(0x0)\nBoot0002* UEFI Mystery SSD\tVenHw(y)\n' > "$w/entries"
+echo 0001,0002 > "$w/order"
+out=$(run --dry-run nvme); rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "entry 0002"; } \
+  && ok "a classless entry still matches by description" || bad "classless fallback: rc=$rc $out"
+
+# 9. "SD/MMC" descriptions carry the MMC word without being eMMC.
+printf 'Boot0001* UEFI SD/MMC Card\tVenHw(z)\n' > "$w/entries"
+echo 0001 > "$w/order"
+out=$(run --dry-run emmc); rc=$?
+[ $rc -ne 0 ] && ok "an SD/MMC description is not taken as emmc" || bad "sd/mmc taken as emmc: $out"
+
+# 10. Already first: nothing is written.
+printf 'Boot0001* UEFI Samsung SSD\tPcieRoot(0x0)/NVMe(0x1,00-00-00-00-00-00-00-01)\nBoot0002* UEFI SD Device\tVenHw(x)/SD(0x0)\n' > "$w/entries"
+echo 0001,0002 > "$w/order"
+out=$(run nvme); rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "Already first" && [ "$(cat "$w/order")" = 0001,0002 ]; } \
+  && ok "already-first writes nothing" || bad "already first: rc=$rc $out"
+
+# 11. Several matches: warn, and use the first one efibootmgr lists.
+printf 'Boot0003* UEFI SSD A\tPcieRoot(0x0)/NVMe(0x1,00-00-00-00-00-00-00-0a)\nBoot0001* UEFI SSD B\tPcieRoot(0x0)/NVMe(0x1,00-00-00-00-00-00-00-0b)\nBoot0002* UEFI SD Device\tVenHw(x)/SD(0x0)\n' > "$w/entries"
+echo 0002,0001,0003 > "$w/order"
+out=$(run --dry-run nvme); rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "warning: 2 entries match" && echo "$out" | grep -q "entry 0003"; } \
+  && ok "multiple matches warn and use the first listed" || bad "multi match: rc=$rc $out"
+
+# 12. Firmware that accepts a write and discards it must fail the command, for
+# BootOrder and for BootNext alike.
+touch "$w/discard"
+echo 0002,0001,0003 > "$w/order"; : > "$w/next"
+out=$(run nvme); rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "BootOrder reads back as"; } \
+  && ok "a discarded BootOrder write is reported" || bad "order readback: rc=$rc $out"
+out=$(run --once nvme); rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "BootNext reads back as"; } \
+  && ok "a discarded BootNext write is reported" || bad "next readback: rc=$rc $out"
+rm -f "$w/discard"
+
+total=13
+echo; echo "passed: $pass  failed: $fail  (checks: $((pass+fail))/$total run)"; [ "$fail" -eq 0 ] && [ $((pass+fail)) -eq $total ]

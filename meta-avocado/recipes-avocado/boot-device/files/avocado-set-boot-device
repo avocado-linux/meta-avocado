@@ -124,6 +124,36 @@ entries_for_class_by_partuuid() {
   done
 }
 
+# Class an entry already declares, from its device path node or, failing that,
+# its partition GUID. Prints nothing when the entry declares none.
+entry_declared_class() {
+  for c in nvme sd emmc usb; do
+    if echo "$1" | grep -qF "$(class_pattern "$c")"; then
+      echo "$c"
+      return 0
+    fi
+  done
+  guid=$(echo "$1" | sed -n 's/.*HD([0-9]*,GPT,\([0-9A-Fa-f-]*\),.*/\1/p' | tr 'A-F' 'a-f')
+  [ -z "$guid" ] || disk_class_of_partuuid "$guid" || true
+}
+
+# Last-resort match on the description. An entry that already declares a
+# different class is skipped: a description word cannot outvote the device
+# path, or `nvme` would promote a USB SSD whose description reads "SSD".
+entries_for_class_by_description() {
+  efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | grep "$2" | while IFS= read -r line; do
+    declared=$(entry_declared_class "$line")
+    if [ -n "$declared" ] && [ "$declared" != "$1" ]; then
+      continue
+    fi
+    # "SD/MMC" descriptions carry the MMC word without being eMMC.
+    if [ "$1" = emmc ] && echo "$line" | grep -q 'SD'; then
+      continue
+    fi
+    echo "$line" | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/'
+  done
+}
+
 current_order() {
   efibootmgr | sed -n 's/^BootOrder: //p' | tr -d '[:space:]'
 }
@@ -140,8 +170,7 @@ entries_for_class() {
     found=$(entries_for_class_by_partuuid "$class" || true)
   fi
   if [ -z "$found" ]; then
-    found=$(efibootmgr -v | grep '^Boot[0-9A-Fa-f]\{4\}' | grep "$desc_pat" \
-      | sed 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/' || true)
+    found=$(entries_for_class_by_description "$class" "$desc_pat" || true)
   fi
   echo "$found"
 }

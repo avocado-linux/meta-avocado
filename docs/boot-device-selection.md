@@ -59,7 +59,8 @@ SolidRun R8000 writes a single short-form "UEFI OS" entry with no class node at
 all. A class that matches none of the three makes the tool refuse rather than
 misbehave, but it also makes it useless on that board.
 
-Host test: `meta-avocado/recipes-avocado/boot-device/tests/test-avocado-set-boot-device.sh`.
+Host test: `meta-avocado-nvidia/stone/tegra/tests/test-avocado-set-boot-device.sh`, run by
+`run-tegra-tests.sh` in CI.
 
 ## Related
 
