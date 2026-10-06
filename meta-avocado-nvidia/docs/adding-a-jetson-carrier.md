@@ -390,8 +390,8 @@ cause).
   `AVOCADO_PROVISION_USB_DEVICE` only, and refuses when it is unset:
 
   ```bash
-  AVOCADO_PROVISION_USB_DEVICE=sda \
-    avocado provision -r dev --profile tegraflash-usb
+  avocado provision -r dev --profile tegraflash-usb \
+    --env AVOCADO_PROVISION_USB_DEVICE=sda
   ```
 
   The missing manifest key is deliberate, and is the one place this
