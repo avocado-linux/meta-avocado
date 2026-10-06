@@ -41,7 +41,7 @@ set (see §3).
 | Group        | Token         | Adds                                            | Vendor layer            | Requires |
 |--------------|---------------|-------------------------------------------------|-------------------------|----------|
 | system-base  | `system-base` | core utilities, cockpit, redis, uv, vim         | (none, oe-core/meta-oe) | -        |
-| networking   | `networking`  | NetworkManager, openssh, bluez5, wireguard      | (none)                  | -        |
+| networking   | `networking`  | NetworkManager, openssh, bluez5, wireguard, cloudflared, caddy | (none)                  | -        |
 | multimedia   | `multimedia`  | GStreamer, opencv, v4l-utils                    | (none)                  | -        |
 | python       | `python`      | python3 runtime set (flask, requests, etc.)     | (none)                  | -        |
 | graphics     | `graphics`    | weston, wayland                                 | meta-wayland            | DISTRO_FEATURES opengl |
@@ -52,10 +52,13 @@ set (see §3).
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
 | observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
+| robotics     | `robotics`    | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers | meta-ros (via `ros.yml`) | -        |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
-`python-ai.yml`, `ros.yml`, `virtualization.yml`.
+`python-ai.yml`, `ros.yml`, `virtualization.yml`. `robotics.yml` includes
+`ros.yml` and adds the token, the same way `containers.yml` sits on
+`virtualization.yml`.
 
 ### Container Dev Mode
 
@@ -76,14 +79,14 @@ third group, add it there rather than widening the base packagegroup.
 
 ### Groups this branch cannot build
 
-`cameras`, `cloud-aws` and `ros` are in tree but not wired into
-`complete.yml`. Their vendor layers - meta-basler-tools,
-meta-intel-realsense, meta-aws and meta-ros - have no wrynose branch, and each
-declares a `LAYERSERIES_COMPAT` that predates wrynose, so provisioning one fails
-the compatibility check and takes the whole build down rather than skipping a
-group. The fragments keep their scarthgap pins deliberately: including one fails
-loudly at parse rather than silently shipping less than asked for. Repin the
-fragment and add its `complete.yml` line back in the same commit.
+`cameras` and `cloud-aws` are in tree but not wired into `complete.yml`. Their
+vendor layers - meta-basler-tools, meta-intel-realsense and meta-aws - have no
+wrynose branch, and each declares a `LAYERSERIES_COMPAT` that predates
+wrynose, so provisioning one fails the compatibility check and takes the whole
+build down rather than skipping a group. The fragments keep their scarthgap
+pins deliberately: including one fails loudly at parse rather than silently
+shipping less than asked for. Repin the fragment and add its `complete.yml`
+line back in the same commit.
 
 Two members are missing from groups for the same reason: `graphics` drops
 wpewebkit, wpebackend-fdo and cog (meta-webkit), and `system-base` drops
