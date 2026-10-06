@@ -72,7 +72,8 @@ fill_layout() {
     -e "s,ESP_FILE,esp.img," -e "/RECFILE/d" -e "/RECDTB-FILE/d" "$1" > "$2"
 }
 
-# run_subst <layout> -> rc; runs the block the way the script does.
+# run_subst <layout> [slot-A uuid] [slot-B uuid] -> rc; runs the block the way
+# the script does. Pass empty uuids for the unpinned (prebuilt boot.img) path.
 run_subst() {
   (
     build_dir="$work/build"
@@ -80,9 +81,9 @@ run_subst() {
     cp "$1" "$build_dir/external-flash.xml.in"
     # Read by the sourced block below.
     # shellcheck disable=SC2034
-    app_partuuid="$A"
+    app_partuuid="${2-$A}"
     # shellcheck disable=SC2034
-    app_b_partuuid="$B"
+    app_b_partuuid="${3-$B}"
     # shellcheck disable=SC1091
     . "$work/subst.sh"
   ) >"$work/subst.out" 2>&1
@@ -134,6 +135,20 @@ if run_subst "$work/no-b.xml"; then
   fail "a layout missing the slot-B placeholder was accepted"
 else
   pass "a layout missing the slot-B placeholder is rejected"
+fi
+
+# Unpinned: the prebuilt boot.img names no PARTUUID, so the placeholders must be
+# blanked. Left in, sgdisk takes the literal APPUUID as an all-zero GUID.
+if run_subst "$work/external-flash.xml" "" ""; then
+  out="$work/build/external-flash.xml.in"
+  if ! grep -q APPUUID "$out" && [ -z "$(guid_of "$out" APP)" ] \
+    && [ -z "$(guid_of "$out" APP_b)" ]; then
+    pass "unpinned: placeholders are blanked, leaving sgdisk to generate GUIDs"
+  else
+    fail "unpinned: APP=$(guid_of "$out" APP) APP_b=$(guid_of "$out" APP_b)"
+  fi
+else
+  fail "unpinned substitution failed: $(head -3 "$work/subst.out")"
 fi
 
 # Through to the disk: nvflashxmlparse -> make_partitions -> sgdisk -> GPT.

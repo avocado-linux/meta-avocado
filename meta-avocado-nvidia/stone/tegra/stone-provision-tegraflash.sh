@@ -693,6 +693,13 @@ if [ -n "$app_partuuid" ]; then
     exit 1
   fi
   echo "Rootfs PARTUUID: $app_partuuid (slot A), $app_b_partuuid (slot B)"
+else
+  # Nothing pinned (prebuilt boot.img): blank the placeholders, as
+  # tegraflash-bsp.bb did before it started keeping them. Left in, sgdisk
+  # accepts the literal "APPUUID" and writes an all-zero PARTUUID to both
+  # rootfs slots instead of generating one.
+  layout_xml="$build_dir/external-flash.xml.in"
+  [ ! -f "$layout_xml" ] || sed -i -e 's/APPUUID_b//g' -e 's/APPUUID//g' "$layout_xml"
 fi
 
 # Composable env var flags (override defaults from profile)
