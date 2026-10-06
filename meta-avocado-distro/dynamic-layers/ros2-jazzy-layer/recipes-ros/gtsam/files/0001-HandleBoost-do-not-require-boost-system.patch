@@ -1,0 +1,33 @@
+Boost 1.89 removed the compiled Boost.System library (the component is
+header-only now and has no CMake package), so find_package(Boost COMPONENTS
+system) fails against the Boost 1.90 in oe-core and GTSAM 4.2.0's configure
+stops with "Missing required Boost components". GTSAM 4.2.0 only names the
+component; nothing in its sources includes boost/system. Stop requiring it.
+
+Upstream-Status: Inappropriate [version-specific workaround for Boost 1.89 and later]
+
+--- a/cmake/HandleBoost.cmake
++++ b/cmake/HandleBoost.cmake
+@@ -23,12 +23,12 @@
+ 
+ # Store these in variables so they are automatically replicated in GTSAMConfig.cmake and such.
+ set(BOOST_FIND_MINIMUM_VERSION 1.65)
+-set(BOOST_FIND_MINIMUM_COMPONENTS serialization system filesystem thread program_options date_time timer chrono regex)
++set(BOOST_FIND_MINIMUM_COMPONENTS serialization filesystem thread program_options date_time timer chrono regex)
+ 
+ find_package(Boost ${BOOST_FIND_MINIMUM_VERSION} COMPONENTS ${BOOST_FIND_MINIMUM_COMPONENTS})
+ 
+ # Required components
+-if(NOT Boost_SERIALIZATION_LIBRARY OR NOT Boost_SYSTEM_LIBRARY OR NOT Boost_FILESYSTEM_LIBRARY OR
++if(NOT Boost_SERIALIZATION_LIBRARY OR NOT Boost_FILESYSTEM_LIBRARY OR
+     NOT Boost_THREAD_LIBRARY OR NOT Boost_DATE_TIME_LIBRARY)
+   message(FATAL_ERROR "Missing required Boost components >= v1.65, please install/upgrade Boost or configure your search paths.")
+ endif()
+@@ -37,7 +37,6 @@
+ # Allow for not using the timer libraries on boost < 1.48 (GTSAM timing code falls back to old timer library)
+ set(GTSAM_BOOST_LIBRARIES
+   Boost::serialization
+-  Boost::system
+   Boost::filesystem
+   Boost::thread
+   Boost::date_time
