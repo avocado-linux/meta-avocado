@@ -1,0 +1,12 @@
+header:
+  version: 16
+  includes:
+  # gtsam and the Boost 1.87-compatible websocketpp only exist in meta-ros,
+  # so the layer comes from ros.yml rather than a second pin of the same repo
+  # here. This fragment adds only the feature-group token on top.
+  - repo: meta-avocado
+    file: kas/feature/ros.yml
+
+local_conf_header:
+  feature/robotics: |
+    AVOCADO_FEATURE_GROUPS:append = " robotics"

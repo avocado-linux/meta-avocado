@@ -45,4 +45,6 @@ RDEPENDS:${PN} = " \
   zeromq \
   libimobiledevice \
   usbmuxd \
+  cloudflared \
+  caddy \
 "
