@@ -54,3 +54,13 @@ RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
     kernel-module-lz4-compress-${KERNEL_VERSION} \
     kernel-module-sch-fq-codel-${KERNEL_VERSION} \
 "
+
+# The Orin Nano carrier NIC is an RTL8111/8168 and the curated list above
+# omitted its driver, so no Ethernet interface appeared. r8169 needs the
+# realtek PHY module and the rtl8168h firmware. Scoped to the Orin Nano so
+# the AGX Orin machines are untouched.
+RDEPENDS:packagegroup-avocado-rootfs-modules:append:jetson-orin-nano = " \
+    kernel-module-r8169-${KERNEL_VERSION} \
+    kernel-module-realtek-${KERNEL_VERSION} \
+    linux-firmware-rtl8168 \
+"
