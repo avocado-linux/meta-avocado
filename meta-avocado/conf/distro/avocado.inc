@@ -4,6 +4,49 @@ DISTRO_VENDOR = "Avocado Linux"
 DISTRO_VENDOR_URL = "https://avocadolinux.org"
 DISTRO_DOCUMENTATION_URL = "https://docs.avocadolinux.org"
 
+# release/channel, and the release names the generation rather than the word
+# "dev". DISTRO_CODENAME is what dnf expands $releasever to, so it decides both
+# the feed directory a build renders into and the one a client resolves
+# against; two generations sharing a value share a package set.
+#
+# That is not hypothetical. Every local build used to be "dev/local", so a
+# scarthgap tree and a wrynose tree rendered into one channel and the snapshot
+# was their union - two libdevmapper, two lvm2 and two busybox versions in one
+# repo, which dnf refuses to resolve. Naming the year and the Yocto series
+# makes the collision impossible rather than unlikely: a tree can only collide
+# with another tree of the same generation, which is the case where sharing is
+# correct.
+#
+# Composed only when the caller left it empty, which is the shape kas passes
+# through: a released build sets the whole codename in the environment and that
+# value wins untouched. `?=` would not be enough, because kas exports the key
+# with an empty default rather than leaving it unset, and an empty string is
+# still a value that `?=` declines to replace.
+#
+# The fallbacks are deliberately wrong-looking. A tree that reaches here with
+# no parts has lost kas/base.yml, and "0000-unknown" says so in the feed path
+# rather than quietly resolving to something plausible.
+AVOCADO_RELEASE_YEAR ??= "0000"
+AVOCADO_YOCTO_SERIES ??= "unknown"
+DISTRO_CHANNEL ??= "local"
+DISTRO_CODENAME := "${@d.getVar('DISTRO_CODENAME') or '${AVOCADO_RELEASE_YEAR}-${AVOCADO_YOCTO_SERIES}/${DISTRO_CHANNEL}'}"
+
+# A release build is handed DISTRO_VERSION and BUILD_ID by the pipeline and those
+# win untouched. A local build composes them from the layer's history: the
+# commit count first, so two builds order the way the commits do, then the
+# revision, so they still differ when the counts tie. The revision alone orders
+# arbitrarily - rpm ranks "gf0000000" above "g10000000". "<year>.0+" keeps a
+# local build below any published "<year>.<build-id>". The identity goes in the
+# version rather than the codename because a per-build value in the codename
+# would give every build its own feed directory.
+#
+# Read once at config parse, so every commit changes it, and with it the PV of
+# the avocado-* recipes, os-release and the parse cache. Same ":=" over getVar
+# as the codename above, for the same reason.
+AVOCADO_LAYER_REV := "${@avocado_distro.revision_tag(d.getVar('AVOCADO_LAYER_DIR'))}"
+DISTRO_VERSION := "${@d.getVar('DISTRO_VERSION') or '${AVOCADO_RELEASE_YEAR}.0+${AVOCADO_LAYER_REV}'}"
+BUILD_ID := "${@d.getVar('BUILD_ID') or '${AVOCADO_LAYER_REV}'}"
+
 SDK_VENDOR = "-avocadosdk"
 SDK_VERSION := "${@'${DISTRO_VERSION}'.replace('snapshot-${METADATA_REVISION}','snapshot')}"
 SDK_VERSION[vardepvalue] = "${SDK_VERSION}"
