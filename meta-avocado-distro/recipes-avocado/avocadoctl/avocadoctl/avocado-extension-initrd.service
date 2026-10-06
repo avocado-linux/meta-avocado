@@ -18,7 +18,12 @@ RemainAfterExit=yes
 TimeoutStartSec=90
 ExecStart=avocadoctl refresh
 ExecReload=avocadoctl refresh
-ExecStop=-avocadoctl unmerge
+# No ExecStop. This unit stops when the initrd switches root, and by then
+# initrd cleanup has already stopped avocadoctl.socket and its daemon, so an
+# `avocadoctl unmerge` here can only fail, logging "Varlink Error" on every
+# boot with extensions. There is nothing to undo either: the initrd's merged
+# tree is discarded at the switch, and avocado-extension.service merges the
+# system's extensions afresh.
 
 [Install]
 WantedBy=sysinit.target
