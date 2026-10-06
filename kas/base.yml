@@ -31,8 +31,11 @@ env:
   # Empty means "compose it from the parts above"; avocado.inc does that.
   DISTRO_CODENAME: ""
 
-  DISTRO_VERSION: "0.0.0"
-  BUILD_ID: "0"
+  # Same shape as DISTRO_CODENAME: passthroughs so a caller can set them, empty
+  # so avocado.inc composes them. A release build sets both in the environment
+  # (<release>.<build-id> and the build id) and that value wins untouched.
+  DISTRO_VERSION: ""
+  BUILD_ID: ""
   PARALLEL_MAKE_HIGHMEM: ""
   SDKMACHINE: "x86_64"
   AVOCADO_DEV_ROOT_LOGIN: "0"
