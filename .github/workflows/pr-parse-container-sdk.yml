@@ -56,3 +56,29 @@ jobs:
         run: |
           . scripts/init-build kas/sdk/container-${{ matrix.arch }}.yml
           kas shell meta-avocado/kas/sdk/container-${{ matrix.arch }}.yml -c "bitbake -p"
+      # DISTRO_CODENAME is what dnf expands $releasever to. Empty (as this job
+      # sets it) must compose to the generation from kas/base.yml; a value set
+      # by the caller, as release builds do, must pass through untouched.
+      # Update the expected value together with AVOCADO_RELEASE_YEAR and
+      # AVOCADO_YOCTO_SERIES.
+      - name: DISTRO_CODENAME composition (${{ matrix.arch }})
+        shell: bash
+        env:
+          BB_GIT_SHALLOW: "1"
+          SDKMACHINE: "x86_64"
+          DISTRO_CODENAME: ""
+          CI: "true"
+        run: |
+          set -eo pipefail
+          . scripts/init-build kas/sdk/container-${{ matrix.arch }}.yml
+          k=meta-avocado/kas/sdk/container-${{ matrix.arch }}.yml
+          check() {
+            got=$(DISTRO_CODENAME="$1" kas shell "$k" -c "bitbake-getvar --value DISTRO_CODENAME" | tail -n 1)
+            if [ "$got" != "$2" ]; then
+              echo "DISTRO_CODENAME='$1' resolved to '$got', expected '$2'"
+              exit 1
+            fi
+            echo "DISTRO_CODENAME='$1' -> '$got'"
+          }
+          check "" "2026-scarthgap/local"
+          check "2026/edge" "2026/edge"
