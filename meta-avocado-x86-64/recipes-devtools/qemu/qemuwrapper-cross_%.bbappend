@@ -1,9 +1,10 @@
-# Native-exec qemuwrapper for intel-x86-64-v4.
+# Native-exec qemuwrapper for the machines that carry the avocado-native-exec
+# override (avocado-intel-x86-64-v4 and avocado-amd-x86-64-v4).
 #
-# v4 opts qemu-usermode out (avocado-intel-x86-64-v4.conf) because QEMU's TCG
+# v4 opts qemu-usermode out (the machine conf) because QEMU's TCG
 # implements no AVX-512 -- qemu 10.2.0 target/i386/cpu.c has zero AVX-512 bits in
 # any TCG_*_FEATURES mask, AVX2 is the ceiling -- and the v4 userland genuinely
-# uses it: the built udevadm carries 197 AVX-512 instructions. Emulating a v4
+# uses it: the built udevadm carries AVX-512 instructions. Emulating a v4
 # binary is impossible, not merely slow.
 #
 # But do_rootfs runs postinst intercepts (update_udev_hwdb, glib's gio module
@@ -29,19 +30,19 @@
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-SRC_URI:append:intel-x86-64-v4:class-target = " file://qemuwrapper-native"
+SRC_URI:append:avocado-native-exec:class-target = " file://qemuwrapper-native"
 
 # Adding a SRC_URI to a recipe that previously fetched nothing makes the
 # license-checksum QA check apply, and neither qemuwrapper-cross recipe carries a
 # LIC_FILES_CHKSUM (they had nothing to fetch). The wrapper is our own file under
 # the recipe's MIT licence, so point at the common MIT text.
-LIC_FILES_CHKSUM:intel-x86-64-v4:class-target = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+LIC_FILES_CHKSUM:avocado-native-exec:class-target = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 # Host CPU flags a build host must have for the above to work. Only set for the
 # machines that execute target binaries natively; empty elsewhere disables the
 # check entirely.
 AVOCADO_NATIVE_EXEC_REQUIRES_FLAGS ?= ""
-AVOCADO_NATIVE_EXEC_REQUIRES_FLAGS:intel-x86-64-v4:class-target = "avx512f avx512bw avx512cd avx512dq avx512vl"
+AVOCADO_NATIVE_EXEC_REQUIRES_FLAGS:avocado-native-exec:class-target = "avx512f avx512bw avx512cd avx512dq avx512vl"
 
 # Fail at parse, not two hours later inside do_rootfs. Without this the build
 # runs to ~95% and then dies on a SIGILL or an offline-postinst error whose text
@@ -82,7 +83,7 @@ python () {
             % (d.getVar('MACHINE'), ' '.join(missing), d.getVar('MACHINE')))
 }
 
-do_install:append:intel-x86-64-v4:class-target() {
+do_install:append:avocado-native-exec:class-target() {
     install -m 0755 ${UNPACKDIR}/qemuwrapper-native \
         ${D}${bindir_crossscripts}/${MLPREFIX}qemuwrapper
 }
