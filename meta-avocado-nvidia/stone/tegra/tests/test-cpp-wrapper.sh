@@ -59,6 +59,7 @@ fi
 
 # The wrapper body must quote the path, or an SDK unpacked below a directory
 # with a space in it makes the wrapper exec its first word.
+# shellcheck disable=SC2016  # literal grep pattern: ${SDK_HOST_CPP} must stay unexpanded
 if grep -q 'exec "${SDK_HOST_CPP}"' "$TARGET"; then
   pass "wrapper body quotes the interpolated preprocessor path"
 else

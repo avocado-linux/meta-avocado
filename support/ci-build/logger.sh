@@ -43,8 +43,8 @@ __log() {
   shift
 
   level=${FUNCNAME[1]} # `main` if called from top-level
-  level=${level#log.} # substring after `log.`
-  level=${level^^} # UPPERCASE
+  level=${level#log.}  # substring after `log.`
+  level=${level^^}     # UPPERCASE
 
   if [[ ! -v "LOG_${level}_DISABLED" ]]; then
     instant=$(date '+%F %T.%-3N' 2>/dev/null || :)
@@ -65,9 +65,9 @@ __log() {
 #     "log.$level" message
 #
 # @formatter:off
-log.debug   () { __log 37 "$@"; } # white
-log.notice  () { __log 34 "$@"; } # blue
-log.warning () { __log 33 "$@"; } # yellow
-log.error   () { __log 31 "$@"; } # red
-log.success () { __log 32 "$@"; } # green
+log.debug() { __log 37 "$@"; }   # white
+log.notice() { __log 34 "$@"; }  # blue
+log.warning() { __log 33 "$@"; } # yellow
+log.error() { __log 31 "$@"; }   # red
+log.success() { __log 32 "$@"; } # green
 # @formatter:on

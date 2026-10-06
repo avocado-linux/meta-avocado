@@ -6,7 +6,10 @@
 set -euo pipefail
 
 BUILD_DIR="$(pwd)/build"
-[ -d "$BUILD_DIR/tmp" ] || { echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"; exit 1; }
+[ -d "$BUILD_DIR/tmp" ] || {
+  echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"
+  exit 1
+}
 SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
@@ -29,7 +32,7 @@ LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev
 LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
 
 run_native() {
-    "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
+  "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
 }
 
 echo "Resizing image to 1024M..."
@@ -38,12 +41,12 @@ run_native "$QEMU_IMG" resize -f raw "$IMAGE_FILE" 1024M
 echo "Starting QEMU ARM64..."
 echo "-------------------------------------"
 run_native "$QEMU_EXEC" \
-    -L "$QEMU_DATA_DIR" \
-    -bios "${QEMU_BIOS}" \
-    -device sdhci-pci \
-    -device sd-card,drive=mmc \
-    -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
-    -M virt,secure=on,highmem=off,acpi=off \
-    -cpu cortex-a53 \
-    -m 1024 \
-    -nographic
+  -L "$QEMU_DATA_DIR" \
+  -bios "${QEMU_BIOS}" \
+  -device sdhci-pci \
+  -device sd-card,drive=mmc \
+  -drive file="$IMAGE_FILE",if=none,format=raw,id=mmc \
+  -M virt,secure=on,highmem=off,acpi=off \
+  -cpu cortex-a53 \
+  -m 1024 \
+  -nographic

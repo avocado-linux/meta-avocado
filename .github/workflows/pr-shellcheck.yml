@@ -1,0 +1,105 @@
+name: PR-Shellcheck
+
+# Shell lint gate for every shell script in the repository.
+#
+# The repository has run shellcheck as a pre-commit hook for a while, but the
+# hook only sees files a commit touches, and 120 of the 186 shell scripts here
+# were already failing it. That combination is worse than no gate: anyone
+# editing one of those files hit findings they did not introduce, and the way
+# past it is `--no-verify`, which switches off every hook rather than the one
+# finding in the way. On scripts that decide which disk a board boots from and
+# which device an image is written to, that is the wrong thing to train people
+# to do.
+#
+# The tree was made clean in the same change that added this job, so from here
+# a finding in CI is a finding the pull request introduced.
+#
+# Discovery is by shebang as well as by extension, because more than half of
+# these scripts carry no .sh suffix - avocado-build-<machine>,
+# avocado-provision-<machine>, avocado-tegra-init and friends. Matching on the
+# name alone would leave them unguarded, which is how they drifted.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege: this job only checks out and lints.
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: shellcheck-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned deliberately. shellcheck adds checks between releases, so an
+  # unpinned version turns an unrelated upstream release into a red build on a
+  # pull request that changed nothing. This matches the shellcheck-py rev in
+  # .pre-commit-config.yaml, so the hook and CI agree on what passes; bump both
+  # together.
+  SHELLCHECK_VERSION: "0.11.0"
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck ${{ env.SHELLCHECK_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL "$url" -o /tmp/shellcheck.tar.xz
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          sudo install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+      - name: Lint every shell script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Tracked files that are shell: either a .sh suffix, or a shell
+          # shebang on the first line. Anything the repo does not track is not
+          # ours to lint.
+          mapfile -t scripts < <(
+            git ls-files -z \
+              | while IFS= read -r -d '' f; do
+                  [ -f "$f" ] || continue
+                  case "$f" in
+                    *.sh) echo "$f"; continue ;;
+                  esac
+                  read -r first < "$f" || continue
+                  case "$first" in
+                    '#!'*bash*|'#!'*/bin/sh*|'#!'*dash*|'#!'*ash*) echo "$f" ;;
+                  esac
+                done
+          )
+
+          # A discovery bug that matches nothing would otherwise report success
+          # over an empty set, which reads exactly like a clean tree. Refuse a
+          # count that cannot be right instead of trusting the exit status.
+          echo "discovered ${#scripts[@]} shell scripts"
+          if [ "${#scripts[@]}" -lt 150 ]; then
+            echo "ERROR: only ${#scripts[@]} shell scripts found; expected at least 150." >&2
+            echo "       Discovery is broken - this run proves nothing." >&2
+            exit 1
+          fi
+
+          failed=0
+          for f in "${scripts[@]}"; do
+            if ! shellcheck -f gcc "$f"; then
+              failed=$((failed + 1))
+            fi
+          done
+
+          echo "checked ${#scripts[@]}/${#scripts[@]}, ${failed} with findings"
+          if [ "$failed" -ne 0 ]; then
+            echo "ERROR: ${failed} shell script(s) have shellcheck findings." >&2
+            echo "       Fix them, or silence a false positive with a" >&2
+            echo "       '# shellcheck disable=SCxxxx' carrying a stated reason." >&2
+            exit 1
+          fi

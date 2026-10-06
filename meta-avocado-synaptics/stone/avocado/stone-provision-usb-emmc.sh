@@ -17,16 +17,16 @@ USBBOOT_IMAGES="${OECORE_NATIVE_SYSROOT}/usr/share/astra-update/astra-usbboot-im
 # Verify required tools and paths
 # ---------------------------------------------------------------------------
 for tool in astra-update jq; do
-    if ! command -v "${tool}" &>/dev/null; then
-        echo "ERROR: required tool '${tool}' not found in PATH" >&2
-        exit 1
-    fi
+  if ! command -v "${tool}" &>/dev/null; then
+    echo "ERROR: required tool '${tool}' not found in PATH" >&2
+    exit 1
+  fi
 done
 
 if [ ! -d "${USBBOOT_IMAGES}" ]; then
-    echo "ERROR: astra-usbboot-images not found at ${USBBOOT_IMAGES}" >&2
-    echo "       Ensure nativesdk-astra-usbboot-images is installed in the SDK." >&2
-    exit 1
+  echo "ERROR: astra-usbboot-images not found at ${USBBOOT_IMAGES}" >&2
+  echo "       Ensure nativesdk-astra-usbboot-images is installed in the SDK." >&2
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "Building SYNAIMG..."
 AVOCADO_PROVISION_OUT="${SYNAIMG_DIR}" \
-    bash "${SCRIPT_DIR}/stone-provision-synaimg.sh"
+  bash "${SCRIPT_DIR}/stone-provision-synaimg.sh"
 
 # ---------------------------------------------------------------------------
 # Provision the board via USB eMMC

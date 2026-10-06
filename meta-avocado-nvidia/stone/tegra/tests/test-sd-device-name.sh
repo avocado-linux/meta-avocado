@@ -97,8 +97,8 @@ run_branch() {
 # hardware) and an eMMC-bearing one (mmcblk1, what the BSP xml assumes). A
 # branch that hardcoded either would fail one of them.
 run_branch "mmcblk0" ""
-if grep -q 'ROOTFS_DEVICE="mmcblk0"' <<<"$branch_env" &&
-  grep -q 'BOOTDEV="mmcblk0p1"' <<<"$branch_env"; then
+if grep -q 'ROOTFS_DEVICE="mmcblk0"' <<<"$branch_env" \
+  && grep -q 'BOOTDEV="mmcblk0p1"' <<<"$branch_env"; then
   pass "a declared mmcblk0 reaches BOOTDEV and ROOTFS_DEVICE"
 else
   fail "mmcblk0 not written; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$branch_env" | tr '\n' ' ')"
@@ -111,8 +111,8 @@ else
 fi
 
 run_branch "mmcblk1" ""
-if grep -q 'ROOTFS_DEVICE="mmcblk1"' <<<"$branch_env" &&
-  grep -q 'BOOTDEV="mmcblk1p1"' <<<"$branch_env"; then
+if grep -q 'ROOTFS_DEVICE="mmcblk1"' <<<"$branch_env" \
+  && grep -q 'BOOTDEV="mmcblk1p1"' <<<"$branch_env"; then
   pass "a declared mmcblk1 reaches BOOTDEV and ROOTFS_DEVICE"
 else
   fail "mmcblk1 not written; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$branch_env" | tr '\n' ' ')"
@@ -122,8 +122,8 @@ fi
 # The probe value is deliberately one no board would declare, so this cannot
 # pass by coincidence the way mmcblk0 or mmcblk1 could.
 run_branch "mmcblk0" "mmcblk3"
-if grep -q 'ROOTFS_DEVICE="mmcblk3"' <<<"$branch_env" &&
-  grep -q 'BOOTDEV="mmcblk3p1"' <<<"$branch_env"; then
+if grep -q 'ROOTFS_DEVICE="mmcblk3"' <<<"$branch_env" \
+  && grep -q 'BOOTDEV="mmcblk3p1"' <<<"$branch_env"; then
   pass "AVOCADO_PROVISION_SD_DEVICE overrides the manifest value"
 else
   fail "override ignored; got: $(grep -E '^(BOOTDEV|ROOTFS_DEVICE)=' <<<"$branch_env" | tr '\n' ' ')"

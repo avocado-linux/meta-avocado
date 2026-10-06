@@ -12,50 +12,50 @@ HOST_FWD_ARGS=()
 QGA_PORT=""
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        --mem)
-            MEMORY="$2"
-            shift 2
-            ;;
-        --smp)
-            SMP="$2"
-            shift 2
-            ;;
-        --enable-kvm)
-            ENABLE_KVM=true
-            shift
-            ;;
-        --host-fwd)
-            HOST_FWD_ARGS+=("$2")
-            shift 2
-            ;;
-        --qga-port)
-            QGA_PORT="$2"
-            shift 2
-            ;;
-        -*)
-            echo "Error: Unknown option $1"
-            echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
-            exit 1
-            ;;
-        *)
-            if [ -z "$RUNTIME" ]; then
-                RUNTIME="$1"
-            else
-                echo "Error: Multiple runtime arguments provided"
-                echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
-                exit 1
-            fi
-            shift
-            ;;
-    esac
+  case $1 in
+    --mem)
+      MEMORY="$2"
+      shift 2
+      ;;
+    --smp)
+      SMP="$2"
+      shift 2
+      ;;
+    --enable-kvm)
+      ENABLE_KVM=true
+      shift
+      ;;
+    --host-fwd)
+      HOST_FWD_ARGS+=("$2")
+      shift 2
+      ;;
+    --qga-port)
+      QGA_PORT="$2"
+      shift 2
+      ;;
+    -*)
+      echo "Error: Unknown option $1"
+      echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
+      exit 1
+      ;;
+    *)
+      if [ -z "$RUNTIME" ]; then
+        RUNTIME="$1"
+      else
+        echo "Error: Multiple runtime arguments provided"
+        echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
+        exit 1
+      fi
+      shift
+      ;;
+  esac
 done
 
 # Check if runtime argument is provided
 if [ -z "$RUNTIME" ]; then
-    echo "Error: Runtime argument required"
-    echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
-    exit 1
+  echo "Error: Runtime argument required"
+  echo "Usage: $0 <runtime> [--mem MEMORY] [--smp SMP] [--enable-kvm] [--host-fwd HOST_PORT:GUEST_PORT]"
+  exit 1
 fi
 
 # Display runtime and flag arguments
@@ -64,50 +64,53 @@ echo "Memory: ${MEMORY} MB"
 echo "SMP: ${SMP}"
 echo "KVM Enabled: ${ENABLE_KVM}"
 if [ ${#HOST_FWD_ARGS[@]} -gt 0 ]; then
-    echo "Port Forwarding: ${HOST_FWD_ARGS[*]}"
+  echo "Port Forwarding: ${HOST_FWD_ARGS[*]}"
 fi
 
 # Check if this is a QEMU target
 if [[ ! "$AVOCADO_SDK_TARGET" =~ qemu ]]; then
-    echo "Error: This script can only be run for QEMU targets"
-    echo "Current target: $AVOCADO_SDK_TARGET"
-    exit 1
+  echo "Error: This script can only be run for QEMU targets"
+  echo "Current target: $AVOCADO_SDK_TARGET"
+  exit 1
 fi
 
 # Extract architecture from AVOCADO_SDK_TARGET and determine QEMU binary, BIOS, and CPU
 if [[ "$AVOCADO_SDK_TARGET" =~ x86-64$ ]]; then
-    QEMU_ARCH="x86_64"
-    QEMU_BINARY="qemu-system-x86_64"
-    QEMU_BIOS_FILE="u-boot.rom"
-    QEMU_CPU="max"
-    QEMU_MACHINE=""
+  QEMU_ARCH="x86_64"
+  QEMU_BINARY="qemu-system-x86_64"
+  QEMU_BIOS_FILE="u-boot.rom"
+  QEMU_CPU="max"
+  QEMU_MACHINE=""
 elif [[ "$AVOCADO_SDK_TARGET" =~ arm64$ ]]; then
-    QEMU_ARCH="aarch64"
-    QEMU_BINARY="qemu-system-aarch64"
-    QEMU_BIOS_FILE="flash.bin"
-    QEMU_CPU="cortex-a53"
-    QEMU_MACHINE="@QB_MACHINE@"
+  # Not consumed below (QEMU_BINARY already encodes the arch), but kept so
+  # both branches of this mapping describe the target the same way.
+  # shellcheck disable=SC2034
+  QEMU_ARCH="aarch64"
+  QEMU_BINARY="qemu-system-aarch64"
+  QEMU_BIOS_FILE="flash.bin"
+  QEMU_CPU="cortex-a53"
+  QEMU_MACHINE="@QB_MACHINE@"
 else
-    echo "Error: Unsupported architecture in AVOCADO_SDK_TARGET: $AVOCADO_SDK_TARGET"
-    echo "Supported architectures: x86-64, arm64"
-    exit 1
+  echo "Error: Unsupported architecture in AVOCADO_SDK_TARGET: $AVOCADO_SDK_TARGET"
+  echo "Supported architectures: x86-64, arm64"
+  exit 1
 fi
 
 # Override CPU to 'host' if KVM is enabled
 if [ "$ENABLE_KVM" = true ]; then
-    QEMU_CPU="host"
+  QEMU_CPU="host"
 fi
 
 # Build hostfwd string from collected port mappings
 HOSTFWD_STRING=""
 if [ ${#HOST_FWD_ARGS[@]} -gt 0 ]; then
-    for hostfwd in "${HOST_FWD_ARGS[@]}"; do
-        if [ -z "$HOSTFWD_STRING" ]; then
-            HOSTFWD_STRING="hostfwd=tcp::${hostfwd}"
-        else
-            HOSTFWD_STRING="${HOSTFWD_STRING},hostfwd=tcp::${hostfwd}"
-        fi
-    done
+  for hostfwd in "${HOST_FWD_ARGS[@]}"; do
+    if [ -z "$HOSTFWD_STRING" ]; then
+      HOSTFWD_STRING="hostfwd=tcp::${hostfwd}"
+    else
+      HOSTFWD_STRING="${HOSTFWD_STRING},hostfwd=tcp::${hostfwd}"
+    fi
+  done
 fi
 
 # Set the Stone build directory
@@ -117,9 +120,9 @@ STONE_BUILD_DIR="${STONE_DATA_DIR}/_build"
 # Check if the image file exists
 IMAGE_FILE="${STONE_BUILD_DIR}/avocado-os-${AVOCADO_SDK_TARGET}.img"
 if [ ! -f "$IMAGE_FILE" ]; then
-    echo "Error: Image file not found: $IMAGE_FILE"
-    echo "Please build the image first using: avocado-build image"
-    exit 1
+  echo "Error: Image file not found: $IMAGE_FILE"
+  echo "Please build the image first using: avocado-build image"
+  exit 1
 fi
 
 # QEMU's sd-card device requires a power-of-two backing size, so pad the image
@@ -130,38 +133,41 @@ fi
 image_bytes=$(stat -c %s "$IMAGE_FILE")
 resize_mib=1024
 while [ $((resize_mib * 1024 * 1024)) -lt "$image_bytes" ]; do
-    resize_mib=$((resize_mib * 2))
+  resize_mib=$((resize_mib * 2))
 done
 qemu-img resize -f raw "$IMAGE_FILE" "${resize_mib}M"
 
 QEMU_BIOS="${STONE_DATA_DIR}/${QEMU_BIOS_FILE}"
 
 # Build QEMU command arguments
+# The commas below belong to QEMU's own option syntax (sd-card,drive=mmc and
+# the -drive property list); they are not array element separators.
+# shellcheck disable=SC2054
 QEMU_ARGS=(
-    -bios "${QEMU_BIOS}"
-    -device sdhci-pci
-    -device sd-card,drive=mmc
-    -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc
-    -m "${MEMORY}"
-    -smp "${SMP}"
-    -cpu "${QEMU_CPU}"
-    -nographic
+  -bios "${QEMU_BIOS}"
+  -device sdhci-pci
+  -device sd-card,drive=mmc
+  -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc
+  -m "${MEMORY}"
+  -smp "${SMP}"
+  -cpu "${QEMU_CPU}"
+  -nographic
 )
 
 # Add network arguments if port forwarding is configured
 if [ -n "$HOSTFWD_STRING" ]; then
-    QEMU_ARGS+=(-netdev "user,id=net0,$HOSTFWD_STRING")
-    QEMU_ARGS+=(-device "e1000,netdev=net0")
+  QEMU_ARGS+=(-netdev "user,id=net0,$HOSTFWD_STRING")
+  QEMU_ARGS+=(-device "e1000,netdev=net0")
 fi
 
 # Add machine type if specified
 if [ -n "$QEMU_MACHINE" ]; then
-    QEMU_ARGS+=(-machine "${QEMU_MACHINE}")
+  QEMU_ARGS+=(-machine "${QEMU_MACHINE}")
 fi
 
 # Add KVM flag if enabled
 if [ "$ENABLE_KVM" = true ]; then
-    QEMU_ARGS+=(-enable-kvm)
+  QEMU_ARGS+=(-enable-kvm)
 fi
 
 # Add the QEMU guest agent channel (opt-in via --qga-port). Lets a host-side
@@ -169,11 +175,14 @@ fi
 # TCP chardev is host-reachable because `avocado sdk run` uses --network=host,
 # so the host connects to 127.0.0.1:${QGA_PORT}.
 if [ -n "$QGA_PORT" ]; then
-    QEMU_ARGS+=(
-        -chardev "socket,id=qga,host=127.0.0.1,port=${QGA_PORT},server=on,wait=off"
-        -device virtio-serial
-        -device virtserialport,chardev=qga,name=org.qemu.guest_agent.0
-    )
+  # Commas here are QEMU chardev/device property separators, not array
+  # element separators.
+  # shellcheck disable=SC2054
+  QEMU_ARGS+=(
+    -chardev "socket,id=qga,host=127.0.0.1,port=${QGA_PORT},server=on,wait=off"
+    -device virtio-serial
+    -device virtserialport,chardev=qga,name=org.qemu.guest_agent.0
+  )
 fi
 
 "${QEMU_BINARY}" "${QEMU_ARGS[@]}"

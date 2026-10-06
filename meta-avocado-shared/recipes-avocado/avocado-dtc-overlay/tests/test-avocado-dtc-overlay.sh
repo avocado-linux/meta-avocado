@@ -15,16 +15,25 @@ wrapper="$here/../files/avocado-dtc-overlay"
 pass=0
 fail=0
 
-ok()   { printf '  ok   - %s\n' "$1"; pass=$((pass + 1)); }
-bad()  { printf '  FAIL - %s\n' "$1"; fail=$((fail + 1)); }
+ok() {
+  printf '  ok   - %s\n' "$1"
+  pass=$((pass + 1))
+}
+bad() {
+  printf '  FAIL - %s\n' "$1"
+  fail=$((fail + 1))
+}
 
 for t in dtc cpp fdtget; do
-    command -v "$t" >/dev/null 2>&1 || { echo "SKIP: host missing $t"; exit 0; }
+  command -v "$t" >/dev/null 2>&1 || {
+    echo "SKIP: host missing $t"
+    exit 0
+  }
 done
 
 if [[ ! -x "$wrapper" ]]; then
-    echo "FAIL - wrapper not found or not executable: $wrapper"
-    exit 1
+  echo "FAIL - wrapper not found or not executable: $wrapper"
+  exit 1
 fi
 
 work="$(mktemp -d)"
@@ -34,7 +43,7 @@ trap 'rm -rf "$work"' EXIT
 # wrapper's cpp include path must resolve.
 kdir="$work/kernel"
 mkdir -p "$kdir/include/dt-bindings/gpio" "$kdir/scripts/dtc/include-prefixes"
-cat > "$kdir/include/dt-bindings/gpio/gpio.h" <<'EOF'
+cat >"$kdir/include/dt-bindings/gpio/gpio.h" <<'EOF'
 #ifndef _DT_BINDINGS_GPIO_GPIO_H
 #define _DT_BINDINGS_GPIO_GPIO_H
 #define GPIO_ACTIVE_HIGH 0
@@ -46,7 +55,7 @@ ln -s ../../../include/dt-bindings "$kdir/scripts/dtc/include-prefixes/dt-bindin
 run() { "$wrapper" --kdir "$kdir" "$@"; }
 
 # --- Case 1: path-targeted, label-free overlay compiles cleanly ---
-cat > "$work/path.dtso" <<'EOF'
+cat >"$work/path.dtso" <<'EOF'
 /dts-v1/;
 /plugin/;
 / {
@@ -61,17 +70,17 @@ cat > "$work/path.dtso" <<'EOF'
 };
 EOF
 if run --src "$work/path.dtso" --out "$work/path.dtbo" >/dev/null 2>"$work/path.err"; then
-    if fdtget -l "$work/path.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
-        ok "path-targeted label-free overlay builds (no false negative on absent __symbols__)"
-    else
-        bad "path overlay built but produced no fragment@ node"
-    fi
+  if fdtget -l "$work/path.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
+    ok "path-targeted label-free overlay builds (no false negative on absent __symbols__)"
+  else
+    bad "path overlay built but produced no fragment@ node"
+  fi
 else
-    bad "path-targeted overlay rejected (regression: valid overlay); stderr: $(cat "$work/path.err")"
+  bad "path-targeted overlay rejected (regression: valid overlay); stderr: $(cat "$work/path.err")"
 fi
 
 # --- Case 2: dt-bindings include resolves + external phandle target -> __fixups__ ---
-cat > "$work/phandle.dtso" <<'EOF'
+cat >"$work/phandle.dtso" <<'EOF'
 /dts-v1/;
 /plugin/;
 #include <dt-bindings/gpio/gpio.h>
@@ -89,17 +98,17 @@ cat > "$work/phandle.dtso" <<'EOF'
 };
 EOF
 if run --src "$work/phandle.dtso" --out "$work/phandle.dtbo" >/dev/null 2>"$work/phandle.err"; then
-    if fdtget -l "$work/phandle.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
-        ok "external-phandle overlay builds with dt-bindings include and exports __fixups__"
-    else
-        bad "phandle overlay built but __fixups__ missing"
-    fi
+  if fdtget -l "$work/phandle.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
+    ok "external-phandle overlay builds with dt-bindings include and exports __fixups__"
+  else
+    bad "phandle overlay built but __fixups__ missing"
+  fi
 else
-    bad "phandle overlay with dt-bindings include rejected; stderr: $(cat "$work/phandle.err")"
+  bad "phandle overlay with dt-bindings include rejected; stderr: $(cat "$work/phandle.err")"
 fi
 
 # --- Case 3: missing /plugin/; is a hard error (the #1 silent-failure) ---
-cat > "$work/noplugin.dtso" <<'EOF'
+cat >"$work/noplugin.dtso" <<'EOF'
 /dts-v1/;
 / {
     acme-node {
@@ -108,29 +117,29 @@ cat > "$work/noplugin.dtso" <<'EOF'
 };
 EOF
 if run --src "$work/noplugin.dtso" --out "$work/noplugin.dtbo" >/dev/null 2>"$work/noplugin.err"; then
-    bad "overlay without /plugin/; was accepted (should hard-error)"
+  bad "overlay without /plugin/; was accepted (should hard-error)"
 else
-    if grep -qi 'plugin' "$work/noplugin.err"; then
-        ok "missing /plugin/; hard-errors with a clear message"
-    else
-        bad "missing /plugin/; failed but message did not mention /plugin/;: $(cat "$work/noplugin.err")"
-    fi
+  if grep -qi 'plugin' "$work/noplugin.err"; then
+    ok "missing /plugin/; hard-errors with a clear message"
+  else
+    bad "missing /plugin/; failed but message did not mention /plugin/;: $(cat "$work/noplugin.err")"
+  fi
 fi
 
 # --- Case 4: missing/invalid KDIR is a hard error ---
 if "$wrapper" --kdir "$work/nonexistent-kdir" --src "$work/path.dtso" \
-        --out "$work/x.dtbo" >/dev/null 2>"$work/kdir.err"; then
-    bad "invalid --kdir was accepted (should hard-error)"
+  --out "$work/x.dtbo" >/dev/null 2>"$work/kdir.err"; then
+  bad "invalid --kdir was accepted (should hard-error)"
 else
-    ok "invalid --kdir hard-errors"
+  ok "invalid --kdir hard-errors"
 fi
 
 # --- Case 5: garbage source fails the dtc compile (not a silent pass) ---
-printf 'this is not device tree source {{{\n' > "$work/garbage.dtso"
+printf 'this is not device tree source {{{\n' >"$work/garbage.dtso"
 if run --src "$work/garbage.dtso" --out "$work/garbage.dtbo" >/dev/null 2>"$work/garbage.err"; then
-    bad "malformed source was accepted (should fail compile)"
+  bad "malformed source was accepted (should fail compile)"
 else
-    ok "malformed source fails the build"
+  ok "malformed source fails the build"
 fi
 
 # --- Case 6: $CROSS_COMPILE-prefixed preprocessor is used when set ---
@@ -138,40 +147,40 @@ fi
 # Uses an #include overlay so the cpp step actually runs (a no-#include overlay
 # skips cpp entirely).
 if CROSS_COMPILE="/usr/bin/" "$wrapper" --kdir "$kdir" --src "$work/phandle.dtso" \
-        --out "$work/cross.dtbo" >/dev/null 2>"$work/cross.err"; then
-    ok "\$CROSS_COMPILE-prefixed cpp resolves and builds"
+  --out "$work/cross.dtbo" >/dev/null 2>"$work/cross.err"; then
+  ok "\$CROSS_COMPILE-prefixed cpp resolves and builds"
 else
-    bad "\$CROSS_COMPILE resolution broke the build; stderr: $(cat "$work/cross.err")"
+  bad "\$CROSS_COMPILE resolution broke the build; stderr: $(cat "$work/cross.err")"
 fi
 
 # --- Case 7: no-#include overlay builds without a dt-bindings tree ---
 # A pure path/phandle overlay references no headers, so it must not require
 # kernel-devsrc: the common case where the target sysroot has no dt-bindings.
 nobind="$work/kernel-nobindings"
-mkdir -p "$nobind"                     # exists, but has no include/dt-bindings
+mkdir -p "$nobind" # exists, but has no include/dt-bindings
 if "$wrapper" --kdir "$nobind" --src "$work/path.dtso" \
-        --out "$work/nobind.dtbo" >/dev/null 2>"$work/nobind.err"; then
-    if fdtget -l "$work/nobind.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
-        ok "no-#include overlay builds without a dt-bindings tree"
-    else
-        bad "no-#include overlay built but produced no fragment@ node"
-    fi
+  --out "$work/nobind.dtbo" >/dev/null 2>"$work/nobind.err"; then
+  if fdtget -l "$work/nobind.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
+    ok "no-#include overlay builds without a dt-bindings tree"
+  else
+    bad "no-#include overlay built but produced no fragment@ node"
+  fi
 else
-    bad "no-#include overlay rejected without dt-bindings (relaxation missing); stderr: $(cat "$work/nobind.err")"
+  bad "no-#include overlay rejected without dt-bindings (relaxation missing); stderr: $(cat "$work/nobind.err")"
 fi
 
 # --- Case 8: #include overlay still requires dt-bindings (relaxation is scoped) ---
 # The relaxation must not leak: an overlay that #includes headers still needs a
 # resolvable dt-bindings tree or the cpp step would fail on undefined tokens.
 if "$wrapper" --kdir "$nobind" --src "$work/phandle.dtso" \
-        --out "$work/needbind.dtbo" >/dev/null 2>"$work/needbind.err"; then
-    bad "#include overlay accepted without dt-bindings (relaxation too broad)"
+  --out "$work/needbind.dtbo" >/dev/null 2>"$work/needbind.err"; then
+  bad "#include overlay accepted without dt-bindings (relaxation too broad)"
 else
-    if grep -qi 'dt-bindings' "$work/needbind.err"; then
-        ok "#include overlay still hard-errors when dt-bindings absent"
-    else
-        bad "#include overlay failed but not for dt-bindings: $(cat "$work/needbind.err")"
-    fi
+  if grep -qi 'dt-bindings' "$work/needbind.err"; then
+    ok "#include overlay still hard-errors when dt-bindings absent"
+  else
+    bad "#include overlay failed but not for dt-bindings: $(cat "$work/needbind.err")"
+  fi
 fi
 
 # --- Case 9: a no-#include overlay needs no preprocessor at all ---
@@ -179,28 +188,28 @@ fi
 # not break the build (the SDK ships no host cpp; a simple overlay must still
 # compile via dtc directly).
 if CPP="/nonexistent/definitely-not-a-cpp" "$wrapper" --kdir "$kdir" --src "$work/path.dtso" \
-        --out "$work/nocpp.dtbo" >/dev/null 2>"$work/nocpp.err"; then
-    if fdtget -l "$work/nocpp.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
-        ok "no-#include overlay builds with no usable preprocessor (cpp skipped)"
-    else
-        bad "no-#include overlay built but produced no fragment@ node"
-    fi
+  --out "$work/nocpp.dtbo" >/dev/null 2>"$work/nocpp.err"; then
+  if fdtget -l "$work/nocpp.dtbo" / 2>/dev/null | grep -q '^fragment@'; then
+    ok "no-#include overlay builds with no usable preprocessor (cpp skipped)"
+  else
+    bad "no-#include overlay built but produced no fragment@ node"
+  fi
 else
-    bad "no-#include overlay failed with a bogus \$CPP (cpp not skipped); stderr: $(cat "$work/nocpp.err")"
+  bad "no-#include overlay failed with a bogus \$CPP (cpp not skipped); stderr: $(cat "$work/nocpp.err")"
 fi
 
 # --- Case 10: a multi-token $CPP is honored (the SDK sets CPP="\$CC -E ...") ---
 # environment-setup exports CPP as a full command with args, not a bare program
 # name; the wrapper must word-split it rather than command -v the whole string.
 if CPP="cpp -DAVOCADO_MULTITOK" "$wrapper" --kdir "$kdir" --src "$work/phandle.dtso" \
-        --out "$work/multitok.dtbo" >/dev/null 2>"$work/multitok.err"; then
-    if fdtget -l "$work/multitok.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
-        ok "multi-token \$CPP is word-split and used"
-    else
-        bad "multi-token \$CPP built but __fixups__ missing"
-    fi
+  --out "$work/multitok.dtbo" >/dev/null 2>"$work/multitok.err"; then
+  if fdtget -l "$work/multitok.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
+    ok "multi-token \$CPP is word-split and used"
+  else
+    bad "multi-token \$CPP built but __fixups__ missing"
+  fi
 else
-    bad "multi-token \$CPP rejected (command -v on the whole string?); stderr: $(cat "$work/multitok.err")"
+  bad "multi-token \$CPP rejected (command -v on the whole string?); stderr: $(cat "$work/multitok.err")"
 fi
 
 # --- Case 11: /include/ of a .dtsi resolves even after cpp relocates the unit ---
@@ -208,7 +217,7 @@ fi
 # where the source came from or a native /include/ beside it stops resolving.
 # The pairing matters: it takes a #include to move the compilation unit, and an
 # /include/ to need the source dir, so neither alone reproduces it.
-cat > "$work/frag.dtsi" <<'EOF'
+cat >"$work/frag.dtsi" <<'EOF'
 / {
     fragment@9 {
         target-path = "/";
@@ -220,23 +229,23 @@ cat > "$work/frag.dtsi" <<'EOF'
     };
 };
 EOF
-cat > "$work/withinc.dtso" <<'EOF'
+cat >"$work/withinc.dtso" <<'EOF'
 /dts-v1/;
 /plugin/;
 #include <dt-bindings/gpio/gpio.h>
 /include/ "frag.dtsi"
 EOF
 if run --src "$work/withinc.dtso" --out "$work/withinc.dtbo" >/dev/null 2>"$work/withinc.err"; then
-    ok "/include/ of a sibling .dtsi resolves when cpp has relocated the unit"
+  ok "/include/ of a sibling .dtsi resolves when cpp has relocated the unit"
 else
-    bad "/include/ beside the source unresolved (dtc missing -i <srcdir>); stderr: $(cat "$work/withinc.err")"
+  bad "/include/ beside the source unresolved (dtc missing -i <srcdir>); stderr: $(cat "$work/withinc.err")"
 fi
 
 # --- Case 12: an overlay whose top-level node is not named fragment@N ---
 # fragment@N is dtc's generated name for the &label shorthand, not part of the
 # format. The kernel selects fragments on the presence of an __overlay__ child
 # and ignores every other top-level node, so the wrapper must not be stricter.
-cat > "$work/named.dtso" <<'EOF'
+cat >"$work/named.dtso" <<'EOF'
 /dts-v1/;
 /plugin/;
 / {
@@ -251,16 +260,16 @@ cat > "$work/named.dtso" <<'EOF'
 };
 EOF
 if run --src "$work/named.dtso" --out "$work/named.dtbo" >/dev/null 2>"$work/named.err"; then
-    ok "overlay with a non-fragment@ top-level node is accepted"
+  ok "overlay with a non-fragment@ top-level node is accepted"
 else
-    bad "custom-named fragment rejected (structural check greps the node name); stderr: $(cat "$work/named.err")"
+  bad "custom-named fragment rejected (structural check greps the node name); stderr: $(cat "$work/named.err")"
 fi
 
 # --- Case 13: a commented-out target = <&label> must not fail the build ---
 # The __fixups__ assertion has to read the compiled blob. Gating it on the
 # source text makes a comment fire it, and makes the verdict depend on whether
 # an unrelated #include caused cpp to strip that comment first.
-cat > "$work/comment.dtso" <<'EOF'
+cat >"$work/comment.dtso" <<'EOF'
 /dts-v1/;
 /plugin/;
 /* example: target = <&spi0>; */
@@ -276,16 +285,16 @@ cat > "$work/comment.dtso" <<'EOF'
 };
 EOF
 if run --src "$work/comment.dtso" --out "$work/comment.dtbo" >/dev/null 2>"$work/comment.err"; then
-    ok "a commented-out target = <&label> does not trip the __fixups__ check"
+  ok "a commented-out target = <&label> does not trip the __fixups__ check"
 else
-    bad "comment tripped the __fixups__ check (guard reads source text); stderr: $(cat "$work/comment.err")"
+  bad "comment tripped the __fixups__ check (guard reads source text); stderr: $(cat "$work/comment.err")"
 fi
 
 # --- Case 14: the &label shorthand is still covered by the __fixups__ check ---
 # The other direction of the same defect: this form carries no 'target' token in
 # the source, so a source-text guard skipped the assertion entirely. Reading the
 # blob, the fragment does have a target property and __fixups__ must be present.
-cat > "$work/short.dtso" <<'EOF'
+cat >"$work/short.dtso" <<'EOF'
 /dts-v1/;
 /plugin/;
 &spi0 {
@@ -293,13 +302,13 @@ cat > "$work/short.dtso" <<'EOF'
 };
 EOF
 if run --src "$work/short.dtso" --out "$work/short.dtbo" >/dev/null 2>"$work/short.err"; then
-    if fdtget -l "$work/short.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
-        ok "&label shorthand builds and its external target is covered by __fixups__"
-    else
-        bad "&label shorthand built without __fixups__"
-    fi
+  if fdtget -l "$work/short.dtbo" / 2>/dev/null | grep -q '^__fixups__$'; then
+    ok "&label shorthand builds and its external target is covered by __fixups__"
+  else
+    bad "&label shorthand built without __fixups__"
+  fi
 else
-    bad "&label shorthand rejected; stderr: $(cat "$work/short.err")"
+  bad "&label shorthand rejected; stderr: $(cat "$work/short.err")"
 fi
 
 # --- Case 15: an option given without its value reports the missing argument ---
@@ -307,14 +316,14 @@ fi
 # set -e, kills the script before the required-argument diagnostics can run -
 # so the user gets a bare exit 1 with nothing on either stream.
 if "$wrapper" --kdir "$kdir" --src "$work/path.dtso" --out \
-        >"$work/noval.out" 2>"$work/noval.err"; then
-    bad "a trailing --out with no value was accepted"
+  >"$work/noval.out" 2>"$work/noval.err"; then
+  bad "a trailing --out with no value was accepted"
 else
-    if grep -qi 'out is required\|usage' "$work/noval.err"; then
-        ok "an option missing its value reports the missing argument"
-    else
-        bad "option missing its value died silently (shift 2 under set -e); stderr: [$(cat "$work/noval.err")]"
-    fi
+  if grep -qi 'out is required\|usage' "$work/noval.err"; then
+    ok "an option missing its value reports the missing argument"
+  else
+    bad "option missing its value died silently (shift 2 under set -e); stderr: [$(cat "$work/noval.err")]"
+  fi
 fi
 
 echo
