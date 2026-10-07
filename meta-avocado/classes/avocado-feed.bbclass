@@ -16,6 +16,7 @@ AVOCADO_FEED_DIR ?= "${DEPLOY_DIR}/avocado-feed"
 
 python avocado_feed_index() {
     import os
+    import shutil
     import subprocess
 
     bb.build.exec_func('do_create_repo_map', d)
@@ -26,19 +27,28 @@ python avocado_feed_index() {
     if not createrepo:
         bb.fatal("createrepo_c not in PATH; add createrepo-c-native to DEPENDS")
 
-    links = {}
-    roots = []
+    entries = []
     with open(os.path.join(rpm_dir, 'avocado-repo.map')) as f:
         for line in f:
             key, _, path = line.strip().partition('=')
-            path = path.replace('$releasever/', '', 1)
-            if key == 'repo':
-                roots.append(path)
-            elif os.path.isdir(os.path.join(rpm_dir, key)):
-                # Flat repos (sdk/<machine>) take several arch dirs, so the
-                # arch dir always becomes a leaf under its package path.
-                leaf = path if os.path.basename(path) == key else os.path.join(path, key)
-                links[os.path.join(feed_dir, leaf)] = os.path.join(rpm_dir, key)
+            entries.append((key, path.replace('$releasever/', '', 1)))
+    roots = [path for key, path in entries if key == 'repo']
+
+    links = {}
+    for key, path in entries:
+        if key == 'repo' or not os.path.isdir(os.path.join(rpm_dir, key)):
+            continue
+        # Flat repos (sdk/<machine>) take several arch dirs, so the arch dir
+        # always becomes a leaf under its package path. A package path that is
+        # itself a repo root (the pooled layout, AVOCADO_PERTARGET_REPOS=0, maps
+        # noarch=target/noarch and repo=target/noarch) keeps the link below the
+        # root, or the root would be a link into deploy/rpm and createrepo_c
+        # would write repodata there.
+        if os.path.basename(path) == key and path not in roots:
+            leaf = path
+        else:
+            leaf = os.path.join(path, key)
+        links[os.path.join(feed_dir, leaf)] = os.path.join(rpm_dir, key)
 
     # Drop links the map no longer names (arch dir gone, layout changed).
     for top, dirs, files in os.walk(feed_dir):
@@ -57,6 +67,17 @@ python avocado_feed_index() {
         os.symlink(rel, link)
 
     roots += [r + '-ext' for r in roots if r.startswith('target/')]
+
+    # A root the map no longer names lost its links above, so its repodata now
+    # lists packages that are gone. Drop that repodata so the server stops
+    # offering them. -ext roots hold real extension RPMs, not links, so their
+    # metadata still matches what is on disk and is kept.
+    active = {os.path.join(feed_dir, r) for r in roots}
+    for top, dirs, files in os.walk(feed_dir):
+        if 'repodata' in dirs and top not in active and not top.endswith('-ext'):
+            shutil.rmtree(os.path.join(top, 'repodata'))
+            dirs.remove('repodata')
+
     for root in roots:
         repo = os.path.join(feed_dir, root)
         bb.utils.mkdirhier(repo)
