@@ -1,11 +1,16 @@
 SUMMARY = "Meta-target to build Avocado OS images, extensions, and extra packages"
 LICENSE = "Apache-2.0"
 
-inherit avocado-repo-map
+inherit avocado-feed
 
 # Ensure build task runs after dependencies
 do_compile[depends] += "avocado-distro:do_build"
 do_compile[depends] += "avocado-sdk:do_build"
+
+# createrepo_c for the local feed index (see avocado-feed.bbclass). DEPENDS, not
+# do_compile[depends]: a populate_sysroot task dep would make extend_recipe_sysroot
+# walk every do_build above and stage the whole distro.
+DEPENDS += "${@'createrepo-c-native' if d.getVar('AVOCADO_FEED_INDEX') == '1' else ''}"
 
 # Skip other tasks
 do_configure[noexec] = "1"
@@ -44,6 +49,9 @@ python do_compile() {
 
     # Generate the repo map file
     bb.build.exec_func('do_create_repo_map', d)
+
+    if d.getVar('AVOCADO_FEED_INDEX') == '1':
+        bb.build.exec_func('avocado_feed_index', d)
 }
 
 # Force the compile task to be part of the build pipeline
