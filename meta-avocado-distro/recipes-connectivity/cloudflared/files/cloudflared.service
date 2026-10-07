@@ -7,7 +7,12 @@ Wants=network-online.target
 Type=notify
 DynamicUser=yes
 EnvironmentFile=/etc/default/cloudflared
-ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token ${TUNNEL_TOKEN}
+# Local change from the meta-networking unit: the token reaches cloudflared
+# through the TUNNEL_TOKEN environment variable, not argv, so it stays out of
+# /proc/<pid>/cmdline. ExecCondition skips the unit (without a failure and
+# without the RestartSec loop) while the token is empty.
+ExecCondition=/bin/sh -c 'test -n "$TUNNEL_TOKEN"'
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
 Restart=on-failure
 RestartSec=5s
 
