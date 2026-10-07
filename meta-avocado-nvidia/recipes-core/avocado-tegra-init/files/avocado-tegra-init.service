@@ -3,6 +3,12 @@ Description=Detect and mount APP_<slot> partition on /sysroot
 DefaultDependencies=no
 After=systemd-udev-trigger.service
 Before=initrd-root-fs.target
+# Fail closed. WantedBy is a weak dependency: without this a failure (e.g.
+# cryptsetup-var refusing to open /var without its TPM2 keyslot) was ignored
+# and the initrd switched root with /var unmounted, running on the read-only
+# rootfs's empty /var. Stop in the emergency target instead.
+OnFailure=emergency.target
+OnFailureJobMode=replace-irreversibly
 
 [Service]
 Type=oneshot
