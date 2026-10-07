@@ -11,7 +11,8 @@
       "command": ["nvbootctrl", "get-current-slot"]
     },
     "os_artifacts": {
-      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] }
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] },
+      "boot": { "image_key": "boot", "slot_partitions": ["A_kernel", "B_kernel"] }
     },
     "activate": [
       {
@@ -107,6 +108,11 @@
         "rootfs": "avocado-image-rootfs-jetson-orin-nx.erofs-lz4",
         "var": "avocado-image-var-jetson-orin-nx.btrfs",
         "initramfs": "avocado-image-initramfs-jetson-orin-nx.cpio.zst",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-orin-nx.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nx.esp",
         "tegraflash_tos": "tos-avocado-jetson-orin-nx.img",
