@@ -223,3 +223,10 @@ TEGRA_TEST_PACKAGES = " \
   gstreamer-tests \
   deepstream-tests \
 "
+
+# nvidia-drm with modeset=1 fbdev=1, autoloaded (modprobe.d + modules-load.d).
+# Wrynose had no consumer; scarthgap only got it through its weston bbappend,
+# so the DRM device and console framebuffer depended on the compositor.
+# Orin only for now: Thor's display stack (tegra-drm, openrm) is not yet
+# validated with it.
+RDEPENDS:${PN}:append:tegra234 = " nvidia-drm-loadconf"
