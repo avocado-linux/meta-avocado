@@ -53,4 +53,5 @@ RDEPENDS:${PN} = " \
   usbutils \
   uv \
   vim \
+  which \
 "
