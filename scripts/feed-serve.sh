@@ -11,10 +11,9 @@ set -euo pipefail
 
 NAME=${NAME:-avocado-feed}
 PORT=${PORT:-8080}
-ENGINE=${ENGINE:-$(command -v docker || command -v podman)}
 
 if [ "${1:-}" = "--stop" ]; then
-    exec "$ENGINE" rm -f "$NAME"
+    exec docker rm -f "$NAME"
 fi
 
 BUILD_DIR=$(realpath "${1:-${BUILDDIR:-build}}")
@@ -28,8 +27,8 @@ if [ ! -d "$DEPLOY/avocado-feed" ]; then
 fi
 
 CONF="$(cd "$(dirname "$0")/.." && pwd)/support/feed-serve/nginx.conf"
-"$ENGINE" rm -f "$NAME" >/dev/null 2>&1 || true
-"$ENGINE" run -d --restart unless-stopped --name "$NAME" -p "$PORT:80" \
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+docker run -d --restart unless-stopped --name "$NAME" -p "$PORT:80" \
     -v "$DEPLOY:/deploy:ro" -v "$CONF:/etc/nginx/conf.d/default.conf:ro" \
     docker.io/library/nginx:alpine >/dev/null
 echo "serving $DEPLOY/avocado-feed on http://localhost:$PORT"

@@ -37,8 +37,17 @@ avocado sdk install && avocado install
 ```
 
 The server maps any `<release>/<channel>/` prefix to the feed root, so the
-`distro` block in `avocado.yaml` needs no change. `PORT=`, `NAME=` and
-`ENGINE=podman` override the defaults; `feed-serve.sh --stop` removes it.
+`distro` block in `avocado.yaml` needs no change. `PORT=` and `NAME=`
+override the defaults; `feed-serve.sh --stop` removes it. It runs under docker.
+
+A project that has installed from the published feed has a snapshot pin in
+its lock file, and the local feed has no snapshots, so that pin 404s here.
+Set `AVOCADO_RELEASEVER` as well: the CLI skips snapshot resolution entirely
+when it is set, and the server accepts any `<release>/<channel>/`.
+
+```bash
+export AVOCADO_RELEASEVER=<release>/<channel>   # e.g. 2024/edge
+```
 
 Iterating on one package:
 
