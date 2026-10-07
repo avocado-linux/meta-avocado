@@ -58,7 +58,12 @@ Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
 `python-ai.yml`, `ros.yml`, `virtualization.yml`. `robotics.yml` includes
 `ros.yml` and adds the token, the same way `containers.yml` sits on
-`virtualization.yml`.
+`virtualization.yml`. `complete.yml` lists `robotics.yml` only, not `ros.yml`.
+
+gtsam in the robotics group installs under `/opt/ros/jazzy/{lib,include}`
+(it inherits `ros_opt_prefix`), unlike geographiclib, tinyxml2, asio and
+websocketpp, which install to `/usr`. A consumer needs `/opt/ros/jazzy` in
+`CMAKE_PREFIX_PATH` to find GTSAM at build time.
 
 ### Container Dev Mode
 
