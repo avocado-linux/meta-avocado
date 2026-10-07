@@ -40,6 +40,4 @@ header:
   - repo: meta-avocado
     file: kas/feature/observability.yml
   - repo: meta-avocado
-    file: kas/feature/ros.yml
-  - repo: meta-avocado
     file: kas/feature/robotics.yml
