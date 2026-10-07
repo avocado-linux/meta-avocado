@@ -5,6 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 SRC_URI = " \
     file://cryptsetup-var.sh \
     file://var-key.sh \
+    file://tpm2-lockout-reset.sh \
     file://cryptsetup-var.service \
     file://99-zz-cryptsetup-var.rules \
     file://avocado-posture-publish.sh \
@@ -45,6 +46,7 @@ do_install() {
     install -d ${D}${libexecdir}/cryptsetup-var
     install -m 0750 ${UNPACKDIR}/cryptsetup-var.sh ${D}${libexecdir}/cryptsetup-var/
     install -m 0750 ${UNPACKDIR}/var-key.sh ${D}${libexecdir}/cryptsetup-var/
+    install -m 0750 ${UNPACKDIR}/tpm2-lockout-reset.sh ${D}${libexecdir}/cryptsetup-var/
     # Optional hardware key backend, added to SRC_URI by a vendor bbappend for
     # machines with a key-wrapping engine (see var-hwkey.sh's contract in
     # cryptsetup-var.sh). Absent on machines without one.

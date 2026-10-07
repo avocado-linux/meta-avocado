@@ -238,26 +238,10 @@ hwkey_passphrase_to() {
     return $_rc
 }
 
-# Some firmware TPMs keep no NV state across boots. Measured on Jetson Orin
-# (NVIDIA OP-TEE fTPM, ms-tpm-20-ref): the seeds are stable - a credential
-# sealed on one boot unseals on the next, so a TPM2 keyslot is sound - but the
-# dictionary-attack state resets every boot to inLockout=1 with maxTries=0,
-# and every object load then fails with TPM_RC_LOCKOUT (0x921) until a
-# DictionaryAttackLockReset. lockoutAuth cannot be persisted either, so the
-# reset is free; DA protection is therefore nil on such parts, which is
-# acceptable here because the sealed keyslot carries a PCR policy and no auth
-# value. Best-effort and silent where tpm2-tools are absent or the TPM is not
-# in lockout.
+# Firmware TPMs that come up in DA lockout every boot (Jetson's fTPM): see
+# tpm2-lockout-reset.sh, shared with the platform initrds.
 ensure_tpm2_unlocked() {
-    [ -e "$TPM_DEV" ] || return 0
-    command -v tpm2_getcap >/dev/null 2>&1 || return 0
-    if tpm2_getcap properties-variable 2>/dev/null | awk '/inLockout:/{f=($2==1)} END{exit !f}'; then
-        echo "cryptsetup-var: TPM is in dictionary-attack lockout at boot - resetting"
-        tpm2_dictionarylockout --clear-lockout 2>/dev/null \
-            && tpm2_dictionarylockout --setup-parameters --max-tries=32 \
-                   --recovery-time=600 --lockout-recovery-time=86400 2>/dev/null \
-            || echo "cryptsetup-var: TPM lockout reset failed - TPM2 unlock will fall back to the recovery key" >&2
-    fi
+    TPM_DEV="$TPM_DEV" "$(dirname "$0")/tpm2-lockout-reset.sh" || true
 }
 
 # Which keyslot actually opened /var this boot. Recorded because it is the one

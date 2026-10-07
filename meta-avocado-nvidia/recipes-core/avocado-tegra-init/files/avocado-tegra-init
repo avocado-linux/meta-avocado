@@ -152,6 +152,13 @@ fi
 # at coldplug. Fail closed: a marker
 # without the tooling, or without a var partition, must not fall through to a
 # plaintext mount.
+# The OP-TEE fTPM comes up in dictionary-attack lockout on every boot (it
+# keeps no NV state). Reset it here for every runtime, not only encrypted
+# ones, so systemd's TPM units and any later TPM user work; cryptsetup-var.sh
+# runs the same reset before its own unlock. Best-effort, never fails boot.
+TPM_RESET=/usr/libexec/cryptsetup-var/tpm2-lockout-reset.sh
+if [ -x "$TPM_RESET" ]; then "$TPM_RESET"; fi
+
 ENC_MARKER=/etc/avocado/var-encrypt
 CRYPT_SH=/usr/libexec/cryptsetup-var/cryptsetup-var.sh
 if [ -e "$ENC_MARKER" ]; then
