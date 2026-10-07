@@ -304,6 +304,11 @@ disconnect_usb_device() {
 }
 
 sign_binaries() {
+    # Every helper call passes ODMDATA in its environment: .env.initrd-flash is
+    # sourced, not exported, and the tegra234 helper reads the carrier's value
+    # (CARRIER_ENV_ODMDATA) from the environment before falling back to the
+    # MACHINE's flashvars default. Without it a carrier's UPHY lane routing
+    # (e.g. the GBE UPHY to a PCIe controller) never reaches MB1.
     if [ -n "$PRESIGNED" ]; then
 	cp doflash.sh flash_signed.sh
 	sed -i -e's,--cfg secureflash.xml,--cfg internal-secureflash.xml,g' flash_signed.sh
@@ -327,7 +332,7 @@ sign_binaries() {
 	wait_for_rcm
     fi
     rm -rf rcmboot_blob
-    if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU serial_number=$serial_number \
+    if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" serial_number=$serial_number \
 	      "$here/$FLASH_HELPER" --no-flash --sign -u "$keyfile" -v "$sbk_keyfile" $instance_args \
 	      flash.xml.in $DTBFILE $EMMC_BCTS $ODMDATA $LNXFILE $ROOTFS_IMAGE; then
 	cp flashcmd.txt flash_signed.sh
@@ -344,7 +349,7 @@ sign_binaries() {
     if [ -e external-flash.xml.in ]; then
 	if grep -q 'oem_sign="true"' external-flash.xml.in 2>/dev/null; then
 	    . ./boardvars.sh
-            if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU \
+            if MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" \
 				"$here/$FLASH_HELPER" --no-flash --sign --external-device -u "$keyfile" -v "$sbk_keyfile" $instance_args \
 				external-flash.xml.in $DTBFILE $EMMC_BCTS $ODMDATA $LNXFILE $ROOTFS_IMAGE; then
 		mv secureflash.xml external-secureflash.xml
@@ -1050,7 +1055,7 @@ prepare_binaries_t264() {
 
     if [ "$target" = "internal" ]; then
         if [ -z "$PRESIGNED" ]; then
-            if ! MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU serial_number=$serial_number \
+            if ! MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" serial_number=$serial_number \
                  "$here/$FLASH_HELPER" --no-flash --sign -u "$keyfile" -v "$sbk_keyfile" --datafile "$datafile" $instance_args "$layout_xml" "$kernel" "$rootfs_img"; then
                 return 1
             fi
@@ -1064,7 +1069,7 @@ prepare_binaries_t264() {
         return 0
     elif [ "$target" = "external" ]; then
         if [ -z "$PRESIGNED" ]; then
-            if ! MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU \
+            if ! MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" \
                  "$here/$FLASH_HELPER" --no-flash --sign --external-device -u "$keyfile" -v "$sbk_keyfile" --datafile "$datafile" $instance_args "$layout_xml" "$kernel" "$rootfs_img"; then
                 return 1
             fi
@@ -1079,7 +1084,7 @@ prepare_binaries_t264() {
     elif [ "$target" = "rcm-boot" ]; then
         if [ -z "$PRESIGNED" ]; then
             rm -rf rcmboot_blob
-            if ! MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU serial_number=$serial_number \
+            if ! MACHINE=$MACHINE BOARDID=$BOARDID FAB=$FAB BOARDSKU=$BOARDSKU BOARDREV=$BOARDREV CHIPREV=$CHIPREV CHIP_SKU=$CHIP_SKU ODMDATA="$ODMDATA" serial_number=$serial_number \
                  "$here/$FLASH_HELPER" --no-flash --rcm-boot -u "$keyfile" -v "$sbk_keyfile" --datafile "$datafile" $instance_args "$layout_xml" "$kernel" "$rootfs_img"; then
                 echo "ERR: could not create RCM boot blob" >&2
                 return 1
