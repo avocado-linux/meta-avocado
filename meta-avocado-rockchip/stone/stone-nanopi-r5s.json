@@ -1,0 +1,200 @@
+{
+  "runtime": {
+    "platform": "avocado-nanopi-r5s",
+    "architecture": "arm64",
+    "provision_default": "img",
+    "update_strategy": "gpt-ab"
+  },
+  "update": {
+    "slot_detection": {
+      "type": "uboot-env",
+      "var": "avocado_boot_slot"
+    },
+    "os_artifacts": {
+      "boot": {
+        "image_key": "boot",
+        "slot_partitions": [
+          "boot-a",
+          "boot-b"
+        ]
+      },
+      "rootfs": {
+        "image_key": "rootfs",
+        "slot_partitions": [
+          "rootfs-a",
+          "rootfs-b"
+        ]
+      }
+    },
+    "activate": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{inactive_slot}",
+          "{inactive_slot}.avocado_platform": "{platform}",
+          "{inactive_slot}.avocado_architecture": "{architecture}"
+        }
+      }
+    ],
+    "rollback": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{previous_slot}"
+        }
+      }
+    ]
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      }
+    },
+    "fields": {
+      "AVOCADO_DEVICE_CERT": {
+        "type": "file",
+        "label": "Device certificate",
+        "description": "X.509 device certificate in PEM format."
+      },
+      "AVOCADO_DEVICE_KEY": {
+        "type": "file",
+        "label": "Device private key",
+        "description": "PEM-encoded private key paired with the device certificate.",
+        "secret": true
+      },
+      "AVOCADO_DEVICE_ID": {
+        "type": "string",
+        "label": "Device ID",
+        "description": "Stable identifier registered with Peridio."
+      }
+    },
+    "profiles": {
+      "img": {
+        "script": "stone-provision-img.sh"
+      },
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": [
+          "device_info"
+        ],
+        "requires": [
+          "usb"
+        ]
+      },
+      "emmc": {
+        "script": "stone-provision-emmc.sh",
+        "envs": [
+          "device_info"
+        ],
+        "requires": [
+          "usb"
+        ]
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-nanopi-r5s-rootdisk.img",
+      "devpath": "/dev/mmcblk1",
+      "block_size": 512,
+      "images": {
+        "idbloader": "idbloader.img",
+        "uboot_itb": "u-boot.itb",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "label": "BOOT",
+            "files": [
+              {
+                "in": "Image",
+                "out": "boot/Image"
+              },
+              {
+                "in": "rk3568-nanopi-r5s.dtb",
+                "out": "boot/rk3568-nanopi-r5s.dtb"
+              },
+              {
+                "in": "avocado-image-initramfs-nanopi-r5s.cpio.zst",
+                "out": "avocado-initramfs.cpio.zst"
+              },
+              {
+                "in": "extlinux.conf",
+                "out": "extlinux/extlinux.conf"
+              }
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-nanopi-r5s.erofs-lz4",
+        "var": "avocado-image-var-nanopi-r5s.btrfs",
+        "kernel": "Image",
+        "initramfs": "avocado-image-initramfs-nanopi-r5s.cpio.zst"
+      },
+      "partitions": [
+        {
+          "name": "idbloader",
+          "image": "idbloader",
+          "offset": 64,
+          "offset_unit": "sectors",
+          "size": 8128,
+          "size_unit": "sectors",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "uboot-itb",
+          "image": "uboot_itb",
+          "offset": 16384,
+          "offset_unit": "sectors",
+          "size": 16384,
+          "size_unit": "sectors",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "boot-a",
+          "image": "boot",
+          "partition_type": "EF00",
+          "partition_uuid": "a924f3b4-83c4-41f8-900a-ace71d20140c",
+          "offset": 32,
+          "offset_unit": "mebibytes",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "boot-b",
+          "partition_type": "EF00",
+          "partition_uuid": "200fdb1b-0458-45fc-935e-6dbcd5757b22",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-a",
+          "image": "rootfs",
+          "partition_type": "8305",
+          "partition_uuid": "26de86c9-07f6-4708-82c8-95a21ff6b38d",
+          "size": 320,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "rootfs-b",
+          "partition_type": "8305",
+          "partition_uuid": "3a37df8d-529c-4ff3-a479-b4dd6fef34ab",
+          "size": 320,
+          "size_unit": "mebibytes"
+        },
+        {
+          "name": "var",
+          "image": "var",
+          "partition_type": "8300",
+          "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d",
+          "expand": "true"
+        }
+      ]
+    }
+  }
+}
