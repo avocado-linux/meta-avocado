@@ -387,38 +387,21 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
         echo "ERROR: initramfs cpio not staged at $initramfs_in_build"
         exit 1
     fi
-    # Carry over the kernel command line from the prebuilt boot.img before we
-    # overwrite it. The Yocto cboot image type builds that one with
-    # `mkbootimg --cmdline '${KERNEL_ARGS}'`; mkbootimg here defaults to an
-    # EMPTY cmdline, and an empty cmdline is silently fatal: UEFI's
-    # L4TLauncher then falls back to the stock NVIDIA bootargs baked into the
-    # kernel DTB, which on tegra264 point earlycon/console at a different
-    # tegra-utc instance than the one wired out (0xc4e0000 vs the MACHINE's
-    # 0xc5a0000) and set root=/dev/initrd rootfstype=ext4. The board flashes
-    # fine, prints one line, then hangs with a dead console.
-    #
-    # Read it out of the boot.img header rather than plumbing KERNEL_ARGS
-    # through the manifest, so the Yocto build stays the single source of
-    # truth. Android boot_img_hdr: cmdline is 512 bytes at offset 0x40.
-    boot_cmdline=""
-    if [ -f "$build_dir/boot.img" ]; then
-        boot_cmdline=$(dd if="$build_dir/boot.img" bs=1 skip=64 count=512 \
-                          2>/dev/null | tr -d '\0') || boot_cmdline=""
-    fi
-    if [ -z "$boot_cmdline" ]; then
-        echo "ERROR: no kernel command line found in the prebuilt $build_dir/boot.img."
-        echo "       Repacking without one produces a board that flashes but never boots."
-        exit 1
-    fi
+    # The command line comes from the prebuilt boot.img header, composed with
+    # the project's kernel.cmdline / cmdline_extra; see avocado-tegra-bootimg.
+    # An empty line is silently fatal: L4TLauncher falls back to the stock
+    # NVIDIA bootargs in the kernel DTB, which on tegra264 point the console
+    # at a tegra-utc instance that is not wired out.
     echo "Packing boot.img from kernel ${AVOCADO_PROVISION_KERNEL_VERSION:-?} (Image=$AVOCADO_PROVISION_KERNEL_IMAGE)"
-    echo "  cmdline: $boot_cmdline"
-    mkbootimg \
-        --kernel "$AVOCADO_PROVISION_KERNEL_IMAGE" \
-        --ramdisk "$initramfs_in_build" \
-        --cmdline "$boot_cmdline" \
-        --output "$build_dir/boot.img"
+    avocado-tegra-bootimg "$(command -v mkbootimg)" "$build_dir/boot.img" \
+        "$AVOCADO_PROVISION_KERNEL_IMAGE" "$initramfs_in_build" "$build_dir/boot.img" || exit 1
     echo "boot.img repacked at provision time"
 else
+    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+        echo "ERROR: kernel.cmdline / cmdline_extra is set, but no kernel Image was staged"
+        echo "       (AVOCADO_PROVISION_KERNEL_IMAGE) to repack boot.img with it."
+        exit 1
+    fi
     echo "AVOCADO_PROVISION_KERNEL_IMAGE not set — using prebuilt boot.img from BSP"
 fi
 
