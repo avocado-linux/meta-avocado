@@ -83,73 +83,10 @@ echo -e "\033[94m[INFO]\033[0m Extracted image names from manifest:
   BPMP DTB:  ${bpmp_dtb_image}
   Boot:      ${boot_image:-<not declared>}"
 
-# --- Assemble boot.img for the A_kernel/B_kernel partitions ------------------
-#
-# Only runs when the manifest declares an `images.boot` entry, so this is a
-# no-op for targets that have not opted in.
-#
-# Why here and not in Yocto or avocado-cli:
-#
-#   * Yocto cannot know which kernel this project pins. On a multi-kernel
-#     target the feed carries both linux-yocto and the L4T kernel, and
-#     `avocado install` picks one per-project from the lockfile -- after the
-#     build. meta-tegra's cboot conversion always wraps the default-mc kernel
-#     (CBOOTIMG_KERNEL), so its boot.img is only right by luck.
-#   * avocado-cli is platform-neutral; an Android boot image is a Tegra detail
-#     and does not belong there. This hook is the platform seam.
-#   * stone can only *construct* fat and fwup images, so anything else has to
-#     already exist on disk when `stone create` runs.
-#
-# Without this, OTA cannot update the kernel at all: `os_artifacts` can only
-# reference an image that exists at build time, and until now the only correct
-# boot.img was the one stone-provision-tegraflash.sh repacks at *provision*
-# time -- long after the OS bundle has been built. That is why every Jetson
-# ships `os_artifacts` with rootfs only and needs a physical reflash for a
-# kernel change.
+# Assemble boot.img for the A_kernel/B_kernel partitions when the manifest
+# declares `images.boot`, so an OS update carries the kernel and initramfs.
 if [ -n "$boot_image" ]; then
-    echo -e "\033[94m[INFO]\033[0m Assembling ${boot_image} for the kernel A/B partitions."
-
-    # Pinned kernel. Prefer the content-addressed kernel sysroot that
-    # `avocado install` stages, falling back to the rootfs /boot copy -- the
-    # same precedence avocado-cli uses when it exports
-    # AVOCADO_PROVISION_KERNEL_IMAGE for the provision hook.
-    boot_kernel=""
-    for candidate in "$AVOCADO_PREFIX"/kernel/*/Image; do
-        [ -e "$candidate" ] || continue      # unmatched glob expands literally
-        boot_kernel="$candidate"
-        break
-    done
-    if [ -z "$boot_kernel" ]; then
-        for candidate in "$AVOCADO_PREFIX"/rootfs/boot/Image-*; do
-            [ -e "$candidate" ] || continue
-            boot_kernel="$candidate"
-            break
-        done
-    fi
-    [ -n "$boot_kernel" ] || {
-        echo -e "\033[91m[ERROR]\033[0m No pinned kernel Image found under $AVOCADO_PREFIX/kernel or $AVOCADO_PREFIX/rootfs/boot." >&2
-        exit 1
-    }
-
-    boot_ramdisk="$input_dir/$initramfs_image"
-    [ -f "$boot_ramdisk" ] || {
-        echo -e "\033[91m[ERROR]\033[0m Initramfs '$boot_ramdisk' not found (manifest images.initramfs)." >&2
-        exit 1
-    }
-
-    mkbootimg_bin="$input_dir/tegraflash-tools/mkbootimg"
-    [ -x "$mkbootimg_bin" ] || mkbootimg_bin="$(command -v mkbootimg || true)"
-    [ -n "$mkbootimg_bin" ] && [ -x "$mkbootimg_bin" ] || {
-        echo -e "\033[91m[ERROR]\033[0m mkbootimg not found (looked in $input_dir/tegraflash-tools and PATH)." >&2
-        exit 1
-    }
-
-    # Command line: the BSP-built boot.img's, composed with the project's
-    # kernel.cmdline / cmdline_extra. Shared with the provision-time repack.
-    avocado-tegra-bootimg "$mkbootimg_bin" "$input_dir/tegraflash-bsp/boot.img" \
-        "$boot_kernel" "$boot_ramdisk" "$input_dir/$boot_image" || exit 1
-
-    echo -e "\033[92m[SUCCESS]\033[0m Assembled ${boot_image} ($(stat -c%s "$input_dir/$boot_image") bytes)."
+    avocado-tegra-build-bootimg "$input_dir" "$initramfs_image" "$boot_image" || exit 1
 fi
 
 # stone validate/create used to run here. avocado-cli commit 35124cb moved that
