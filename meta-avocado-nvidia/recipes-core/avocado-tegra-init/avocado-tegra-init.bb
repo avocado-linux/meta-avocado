@@ -33,6 +33,10 @@ do_install() {
     # when cryptsetup-var is not in the image at all.
     install -d ${D}${sysconfdir}/systemd/system
     ln -sf /dev/null ${D}${sysconfdir}/systemd/system/cryptsetup-var.service
+    # Likewise optee-ftpm-setup.service: avocado-tegra-init runs the script
+    # itself once it knows the boot disk, so the fTPM store is taken from that
+    # disk only. Inert when optee-ftpm-init is not in the image.
+    ln -sf /dev/null ${D}${sysconfdir}/systemd/system/optee-ftpm-setup.service
 
     # systemd 258+ uses initrd-preset/ instead of system-preset/ when
     # /etc/initrd-release exists (i.e. in initramfs images).  The bbclass
@@ -49,4 +53,5 @@ SYSTEMD_AUTO_ENABLE = "enable"
 FILES:${PN} += "${sbindir}/avocado-tegra-init \
                 ${systemd_system_unitdir}/avocado-tegra-init.service \
                 ${sysconfdir}/systemd/system/cryptsetup-var.service \
+                ${sysconfdir}/systemd/system/optee-ftpm-setup.service \
                 ${systemd_unitdir}/initrd-preset/98-avocado-tegra-init.preset"
