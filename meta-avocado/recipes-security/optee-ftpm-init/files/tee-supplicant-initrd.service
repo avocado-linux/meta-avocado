@@ -1,0 +1,19 @@
+[Unit]
+Description=OP-TEE supplicant for the fTPM store, started in the initrd and kept running across the switch to the real root
+DefaultDependencies=no
+# Started by optee-ftpm-setup.sh (see supplicant_mode there for when) once the persistent TEE store is mounted; not enabled on its own.
+IgnoreOnIsolate=yes
+
+[Service]
+# oneshot: the main process is the `-d` parent, which exits as soon as the daemon has opened the TEE device. systemd then
+# tracks no main pid, so a later stop of this unit cannot signal the daemon. A real root that does not ship this unit
+# stops it as a stub at the switch, and that stop kills what is left in the unit's cgroup, so optee-ftpm-setup.sh also
+# moves the daemon out of this unit's cgroup.
+Type=oneshot
+RemainAfterExit=yes
+# The '@' form of ExecStart=: the binary, then argv[0] "@tee-supplicant", then the arguments. At the switch to the real root
+# systemd sends SIGTERM to every process still alive in the initrd, except one whose argv[0] starts with '@'
+# (https://systemd.io/ROOT_STORAGE_DAEMONS/). Without the '@' the supplicant is killed at the switch and, when nothing
+# else serves the fTPM's storage, the fTPM trusted application dies (TEE_ERROR_TARGET_DEAD, 0xffff3024) on the first
+# command from the real root.
+ExecStart=@/usr/sbin/tee-supplicant @tee-supplicant -d
