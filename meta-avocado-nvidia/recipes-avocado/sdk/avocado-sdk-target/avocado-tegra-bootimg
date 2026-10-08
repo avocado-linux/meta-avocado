@@ -32,16 +32,19 @@ if [ -n "${AVOCADO_KERNEL_CMDLINE:-}" ]; then
     cmdline=$AVOCADO_KERNEL_CMDLINE
     echo "Kernel cmdline replaced from project config"
 fi
+
+# Check the base line before the append: cmdline_extra only adds to it, and a
+# line of extras alone has no console= or root=.
+[ -n "$cmdline" ] || {
+    echo "ERROR: no kernel command line recoverable from $base." >&2
+    echo "       A boot.img without one flashes and never boots. Set" >&2
+    echo "       kernel.cmdline, or rebuild the BSP boot.img with KERNEL_ARGS." >&2
+    exit 1
+}
 if [ -n "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
     cmdline="$cmdline $AVOCADO_KERNEL_CMDLINE_EXTRA"
     echo "Kernel cmdline extended from project config: $AVOCADO_KERNEL_CMDLINE_EXTRA"
 fi
-
-[ -n "$cmdline" ] || {
-    echo "ERROR: no kernel command line recoverable from $base." >&2
-    echo "       A boot.img without one flashes and never boots." >&2
-    exit 1
-}
 len=$(printf '%s' "$cmdline" | wc -c)
 [ "$len" -le 511 ] || {
     echo "ERROR: kernel command line is $len bytes; boot.img holds 511." >&2

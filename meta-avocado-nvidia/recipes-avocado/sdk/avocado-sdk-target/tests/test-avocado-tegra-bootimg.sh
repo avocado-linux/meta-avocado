@@ -35,5 +35,7 @@ msg=$(run); rc=$?
 { [ $rc -ne 0 ] && [ ! -e "$w/out.img" ]; } && ok "an empty base cmdline fails closed" || bad "empty: rc=$rc $msg"
 msg=$(run AVOCADO_KERNEL_CMDLINE="console=ttyTCU0,115200"); rc=$?
 { [ $rc -eq 0 ] && [ "$(cat "$w/out.img")" = "console=ttyTCU0,115200" ]; } && ok "an explicit cmdline still packs over an empty base" || bad "replace-empty: rc=$rc $msg"
+msg=$(run AVOCADO_KERNEL_CMDLINE_EXTRA="quiet"); rc=$?
+{ [ $rc -ne 0 ] && [ ! -e "$w/out.img" ]; } && ok "cmdline_extra alone does not stand in for an empty base" || bad "extra-on-empty: rc=$rc $(cat "$w/out.img" 2>/dev/null)"
 
 echo "$pass passed, $fail failed"; [ $fail -eq 0 ]
