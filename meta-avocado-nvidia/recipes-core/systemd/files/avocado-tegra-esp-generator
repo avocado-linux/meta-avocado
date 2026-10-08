@@ -14,10 +14,10 @@
 # platform exposes no Loader* EFI variables at all. The booted rootfs names its
 # disk, and the ESP that belongs to this install is the one on that disk.
 #
-# A generator must not break the boot. Every path that cannot answer the
-# question leaves the unit alone and exits 0, which restores exactly the
-# previous behaviour rather than failing closed on a board where the old
-# ambiguous mount happened to be right.
+# A generator must not break the boot, so it always exits 0. Where the answer
+# cannot be found the unit stays as shipped, unless more than one disk carries
+# an `esp`: then the label is ambiguous and a drop-in skips the mount instead
+# of mounting whichever disk udev happened to pick.
 
 normal_dir="${1:-}"
 [ -n "$normal_dir" ] || exit 0
@@ -53,25 +53,46 @@ esac
 disk_name="${boot_disk#/dev/}"
 [ -d "/sys/block/$disk_name" ] || exit 0
 
-esp_dev=""
-esp_count=0
-for partdir in "/sys/block/$disk_name/$disk_name"*; do
-  [ "$(partname_of "$partdir" || true)" = "esp" ] || continue
-  candidate="/dev/$(basename "$partdir")"
-  [ -b "$candidate" ] || continue
-  esp_dev="$candidate"
-  esp_count=$((esp_count + 1))
-done
+# Count the esp partitions on one disk, leaving the last one found in esp_dev.
+count_esp() {
+  esp_dev=""
+  esp_count=0
+  for partdir in "/sys/block/$1/$1"*; do
+    [ "$(partname_of "$partdir" || true)" = "esp" ] || continue
+    candidate="/dev/$(basename "$partdir")"
+    [ -b "$candidate" ] || continue
+    esp_dev="$candidate"
+    esp_count=$((esp_count + 1))
+  done
+}
 
-if [ "$esp_count" -eq 0 ]; then
-  log "no esp partition on $boot_disk; leaving boot-efi.mount as shipped"
-  exit 0
-fi
+count_esp "$disk_name"
 
-# More than one would mean the booted disk itself carries an ambiguous layout,
-# which is not something to resolve by picking. Say so and change nothing.
-if [ "$esp_count" -gt 1 ]; then
-  log "$esp_count esp partitions on $boot_disk; refusing to choose"
+if [ "$esp_count" -ne 1 ]; then
+  # The booted disk gives no single answer, so the shipped by-partlabel mount
+  # is only safe while no other disk can claim the label. Count across every
+  # disk: with at most one esp in total the symlink cannot point anywhere else,
+  # and with more it may point at a disk that did not boot, so skip the mount
+  # rather than mount the wrong ESP. This matches the initrd, which refuses
+  # when two or more disks carry the label.
+  total=0
+  for blockdir in /sys/block/*; do
+    count_esp "${blockdir##*/}"
+    total=$((total + esp_count))
+  done
+  if [ "$total" -le 1 ]; then
+    log "no unique esp on $boot_disk and $total esp in total; leaving boot-efi.mount as shipped"
+    exit 0
+  fi
+  mkdir -p "$normal_dir/boot-efi.mount.d" || exit 0
+  cat >"$normal_dir/boot-efi.mount.d/10-avocado-booted-disk.conf" <<EOF
+# Written by avocado-tegra-esp-generator. $boot_disk has no single esp and
+# $total esp partitions exist across all disks, so by-partlabel/esp is ambiguous.
+# The path below never exists, which skips the mount.
+[Unit]
+ConditionPathExists=/run/avocado-esp-unresolved
+EOF
+  log "$total esp partitions across disks, none unique on $boot_disk; boot-efi.mount skipped"
   exit 0
 fi
 

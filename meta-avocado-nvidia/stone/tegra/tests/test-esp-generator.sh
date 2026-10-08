@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # avocado-tegra-esp-generator must point boot-efi.mount at the ESP on the disk
-# the system booted from, and leave the unit exactly as shipped (exit 0, no
-# drop-in) whenever it cannot answer that.
+# the system booted from. When the booted disk has no single esp it leaves the
+# unit as shipped (exit 0, no drop-in) if at most one disk has an esp, and writes
+# a drop-in that skips the mount if more than one does. It always exits 0.
 #
 # Runs the real generator against a fake /proc/mounts, /sys/block and /dev. The
 # layout is the one that made the shipped PARTLABEL lookup wrong: an NVMe and an
@@ -113,46 +114,105 @@ else
   fail "esp_alt chosen: $(grep '^What=' "$out_dir/$dropin")"
 fi
 
-# No esp on the booted disk. The other disk's esp must not be borrowed.
+# The cases below each start from an empty tree: the policy counts esp across
+# every disk, so a disk left over from an earlier case would change the answer.
+reset_tree() {
+  rm -rf "${work:?}/sys" "${work:?}/dev"
+  mkdir -p "$work/sys/block" "$work/dev"
+}
+
+# Result helpers for the two non-pinning outcomes.
+shipped() { [ "$rc" -eq 0 ] && [ ! -e "$out_dir/boot-efi.mount.d" ]; }
+skipped() {
+  [ "$rc" -eq 0 ] &&
+    [ "$(grep -c '^ConditionPathExists=/run/avocado-esp-unresolved$' "$out_dir/$dropin" 2>/dev/null)" = 1 ] &&
+    grep -q '^\[Unit\]$' "$out_dir/$dropin" &&
+    ! grep -q '^What=' "$out_dir/$dropin"
+}
+state() { [ -e "$out_dir/boot-efi.mount.d" ] && echo dropin-present || echo dropin-absent; }
+
+# No esp on any disk: the shipped unit cannot be ambiguous, leave it.
+reset_tree
 part sda sda1 APP
-mkdir -p "$work/dev"
 run /dev/sda1
-if [ "$rc" -eq 0 ] && [ ! -e "$out_dir/boot-efi.mount.d" ] && printf '%s' "$err" | grep -q 'no esp partition on /dev/sda'; then
-  pass "no esp on the booted disk writes nothing and exits 0"
+if shipped && printf '%s' "$err" | grep -q 'leaving boot-efi.mount as shipped'; then
+  pass "no esp on any disk leaves the unit as shipped and exits 0"
 else
-  fail "no-esp: rc=$rc dropin=$([ -e "$out_dir/boot-efi.mount.d" ] && echo present || echo absent) err=[$err]"
+  fail "no esp anywhere: rc=$rc $(state) err=[$err]"
+fi
+
+# One esp, on a disk that did not boot: it is the only one, so the shipped label
+# cannot point elsewhere. It is not borrowed as the booted disk's ESP either.
+reset_tree
+part sda sda1 APP
+part sdc sdc1 esp
+run /dev/sda1
+if shipped && ! grep -rq 'sdc1' "$out_dir" 2>/dev/null; then
+  pass "a single esp on another disk is left to the shipped unit, not borrowed"
+else
+  fail "esp on other disk only: rc=$rc $(state)"
+fi
+
+# The booted disk has no esp and two other disks each carry one: by-partlabel/esp
+# could resolve to either, so the mount is skipped.
+reset_tree
+part sda sda1 APP
+part sdb sdb1 esp
+part sdc sdc1 esp
+run /dev/sda1
+if skipped && printf '%s' "$err" | grep -q 'boot-efi.mount skipped'; then
+  pass "no esp on the booted disk and one on each of two others skips the mount"
+else
+  fail "two other disks: rc=$rc err=[$err] dropin=$(cat "$out_dir/$dropin" 2>/dev/null)"
 fi
 
 # Two esp on the booted disk is an ambiguous layout: refuse rather than pick.
+reset_tree
 part sdb sdb1 APP
 part sdb sdb2 esp
 part sdb sdb3 esp
 run /dev/sdb1
-if [ "$rc" -eq 0 ] && [ ! -e "$out_dir/boot-efi.mount.d" ] && printf '%s' "$err" | grep -q 'refusing to choose'; then
-  pass "two esp on the booted disk refuses to choose and exits 0"
+if skipped; then
+  pass "two esp on the booted disk skips the mount and exits 0"
 else
-  fail "ambiguous: rc=$rc dropin=$([ -e "$out_dir/boot-efi.mount.d" ] && echo present || echo absent) err=[$err]"
+  fail "ambiguous: rc=$rc err=[$err] dropin=$(cat "$out_dir/$dropin" 2>/dev/null)"
+fi
+
+# The booted disk's single esp wins even when another disk carries one too: the
+# pinned What= is the whole point of the generator.
+reset_tree
+part sda sda1 APP
+part sda sda2 esp
+part sdb sdb1 esp
+run /dev/sda1
+if [ "$rc" -eq 0 ] && [ "$(grep '^What=' "$out_dir/$dropin" 2>/dev/null)" = "What=$work/dev/sda2" ] &&
+  ! grep -q '^ConditionPathExists=' "$out_dir/$dropin"; then
+  pass "one esp on the booted disk is pinned even with another disk's esp present"
+else
+  fail "pin with other disk: rc=$rc dropin=$(cat "$out_dir/$dropin" 2>/dev/null)"
 fi
 
 # nvme0n11 is a sibling namespace of nvme0n1 in sysfs, never a child. Its esp
 # must not be found by a prefix match on the disk name.
+reset_tree
 part nvme1n1 nvme1n1p1 APP
 part nvme1n11 nvme1n11p11 esp
 run /dev/nvme1n1p1
-if [ "$rc" -eq 0 ] && [ ! -e "$out_dir/boot-efi.mount.d" ]; then
+if shipped; then
   pass "a sibling namespace's esp is not taken for this disk's"
 else
-  fail "sibling namespace: rc=$rc dropin=$([ -e "$out_dir/boot-efi.mount.d" ] && echo present || echo absent)"
+  fail "sibling namespace: rc=$rc $(state)"
 fi
 
 # An esp present in sysfs with no device node is skipped, not written down.
+reset_tree
 part vda vda1 APP
 part vda vda2 esp nodev
 run /dev/vda1
-if [ "$rc" -eq 0 ] && [ ! -e "$out_dir/boot-efi.mount.d" ]; then
+if shipped; then
   pass "an esp with no block device node is skipped"
 else
-  fail "no node: rc=$rc dropin=$([ -e "$out_dir/boot-efi.mount.d" ] && echo present || echo absent)"
+  fail "no node: rc=$rc $(state)"
 fi
 
 # Root on something that is not a partition of a disk this knows (device-mapper,
@@ -190,7 +250,7 @@ fi
 echo
 # A case that is skipped or exits the script early would otherwise read as a
 # pass; the count is what says every case ran.
-expected_checks=13
+expected_checks=16
 echo "checks: $checks/$expected_checks run"
 if [ "$checks" -ne "$expected_checks" ]; then
   echo "test-esp-generator: FAIL (ran $checks of $expected_checks checks)"
