@@ -3,6 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.18:${THISDIR}/files:"
 SRC_URI += " \
   file://avocado-core.cfg \
   file://avocado-extra.cfg \
+  file://avocado-modules.cfg \
 "
 
 # spi-tegra114 drops a software-held chip select on the next spi_message, which
