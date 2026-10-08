@@ -17,10 +17,10 @@ def generate_flashvar_settings(d):
     vars = sorted([v for v in d.getVar('TEGRA_FLASHVARS').split() if d.getVar('TEGRA_FLASHVAR_' + v)])
     need_subst = ' '.join([v for v in vars if '@' in d.getVar('TEGRA_FLASHVAR_' + v)])
     result = 'FLASHVARS="{}"\nOVERLAY_DTB_FILE="{}"\n'.format(need_subst, d.getVar('OVERLAY_DTB_FILE'))
-    # Add DCE_OVERLAY from TEGRA_FLASHVAR_DCE_OVERLAY variable
-    dce_overlay = d.getVar('TEGRA_FLASHVAR_DCE_OVERLAY') or ""
-    if dce_overlay:
-        result += 'DCE_OVERLAY="{}"\n'.format(dce_overlay)
+    # Always emit DCE_OVERLAY, empty when the MACHINE sets none (Orin): a
+    # carrier's CARRIER_FV_DCE_OVERLAY can only rewrite a line that exists.
+    # The flash helper skips --dce_overlay_dtb for an empty value.
+    result += 'DCE_OVERLAY="{}"\n'.format(d.getVar('TEGRA_FLASHVAR_DCE_OVERLAY') or "")
     result += 'CHIPID={}\nPLUGIN_MANAGER_OVERLAYS="{}"\n'.format(d.getVar('NVIDIA_CHIP'), ','.join(d.getVar('TEGRA_PLUGIN_MANAGER_OVERLAYS').split()))
     flashvar_values = '\n'.join(['{}="{}"'.format(v, d.getVar('TEGRA_FLASHVAR_' + v)) for v in d.getVar('TEGRA_FLASHVARS').split() if d.getVar('TEGRA_FLASHVAR_' + v)])
     if flashvar_values:
