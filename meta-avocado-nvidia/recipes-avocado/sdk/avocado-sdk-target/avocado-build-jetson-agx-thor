@@ -144,34 +144,10 @@ if [ -n "$boot_image" ]; then
         exit 1
     }
 
-    # Kernel command line. Take it from the BSP-built boot.img rather than
-    # restating KERNEL_ARGS here, so the Yocto build stays the single source of
-    # truth. Android boot_img_hdr: cmdline is 512 bytes at offset 0x40.
-    #
-    # Fail closed on an empty result. An empty cmdline is silently fatal: UEFI
-    # falls back to the stock NVIDIA bootargs baked into the kernel DTB, which
-    # on tegra264 point console at a different tegra-utc instance than the one
-    # wired out -- the board flashes and boots to a dead console.
-    bsp_bootimg="$input_dir/tegraflash-bsp/boot.img"
-    boot_cmdline=""
-    if [ -f "$bsp_bootimg" ]; then
-        boot_cmdline=$(dd if="$bsp_bootimg" bs=1 skip=64 count=512 2>/dev/null | tr -d '\0') || boot_cmdline=""
-    fi
-    [ -n "$boot_cmdline" ] || {
-        echo -e "\033[91m[ERROR]\033[0m No kernel command line recoverable from $bsp_bootimg." >&2
-        echo -e "        Building boot.img without one yields a board that flashes and never boots." >&2
-        exit 1
-    }
-
-    echo -e "  Kernel:   ${boot_kernel}"
-    echo -e "  Ramdisk:  ${boot_ramdisk}"
-    echo -e "  Cmdline:  ${boot_cmdline}"
-
-    "$mkbootimg_bin" \
-        --kernel "$boot_kernel" \
-        --ramdisk "$boot_ramdisk" \
-        --cmdline "$boot_cmdline" \
-        --output "$input_dir/$boot_image"
+    # Command line: the BSP-built boot.img's, composed with the project's
+    # kernel.cmdline / cmdline_extra. Shared with the provision-time repack.
+    avocado-tegra-bootimg "$mkbootimg_bin" "$input_dir/tegraflash-bsp/boot.img" \
+        "$boot_kernel" "$boot_ramdisk" "$input_dir/$boot_image" || exit 1
 
     echo -e "\033[92m[SUCCESS]\033[0m Assembled ${boot_image} ($(stat -c%s "$input_dir/$boot_image") bytes)."
 fi
