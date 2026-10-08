@@ -123,4 +123,15 @@ printf '%s\n' "$rcode" | grep -q 'file://tee-supplicant-initrd.service' \
     && printf '%s\n' "$rcode" | grep -q 'FILES:${PN} += "${systemd_system_unitdir}/tee-supplicant-initrd.service"' \
     && ok "the recipe fetches, installs and packages the supplicant unit" || bad "recipe does not ship tee-supplicant-initrd.service"
 
+# In the initrd, optee-ftpm-setup runs the only supplicant, on the persistent
+# store. optee-client's units (WantedBy=basic.target) would start a second one
+# there on the default (tmpfs) store, and one of the two fails on the
+# single-open supplicant device. Both must skip the initrd.
+recipe=$here/../optee-ftpm-init.bb
+for u in tee-supplicant tee-ftpm-modprobe; do
+    c=$here/../files/$u-initrd.conf
+    { grep -qx 'ConditionPathExists=!/etc/initrd-release' "$c" 2>/dev/null && grep -q "$u.service.d" "$recipe"; } \
+        && ok "$u.service skips the initrd" || bad "$u.service has no initrd drop-in installed"
+done
+
 echo "$pass passed, $fail failed"; [ $fail -eq 0 ]
