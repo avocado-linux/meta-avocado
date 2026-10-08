@@ -99,7 +99,10 @@ fi
 # that makes that sequence deterministic instead of a race.
 TEE_STORE=/var/lib/tee
 mkdir -p "$TEE_STORE"
-if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
+# Always mount with the store's type: an untyped mount of a blank partition
+# probes every filesystem, and a failing probe can take the kernel down (the
+# 6.18 erofs probe double-frees in put_fs_context).
+if ! mount -t btrfs "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
     # Probe before formatting, same intent as cryptsetup-var.sh's ensure_fs:
     # mount can fail for reasons other than "no filesystem yet" (a dirty btrfs
     # needing recovery, a foreign signature), and -f would clobber the recovery
@@ -125,7 +128,7 @@ if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
     # If we cannot format and mount the persistent store, do not fall through:
     # tee-supplicant would keep the fTPM NV on the initramfs tmpfs, silently
     # non-persistent. Skip fTPM bring-up instead so /var takes its Argon2id path.
-    if ! mkfs.btrfs -M -L teestore "$TEE_DEV" || ! mount "$TEE_DEV" "$TEE_STORE"; then
+    if ! mkfs.btrfs -M -L teestore "$TEE_DEV" || ! mount -t btrfs "$TEE_DEV" "$TEE_STORE"; then
         echo "optee-ftpm: could not prepare persistent TEE store on $TEE_DEV;" \
              "skipping fTPM bring-up (/var will fall back to Argon2id)" >&2
         exit 0

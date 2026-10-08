@@ -16,4 +16,9 @@ res(){ OPTEE_FTPM_SETUP_LIB=1 AVOCADO_SYSFS="$w/sys" bash -c '. "$1"; store_on_d
 [ -z "$(res sda /dev/disk/by-partlabel/reserved)" ] && ok "a boot disk without the label resolves to nothing, not another disk" || bad "sda: $(res sda /dev/disk/by-partlabel/reserved)"
 [ -z "$(res nvme1n1 /dev/disk/by-partlabel/reserved)" ] && ok "an unknown disk resolves to nothing" || bad "unknown"
 
+# The store is btrfs. A mount without -t probes every filesystem on a blank
+# partition, and the 6.18 erofs probe double-frees in put_fs_context (oops).
+untyped=$(grep -nE '(^|[^a-z])mount +"\$TEE_DEV"' "$script")
+[ -z "$untyped" ] && ok "the store is mounted with its type, never probed" || bad "untyped mount: $untyped"
+
 echo "$pass passed, $fail failed"; [ $fail -eq 0 ]
