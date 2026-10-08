@@ -149,9 +149,14 @@ fi
 # as optee-ftpm-setup.service (masked by this recipe, like cryptsetup-var):
 # only this script knows the boot disk, and the store must never come from
 # another disk that also carries the label.
+#
+# Non-fatal, as the unit was: the setup script exits 1 when the image declares
+# no ftpm capability or the kernel has no TEE, and under `set -e` that would
+# stop the initrd before /var is mounted.
 FTPM_SETUP=/usr/libexec/optee-ftpm/optee-ftpm-setup.sh
 if [ -x "$FTPM_SETUP" ]; then
-    "$FTPM_SETUP" "${rootdiskname:-}"
+    "$FTPM_SETUP" "${rootdiskname:-}" ||
+        echo "avocado-tegra-init: optee-ftpm-setup exited $?, continuing without a persistent fTPM store"
 fi
 
 # Encrypted /var: a per-runtime opt-in. avocado-cli drops the marker into the
