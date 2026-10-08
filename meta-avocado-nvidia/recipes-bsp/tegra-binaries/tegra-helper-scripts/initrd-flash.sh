@@ -543,6 +543,16 @@ mount_partition() {
     # Create mount point
     mkdir -p "$mnt_point"
 
+    # The node can exist before the kernel has finished probing the disk
+    # (slow over a remote USB/IP link: "Can't open blockdev"); wait until
+    # it reads, up to 15 s.
+    local tries=0
+    until dd if="$dev" of=/dev/null bs=512 count=1 status=none 2>/dev/null; do
+        tries=$((tries + 1))
+        [ $tries -ge 30 ] && break
+        sleep 0.5
+    done
+
     # Detect filesystem type
     fstype=$(detect_filesystem "$dev")
 

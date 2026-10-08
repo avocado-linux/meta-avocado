@@ -166,7 +166,12 @@ copy_to_device() {
     local src="$1"
     local dst="$2"
     if [ -z "$HAVEBMAPTOOL" ]; then
-	dd if="$src" of="$dst" conv=fsync status=none >/dev/null 2>&1 || return 1
+	# Large blocks: dd's default 512 B writes to a block device go through
+	# the page cache as partial pages, and the kernel reads each 4 KiB page
+	# from the device before writing it. Over USB mass storage (initrd-flash
+	# export) that doubled the traffic and made it latency-bound: 64 MiB took
+	# 95 s at bs=512 vs 23 s at bs=4M through the same bridge.
+	dd if="$src" of="$dst" bs=4M conv=fsync status=none >/dev/null 2>&1 || return 1
 	return 0
     fi
     local bmap=$(mktemp)
