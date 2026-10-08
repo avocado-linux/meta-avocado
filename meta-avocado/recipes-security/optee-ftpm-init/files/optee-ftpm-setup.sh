@@ -18,6 +18,26 @@
 # CFG_RPMB_FS=y. So the seal is created on first boot and /var falls back to
 # Argon2id on reboot. See optee-ftpm-init.bb.
 set -u
+
+# The store partition named by @TEE_STORE_DEV@ (a /dev/disk/by-partlabel/
+# path), looked up on one disk only: $1 is the disk the root filesystem was
+# found on (e.g. mmcblk0), passed by a platform initrd that knows it. A
+# partlabel symlink names whichever disk udev saw last when several carry the
+# label (an eMMC and an NVMe that were both provisioned), and the fTPM's NV
+# must not land on, or move to, a disk the device did not boot from. Prints
+# the device; prints nothing when the label is not on that disk.
+store_on_disk() {
+    _disk=$1 _label=${2##*/}
+    for _p in "${AVOCADO_SYSFS:-/sys}/block/$_disk/$_disk"*; do
+        [ -f "$_p/uevent" ] || continue
+        if grep -qx "PARTNAME=$_label" "$_p/uevent"; then
+            echo "/dev/${_p##*/}"
+            return 0
+        fi
+    done
+}
+[ "${OPTEE_FTPM_SETUP_LIB:-}" = 1 ] && return 0
+
 # Surface progress on the console (the initrd journal is not forwarded here).
 exec >/dev/console 2>&1
 
@@ -55,6 +75,12 @@ check_optee_available
 
 # Substituted from OPTEE_FTPM_TEE_STORE_DEV by optee-ftpm-init.bb.
 TEE_DEV=@TEE_STORE_DEV@
+BOOT_DISK=${1:-}
+if [ -n "$BOOT_DISK" ] && [ "${TEE_DEV#/dev/disk/by-partlabel/}" != "$TEE_DEV" ]; then
+    TEE_DEV=$(store_on_disk "$BOOT_DISK" "$TEE_DEV")
+    [ -n "$TEE_DEV" ] || { echo "optee-ftpm: no @TEE_STORE_DEV@ partition on the boot disk $BOOT_DISK, skipping fTPM bring-up"; exit 0; }
+    echo "optee-ftpm: TEE store $TEE_DEV (on the boot disk $BOOT_DISK)"
+fi
 [ -b "$TEE_DEV" ] || { echo "optee-ftpm: no TEE store partition at $TEE_DEV, skipping fTPM bring-up"; exit 0; }
 
 # Mount the persistent TEE store, formatting it (btrfs) on first boot.
@@ -73,7 +99,10 @@ TEE_DEV=@TEE_STORE_DEV@
 # that makes that sequence deterministic instead of a race.
 TEE_STORE=/var/lib/tee
 mkdir -p "$TEE_STORE"
-if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
+# Always mount with the store's type: an untyped mount of a blank partition
+# probes every filesystem, and a failing probe can take the kernel down (the
+# 6.18 erofs probe double-frees in put_fs_context).
+if ! mount -t btrfs "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
     # Probe before formatting, same intent as cryptsetup-var.sh's ensure_fs:
     # mount can fail for reasons other than "no filesystem yet" (a dirty btrfs
     # needing recovery, a foreign signature), and -f would clobber the recovery
@@ -99,7 +128,7 @@ if ! mount "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
     # If we cannot format and mount the persistent store, do not fall through:
     # tee-supplicant would keep the fTPM NV on the initramfs tmpfs, silently
     # non-persistent. Skip fTPM bring-up instead so /var takes its Argon2id path.
-    if ! mkfs.btrfs -M -L teestore "$TEE_DEV" || ! mount "$TEE_DEV" "$TEE_STORE"; then
+    if ! mkfs.btrfs -M -L teestore "$TEE_DEV" || ! mount -t btrfs "$TEE_DEV" "$TEE_STORE"; then
         echo "optee-ftpm: could not prepare persistent TEE store on $TEE_DEV;" \
              "skipping fTPM bring-up (/var will fall back to Argon2id)" >&2
         exit 0

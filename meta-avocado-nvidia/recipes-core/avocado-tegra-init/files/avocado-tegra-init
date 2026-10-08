@@ -143,6 +143,17 @@ if [ -z "$vardev" ]; then
     done
 fi
 
+# Persistent fTPM: when the runtime carries optee-ftpm-init, bring up its
+# store (the `reserved` partition) and tee-supplicant now, on the disk the
+# rootfs came from, before the TPM2 unlock of /var below. Run here rather than
+# as optee-ftpm-setup.service (masked by this recipe, like cryptsetup-var):
+# only this script knows the boot disk, and the store must never come from
+# another disk that also carries the label.
+FTPM_SETUP=/usr/libexec/optee-ftpm/optee-ftpm-setup.sh
+if [ -x "$FTPM_SETUP" ]; then
+    "$FTPM_SETUP" "${rootdiskname:-}"
+fi
+
 # Encrypted /var: a per-runtime opt-in. avocado-cli drops the marker into the
 # initramfs when avocado.yaml sets `var.encrypt`; the plaintext default has no
 # marker and takes the unchanged path below. cryptsetup-var.sh (from the feed's
