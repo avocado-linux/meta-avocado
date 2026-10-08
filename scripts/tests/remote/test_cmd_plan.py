@@ -655,3 +655,17 @@ def test_plan_refuses_an_arming_profile_that_maps_no_image_to_an_esp():
             part["type_guid"] = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
     res, ops, rec = plan(profile, phash)
     assert_clean_refusal(res, ops, rec, "EFI System Partition")
+
+
+def test_a_disk_with_partitions_is_refused_and_the_refusal_names_the_way_out():
+    from types import SimpleNamespace
+
+    from avocado_flash_remote import cmd_plan
+
+    ops = SimpleNamespace(lsblk=lambda dev, cols, check=False: OpResult(rc=0, stdout=b"mmcblk0 disk\nmmcblk0p1 part\nmmcblk0p2 part\n"))
+    profile = SimpleNamespace(target=SimpleNamespace(device="/dev/mmcblk0"))
+    with pytest.raises(cmd_plan._Refusal) as err:
+        cmd_plan._check_empty(ops, profile)
+    text = str(err.value)
+    assert "lsblk shows 2 partition(s) on /dev/mmcblk0; refusing a disk that is not empty" in text
+    assert "expected after an earlier install" in text and "wipefs -a" in text and "plan again" in text

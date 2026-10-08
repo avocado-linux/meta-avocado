@@ -266,7 +266,11 @@ def _check_empty(ops: Ops, profile) -> None:
     out = ops.lsblk(dev, "NAME,TYPE", check=True).text
     parts = [ln for ln in out.splitlines() if len(ln.split()) >= 2 and ln.split()[1] == "part"]
     if parts:
-        raise _Refusal(f"lsblk shows {len(parts)} partition(s) on {dev}; refusing a disk that is not empty")
+        raise _Refusal(
+            f"lsblk shows {len(parts)} partition(s) on {dev}; refusing a disk that is not empty "
+            "(expected after an earlier install: clear its signatures with wipefs -a on each partition and on the "
+            "device, confirm check passes, then plan again)"
+        )
     res = ops.sfdisk_dump(dev, check=False)
     if res.rc != 0:
         if _NO_TABLE_RE.search(res.stderr):

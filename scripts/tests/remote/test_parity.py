@@ -1477,7 +1477,8 @@ def test_stage_case(name, tmp_path, golden):
         assert kit_exit != 0
         assert not r.ok and isinstance(r.error, HostError) and "verification" in str(r.error)
         assert sum(1 for c in r.calls if c.kind == "put_tar") == 1  # copied, then the check failed
-        assert not any("staged" in ln for ln in r.out)
+        # The success claim is "staged to <dir>"; progress lines may name the staging directory.
+        assert not any("staged to" in ln for ln in r.out)
     elif m.port == "ssh_fail":
         assert kit_exit != 0
         assert not r.ok and isinstance(r.error, HostError)

@@ -408,7 +408,17 @@ def _do_write(ctx: _Ctx) -> int:
     for role, image in sorted(ctx.profile.images.items()):
         ctx.out(f"  image {role}: {image.file} -> partition {image.partition}")
     ask = ctx.confirm or input
-    typed = ask(f"This erases and rewrites {device} on {args.host}. Retype the device to continue: ")
+    if ctx.confirm is None and not sys.stdin.isatty():
+        _err(
+            f"{PREFIX}: write needs an interactive terminal to retype the target device; run it from a terminal "
+            "(not through a pipe, a redirect or a command box that gives no input); nothing was written to the board"
+        )
+        return 1
+    try:
+        typed = ask(f"This erases and rewrites {device} on {args.host}. Retype the device to continue: ")
+    except EOFError:
+        _err(f"{PREFIX}: no answer was given at the confirmation prompt (end of input): refusing; nothing was written to the board")
+        return 1
     if str(typed).strip() != device:
         _err(f"{PREFIX}: confirmation does not match {device}: refusing; nothing was written to the board")
         return 1

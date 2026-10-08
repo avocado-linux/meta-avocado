@@ -1426,3 +1426,26 @@ def test_runner_only_is_a_stage_option_and_takes_no_images(images, tmp_path, cap
     rc, _ = run(args(images, tmp_path, "stage", "--runner-only"), board)
     assert rc == 64
     assert "--images" in capsys.readouterr().err
+
+
+def test_write_without_a_terminal_says_it_needs_one_and_writes_nothing(images, tmp_path, board, capsys, monkeypatch):
+    rid = _stage_and_plan(images, tmp_path, board)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
+    rc, _ = run(args(images, tmp_path, "write", "--run-id", rid), board, confirm=None)
+    assert rc == 1
+    assert "write" not in board.subs()
+    err = capsys.readouterr().err
+    assert "needs an interactive terminal" in err and "nothing was written" in err
+
+
+def test_write_with_end_of_input_at_the_prompt_refuses_with_a_clear_message(images, tmp_path, board, capsys):
+    rid = _stage_and_plan(images, tmp_path, board)
+
+    def eof(prompt):
+        raise EOFError
+
+    rc, _ = run(args(images, tmp_path, "write", "--run-id", rid), board, confirm=eof)
+    assert rc == 1
+    assert "write" not in board.subs()
+    err = capsys.readouterr().err
+    assert "no answer was given" in err and "nothing was written" in err

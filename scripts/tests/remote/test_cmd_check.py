@@ -698,3 +698,14 @@ def test_l4t_default_boot_mode_absent_reads_unset_and_changes_no_count(efivars):
     res, _ = run(efivars)
     assert "INFO  L4TDefaultBootMode: unset" in res.lines
     assert res.exit_code == 0
+
+
+def test_a_present_partition_table_names_the_way_out():
+    from types import SimpleNamespace
+
+    ops = SimpleNamespace(sfdisk_dump=lambda dev: OpResult(rc=0, stdout=b"label: gpt\n"))
+    c = SimpleNamespace(device=DISK, require_device=lambda: None, ops=ops)
+    ok, detail = cmd_check._no_partition_table(c)
+    assert not ok
+    assert "a partition table is present" in detail
+    assert "expected after an earlier install" in detail and "wipefs -a" in detail

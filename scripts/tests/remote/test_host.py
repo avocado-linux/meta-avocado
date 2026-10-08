@@ -1661,3 +1661,68 @@ def test_check_staged_build_refuses_every_branch_but_an_exact_match(res, exc, te
 def test_check_staged_build_accepts_the_exact_digest_in_either_case():
     assert _staged_build(RunResult(0, f"{_GOOD}  /run/x/runner.pyz\n".encode(), b"")) is None
     assert _staged_build(RunResult(0, f"{_GOOD.upper()}  /run/x/runner.pyz\n".encode(), b"")) is None
+
+
+# --- sudo password: asked once through a file, never through argv or the environment's value ----------------
+
+
+def test_password_file_is_read_when_it_is_private(tmp_path, monkeypatch):
+    f = tmp_path / "pw"
+    f.write_text("s3cret\nignored second line\n")
+    f.chmod(0o600)
+    monkeypatch.setenv(host.SUDO_PASSWORD_FILE_ENV, str(f))
+    assert host.default_ask_password() == "s3cret"
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o604, 0o644, 0o660])
+def test_password_file_with_group_or_other_access_is_refused(tmp_path, monkeypatch, mode):
+    f = tmp_path / "pw"
+    f.write_text("s3cret\n")
+    f.chmod(mode)
+    monkeypatch.setenv(host.SUDO_PASSWORD_FILE_ENV, str(f))
+    with pytest.raises(host.HostError, match="mode 0600") as err:
+        host.default_ask_password()
+    assert "s3cret" not in str(err.value)
+
+
+def test_password_file_that_is_missing_or_not_a_regular_file_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv(host.SUDO_PASSWORD_FILE_ENV, str(tmp_path / "nope"))
+    with pytest.raises(host.HostError, match="cannot be read"):
+        host.default_ask_password()
+    monkeypatch.setenv(host.SUDO_PASSWORD_FILE_ENV, str(tmp_path))
+    with pytest.raises(host.HostError, match="regular file"):
+        host.default_ask_password()
+
+
+def test_no_terminal_and_no_password_file_names_the_way_out(monkeypatch):
+    monkeypatch.delenv(host.SUDO_PASSWORD_FILE_ENV, raising=False)
+    monkeypatch.setattr(host.sys.stdin, "isatty", lambda: False)
+    with pytest.raises(host.HostError) as err:
+        host.default_ask_password()
+    assert host.SUDO_PASSWORD_FILE_ENV in str(err.value) and "terminal" in str(err.value)
+
+
+def test_the_prompt_says_what_the_password_is_for(monkeypatch):
+    monkeypatch.delenv(host.SUDO_PASSWORD_FILE_ENV, raising=False)
+    monkeypatch.setattr(host.sys.stdin, "isatty", lambda: True)
+    seen = []
+    monkeypatch.setattr(host.getpass, "getpass", lambda prompt="": seen.append(prompt) or "pw")
+    assert host.default_ask_password() == "pw"
+    assert "login user" in seen[0] and "sudo" in seen[0] and "once per command" in seen[0]
+
+
+# --- stage says what it is doing ---------------------------------------------------------------------------
+
+
+def test_stage_reports_the_copy_the_stream_and_the_remote_verification(kit, resolved):
+    images, bundle_path, files = kit
+    t = StubTransport(handler=handler_for(10_000_000))
+    lines = []
+    host.stage(t, resolved.profile, resolved, images, bundle_path, out=lines.append)
+    text = "\n".join(lines)
+    assert "stage: copying " in text and "MiB" in text
+    assert "no progress is shown until it ends" in text
+    assert "stage: transferred " in text
+    assert "the board verified the staged images against MANIFEST.hashes" in text
+    # the order is the order of the work
+    assert text.index("copying") < text.index("transferred") < text.index("the board verified")

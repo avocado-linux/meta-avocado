@@ -171,7 +171,10 @@ def _no_partition_table(c: _Ctx):
     if res.rc != 0 and _NO_TABLE_RE.search(text):
         return True, "sfdisk --dump reports no partition table"
     if res.rc == 0:
-        return False, "a partition table is present (sfdisk --dump succeeded)"
+        return False, (
+            "a partition table is present (sfdisk --dump succeeded); expected after an earlier install: "
+            "clear its signatures (wipefs -a on each partition and on the device), then run check again"
+        )
     first = text.strip().splitlines()[0] if text.strip() else ""
     return False, f"sfdisk --dump failed rc={res.rc}: {first}"
 

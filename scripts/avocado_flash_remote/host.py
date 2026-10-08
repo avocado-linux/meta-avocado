@@ -30,11 +30,13 @@ import re
 import secrets
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -348,10 +350,38 @@ def sudo_probe(transport) -> bool:
     return rc == 0
 
 
+SUDO_PASSWORD_FILE_ENV = "AVOCADO_FLASH_SUDO_PASSWORD_FILE"
+
+
+def _password_from_file(path: str) -> str:
+    """Read the sudo password from a file the caller owns, for a wrapper that asks once for several runs.
+
+    The file must be a regular file owned by this user with no group or other access, so a password left
+    in a shared place is refused rather than used.
+    """
+    try:
+        st = os.stat(path)
+    except OSError as exc:
+        raise HostError(f"{SUDO_PASSWORD_FILE_ENV} names a file that cannot be read: {exc.strerror}") from None
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        raise HostError(f"{SUDO_PASSWORD_FILE_ENV} must name a regular file owned by you with mode 0600")
+    with open(path, encoding="utf-8") as handle:
+        return handle.readline().rstrip("\n")
+
+
 def default_ask_password() -> str:
+    path = os.environ.get(SUDO_PASSWORD_FILE_ENV)
+    if path:
+        return _password_from_file(path)
     if not sys.stdin.isatty():
-        raise HostError("sudo needs a password but there is no terminal to ask on; configure sudo -n access or run from a terminal")
-    return getpass.getpass("sudo password on the board: ")
+        raise HostError(
+            "sudo needs a password but there is no terminal to ask on; configure sudo -n access, "
+            f"run from a terminal, or point {SUDO_PASSWORD_FILE_ENV} at a mode-0600 file holding it"
+        )
+    return getpass.getpass(
+        "Password for the board's login user, used with sudo for the privileged steps of this command "
+        "(asked once per command): "
+    )
 
 
 PRIVILEGE_ROOT = "root (no sudo)"
@@ -708,6 +738,12 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
 
     resolved.recheck()
     total = sum(r[2] for r in rows)
+    out(
+        f"stage: copying {len(rows)} file(s), {total / (1 << 20):.0f} MiB, to {staging_dir} on the board "
+        "(memory-backed or scratch space, no disk partition is written)"
+    )
+    for name, _src, size, _sha in rows:
+        out(f"  {name}  {size / (1 << 20):.1f} MiB")
     probe_board_tools(transport)
     check_staging_space(transport, profile, total)
 
@@ -724,17 +760,23 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     files = {name: src for name, src, _s, _h in rows}
     bundle_name = Path(bundle_path).name
     modes = {name: (0o755 if name == bundle_name else 0o644) for name in files}
+    out("stage: transferring as one stream over ssh; no progress is shown until it ends, so a large set can take minutes")
+    started = time.monotonic()
     put = transport.put_tar(files, staging_dir, modes)
     if put.rc != 0:
         raise HostError(f"copy to the board failed (rc={put.rc})")
+    elapsed = time.monotonic() - started
+    out(f"stage: transferred {total / (1 << 20):.0f} MiB in {elapsed:.0f} s ({total / (1 << 20) / max(elapsed, 0.001):.1f} MiB/s)")
 
     if not runner_only:
+        out("stage: verifying the image checksums on the board against MANIFEST.hashes")
         check = transport.run(
             ["sh", "-c", 'cd "$1" && sha256sum --strict -c MANIFEST.hashes', "sh", staging_dir],
             None, sudo=False, timeout=TAR_TIMEOUT,
         )
         if check.rc != 0:
             raise HostError("remote hash verification of the images failed")
+        out("stage: the board verified the staged images against MANIFEST.hashes")
     unzip = "import sys, zipfile; sys.exit(1 if zipfile.ZipFile(sys.argv[1]).testzip() else 0)"
     # Privileged like the runner: the interpreter named here is the one that will run the bundle as root.
     require_interpreter(transport, python)
