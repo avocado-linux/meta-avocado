@@ -26,8 +26,23 @@ input_dir=$1 initramfs_image=$2 boot_image=$3
 # version's content-addressed kernel sysroot, falling back to the rootfs copy:
 # the precedence avocado-cli uses for AVOCADO_PROVISION_KERNEL_IMAGE. Never
 # glob kernel/*: it keeps every kernel this volume has ever installed.
+#
+# No pinned kernel (a project whose rootfs.packages leave out the kernel
+# meta-package): carry the BSP boot.img as built, the same rule provision
+# follows, so an update ships what a flash would. kernel.cmdline and
+# cmdline_extra need a repack, and so a kernel; fail like provision does.
 set -- "$AVOCADO_PREFIX"/rootfs/boot/Image-*
-[ $# -eq 1 ] && [ -e "$1" ] || {
+if [ $# -eq 1 ] && [ ! -e "$1" ]; then
+    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+        echo "ERROR: kernel.cmdline / cmdline_extra is set, but no kernel is pinned in" >&2
+        echo "       $AVOCADO_PREFIX/rootfs/boot to repack $boot_image with it." >&2
+        exit 1
+    fi
+    cp "$input_dir/tegraflash-bsp/boot.img" "$input_dir/$boot_image"
+    echo "No pinned kernel: $boot_image is the BSP boot.img as built"
+    exit 0
+fi
+[ $# -eq 1 ] || {
     echo "ERROR: expected one pinned kernel in $AVOCADO_PREFIX/rootfs/boot, found: $*" >&2
     exit 1
 }
