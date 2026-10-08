@@ -1,0 +1,58 @@
+#!/bin/sh
+# Pack a Tegra Android boot.img (kernel + initramfs + cmdline) for the
+# A_kernel/B_kernel partitions. One implementation for both callers: the
+# build hooks (OTA payload) and stone-provision-tegraflash.sh (flash time).
+#
+#   avocado-tegra-bootimg <mkbootimg> <base boot.img> <kernel Image> <ramdisk> <output>
+#
+# Command line: read from the BSP-built <base boot.img> header, so the Yocto
+# build (KERNEL_ARGS) stays the source of truth, then composed with the
+# project's kernel config, which avocado-cli exports:
+#
+#   AVOCADO_KERNEL_CMDLINE        replace the line outright
+#   AVOCADO_KERNEL_CMDLINE_EXTRA  append to it
+#
+# Fails closed on an empty line (UEFI falls back to the stock bootargs in the
+# kernel DTB, and the board boots to a dead console) and on one longer than
+# the header's 511 usable bytes (mkbootimg would spill the rest into
+# extra_cmdline, which L4TLauncher does not read).
+set -eu
+
+[ $# -eq 5 ] || { echo "usage: $0 <mkbootimg> <base boot.img> <kernel> <ramdisk> <output>" >&2; exit 2; }
+mkbootimg_bin=$1 base=$2 kernel=$3 ramdisk=$4 out=$5
+
+for f in "$base" "$kernel" "$ramdisk"; do
+    [ -f "$f" ] || { echo "ERROR: $f not found" >&2; exit 1; }
+done
+[ -x "$mkbootimg_bin" ] || { echo "ERROR: mkbootimg '$mkbootimg_bin' not executable" >&2; exit 1; }
+
+# Android boot_img_hdr: cmdline is 512 bytes at offset 0x40.
+cmdline=$(dd if="$base" bs=1 skip=64 count=512 2>/dev/null | tr -d '\0')
+if [ -n "${AVOCADO_KERNEL_CMDLINE:-}" ]; then
+    cmdline=$AVOCADO_KERNEL_CMDLINE
+    echo "Kernel cmdline replaced from project config"
+fi
+
+# Check the base line before the append: cmdline_extra only adds to it, and a
+# line of extras alone has no console= or root=.
+[ -n "$cmdline" ] || {
+    echo "ERROR: no kernel command line recoverable from $base." >&2
+    echo "       A boot.img without one flashes and never boots. Set" >&2
+    echo "       kernel.cmdline, or rebuild the BSP boot.img with KERNEL_ARGS." >&2
+    exit 1
+}
+if [ -n "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    cmdline="$cmdline $AVOCADO_KERNEL_CMDLINE_EXTRA"
+    echo "Kernel cmdline extended from project config: $AVOCADO_KERNEL_CMDLINE_EXTRA"
+fi
+len=$(printf '%s' "$cmdline" | wc -c)
+[ "$len" -le 511 ] || {
+    echo "ERROR: kernel command line is $len bytes; boot.img holds 511." >&2
+    echo "       Shorten kernel.cmdline / cmdline_extra." >&2
+    exit 1
+}
+
+echo "  Kernel:   $kernel"
+echo "  Ramdisk:  $ramdisk"
+echo "  Cmdline:  $cmdline"
+"$mkbootimg_bin" --kernel "$kernel" --ramdisk "$ramdisk" --cmdline "$cmdline" --output "$out"
