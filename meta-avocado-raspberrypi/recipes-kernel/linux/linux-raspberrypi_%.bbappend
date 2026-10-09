@@ -17,7 +17,10 @@ require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 # their drivers in the rootfs. The kernel already builds them as modules; they
 # are not installed unless something depends on them, so a modem enumerates
 # with no driver bound. PPP covers dial-up fallback, tun the tunnel clients,
-# and dummy gives tests a netdev that needs no hardware.
+# and dummy gives tests a netdev that needs no hardware. The brcmfmac group
+# is the onboard Wi-Fi, pwm_fan and raspberrypi_hwmon run the fan and report
+# undervoltage, uvcvideo drives USB cameras, and the i2c group exposes the
+# RP1 I2C buses as /dev/i2c-* for watchdog and display boards.
 RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
     kernel-module-usbnet-${KERNEL_VERSION} \
     kernel-module-cdc-ether-${KERNEL_VERSION} \
@@ -44,4 +47,10 @@ RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
     kernel-module-brcmutil-${KERNEL_VERSION} \
     kernel-module-cfg80211-${KERNEL_VERSION} \
     kernel-module-rfkill-${KERNEL_VERSION} \
+    kernel-module-pwm-fan-${KERNEL_VERSION} \
+    kernel-module-raspberrypi-hwmon-${KERNEL_VERSION} \
+    kernel-module-uvcvideo-${KERNEL_VERSION} \
+    kernel-module-i2c-dev-${KERNEL_VERSION} \
+    kernel-module-i2c-designware-core-${KERNEL_VERSION} \
+    kernel-module-i2c-designware-platform-${KERNEL_VERSION} \
 "
