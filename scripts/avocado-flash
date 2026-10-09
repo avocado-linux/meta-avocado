@@ -972,6 +972,8 @@ media:
             that is P2, not the power-only P1 or the debug P16.
   fuse-srk  program the AHAB SRK hash over the serial console. Never reachable
             from sd/emmc: flashing is repeatable, fuses are not.
+  ssh-emmc  write a board's eMMC over SSH; must be the first argument and takes
+            its own options (see 'avocado-flash ssh-emmc --help').
 
 backends:
   fwup      writes the stone fwup archive. The default for 'sd' because it is the
@@ -1020,7 +1022,26 @@ examples:
     return ap
 
 
+def dispatch_ssh_emmc(argv: list[str]) -> int:
+    """Hand the ssh-emmc medium its own argument list.
+
+    Runs before build_parser(): that parser requires one of the local media and
+    a positional device, so the ssh-emmc flags would fail to parse, and the
+    medium needs no Yocto deploy tree or machine resolution.
+    """
+    # Import by the script's own directory so it works however it is invoked.
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from avocado_flash_remote import cli
+
+    return cli.main(argv)
+
+
 def main() -> int:
+    # ssh-emmc must be the first argument; every other invocation is untouched.
+    if len(sys.argv) > 1 and sys.argv[1] == "ssh-emmc":
+        return dispatch_ssh_emmc(sys.argv[2:])
     args = build_parser().parse_args()
 
     deploy = resolve_deploy_dir(args.deploy)
