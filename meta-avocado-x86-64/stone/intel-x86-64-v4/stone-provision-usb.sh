@@ -16,7 +16,19 @@ set -e
 set -u
 set -o pipefail
 
+# The target checks read findmnt, lsblk and blockdev. Missing, they would lose
+# the root disk, report a real disk as "unknown" or its mounts as none, so stop
+# before anything else runs.
+for tool in findmnt lsblk blockdev; do
+    command -v "$tool" >/dev/null 2>&1 \
+        || { echo "ERROR: ${tool} not found; the target checks need util-linux ${tool}"; exit 1; }
+done
+
 MANIFEST="$AVOCADO_STONE_MANIFEST"
+# Never read below, but the assignment is load-bearing under `set -u`: it aborts
+# the script here if stone did not export AVOCADO_STONE_DATA_DIR, rather than
+# part-way through writing a disk.
+# shellcheck disable=SC2034
 DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
@@ -52,21 +64,57 @@ if [ ! -f "$IMAGE_FILE" ]; then
 fi
 
 IMAGE_SIZE=$(du -h "$IMAGE_FILE" | cut -f1)
+image_bytes=$(stat -c%s "$IMAGE_FILE")
+
+sysblock=${AVOCADO_PROVISION_SYSBLOCK:-/sys/class/block}
+
+die() {
+    echo "ERROR: $*"
+    exit 1
+}
 
 # =============================================================================
-# Step 2: Find the boot volume so we can hide and protect it
+# Step 2: Find the devices the running system lives on
 # =============================================================================
+# Every block device under / - partitions, dm-crypt, LVM, md and the physical
+# disks beneath them - so a target that is any of them is refused however it
+# is spelled. A root on overlay, tmpfs or NFS has no backing disk here.
 
-root_dev=""
-if [ -f /proc/mounts ]; then
-    root_mount=$(awk '$2 == "/" {print $1; exit}' /proc/mounts)
-    if [ -n "$root_mount" ] && [ -b "$root_mount" ]; then
-        root_dev=$(echo "$root_mount" | sed -E 's/p?[0-9]+$//')
-        if [ "$root_dev" = "$root_mount" ]; then
-            root_dev=$(echo "$root_mount" | sed 's/[0-9]*$//')
+# --nofsroot drops the "[/@]" a btrfs subvolume or bind mount appends to SOURCE.
+# A failed query would read as "no local root disk" and skip every root guard.
+root_src=$(findmnt -n --nofsroot -o SOURCE /) \
+    || die "cannot tell what / is mounted from; refusing to guess"
+case "$root_src" in
+    //*) root_src="" ;; # CIFS share, no local disk
+    /*)
+        if [ ! -e "$root_src" ]; then
+            # /dev/root and the like: resolve through the mount's device number.
+            majmin=$(findmnt -n -o MAJ:MIN / 2>/dev/null || true)
+            if [ -n "$majmin" ] && [ -e "/sys/dev/block/$majmin" ]; then
+                root_src="/dev/$(basename "$(readlink -f "/sys/dev/block/$majmin")")"
+            fi
         fi
-    fi
+        [ -e "$root_src" ] \
+            || die "cannot tell which disk holds the running root (${root_src}); refusing to guess"
+        ;;
+    *) root_src="" ;;
+esac
+
+# root_chain: every device under /; root_disks: the physical disks among them,
+# which are also hidden from the listing below.
+root_chain=""
+root_disks=""
+if [ -n "$root_src" ]; then
+    chain=$(lsblk -nslo NAME,TYPE "$root_src") || die "cannot read the device chain under /"
+    root_chain=$(printf '%s\n' "$chain" | awk '{print $1}' | sort -u | tr '\n' ' ')
+    root_disks=$(printf '%s\n' "$chain" | awk '$2 == "disk" {print $1}' | sort -u | tr '\n' ' ')
 fi
+
+in_list() {
+    local d
+    for d in $2; do [ "$d" = "$1" ] && return 0; done
+    return 1
+}
 
 # =============================================================================
 # Step 3: Detect and select target device
@@ -77,13 +125,13 @@ echo ""
 
 list_devices() {
     local found=0
-    for dev in /sys/block/sd* /sys/block/nvme* /sys/block/vd* /sys/block/mmcblk*; do
+    for dev in "$sysblock"/sd* "$sysblock"/nvme* "$sysblock"/vd* "$sysblock"/mmcblk*; do
         [ -e "$dev" ] || continue
+        [ -e "$dev/partition" ] && continue
         devname=$(basename "$dev")
-        devpath="/dev/${devname}"
 
-        # Hide the boot volume
-        if [ -n "$root_dev" ] && [ "$devpath" = "$root_dev" ]; then
+        # Hide the disks the running system lives on
+        if in_list "$devname" "$root_disks"; then
             continue
         fi
 
@@ -110,47 +158,53 @@ list_devices() {
 
 list_devices
 
-if [ -n "$root_dev" ]; then
+if [ -n "$root_disks" ]; then
     echo ""
-    echo "  (boot volume ${root_dev} is hidden)"
+    echo "  (boot volume ${root_disks% } is hidden)"
 fi
 echo ""
 
 read -p "Enter the target device path (e.g. /dev/sdX): " -r target_device 2>&1
 
-if [ -z "$target_device" ]; then
-    echo "ERROR: No device specified"
-    exit 1
-fi
+[ -n "$target_device" ] || die "No device specified"
 
-if [ ! -b "$target_device" ]; then
-    echo "ERROR: ${target_device} is not a valid block device"
-    exit 1
-fi
+# Resolve aliases (/dev/disk/by-id/..., /dev/mapper/..., relative paths) to the
+# kernel device, so every check below and dd itself see the same device.
+target_device=$(readlink -f -- "$target_device") || die "cannot resolve ${target_device}"
+target_name=$(basename "$target_device")
 
-# Prevent writing to the boot volume
-if [ -n "$root_dev" ] && [ "$target_device" = "$root_dev" ]; then
-    echo "ERROR: ${target_device} is the boot volume -- refusing to overwrite"
-    exit 1
+[ -e "$sysblock/$target_name" ] || die "${target_device} is not a block device"
+if [ -e "$sysblock/$target_name/partition" ]; then
+    die "${target_device} is a partition; give the whole disk - the image carries its own partition table"
 fi
+if in_list "$target_name" "$root_chain"; then
+    die "${target_device} holds the running root filesystem -- refusing to overwrite"
+fi
+# The image is a whole-disk layout. A dm volume, md array or loop device is a
+# whole block device too, but writing a disk image over it destroys a volume.
+target_type=$(lsblk -dno TYPE "$target_device" 2>/dev/null) || target_type=
+[ "$target_type" = "disk" ] || die "${target_device} is a ${target_type:-unknown} device, not a disk"
 
 # =============================================================================
 # Step 4: Safety checks
 # =============================================================================
 
-device_size_bytes=$(blockdev --getsize64 "$target_device" 2>/dev/null || echo "unknown")
-
-echo ""
-if [ "$device_size_bytes" != "unknown" ]; then
-    device_size_gib=$(awk "BEGIN {printf \"%.2f\", $device_size_bytes / 1073741824}")
-    devname_short=$(basename "$target_device")
-    device_model=$(cat "/sys/block/${devname_short}/device/model" 2>/dev/null | xargs || echo "unknown")
-    echo "Target device: ${target_device}"
-    echo "  Model: ${device_model}"
-    echo "  Size:  ${device_size_gib} GiB"
-else
-    echo "Target device: ${target_device}"
+device_size_bytes=$(blockdev --getsize64 "$target_device" 2>/dev/null) || device_size_bytes=
+case "$device_size_bytes" in
+    '' | *[!0-9]*) die "cannot read the size of ${target_device}" ;;
+esac
+# A short target would lose its partition table to dd and then fail at the end
+# of the device, leaving neither the old contents nor a bootable image.
+if [ "$device_size_bytes" -lt "$image_bytes" ]; then
+    die "${target_device} is smaller than the image (${device_size_bytes} < ${image_bytes} bytes)"
 fi
+
+device_size_gib=$(awk "BEGIN {printf \"%.2f\", $device_size_bytes / 1073741824}")
+device_model=$(cat "$sysblock/${target_name}/device/model" 2>/dev/null | xargs || echo "unknown")
+echo ""
+echo "Target device: ${target_device}"
+echo "  Model: ${device_model}"
+echo "  Size:  ${device_size_gib} GiB"
 
 echo ""
 echo "WARNING: This will completely overwrite ${target_device}!"
@@ -169,15 +223,39 @@ fi
 # =============================================================================
 # Step 5: Unmount any existing partitions
 # =============================================================================
+# lsblk lists the target and its own partitions only; a name glob would also
+# catch another disk sharing the prefix (/dev/sdb vs /dev/sdbb). A filesystem
+# still mounted while dd rewrites its disk is corrupted, so a failure stops here.
 echo ""
 echo "Unmounting any mounted partitions on ${target_device}..."
 
-for part in "${target_device}"*; do
-    if mountpoint -q "$part" 2>/dev/null || mount | grep -q "^${part} "; then
+mounted=$(lsblk -nlo PATH,MOUNTPOINT "$target_device" | awk 'NF >= 2 {print $1, $2}') \
+    || die "cannot list the partitions of ${target_device}"
+while read -r part mnt; do
+    [ -n "$part" ] || continue
+    if [ "$mnt" = "[SWAP]" ]; then
+        echo "  Disabling swap on ${part}..."
+        swapoff "$part" || die "cannot disable swap on ${part}"
+    else
+        # -A: every mount of the partition, not just the one lsblk shows.
         echo "  Unmounting ${part}..."
-        umount "$part" 2>/dev/null || true
+        umount -A "$part" || die "cannot unmount ${part}; close whatever holds it and retry"
     fi
-done
+done <<EOF
+$mounted
+EOF
+
+# lsblk sees only this mount namespace. Inside the SDK container a partition
+# the host has mounted looks free; the kernel still refuses to re-read the
+# table of a disk with a partition in use, whoever uses it. That refusal is the
+# only evidence the disk is free, so any failure stops the run; LC_ALL=C keeps
+# the EBUSY text untranslated for the message.
+if ! rr_err=$(LC_ALL=C blockdev --rereadpt "$target_device" 2>&1); then
+    case "$rr_err" in
+        *busy*) die "${target_device} is still in use (mounted or held outside this environment, e.g. by the host); release it and retry" ;;
+        *) die "cannot re-read the partition table of ${target_device} (${rr_err}), so nothing shows it is free" ;;
+    esac
+fi
 
 # =============================================================================
 # Step 6: Write image to device
@@ -191,7 +269,6 @@ echo ""
 if dd if=/dev/zero of=/dev/null bs=1 count=1 status=progress 2>/dev/null; then
     dd if="$IMAGE_FILE" of="$target_device" bs=4M conv=fsync status=progress
 else
-    image_bytes=$(stat -c%s "$IMAGE_FILE")
     dd if="$IMAGE_FILE" of="$target_device" bs=4M conv=fsync &
     dd_pid=$!
     while kill -0 "$dd_pid" 2>/dev/null; do
@@ -216,5 +293,4 @@ echo ""
 echo "Avocado OS has been written to ${target_device}."
 echo "You may now boot the target system from this device."
 echo ""
-echo "The var partition can be expanded to fill the remaining disk space"
-echo "by running: growpart ${target_device} 6 && btrfs filesystem resize max /var"
+echo "The var partition grows to fill the rest of the disk on first boot."

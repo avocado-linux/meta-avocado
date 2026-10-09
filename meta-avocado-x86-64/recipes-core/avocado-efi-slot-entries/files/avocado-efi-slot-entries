@@ -1,0 +1,256 @@
+#!/bin/sh
+# avocado-efi-slot-entries - make sure UEFI has one boot entry per A/B boot
+# slot on the disk this system booted from, labelled the way avocadoctl's
+# `efibootmgr` slot action looks them up (the stone manifest's slot_entries:
+# boot-a, boot-b).
+#
+# Provisioning writes the disk image and nothing else, so firmware only ever
+# creates its own entries: on the R8000 that is a PXE entry and a removable-
+# media 'UEFI OS' entry pointing at the first ESP. Without an entry per slot,
+# activation cannot find the target slot, and the second ESP is unreachable.
+#
+# The disk comes from LoaderDevicePartUUID, the ESP systemd-boot was loaded
+# from, so a same-named partition on another disk is never used. A second disk
+# flashed from the same image carries the same partition UUIDs, and neither
+# udev's by-partuuid link nor firmware's HD() device path can tell the two
+# apart, so the script refuses to touch NVRAM while one is attached.
+#
+# BootOrder belongs to avocadoctl: commit moves the committed slot to the
+# front. So this script leaves an intact pair where it is. A replaced entry
+# takes the position of the one it replaces, a slot missing from BootOrder goes
+# next to the other slot, and only when no slot is in BootOrder at all (first
+# boot) do the slots go to the front, booted slot first. The one reordering:
+# when a run created or replaced entries, the booted slot's entry is put ahead
+# of the other slot's, in place, unless BootNext is set (see below).
+set -eu
+
+efivars=${AVOCADO_EFI_SLOTS_EFIVARS:-/sys/firmware/efi/efivars}
+devdir=${AVOCADO_EFI_SLOTS_DEVDIR:-/dev}
+sysblock=${AVOCADO_EFI_SLOTS_SYSBLOCK:-/sys/class/block}
+slots=${AVOCADO_EFI_SLOTS_LABELS:-boot-a boot-b}
+loader='\EFI\BOOT\BOOTX64.EFI'
+
+log() { echo "avocado-efi-slot-entries: $*"; }
+
+var=$efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+[ -r "$var" ] || { log "no LoaderDevicePartUUID, not booted through systemd-boot; nothing to do"; exit 0; }
+
+# local-fs.target only waits for what is mounted. A disk still being probed
+# from coldplug, such as a second USB stick carrying this image, would be
+# missed by the duplicate-PARTUUID check below, so wait out the event queue.
+if [ -z "${AVOCADO_EFI_SLOTS_NO_SETTLE:-}" ] && command -v udevadm >/dev/null 2>&1; then
+    udevadm settle --timeout=30 || log "udevadm settle timed out, continuing"
+fi
+
+# efivarfs prefixes 4 attribute bytes; the rest is a UTF-16LE GUID string.
+booted=$(tail -c +5 "$var" | tr -d '\000\n' | tr 'A-F' 'a-f')
+
+# Partitions carrying a PARTUUID, read from sysfs rather than the single
+# by-partuuid link, which names only one of several.
+parts_with_uuid() {
+    for u in "$sysblock"/*/uevent; do
+        [ -r "$u" ] || continue
+        tr '[:upper:]' '[:lower:]' <"$u" | grep -qxF "partuuid=$1" && basename "$(dirname "$u")"
+    done
+    return 0
+}
+
+unique_part() {
+    # shellcheck disable=SC2046 # split on purpose: one kernel partition name per word
+    set -- $(parts_with_uuid "$1")
+    [ $# -le 1 ] || { log "PARTUUID $u is carried by more than one partition ($*): a disk cloned from this image is attached; detach it, nothing written" >&2; exit 1; }
+    [ $# -eq 1 ] && echo "$1"
+    return 0
+}
+
+esp=$(u=$booted unique_part "$booted")
+[ -n "$esp" ] && [ -e "$devdir/$esp" ] || { log "booted ESP $booted has no block device"; exit 1; }
+disk=$(basename "$(readlink -f "$sysblock/$esp/..")")
+
+# Partition device name for a GPT partition label, on the booted disk only.
+part_for_label() {
+    for u in "$sysblock/$disk"/*/uevent; do
+        [ -r "$u" ] || continue
+        grep -qxF "PARTNAME=$1" "$u" && { basename "$(dirname "$u")"; return 0; }
+    done
+    return 1
+}
+
+partuuid_of() {
+    uuid=$(tr '[:upper:]' '[:lower:]' <"$sysblock/$1/uevent" | sed -n 's/^partuuid=//p')
+    [ -n "$uuid" ] && echo "$uuid"
+}
+
+# Callers capture this with `x=$(efibootmgr_out ...)`, so a failure fails the
+# assignment and set -e stops the run. Read as empty output instead, a failed
+# listing would make every slot look missing and create duplicates, and a
+# failed BootOrder read would drop every non-slot entry from the order.
+efibootmgr_out() {
+    efibootmgr "$@" || { log "efibootmgr $* failed" >&2; return 1; }
+}
+
+# Every entry number carrying exactly this label, as avocadoctl matches it.
+# Firmware resets and repeated provisioning can leave more than one.
+entries_for_label() {
+    printf '%s\n' "$2" | awk -v want="$1" '
+        /^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ {
+            num = substr($0, 5, 4); rest = substr($0, 9)
+            sub(/^\*/, "", rest); sub(/^ +/, "", rest)
+            label = rest; sub(/\t.*/, "", label); sub(/ +$/, "", label)
+            if (label == want) print num
+        }'
+}
+
+# Every entry with this label whose device path names this PARTUUID.
+good_entries() {
+    for n in $(entries_for_label "$1" "$3"); do
+        printf '%s\n' "$3" | grep "^Boot$n" | tr 'A-F' 'a-f' | grep -q "$2" && echo "$n"
+    done
+    return 0
+}
+
+# Of several good duplicates keep the one firmware is about to use (BootNext),
+# is using (BootCurrent) or will try first, so deleting the others moves nothing
+# avocadoctl pointed at.
+pick() {
+    for want in $prefs; do
+        for n in $1; do [ "$n" = "$want" ] && { echo "$n"; return 0; }; done
+    done
+    for n in $1; do echo "$n"; return 0; done
+    return 1
+}
+
+# BootOrder with every occurrence of $2 replaced by $3, duplicates dropped.
+# When $2 sits ahead of $3 the kept entry moves up into $2's place: that is
+# the position whoever wrote BootOrder last (normally avocadoctl's commit)
+# gave the slot.
+swap_in_order() {
+    printf '%s\n' "$1" | awk -F, -v from="$2" -v to="$3" '{
+        for (i = 1; i <= NF; i++) {
+            e = ($i == from) ? to : $i
+            if (e != "" && !(e in seen)) { seen[e] = 1; out = out (out == "" ? "" : ",") e }
+        }
+        print out }'
+}
+
+boot_order() {
+    o=$(efibootmgr_out) || return 1
+    printf '%s\n' "$o" | sed -n 's/^BootOrder: //p'
+}
+
+# avocadoctl's efibootmgr slot action takes this lock around its own listing
+# and writes, so neither acts on an entry number the other is deleting. The
+# wait is bounded and a failure only logs: a wedged holder must not stop the
+# slot entries from being repaired.
+lock=${AVOCADO_EFI_SLOTS_LOCK:-/run/avocado/efi-nvram.lock}
+if command -v flock >/dev/null 2>&1 && mkdir -p "$(dirname "$lock")" && (umask 077 && : >>"$lock"); then
+    exec 9<"$lock"
+    flock -w "${AVOCADO_EFI_SLOTS_LOCK_WAIT:-30}" 9 || log "$lock is held elsewhere, continuing without it"
+else
+    log "cannot take $lock, continuing without it"
+fi
+
+nv=$(efibootmgr_out -v)
+next=$(printf '%s\n' "$nv" | sed -n 's/^BootNext: //p')
+prefs="$next $(printf '%s\n' "$nv" | sed -n 's/^BootCurrent: //p') $(printf '%s\n' "$nv" | sed -n 's/^BootOrder: //p' | tr ',' ' ')"
+
+# Every slot is checked before the first write, so a clone of either slot
+# stops the run with NVRAM untouched. unique_part exits only its subshell, so
+# the refusal is repeated here.
+for s in $slots; do
+    p=$(part_for_label "$s") || continue
+    uuid=$(partuuid_of "$p") || continue
+    [ "$(u=$uuid unique_part "$uuid")" = "$p" ] || exit 1
+done
+
+kept=
+booted_keep=
+replaced=
+for s in $slots; do
+    p=$(part_for_label "$s") || { log "no partition labelled $s on /dev/$disk, skipping it"; continue; }
+    uuid=$(partuuid_of "$p") || { log "$p has no PARTUUID, skipping $s"; continue; }
+    keep=$(pick "$(good_entries "$s" "$uuid" "$nv")") || keep=
+    if [ -z "$keep" ]; then
+        partno=$(cat "$sysblock/$p/partition")
+        log "creating '$s' for /dev/$p (partition $partno of /dev/$disk)"
+        # -C, not -c: -c prepends to BootOrder, which would promote this slot.
+        efibootmgr -q -C -d "$devdir/$disk" -p "$partno" -L "$s" -l "$loader"
+        replaced=1
+        nv=$(efibootmgr_out -v)
+        keep=$(pick "$(good_entries "$s" "$uuid" "$nv")") || { log "created '$s' but efibootmgr does not list it"; exit 1; }
+    fi
+    # Stale and duplicate entries go only once a good one exists. Before each
+    # delete, the kept entry takes over the doomed one's BootOrder position and
+    # any BootNext pointing at it, so an NVRAM write failing at any point
+    # leaves nothing naming an entry that no longer exists: a lost BootNext
+    # would drop a pending trial or rollback, and -B also removes the number
+    # from BootOrder, which would push the slot out of it.
+    for n in $(entries_for_label "$s" "$nv"); do
+        [ "$n" = "$keep" ] && continue
+        log "removing Boot$n '$s', it duplicates Boot$keep or points elsewhere"
+        order=$(boot_order)
+        swapped=$(swap_in_order "$order" "$n" "$keep")
+        if [ "$swapped" != "$order" ]; then
+            log "BootOrder $order -> $swapped (Boot$keep takes Boot$n's place)"
+            efibootmgr -q -o "$swapped"
+        fi
+        if [ "$n" = "$next" ]; then
+            log "BootNext Boot$n is being removed, pointing it at Boot$keep"
+            efibootmgr -q -n "$keep"
+            next=$keep
+        fi
+        efibootmgr -q -b "$n" -B
+        replaced=1
+    done
+    if [ "$uuid" = "$booted" ]; then
+        kept="$keep $kept"
+        booted_keep=$keep
+    else
+        kept="$kept $keep"
+    fi
+done
+
+# Only slots still missing from BootOrder are added: next to the other slot
+# when one is there, at the front (booted slot first) when none is (first boot).
+current=$(boot_order)
+wanted=$(awk -v order="$current" -v slots="$kept" 'BEGIN {
+    ns = split(slots, sl, " "); for (i = 1; i <= ns; i++) isslot[sl[i]] = 1
+    no = split(order, od, ","); n = 0; last = 0
+    for (i = 1; i <= no; i++) {
+        if (od[i] == "" || od[i] in seen) continue
+        seen[od[i]] = 1; out[++n] = od[i]; if (od[i] in isslot) last = n
+    }
+    miss = ""; for (i = 1; i <= ns; i++) if (!(sl[i] in seen)) miss = miss " " sl[i]
+    nmiss = split(miss, mv, " ")
+    for (i = 1; i <= n; i++) {
+        if (last == 0 && i == 1) for (j = 1; j <= nmiss; j++) r = r (r == "" ? "" : ",") mv[j]
+        r = r (r == "" ? "" : ",") out[i]
+        if (last == i) for (j = 1; j <= nmiss; j++) r = r "," mv[j]
+    }
+    if (n == 0) for (j = 1; j <= nmiss; j++) r = r (r == "" ? "" : ",") mv[j]
+    print r
+}')
+
+# Entries this run created or replaced inherit whatever positions the stale ones
+# held, so after a reflash the pair's order is left over from the previous image
+# and can put the other slot first. Firmware that later drops its own entries
+# (the R8000's AMI rebuilds BootOrder at POST) then boots that slot on a plain
+# reboot. Put the booted slot's entry ahead of the other slot's, swapping only
+# the two. The boot that reaches this service has passed avocadoctl's
+# verification - a failed one reboots from the initrd - so this never promotes a
+# failed slot. Not while BootNext is set: the next boot is already decided,
+# possibly mid-rollback on an avocadoctl that does not reboot after one.
+if [ -n "$replaced" ] && [ -z "$next" ] && [ -n "$booted_keep" ]; then
+    wanted=$(printf '%s\n' "$wanted" | awk -F, -v mine="$booted_keep" -v slots="$kept" '{
+        ns = split(slots, sl, " "); other = ""
+        for (i = 1; i <= ns; i++) if (sl[i] != mine) { other = sl[i]; break }
+        im = 0; io = 0
+        for (i = 1; i <= NF; i++) { if ($i == mine) im = i; if ($i == other) io = i }
+        if (im && io && io < im) { t = $im; $im = $io; $io = t }
+        r = ""; for (i = 1; i <= NF; i++) r = r (i > 1 ? "," : "") $i
+        print r }')
+fi
+
+[ "$wanted" = "$current" ] && exit 0
+efibootmgr -q -o "$wanted"
+log "BootOrder now $wanted (was $current)"
