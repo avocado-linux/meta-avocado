@@ -39,4 +39,9 @@ RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
     kernel-module-slhc-${KERNEL_VERSION} \
     kernel-module-tun-${KERNEL_VERSION} \
     kernel-module-dummy-${KERNEL_VERSION} \
+    kernel-module-brcmfmac-${KERNEL_VERSION} \
+    kernel-module-brcmfmac-wcc-${KERNEL_VERSION} \
+    kernel-module-brcmutil-${KERNEL_VERSION} \
+    kernel-module-cfg80211-${KERNEL_VERSION} \
+    kernel-module-rfkill-${KERNEL_VERSION} \
 "
