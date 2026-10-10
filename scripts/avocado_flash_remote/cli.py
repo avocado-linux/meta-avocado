@@ -565,6 +565,48 @@ def _collect_write(ctx: _Ctx, run_id: str, remote_dir: str, local: Path) -> evid
     return evidence.VerifyResult(not problems, problems)
 
 
+HEARTBEAT_AFTER_S = 10.0
+
+
+def _images_text(images: dict) -> str:
+    return ", ".join(f"{name}={state}" for name, state in images.items())
+
+
+class _WriteProgress:
+    """Says what a followed write is doing: a line when the phase or an image's state changes, a heartbeat otherwise.
+
+    The board's runner prints nothing while it writes, so without this the host is silent from ``detached:`` to
+    ``write COMPLETE``. Every line goes through ``ctx.out``, so it reaches the log and the operator's terminal.
+    """
+
+    def __init__(self, ctx: _Ctx, clock: Callable[[], float] = time.monotonic) -> None:
+        self._out = ctx.out
+        self._clock = clock
+        self._started = clock()
+        self._last_line = self._started
+        self._shown: Optional[tuple] = None
+
+    def poll(self, rec, phase: Optional[str]) -> None:
+        now = self._clock()
+        images = dict(getattr(rec, "images", None) or {})
+        if phase is not None:
+            snapshot = (phase, tuple(images.items()))
+            if snapshot != self._shown:
+                self._shown = snapshot
+                self._last_line = now
+                self._out(f"write: {phase}" + (f" - images: {_images_text(images)}" if images else ""))
+                return
+        if now - self._last_line >= HEARTBEAT_AFTER_S:
+            self._last_line = now
+            # A poll that dropped or came back unreadable carries no phase; the last one seen is still the best answer.
+            if phase is None and self._shown is not None:
+                phase, images = self._shown[0], dict(self._shown[1])
+            where = phase or "waiting for the board to record the run"
+            self._out(
+                f"write: still {where}, {now - self._started:.0f} s" + (f" - images: {_images_text(images)}" if images else "")
+            )
+
+
 def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     polls = max(1, math.ceil(ctx.args.wait_seconds / max(ctx.poll_interval, 0.001)))
     phase = None
@@ -572,8 +614,10 @@ def _follow_write(ctx: _Ctx, run_id: str, remote_dir: str, nonce: str) -> int:
     last_phase = None
     noted_unknown = False
     unreadable = 0  # consecutive polls where the board said this run's record cannot be read
+    progress = _WriteProgress(ctx)
     for _ in range(polls):
         rec, phase = _reconcile_phase(ctx, run_id)
+        progress.poll(rec, phase)
         if rec is not None and rec.ok:
             unstarted = unstarted + 1 if phase is None else 0
             unreadable = 0
@@ -797,6 +841,11 @@ def _run(argv, factory, ask_password, confirm, sleep, out, poll_interval) -> int
         return 1
 
 
+def _print_flushed(*args, **kwargs) -> None:
+    """print() that reaches the pipe at once: a progress line held in a block buffer is as good as none."""
+    print(*args, flush=True, **kwargs)
+
+
 def main(
     argv: List[str],
     *,
@@ -804,7 +853,7 @@ def main(
     ask_password: Optional[Callable[[], str]] = None,
     confirm: Optional[Callable[[str], str]] = None,
     sleep: Callable[[float], None] = time.sleep,
-    out: Callable = print,
+    out: Callable = _print_flushed,
     poll_interval: float = 5.0,
 ) -> int:
     """Run the ssh-emmc medium; argv is everything after the `ssh-emmc` word."""
