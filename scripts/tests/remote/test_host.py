@@ -11,6 +11,7 @@ import re
 import shlex
 import subprocess
 import tarfile
+import time
 
 import pytest
 
@@ -1721,8 +1722,42 @@ def test_stage_reports_the_copy_the_stream_and_the_remote_verification(kit, reso
     host.stage(t, resolved.profile, resolved, images, bundle_path, out=lines.append)
     text = "\n".join(lines)
     assert "stage: copying " in text and "MiB" in text
-    assert "no progress is shown until it ends" in text
+    assert "a progress line follows every" in text
     assert "stage: transferred " in text
     assert "the board verified the staged images against MANIFEST.hashes" in text
     # the order is the order of the work
     assert text.index("copying") < text.index("transferred") < text.index("the board verified")
+
+
+class _SlowPutTar(StubTransport):
+    """A transfer that takes a while and reports its bytes through the counter stage hands it."""
+
+    def put_tar(self, files, dest_dir, modes=None, **kw):
+        for _ in range(5):
+            kw["sent"].n += 1 << 10  # 1 KiB a step: well under the kit's size, so the clamp is not what is tested
+            time.sleep(0.06)
+        return super().put_tar(files, dest_dir, modes, **kw)
+
+
+def test_stage_reports_bytes_sent_while_the_stream_runs_and_keeps_its_summary(kit, resolved, monkeypatch):
+    images, bundle_path, files = kit
+    monkeypatch.setattr(host, "PROGRESS_INTERVAL_S", 0.05)
+    t = _SlowPutTar(handler=handler_for(10_000_000))
+    lines = []
+    host.stage(t, resolved.profile, resolved, images, bundle_path, out=lines.append)
+    sent = [i for i, line in enumerate(lines) if re.fullmatch(r"stage: sent \d+ of \d+ KiB, \d+ s", line)]
+    done = next(i for i, line in enumerate(lines) if line.startswith("stage: transferred "))
+    assert len(sent) >= 2 and max(sent) < done
+    shown = [int(re.findall(r"\d+", lines[i])[0]) for i in sent]
+    total = int(re.findall(r"\d+", lines[sent[0]])[1])
+    # the counter's bytes reach the line (a clamp to the total would show a constant), grow, and never pass the total
+    assert shown == sorted(shown) and 0 < shown[0] < shown[-1] <= total
+
+
+def test_tar_writer_counts_every_byte_it_streams(tmp_path):
+    src = tmp_path / "a.bin"
+    src.write_bytes(b"x" * 5000)
+    sent = host.ByteCount()
+    buf = io.BytesIO()
+    host._tar_writer({"a.bin": str(src)}, {}, sent)(buf)
+    assert sent.n == len(buf.getvalue()) and sent.n > 5000

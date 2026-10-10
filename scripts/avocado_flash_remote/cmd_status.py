@@ -59,6 +59,11 @@ def run_status(state_dir, out=print, run_id=None) -> StatusResult:
     state = loaded.state
     recovery = describe_recovery(state)
     out(f"status: {state.phase} run={state.run_id} recovery={recovery}")
+    images = state.data.get("images") or {}
+    names = [name for name in state.data.get("image_order", []) if isinstance(images.get(name), dict)]
+    if names:
+        # A second line, so a host that only reads the first keeps working; the host follows a write with it.
+        out("images: " + ", ".join(f"{name}={images[name].get('state')}" for name in names))
     return StatusResult(0, state.phase, state.run_id, recovery)
 
 
