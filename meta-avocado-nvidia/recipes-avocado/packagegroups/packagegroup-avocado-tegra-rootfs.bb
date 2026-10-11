@@ -13,4 +13,11 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
-RDEPENDS:${PN} = "tegra-firmware-tegra234"
+# avocado-tegra-esp-generator is here rather than beside setup-nv-boot-control
+# because it corrects that package's ESP mount and has to be present wherever
+# the mount can be enabled, including images that pull the redundant-boot chain
+# in through the BSP extension rather than through a packagegroup.
+RDEPENDS:${PN} = " \
+  tegra-firmware-tegra234 \
+  avocado-tegra-esp-generator \
+"
