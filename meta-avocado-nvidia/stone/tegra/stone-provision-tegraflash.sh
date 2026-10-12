@@ -702,6 +702,37 @@ else
   [ ! -f "$layout_xml" ] || sed -i -e 's/APPUUID_b//g' -e 's/APPUUID//g' "$layout_xml"
 fi
 
+# Record the resolved boot medium on the var image itself, so userspace can
+# read back which device this flash targeted without re-deriving it from
+# BOOTDEV/ROOTFS_DEVICE. Written once here, keyed on the already-resolved
+# $boot_media, rather than duplicated into each arm of the case above.
+if [ -n "$var_file" ]; then
+  var_image_path="$build_dir/$(basename "$var_file")"
+  if [ -L "$var_image_path" ]; then
+    echo "ERROR: var image path is a symlink, refusing to loop-mount it: $var_image_path" >&2
+    exit 1
+  fi
+  if [ -f "$var_image_path" ]; then
+    # Subshell so this block's own EXIT trap is scoped locally - the
+    # script already has an EXIT trap cleaning up temp_bin_dir, and a
+    # bare `trap ... EXIT` here would silently
+    # replace it rather than add to it. The trap below covers a
+    # failure between mount and umount (e.g. the var image is full),
+    # which would otherwise abort the script under set -e with the
+    # loop mount and tmpdir still held, leaking into the next run.
+    (
+      boot_marker_mount=$(mktemp -d)
+      trap 'umount "$boot_marker_mount" 2>/dev/null; rmdir "$boot_marker_mount" 2>/dev/null' EXIT
+      mount -t btrfs -o loop "$var_image_path" "$boot_marker_mount"
+      mkdir -p "$boot_marker_mount/lib/avocado"
+      printf '%s\n' "$boot_media" >"$boot_marker_mount/lib/avocado/boot-order-marker"
+    )
+    echo "Wrote boot-order marker ($boot_media) to $(basename "$var_file")"
+  else
+    echo "WARNING: var image not found for boot-order marker: $var_image_path"
+  fi
+fi
+
 # Composable env var flags (override defaults from profile)
 [ "${ERASE_NVME:-0}" = "1" ] && flash_args="$flash_args --erase-nvme"
 [ "${ERASE_EMMC:-0}" = "1" ] && flash_args="$flash_args --erase-emmc"

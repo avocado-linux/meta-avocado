@@ -6,6 +6,8 @@ inherit packagegroup
 PACKAGES = "${PN}"
 
 RDEPENDS:${PN} = " \
+    avocado-boot-device \
+    avocado-boot-order-assert \
     avocado-tegra-init \
     tegra-firmware-xusb \
 "
