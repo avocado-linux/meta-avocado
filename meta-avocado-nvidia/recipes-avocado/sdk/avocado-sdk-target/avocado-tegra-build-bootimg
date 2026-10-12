@@ -1,0 +1,60 @@
+#!/bin/sh
+# Build-time boot.img for the A_kernel/B_kernel partitions, so an OS update
+# can carry the kernel and initramfs. Called by the Jetson build hooks when
+# the stone manifest declares `images.boot`.
+#
+#   avocado-tegra-build-bootimg <runtime input dir> <initramfs image> <boot image>
+#
+# Why here and not in Yocto or avocado-cli:
+#
+#   * Yocto cannot know which kernel this project pins. On a multi-kernel
+#     target the feed carries both linux-yocto and the L4T kernel, and
+#     `avocado install` picks one per project from the lockfile, after the
+#     build. meta-tegra's cboot conversion always wraps the default-mc kernel
+#     (CBOOTIMG_KERNEL), so its boot.img is only right by luck.
+#   * avocado-cli is platform-neutral; an Android boot image is a Tegra
+#     detail. The build hook is the platform seam.
+#   * stone can only construct fat and fwup images, so the file has to exist
+#     on disk before `stone bundle` runs.
+set -eu
+
+[ $# -eq 3 ] || { echo "usage: $0 <input dir> <initramfs image> <boot image>" >&2; exit 2; }
+input_dir=$1 initramfs_image=$2 boot_image=$3
+
+# The pinned kernel: the rootfs sysroot holds exactly one /boot/Image-<kver>
+# (the kernel-image package `avocado install` resolved). Prefer that
+# version's content-addressed kernel sysroot, falling back to the rootfs copy:
+# the precedence avocado-cli uses for AVOCADO_PROVISION_KERNEL_IMAGE. Never
+# glob kernel/*: it keeps every kernel this volume has ever installed.
+#
+# No pinned kernel (a project whose rootfs.packages leave out the kernel
+# meta-package): carry the BSP boot.img as built, the same rule provision
+# follows, so an update ships what a flash would. kernel.cmdline and
+# cmdline_extra need a repack, and so a kernel; fail like provision does.
+set -- "$AVOCADO_PREFIX"/rootfs/boot/Image-*
+if [ $# -eq 1 ] && [ ! -e "$1" ]; then
+    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+        echo "ERROR: kernel.cmdline / cmdline_extra is set, but no kernel is pinned in" >&2
+        echo "       $AVOCADO_PREFIX/rootfs/boot to repack $boot_image with it." >&2
+        exit 1
+    fi
+    cp "$input_dir/tegraflash-bsp/boot.img" "$input_dir/$boot_image"
+    echo "No pinned kernel: $boot_image is the BSP boot.img as built"
+    exit 0
+fi
+[ $# -eq 1 ] || {
+    echo "ERROR: expected one pinned kernel in $AVOCADO_PREFIX/rootfs/boot, found: $*" >&2
+    exit 1
+}
+kver=${1##*/Image-}
+kernel="$AVOCADO_PREFIX/kernel/$kver/Image"
+[ -e "$kernel" ] || kernel=$1
+
+mkbootimg_bin="$input_dir/tegraflash-tools/mkbootimg"
+[ -x "$mkbootimg_bin" ] || mkbootimg_bin=$(command -v mkbootimg || true)
+[ -n "$mkbootimg_bin" ] || { echo "ERROR: mkbootimg not found ($input_dir/tegraflash-tools or PATH)" >&2; exit 1; }
+
+echo "Assembling $boot_image from kernel $kver for the kernel A/B partitions"
+avocado-tegra-bootimg "$mkbootimg_bin" "$input_dir/tegraflash-bsp/boot.img" \
+    "$kernel" "$input_dir/$initramfs_image" "$input_dir/$boot_image"
+echo "Assembled $boot_image ($(stat -c%s "$input_dir/$boot_image") bytes)"
