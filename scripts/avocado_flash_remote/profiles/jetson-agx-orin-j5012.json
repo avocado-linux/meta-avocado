@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "board": "jetson-agx-orin-j5012",
+  "description": "Jetson AGX Orin on the J5012 carrier: flash the internal eMMC from the running NVMe system. Generic profile: the eMMC identity is the device name plus the sector count, and the name check can never differ. A board-support extension profile (--extension-dir) must pin the eMMC serial (target.identity kind serial, sysfs_attr serial) and list target-identity in checks.",
+  "target": {
+    "device": "/dev/mmcblk0",
+    "sector_size": 512,
+    "sectors": 122314752,
+    "require_empty": true,
+    "identity": {
+      "kind": "sysfs-name",
+      "value": "mmcblk0"
+    }
+  },
+  "layout": {
+    "strategy": "explicit-table",
+    "params": {
+      "sector_size": 512,
+      "first_lba": 40,
+      "last_lba": 122314718,
+      "device_sectors": 122314752,
+      "table": [
+        {
+          "number": 3,
+          "name": "A_kernel",
+          "start": 40,
+          "size": 262144,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 4,
+          "name": "A_kernel-dtb",
+          "start": 262184,
+          "size": 1536,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 5,
+          "name": "A_reserved_on_user",
+          "start": 263720,
+          "size": 64768,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 6,
+          "name": "B_kernel",
+          "start": 328488,
+          "size": 262144,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 7,
+          "name": "B_kernel-dtb",
+          "start": 590632,
+          "size": 1536,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 8,
+          "name": "B_reserved_on_user",
+          "start": 592168,
+          "size": 64768,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 9,
+          "name": "recovery",
+          "start": 656936,
+          "size": 163840,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 10,
+          "name": "recovery-dtb",
+          "start": 820776,
+          "size": 1024,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 11,
+          "name": "esp",
+          "start": 821800,
+          "size": 131072,
+          "type_guid": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+        },
+        {
+          "number": 12,
+          "name": "recovery_alt",
+          "start": 952872,
+          "size": 163840,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 13,
+          "name": "recovery-dtb_alt",
+          "start": 1116712,
+          "size": 1024,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 14,
+          "name": "esp_alt",
+          "start": 1117736,
+          "size": 131072,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 15,
+          "name": "reserved",
+          "start": 1248808,
+          "size": 982016,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 1,
+          "name": "APP",
+          "start": 2230848,
+          "size": 524288,
+          "type_guid": "B921B045-1DF0-41C3-AF44-4C6F280D3FAE"
+        },
+        {
+          "number": 2,
+          "name": "APP_b",
+          "start": 2755136,
+          "size": 524288,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        },
+        {
+          "number": 16,
+          "name": "DATAPART_EXPAND",
+          "start": 3279424,
+          "size": 119035289,
+          "type_guid": "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
+          "uuid": "4D21B016-B534-45C2-A9FB-5C16E091FD2D"
+        }
+      ]
+    }
+  },
+  "images": {
+    "boot": {
+      "partition": 3,
+      "max_bytes": 134217728,
+      "must_be_populated": true,
+      "file": "boot.img"
+    },
+    "boot_b": {
+      "partition": 6,
+      "max_bytes": 134217728,
+      "must_be_populated": true,
+      "file": "boot.img"
+    },
+    "dtb": {
+      "partition": 4,
+      "max_bytes": 786432,
+      "must_be_populated": true,
+      "file": "tegra234-j501x-0000+p3701-0005-recomputer-mini.dtb"
+    },
+    "dtb_b": {
+      "partition": 7,
+      "max_bytes": 786432,
+      "must_be_populated": true,
+      "file": "tegra234-j501x-0000+p3701-0005-recomputer-mini.dtb"
+    },
+    "esp": {
+      "partition": 11,
+      "max_bytes": 67108864,
+      "must_be_populated": true,
+      "file": "tegra-espimage-avocado-jetson-agx-orin-devkit.esp"
+    },
+    "rootfs": {
+      "partition": 1,
+      "max_bytes": 268435456,
+      "must_be_populated": true,
+      "file": "avocado-image-rootfs-jetson-agx-orin-devkit.erofs-lz4"
+    },
+    "var": {
+      "partition": 16,
+      "max_bytes": 60946067968,
+      "must_be_populated": true,
+      "file": "avocado-image-var-jetson-agx-orin-devkit.btrfs"
+    }
+  },
+  "checks": [
+    "emmc-exists",
+    "emmc-not-read-only",
+    "emmc-sector-count",
+    "emmc-no-partition-table",
+    "emmc-not-mounted",
+    "efibootmgr-supports-bootnext",
+    "boot-order-unchanged",
+    "boot-next-unset",
+    "arm-entry-unique",
+    "arm-entry-after-boot-current",
+    "efivarfs-rw",
+    "secure-boot-disabled",
+    "staged-images-present",
+    "staged-image-checksums",
+    "staging-space-free",
+    "board-prerequisites"
+  ],
+  "arm": {
+    "strategy": "uefi-bootnext",
+    "params": {
+      "entry_label": "UEFI eMMC Device"
+    }
+  },
+  "guard": {
+    "strategy": "boot-arg",
+    "params": {
+      "argument": "module_blacklist=nvme,nvme_core,pcie_tegra194",
+      "partitions": [
+        "A_kernel",
+        "B_kernel"
+      ]
+    }
+  },
+  "staging": {
+    "dir": "/run/emmc-test-images",
+    "min_free_kib": 716800
+  },
+  "state_dir": "/var/lib/avocado-flash"
+}
