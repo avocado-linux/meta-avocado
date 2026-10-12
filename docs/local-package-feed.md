@@ -11,6 +11,71 @@ required except the broken-out extension repos (see Prerequisites).
 
 ---
 
+## 0. Direct feed from the build (fast path)
+
+For iterating on layers, skip the `_repo/` copy entirely. `avocado-complete`
+(with `AVOCADO_FEED_INDEX = "1"`, the default) finishes by indexing the build's
+own `deploy/rpm` into `build/tmp/deploy/avocado-feed/`:
+
+```
+avocado-feed/
+├── sdk/all/{all_avocadosdk -> ../../../rpm/all_avocadosdk, repodata/}
+├── sdk/<machine>/{x86_64_avocadosdk -> ..., repodata/}
+├── target/<machine>/{<machine-arch>, <tunes>, noarch -> ..., repodata/}
+└── target/<machine>-ext/repodata/          # empty until you add extensions
+```
+
+The layout comes from `avocado-repo.map`, so it is exactly what the SDK's
+`.repo` files expect. Metadata is `createrepo_c --update`: only new RPMs are
+hashed, and an RPM that sstate removes from `deploy/rpm` leaves the feed too.
+
+```bash
+kas build kas/machine/<m>.yml --target avocado-complete
+./scripts/feed-serve.sh build-<m>          # once; survives rebuilds and reboots
+export AVOCADO_REPO_URL=http://localhost:8080
+avocado sdk install && avocado install
+```
+
+The server maps any `<release>/<channel>/` prefix to the feed root, so the
+`distro` block in `avocado.yaml` needs no change. `PORT=` and `NAME=`
+override the defaults; `feed-serve.sh --stop` removes it. It runs under docker.
+
+A project that has installed from the published feed has a snapshot pin in
+its lock file, and the local feed has no snapshots, so that pin 404s here.
+Set `AVOCADO_RELEASEVER` as well: the CLI skips snapshot resolution entirely
+when it is set, and the server accepts any `<release>/<channel>/`.
+
+```bash
+export AVOCADO_RELEASEVER=<release>/<channel>   # e.g. 2024/edge
+```
+
+Iterating on one package:
+
+```bash
+bitbake <recipe> && bitbake avocado-feed-index
+avocado update && avocado install
+```
+
+(Two commands, not `bitbake <recipe> avocado-feed-index`: bitbake does not order
+independent targets, so the index could run before the package is written.)
+
+Extensions: during OS work, reference them with `path:` or `git:` sources in
+`avocado.yaml`; the CLI mounts them, so nothing needs packaging. To test one as
+a feed package:
+
+```bash
+avocado ext package -e <ext> --target <m> \
+  --out-dir build-<m>/build/tmp/deploy/avocado-feed/target/<m>-ext
+bitbake avocado-feed-index
+```
+
+CI and other builds that never serve the feed can set
+`AVOCADO_FEED_INDEX = "0"`. The rest of this guide covers `dev-repo.sh`, which
+reproduces the production content-pool render and `targets.json` across several
+targets.
+
+---
+
 ## Table of Contents
 
 1. [TL;DR](#1-tldr)
