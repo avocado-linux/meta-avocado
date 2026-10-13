@@ -552,6 +552,36 @@ case "$boot_media" in
         ;;
 esac
 
+# Boot the medium this flash targets. The flash resets the UEFI variable store,
+# and on an empty store the firmware sorts BootOrder once by DefaultBootPriority
+# (edk2-nvidia PlatformBootOrderLib), never again. L4TConfiguration.dtbo ships
+# "usb,nvme,emmc,sd,ufs", so a provisioned SD card loses to any NVMe or USB disk
+# still carrying an OS. Put the target class first; the rest keep their order.
+l4t_conf_dtbo="$build_dir/L4TConfiguration.dtbo"
+boot_priority_node=/fragment@0/__overlay__/firmware/uefi/variables/gNVIDIATokenSpaceGuid/DefaultBootPriority
+stock_priority=$(fdtget -t s "$l4t_conf_dtbo" "$boot_priority_node" data) || {
+    echo "ERROR: cannot read DefaultBootPriority from $l4t_conf_dtbo" >&2
+    exit 1
+}
+boot_priority=$boot_media
+IFS=, read -ra stock_classes <<<"$stock_priority"
+for class in "${stock_classes[@]}"; do
+    [ "$class" = "$boot_media" ] || boot_priority="$boot_priority,$class"
+done
+# Edit a private copy: a link would carry the change back into the staged BSP.
+if [ -L "$l4t_conf_dtbo" ]; then
+    cp --remove-destination "$(readlink -f "$l4t_conf_dtbo")" "$l4t_conf_dtbo" || exit 1
+fi
+fdtput -t s "$l4t_conf_dtbo" "$boot_priority_node" data "$boot_priority" || {
+    echo "ERROR: cannot set DefaultBootPriority in $l4t_conf_dtbo" >&2
+    exit 1
+}
+[ "$(fdtget -t s "$l4t_conf_dtbo" "$boot_priority_node" data)" = "$boot_priority" ] || {
+    echo "ERROR: DefaultBootPriority did not take in $l4t_conf_dtbo" >&2
+    exit 1
+}
+echo "UEFI DefaultBootPriority: $boot_priority (was $stock_priority)"
+
 # Composable env var flags (override defaults from profile)
 [ "${ERASE_NVME:-0}" = "1" ] && flash_args="$flash_args --erase-nvme"
 [ "${ERASE_EMMC:-0}" = "1" ] && flash_args="$flash_args --erase-emmc"

@@ -11,6 +11,7 @@ RDEPENDS:${PN}:append = " \
   nativesdk-qemu-system-x86-64 \
   nativesdk-python3-pyyaml \
   nativesdk-boardctl \
+  nativesdk-dtc \
 "
 
 # Shared boot.img packer for the A_kernel/B_kernel partitions, called by the
