@@ -22,7 +22,7 @@ one or many.
 
 1. [When Multi-Kernel Is Needed](#1-when-multi-kernel-is-needed)
 2. [Architecture Overview](#2-architecture-overview)
-3. [Two Variants: Different Recipes vs Same Recipe Different Versions](#3-two-variants-different-recipes-vs-same-recipe-different-versions)
+3. [Three Variants: Different Recipes, Same Recipe Different Versions, Stock/RT Pairs](#3-three-variants-different-recipes-same-recipe-different-versions-stockrt-pairs)
 4. [Required Components Checklist](#4-required-components-checklist)
 5. [Multiconfig Conf](#5-multiconfig-conf)
 6. [Feature YML](#6-feature-yml)
@@ -105,20 +105,20 @@ shape.
 
 ---
 
-## 3. Two Variants: Different Recipes vs Same Recipe Different Versions
+## 3. Three Variants: Different Recipes, Same Recipe Different Versions, Stock/RT Pairs
 
-The two multi-kernel families today take different shapes, and the
-distinction drives the multiconfig conf:
+The multi-kernel families today take three shapes, and the distinction
+drives the multiconfig conf:
 
 ### Variant A — Different recipes (Jetson)
 
-Default kernel is `linux-yocto` 6.6; alt is `linux-jammy-nvidia-tegra`
-5.15. The two recipes have different `${PN}` values, so:
+Default kernel is `linux-yocto` 6.18; alt is `linux-noble-nvidia-tegra`
+6.8. The two recipes have different `${PN}` values, so:
 
 - `BUILDHISTORY_DIR_PACKAGE = ${BUILDHISTORY_DIR}/packages/${MULTIMACH_TARGET_SYS}/${PN}`
   has different paths for each — no per-mc BUILDHISTORY_DIR override needed.
 - The multiconfig conf uses
-  `PREFERRED_PROVIDER_virtual/kernel:forcevariable = "linux-jammy-nvidia-tegra"`
+  `PREFERRED_PROVIDER_virtual/kernel:forcevariable = "linux-noble-nvidia-tegra"`
   to switch the kernel provider in the alt mc.
 
 ### Variant B — Same recipe, different versions (Raspberry Pi)
@@ -134,17 +134,67 @@ Same `${PN}` means:
   `PREFERRED_VERSION_<recipe>:forcevariable = "6.6.%"` to pin the version
   in the alt mc; the provider stays the same.
 
+### Variant C — Stock/PREEMPT_RT pair off one source tree (qcom, Jetson)
+
+A PREEMPT_RT sibling is its own recipe with its own `${PN}`
+(`linux-qcom-rt`, `linux-noble-nvidia-tegra-rt`, `linux-yocto-rt`), so it
+looks like Variant A and takes the same `PREFERRED_PROVIDER_virtual/kernel`
+knob. What makes it its own case is that the two recipes build the **same
+upstream source at the same version**, which breaks two assumptions the
+other variants get for free:
+
+- **Per-mc `BUILDHISTORY_DIR` is required**, unlike plain Variant A. The
+  kernel PNs differ, but the shared *helper* recipes that depend on
+  `virtual/kernel` keep one `${PN}` across both mcs (`make-mod-scripts`,
+  `kernel-devsrc`, `nvidia-kernel-oot`, the vendor `*-dtbbin` recipes…).
+  Each mc's distinct taskhash draws its own AUTOPR from the PR service, so
+  both write the same buildhistory path with different PRs and the QA guard
+  reports a spurious `version went backwards`.
+- **`${PV}` may need an explicit suffix.** `${KERNEL_VERSION}` is normally
+  already distinct — the RT recipe adds a localversion — and that covers
+  every name built from it (`kernel-${kver}`, `kernel-module-*-${kver}`,
+  `packagegroup-avocado-{rootfs,initramfs}-modules-${kver}`). But
+  `kernel.bbclass` never version-qualifies `kernel`, `kernel-dbg`,
+  `kernel-dev` or `kernel-vmlinux`, and those are named from `${PV}`. If
+  both recipes land on the same `${PV}`, the RT build ships a different
+  payload under an identical NEVRA — which trips bitbake's shared-area
+  guard locally and silently puts two artifacts under one NEVRA in Pulp.
+
+  Check before assuming — and do not check with `bitbake -e`.
+  `linux-qcom`/`linux-qcom-rt` and `linux-noble-nvidia-tegra`/`-rt` all use a
+  plain `PV = "${LINUX_VERSION}"` and collide, so their RT bbappends set
+  `PV = "${LINUX_VERSION}.rt"`. `linux-yocto`/`linux-yocto-rt` use
+  `PV = "${LINUX_VERSION}+git"` and *look* identical at parse time — both
+  report `PKGV = "6.18.35+git"` — but a `PKGV` containing `+` is expanded at
+  `do_package` by `package.bbclass`'s `package_setup_pkgv`, which appends the
+  `SRCREV`-derived string assembled per `SRCREV_FORMAT`. The two pin different
+  `SRCREV_machine`, so the packaged versions differ and no suffix is needed.
+  Confirm on a real build by comparing RPM filenames under `deploy/rpm`, never
+  from the parse-time value.
+
+  Use `.rt`, not `+rt`: a `+` in `PV` is OE's marker for the git-srcrev
+  idiom, so `+rt` comes out as `<ver>+rt0+<srcrev>` and embeds the SRCREV in
+  `PV` for the RT kernel only, moving in an arbitrary direction on every
+  repin. `.rt` just appends a segment — still above plain `<ver>` under
+  rpmvercmp, and still monotonic across a repin.
+
+Out-of-tree module recipes need explicit `AVOCADO_MULTIKERNEL_MC_RECIPES`
+entries here just as in Variant A: only in-tree modules come along with the
+kernel recipe, and an RT runtime offered a stock-vermagic module refuses it.
+
 ### Picking your variant
 
-| Question | Variant A | Variant B |
-|----------|-----------|-----------|
-| Are the two kernels different recipe names? | Yes | No (same recipe at different PVs) |
-| Multiconfig override knob | `PREFERRED_PROVIDER_virtual/kernel:forcevariable` | `PREFERRED_VERSION_<recipe>:forcevariable` |
-| Per-mc `BUILDHISTORY_DIR` required? | No | **Yes** |
-| Per-mc `TMPDIR` required? | Yes | Yes |
+| Question | Variant A | Variant B | Variant C |
+|----------|-----------|-----------|-----------|
+| Are the two kernels different recipe names? | Yes | No (same recipe at different PVs) | Yes |
+| Same upstream source and version? | No | No | **Yes** |
+| Multiconfig override knob | `PREFERRED_PROVIDER_virtual/kernel:forcevariable` | `PREFERRED_VERSION_<recipe>:forcevariable` | `PREFERRED_PROVIDER_virtual/kernel:forcevariable` |
+| Per-mc `BUILDHISTORY_DIR` required? | No | **Yes** | **Yes** |
+| Per-mc `TMPDIR` required? | Yes | Yes | Yes |
+| `${PV}` suffix on the alt recipe? | No | No | Only if both land on the same `${PV}` |
 
-Both variants share the rest of the infrastructure (feature yml, bbclass,
-machine-yml composition).
+All three variants share the rest of the infrastructure (feature yml,
+bbclass, machine-yml composition).
 
 ---
 
@@ -401,5 +451,14 @@ package.
 
 | Family | Default kernel | Alt kernel(s) | mc name | Variant | Multiconfig conf |
 |--------|----------------|---------------|---------|---------|------------------|
-| Jetson | linux-yocto 6.6 | linux-jammy-nvidia-tegra 5.15 + nvidia-kernel-oot | `jetson-l4t` | A (different recipes) | `meta-avocado-nvidia/conf/multiconfig/jetson-l4t.conf` |
+| Jetson | linux-yocto 6.18 | linux-noble-nvidia-tegra 6.8 + nvidia-kernel-oot | `jetson-l4t` | A (different recipes) | `meta-avocado-nvidia/conf/multiconfig/jetson-l4t.conf` |
+| Jetson | linux-yocto 6.18 | linux-yocto-rt 6.18 + nvidia-kernel-oot | `jetson-rt` | C (stock/RT pair) | `meta-avocado-nvidia/conf/multiconfig/jetson-rt.conf` |
+| Jetson | linux-yocto 6.18 | linux-noble-nvidia-tegra-rt 6.8 + nvidia-kernel-oot | `jetson-l4t-rt` | C (stock/RT pair) | `meta-avocado-nvidia/conf/multiconfig/jetson-l4t-rt.conf` |
+| qcom | linux-qcom 6.18 | linux-qcom-rt 6.18 | `qcom-rt` | C (stock/RT pair) | `meta-avocado-qcom/conf/multiconfig/qcom-rt.conf` |
 | Raspberry Pi | linux-raspberrypi 6.12 | linux-raspberrypi 6.6 | `raspberrypi-6_6` | B (same recipe, different versions) | `meta-avocado-raspberrypi/conf/multiconfig/raspberrypi-6_6.conf` |
+
+Jetson carries three alt mcs, so every Jetson machine builds four kernels:
+the stock and PREEMPT_RT halves of both the mainline (`linux-yocto`) and the
+L4T (`linux-noble-nvidia-tegra`) trees. All three are activated from the one
+`kas/feature/multi-kernel-jetson.yml` overlay every Jetson machine yml
+already includes.
