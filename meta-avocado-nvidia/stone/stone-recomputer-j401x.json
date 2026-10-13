@@ -76,6 +76,9 @@
         "tegraflash_tos": "tos-avocado-recomputer-j401x.img",
         "tegraflash_bsp": "tegraflash-bsp",
         "tegraflash_tools": "tegraflash-tools"
+      },
+      "tegraflash": {
+        "sd_device": "mmcblk1"
       }
     }
   }
