@@ -79,6 +79,11 @@ bpmp_dtb_file=$(jq -r '.storage_devices.rootdisk.images.bpmp_dtb // empty' "$AVO
 tegraflash_overlays=$(jq -r '.storage_devices.rootdisk.tegraflash.overlays // [] | join(",")' "$AVOCADO_STONE_MANIFEST")
 tegraflash_dce_overlays=$(jq -r '.storage_devices.rootdisk.tegraflash.dce_overlays // [] | join(",")' "$AVOCADO_STONE_MANIFEST")
 
+# Block device the SD card enumerates as on this module - a board property, so
+# the board's manifest is where it is declared. Consumed by the sd) branch of
+# the boot-media case below.
+tegraflash_sd_device=$(jq -r '.storage_devices.rootdisk.tegraflash.sd_device // empty' "$AVOCADO_STONE_MANIFEST")
+
 echo "Runtime images from manifest:"
 echo "  rootfs: $rootfs_file"
 echo "  var: $var_file"
@@ -95,6 +100,7 @@ echo "  dtb: $dtb_file"
 echo "  bpmp_dtb: $bpmp_dtb_file"
 echo "  overlays: $tegraflash_overlays"
 echo "  dce_overlays: $tegraflash_dce_overlays"
+echo "  sd_device: ${tegraflash_sd_device:-<not declared>}"
 
 # Create build directory for tegraflash working area
 build_dir="${AVOCADO_STONE_BUILD_DIR}/tegraflash"
@@ -508,13 +514,73 @@ case "$boot_media" in
         fi
         ;;
     sd)
+        # Which MMC device the card enumerates as is a property of the module,
+        # so it is declared per board rather than defaulted here. An eMMC-less
+        # module instantiates only the SD controller and the card is the first
+        # MMC device (3400000.mmc -> mmc0 -> mmcblk0); a module carrying eMMC
+        # puts eMMC on mmc0 and the card on mmc1, which is what the BSP's
+        # generic/cfg/flash_t234_qspi_sd*.xml assume. There is no default that
+        # is right for both, and getting it wrong writes at the other device -
+        # on an eMMC-bearing module, at internal storage.
+        sd_device="${AVOCADO_PROVISION_SD_DEVICE:-$tegraflash_sd_device}"
+        if [ -z "$sd_device" ]; then
+            echo "ERROR: no SD card device declared for this board." >&2
+            echo "       Add .storage_devices.rootdisk.tegraflash.sd_device to" >&2
+            echo "       $AVOCADO_STONE_MANIFEST - mmcblk0 on a module without" >&2
+            echo "       eMMC, the next MMC index on one that has it - or set" >&2
+            echo "       AVOCADO_PROVISION_SD_DEVICE for a one-off run." >&2
+            exit 1
+        fi
+        # Validate before it reaches sed's replacement text. The natural
+        # mistake is a /dev path, which turns the substitution into
+        # s/^BOOTDEV=.*/BOOTDEV="/dev/mmcblk1p1"/ and dies at "unknown option
+        # to `s'"; an & would silently insert the matched text instead. The
+        # accepted form is the one initrd-flash's own export path matches.
+        if [[ ! "$sd_device" =~ ^mmcblk[0-9]+$ ]]; then
+            echo "ERROR: SD card device '$sd_device' is not a bare mmcblkN name." >&2
+            echo "       Expected e.g. mmcblk0, not a /dev path and not a" >&2
+            echo "       partition. Set AVOCADO_PROVISION_SD_DEVICE or the" >&2
+            echo "       manifest's tegraflash.sd_device accordingly." >&2
+            exit 1
+        fi
+        echo "SD card device: $sd_device"
         sed -i \
-            -e 's/^BOOTDEV=.*/BOOTDEV="mmcblk1p1"/' \
-            -e 's/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE="mmcblk1"/' \
+            -e "s/^BOOTDEV=.*/BOOTDEV=\"${sd_device}p1\"/" \
+            -e "s/^ROOTFS_DEVICE=.*/ROOTFS_DEVICE=\"${sd_device}\"/" \
             -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
             "$build_dir/.env.initrd-flash"
         ;;
 esac
+
+# Boot the medium this flash targets. The flash resets the UEFI variable store,
+# and on an empty store the firmware sorts BootOrder once by DefaultBootPriority
+# (edk2-nvidia PlatformBootOrderLib), never again. L4TConfiguration.dtbo ships
+# "usb,nvme,emmc,sd,ufs", so a provisioned SD card loses to any NVMe or USB disk
+# still carrying an OS. Put the target class first; the rest keep their order.
+l4t_conf_dtbo="$build_dir/L4TConfiguration.dtbo"
+boot_priority_node=/fragment@0/__overlay__/firmware/uefi/variables/gNVIDIATokenSpaceGuid/DefaultBootPriority
+stock_priority=$(fdtget -t s "$l4t_conf_dtbo" "$boot_priority_node" data) || {
+    echo "ERROR: cannot read DefaultBootPriority from $l4t_conf_dtbo" >&2
+    exit 1
+}
+boot_priority=$boot_media
+IFS=, read -ra stock_classes <<<"$stock_priority"
+for class in "${stock_classes[@]}"; do
+    [ "$class" = "$boot_media" ] || boot_priority="$boot_priority,$class"
+done
+# Edit a private copy: a link would carry the change back into the staged BSP.
+if [ -L "$l4t_conf_dtbo" ]; then
+    cp --remove-destination "$(readlink -f "$l4t_conf_dtbo")" "$l4t_conf_dtbo" || exit 1
+fi
+fdtput -t s "$l4t_conf_dtbo" "$boot_priority_node" data "$boot_priority" || {
+    echo "ERROR: cannot set DefaultBootPriority in $l4t_conf_dtbo" >&2
+    exit 1
+}
+[ "$(fdtget -t s "$l4t_conf_dtbo" "$boot_priority_node" data)" = "$boot_priority" ] || {
+    echo "ERROR: DefaultBootPriority did not take in $l4t_conf_dtbo" >&2
+    exit 1
+}
+echo "UEFI DefaultBootPriority: $boot_priority (was $stock_priority)"
 
 # Composable env var flags (override defaults from profile)
 [ "${ERASE_NVME:-0}" = "1" ] && flash_args="$flash_args --erase-nvme"

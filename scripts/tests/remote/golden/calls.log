@@ -1,0 +1,992 @@
+=== CASE install:dry
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+=== CASE install:dry#2
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+=== CASE install:ok
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE install:ok#2
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+=== CASE install:ok#3
+exit=0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr -v
+=== CASE install:ok#4
+exit=0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr -v
+efibootmgr -N
+efibootmgr -B -b 0005
+sfdisk --delete /dev/mmcblk0 3 4 5 6 7 8 9 10 11 12 13 14 15 1 2 16
+sfdisk --dump /dev/mmcblk0
+wipefs -a /dev/mmcblk0
+efibootmgr -v
+=== CASE install:ok#5
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE install:rmismatch1
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE install:rmismatch1#2
+exit=1
+sfdisk --dump /dev/mmcblk0
+=== CASE install:rmismatch2
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE install:rmismatch2#2
+exit=1
+sfdisk --dump /dev/mmcblk0
+=== CASE install:rnostate
+exit=1
+=== CASE install:disk-nvme0n1
+exit=1
+=== CASE install:disk-nvme0n1p1
+exit=1
+=== CASE install:disk-sda
+exit=1
+=== CASE install:disk-nvme-dry
+exit=1
+=== CASE install:badsum
+exit=1
+=== CASE install:modified
+exit=1
+=== CASE install:foreign
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+=== CASE install:foreign-lsblk
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+=== CASE install:mounted
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+=== CASE install:badcmd
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+=== CASE install:unseated
+exit=0
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE install:readback
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+=== CASE install:extracmd
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE install:nearmiss
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+=== CASE install:hdrv3
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+=== CASE install:noarg
+exit=1
+=== CASE install:bochange
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+=== CASE install:noc
+exit=1
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+=== CASE install:nocfb
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -n 0002
+efibootmgr -v
+=== CASE install:devimages
+exit=1
+=== CASE install:nondevimages
+exit=0
+dd if=<TMP>/images/boot.img of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+blockdev --getsz /dev/mmcblk0
+findmnt -rn -o SOURCE
+lsblk -rn -o NAME,TYPE /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+efibootmgr -v
+efibootmgr --help
+sfdisk /dev/mmcblk0
+udevadm settle
+sfdisk --dump /dev/mmcblk0
+blockdev --getsize64 /dev/mmcblk0p3
+blockdev --getsize64 /dev/mmcblk0p4
+blockdev --getsize64 /dev/mmcblk0p5
+blockdev --getsize64 /dev/mmcblk0p6
+blockdev --getsize64 /dev/mmcblk0p7
+blockdev --getsize64 /dev/mmcblk0p8
+blockdev --getsize64 /dev/mmcblk0p9
+blockdev --getsize64 /dev/mmcblk0p10
+blockdev --getsize64 /dev/mmcblk0p11
+blockdev --getsize64 /dev/mmcblk0p12
+blockdev --getsize64 /dev/mmcblk0p13
+blockdev --getsize64 /dev/mmcblk0p14
+blockdev --getsize64 /dev/mmcblk0p15
+blockdev --getsize64 /dev/mmcblk0p1
+blockdev --getsize64 /dev/mmcblk0p2
+blockdev --getsize64 /dev/mmcblk0p16
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+dd if=<TMP>/images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+dd if=<TMP>/images/board.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+dd if=<TMP>/images/esp.img of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+dd if=<TMP>/images/rootfs.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+dd if=<TMP>/images/var.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+dd if=/dev/mmcblk0p3 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p6 of=<TMP>/run/bhdr.<RAND> bs=2048 count=1 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=64 count=512 status=none
+dd if=<TMP>/run/bhdr.<RAND> bs=1 skip=608 count=1024 status=none
+dd if=/dev/mmcblk0p3 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p6 bs=4M iflag=count_bytes count=6144 status=none
+dd if=/dev/mmcblk0p4 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p7 bs=4M iflag=count_bytes count=4096 status=none
+dd if=/dev/mmcblk0p11 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p1 bs=4M iflag=count_bytes count=1048576 status=none
+dd if=/dev/mmcblk0p16 bs=4M iflag=count_bytes count=524288 status=none
+blkid -p -s TYPE -o value /dev/mmcblk0p11
+efibootmgr -v
+efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \EFI\BOOT\BOOTAA64.EFI -u bootmode=bootimg
+efibootmgr -v
+efibootmgr -n 0005
+efibootmgr -v
+=== CASE stage:dry
+exit=0
+=== CASE stage:defsrc
+exit=0
+=== CASE stage:oldsrc
+exit=0
+=== CASE stage:dev-_dev_shm_x
+exit=2
+=== CASE stage:dev-_dev_shm
+exit=2
+=== CASE stage:dev-_dev
+exit=2
+=== CASE stage:dev-_dev_mmcblk0p1
+exit=2
+=== CASE stage:dev-_dev_.._run_x
+exit=2
+=== CASE stage:devmsg
+exit=2
+=== CASE stage:out-_tmp_x
+exit=2
+=== CASE stage:out-_home_user_x
+exit=2
+=== CASE stage:out-_etc
+exit=2
+=== CASE stage:out-_runx_y
+exit=2
+=== CASE stage:out-_run
+exit=2
+=== CASE stage:out-_var_tmp
+exit=2
+=== CASE stage:out-_run_.._etc_x
+exit=2
+=== CASE stage:ok
+exit=0
+CALL host=target-board
+CMD mkdir -p /run/emmc-test-images && tar -C /run/emmc-test-images -xf - && cd /run/emmc-test-images && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:custom
+exit=0
+CALL host=myboard
+CMD mkdir -p /var/tmp/alt-stage && tar -C /var/tmp/alt-stage -xf - && cd /var/tmp/alt-stage && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:corrupt
+exit=1
+CALL host=target-board
+CMD mkdir -p /run/emmc-test-images && tar -C /run/emmc-test-images -xf - && cd /run/emmc-test-images && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:corrupt-install.sh
+exit=1
+CALL host=target-board
+CMD mkdir -p /run/emmc-test-images && tar -C /run/emmc-test-images -xf - && cd /run/emmc-test-images && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:corrupt-preflight.sh
+exit=1
+CALL host=target-board
+CMD mkdir -p /run/emmc-test-images && tar -C /run/emmc-test-images -xf - && cd /run/emmc-test-images && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:corrupt-readback.sh
+exit=1
+CALL host=target-board
+CMD mkdir -p /run/emmc-test-images && tar -C /run/emmc-test-images -xf - && cd /run/emmc-test-images && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:sshfail
+exit=1
+CALL host=target-board
+CMD mkdir -p /run/emmc-test-images && tar -C /run/emmc-test-images -xf - && cd /run/emmc-test-images && chmod 0644 boot.img avocado-image-rootfs-test.erofs-lz4 avocado-image-var-test.btrfs tegra-espimage-test.esp tegra234-test.dtb MANIFEST MANIFEST.hashes && chmod 0755 install.sh preflight.sh readback.sh && sha256sum --strict -c MANIFEST.hashes && printf '<SHA256>  install.sh\n<SHA256>  preflight.sh\n<SHA256>  readback.sh\n' | sha256sum --strict -c -
+=== CASE stage:badsrc
+exit=2
+=== CASE window:pf-good
+exit=0
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-parttable
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-sectors
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-readonly
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-mounted
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-bootnext
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-bootorder
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-stale
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-noC
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-efivarfsro
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-secureboot
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-corrupt
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-space
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-sb-absent
+exit=0
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-image-missing
+exit=1
+efibootmgr -v
+blockdev --getro /dev/mmcblk0
+blockdev --getsz /dev/mmcblk0
+sfdisk --dump /dev/mmcblk0
+findmnt -rn -o SOURCE
+efibootmgr --help
+findmnt -no OPTIONS /sys/firmware/efi/efivars
+df -Pk <TMP>/stage
+findmnt -no FSTYPE -T <TMP>/stage
+uname -r
+docker ps -q
+=== CASE window:pf-missing-tool
+exit=2
+=== CASE window:pf-no-manifest
+exit=2
+=== CASE window:pf-efi-fail
+exit=2
+efibootmgr -v
+=== CASE window:pf-noroot
+exit=2
+=== CASE window:rb-default
+exit=0
+efibootmgr -v
+lsblk -dn -o NAME
+lsblk /dev/mmcblk0
+lsblk -rn -o NAME,PARTLABEL /dev/mmcblk0
+findmnt -no FSTYPE -T <TMP>/out
+mount -o ro -t btrfs /dev/mmcblk0p16 <TMP>/mnt
+ls -la <TMP>/mnt
+ls -laR <TMP>/mnt/log/journal
+umount <TMP>/mnt
+=== CASE window:rb-entry
+exit=0
+efibootmgr -v
+lsblk -dn -o NAME
+lsblk /dev/mmcblk0
+lsblk -rn -o NAME,PARTLABEL /dev/mmcblk0
+findmnt -no FSTYPE -T <TMP>/out
+mount -o ro -t btrfs /dev/mmcblk0p16 <TMP>/mnt
+ls -la <TMP>/mnt
+umount <TMP>/mnt
+=== CASE window:rb-fallback
+exit=0
+efibootmgr -v
+lsblk -dn -o NAME
+lsblk /dev/mmcblk0
+lsblk -rn -o NAME,PARTLABEL /dev/mmcblk0
+findmnt -no FSTYPE -T <TMP>/out
+mount -o ro -t btrfs /dev/mmcblk0p16 <TMP>/mnt
+ls -la <TMP>/mnt
+umount <TMP>/mnt
+=== CASE window:rb-differs
+exit=1
+efibootmgr -v
+lsblk -dn -o NAME
+lsblk /dev/mmcblk0
+lsblk -rn -o NAME,PARTLABEL /dev/mmcblk0
+findmnt -no FSTYPE -T <TMP>/out
+mount -o ro -t btrfs /dev/mmcblk0p16 <TMP>/mnt
+ls -la <TMP>/mnt
+umount <TMP>/mnt
+=== CASE window:rb-notmpfs
+exit=1
+efibootmgr -v
+lsblk -dn -o NAME
+lsblk /dev/mmcblk0
+lsblk -rn -o NAME,PARTLABEL /dev/mmcblk0
+findmnt -no FSTYPE -T <TMP>/out
+=== CASE window:rb-mountfail
+exit=1
+efibootmgr -v
+lsblk -dn -o NAME
+lsblk /dev/mmcblk0
+lsblk -rn -o NAME,PARTLABEL /dev/mmcblk0
+findmnt -no FSTYPE -T <TMP>/out
+mount -o ro -t btrfs /dev/mmcblk0p16 <TMP>/mnt
+=== CASE window:rb-missing-tool
+exit=2
+=== CASE window:rb-cleanup
+exit=0
+efibootmgr -v
+efibootmgr -N
+efibootmgr -B -b 0005
+efibootmgr -v
+=== CASE window:rb-cleanup-two
+exit=1
+efibootmgr -v
+=== CASE window:rb-cleanup-none
+exit=0
+efibootmgr -v
+efibootmgr -v
+=== CASE window:rb-cleanup-next-only
+exit=0
+efibootmgr -v
+efibootmgr -N
+efibootmgr -v

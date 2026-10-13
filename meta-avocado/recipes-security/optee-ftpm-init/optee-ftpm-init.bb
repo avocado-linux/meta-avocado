@@ -28,7 +28,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 SRC_URI = " \
     file://optee-ftpm-setup.sh \
     file://optee-ftpm-setup.service \
+    file://tee-supplicant-initrd.service \
     file://optee-ftpm.conf \
+    file://tee-supplicant-initrd.conf \
+    file://tee-ftpm-modprobe-initrd.conf \
 "
 
 # tee-supplicant (optee-client) services the fTPM REE-FS; the fTPM driver is a
@@ -69,6 +72,18 @@ do_install() {
            -e 's|@TEE_STORE_UNIT@|${OPTEE_FTPM_TEE_STORE_UNIT}|g' \
         ${D}${systemd_system_unitdir}/optee-ftpm-setup.service
 
+    # Started by optee-ftpm-setup.sh, not enabled: it runs tee-supplicant with an '@'
+    # argv[0] so the daemon survives the switch to the real root.
+    install -m 0644 ${UNPACKDIR}/tee-supplicant-initrd.service ${D}${systemd_system_unitdir}/
+
+    # Keep optee-client's own supplicant units out of the initrd, where
+    # optee-ftpm-setup.service runs the supplicant (see the drop-ins).
+    for u in tee-supplicant tee-ftpm-modprobe; do
+        install -d ${D}${systemd_system_unitdir}/$u.service.d
+        install -m 0644 ${UNPACKDIR}/$u-initrd.conf \
+            ${D}${systemd_system_unitdir}/$u.service.d/50-optee-ftpm-initrd.conf
+    done
+
     # Statically enable for the initrd (the initramfs build does not apply the
     # preset for a WantedBy=initrd-root-fs.target unit - same as cryptsetup-var).
     install -d ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants
@@ -79,7 +94,9 @@ do_install() {
 FILES:${PN} += "${libexecdir}/optee-ftpm/"
 FILES:${PN} += "${nonarch_base_libdir}/modprobe.d/optee-ftpm.conf"
 FILES:${PN} += "${systemd_system_unitdir}/optee-ftpm-setup.service"
+FILES:${PN} += "${systemd_system_unitdir}/tee-supplicant-initrd.service"
 FILES:${PN} += "${systemd_system_unitdir}/initrd-root-fs.target.wants/optee-ftpm-setup.service"
+FILES:${PN} += "${systemd_system_unitdir}/tee-supplicant.service.d ${systemd_system_unitdir}/tee-ftpm-modprobe.service.d"
 
 # Only the OP-TEE fTPM machines need this. Lives in the shared layer rather
 # than meta-avocado-qemu because an i.MX93 build never parses that layer - its

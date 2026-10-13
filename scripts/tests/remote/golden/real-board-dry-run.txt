@@ -1,0 +1,66 @@
+verifying checksums from /run/emmc-test-images/MANIFEST
+checksums OK (5 file(s))
+== partitions to create on /dev/mmcblk0 (boot-design.md section 1) ==
+  /dev/mmcblk0p3   A_kernel             start=40       size=262144     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p4   A_kernel-dtb         start=262184   size=1536       type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p5   A_reserved_on_user   start=263720   size=64768      type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p6   B_kernel             start=328488   size=262144     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p7   B_kernel-dtb         start=590632   size=1536       type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p8   B_reserved_on_user   start=592168   size=64768      type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p9   recovery             start=656936   size=163840     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p10  recovery-dtb         start=820776   size=1024       type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p11  esp                  start=821800   size=131072     type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+  /dev/mmcblk0p12  recovery_alt         start=952872   size=163840     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p13  recovery-dtb_alt     start=1116712  size=1024       type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p14  esp_alt              start=1117736  size=131072     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p15  reserved             start=1248808  size=982016     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p1   APP                  start=2230848  size=524288     type=B921B045-1DF0-41C3-AF44-4C6F280D3FAE
+  /dev/mmcblk0p2   APP_b                start=2755136  size=524288     type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+  /dev/mmcblk0p16  DATAPART_EXPAND      start=3279424  size=119035295  type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+== images to write ==
+  boot.img -> /dev/mmcblk0p3 (A_kernel)
+  boot.img -> /dev/mmcblk0p6 (B_kernel)
+  tegra234-j501x-0000+p3701-0005-recomputer-mini.dtb -> /dev/mmcblk0p4 (A_kernel-dtb)
+  tegra234-j501x-0000+p3701-0005-recomputer-mini.dtb -> /dev/mmcblk0p7 (B_kernel-dtb)
+  tegra-espimage-avocado-jetson-agx-orin-devkit.esp -> /dev/mmcblk0p11 (esp)
+  avocado-image-rootfs-jetson-agx-orin-devkit.erofs-lz4 -> /dev/mmcblk0p1 (APP)
+  avocado-image-var-jetson-agx-orin-devkit.btrfs -> /dev/mmcblk0p16 (DATAPART_EXPAND)
+== boot entry (BootNext only, BootOrder untouched) ==
+  create : efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l '\EFI\BOOT\BOOTAA64.EFI' -u 'bootmode=bootimg'
+  arm    : efibootmgr -n <new entry number>
+== dry run ==
+  would create the table from this sfdisk input:
+    label: gpt
+    first-lba: 40
+    last-lba: 122314718
+    sector-size: 512
+    
+    /dev/mmcblk0p3 : start=40, size=262144, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="A_kernel"
+    /dev/mmcblk0p4 : start=262184, size=1536, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="A_kernel-dtb"
+    /dev/mmcblk0p5 : start=263720, size=64768, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="A_reserved_on_user"
+    /dev/mmcblk0p6 : start=328488, size=262144, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="B_kernel"
+    /dev/mmcblk0p7 : start=590632, size=1536, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="B_kernel-dtb"
+    /dev/mmcblk0p8 : start=592168, size=64768, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="B_reserved_on_user"
+    /dev/mmcblk0p9 : start=656936, size=163840, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="recovery"
+    /dev/mmcblk0p10 : start=820776, size=1024, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="recovery-dtb"
+    /dev/mmcblk0p11 : start=821800, size=131072, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="esp"
+    /dev/mmcblk0p12 : start=952872, size=163840, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="recovery_alt"
+    /dev/mmcblk0p13 : start=1116712, size=1024, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="recovery-dtb_alt"
+    /dev/mmcblk0p14 : start=1117736, size=131072, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="esp_alt"
+    /dev/mmcblk0p15 : start=1248808, size=982016, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="reserved"
+    /dev/mmcblk0p1 : start=2230848, size=524288, type=B921B045-1DF0-41C3-AF44-4C6F280D3FAE, name="APP"
+    /dev/mmcblk0p2 : start=2755136, size=524288, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="APP_b"
+    /dev/mmcblk0p16 : start=3279424, size=119035295, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=4D21B016-B534-45C2-A9FB-5C16E091FD2D, name="DATAPART_EXPAND"
+DRY-RUN would run: sfdisk /dev/mmcblk0
+DRY-RUN would run: dd if=/run/emmc-test-images/boot.img of=/dev/mmcblk0p3 bs=1M conv=fsync status=none
+DRY-RUN would run: dd if=/run/emmc-test-images/boot.img of=/dev/mmcblk0p6 bs=1M conv=fsync status=none
+DRY-RUN would run: dd if=/run/emmc-test-images/tegra234-j501x-0000+p3701-0005-recomputer-mini.dtb of=/dev/mmcblk0p4 bs=1M conv=fsync status=none
+DRY-RUN would run: dd if=/run/emmc-test-images/tegra234-j501x-0000+p3701-0005-recomputer-mini.dtb of=/dev/mmcblk0p7 bs=1M conv=fsync status=none
+DRY-RUN would run: dd if=/run/emmc-test-images/tegra-espimage-avocado-jetson-agx-orin-devkit.esp of=/dev/mmcblk0p11 bs=1M conv=fsync status=none
+DRY-RUN would run: dd if=/run/emmc-test-images/avocado-image-rootfs-jetson-agx-orin-devkit.erofs-lz4 of=/dev/mmcblk0p1 bs=1M conv=fsync status=none
+DRY-RUN would run: dd if=/run/emmc-test-images/avocado-image-var-jetson-agx-orin-devkit.btrfs of=/dev/mmcblk0p16 bs=1M conv=fsync status=none
+DRY-RUN would read back the boot image header from /dev/mmcblk0p3 and /dev/mmcblk0p6 and refuse BootNext unless the NVMe-hiding argument is present
+DRY-RUN would run: efibootmgr -C -d /dev/mmcblk0 -p 11 -L avocado-emmc-oneshot -l \\EFI\\BOOT\\BOOTAA64.EFI -u bootmode=bootimg
+DRY-RUN would run: efibootmgr -n NNNN
+dry run complete: no mutating tool was called
+DRYRUN-RC=0

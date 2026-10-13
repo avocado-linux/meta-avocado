@@ -11,12 +11,14 @@ RDEPENDS:${PN}:append = " \
   nativesdk-qemu-system-x86-64 \
   nativesdk-python3-pyyaml \
   nativesdk-boardctl \
+  nativesdk-dtc \
 "
 
 # Shared boot.img packer for the A_kernel/B_kernel partitions, called by the
 # Jetson build hooks (OTA payload) and stone-provision-tegraflash.sh (flash).
-SRC_URI += "file://avocado-tegra-bootimg"
-FILES:${PN} += "${SDKPATHNATIVE}${bindir}/avocado-tegra-bootimg"
+SRC_URI += "file://avocado-tegra-bootimg file://avocado-tegra-build-bootimg"
+FILES:${PN} += "${SDKPATHNATIVE}${bindir}/avocado-tegra-bootimg ${SDKPATHNATIVE}${bindir}/avocado-tegra-build-bootimg"
 do_install:append() {
     install -m 0755 ${UNPACKDIR}/avocado-tegra-bootimg ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/avocado-tegra-build-bootimg ${D}${SDKPATHNATIVE}${bindir}
 }
