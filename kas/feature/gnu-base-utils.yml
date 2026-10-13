@@ -1,0 +1,29 @@
+header:
+  version: 16
+
+# GNU base utilities instead of BusyBox in the rootfs, on any machine.
+#
+#   bakar build meta-avocado/kas/machine/<board>.yml:meta-avocado/kas/feature/gnu-base-utils.yml
+#
+# OPT-IN. The default rootfs keeps BusyBox: it is the smallest base, and the
+# rootfs slots are a fixed size on deployed devices. Use this where the code
+# that runs on the device needs GNU behavior, for example iproute2's `ip` with
+# its full option set, bash under #!/bin/bash scripts, or GNU flags on the
+# coreutils.
+#
+# What changes on the device: /bin/sh is bash, `ip` is iproute2 6.x, and the
+# coreutils, procps, util-linux and findutils are the GNU versions. What goes
+# away: the BusyBox applets that packagegroup-avocado-base-utils does not
+# replace, such as vi, wget, nc, ifconfig, netstat and nslookup. Scripts
+# written against BusyBox ash usually still run. A script that uses bash-isms
+# under #!/bin/sh works here but fails on a machine that keeps BusyBox, so test
+# on both when a project targets several machines.
+local_conf_header:
+  feature/gnu-base-utils: |
+    # oe-core's layer.conf expands this variable inside a
+    # SIGGEN_EXCLUDE_SAFE_RECIPE_DEPS entry, so it must stay a single package
+    # name. The package list lives in the packagegroup.
+    VIRTUAL-RUNTIME_base-utils = "packagegroup-avocado-base-utils"
+
+    # systemd supplies the logger; busybox-syslog would bring BusyBox back.
+    VIRTUAL-RUNTIME_base-utils-syslog = ""
