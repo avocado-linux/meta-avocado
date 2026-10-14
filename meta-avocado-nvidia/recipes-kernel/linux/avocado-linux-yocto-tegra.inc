@@ -21,3 +21,21 @@ SRC_URI += " file://avocado-modules.cfg"
 # Needed by the RT sibling for the same reason: same driver, same tree, and the
 # RT branch carries no fix of its own.
 SRC_URI += " file://0001-spi-tegra114-keep-software-CS-across-a-multi-message-.patch"
+
+# NVIDIA's AQR113C wake commit (get_wol/set_wol) lands its two table lines in
+# the AQR111B0 phy_driver entry once the Tegra patch series is applied, so the
+# 10G port's PHY has no get_wol and ethtool reports "Supports Wake-on: d". The
+# fix moves them to the AQR113C entry. It has to apply after that series, which
+# the SRC_URI patches (queued first) cannot do, so it is kept as a .fixup file,
+# which the kernel patch queue does not pick up, and applied after do_patch.
+# Drop it when the series carries the hooks in the right entry.
+SRC_URI += " file://aquantia-aqr113c-wol-hooks.fixup"
+
+do_patch:append() {
+    fix="${UNPACKDIR}/aquantia-aqr113c-wol-hooks.fixup"
+    if patch -p1 -R --dry-run -s -d ${S} < "$fix" > /dev/null 2>&1; then
+        bbnote "aquantia-aqr113c-wol-hooks.fixup is already applied"
+    else
+        patch -p1 -d ${S} < "$fix" || bbfatal "aquantia-aqr113c-wol-hooks.fixup does not apply; the Tegra patch series changed"
+    fi
+}
