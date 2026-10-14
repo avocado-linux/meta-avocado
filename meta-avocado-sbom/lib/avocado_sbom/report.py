@@ -51,8 +51,17 @@ def _read_pkgdata_fields(path):
         with open(path, errors="ignore") as f:
             for line in f:
                 key, sep, value = line.partition(": ")
-                if sep and key in ("PN", "PV", "PKGV", "PKGR"):
+                if not sep:
+                    continue
+                if key in ("PN", "PV", "PKGV", "PKGR"):
                     fields[key] = value.strip()
+                elif key.startswith(("PKGV:", "PKGR:")):
+                    # A recipe that gives one of its packages its own version
+                    # (lvm2's libdevmapper is 1.02.213 against lvm2's 2.03.39)
+                    # writes PKGV:<package> and no plain PKGV in that package's
+                    # runtime-reverse file. The file describes one package, so
+                    # its single qualified key is the one that applies.
+                    fields.setdefault(key.partition(":")[0] + ":pkg", value.strip())
     except OSError:
         return {}
     return fields
@@ -75,7 +84,10 @@ def read_pkgdata(pkgdata_dirs, stats):
                 stats.pkgdata_unreadable += 1
                 continue
 
-            version = _join_version(fields.get("PKGV"), fields.get("PKGR"))
+            version = _join_version(
+                fields.get("PKGV") or fields.get("PKGV:pkg"),
+                fields.get("PKGR") or fields.get("PKGR:pkg"),
+            )
             recipe_versions.setdefault(recipe, set()).update(
                 v for v in (fields.get("PV"), fields.get("PKGV")) if v
             )
@@ -116,6 +128,9 @@ CVE_SUMMARY_FIELDS = ("summary", "description")
 # anything else would match no issue at all and produce an empty,
 # CVE-free-looking report.
 CVE_STATUSES = ("Unpatched", "Patched", "Ignored")
+# A report may list one of those, or all three with a status on every CVE.
+STATUS_ALL = "All"
+REPORT_STATUSES = CVE_STATUSES + (STATUS_ALL,)
 
 # sbom-cve-check names each export after the SBOM it scanned, with the
 # extension from SBOM_CVE_CHECK_EXPORT_CVECHECK[ext], and deploys it to
@@ -152,6 +167,7 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
         if summary
         else tuple(f for f in CVE_FIELDS if f not in CVE_SUMMARY_FIELDS)
     )
+    listed = set(CVE_STATUSES) if status == STATUS_ALL else {status}
     recipes = {}
     scanned = set()
 
@@ -213,8 +229,14 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
             issues = []
             for issue in raw_issues:
                 issue_status = issue.get("status")
-                if issue_status == status:
-                    issues.append({k: issue[k] for k in fields if k in issue})
+                if issue_status in listed:
+                    item = {k: issue[k] for k in fields if k in issue}
+                    if status == STATUS_ALL:
+                        # One status is implied by the report's own "status";
+                        # a report of every status has to say which each CVE is.
+                        item["status"] = issue_status
+                        stats[_FILTERED_COUNTER[issue_status]] += 1
+                    issues.append(item)
                     continue
 
                 counter = _FILTERED_COUNTER.get(issue_status)
@@ -258,10 +280,10 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
 REPORT_VERSION = "1"
 
 def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summary=True):
-    if status not in CVE_STATUSES:
+    if status not in REPORT_STATUSES:
         raise ValueError(
             "unknown CVE status %r; expected one of %s"
-            % (status, ", ".join(CVE_STATUSES))
+            % (status, ", ".join(REPORT_STATUSES))
         )
 
     stats = Stats()
@@ -443,8 +465,10 @@ def main():
     parser.add_argument(
         "--status",
         default="Unpatched",
-        choices=CVE_STATUSES,
-        help="CVE status to report on",
+        choices=REPORT_STATUSES,
+        help="CVE status to list. All lists every status, each CVE carrying "
+        "its own, and then counts.unpatched_cves, patched_cves and ignored_cves "
+        "count what is listed instead of what was left out",
     )
     parser.add_argument(
         "--no-summary", action="store_true", help="drop CVE description text"

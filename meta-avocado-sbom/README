@@ -106,7 +106,15 @@ Variables
                                "Patched" is the mode that needs
                                SPDX_INCLUDE_VEX = "all": under "current" the
                                fixed-version and cpe-stable-backport statements
-                               never reach the document to be reported on
+                               never reach the document to be reported on.
+                               "All" lists every status in one report and puts
+                               a "status" on each CVE, so a fix shows up as a
+                               CVE moving from Unpatched to Patched between
+                               builds and Patched, Ignored and absent stay
+                               distinguishable. At "All", counts.unpatched_cves,
+                               patched_cves and ignored_cves count what the
+                               report lists; at any single status they count
+                               the CVEs of the other statuses left out of it
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
 
 Report format
