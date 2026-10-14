@@ -37,7 +37,7 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", _refuse("connect_ex"))
 
 
-_GOOD_ARG = b"console=ttyS0 module_blacklist=nvme,nvme_core,pcie_tegra194 quiet"
+_GOOD_ARG = b"console=ttyS0 module_blacklist=nvme,nvme_core quiet"
 
 
 def _good_boot_header() -> bytes:

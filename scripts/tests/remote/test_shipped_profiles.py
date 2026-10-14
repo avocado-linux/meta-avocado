@@ -153,7 +153,7 @@ def test_jetson_arm_guard(jetson):
     assert jetson.arm.strategy == "uefi-bootnext"
     assert jetson.arm.params == {"entry_label": "UEFI eMMC Device"}
     assert jetson.guard.strategy == "boot-arg"
-    assert jetson.guard.params["argument"] == "module_blacklist=nvme,nvme_core,pcie_tegra194"
+    assert jetson.guard.params["argument"] == "module_blacklist=nvme,nvme_core"
     names = {p["name"] for p in jetson.layout.params["table"]}
     assert set(jetson.guard.params["partitions"]) == {"A_kernel", "B_kernel"} <= names
 

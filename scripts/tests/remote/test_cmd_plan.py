@@ -64,7 +64,7 @@ def kit_to_port_arm_lines(golden_lines):
 BLANK = OpResult(rc=1, stderr="sfdisk: /dev/mmcblk0: does not contain a recognized partition table")
 
 
-ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+ARG = "module_blacklist=nvme,nvme_core"
 
 
 def hdr(cmdline="console=ttyS0 " + ARG, extra="", magic=b"ANDROID!", version=0):

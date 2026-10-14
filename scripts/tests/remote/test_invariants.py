@@ -68,7 +68,7 @@ EFI_PRE = (
 )
 EFI_AFTER = EFI_PRE
 EFI_FINAL = EFI_PRE + f"BootNext: {ENTRY}\n"
-NVME_ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+NVME_ARG = "module_blacklist=nvme,nvme_core"
 BLANK = OpResult(rc=1, stderr=f"sfdisk: {DEV}: does not contain a recognized partition table\n")
 
 

@@ -207,7 +207,7 @@
   "guard": {
     "strategy": "boot-arg",
     "params": {
-      "argument": "module_blacklist=nvme,nvme_core,pcie_tegra194",
+      "argument": "module_blacklist=nvme,nvme_core",
       "partitions": [
         "A_kernel",
         "B_kernel"
