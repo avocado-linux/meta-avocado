@@ -52,7 +52,7 @@ set (see §3).
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
 | observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
-| robotics     | `robotics`    | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers | meta-ros (via `ros.yml`) | -        |
+| robotics     | `robotics`    | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers, PROJ, libccd, GraphicsMagick, urdfdom-headers, cpp-semver, and the libraries ROS vendor packages build (libyaml, console_bridge, foonathan_memory, orocos_kdl, gz-cmake3, gz-utils2, gz-math7) | meta-ros (via `ros.yml`) | -        |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
