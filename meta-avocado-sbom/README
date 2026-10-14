@@ -62,6 +62,18 @@ adds them), and a recipe whose runtime dependency has no provider stops the
 whole scan at the first one it meets. OE-core's WORLD_SBOM_EXCLUDE lists
 recipes to leave out of the world SBOM.
 
+On wrynose, world scope is not supported for a single machine build. On
+raspberrypi5 the world SBOM stops at, in order: avocado-sdk-scripts
+(packagegroup-avocado-container, COMPATIBLE_MACHINE avocado-container),
+wpewebkit (packagegroup-avocado-feature-graphics), greengrass-bin
+(packagegroup-avocado-feature-cloud-aws), gst-plugin-pylon
+(packagegroup-avocado-feature-cameras), gnome-settings-daemon (budgie-desktop),
+python3-pkg-resources (azote) and cups-pk-helper. The first four are Avocado
+packagegroups whose provider layer is absent; the rest are meta-wayland
+recipes broken on wrynose, so excluding the packagegroups would not make the
+scan resolve. Bitbake names one recipe per run, so WORLD_SBOM_EXCLUDE becomes a
+list to maintain. Use image scope on wrynose.
+
 Image scope works on any machine build, with no extra layers. It scans the SBOM
 of one image, the packages that image installs:
 
