@@ -161,6 +161,16 @@ def _strip_pe(version):
         return rest
     return version
 
+def _count_listed(stats, items):
+    """At All, count the CVEs the report lists under their own status.
+
+    This runs where a CVE is added to the report, after a repeated id has been
+    dropped, so unpatched_cves + patched_cves + ignored_cves equals cves even
+    when two manifests or a multilib variant name the same recipe.
+    """
+    for item in items:
+        stats[_FILTERED_COUNTER[item["status"]]] += 1
+
 def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary=True):
     fields = (
         CVE_FIELDS
@@ -235,7 +245,6 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
                         # One status is implied by the report's own "status";
                         # a report of every status has to say which each CVE is.
                         item["status"] = issue_status
-                        stats[_FILTERED_COUNTER[issue_status]] += 1
                     issues.append(item)
                     continue
 
@@ -259,6 +268,8 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
                 new = [i for i in issues if i.get("id") not in seen]
                 existing["cves"].extend(new)
                 stats.cves += len(new)
+                if status == STATUS_ALL:
+                    _count_listed(stats, new)
                 if existing["packaged"]:
                     stats.packaged_cves += len(new)
                 continue
@@ -269,6 +280,8 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
                 "cves": issues,
             }
             stats.cves += len(issues)
+            if status == STATUS_ALL:
+                _count_listed(stats, issues)
 
             if packaged:
                 stats.packaged_recipes += 1

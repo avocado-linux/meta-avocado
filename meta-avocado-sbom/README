@@ -92,8 +92,11 @@ Variables
                                builds and Patched, Ignored and absent stay
                                distinguishable. At "All", counts.unpatched_cves,
                                patched_cves and ignored_cves count what the
-                               report lists; at any single status they count
-                               the CVEs of the other statuses left out of it
+                               report lists, so they add up to counts.cves; at
+                               any single status they count the CVEs of the
+                               other statuses left out of it. When two
+                               manifests name one recipe, a CVE id is listed
+                               once, with the status of the first manifest
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
 
 Report format
