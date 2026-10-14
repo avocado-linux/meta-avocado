@@ -51,8 +51,17 @@ def _read_pkgdata_fields(path):
         with open(path, errors="ignore") as f:
             for line in f:
                 key, sep, value = line.partition(": ")
-                if sep and key in ("PN", "PV", "PKGV", "PKGR"):
+                if not sep:
+                    continue
+                if key in ("PN", "PV", "PKGV", "PKGR"):
                     fields[key] = value.strip()
+                elif key.startswith(("PKGV:", "PKGR:")):
+                    # A recipe that gives one of its packages its own version
+                    # (lvm2's libdevmapper is 1.02.213 against lvm2's 2.03.39)
+                    # writes PKGV:<package> and no plain PKGV in that package's
+                    # runtime-reverse file. The file describes one package, so
+                    # its single qualified key is the one that applies.
+                    fields.setdefault(key.partition(":")[0] + ":pkg", value.strip())
     except OSError:
         return {}
     return fields
@@ -75,7 +84,10 @@ def read_pkgdata(pkgdata_dirs, stats):
                 stats.pkgdata_unreadable += 1
                 continue
 
-            version = _join_version(fields.get("PKGV"), fields.get("PKGR"))
+            version = _join_version(
+                fields.get("PKGV") or fields.get("PKGV:pkg"),
+                fields.get("PKGR") or fields.get("PKGR:pkg"),
+            )
             recipe_versions.setdefault(recipe, set()).update(
                 v for v in (fields.get("PV"), fields.get("PKGV")) if v
             )
