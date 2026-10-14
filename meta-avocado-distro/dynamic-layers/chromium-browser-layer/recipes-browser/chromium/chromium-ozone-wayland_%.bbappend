@@ -148,3 +148,20 @@ do_copy_clang_library () {
         done
     fi
 }
+
+# V8's snapshot tools (mksnapshot and friends) are built for the target and run
+# under qemu-user. QEMU cannot execute AVX-512, so on x86-64-v4 they die with
+# SIGILL, starting in the v4 glibc. Run them natively through the sysroot's
+# loader instead; that needs a build host with AVX-512.
+python do_create_v8_qemu_wrapper:append:intel-x86-64-v4() {
+    loader = d.expand('${STAGING_DIR_HOST}${base_libdir}/ld-linux-x86-64.so.2')
+    with open(wrapper_path, 'w') as wrapper_file:
+        wrapper_file.write('\n'.join([
+            '#!/bin/sh',
+            'grep -qw avx512bw /proc/cpuinfo || {',
+            '    echo "v8-qemu-wrapper: x86-64-v4 build tools need an AVX-512 build host" >&2',
+            '    exit 1',
+            '}',
+            'exec %s --library-path %s "$@"' % (loader, ':'.join(qemu_libdirs)),
+            '']))
+}

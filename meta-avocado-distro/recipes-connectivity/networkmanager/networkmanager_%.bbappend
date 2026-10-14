@@ -13,3 +13,7 @@
 #                adds it to RRECOMMENDS of the meta networkmanager package.
 
 PACKAGECONFIG:append = " modemmanager wwan"
+
+# The vala API needs GObject introspection data, which OE drops on machines
+# without qemu-usermode (x86-64-v4). meta-oe only checks the distro feature.
+PACKAGECONFIG:remove = "${@'' if d.getVar('GI_DATA_ENABLED') == 'True' else 'vala'}"
