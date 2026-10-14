@@ -56,6 +56,25 @@ Usage
 
 Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json.
 
+World scope needs every world recipe to resolve. A plain machine build does
+not carry the vendor layers some world recipes need (kas/feature/complete.yml
+adds them), and a recipe whose runtime dependency has no provider stops the
+whole scan at the first one it meets. OE-core's WORLD_SBOM_EXCLUDE lists
+recipes to leave out of the world SBOM.
+
+Image scope works on any machine build, with no extra layers. It scans the SBOM
+of one image, the packages that image installs:
+
+  kas build kas/machine/<machine>.yml:kas/feature/cve-check-image.yml \
+      --target avocado-cve-report
+
+That fragment sets AVOCADO_CVE_SCOPE = "image" and adds sbom-cve-check to
+IMAGE_CLASSES; AVOCADO_CVE_IMAGE names the image, avocado-image-rootfs by
+default. The report format is the same, and pkgdata still describes every
+package the build made, so counts.packages is build-wide while the CVEs are the
+image's. Use the world scan for "what could a user install from the feed" and
+this one for "what does this image ship".
+
 do_cve_report depends on meta-world-recipe-sbom:do_sbom_cve_check_recipe, so
 the second command runs the scan itself. The world build is still needed first,
 for pkgdata: the scan alone never writes it.
@@ -68,9 +87,11 @@ The same code can run standalone against a build tree, if needed:
 Variables
 ---------
 
+  AVOCADO_CVE_SCOPE            "world" (default) or "image"; see Usage
+  AVOCADO_CVE_IMAGE            image scanned at image scope, avocado-image-rootfs
   AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
                                of them; defaults to the world SBOM's export in
-                               ${DEPLOY_DIR_IMAGE}
+                               ${DEPLOY_DIR_IMAGE}, or the image's at image scope
   AVOCADO_CVE_REPORT_FILE      output path
   AVOCADO_CVE_REPORT_STATUS    CVE status to report, default "Unpatched".
                                Set to "Ignored" to audit what
