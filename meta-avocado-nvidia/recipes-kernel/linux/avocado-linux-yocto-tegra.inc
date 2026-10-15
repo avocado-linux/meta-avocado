@@ -37,13 +37,21 @@ SRC_URI += " file://0001-spi-tegra114-keep-software-CS-across-a-multi-message-.p
 # the SRC_URI patches (queued first) cannot do, so it is kept as a .fixup file,
 # which the kernel patch queue does not pick up, and applied after do_patch.
 # Drop it when the series carries the hooks in the right entry.
-SRC_URI += " file://aquantia-aqr113c-wol-hooks.fixup"
+#
+# The second fixup masks the autoneg interrupt while the AQR113C wake is armed.
+# Arming restarts autonegotiation, and the resulting link-up event drives the PHY
+# interrupt, which the Jetson wires as a wake source, so the system woke a few
+# seconds after it suspended. NVIDIA's 6.8 kernel masks it; the 6.18 port lost
+# those lines. Applied in order: it expects the first fixup's tree.
+SRC_URI += " file://aquantia-aqr113c-wol-hooks.fixup file://aquantia-aqr113c-wol-mask-aneg-irq.fixup"
 
 do_patch:append() {
-    fix="${UNPACKDIR}/aquantia-aqr113c-wol-hooks.fixup"
-    if patch -p1 -R --dry-run -s -d ${S} < "$fix" > /dev/null 2>&1; then
-        bbnote "aquantia-aqr113c-wol-hooks.fixup is already applied"
-    else
-        patch -p1 -d ${S} < "$fix" || bbfatal "aquantia-aqr113c-wol-hooks.fixup does not apply; the Tegra patch series changed"
-    fi
+    for name in aquantia-aqr113c-wol-hooks aquantia-aqr113c-wol-mask-aneg-irq; do
+        fix="${UNPACKDIR}/${name}.fixup"
+        if patch -p1 -R --dry-run -s -d ${S} < "$fix" > /dev/null 2>&1; then
+            bbnote "${name}.fixup is already applied"
+        else
+            patch -p1 -d ${S} < "$fix" || bbfatal "${name}.fixup does not apply; the Tegra patch series changed"
+        fi
+    done
 }
