@@ -109,7 +109,8 @@ COMPATIBLE_MACHINE = "avocado-qemuarm64|avocado-imx93-frdm|tegra"
 
 # Block device holding the persistent REE-FS TEE store (/var/lib/tee). A
 # machine fact: a small, otherwise-unused GPT partition outside the encrypted
-# /var. The generic default is the recovery partition (qemuarm64, imx93-frdm);
+# /var. The generic default is the recovery partition (qemuarm64); imx93-frdm
+# uses the i.MX layout's `tee` partition (avocado-imx93-frdm.conf), and
 # Jetson overrides it in avocado-jetson.inc because its `recovery` partition
 # holds a kernel image. Substituted into the script and unit at install time.
 OPTEE_FTPM_TEE_STORE_DEV ?= "/dev/disk/by-partlabel/recovery"
