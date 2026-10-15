@@ -1,0 +1,51 @@
+From: Javier Tia <j.tia@peridio.com>
+Date: Thu, 15 Oct 2026 15:15:00 -0600
+Subject: [PATCH] net: phy: aquantia: mask the autoneg interrupt while the
+ AQR113C wake is armed
+
+Arming wake on the AQR113C (aqr113c_wol_settings(true)) ends with
+genphy_c45_restart_aneg(), which drops the link and renegotiates it a few
+seconds later. aqr_config_intr() leaves the vendor autoneg interrupt unmasked
+(VEND1_GLOBAL_INT_VEND_MASK_AN), so the link-up event drives INT_N, which the
+Jetson wires to the SoC as a PMC wake (the "mgbe" event). The status is cleared
+only by aqr_handle_interrupt(), which does not run in a suspended system. The
+board therefore resumes a few seconds after it suspends, before any packet.
+
+Measured on a Jetson AGX Orin with the 10G port connected: with wake armed the
+system woke 8 s and 13 s after suspend entry in two runs, against a 300 s timer.
+
+NVIDIA's R39 6.8 kernel masks that interrupt when arming and unmasks it again
+when disarming, in the same function. The 6.18 port of the change lost both
+lines. Restore them.
+
+---
+ drivers/net/phy/aquantia/aquantia_main.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+--- a/drivers/net/phy/aquantia/aquantia_main.c
++++ b/drivers/net/phy/aquantia/aquantia_main.c
+@@ -1447,6 +1447,10 @@
+ 			return ret;
+ 		val = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_GLOBAL_INT_VEND_MASK);
+ 		val |= VEND1_GLOBAL_INT_VEND_MASK_GBE;
++		/* Mask the autoneg interrupt while armed: the restart below drops
++		 * and renegotiates the link, and that event must not wake the system.
++		 */
++		val &= ~VEND1_GLOBAL_INT_VEND_MASK_AN;
+ 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND1, VEND1_GLOBAL_INT_VEND_MASK, val);
+ 		if (ret < 0)
+ 			return ret;
+@@ -1472,6 +1476,13 @@
+ 		if (ret < 0)
+ 			return ret;
+ 
++		/* Unmask the autoneg interrupt again */
++		val = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_GLOBAL_INT_VEND_MASK);
++		val |= VEND1_GLOBAL_INT_VEND_MASK_AN;
++		ret = phy_write_mmd(phydev, MDIO_MMD_VEND1, VEND1_GLOBAL_INT_VEND_MASK, val);
++		if (ret < 0)
++			return ret;
++
+ 		/* Restore the SERDES/System Interface back to the XFI mode */
+ 		ret = phy_write_mmd(phydev, MDIO_MMD_VEND1,
+ 				    VEND1_GLOBAL_CFG_100M, VEND1_GLOBAL_SYS_CONFIG_XFI);
