@@ -7,7 +7,7 @@ AUTHOR = "Ben Nuttall <ben@bennuttall.com>"
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE.rst;md5=f7edfe7aeac02cb6c394726db07eb41c"
 
-SRC_URI[sha256sum] = "d4ea1952689ec7e331f9d4ebc9adb15f1d01c2c9dcfabb72e752c9869ab7e97e"
+SRC_URI[sha256sum] = "745feab6df463ac2e9de10c67e2dd9f396e668ba4e281e92381d6c460100a8f7"
 
 inherit pypi python_setuptools_build_meta
 
