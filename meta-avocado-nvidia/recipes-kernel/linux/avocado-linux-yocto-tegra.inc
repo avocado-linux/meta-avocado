@@ -10,6 +10,14 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/linux-yocto-6.18:${THISDIR}/files:"
 # lives here rather than in avocado-linux-tegra.inc.
 SRC_URI += " file://avocado-modules.cfg"
 
+# The PHY drivers nvethernet needs while it probes have to be built in (see
+# avocado-phy-builtin.cfg). The Tegra layer's jetson-devkit.cfg sets
+# CONFIG_AQUANTIA_PHY=m and is applied after any plain SRC_URI fragment, so the
+# fragment rides in a feature that is appended to KERNEL_FEATURES and applied
+# after it.
+SRC_URI += " file://avocado-phy-builtin.scc file://avocado-phy-builtin.cfg"
+KERNEL_FEATURES:append:tegra = " avocado-phy-builtin.scc"
+
 # spi-tegra114 drops a software-held chip select on the next spi_message, which
 # breaks any driver that builds one transaction out of several messages with
 # cs_change (tpm_tis_spi, cros_ec_spi, mmc_spi, ad_sigma_delta, ...). On Thor
