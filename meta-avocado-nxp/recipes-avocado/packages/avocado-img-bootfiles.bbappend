@@ -10,31 +10,54 @@ do_install:append() {
     rm -f ${D}/imx-boot-tools/mkimage_imx8
 }
 
-# Re-keying a prebuilt imx-boot (project FIT key into the control DTB, then the
-# same soc.mak targets the distro ran) is a fixed procedure; what varies per
-# machine is a handful of facts the recipe knows and a project cannot guess.
-# Ship the procedure and write the facts next to it, so `avocado build` can run
-# it whenever a runtime sets signing.fit_key. i.MX8M only: i.MX9 boots an AHAB
-# container that is assembled and signed differently.
-FILESEXTRAPATHS:prepend:mx8m-generic-bsp := "${THISDIR}/avocado-img-bootfiles:"
-SRC_URI:append:mx8m-generic-bsp = " file://rekey-imx-boot.sh"
+# Re-keying a prebuilt imx-boot (project FIT key into the U-Boot control DTB,
+# then the same soc.mak targets the distro ran) is a fixed procedure; what
+# varies per machine is a handful of facts the recipe knows and a project
+# cannot guess. Ship the procedure and write the facts next to it, so `avocado
+# build` can run it whenever a runtime sets signing.fit_key.
+#
+# The family picks the procedure's branch: i.MX8M packs SPL + a U-Boot FIT;
+# i.MX9 packs AHAB containers (the ELE firmware, SPL+DDR, then U-Boot with
+# TF-A and OP-TEE). i.MX94/95 are left out: their containers also carry the
+# System Manager and OEI images, which imx-boot-tools does not ship.
+AVOCADO_REKEY_IMX_FAMILY = ""
+AVOCADO_REKEY_IMX_FAMILY:mx8m-generic-bsp = "imx8m"
+AVOCADO_REKEY_IMX_FAMILY:mx91-generic-bsp = "imx9"
+AVOCADO_REKEY_IMX_FAMILY:mx93-generic-bsp = "imx9"
+FILESEXTRAPATHS:prepend := "${THISDIR}/avocado-img-bootfiles:"
+SRC_URI:append = " file://rekey-imx-boot.sh"
 # The base recipe fetches nothing, so it never needed S; with a file:// entry
 # do_unpack looks for ${UNPACKDIR}/${BP} and warns. The script lands in
 # ${UNPACKDIR} directly.
 S = "${UNPACKDIR}"
-do_install:append:mx8m-generic-bsp() {
-    install -m 0755 ${UNPACKDIR}/rekey-imx-boot.sh ${D}/imx-boot-tools/rekey-imx-boot.sh
-    cat > ${D}/imx-boot-tools/rekey.env <<EOF
+# An if-block, not an early return: the do_install appends below this one run
+# in the same shell function.
+do_install:append() {
+    if [ -n "${AVOCADO_REKEY_IMX_FAMILY}" ]; then
+        uboot_cfg="${@d.getVar('UBOOT_CONFIG').split()[0]}"
+        install -m 0755 ${UNPACKDIR}/rekey-imx-boot.sh ${D}/imx-boot-tools/rekey-imx-boot.sh
+        cat > ${D}/imx-boot-tools/rekey.env <<EOF
+FAMILY="${AVOCADO_REKEY_IMX_FAMILY}"
 MACHINE="${MACHINE}"
 SOC="${IMX_BOOT_SOC_TARGET}"
-UBOOT_CONFIG_EXTRA="${@d.getVar('UBOOT_CONFIG').split()[0]}"
+UBOOT_CONFIG_EXTRA="$uboot_cfg"
 UBOOT_DTB_NAME="${UBOOT_DTB_NAME}"
 IMXBOOT_TARGETS="${IMXBOOT_TARGETS}"
 DDR_FIRMWARE_NAME="${DDR_FIRMWARE_NAME}"
 MKIMAGE_ARGS="${@'REV=' + d.getVar('IMX_SOC_REV_UPPER') if d.getVar('IMX_SOC_REV_UPPER') else ''}"
 EOF
+        if [ "${AVOCADO_REKEY_IMX_FAMILY}" = imx9 ]; then
+            # i.MX9's imx-boot takes the combined u-boot.bin, so imx-boot-tools
+            # lacks its two halves; ship them under the names the i.MX8M
+            # imx-boot deploys (the re-key puts the key in the DTB and joins
+            # them again). The generic deploy links name the last U-Boot
+            # config built: one config on these machines.
+            install -m 0644 ${DEPLOY_DIR_IMAGE}/u-boot-nodtb.bin ${D}/imx-boot-tools/u-boot-nodtb.bin-${MACHINE}-$uboot_cfg
+            install -m 0644 ${DEPLOY_DIR_IMAGE}/u-boot.dtb ${D}/imx-boot-tools/u-boot.dtb-${MACHINE}-$uboot_cfg
+        fi
+    fi
 }
-do_install[vardeps] += "IMX_BOOT_SOC_TARGET UBOOT_CONFIG UBOOT_DTB_NAME IMXBOOT_TARGETS DDR_FIRMWARE_NAME IMX_SOC_REV_UPPER"
+do_install[vardeps] += "AVOCADO_REKEY_IMX_FAMILY IMX_BOOT_SOC_TARGET UBOOT_CONFIG UBOOT_DTB_NAME IMXBOOT_TARGETS DDR_FIRMWARE_NAME IMX_SOC_REV_UPPER"
 
 # The collect task scrapes DEPLOY_DIR_IMAGE, so its signature must carry the
 # recipes that put the bootloader there or a U-Boot change never invalidates
