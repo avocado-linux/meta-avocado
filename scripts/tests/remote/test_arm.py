@@ -4,6 +4,7 @@ import struct
 from types import SimpleNamespace as NS
 
 import pytest
+from golden_deviation import APP_PARTUUID
 
 from avocado_flash_remote import arm as armmod
 from avocado_flash_remote.arm import (
@@ -18,7 +19,7 @@ from avocado_flash_remote.ops import MutationRefused, OpResult, ReadOnlyOps, Rec
 
 # The firmware's own description of the storage entry the tool arms (never creates).
 LABEL = "UEFI eMMC Device"
-ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+ARG = f"avocado.root=PARTUUID={APP_PARTUUID}"
 LIST = "efibootmgr -v"
 ENTRY = "0002"
 ENTRY_LINE = f"Boot{ENTRY}* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)"
@@ -329,7 +330,8 @@ def test_guard_counts_argument_in_extra_cmdline_like_the_kit():
 
 def test_guard_kit_concatenation_quirk_is_preserved():
     # kit: cmdline_has_arg tests BC_A+BC_B joined with and without a space.
-    ops = guard_ops(header("quiet module_blacklist=nvme,", extra="nvme_core,pcie_tegra194"), header(ARG))
+    head, tail = ARG[:30], ARG[30:]  # splits inside the GUID
+    ops = guard_ops(header("quiet " + head, extra=tail), header(ARG))
     get_guard("boot-arg").check(ops, profile(), NODES)
 
 

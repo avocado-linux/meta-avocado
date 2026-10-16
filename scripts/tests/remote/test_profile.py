@@ -476,3 +476,49 @@ def test_a_profile_that_does_not_arm_needs_no_esp_image():
         d["guard"] = {"strategy": "none", "params": {}}
 
     assert load_profile_bytes(mutated(go)).arm.strategy == "none"
+
+
+# ---- a guard argument that pins the root by PARTUUID must name a partition the tool writes ----
+
+PIN_UUID = "727dfa31-d47f-4a55-8d62-d812de5ce092"
+
+
+def _pin(guid=PIN_UUID, layout_uuid=None, on_partition=2):
+    def go(d):
+        d["guard"]["params"]["argument"] = f"avocado.root=PARTUUID={guid}"
+        if layout_uuid is not None:
+            for part in d["layout"]["params"]["table"]:
+                if part["number"] == on_partition:
+                    part["uuid"] = layout_uuid
+
+    return mutated(go)
+
+
+def test_a_root_pin_matching_the_uuid_of_a_written_partition_loads():
+    p = load_profile_bytes(_pin(layout_uuid=PIN_UUID))
+    assert p.guard.params["argument"] == f"avocado.root=PARTUUID={PIN_UUID}"
+
+
+def test_a_root_pin_matches_the_layout_uuid_without_regard_to_case():
+    load_profile_bytes(_pin(layout_uuid=PIN_UUID.upper()))
+
+
+def test_a_root_pin_that_no_layout_partition_carries_is_refused():
+    # The boot header would name a root the layout never writes, and every boot would stop in the initrd.
+    with pytest.raises(ProfileError, match=r"guard\.params\.argument"):
+        load_profile_bytes(_pin(layout_uuid=None))
+
+
+def test_a_root_pin_naming_another_partition_uuid_is_refused():
+    with pytest.raises(ProfileError, match=r"guard\.params\.argument"):
+        load_profile_bytes(_pin(layout_uuid="11111111-2222-4333-8444-555555555555"))
+
+
+def test_a_root_pin_whose_partition_has_no_image_is_refused():
+    # Partition 3 ("var") exists in the table but no image is mapped to it, so the tool never writes it.
+    with pytest.raises(ProfileError, match=r"guard\.params\.argument"):
+        load_profile_bytes(_pin(layout_uuid=PIN_UUID, on_partition=3))
+
+
+def test_a_guard_argument_that_is_not_a_root_pin_is_not_cross_checked():
+    load_profile_bytes(mutated(lambda d: d["guard"]["params"].update(argument="module_blacklist=nvme,nvme_core")))

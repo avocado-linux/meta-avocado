@@ -13,6 +13,7 @@ import pathlib
 
 import devgraph
 import pytest
+from golden_deviation import APP_PARTUUID
 
 from avocado_flash_remote import cmd_write, layout
 from avocado_flash_remote import profile as prof
@@ -42,7 +43,7 @@ EFI_PRE = (
     f"Boot{ENTRY}* {LABEL}\tVenHw(1e5a432c-0000-0000-0000-000000000000)/SD(0)\n"
 )
 EFI_FINAL = EFI_PRE + f"BootNext: {ENTRY}\n"
-NVME_ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+NVME_ARG = f"avocado.root=PARTUUID={APP_PARTUUID}"
 BLANK = OpResult(rc=1, stderr=f"sfdisk: {DEV}: does not contain a recognized partition table\n")
 RAW_SHIPPED_BYTES = PROFILE_PATH.read_bytes()
 _BASE_SERIAL = "0x0badc0de"

@@ -11,6 +11,7 @@ import socket
 import sys
 
 import pytest
+from golden_deviation import APP_PARTUUID
 
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parents[2]
 if str(SCRIPTS_DIR) not in sys.path:
@@ -37,7 +38,7 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", _refuse("connect_ex"))
 
 
-_GOOD_ARG = b"console=ttyS0 module_blacklist=nvme,nvme_core,pcie_tegra194 quiet"
+_GOOD_ARG = f"console=ttyS0 avocado.root=PARTUUID={APP_PARTUUID} quiet".encode()
 
 
 def _good_boot_header() -> bytes:

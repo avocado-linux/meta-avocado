@@ -12,7 +12,7 @@ import pytest
 from avocado_flash_remote import cmd_plan, layout
 from avocado_flash_remote import profile as prof
 from avocado_flash_remote.images import ScanResult
-from golden_deviation import kit_to_port_data_size
+from golden_deviation import APP_PARTUUID, kit_to_port_app_uuid, kit_to_port_data_size
 from avocado_flash_remote.ops import (
     FS_READ_KINDS,
     MutationRefused,
@@ -64,7 +64,7 @@ def kit_to_port_arm_lines(golden_lines):
 BLANK = OpResult(rc=1, stderr="sfdisk: /dev/mmcblk0: does not contain a recognized partition table")
 
 
-ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+ARG = f"avocado.root=PARTUUID={APP_PARTUUID}"
 
 
 def hdr(cmdline="console=ttyS0 " + ARG, extra="", magic=b"ANDROID!", version=0):
@@ -198,8 +198,9 @@ def test_plan_body_matches_real_board_golden_byte_for_byte():
     assert golden[0] == kit_line
     assert body[0] == kit_line + ".hashes"
     body = [kit_line] + body[1:]
-    # The data partition size is the second deliberate difference: see golden_deviation.
-    assert body == kit_to_port_data_size(kit_to_port_arm_lines(golden[:-1]))
+    # The data partition size and the APP partition's fixed GUID are the next deliberate differences: see
+    # golden_deviation.
+    assert body == kit_to_port_app_uuid(kit_to_port_data_size(kit_to_port_arm_lines(golden[:-1])))
     joined = "\n".join(header)
     assert prof.profile_hash(PROFILE_PATH.read_bytes()) in joined
     assert "/dev/mmcblk0" in joined

@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from golden_deviation import KIT_DATA_SIZE, PORT_DATA_SIZE, kit_to_port_data_size
+from golden_deviation import APP_PARTUUID, KIT_DATA_SIZE, PORT_DATA_SIZE, kit_to_port_data_size
 from avocado_flash_remote import layout
 from avocado_flash_remote import profile as prof
 
@@ -91,7 +91,7 @@ def test_jetson_loads(jetson):
 def test_jetson_table_equals_golden(jetson):
     table = list(jetson.layout.params["table"])
     carried = {r["number"]: r["uuid"] for r in table if "uuid" in r}
-    assert carried == {16: "4D21B016-B534-45C2-A9FB-5C16E091FD2D"}
+    assert carried == {1: APP_PARTUUID, 16: "4D21B016-B534-45C2-A9FB-5C16E091FD2D"}
     stripped = [{k: v for k, v in r.items() if k != "uuid"} for r in table]
     # The data partition size is a deliberate deviation from the kit: see golden_deviation.
     assert stripped == _golden_table(normalised=True)
@@ -153,9 +153,20 @@ def test_jetson_arm_guard(jetson):
     assert jetson.arm.strategy == "uefi-bootnext"
     assert jetson.arm.params == {"entry_label": "UEFI eMMC Device"}
     assert jetson.guard.strategy == "boot-arg"
-    assert jetson.guard.params["argument"] == "module_blacklist=nvme,nvme_core,pcie_tegra194"
+    assert jetson.guard.params["argument"] == f"avocado.root=PARTUUID={APP_PARTUUID}"
     names = {p["name"] for p in jetson.layout.params["table"]}
     assert set(jetson.guard.params["partitions"]) == {"A_kernel", "B_kernel"} <= names
+
+
+def test_jetson_guard_pins_the_root_and_does_not_hide_the_nvme(jetson):
+    # The test boot must not mount another disk's APP partition, and must leave the NVMe visible: Avocado OS is
+    # meant to boot from it. The pin names the APP partition by a fixed GUID the layout writes, so it can be
+    # checked in the boot header before the write.
+    app = next(p for p in jetson.layout.params["table"] if p["name"] == "APP")
+    assert app["number"] == 1
+    assert app["uuid"].lower() == APP_PARTUUID
+    assert jetson.images["rootfs"].partition == app["number"]
+    assert "module_blacklist" not in jetson.guard.params["argument"]
 
 
 def test_jetson_checks_are_the_kits_fourteen_plus_board_prerequisites(jetson):

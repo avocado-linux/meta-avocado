@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from golden_deviation import kit_to_port_data_size
+from golden_deviation import APP_PARTUUID, kit_to_port_app_uuid, kit_to_port_data_size
 from avocado_flash_remote import strategies
 from avocado_flash_remote.strategies import StrategyError, validate
 
@@ -417,12 +417,12 @@ def test_layout_uuid_duplicate_rejected_case_insensitive():
     assert "uuid" in str(exc.value)
 
 
-def test_jetson_profile_partition_16_carries_uuid():
+def test_jetson_profile_partitions_1_and_16_carry_uuids():
     import json
 
     table = json.loads(PROFILE_JSON.read_text())["layout"]["params"]["table"]
     carried = {p["number"]: p["uuid"] for p in table if "uuid" in p}
-    assert carried == {16: JETSON_UUID}
+    assert carried == {1: APP_PARTUUID, 16: JETSON_UUID}
 
 
 def test_jetson_profile_sfdisk_input_equals_golden_without_uuids_argument():
@@ -439,8 +439,9 @@ def test_jetson_profile_sfdisk_input_equals_golden_without_uuids_argument():
         if not line.startswith("    "):
             break
         block.append(line[4:])
-    # The data partition size is a deliberate deviation from the kit: see golden_deviation.
-    assert got == "\n".join(kit_to_port_data_size(block)) + "\n"
+    # The data partition size and the APP partition's fixed GUID are deliberate deviations from the kit: see
+    # golden_deviation.
+    assert got == "\n".join(kit_to_port_app_uuid(kit_to_port_data_size(block))) + "\n"
 
 
 # ---- 5.33: partition names and UUIDs are interpolated into an sfdisk script ----

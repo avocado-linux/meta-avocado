@@ -3,14 +3,15 @@ set -e
 
 slotsfx=""
 mayberoot=""
+pinroot=""
 foundslotsfx="no"
-for bootarg in `cat /proc/cmdline`; do
+read -r cmdline < /proc/cmdline || true
+# shellcheck disable=SC2086 # one word per kernel argument is the point
+for bootarg in $cmdline; do
     case "$bootarg" in
         boot.slot_suffix=*) slotsfx="${bootarg##boot.slot_suffix=}"; foundslotsfx="yes" ;;
+        avocado.root=*) pinroot="${bootarg##avocado.root=}" ;;
         root=*) mayberoot="${bootarg##root=}" ;;
-        ro) opt="ro" ;;
-        rootwait) wait="yes" ;;
-        rootfstype=*) fstype="${bootarg##rootfstype=}" ;;
     esac
 done
 
@@ -21,7 +22,11 @@ rootdev=""
 # usually 7 (NV+BS+RT) on T26x where the firmware sets NON_VOLATILE, and 6
 # (BS+RT) on older T23x — accept either.
 if [ "$foundslotsfx" != "yes" ]; then
-    bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null) || true)
+    # hexdump prints " <attributes> <slot>"; word splitting drops the leading space so the fields cut below
+    # start at 1. The shell does it, as before, because the initramfs is not known to carry awk on this path.
+    # shellcheck disable=SC2046
+    set -- $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null) || true
+    bcdata="$*"
     bctype=$(echo "$bcdata" | cut -d' ' -f1)
     if [ "$bctype" = "6" ] || [ "$bctype" = "7" ]; then
         slotnum=$(echo "$bcdata" | cut -d' ' -f2)
@@ -30,23 +35,65 @@ if [ "$foundslotsfx" != "yes" ]; then
     fi
 fi
 
+# Path 0: an explicit pin, avocado.root=PARTUUID=<uuid> or UUID=<uuid>, wins over every
+# discovery path below. The label scan takes the first disk that carries an APP partition, so
+# a second disk with its own APP (a vendor system on an NVMe) can be mounted as the root. A
+# pin that does not resolve stops the boot; it never falls back to the scan, which is what
+# the pin exists to avoid. PARTLABEL and LABEL pins are refused because they can match on
+# two disks. root= is not used for this: it is a static fallback and can name the wrong slot.
+resolve_pinned_root() {
+    case "$1" in
+        # blkid prints a PARTUUID in lower case and matches it exactly, so fold the pin. A filesystem UUID is
+        # matched as written: a vfat one is upper case.
+        PARTUUID=*) blkid -t "PARTUUID=$(echo "${1#PARTUUID=}" | tr 'A-F' 'a-f')" -l | cut -d: -f1 ;;
+        UUID=*)     blkid -t "UUID=${1#UUID=}" -l | cut -d: -f1 ;;
+        *)          return 1 ;;
+    esac
+}
+
+if [ -n "$pinroot" ]; then
+    printf '%s' "Waiting for the pinned root avocado.root=$pinroot..."
+    for _ in $(seq 1 10); do
+        for dev in $(lsblk -dnpo NAME); do
+            blkid --probe "$dev" || true
+        done
+        rootdev=$(resolve_pinned_root "$pinroot") || true
+        if [ -n "$rootdev" ]; then
+            echo "[OK: $rootdev]"
+            break
+        fi
+        printf '.'
+        sleep 0.5
+    done
+    if [ -z "$rootdev" ]; then
+        echo
+        echo "Error: avocado.root=$pinroot did not resolve to a partition; not scanning other disks"
+        echo "  cmdline: $(cat /proc/cmdline)"
+        echo "  blkid:"
+        blkid || true
+        exit 1
+    fi
+fi
+
 # Path 2: locate APP$slotsfx by PARTLABEL (works for both Path 1 and the
 # default empty-slotsfx case). Probe every block device first since blkid's
 # label cache may be stale right after a fresh flash.
-message="Waiting for APP$slotsfx partition..."
-echo -n "$message"
-for count in $(seq 1 10); do
-    for dev in $(lsblk -dnpo NAME); do
-      blkid --probe "$dev" || true
+if [ -z "$rootdev" ]; then
+    message="Waiting for APP$slotsfx partition..."
+    printf '%s' "$message"
+    for _ in $(seq 1 10); do
+        for dev in $(lsblk -dnpo NAME); do
+          blkid --probe "$dev" || true
+        done
+        rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
+        if [ -n "$rootdev" ]; then
+            echo "[OK: $rootdev]"
+            break
+        fi
+        printf '.'
+        sleep 0.5
     done
-    rootdev=$(blkid -l -t PARTLABEL=APP$slotsfx | cut -d: -f1)
-    if [ -n "$rootdev" ]; then
-        echo "[OK: $rootdev]"
-        break
-    fi
-    echo -n "."
-    sleep 0.5
-done
+fi
 
 # Path 3: fall back to root= from /proc/cmdline (mirrors upstream
 # meta-tegra/recipes-core/initrdscripts/tegra-minimal-init/platform-preboot.sh).
@@ -94,8 +141,7 @@ mount "$rootdev" /sysroot
 
 # Helper: scan a disk's partitions for DATAPART_EXPAND via sysfs uevent
 find_datapart_on_disk() {
-    local diskname="$1"
-    for partdir in /sys/block/$diskname/${diskname}p*; do
+    for partdir in /sys/block/"$1"/"$1"p*; do
         [ -d "$partdir" ] || continue
         if [ -f "$partdir/uevent" ]; then
             while IFS='=' read -r key val; do
