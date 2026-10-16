@@ -172,10 +172,25 @@ def _validate_boot_arg(where, params):
         {
             "argument": ("str", True, None),
             "partitions": (_STR_LIST, True, None),
+            "initramfs_file": ("str", False, None),
+            "initramfs_contains": ("str", False, None),
         },
         params,
     )
     arg = out["argument"]
+    # An image's ramdisk must carry a file with some text in it, so the host can refuse an image whose init
+    # does not understand the argument. Both fields or neither: half a requirement checks nothing.
+    if ("initramfs_file" in out) != ("initramfs_contains" in out):
+        raise StrategyError(f"{where}: parameters initramfs_file and initramfs_contains must be given together")
+    if "initramfs_file" in out:
+        path = out["initramfs_file"]
+        if not path or path.startswith("/") or any(part in ("", ".", "..") for part in path.split("/")):
+            raise StrategyError(
+                f"{where}: parameter 'initramfs_file' must be a clean relative path "
+                "(no leading slash, empty, '.' or '..' component)"
+            )
+        if not out["initramfs_contains"]:
+            raise StrategyError(f"{where}: parameter 'initramfs_contains' must not be empty")
     # An empty or multi-token argument makes the guard vacuous or unmatchable
     # (it is compared against whole command-line tokens).
     if not arg or any(c.isspace() for c in arg):

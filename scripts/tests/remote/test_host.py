@@ -14,7 +14,7 @@ import tarfile
 
 import pytest
 
-from avocado_flash_remote import bundle, evidence, host
+from avocado_flash_remote import bundle, evidence, host, ramdisk
 from avocado_flash_remote.host import (
     HostError,
     RunResult,
@@ -1726,3 +1726,39 @@ def test_stage_reports_the_copy_the_stream_and_the_remote_verification(kit, reso
     assert "the board verified the staged images against MANIFEST.hashes" in text
     # the order is the order of the work
     assert text.index("copying") < text.index("transferred") < text.index("the board verified")
+
+
+# ---- the guard's initramfs requirement is checked on the host before anything is copied ----------------------
+
+
+def _refuse_initramfs(profile, image_dir):
+    raise ramdisk.RamdiskError("boot.img: usr/sbin/avocado-tegra-init in the ramdisk does not contain 'resolve_pinned_root'")
+
+
+def test_stage_refuses_an_image_failing_the_initramfs_requirement_before_any_remote_call(kit, resolved, monkeypatch):
+    images, bundle_path, _ = kit
+    monkeypatch.setattr(host.ramdisk, "check_initramfs_requires", _refuse_initramfs)
+    t = StubTransport(handler=handler_for(10_000_000))
+    with pytest.raises(host.HostError, match="does not contain 'resolve_pinned_root'"):
+        host.stage(t, resolved.profile, resolved, images, bundle_path, dry_run=False)
+    assert t.calls == []
+
+
+def test_stage_dry_run_refuses_an_image_failing_the_initramfs_requirement(kit, resolved, monkeypatch):
+    images, bundle_path, _ = kit
+    monkeypatch.setattr(host.ramdisk, "check_initramfs_requires", _refuse_initramfs)
+    with pytest.raises(host.HostError, match="does not contain"):
+        host.stage(None, resolved.profile, resolved, images, bundle_path, dry_run=True)
+
+
+def test_a_runner_only_stage_has_no_images_and_skips_the_initramfs_requirement(kit, resolved, monkeypatch):
+    monkeypatch.setattr(host.ramdisk, "check_initramfs_requires", _refuse_initramfs)
+    host.stage(None, resolved.profile, resolved, None, kit[1], dry_run=True, runner_only=True)
+
+
+def test_stage_reports_which_boot_images_met_the_initramfs_requirement(kit, resolved, monkeypatch):
+    images, bundle_path, _ = kit
+    monkeypatch.setattr(host.ramdisk, "check_initramfs_requires", lambda profile, image_dir: ["boot.img"])
+    lines = []
+    host.stage(None, resolved.profile, resolved, images, bundle_path, dry_run=True, out=lines.append)
+    assert any("boot.img" in ln and "initramfs" in ln for ln in lines), lines
