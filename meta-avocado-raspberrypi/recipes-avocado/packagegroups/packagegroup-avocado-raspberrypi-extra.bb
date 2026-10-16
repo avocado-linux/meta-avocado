@@ -18,5 +18,6 @@ inherit packagegroup nospdx
 RDEPENDS:${PN} = " \
   userlandtools \
   python3-gpiozero \
+  python3-lgpio \
   ${MACHINE_EXTRA_RRECOMMENDS} \
 "
