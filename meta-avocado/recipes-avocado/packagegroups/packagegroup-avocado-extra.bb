@@ -34,6 +34,12 @@ RDEPENDS:${PN} = " \
   linux-firmware \
   linuxptp \
   phytool \
+  python3-cbor2 \
+  python3-lz4 \
+  python3-pillow \
+  python3-protobuf \
+  python3-pyephem \
+  python3-zstandard \
   qemu-user-static \
   qemu-user-static-binfmt \
   qemu-guest-agent \
