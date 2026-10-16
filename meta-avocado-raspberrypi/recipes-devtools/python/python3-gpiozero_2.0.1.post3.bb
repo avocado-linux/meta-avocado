@@ -11,7 +11,22 @@ SRC_URI[sha256sum] = "745feab6df463ac2e9de10c67e2dd9f396e668ba4e281e92381d6c4601
 
 inherit pypi python_setuptools_build_meta
 
+# The stdlib sub-packages are the modules gpiozero imports on startup, measured
+# on a host Python 3.14 and then checked on a Pi 5 whose Python carries only
+# python3-core: without json and pprint `import gpiozero` fails there. The set
+# is measured, not minimised, so an entry may be removable.
 RDEPENDS:${PN} += " \
     python3-colorzero \
+    python3-compression \
+    python3-datetime \
+    python3-image \
+    python3-io \
+    python3-json \
+    python3-math \
+    python3-mmap \
+    python3-numbers \
+    python3-pprint \
+    python3-statistics \
+    python3-threading \
 "
 
