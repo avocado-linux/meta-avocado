@@ -17,6 +17,7 @@ inherit packagegroup nospdx
 
 RDEPENDS:${PN} = " \
   userlandtools \
+  nats-server \
   python3-gpiozero \
   ${MACHINE_EXTRA_RRECOMMENDS} \
 "
