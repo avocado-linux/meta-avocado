@@ -1,0 +1,53 @@
+From: Javier Tia <j.tia@peridio.com>
+Date: Wed, 14 Oct 2026 15:50:00 -0600
+Subject: [PATCH] net: phy: aquantia: attach the AQR113C wake hooks to the
+ AQR113C entry
+
+The NVIDIA wake-on-boot change for the AQR113C (aqr113c_get_wol and
+aqr113c_set_wol) registers its hooks in the phy_driver table. In this tree
+the two lines sit in the AQR111B0 entry, and the AQR113C entry has none.
+The table gained entries after the change was written, so its last hunk
+now lands in the neighbouring entry.
+
+The effect is on the 10G port of the Jetson AGX Orin carriers, whose PHY
+matches PHY_ID_AQR113C. phydev->drv->get_wol is NULL there,
+phy_ethtool_get_wol() leaves wolinfo.supported at 0, and nvethernet's
+ether_get_wol() copies that out, so ethtool prints "Supports Wake-on: d"
+and ethtool -s <port> wol g is refused. aqr113c_get_wol() sets
+supported = WAKE_MAGIC unconditionally, so the only missing piece is the
+table entry.
+
+Move the two lines into the AQR113C entry. The AQR111B0 PHY has no use for
+the AQR113C-specific register sequence, so it loses them.
+
+The wake sequence itself is unchanged. It matches the one NVIDIA's R39
+kernel (a 6.8 tree) carries in its AQR113C entry, where ethtool reports
+"Supports Wake-on: g" on the same board.
+
+---
+ drivers/net/phy/aquantia/aquantia_main.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/phy/aquantia/aquantia_main.c b/drivers/net/phy/aquantia/aquantia_main.c
+--- a/drivers/net/phy/aquantia/aquantia_main.c
++++ b/drivers/net/phy/aquantia/aquantia_main.c
+@@ -1662,8 +1662,6 @@
+ 	.led_polarity_set = aqr_phy_led_polarity_set,
+ 	.inband_caps	= aqr_gen2_inband_caps,
+ 	.config_inband	= aqr_gen2_config_inband,
+-	.get_wol	= &aqr113c_get_wol,
+-	.set_wol	= &aqr113c_set_wol,
+ },
+ {
+ 	PHY_ID_MATCH_MODEL(PHY_ID_AQR405),
+@@ -1794,6 +1792,8 @@
+ 	.led_polarity_set = aqr_phy_led_polarity_set,
+ 	.inband_caps    = aqr_gen2_inband_caps,
+ 	.config_inband  = aqr_gen2_config_inband,
++	.get_wol	= &aqr113c_get_wol,
++	.set_wol	= &aqr113c_set_wol,
+ },
+ {
+ 	PHY_ID_MATCH_MODEL(PHY_ID_AQR114C),
+-- 
+2.43.0
