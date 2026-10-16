@@ -35,7 +35,13 @@ RDEPENDS:${PN} = " \
   linuxptp \
   otelcol \
   phytool \
+  python3-cbor2 \
+  python3-lz4 \
+  python3-pillow \
+  python3-protobuf \
+  python3-pyephem \
   python3-rapidfuzz \
+  python3-zstandard \
   qemu-user-static \
   qemu-user-static-binfmt \
   qemu-guest-agent \
