@@ -167,6 +167,9 @@ def test_jetson_guard_pins_the_root_and_does_not_hide_the_nvme(jetson):
     assert app["uuid"].lower() == APP_PARTUUID
     assert jetson.images["rootfs"].partition == app["number"]
     assert "module_blacklist" not in jetson.guard.params["argument"]
+    # The pin is only honoured by an init that knows it; stage refuses an image whose ramdisk lacks it.
+    assert jetson.guard.params["initramfs_file"] == "usr/sbin/avocado-tegra-init"
+    assert jetson.guard.params["initramfs_contains"] == "resolve_pinned_root"
 
 
 def test_jetson_checks_are_the_kits_fourteen_plus_board_prerequisites(jetson):

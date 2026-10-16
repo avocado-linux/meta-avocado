@@ -405,6 +405,15 @@ def load_profile_bytes(data: bytes) -> Profile:
                     )
             pin = _root_pin_partuuid(guard.params["argument"])
             if pin is not None:
+                # The pin is only a request: an initramfs whose init predates it ignores the pin, and the
+                # test boot has nothing else that keeps it off the other disk. The profile must name the
+                # file and text the ramdisk has to carry, which `stage` checks on the host.
+                if "initramfs_file" not in guard.params:
+                    raise ProfileError(
+                        "guard.params.initramfs_file",
+                        "a root pin needs initramfs_file and initramfs_contains, so an image whose init "
+                        "does not know the pin is refused",
+                    )
                 # The boot header names a root by PARTUUID; if the layout never writes that GUID to a
                 # partition the tool fills, the initrd cannot find its root and every boot stops there.
                 written = {img.partition for img in images.values()}

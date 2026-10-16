@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import evidence
+from . import evidence, ramdisk
 from .bundle import verify_bundle
 from .images import scan
 from .ops import DEFAULT_TOOL_DIRS
@@ -723,6 +723,16 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     """
     staging_dir = profile.staging.dir
     rows = _plan_files(None if runner_only else image_dir, bundle_path, resolved)
+    # The boot-arg guard reads only the boot header on the board; whether the image's init understands the
+    # argument is decided here, on the host, before anything is copied.
+    checked = []
+    if not runner_only:
+        try:
+            checked = ramdisk.check_initramfs_requires(profile, image_dir)
+        except ramdisk.RamdiskError as exc:
+            raise HostError(str(exc)) from None
+    if checked:
+        out(f"stage: the guard's initramfs requirement is met in {', '.join(checked)}")
     result = StageResult(
         staging_dir,
         f"{staging_dir}/{Path(bundle_path).name}",
