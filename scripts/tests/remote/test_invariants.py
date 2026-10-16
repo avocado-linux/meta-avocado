@@ -28,6 +28,7 @@ from types import SimpleNamespace as NS
 
 import devgraph
 import pytest
+from golden_deviation import APP_PARTUUID
 
 from avocado_flash_remote import bundle, cli, cmd_check, cmd_plan, cmd_restore, cmd_write, host, layout, runner
 from avocado_flash_remote import profile as prof
@@ -68,7 +69,7 @@ EFI_PRE = (
 )
 EFI_AFTER = EFI_PRE
 EFI_FINAL = EFI_PRE + f"BootNext: {ENTRY}\n"
-NVME_ARG = "module_blacklist=nvme,nvme_core,pcie_tegra194"
+NVME_ARG = f"avocado.root=PARTUUID={APP_PARTUUID}"
 BLANK = OpResult(rc=1, stderr=f"sfdisk: {DEV}: does not contain a recognized partition table\n")
 
 

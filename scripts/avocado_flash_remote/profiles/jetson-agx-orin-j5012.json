@@ -116,7 +116,8 @@
           "name": "APP",
           "start": 2230848,
           "size": 524288,
-          "type_guid": "B921B045-1DF0-41C3-AF44-4C6F280D3FAE"
+          "type_guid": "B921B045-1DF0-41C3-AF44-4C6F280D3FAE",
+          "uuid": "727dfa31-d47f-4a55-8d62-d812de5ce092"
         },
         {
           "number": 2,
@@ -207,7 +208,7 @@
   "guard": {
     "strategy": "boot-arg",
     "params": {
-      "argument": "module_blacklist=nvme,nvme_core,pcie_tegra194",
+      "argument": "avocado.root=PARTUUID=727dfa31-d47f-4a55-8d62-d812de5ce092",
       "partitions": [
         "A_kernel",
         "B_kernel"

@@ -403,6 +403,22 @@ def load_profile_bytes(data: bytes) -> Profile:
                         "guard.params.partitions",
                         f"guard partition '{name}' is not in the layout table",
                     )
+            pin = _root_pin_partuuid(guard.params["argument"])
+            if pin is not None:
+                # The boot header names a root by PARTUUID; if the layout never writes that GUID to a
+                # partition the tool fills, the initrd cannot find its root and every boot stops there.
+                written = {img.partition for img in images.values()}
+                carriers = [p for p in lp["table"] if p.get("uuid", "").lower() == pin]
+                if not carriers:
+                    raise ProfileError(
+                        "guard.params.argument",
+                        f"pins root PARTUUID {pin}, but no layout partition carries that uuid",
+                    )
+                if not any(p["number"] in written for p in carriers):
+                    raise ProfileError(
+                        "guard.params.argument",
+                        f"pins root PARTUUID {pin}, but no image is mapped to the partition that carries it",
+                    )
 
     return Profile(
         schema_version=SCHEMA_VERSION,
@@ -417,6 +433,16 @@ def load_profile_bytes(data: bytes) -> Profile:
         staging=staging,
         state_dir=state_dir,
     )
+
+
+_ROOT_PIN_PREFIX = "avocado.root=PARTUUID="
+
+
+def _root_pin_partuuid(argument: str) -> str | None:
+    """The lower-cased GUID of an ``avocado.root=PARTUUID=<guid>`` guard argument, else None."""
+    if not argument.startswith(_ROOT_PIN_PREFIX):
+        return None
+    return argument[len(_ROOT_PIN_PREFIX) :].lower()
 
 
 def write_identity_problem(profile: Profile) -> str | None:

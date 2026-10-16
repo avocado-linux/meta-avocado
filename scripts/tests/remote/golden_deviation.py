@@ -1,4 +1,5 @@
-"""The one deliberate size deviation between the shipped Jetson profile and the kit's golden.
+"""The deliberate deviations between the shipped Jetson profile and the kit's golden: the data partition
+size (below) and the fixed GUID of the APP partition (``kit_to_port_app_uuid``).
 
 The kit's golden dry run (``golden/real-board-dry-run.txt``) is real recorded output and is
 never edited. It records the data partition (``DATAPART_EXPAND``, partition 16) with
@@ -35,4 +36,30 @@ def kit_to_port_data_size(golden_lines):
         hits += n
         out.append(new)
     assert hits, f"golden no longer carries size={KIT_DATA_SIZE}"
+    return out
+
+
+# The second deliberate deviation: the shipped profile gives the APP partition a fixed GUID, so the test
+# boot can name its root by PARTUUID (avocado.root=) instead of hiding the NVMe. The kit's golden has no
+# GUID on that partition, because the kit lets sfdisk generate one.
+APP_PARTUUID = "727dfa31-d47f-4a55-8d62-d812de5ce092"
+
+_KIT_APP_LINE = re.compile(
+    r'^(\s*/dev/mmcblk0p1 : start=2230848, size=524288, type=B921B045-1DF0-41C3-AF44-4C6F280D3FAE), name="APP"$'
+)
+
+
+def kit_to_port_app_uuid(golden_lines):
+    """The golden lines with only the sfdisk line of the APP partition given the shipped fixed GUID.
+
+    Asserts exactly one line matched, so a golden that stops recording the APP partition cannot make the
+    normalisation silently do nothing.
+    """
+    out = []
+    hits = 0
+    for ln in golden_lines:
+        new, n = _KIT_APP_LINE.subn(rf'\1, uuid={APP_PARTUUID}, name="APP"', ln)
+        hits += n
+        out.append(new)
+    assert hits == 1, f"expected one sfdisk line for the APP partition in the golden, found {hits}"
     return out
