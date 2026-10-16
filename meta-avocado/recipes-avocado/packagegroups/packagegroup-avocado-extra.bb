@@ -32,10 +32,12 @@ RDEPENDS:${PN} = " \
   avocado-pkg-rootfs \
   avocado-pkg-initramfs \
   linux-firmware \
+  linuxptp \
   phytool \
   qemu-user-static \
   qemu-user-static-binfmt \
   qemu-guest-agent \
+  sudo \
 "
 
 RDEPENDS:${PN} += "${@' '.join('packagegroup-avocado-feature-' + g for g in (d.getVar('AVOCADO_FEATURE_GROUPS') or '').split())}"
