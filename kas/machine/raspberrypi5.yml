@@ -10,6 +10,12 @@ header:
       file: kas/feature/multi-kernel-raspberrypi.yml
     - repo: meta-avocado
       file: kas/target/distro.yml
+    # numba and llvmlite come from meta-python-ai, which needs meta-clang-revival
+    # and, through its layer dependencies, meta-virtualization.
+    - repo: meta-avocado
+      file: kas/feature/virtualization.yml
+    - repo: meta-avocado
+      file: kas/feature/python-ai.yml
 
 repos:
   meta-avocado:
