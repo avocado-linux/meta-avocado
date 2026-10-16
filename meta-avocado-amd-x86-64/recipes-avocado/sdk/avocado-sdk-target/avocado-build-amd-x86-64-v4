@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+set -e
+
+hook="avocado-build"
+target="amd-x86-64-v4"
+
+RUNTIME_NAME="${1:-}"
+
+# The name becomes a path component under output/runtimes/; refuse anything
+# that would be empty or step outside it.
+case "$RUNTIME_NAME" in
+    ''|.|..|*/*) echo "ERROR: invalid runtime name '${RUNTIME_NAME}'" >&2; exit 1 ;;
+esac
+
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
+
+mkdir -p "$output_dir"
+
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
+
+# Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
+# shellcheck disable=SC2329 # orphaned by 35124cb's stone-bundle move; kept for parity with the Intel template this was copied from, not currently called
+build_include_flags() {
+    local main_input_dir="$1"
+    local include_flags=""
+    
+    # Add SDK stone directory for BSP files
+    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+        include_flags="$include_flags -i \"$AVOCADO_SDK_PREFIX/stone\""
+    fi
+    
+    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                include_flags="$include_flags -i \"$path\""
+            fi
+        done
+    fi
+    
+    include_flags="$include_flags -i \"$main_input_dir\""
+    echo "$include_flags"
+}
+
+# Build display string of all include paths
+# shellcheck disable=SC2329 # orphaned by 35124cb's stone-bundle move; kept for parity with the Intel template this was copied from, not currently called
+build_include_display() {
+    local main_input_dir="$1"
+    local display=""
+    
+    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+        display="${display}\n    - ${AVOCADO_SDK_PREFIX}/stone"
+    fi
+    
+    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
+        for path in "${PATHS[@]}"; do
+            if [ -n "$path" ]; then
+                display="${display}\n    - ${path}"
+            fi
+        done
+    fi
+    
+    display="${display}\n    - ${main_input_dir}"
+    echo -e "$display"
+}
+
+# Extract image names from manifest
+rootfs_image=$(jq -r '.storage_devices.rootdisk.images.rootfs // empty' "$manifest")
+var_image=$(jq -r '.storage_devices.rootdisk.images.var // empty' "$manifest")
+initramfs_image=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
+kernel_image=$(jq -r '.storage_devices.rootdisk.images.kernel // empty' "$manifest")
+bootloader_image=$(jq -r '.storage_devices.rootdisk.images.bootloader // empty' "$manifest")
+
+echo -e "\033[94m[INFO]\033[0m Extracted image names from manifest:
+  Rootfs:     ${rootfs_image}
+  Var:        ${var_image}
+  Initramfs:  ${initramfs_image}
+  Kernel:     ${kernel_image}
+  Bootloader: ${bootloader_image}"
+
+# stone validate/create used to run here. avocado-cli commit 35124cb moved that
+# work into the runtime build as `stone bundle`, which resolves the same inputs
+# and additionally records the bundle hash in the runtime manifest. This hook is
+# now the pre-bundle seam only: stage artifacts the manifest references that the
+# generic pipeline cannot build, and let stone bundle consume them.
+
+echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+exit 0
