@@ -1,5 +1,6 @@
-SUMMARY = "mkimage_imx8 and mkimage_fit_atf.sh for repacking imx-boot outside bitbake"
-DESCRIPTION = "The i.MX8M boot-container packer as an SDK host tool. meta-freescale's \
+SUMMARY = "imx-boot packers (i.MX8M and i.MX9) and mkimage_fit_atf.sh for repacking imx-boot outside bitbake"
+DESCRIPTION = "NXP's boot-image packers as SDK host tools: the i.MX8M one and the \
+i.MX9 AHAB container one (imx-mkimage's top-level build). meta-freescale's \
 imx-mkimage recipe is `inherit native` and cannot be BBCLASSEXTENDed, and its \
 deployed copy in imx-boot-tools/ is a build-host binary with an RPATH into the \
 build tree, so neither reaches the SDK. This recipe builds only what a project \
@@ -24,17 +25,27 @@ DEPENDS = "zlib"
 
 # soc.mak's own rule for $(MKIMG), minus -static (nativesdk links the SDK's
 # libz) and with the toolchain from the environment rather than a bare gcc.
+#
+# The i.MX9 soc.mak calls a different program under the same name: the
+# container packer imx-mkimage's top-level Makefile builds from src/. It is
+# installed as mkimage_imx_container. Its Makefile stamps `git rev-parse
+# --short=8 HEAD` into build_info.h, which `-commit` writes into every image;
+# take it from the same SRCREV so a re-pack matches the distro's imx-boot.
 do_compile() {
     ${CC} ${CFLAGS} ${LDFLAGS} -std=c99 -Wall ${S}/iMX8M/mkimage_imx8.c -o ${B}/mkimage_imx8 -lz
+    printf '#define MKIMAGE_COMMIT 0x%s\n' "$(echo ${SRCREV} | cut -c1-8)" > ${B}/build_info.h
+    ${CC} ${CFLAGS} ${LDFLAGS} -std=c99 -Wall -I${B} -I${S}/src \
+        ${S}/src/imx8qxb0.c ${S}/src/mkimage_imx8.c -o ${B}/mkimage_imx_container -lz
 }
 
 do_install() {
     install -d ${D}${bindir}
     install -m 0755 ${B}/mkimage_imx8 ${D}${bindir}/mkimage_imx8
+    install -m 0755 ${B}/mkimage_imx_container ${D}${bindir}/mkimage_imx_container
     install -m 0755 ${S}/iMX8M/mkimage_fit_atf.sh ${D}${bindir}/mkimage_fit_atf.sh
 }
 
 # No COMPATIBLE_MACHINE: nativesdk.bbclass empties MACHINEOVERRIDES, so it
-# could never match. packagegroup-avocado-imx-sdk-extra scopes the pull to
-# mx8m-generic-bsp instead.
+# could never match. avocado-sdk-target (meta-avocado-nxp bbappend) scopes
+# the pull to the machines avocado-img-bootfiles ships a re-key procedure for.
 BBCLASSEXTEND = "nativesdk"
