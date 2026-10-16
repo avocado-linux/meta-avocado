@@ -198,6 +198,36 @@ def test_guard_boot_arg_rejects_an_empty_or_duplicated_partition_list(partitions
         validate("guard", "boot-arg", {"argument": "a=b", "partitions": partitions})
 
 
+def test_guard_boot_arg_initramfs_requirement_valid():
+    p = {
+        "argument": "avocado.root=PARTUUID=727dfa31-d47f-4a55-8d62-d812de5ce092",
+        "partitions": ["A_kernel"],
+        "initramfs_file": "usr/sbin/avocado-tegra-init",
+        "initramfs_contains": "resolve_pinned_root",
+    }
+    assert validate("guard", "boot-arg", p) == p
+
+
+@pytest.mark.parametrize("given", ["initramfs_file", "initramfs_contains"])
+def test_guard_boot_arg_initramfs_requirement_needs_both_fields(given):
+    p = {"argument": "a=b", "partitions": ["A_kernel"], given: "usr/sbin/x" if given == "initramfs_file" else "text"}
+    with pytest.raises(StrategyError, match="initramfs_file and initramfs_contains"):
+        validate("guard", "boot-arg", p)
+
+
+@pytest.mark.parametrize("path", ["", "/usr/sbin/x", "usr/../sbin/x", "usr//sbin/x", "usr/sbin/x/", "./usr/sbin/x"])
+def test_guard_boot_arg_initramfs_file_must_be_a_clean_relative_path(path):
+    p = {"argument": "a=b", "partitions": ["A_kernel"], "initramfs_file": path, "initramfs_contains": "text"}
+    with pytest.raises(StrategyError, match="initramfs_file.*clean relative path"):
+        validate("guard", "boot-arg", p)
+
+
+def test_guard_boot_arg_initramfs_contains_must_not_be_empty():
+    p = {"argument": "a=b", "partitions": ["A_kernel"], "initramfs_file": "usr/sbin/x", "initramfs_contains": ""}
+    with pytest.raises(StrategyError, match="initramfs_contains.*must not be empty"):
+        validate("guard", "boot-arg", p)
+
+
 def test_guard_none():
     assert validate("guard", "none", {}) == {}
 

@@ -483,9 +483,12 @@ def test_a_profile_that_does_not_arm_needs_no_esp_image():
 PIN_UUID = "727dfa31-d47f-4a55-8d62-d812de5ce092"
 
 
-def _pin(guid=PIN_UUID, layout_uuid=None, on_partition=2):
+def _pin(guid=PIN_UUID, layout_uuid=None, on_partition=2, requirement=True):
     def go(d):
         d["guard"]["params"]["argument"] = f"avocado.root=PARTUUID={guid}"
+        if requirement:
+            d["guard"]["params"]["initramfs_file"] = "usr/sbin/init-x"
+            d["guard"]["params"]["initramfs_contains"] = "resolve_pinned_root"
         if layout_uuid is not None:
             for part in d["layout"]["params"]["table"]:
                 if part["number"] == on_partition:
@@ -522,3 +525,10 @@ def test_a_root_pin_whose_partition_has_no_image_is_refused():
 
 def test_a_guard_argument_that_is_not_a_root_pin_is_not_cross_checked():
     load_profile_bytes(mutated(lambda d: d["guard"]["params"].update(argument="module_blacklist=nvme,nvme_core")))
+
+
+def test_a_root_pin_without_an_initramfs_requirement_is_refused():
+    # The pin is only a request: an initramfs whose init predates it ignores the pin, and with the other disk
+    # visible nothing else keeps the test boot off it. The profile must say which file the ramdisk has to carry.
+    with pytest.raises(ProfileError, match=r"guard\.params\.initramfs_file"):
+        load_profile_bytes(_pin(layout_uuid=PIN_UUID, requirement=False))

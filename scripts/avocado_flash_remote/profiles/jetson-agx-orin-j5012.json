@@ -209,6 +209,8 @@
     "strategy": "boot-arg",
     "params": {
       "argument": "avocado.root=PARTUUID=727dfa31-d47f-4a55-8d62-d812de5ce092",
+      "initramfs_file": "usr/sbin/avocado-tegra-init",
+      "initramfs_contains": "resolve_pinned_root",
       "partitions": [
         "A_kernel",
         "B_kernel"
