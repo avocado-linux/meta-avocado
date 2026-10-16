@@ -1,0 +1,71 @@
+From: Ilies CHERGUI <ichergui@nvidia.com>
+Subject: [PATCH] Updates for OE cross builds
+
+Extract ONNX_VERSION from VERSION_NUMBER so it's available before
+project() is called; build libonnx and libonnx_proto as versioned
+SHARED libraries when BUILD_SHARED_LIBS is on, with SOVERSION matching
+the upstream library policy.
+
+Upstream-Status: Inappropriate [OE-specific]
+Signed-off-by: Ilies CHERGUI <ichergui@nvidia.com>
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,7 +1,32 @@
+ # Minimum CMake required
+ cmake_minimum_required(VERSION 3.26)
++
++function(onnx_extract_version)
++    file(READ "${CMAKE_SOURCE_DIR}/VERSION_NUMBER" ONNX_VERSION)
++    string(STRIP "${ONNX_VERSION}" ONNX_VERSION)
++    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" ONNX_VERSION_MATCH ${ONNX_VERSION})
++    message(STATUS "ONNX matched version: ${ONNX_VERSION_MATCH}")
++    if(ONNX_VERSION_MATCH)
++        # Extract the major version
++        string(REGEX REPLACE "^([0-9]+)\\..*" "\\1" ver_major ${ONNX_VERSION})
++        # Extract the minor version
++        string(REGEX REPLACE "^[0-9]+\\.([0-9]+)\\..*" "\\1" ver_minor ${ONNX_VERSION})
++        # Extract the patch version
++        string(REGEX REPLACE "^[0-9]+\\.[0-9]+\\.([0-9]+)" "\\1" ver_patch ${ONNX_VERSION})
++
++        set(ONNX_VERSION_MAJOR ${ver_major} PARENT_SCOPE)
++        set(ONNX_VERSION_MINOR ${ver_minor} PARENT_SCOPE)
++        set(ONNX_VERSION_PATCH ${ver_patch} PARENT_SCOPE)
++        set(ONNX_VERSION "${ver_major}.${ver_minor}.${ver_patch}" PARENT_SCOPE)
++    else()
++        message(FATAL_ERROR "ONNX version did not match the expected format.")
++    endif()
++endfunction()
++
++onnx_extract_version()
++
+ # Project
+-project(onnx LANGUAGES CXX)
++project(onnx VERSION ${ONNX_VERSION} LANGUAGES C CXX)
+
+ include(cmake/Utils.cmake)
+ # Honor visibility properties for all target types.
+@@ -412,10 +437,20 @@ if(ONNX_USE_LITE_PROTO)
+     set(LINKED_PROTOBUF_TARGET protobuf::libprotobuf-lite)
+   endif()
+ endif()
+-add_library(onnx_proto ${ONNX_PROTO_SRCS})
++if (BUILD_SHARED_LIBS)
++  add_library(onnx_proto SHARED ${ONNX_PROTO_SRCS})
++else()
++  add_library(onnx_proto STATIC ${ONNX_PROTO_SRCS})
++endif()
++set_target_properties(onnx_proto PROPERTIES VERSION ${ONNX_VERSION} SOVERSION ${ONNX_VERSION_MAJOR}.${ONNX_VERSION_MINOR})
+ add_onnx_global_defines(onnx_proto)
+
+-add_library(onnx ${ONNX_SRCS} ${ONNX_PROTO_SRCS})
++if (BUILD_SHARED_LIBS)
++  add_library(onnx SHARED ${ONNX_SRCS} ${ONNX_PROTO_SRCS})
++else()
++  add_library(onnx STATIC ${ONNX_SRCS} ${ONNX_PROTO_SRCS})
++endif()
++set_target_properties(onnx PROPERTIES VERSION ${ONNX_VERSION} SOVERSION ${ONNX_VERSION_MAJOR}.${ONNX_VERSION_MINOR})
+ add_dependencies(onnx onnx_proto)
+ set_source_files_properties(${ONNX_SRCS} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+ add_onnx_global_defines(onnx)
