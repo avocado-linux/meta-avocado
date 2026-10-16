@@ -92,7 +92,7 @@ the arming.
 | `write` | Writes the planned run: partition table, then each image (a `blockdev --flushbufs` of its node, then read-back verification), guard, arm. Runs detached on the board (see `--detach`). | See the write gates below. |
 | `readback` | After the test image has booted, mounts the profile's data partition read-only, copies the persistent journal and boot logs, compares BootOrder with the reference, and prints (never runs) cleanup commands. | Needs `--reference-boot-order` unless the profile's arm strategy is `none`. Refuses to mount when the output directory is not on tmpfs, so logs never land on the live system's disk. The logs are copied to `/run/avocado-flash/<run-id>/readback` and the partition is mounted on `/run/avocado-flash/<run-id>/mnt` (private, mode 0700, one per run id). The board derives both paths from the run id alone, ignoring any directory in the request, and refuses a path with a symlink on it. A reused `--run-id` is refused (exit 1, nothing mounted) while its output directory already exists, so an earlier readback's logs are never deleted by a later failure: read and remove them first. Both are on tmpfs and vanish at reboot, so read the logs before rebooting. The mount is `ro,nosuid,nodev,noexec`. Readback takes the per-host lock, and on the board it refuses (exit 1, nothing mounted) while a run is in a non-terminal phase, while the on-board flash lock is held, or when the mount directory is already a mount point. It refuses to copy a journal larger than the free space of the output filesystem minus a 64 MiB reserve, or larger than 256 MiB. A copy error exits 1 and removes the partial output. Boot logs keep their path relative to the mount (`log/<name>`, `<name>`). The cleanup commands it prints name the mount directory (`umount`, `rmdir`) and the output directory (`rm -r`). |
 | `restore` | Undoes the arming. See "Restore scope". | Takes the per-host lock and, on the board, the on-board flash lock: it refuses while another holder (a write in progress) is live. A run in a non-terminal phase needs `--ack-run RUN_ID` naming it. `--emergency-disarm` needs `--ack-run`. |
-| `status` | Prints the board's recorded phase: `status: PHASE run=RUN_ID recovery=TEXT`, or `status: no run recorded`. Strictly read-only. | None. Use it after a dropped connection. |
+| `status` | Prints the board's recorded phase: `status: PHASE run=RUN_ID recovery=TEXT`, or `status: no run recorded`. When the run has images it adds a second line, `images: NAME=STATE, ...` (state is `pending`, `writing` or `written`), which is how a followed write names the image it is on. Strictly read-only. | None. Use it after a dropped connection. |
 
 ### Write gates
 
@@ -554,6 +554,11 @@ The runner double-forks, starts a new session, redirects its output to
 `<run_dir>/runner.log` on the board, and returns immediately with
 `detached: run=<id> log=<path>`. The host then polls the board's `status` every
 few seconds until the run reaches a terminal phase or `--wait-seconds` elapses.
+While it follows, the host prints `write: PHASE - images: NAME=STATE, ...`
+whenever the phase or an image's state changes, and `write: still PHASE, N s`
+after ten seconds without a change, so a long image write is never silent.
+`stage` likewise prints `stage: sent X of Y MiB, N s` (KiB for a set under a
+mebibyte) every few seconds while its tar stream runs. Every line is flushed as it is printed.
 A connection error during polling is reported and retried. If the board records
 no state for the run after three polls, the host reports that the write did not
 start and prints the tail of `runner.log`. If `--wait-seconds` runs out the
