@@ -160,10 +160,13 @@ PYTHON_AI_PACKAGES = " \
 # pulls virtual/libopencl1, which needs the opencl DISTRO feature we don't set),
 # and `torchvision` is the CUDA cmake build (meta-python-ai's python3-torchvision
 # hard-depends on python3-pytorch -> opencl). See PREFERRED_RPROVIDER for onnx.
+# triton-server is left out of the feed: its do_compile does not cross-build
+# (the nested ExternalProject takes /usr/include/python3.14 from the build host,
+# and libtritonrepoagent_relocation.so fails to link against
+# libcudart_static.a). Add it back once the recipe builds.
 FRAMEWORK_PACKAGES = " \
   python3-torch \
   torchvision \
-  triton-server \
   triton-core \
   triton-tensorrt-backend \
   triton-onnxruntime-backend \
