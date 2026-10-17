@@ -11,12 +11,18 @@ do_install:append () {
     # /usr/lib/systemd or /lib/systemd path: which one is correct depends on
     # whether usrmerge is in DISTRO_FEATURES, and hardcoding the usrmerge
     # answer here would point ExecStart at nothing and fail the unit silently
-    # the day usrmerge is dropped. rootlibexecdir already carries that answer.
+    # the day usrmerge is dropped. systemd_unitdir (bitbake.conf) carries that
+    # answer; rootlibexecdir does not, it is set only inside the systemd recipe's
+    # meson call and expands to nothing here.
     install -d ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d
     install -m 0644 ${UNPACKDIR}/wait-online-any.conf \
         ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/
-    sed -i "s|@ROOTLIBEXECDIR@|${rootlibexecdir}|" \
+    sed -i "s|@SYSTEMD_UNITDIR@|${systemd_unitdir}|" \
         ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/wait-online-any.conf
+    if [ -e ${D}${systemd_system_unitdir}/systemd-networkd-wait-online.service ] && \
+       [ ! -x ${D}${systemd_unitdir}/systemd-networkd-wait-online ]; then
+        bbfatal "wait-online-any.conf points ExecStart at ${systemd_unitdir}/systemd-networkd-wait-online, which this build does not install"
+    fi
 
     # Mask upstream systemd-sysext/confext units.
     # Avocado replaces these with avocado-extension.service and
