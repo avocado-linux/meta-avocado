@@ -299,6 +299,26 @@ def cmdline_has_arg(arg, a, b) -> bool:
     return f" {arg} " in f" {a}{b} " or f" {arg} " in f" {a} {b} "
 
 
+_ROOT_PIN_KEY = "avocado.root="
+
+
+def _other_root_pin(arg, a, b):
+    """Another ``avocado.root=`` token beside ``arg`` in a join that carries ``arg``, else None.
+
+    The init keeps the last pin it reads, so a second pin with another value, for instance from the extra
+    cmdline joined after the first, would pick a different root than the one the guard just checked.
+    """
+    if not arg.startswith(_ROOT_PIN_KEY):
+        return None
+    for joined in (f"{a}{b}", f"{a} {b}"):
+        if f" {arg} " not in f" {joined} ":
+            continue
+        for token in joined.split():
+            if token.startswith(_ROOT_PIN_KEY) and token != arg:
+                return token
+    return None
+
+
 class BootArgGuard:
     """boot-arg: refuse unless every guard partition's boot image carries the argument."""
 
@@ -314,6 +334,12 @@ class BootArgGuard:
                 raise GuardError(
                     f"{name} ({node}): boot image cmdline lacks required argument "
                     f"'{arg}'; refusing to arm"
+                )
+            other = _other_root_pin(arg, a, b)
+            if other is not None:
+                raise GuardError(
+                    f"{name} ({node}): boot image cmdline carries another root pin {other} "
+                    f"beside '{arg}'; refusing to arm"
                 )
 
     def check_staged(self, profile, staging_dir, file_reader=None) -> None:
@@ -339,6 +365,12 @@ class BootArgGuard:
             if not cmdline_has_arg(arg, a, b):
                 raise GuardError(
                     f"staged boot image {img.file} lacks the required argument {arg} (guard boot-arg)"
+                )
+            other = _other_root_pin(arg, a, b)
+            if other is not None:
+                raise GuardError(
+                    f"staged boot image {img.file} carries another root pin {other} beside {arg} "
+                    "(guard boot-arg)"
                 )
 
 

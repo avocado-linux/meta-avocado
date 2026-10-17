@@ -547,6 +547,34 @@ def test_staged_guard_refuses_an_argument_that_only_appears_after_a_nul():
         get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
 
 
+# ------------------------------------------------- a second root pin makes the effective root ambiguous
+
+OTHER_PIN = "avocado.root=PARTUUID=deadbeef-0000-4000-8000-000000000000"
+
+
+def test_guard_refuses_a_second_different_root_pin_in_the_cmdline():
+    ops = guard_ops(header(f"{ARG} quiet {OTHER_PIN}"), header(ARG))
+    with pytest.raises(GuardError, match="another root pin"):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_refuses_a_second_different_root_pin_in_the_extra_field():
+    ops = guard_ops(header(ARG), header(ARG, extra=OTHER_PIN))
+    with pytest.raises(GuardError, match="another root pin"):
+        get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_guard_accepts_the_same_root_pin_given_twice():
+    ops = guard_ops(header(f"{ARG} quiet {ARG}"), header(ARG, extra=ARG))
+    get_guard("boot-arg").check(ops, profile(), NODES)
+
+
+def test_staged_guard_refuses_a_second_different_root_pin():
+    rd = reader({f"{STAGE}/boot.img": header(ARG), f"{STAGE}/boot-b.img": header(f"{OTHER_PIN} {ARG}")})
+    with pytest.raises(GuardError, match="another root pin"):
+        get_guard("boot-arg").check_staged(staged_profile(), STAGE, rd)
+
+
 # ------------------------------------------------- CRLF and re-check before create
 
 

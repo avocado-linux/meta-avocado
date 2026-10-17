@@ -520,5 +520,26 @@ def test_a_root_pin_whose_partition_has_no_image_is_refused():
         load_profile_bytes(_pin(layout_uuid=PIN_UUID, on_partition=3))
 
 
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "avocado.root=PARTUUID=",  # an empty GUID matches every partition that has no uuid
+        "avocado.root=PARTUUID=not-a-guid",
+        "avocado.root=PARTLABEL=APP",  # the init refuses label pins: they can match on two disks
+        "avocado.root=LABEL=rootfs",
+        "avocado.root=partuuid=" + PIN_UUID,  # the init's case patterns are case-sensitive
+        "avocado.root=UUID=1234-abcd",  # a filesystem uuid cannot be checked against the layout
+        "avocado.root=",
+    ],
+)
+def test_an_avocado_root_argument_that_is_not_a_partuuid_pin_is_refused(argument):
+    # Anything the init cannot resolve stops every boot in the initrd; the loader must not accept it.
+    def go(d):
+        d["guard"]["params"]["argument"] = argument
+
+    with pytest.raises(ProfileError, match=r"guard\.params\.argument"):
+        load_profile_bytes(mutated(go))
+
+
 def test_a_guard_argument_that_is_not_a_root_pin_is_not_cross_checked():
     load_profile_bytes(mutated(lambda d: d["guard"]["params"].update(argument="module_blacklist=nvme,nvme_core")))

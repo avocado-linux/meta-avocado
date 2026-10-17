@@ -21,6 +21,7 @@ case "$*" in
   *"PARTLABEL=APP_b"*) echo "/dev/mmcblk0p2: PARTLABEL=\"APP_b\""; exit 0 ;;
   *"-t PARTLABEL=APP"*"-l"*|*"-l -t PARTLABEL=APP"*) echo "/dev/nvme0n1p1: PARTLABEL=\"APP\""; exit 0 ;;
   *"PARTUUID=1111-abcd"*) echo "/dev/mmcblk0p1: PARTUUID=\"1111-abcd\""; exit 0 ;;
+  *"PARTUUID=2222-abcd"*) echo "/dev/nvme0n1p1: PARTUUID=\"2222-abcd\""; exit 0 ;;
 esac
 exit 2
 STUB
@@ -75,6 +76,20 @@ out=$(run "console=ttyTCU0 avocado.root=PARTUUID=9999-NONE")
 case "$out" in *"rc=0"*) bad "an unresolvable pin did not stop the initrd: $out" ;; *) ok "an unresolvable pin stops the initrd" ;; esac
 case "$out" in *"rootdev=/dev/nvme0n1p1"*) bad "an unresolvable pin fell back to the label scan: $out" ;; *) ok "an unresolvable pin never falls back to the label scan" ;; esac
 case "$out" in *"avocado.root=PARTUUID=9999-NONE"*) ok "the failure names the pin" ;; *) bad "failure does not name the pin: $out" ;; esac
+
+# Two pins that name different partitions leave the root ambiguous: the last token would silently win and
+# can be the other disk, which is the outcome the pin exists to prevent. The same pin twice is harmless.
+out=$(run "console=ttyTCU0 avocado.root=PARTUUID=1111-abcd quiet avocado.root=PARTUUID=2222-abcd")
+case "$out" in *"rc=0"*) bad "two different pins were accepted: $out" ;; *) ok "two different pins stop the initrd" ;; esac
+case "$out" in *"rootdev=/dev/"*) bad "two different pins still picked a root: $out" ;; *) ok "two different pins pick no root" ;; esac
+out=$(run "console=ttyTCU0 avocado.root=PARTUUID=1111-abcd avocado.root=PARTUUID=1111-abcd")
+case "$out" in *"rootdev=/dev/mmcblk0p1"*) ok "the same pin given twice still selects its partition" ;; *) bad "a repeated identical pin was refused: $out" ;; esac
+
+# A pin that is present but empty (a templated cmdline with an unset variable) is still a pin: it must stop the
+# boot, not fall back to the label scan.
+out=$(run "console=ttyTCU0 avocado.root=")
+case "$out" in *"rc=0"*) bad "an empty pin was accepted: $out" ;; *) ok "an empty pin stops the initrd" ;; esac
+case "$out" in *"rootdev=/dev/nvme0n1p1"*) bad "an empty pin fell back to the label scan: $out" ;; *) ok "an empty pin never falls back to the label scan" ;; esac
 
 out=$(run "console=ttyTCU0 avocado.root=PARTLABEL=APP")
 case "$out" in *"rc=0"*) bad "a PARTLABEL pin was accepted: $out" ;; *) ok "a PARTLABEL pin is refused (it can match on two disks)" ;; esac

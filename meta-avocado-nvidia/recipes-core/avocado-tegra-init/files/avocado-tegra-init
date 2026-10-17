@@ -4,13 +4,20 @@ set -e
 slotsfx=""
 mayberoot=""
 pinroot=""
+pinseen="no"
+pinconflict="no"
 foundslotsfx="no"
 read -r cmdline < /proc/cmdline || true
 # shellcheck disable=SC2086 # one word per kernel argument is the point
 for bootarg in $cmdline; do
     case "$bootarg" in
         boot.slot_suffix=*) slotsfx="${bootarg##boot.slot_suffix=}"; foundslotsfx="yes" ;;
-        avocado.root=*) pinroot="${bootarg##avocado.root=}" ;;
+        avocado.root=*)
+            # A second pin with another value would otherwise win silently, as the last token.
+            if [ "$pinseen" = "yes" ] && [ "$pinroot" != "${bootarg##avocado.root=}" ]; then pinconflict="yes"; fi
+            pinroot="${bootarg##avocado.root=}"
+            pinseen="yes"
+            ;;
         root=*) mayberoot="${bootarg##root=}" ;;
     esac
 done
@@ -51,7 +58,14 @@ resolve_pinned_root() {
     esac
 }
 
-if [ -n "$pinroot" ]; then
+if [ "$pinseen" = "yes" ]; then
+    # An empty pin (a templated cmdline with an unset variable) or two different pins are still a pin
+    # that cannot be honoured: stop rather than fall back to the scan the pin exists to avoid.
+    if [ "$pinconflict" = "yes" ] || [ -z "$pinroot" ]; then
+        echo "Error: avocado.root= is empty or given twice with different values; not scanning other disks"
+        echo "  cmdline: $(cat /proc/cmdline)"
+        exit 1
+    fi
     printf '%s' "Waiting for the pinned root avocado.root=$pinroot..."
     for _ in $(seq 1 10); do
         for dev in $(lsblk -dnpo NAME); do

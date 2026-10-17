@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Tuple
 
 from . import strategies
-from .layout import NO_ESP_IMAGE, esp_images
+from .layout import GUID_RE, NO_ESP_IMAGE, esp_images
 
 SCHEMA_VERSION = 1
 IDENTITY_KINDS = ("by-path", "serial", "sysfs-name")
@@ -404,6 +404,15 @@ def load_profile_bytes(data: bytes) -> Profile:
                         f"guard partition '{name}' is not in the layout table",
                     )
             pin = _root_pin_partuuid(guard.params["argument"])
+            if pin is None and guard.params["argument"].startswith(_ROOT_PIN_KEY):
+                # The init resolves only avocado.root=PARTUUID=<guid> (case-sensitive) or a filesystem UUID,
+                # refuses label pins, and a profile can check only a PARTUUID against its layout. Any other
+                # spelling would load here and stop every boot in the initrd.
+                raise ProfileError(
+                    "guard.params.argument",
+                    f"{guard.params['argument']!r} is not a root pin this tool can check: "
+                    f"use {_ROOT_PIN_PREFIX}<guid>",
+                )
             if pin is not None:
                 # The boot header names a root by PARTUUID; if the layout never writes that GUID to a
                 # partition the tool fills, the initrd cannot find its root and every boot stops there.
@@ -435,14 +444,20 @@ def load_profile_bytes(data: bytes) -> Profile:
     )
 
 
-_ROOT_PIN_PREFIX = "avocado.root=PARTUUID="
+_ROOT_PIN_KEY = "avocado.root="
+_ROOT_PIN_PREFIX = _ROOT_PIN_KEY + "PARTUUID="
 
 
 def _root_pin_partuuid(argument: str) -> str | None:
-    """The lower-cased GUID of an ``avocado.root=PARTUUID=<guid>`` guard argument, else None."""
+    """The lower-cased GUID of an ``avocado.root=PARTUUID=<guid>`` guard argument, else None.
+
+    None also covers an ``avocado.root=`` argument whose value is not a well-formed GUID: the caller
+    refuses those, so an empty or malformed GUID never reaches the layout comparison.
+    """
     if not argument.startswith(_ROOT_PIN_PREFIX):
         return None
-    return argument[len(_ROOT_PIN_PREFIX) :].lower()
+    guid = argument[len(_ROOT_PIN_PREFIX) :]
+    return guid.lower() if GUID_RE.fullmatch(guid) else None
 
 
 def write_identity_problem(profile: Profile) -> str | None:
