@@ -1,0 +1,37 @@
+From: Javier Tia <javier@peridio.com>
+Subject: [PATCH] Forward Python_INCLUDE_DIR to the nested project
+
+The real target is an ExternalProject whose CMAKE_CACHE_ARGS list forwards only
+the TRITON_* options and a few CMAKE_* ones. An OE build sets Python_INCLUDE_DIR
+to the target headers on the top-level command line, and without forwarding it
+the nested FindPython takes /usr/include/python3.14 from the build host, which the
+cross toolchain rejects.
+
+The argument is added only when the variable is set, so a build that does not set
+it behaves as before.
+
+Upstream-Status: Inappropriate [OE-Specific]
+Signed-off-by: Javier Tia <javier@peridio.com>
+---
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -179,6 +179,13 @@
+   set(TRITON_DEPENDS ${TRITON_DEPENDS} opentelemetry-cpp)
+ endif() # TRITON_ENABLE_TRACING
+ 
++# OE cross builds pass the target headers' directory; without it FindPython in the
++# nested project takes the include path from the build host's interpreter.
++set(TRITON_PYTHON_ARGS)
++if(Python_INCLUDE_DIR)
++  set(TRITON_PYTHON_ARGS -DPython_INCLUDE_DIR:PATH=${Python_INCLUDE_DIR})
++endif()
++
+ ExternalProject_Add(triton-server
+   PREFIX triton-server
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src"
+@@ -211,4 +218,5 @@
+     -DCMAKE_INSTALL_PREFIX:PATH=${TRITON_INSTALL_PREFIX}
+     -DTRITON_VERSION:STRING=${TRITON_VERSION}
+     -DCMAKE_PREFIX_PATH:PATH=${CMAKE_PREFIX_PATH}
++    ${TRITON_PYTHON_ARGS}
+ )
