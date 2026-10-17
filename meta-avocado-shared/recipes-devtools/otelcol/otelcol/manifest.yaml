@@ -1,0 +1,27 @@
+dist:
+  module: github.com/avocado-linux/otelcol
+  name: otelcol
+  description: Minimal OpenTelemetry Collector for journal log shipping
+  version: 0.163.0
+  output_path: ./_build
+  build_tags: "grpcnotrace"
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/bearertokenauthextension v0.163.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.163.0
+
+receivers:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/journaldreceiver v0.163.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.163.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor v0.163.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.163.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.163.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.163.0
+
+providers:
+  - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.69.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.69.0
