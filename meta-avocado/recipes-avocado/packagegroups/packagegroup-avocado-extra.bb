@@ -34,6 +34,7 @@ RDEPENDS:${PN} = " \
   linux-firmware \
   linuxptp \
   phytool \
+  python3-rapidfuzz \
   qemu-user-static \
   qemu-user-static-binfmt \
   qemu-guest-agent \
