@@ -1,4 +1,4 @@
-From: Javier Tia <j.tia@peridio.com>
+From: Javier Tia <javier@peridio.com>
 Date: Wed, 14 Oct 2026 15:50:00 -0600
 Subject: [PATCH] net: phy: aquantia: attach the AQR113C wake hooks to the
  AQR113C entry
@@ -24,6 +24,8 @@ The wake sequence itself is unchanged. It matches the one NVIDIA's R39
 kernel (a 6.8 tree) carries in its AQR113C entry, where ethtool reports
 "Supports Wake-on: g" on the same board.
 
+Upstream-Status: Inappropriate [fixes up NVIDIA's out-of-tree Tegra series]
+Signed-off-by: Javier Tia <javier@peridio.com>
 ---
  drivers/net/phy/aquantia/aquantia_main.c | 6 ++++--
  1 file changed, 4 insertions(+), 2 deletions(-)

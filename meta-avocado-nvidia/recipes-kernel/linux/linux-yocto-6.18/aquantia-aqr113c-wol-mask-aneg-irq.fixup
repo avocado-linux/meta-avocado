@@ -1,4 +1,4 @@
-From: Javier Tia <j.tia@peridio.com>
+From: Javier Tia <javier@peridio.com>
 Date: Thu, 15 Oct 2026 15:15:00 -0600
 Subject: [PATCH] net: phy: aquantia: mask the autoneg interrupt while the
  AQR113C wake is armed
@@ -18,6 +18,8 @@ NVIDIA's R39 6.8 kernel masks that interrupt when arming and unmasks it again
 when disarming, in the same function. The 6.18 port of the change lost both
 lines. Restore them.
 
+Upstream-Status: Inappropriate [fixes up NVIDIA's out-of-tree Tegra series]
+Signed-off-by: Javier Tia <javier@peridio.com>
 ---
  drivers/net/phy/aquantia/aquantia_main.c | 14 ++++++++++++++
  1 file changed, 14 insertions(+)

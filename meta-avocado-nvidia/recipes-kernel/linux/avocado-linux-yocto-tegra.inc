@@ -48,10 +48,12 @@ SRC_URI += " file://aquantia-aqr113c-wol-hooks.fixup file://aquantia-aqr113c-wol
 do_patch:append() {
     for name in aquantia-aqr113c-wol-hooks aquantia-aqr113c-wol-mask-aneg-irq; do
         fix="${UNPACKDIR}/${name}.fixup"
-        if patch -p1 -R --dry-run -s -d ${S} < "$fix" > /dev/null 2>&1; then
+        # --fuzz=0: at patch's default fuzz a reshuffled phy_driver table can still take a hunk, at the
+        # neighbouring entry, and exit 0, which is the failure these fixups exist to undo.
+        if patch -p1 -R --fuzz=0 --dry-run -s -d ${S} < "$fix" > /dev/null 2>&1; then
             bbnote "${name}.fixup is already applied"
         else
-            patch -p1 -d ${S} < "$fix" || bbfatal "${name}.fixup does not apply; the Tegra patch series changed"
+            patch -p1 --fuzz=0 --no-backup-if-mismatch -d ${S} < "$fix" || bbfatal "${name}.fixup does not apply; the Tegra patch series changed"
         fi
     done
 }
