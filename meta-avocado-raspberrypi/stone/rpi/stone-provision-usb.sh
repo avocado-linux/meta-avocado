@@ -185,6 +185,39 @@ else
     echo "Existing devices: ${existing_devices[*]}"
 fi
 
+# The medium this image is for: the rootdisk devpath in the stone manifest
+# (/dev/mmcblk0 for SD). The mass-storage gadget exposes every disk the Pi
+# has - SD and NVMe both, when an NVMe drive is fitted - and names each one's
+# source in its SCSI vendor field ("mmcblk0", "nvme0n1"), so the disk to write
+# is the one whose source is that device, never just the first that appears.
+target_medium=$(basename "$(jq -r '.storage_devices.rootdisk.devpath' "$AVOCADO_STONE_MANIFEST")")
+if [[ -z "$target_medium" || "$target_medium" == "null" ]]; then
+    echo "Error: no storage_devices.rootdisk.devpath in the stone manifest"
+    exit 1
+fi
+
+# The Pi device a gadget disk exposes (its SCSI vendor field, trimmed), from
+# sysfs (SYSFS overrides the root for tests/test-usb-id-of-block.sh).
+gadget_source_of_block() {
+    local v
+    v=$(cat "${SYSFS:-/sys}/block/$(basename "$1")/device/vendor" 2>/dev/null) || return 1
+    v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    [[ -n "$v" ]] && echo "$v"
+}
+
+# Whether a new gadget disk is the one to write. The Pi 5 gadget names each
+# disk's source in its vendor field, so a disk naming a different Pi block
+# device (the NVMe when this image is for the SD card) is skipped. A gadget
+# that names no Pi block device there exposes one disk, as before: take it.
+gadget_disk_is_target() {
+    local source
+    source=$(gadget_source_of_block "$1" || true)
+    case "$source" in
+        mmcblk[0-9]*|nvme[0-9]*) [[ "$source" == "$2" ]] ;;
+        *) return 0 ;;
+    esac
+}
+
 # Find rpiboot and determine the sysroot prefix
 rpiboot_path=$(which rpiboot)
 if [[ -z "$rpiboot_path" ]]; then
@@ -260,7 +293,11 @@ while [[ -z "$rpi_block_device" ]]; do
             done
             
             if [[ "$device_is_new" == "true" ]]; then
-                # Use the first new device fwup detects
+                if ! gadget_disk_is_target "$device_path" "$target_medium"; then
+                    echo "Skipping $device_path: the gadget exposes $(gadget_source_of_block "$device_path") there, this image is for $target_medium"
+                    existing_devices+=("$device_name")
+                    continue
+                fi
                 rpi_block_device="$device_path"
                 rpi_device_size_bytes="$device_size_bytes"
                 echo "Found new mass storage device: $rpi_block_device"
@@ -387,7 +424,7 @@ usb_id_of_block() {
     return 1
 }
 
-# Unattended (no terminal on stdin, e.g. a Rubicon hub job, or
+# Unattended (no terminal on stdin, e.g. a CI job, or
 # AVOCADO_NONINTERACTIVE set): nobody can answer the prompt, and the only
 # safe target is the disk rpiboot's mass-storage gadget (0a5c:0104) just
 # exposed. Write it without asking if that is provably what was found;
