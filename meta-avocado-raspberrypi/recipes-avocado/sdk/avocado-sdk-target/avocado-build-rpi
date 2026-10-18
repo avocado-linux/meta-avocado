@@ -57,5 +57,31 @@ build_include_display() {
 # now the pre-bundle seam only: stage artifacts the manifest references that the
 # generic pipeline cannot build, and let stone bundle consume them.
 
+# Kernel command line from the project (kernel.cmdline / kernel.cmdline_extra,
+# exported by avocado-cli as AVOCADO_KERNEL_CMDLINE / _EXTRA). The firmware
+# hands U-Boot and the kernel whatever bootfiles/cmdline.txt holds, on SD and
+# NVMe alike, so compose it here from the BSP's copy. The result goes to the
+# runtime's rekeyed/ dir, which stone searches before the runtime dir: the BSP's
+# package-owned file is never written, and both provisioning and the OS bundle
+# pick the composed one up. Removed when the project sets neither, so dropping
+# cmdline_extra from avocado.yaml takes effect on the next build.
+cmdline_src="$input_dir/bootfiles/cmdline.txt"
+cmdline_dst="$input_dir/rekeyed/bootfiles/cmdline.txt"
+rm -f "$cmdline_dst"
+if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}" ]; then
+        cmdline="$AVOCADO_KERNEL_CMDLINE"
+    elif [ -f "$cmdline_src" ]; then
+        cmdline=$(tr '\n' ' ' < "$cmdline_src" | sed 's/[[:space:]]*$//')
+    else
+        echo "[ERROR] $cmdline_src not found: cannot append kernel.cmdline_extra" >&2
+        exit 1
+    fi
+    [ -z "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ] || cmdline="$cmdline $AVOCADO_KERNEL_CMDLINE_EXTRA"
+    mkdir -p "$(dirname "$cmdline_dst")"
+    printf '%s\n' "$cmdline" > "$cmdline_dst"
+    echo -e "\033[94m[INFO]\033[0m Kernel command line from project config: $cmdline"
+fi
+
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
