@@ -372,14 +372,43 @@ echo "WARNING: This will completely overwrite the device $rpi_block_device!"
 echo "All existing data on this ${device_size_gib_decimal} GiB device will be lost."
 echo ""
 
-read -p "Are you sure you want to continue? (y/N): " -r 2>&1
+# The USB device (idVendor:idProduct) a block device sits on, from sysfs
+# (SYSFS overrides the root for tests/test-usb-id-of-block.sh).
+usb_id_of_block() {
+    local sysfs="${SYSFS:-/sys}" d
+    d=$(readlink -f "$sysfs/block/$(basename "$1")/device") || return 1
+    while [[ "$d" != "/" && "$d" != "$sysfs" ]]; do
+        if [[ -f "$d/idVendor" && -f "$d/idProduct" ]]; then
+            echo "$(<"$d/idVendor"):$(<"$d/idProduct")"
+            return 0
+        fi
+        d=$(dirname "$d")
+    done
+    return 1
+}
 
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Operation cancelled by user"
-    exit 1
+# Unattended (no terminal on stdin, e.g. a Rubicon hub job, or
+# AVOCADO_NONINTERACTIVE set): nobody can answer the prompt, and the only
+# safe target is the disk rpiboot's mass-storage gadget (0a5c:0104) just
+# exposed. Write it without asking if that is provably what was found;
+# refuse anything else.
+if [[ -n "${AVOCADO_NONINTERACTIVE:-}" || ! -t 0 ]]; then
+    found_id=$(usb_id_of_block "$rpi_block_device" || true)
+    if [[ "$found_id" != "0a5c:0104" ]]; then
+        echo "Error: unattended provision refuses to write $rpi_block_device: it is on USB device '${found_id:-unknown}', not the rpiboot mass-storage gadget 0a5c:0104"
+        exit 1
+    fi
+    echo "Unattended: $rpi_block_device is the rpiboot mass-storage gadget (0a5c:0104); writing it."
+else
+    read -p "Are you sure you want to continue? (y/N): " -r 2>&1
+
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Operation cancelled by user"
+        exit 1
+    fi
+
+    echo "User confirmed. Proceeding with firmware write..."
 fi
-
-echo "User confirmed. Proceeding with firmware write..."
 
 # Extract uboot-env partition info from manifest to clear it
 echo "Clearing uboot-env partition..."
