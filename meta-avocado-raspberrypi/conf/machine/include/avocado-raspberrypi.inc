@@ -13,8 +13,8 @@ CMDLINE:append = " audit=0"
 
 # What this machine can deliver on the security side; the declaration is what
 # pulls a capability's tooling into the feed (docs/security-capabilities.md).
-# encrypted-var: linux-raspberrypi carries the dm-crypt fragment
-# (avocado-security-kernel.inc), and cryptsetup-var opens the MBR var
+# encrypted-var: linux-raspberrypi builds dm-crypt as a module and the
+# initramfs carries it (linux-raspberrypi_%.bbappend), and cryptsetup-var opens the MBR var
 # partition by its raw node, AVOCADO_VAR_PART_DEV below
 # (avocado-var-device.bbclass). There is no TPM or key-wrapping engine, so a
 # runtime with var.hardware auto unlocks with the Argon2id key var-key.sh
