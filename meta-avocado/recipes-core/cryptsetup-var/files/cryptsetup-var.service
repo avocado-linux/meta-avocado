@@ -11,8 +11,8 @@ Before=var.mount
 # The marker asked for encryption. A failure here must not fall through to the
 # plaintext mount that fstab would otherwise happily perform.
 OnFailure=emergency.target
-# Wait for the var partition's by-partlabel symlink to actually exist before
-# running: ordering after (and requiring) the device unit makes the service
+# Wait for the var partition (AVOCADO_VAR_PART_DEV: a by-partlabel symlink, or
+# a raw node on an MBR disk) to actually exist before running: ordering after (and requiring) the device unit makes the service
 # block until udev has processed the partition. Deliberately NO
 # ConditionPathExists on the symlink: a condition is evaluated once, the
 # instant the job starts, and if the link is momentarily gone (avocado-var-grow
@@ -20,8 +20,8 @@ OnFailure=emergency.target
 # the plaintext partition. With the marker below present, a missing device must
 # be a failure (the script refuses a non-block path), which OnFailure turns
 # into the emergency target - never a quiet plaintext /var.
-Requires=dev-disk-by\x2dpartlabel-var.device
-After=dev-disk-by\x2dpartlabel-var.device avocado-var-grow.service
+Requires=@AVOCADO_VAR_DEVICE_UNIT@
+After=@AVOCADO_VAR_DEVICE_UNIT@ avocado-var-grow.service
 After=systemd-udevd.service
 Wants=systemd-udevd.service
 # The per-runtime opt-in. avocado-cli writes this marker into a runtime's
@@ -35,7 +35,7 @@ ConditionPathExists=/etc/avocado/var-encrypt
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/libexec/cryptsetup-var/cryptsetup-var.sh /dev/disk/by-partlabel/var
+ExecStart=/usr/libexec/cryptsetup-var/cryptsetup-var.sh @AVOCADO_VAR_DEVICE@
 
 [Install]
 WantedBy=initrd-root-fs.target
