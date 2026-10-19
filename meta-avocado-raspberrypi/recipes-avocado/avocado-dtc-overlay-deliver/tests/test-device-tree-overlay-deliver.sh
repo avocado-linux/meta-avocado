@@ -218,6 +218,81 @@ else
   fi
 fi
 
+# boot_config and stock overlays. Each case gets its own staging directory so a
+# manifest the hook rewrote in one case cannot leak into the next.
+run_case() { # <name> <manifest-json> <stone-json>
+  local case_dir="$work/case-$1"
+  mkdir -p "$case_dir"
+  printf '%s\n' "$2" >"$case_dir/overlays.manifest.json"
+  printf '%s\n' "$3" >"$case_dir/stone.json"
+  : >"$case_dir/custom.dtbo"
+  AVOCADO_DTBO_STAGING="$case_dir" \
+    AVOCADO_OVERLAYS_MANIFEST="$case_dir/overlays.manifest.json" \
+    AVOCADO_DELIVERY_FRAGMENT="$case_dir/fragment.json" \
+    AVOCADO_STONE_MANIFEST="$case_dir/stone.json" \
+    "$hook" >"$case_dir/out" 2>"$case_dir/err"
+}
+
+stone_plain="$(cat "$work/stone.json")"
+stone_ships_bt="$(jq -c '.storage_devices.rootdisk.images.boot.build_args.files += [{"in": "disable-bt.dtbo", "out": "overlays/disable-bt.dtbo"}]' "$work/stone.json")"
+
+# boot_config alone, no overlays: the hook must still deliver the include file.
+if run_case bc '{"version": 1, "overlays": [], "boot_config": ["dtparam=i2c_arm=on", "usb_max_current_enable=1"], "boot_config_claimed_by": null}' "$stone_plain"; then
+  d="$work/case-bc"
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtparam=i2c_arm=on\nusb_max_current_enable=1' ]] \
+    && [[ "$(jq -c "$fa" "$d/fragment.json")" == '[{"in":"avocado-overlays.txt","out":"avocado-overlays.txt"}]' ]] \
+    && [[ "$(jq -r '.boot_config_claimed_by' "$d/overlays.manifest.json")" == "avocado-raspberrypi5" ]]; then
+    ok "boot_config alone is written to the include file and claimed"
+  else
+    bad "boot_config-only delivery wrong: txt=$(cat "$d/avocado-overlays.txt") fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook rejected a boot_config-only manifest: $(cat "$work/case-bc/err")"
+fi
+
+# A stock overlay the boot FAT does not ship is appended from the BSP's own
+# files, boot_config lines come before every dtoverlay line, and a custom
+# overlay beside it is delivered as before.
+if run_case mix '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "custom", "file": "custom.dtbo", "params": {"a": "1"}, "stock": false, "claimed_by": null}], "boot_config": ["dtparam=i2c_arm=on"], "boot_config_claimed_by": null}' "$stone_plain"; then
+  d="$work/case-mix"
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtparam=i2c_arm=on\ndtoverlay=disable-bt\ndtoverlay=custom,a=1' ]] \
+    && jq -e "${fa}[] | select(.in == \"disable-bt.dtbo\" and .out == \"overlays/disable-bt.dtbo\")" "$d/fragment.json" >/dev/null \
+    && jq -e "${fa}[] | select(.in == \"custom.dtbo\" and .out == \"overlays/custom.dtbo\")" "$d/fragment.json" >/dev/null \
+    && [[ "$(jq -r "$fa | length" "$d/fragment.json")" == "3" ]]; then
+    ok "stock overlay is appended from the BSP files and boot_config precedes dtoverlay lines"
+  else
+    bad "stock plus custom delivery wrong: txt=$(cat "$d/avocado-overlays.txt") fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook rejected a stock overlay the BSP can supply: $(cat "$work/case-mix/err")"
+fi
+
+# A stock overlay the boot FAT already ships is neither refused (the collision
+# rule is for custom overlays) nor appended a second time.
+if run_case shipped '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}' "$stone_ships_bt"; then
+  d="$work/case-shipped"
+  if [[ "$(jq -c "$fa" "$d/fragment.json")" == '[{"in":"avocado-overlays.txt","out":"avocado-overlays.txt"}]' ]] \
+    && [[ "$(cat "$d/avocado-overlays.txt")" == "dtoverlay=disable-bt" ]] \
+    && [[ "$(jq -r '.overlays[0].claimed_by' "$d/overlays.manifest.json")" == "avocado-raspberrypi5" ]]; then
+    ok "a stock overlay already on the boot FAT is referenced but not appended again"
+  else
+    bad "shipped stock overlay handled wrong: fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook refused a stock overlay the BSP already ships: $(cat "$work/case-shipped/err")"
+fi
+
+# Nothing to deliver is an invocation error, not a silent success.
+if run_case empty '{"version": 1, "overlays": [], "boot_config": [], "boot_config_claimed_by": null}' "$stone_plain"; then
+  bad "hook accepted a manifest with neither overlays nor boot_config"
+else
+  if grep -q 'no overlays or boot_config' "$work/case-empty/err"; then
+    ok "an empty manifest is a hard error"
+  else
+    bad "empty manifest failed without a clear message: $(cat "$work/case-empty/err")"
+  fi
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]

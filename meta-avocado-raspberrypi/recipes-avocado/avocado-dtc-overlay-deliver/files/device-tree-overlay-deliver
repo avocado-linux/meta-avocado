@@ -92,8 +92,9 @@ def main():
     if manifest.get("version") != 1:
         die("overlays.manifest.json: unsupported version")
     overlays = manifest.get("overlays", [])
-    if not overlays:
-        die("hook invoked with no overlays to deliver")
+    boot_config = manifest.get("boot_config", [])
+    if not overlays and not boot_config:
+        die("hook invoked with no overlays or boot_config to deliver")
 
     with open(stone_path) as f:
         stone = json.load(f)
@@ -111,7 +112,9 @@ def main():
     boot_img = stone["storage_devices"][dev_key]["images"][img_key]
     shipped = set(fat_outputs(boot_img))
     collisions = sorted(
-        ov["name"] for ov in overlays if f"overlays/{ov['file']}" in shipped
+        ov["name"]
+        for ov in overlays
+        if not ov.get("stock") and f"overlays/{ov['file']}" in shipped
     )
     if collisions:
         die(f"{', '.join(collisions)}: the BSP already ships an overlay of this "
@@ -119,14 +122,25 @@ def main():
             "dropped rather than applied, and the stock one ships instead)")
 
     # Additive delivery: each .dtbo into overlays/, plus the include file.
+    # A stock overlay is one the BSP's own deploy directory already carries, so
+    # stone resolves `in` from its input path and a name that exists nowhere
+    # fails the bundle by name. One the boot FAT already ships needs no entry:
+    # an identical (in, out) pair would be dropped as a duplicate anyway.
     files_append = [
-        {"in": ov["file"], "out": f"overlays/{ov['file']}"} for ov in overlays
+        {"in": ov["file"], "out": f"overlays/{ov['file']}"}
+        for ov in overlays
+        if not (ov.get("stock") and f"overlays/{ov['file']}" in shipped)
     ]
     files_append.append(
         {"in": "avocado-overlays.txt", "out": "avocado-overlays.txt"}
     )
 
-    overlays_txt = "\n".join(overlay_line(ov) for ov in overlays) + "\n"
+    # boot_config first: a dtparam= line configures the base device tree and
+    # firmware reads config.txt top to bottom, so it has to precede the
+    # dtoverlay= lines that build on it.
+    overlays_txt = "".join(
+        line + "\n" for line in boot_config + [overlay_line(ov) for ov in overlays]
+    )
     with open(os.path.join(staging, "avocado-overlays.txt"), "w") as f:
         f.write(overlays_txt)
 
@@ -141,12 +155,15 @@ def main():
     # Record delivery so the CLI's post-hook check passes.
     for ov in overlays:
         ov["claimed_by"] = platform
+    if boot_config:
+        manifest["boot_config_claimed_by"] = platform
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
     names = ", ".join(ov["name"] for ov in overlays)
-    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) to "
-          f"{dev_key}/{img_key} for {platform}: {names}")
+    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) and "
+          f"{len(boot_config)} boot_config line(s) to {dev_key}/{img_key} "
+          f"for {platform}: {names}")
 
 
 if __name__ == "__main__":
