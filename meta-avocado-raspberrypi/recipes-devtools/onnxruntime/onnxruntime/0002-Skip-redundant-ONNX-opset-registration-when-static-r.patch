@@ -1,0 +1,66 @@
+From: Ilies CHERGUI <ichergui@nvidia.com>
+Date: Fri, 19 Jun 2026 00:00:00 -0700
+Subject: [PATCH] Skip redundant ONNX opset registration when static
+ registration is enabled
+
+This build links the system ONNX shared library, which is compiled
+WITHOUT __ONNX_DISABLE_STATIC_REGISTRATION. ONNX therefore lazily
+auto-registers the standard ai.onnx / ai.onnx.ml (and training) opsets
+the first time its schema map is accessed -- which, in
+Environment::Initialize(), already happens when the contrib and
+com.ms.internal.nhwc opsets are registered just above this point.
+
+onnxruntime additionally calls RegisterOnnxOperatorSetSchema() (and the
+ML / training variants) unconditionally. With an auto-registering ONNX
+this registers every standard operator a second time, so ONNX floods
+stderr with hundreds of lines like:
+
+  Schema error: Trying to register schema with name Abs (domain: 
+  version: 1) ... but it is already registered ...
+
+ONNX documents the contract for this in onnx/defs/operator_sets.h: when
+static registration is enabled (IsOnnxStaticRegistrationDisabled()
+returns false) the linking module must not call the registration
+methods again. Guard the explicit calls accordingly; they still run when
+ONNX is built with static registration disabled (upstream's bundled
+configuration).
+
+Upstream-Status: Inappropriate [OE-specific: depends on linking a
+system ONNX built with static registration enabled]
+Signed-off-by: Ilies CHERGUI <ichergui@nvidia.com>
+---
+diff --git a/onnxruntime/core/session/environment.cc b/onnxruntime/core/session/environment.cc
+index 523ff8eaf13..9b6eefcd3e8 100644
+--- a/onnxruntime/core/session/environment.cc
++++ b/onnxruntime/core/session/environment.cc
+@@ -303,15 +303,27 @@ Status Environment::Initialize(std::unique_ptr<logging::LoggingManager> logging_
+ #ifdef USE_DML
+       dml::RegisterDmlSchemas();
+ #endif
+-      RegisterOnnxOperatorSetSchema();
++      // This build links a system ONNX that is compiled WITHOUT
++      // __ONNX_DISABLE_STATIC_REGISTRATION, so ONNX lazily auto-registers the
++      // standard ai.onnx / ai.onnx.ml (and training) opsets the first time its
++      // schema map is accessed (which already happened above when the contrib /
++      // NHWC opsets were registered). Per ONNX's documented contract in
++      // onnx/defs/operator_sets.h, a linking module must NOT also call these
++      // registration functions when static registration is enabled, otherwise
++      // every standard operator is registered twice and ONNX floods stderr with
++      // "Schema error: ... already registered". Register explicitly only when
++      // ONNX was built with static registration disabled.
++      if (IsOnnxStaticRegistrationDisabled()) {
++        RegisterOnnxOperatorSetSchema();
+ 
+ #ifndef DISABLE_ML_OPS
+-      RegisterOnnxMLOperatorSetSchema();
++        RegisterOnnxMLOperatorSetSchema();
+ #endif
+ 
+ #if defined(ENABLE_TRAINING_OPS)
+-      RegisterOnnxTrainingOperatorSetSchema();
++        RegisterOnnxTrainingOperatorSetSchema();
+ #endif
++      }
+ 
+ #if defined(ENABLE_TRAINING_OPS)
+       // preserve this order until <training schemas>: this depends on operatorsetschema registration.

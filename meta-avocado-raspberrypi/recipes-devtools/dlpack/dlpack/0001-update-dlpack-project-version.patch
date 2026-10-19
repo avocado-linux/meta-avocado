@@ -1,0 +1,55 @@
+From 02491c801659cccf66b49ca79849200a0f7cf859 Mon Sep 17 00:00:00 2001
+From: Ilies CHERGUI <ichergui@nvidia.com>
+Date: Fri, 8 May 2026 15:02:02 -0700
+Subject: [PATCH] update dlpack project version
+
+Upstream-Status: Inappropriate [OE-specific]
+Signed-off-by: Ilies CHERGUI <ichergui@nvidia.com>
+---
+ CMakeLists.txt      | 2 +-
+ docs/Doxyfile       | 2 +-
+ docs/source/conf.py | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3afca82..33730cf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+ # Set variables:
+ #   * PROJECT_NAME
+ #   * PROJECT_VERSION
+-project(dlpack VERSION 0.6 LANGUAGES C CXX)
++project(dlpack VERSION 1.2 LANGUAGES C CXX)
+ 
+ #####
+ # Change the default build type from Debug to Release, while still
+diff --git a/docs/Doxyfile b/docs/Doxyfile
+index 479e211..515ea24 100644
+--- a/docs/Doxyfile
++++ b/docs/Doxyfile
+@@ -48,7 +48,7 @@ PROJECT_NAME           = dlpack
+ # could be handy for archiving the generated documentation or if some version
+ # control system is used.
+ 
+-PROJECT_NUMBER         = 0.6
++PROJECT_NUMBER         = 1.2
+ 
+ # Using the PROJECT_BRIEF tag one can provide an optional one line description
+ # for a project that appears at the top of each page and should give viewers a
+diff --git a/docs/source/conf.py b/docs/source/conf.py
+index 88d63b8..e1adce0 100644
+--- a/docs/source/conf.py
++++ b/docs/source/conf.py
+@@ -22,7 +22,7 @@ copyright = '2022, DLPack contributors'
+ author = 'DLPack contributors'
+ 
+ # The full version, including alpha/beta/rc tags
+-release = '0.6.0'
++release = '1.2'
+ 
+ 
+ # -- General configuration ---------------------------------------------------
+-- 
+2.43.0
+

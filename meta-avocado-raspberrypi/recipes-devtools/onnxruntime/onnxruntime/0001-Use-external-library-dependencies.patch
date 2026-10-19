@@ -1,0 +1,200 @@
+From: Ilies CHERGUI <ichergui@nvidia.com>
+Subject: [PATCH] Use external library dependencies
+
+Rebased from OE4T/meta-tegra-community onnxruntime 1.24.2 onto 1.26.0
+for a CPU-only build: the cutlass hunk (CUDA only) and the DirectML and
+WebAssembly hunks are dropped, and pybind11 already carries its own
+FIND_PACKAGE_ARGS in 1.26.0.
+
+This changes the dependencies on the following libraries so
+that they are provided at build time instead of being
+fetched, built, and installed by CMake:
+
+ - Boost (mp11)
+ - Microsoft.GSL
+ - ONNX
+ - flatbuffers
+ - Eigen3
+
+Also drops the per-target ONNX compile-definitions block, which
+only applies when building ONNX from source.
+
+Upstream-Status: Inappropriate [OE-specific]
+Signed-off-by: Ilies CHERGUI <ichergui@nvidia.com>
+---
+diff --git i/cmake/external/eigen.cmake w/cmake/external/eigen.cmake
+index 2f55860..e4e14d8 100644
+--- i/cmake/external/eigen.cmake
++++ w/cmake/external/eigen.cmake
+@@ -14,5 +14,6 @@ onnxruntime_fetchcontent_declare(
+     PATCH_COMMAND ${Patch_EXECUTABLE} --binary --ignore-whitespace -p1 < ${PATCH_EIGEN_S390X} &&
+                   ${Patch_EXECUTABLE} --binary --ignore-whitespace -p1 < ${PATCH_EIGEN_S390X_WERROR}
+     EXCLUDE_FROM_ALL
++    FIND_PACKAGE_ARGS NAMES Eigen3
+ )
+ onnxruntime_fetchcontent_makeavailable(Eigen3)
+diff --git i/cmake/external/onnxruntime_external_deps.cmake w/cmake/external/onnxruntime_external_deps.cmake
+index be0abc9..b483fe6 100644
+--- i/cmake/external/onnxruntime_external_deps.cmake
++++ w/cmake/external/onnxruntime_external_deps.cmake
+@@ -286,17 +286,13 @@ if(NOT TARGET Boost::mp11)
+      message(STATUS "Aliasing Boost::headers to Boost::mp11")
+      add_library(Boost::mp11 ALIAS Boost::headers)
+   else()
+-    onnxruntime_fetchcontent_declare(
+-     mp11
+-     URL ${DEP_URL_mp11}
+-     EXCLUDE_FROM_ALL
+-     FIND_PACKAGE_ARGS NAMES Boost
+-    )
+-    FetchContent_Populate(mp11)
+-    if(NOT TARGET Boost::mp11)
+-      add_library(Boost::mp11 IMPORTED INTERFACE)
+-      target_include_directories(Boost::mp11 INTERFACE $<BUILD_INTERFACE:${mp11_SOURCE_DIR}/include>)
+-    endif()
++    # OE override: use the externally provided Boost headers package and
++    # alias Boost::headers to Boost::mp11. Upstream's FetchContent_Populate(mp11)
++    # does not honor FIND_PACKAGE_ARGS (only MakeAvailable does). OE's Boost
++    # ships boost_headers-config.cmake (providing Boost::headers, which contains
++    # the mp11 headers) but no per-module boost_mp11Config.cmake.
++    find_package(boost_headers 1.90.0 CONFIG REQUIRED)
++    add_library(Boost::mp11 ALIAS Boost::headers)
+   endif()
+ endif()
+ 
+@@ -412,7 +408,7 @@ if(onnxruntime_USE_CUDA)
+     URL_HASH SHA1=${DEP_SHA1_microsoft_gsl}
+     PATCH_COMMAND ${Patch_EXECUTABLE} --binary --ignore-whitespace -p1 < ${PROJECT_SOURCE_DIR}/patches/gsl/1064.patch
+     EXCLUDE_FROM_ALL
+-    FIND_PACKAGE_ARGS 4.0 NAMES Microsoft.GSL
++    FIND_PACKAGE_ARGS 4.2.1 NAMES Microsoft.GSL
+   )
+ else()
+   onnxruntime_fetchcontent_declare(
+@@ -420,7 +416,7 @@ else()
+     URL ${DEP_URL_microsoft_gsl}
+     URL_HASH SHA1=${DEP_SHA1_microsoft_gsl}
+     EXCLUDE_FROM_ALL
+-    FIND_PACKAGE_ARGS 4.0 NAMES Microsoft.GSL
++    FIND_PACKAGE_ARGS 4.2.1 NAMES Microsoft.GSL
+   )
+ endif()
+ set(GSL_TARGET "Microsoft.GSL::GSL")
+@@ -476,7 +472,7 @@ onnxruntime_fetchcontent_declare(
+     URL_HASH SHA1=${DEP_SHA1_flatbuffers}
+     PATCH_COMMAND ${ONNXRUNTIME_FLATBUFFERS_PATCH_COMMAND}
+     EXCLUDE_FROM_ALL
+-    FIND_PACKAGE_ARGS 23.5.9 NAMES Flatbuffers flatbuffers
++    FIND_PACKAGE_ARGS 25.12.19 NAMES Flatbuffers flatbuffers
+ )
+ 
+ onnxruntime_fetchcontent_makeavailable(flatbuffers)
+@@ -541,7 +537,7 @@ onnxruntime_fetchcontent_declare(
+   URL_HASH SHA1=${DEP_SHA1_onnx}
+   PATCH_COMMAND ${ONNXRUNTIME_ONNX_PATCH_COMMAND}
+   EXCLUDE_FROM_ALL
+-  FIND_PACKAGE_ARGS NAMES ONNX onnx
++  FIND_PACKAGE_ARGS 1.21.0 NAMES ONNX
+ )
+ 
+ onnxruntime_fetchcontent_makeavailable(onnx)
+@@ -601,11 +597,8 @@ set(onnxruntime_EXTERNAL_LIBRARIES ${onnxruntime_EXTERNAL_LIBRARIES_XNNPACK} ${W
+ # The other libs do not have the problem. All the sources are already there. We can compile them in any order.
+ set(onnxruntime_EXTERNAL_DEPENDENCIES onnx_proto flatbuffers::flatbuffers)
+ 
+-if(NOT (onnx_FOUND OR ONNX_FOUND)) # building ONNX from source
+-  target_compile_definitions(onnx PUBLIC $<TARGET_PROPERTY:onnx_proto,INTERFACE_COMPILE_DEFINITIONS> PRIVATE "__ONNX_DISABLE_STATIC_REGISTRATION")
+-  if (NOT onnxruntime_USE_FULL_PROTOBUF)
+-    target_compile_definitions(onnx PUBLIC "__ONNX_NO_DOC_STRINGS")
+-  endif()
++if (onnxruntime_RUN_ONNX_TESTS)
++  add_definitions(-DORT_RUN_EXTERNAL_ONNX_TESTS)
+ endif()
+ 
+ if(onnxruntime_ENABLE_DLPACK)
+diff --git i/cmake/onnxruntime_python.cmake w/cmake/onnxruntime_python.cmake
+index 39985b2..5235f77 100644
+--- i/cmake/onnxruntime_python.cmake
++++ w/cmake/onnxruntime_python.cmake
+@@ -750,15 +750,6 @@ add_custom_command(
+       $<TARGET_FILE_DIR:${build_output_target}>
+ )
+ 
+-if (onnxruntime_BUILD_SHARED_LIB)
+-  add_custom_command(
+-    TARGET onnxruntime_pybind11_state POST_BUILD
+-    COMMAND ${CMAKE_COMMAND} -E copy
+-        $<TARGET_FILE:onnxruntime>
+-        $<TARGET_FILE_DIR:${build_output_target}>/onnxruntime/capi/
+-  )
+-endif()
+-
+ if (onnxruntime_USE_OPENVINO)
+   add_custom_command(
+     TARGET onnxruntime_pybind11_state POST_BUILD
+diff --git i/onnxruntime/core/flatbuffers/schema/ort.fbs.h w/onnxruntime/core/flatbuffers/schema/ort.fbs.h
+index 50fc1db..bf5ab15 100644
+--- i/onnxruntime/core/flatbuffers/schema/ort.fbs.h
++++ w/onnxruntime/core/flatbuffers/schema/ort.fbs.h
+@@ -6,13 +6,6 @@
+ 
+ #include "core/common/flatbuffers.h"
+ 
+-// Ensure the included flatbuffers.h is the same version as when this file was
+-// generated, otherwise it may not be compatible.
+-static_assert(FLATBUFFERS_VERSION_MAJOR == 23 &&
+-              FLATBUFFERS_VERSION_MINOR == 5 &&
+-              FLATBUFFERS_VERSION_REVISION == 26,
+-             "Non-compatible flatbuffers version included");
+-
+ namespace onnxruntime {
+ namespace fbs {
+ 
+diff --git i/onnxruntime/core/flatbuffers/schema/ort_training_checkpoint.fbs.h w/onnxruntime/core/flatbuffers/schema/ort_training_checkpoint.fbs.h
+index 4b2c950..5543065 100644
+--- i/onnxruntime/core/flatbuffers/schema/ort_training_checkpoint.fbs.h
++++ w/onnxruntime/core/flatbuffers/schema/ort_training_checkpoint.fbs.h
+@@ -6,13 +6,6 @@
+ 
+ #include "core/common/flatbuffers.h"
+ 
+-// Ensure the included flatbuffers.h is the same version as when this file was
+-// generated, otherwise it may not be compatible.
+-static_assert(FLATBUFFERS_VERSION_MAJOR == 23 &&
+-              FLATBUFFERS_VERSION_MINOR == 5 &&
+-              FLATBUFFERS_VERSION_REVISION == 26,
+-             "Non-compatible flatbuffers version included");
+-
+ #include "ort.fbs.h"
+ 
+ namespace onnxruntime {
+diff --git i/onnxruntime/core/optimizer/transpose_optimization/optimizer_api.h w/onnxruntime/core/optimizer/transpose_optimization/optimizer_api.h
+index df3eda3..db811b2 100644
+--- i/onnxruntime/core/optimizer/transpose_optimization/optimizer_api.h
++++ w/onnxruntime/core/optimizer/transpose_optimization/optimizer_api.h
+@@ -12,6 +12,7 @@
+ #include <unordered_set>
+ #include <cstdint>
+ #include <vector>
++#include <cstdint>
+ 
+ namespace onnx_transpose_optimization {
+ namespace api {
+diff --git i/onnxruntime/lora/adapter_format/adapter_schema.fbs.h w/onnxruntime/lora/adapter_format/adapter_schema.fbs.h
+index c1d5412..df06650 100644
+--- i/onnxruntime/lora/adapter_format/adapter_schema.fbs.h
++++ w/onnxruntime/lora/adapter_format/adapter_schema.fbs.h
+@@ -5,13 +5,6 @@
+ 
+ #include "flatbuffers/flatbuffers.h"
+ 
+-// Ensure the included flatbuffers.h is the same version as when this file was
+-// generated, otherwise it may not be compatible.
+-static_assert(FLATBUFFERS_VERSION_MAJOR == 23 &&
+-                  FLATBUFFERS_VERSION_MINOR == 5 &&
+-                  FLATBUFFERS_VERSION_REVISION == 26,
+-              "Non-compatible flatbuffers version included");
+-
+ namespace onnxruntime {
+ namespace adapters {
+ 
