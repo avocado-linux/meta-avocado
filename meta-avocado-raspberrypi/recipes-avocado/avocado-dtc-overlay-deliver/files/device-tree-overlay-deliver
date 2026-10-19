@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+
+# Raspberry Pi device-tree overlay delivery hook.
+#
+# The avocado CLI stages compiled .dtbo files plus an overlays.manifest.json and
+# then runs this hook (the single fixed-path hook at
+# usr/libexec/avocado/device-tree-overlay-deliver) before `stone bundle`. Only
+# one BSP's implementation of this path is ever installed in a given machine
+# build, so this file owns delivery for Raspberry Pi.
+#
+# Delivery on the Pi is two additive files, never a modification of a shipped
+# one:
+#   1. each <name>.dtbo -> the boot FAT under overlays/<name>.dtbo
+#   2. avocado-overlays.txt -> the boot FAT root, holding one `dtoverlay=<name>`
+#      line per overlay. The base config.txt carries a static
+#      `include avocado-overlays.txt`, so the firmware applies these overlays at
+#      boot. config.txt itself is never rewritten here (it is a read-only,
+#      recipe-generated artifact).
+#
+# Both are emitted as stone `files_append` entries in a manifest overlay
+# fragment; the CLI passes that fragment to `stone bundle --overlay`. The hook
+# also records `claimed_by` per overlay so the CLI can fail the build if any
+# declared overlay went undelivered.
+
+import json
+import os
+import sys
+
+
+def die(msg):
+    sys.exit(f"[ERROR] device-tree-overlay-deliver (raspberrypi): {msg}")
+
+
+def env(name):
+    value = os.environ.get(name)
+    if not value:
+        die(f"missing required environment variable {name}")
+    return value
+
+
+def fat_outputs(img):
+    """Every output path a FAT image already ships."""
+    outs = []
+    for entry in img.get("build_args", {}).get("files", []):
+        outs.append(entry.get("out") if isinstance(entry, dict) else entry)
+    return outs
+
+
+def find_boot_fat(stone):
+    """Locate the FAT image that carries config.txt, returning
+    (device_key, image_key). config.txt is the RPi firmware entry point, so the
+    image that ships it is the boot FAT regardless of how it is named.
+
+    Every match is collected rather than the first returned: json.load preserves
+    document order, so a second config.txt-bearing FAT (a filled-in recovery
+    slot, say) would silently decide the delivery target by where it happens to
+    sit in the file. Ambiguity here is a manifest bug, not something to resolve
+    by picking one."""
+    matches = []
+    for dev_key, dev in stone.get("storage_devices", {}).items():
+        for img_key, img in (dev.get("images") or {}).items():
+            if not isinstance(img, dict):
+                continue
+            if img.get("build_args", {}).get("type") != "fat":
+                continue
+            if "config.txt" in fat_outputs(img):
+                matches.append((dev_key, img_key))
+    if not matches:
+        die("no FAT image ships config.txt in the stone manifest; cannot place overlays")
+    if len(matches) > 1:
+        named = ", ".join(f"{d}/{i}" for d, i in matches)
+        die(f"more than one FAT image ships config.txt ({named}); "
+            "cannot tell which is the boot FAT")
+    return matches[0]
+
+
+def overlay_line(overlay):
+    line = f"dtoverlay={overlay['name']}"
+    for key in sorted(overlay.get("params", {})):
+        line += f",{key}={overlay['params'][key]}"
+    return line
+
+
+def main():
+    staging = env("AVOCADO_DTBO_STAGING")
+    manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
+    fragment_path = env("AVOCADO_DELIVERY_FRAGMENT")
+    stone_path = env("AVOCADO_STONE_MANIFEST")
+
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    if manifest.get("version") != 1:
+        die("overlays.manifest.json: unsupported version")
+    overlays = manifest.get("overlays", [])
+    if not overlays:
+        die("hook invoked with no overlays to deliver")
+
+    with open(stone_path) as f:
+        stone = json.load(f)
+    dev_key, img_key = find_boot_fat(stone)
+    platform = stone.get("runtime", {}).get("platform", "raspberrypi")
+
+    # An overlay whose delivered path matches one the BSP already ships cannot
+    # be delivered at all: stone reads an identical (in, out) pair as an
+    # idempotent duplicate and drops the append, then resolves the name from the
+    # SDK's own stone dir, which precedes the staging dir on the input path. The
+    # stock blob ships, the user's is nowhere on the image, and claimed_by has
+    # already been set so the CLI's undelivered check passes. Refuse by name
+    # instead - stone's conflict branch is unreachable for this shape, so it has
+    # to be caught here.
+    boot_img = stone["storage_devices"][dev_key]["images"][img_key]
+    shipped = set(fat_outputs(boot_img))
+    collisions = sorted(
+        ov["name"] for ov in overlays if f"overlays/{ov['file']}" in shipped
+    )
+    if collisions:
+        die(f"{', '.join(collisions)}: the BSP already ships an overlay of this "
+            "name on the boot FAT; rename the overlay (a same-named overlay is "
+            "dropped rather than applied, and the stock one ships instead)")
+
+    # Additive delivery: each .dtbo into overlays/, plus the include file.
+    files_append = [
+        {"in": ov["file"], "out": f"overlays/{ov['file']}"} for ov in overlays
+    ]
+    files_append.append(
+        {"in": "avocado-overlays.txt", "out": "avocado-overlays.txt"}
+    )
+
+    overlays_txt = "\n".join(overlay_line(ov) for ov in overlays) + "\n"
+    with open(os.path.join(staging, "avocado-overlays.txt"), "w") as f:
+        f.write(overlays_txt)
+
+    fragment = {
+        "storage_devices": {
+            dev_key: {"images": {img_key: {"build_args": {"files_append": files_append}}}}
+        }
+    }
+    with open(fragment_path, "w") as f:
+        json.dump(fragment, f, indent=2)
+
+    # Record delivery so the CLI's post-hook check passes.
+    for ov in overlays:
+        ov["claimed_by"] = platform
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    names = ", ".join(ov["name"] for ov in overlays)
+    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) to "
+          f"{dev_key}/{img_key} for {platform}: {names}")
+
+
+if __name__ == "__main__":
+    main()
