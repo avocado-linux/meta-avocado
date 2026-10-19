@@ -19,7 +19,6 @@ RDEPENDS:${PN} = " \
   userlandtools \
   onnxruntime \
   python3-onnxruntime \
-  nats-server \
   python3-gpiozero \
   python3-lgpio \
   ${MACHINE_EXTRA_RRECOMMENDS} \

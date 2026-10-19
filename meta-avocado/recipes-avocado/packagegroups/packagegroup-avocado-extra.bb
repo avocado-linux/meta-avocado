@@ -33,6 +33,7 @@ RDEPENDS:${PN} = " \
   avocado-pkg-initramfs \
   linux-firmware \
   linuxptp \
+  nats-server \
   otelcol \
   phytool \
   python3-cbor2 \
