@@ -22,8 +22,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 # key to a publicly known value. So RPMB is deliberately a separate, explicitly
 # confirmed step rather than something a build turns on; see kas/feature/ftpm.yml.
 #
-# Until then the /var/lib/tee store below is persisted on the recovery partition
-# on both machines, so the mechanism is exercised end to end.
+# Until then the /var/lib/tee store below is persisted on a small unencrypted
+# partition outside /var (OPTEE_FTPM_TEE_STORE_DEV), so the mechanism is
+# exercised end to end.
 
 SRC_URI = " \
     file://optee-ftpm-setup.sh \
