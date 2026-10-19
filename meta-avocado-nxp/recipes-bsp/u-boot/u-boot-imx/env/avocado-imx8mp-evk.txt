@@ -68,7 +68,7 @@ avocado_cmdline_init=\
     if fdt get value fitconf /configurations default; then\
       if fdt get value cmdline_extra /configurations/${fitconf} avocado,cmdline-extra; then\
         echo "kernel cmdline extra: ${cmdline_extra}";\
-        setenv bootargs ${bootargs} ${cmdline_extra};\
+        setenv bootargs "${bootargs} ${cmdline_extra}";\
       fi;\
     fi;\
   fi;\
