@@ -126,6 +126,21 @@ avocado_verity_init=\
   fi;\
   true;
 
+# kernel.cmdline_extra from the project: carried in the FIT's configuration
+# node as avocado,cmdline-extra (under the FIT signature, like the root hash)
+# and appended to bootargs. After avocado_verity_init, which rewrites
+# bootargs; ends in `true` so a FIT without the property still boots.
+avocado_cmdline_init=\
+  if fdt addr ${image_addr}; then\
+    if fdt get value fitconf /configurations default; then\
+      if fdt get value cmdline_extra /configurations/${fitconf} avocado,cmdline-extra; then\
+        echo "kernel cmdline extra: ${cmdline_extra}";\
+        setenv bootargs "${bootargs} ${cmdline_extra}";\
+      fi;\
+    fi;\
+  fi;\
+  true;
+
 avocado_boot=bootm ${image_addr};
 
-bootcmd=run avocado_boot_init load_image avocado_verity_init avocado_boot
+bootcmd=run avocado_boot_init load_image avocado_verity_init avocado_cmdline_init avocado_boot
