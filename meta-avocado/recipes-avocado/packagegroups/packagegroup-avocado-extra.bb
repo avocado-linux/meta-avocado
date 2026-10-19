@@ -33,6 +33,7 @@ RDEPENDS:${PN} = " \
   avocado-pkg-initramfs \
   linux-firmware \
   linuxptp \
+  otelcol \
   phytool \
   qemu-user-static \
   qemu-user-static-binfmt \
