@@ -83,5 +83,26 @@ if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
     echo -e "\033[94m[INFO]\033[0m Kernel command line from project config: $cmdline"
 fi
 
+# Kernel: the lockfile-pinned kernel (AVOCADO_KERNEL_IMAGE, exported by
+# avocado-cli), not the Image the bootfiles package carries. The bootfiles copy
+# is the build's default kernel, so a project pinned to another kernel (6.6 on a
+# 6.12-default feed) booted the default while its rootfs held the pinned
+# kernel's modules: no modular driver loaded and nothing said why. Staged into
+# rekeyed/ like the cmdline, which stone searches first. Fail closed: boot and
+# modules disagreeing is worse than not building.
+kernel_dst="$input_dir/rekeyed/Image"
+rm -f "$kernel_dst"
+if [ -z "${AVOCADO_KERNEL_IMAGE:-}" ]; then
+    echo "[ERROR] AVOCADO_KERNEL_IMAGE not set: needs an avocado-cli that exports the pinned kernel to build hooks" >&2
+    exit 1
+fi
+if [ ! -f "$AVOCADO_KERNEL_IMAGE" ]; then
+    echo "[ERROR] pinned kernel $AVOCADO_KERNEL_IMAGE does not exist; run 'avocado install'" >&2
+    exit 1
+fi
+mkdir -p "$(dirname "$kernel_dst")"
+cp -f "$AVOCADO_KERNEL_IMAGE" "$kernel_dst"
+echo -e "\033[94m[INFO]\033[0m Kernel from the project's pin: $AVOCADO_KERNEL_IMAGE"
+
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
