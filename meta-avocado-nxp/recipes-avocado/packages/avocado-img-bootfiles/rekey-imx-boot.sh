@@ -42,6 +42,14 @@ case "$FAMILY" in
     imx9) PACKER=mkimage_imx_container; NEED="dd" ;;
     *) echo "rekey-imx-boot: unknown FAMILY '$FAMILY' in $TOOLS/rekey.env" >&2; exit 1 ;;
 esac
+# The distro's i.MX9 imx-boot under the ahab feature is an AHAB-signed
+# container. This re-key repacks unsigned containers, which a closed part's ELE
+# rejects, so refuse rather than ship an unsigned bootloader under the signed
+# one's name.
+if [ "$FAMILY" = imx9 ] && [ "${AHAB:-}" = 1 ]; then
+    echo "rekey-imx-boot: this feed's imx-boot is AHAB-signed, and re-keying would replace it with an unsigned container; re-keying an AHAB build is not supported" >&2
+    exit 1
+fi
 for t in fdt_add_pubkey "$PACKER" make $NEED; do
     command -v "$t" >/dev/null || { echo "rekey-imx-boot: missing tool: $t" >&2; exit 1; }
 done

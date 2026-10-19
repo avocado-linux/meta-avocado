@@ -22,8 +22,13 @@ do_install:append() {
 # System Manager and OEI images, which imx-boot-tools does not ship.
 AVOCADO_REKEY_IMX_FAMILY = ""
 AVOCADO_REKEY_IMX_FAMILY:mx8m-generic-bsp = "imx8m"
-AVOCADO_REKEY_IMX_FAMILY:mx91-generic-bsp = "imx9"
-AVOCADO_REKEY_IMX_FAMILY:mx93-generic-bsp = "imx9"
+# i.MX9 re-keys from U-Boot's nodtb and DTB halves, which uboot-sign only
+# deploys with UBOOT_SIGN_ENABLE, i.e. under the verified-boot feature. Without
+# it there is no FIT key to enforce, so no re-key script ships and a project
+# that sets signing.fit_key fails loudly at `avocado build`.
+AVOCADO_REKEY_IMX9 = "${@bb.utils.contains('DISTRO_FEATURES', 'verified-boot', 'imx9', '', d)}"
+AVOCADO_REKEY_IMX_FAMILY:mx91-generic-bsp = "${AVOCADO_REKEY_IMX9}"
+AVOCADO_REKEY_IMX_FAMILY:mx93-generic-bsp = "${AVOCADO_REKEY_IMX9}"
 FILESEXTRAPATHS:prepend := "${THISDIR}/avocado-img-bootfiles:"
 SRC_URI:append = " file://rekey-imx-boot.sh"
 # The base recipe fetches nothing, so it never needed S; with a file:// entry
@@ -45,6 +50,7 @@ UBOOT_DTB_NAME="${UBOOT_DTB_NAME}"
 IMXBOOT_TARGETS="${IMXBOOT_TARGETS}"
 DDR_FIRMWARE_NAME="${DDR_FIRMWARE_NAME}"
 MKIMAGE_ARGS="${@'REV=' + d.getVar('IMX_SOC_REV_UPPER') if d.getVar('IMX_SOC_REV_UPPER') else ''}"
+AHAB="${@bb.utils.contains('DISTRO_FEATURES', 'ahab', '1', '', d)}"
 EOF
         if [ "${AVOCADO_REKEY_IMX_FAMILY}" = imx9 ]; then
             # i.MX9's imx-boot takes the combined u-boot.bin, so imx-boot-tools
