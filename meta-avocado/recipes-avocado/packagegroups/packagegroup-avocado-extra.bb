@@ -35,6 +35,7 @@ RDEPENDS:${PN} = " \
   linuxptp \
   nats-server \
   otelcol \
+  packagegroup-gnu-base-utils \
   phytool \
   python3-cbor2 \
   python3-lz4 \
