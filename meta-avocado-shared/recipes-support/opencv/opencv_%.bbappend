@@ -13,3 +13,10 @@
 # CMake config installs the files it checks for. -staticdev keeps requiring
 # -dev, and the two packages are always installed together.
 RDEPENDS:${PN}-dev += "${PN}-staticdev"
+
+# meta-oe builds opencv without the dnn module, so cv2.dnn does not exist on
+# x86-64, Qualcomm, Rockchip or the Pi. An application that calls
+# cv2.dnn.NMSBoxes needs it, and a package that is not machine-specific should
+# behave the same in every feed. NXP's opencv_4.13.0.imx recipe and meta-tegra's
+# CUDA bbappend already enable it, so appending it again there changes nothing.
+PACKAGECONFIG:append = " dnn"
