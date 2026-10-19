@@ -29,6 +29,15 @@ SRC_URI += " \
   file://avocado-extra.cfg \
 "
 
+# KVM host on every kernel, the L4T RT one included (see avocado-kvm.cfg).
+# kernel-yocto only warns when a requested option does not reach .config, so
+# fail the build instead: a kernel without KVM is the silent outcome otherwise.
+SRC_URI += " file://avocado-kvm.cfg"
+
+do_configure:append() {
+    grep -qx 'CONFIG_KVM=y' ${B}/.config || bbfatal "CONFIG_KVM=y did not survive the config merge"
+}
+
 # dm-crypt/dm-verity capability (shared fragments) + the OP-TEE fTPM driver.
 # Unconditional: see avocado-security-kernel.inc for why capability is not
 # gated on a DISTRO_FEATURE. files/ftpm.cfg is shared by all four kernels.

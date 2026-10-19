@@ -135,7 +135,7 @@ RDEPENDS:${PN}:append:rubikpi3 = " \
 RDEPENDS:${PN}:append:rubikpi3 = " kernel-module-avocado-shm"
 
 # kernel-module-avocado-shm is the inter-VM shared-memory driver
-# (recipes-kernel/avocado-shm, ported here from meta-avocado-innodisk). The
+# (meta-avocado/recipes-kernel/avocado-shm, from meta-avocado-innodisk). The
 # demo's `vmm` extension installs it by name, and without it in the feed
 # `avocado install` fails with "No match for argument:
 # kernel-module-avocado-shm". Feed-only here, like everything else in this

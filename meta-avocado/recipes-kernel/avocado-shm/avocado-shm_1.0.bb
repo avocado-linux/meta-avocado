@@ -14,11 +14,11 @@ SRC_URI = " \
 
 S = "${UNPACKDIR}"
 
-# Every qcom machine whose runtime carries the inter-VM demo. Nothing in the
-# driver is board-specific -- it binds on compatible = "avocado,shm" and maps
-# whatever its memory-region phandle points at -- so this list is the consumer
-# set, not a hardware constraint.
-COMPATIBLE_MACHINE = "(q911|rubikpi3|rb3gen2)"
+# No COMPATIBLE_MACHINE: nothing in the driver is board-specific -- it binds on
+# compatible = "avocado,shm" and maps whatever its memory-region phandle points
+# at. A machine builds it only when a packagegroup names
+# kernel-module-avocado-shm, and each multi-kernel machine also lists it in
+# AVOCADO_MULTIKERNEL_MC_RECIPES so every kernel gets a matching module.
 
 # Built by Yocto rather than through sdk.compile.<name>, and the reason is
 # vermagic. The SDK route (see extensions/ext-kmod-v4l2loopback for the shape)
@@ -33,14 +33,9 @@ COMPATIBLE_MACHINE = "(q911|rubikpi3|rb3gen2)"
 # kernel-module-* packages already are, which would make the SDK route work for
 # multi-kernel targets too.
 
-# Ported here from meta-avocado-innodisk, where it was originally written for
-# the EXMP-Q911. It is in meta-avocado-qcom rather than the innodisk layer
-# because all three consumers -- q911, rubikpi3, rb3gen2 -- build with this
-# layer, and rb3gen2 cannot see the innodisk one at all: its `vmm` extension
-# failed with "No match for argument: kernel-module-avocado-shm".
-#
-# Nothing in it is actually qcom-specific either. If a non-qcom board ever
-# needs the demo, this moves to core rather than being copied again.
+# Written for the Innodisk EXMP-Q911, then carried in meta-avocado-qcom for
+# q911, rubikpi3 and rb3gen2. In core since Jetson became the first non-qcom
+# consumer.
 #
 # NOTE for the q911: its build pulls meta-avocado as a pinned kas repo, so it
 # keeps using the innodisk copy until that pin advances past this commit. The
