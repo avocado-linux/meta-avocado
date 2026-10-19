@@ -14,6 +14,8 @@ set -o pipefail
 # AVOCADO_DEVICE_CERT - device certificate content (base64 encoded pem)
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
+# AVOCADO_PROVISION_VERIFY - 1 to read back and compare every write (fwup
+#   --verify-writes); off by default, see the fwup call below
 
 archive_name=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r .storage_devices.rootdisk.out)
 if [[ -z "$archive_name" || "$archive_name" == "null" ]]; then
@@ -443,7 +445,15 @@ if ! dd if="${rpi_block_device}" of=/dev/null bs=512 count=1 2>/dev/null; then
     exit 1
 fi
 
-if ! fwup -a -u -i "${archive_file}" -d "${rpi_block_device}" -t complete 2>&1; then
+# fwup verifies writes by default on a device: every 128 KiB segment is
+# written, read back and compared before the next. Through the rpiboot gadget
+# that read-back is most of the time (2.2 MB/s against 7.9 MB/s without it on
+# the same disk), and a read that stalls in the gadget surfaces as fwup's
+# "write failed at offset". USB and the transport checksum the data; the
+# read-back mostly guards against a bad medium, so it is opt-in here.
+verify_flag=--no-verify-writes
+[[ "${AVOCADO_PROVISION_VERIFY:-0}" == "1" ]] && verify_flag=--verify-writes
+if ! fwup -a -u "$verify_flag" -i "${archive_file}" -d "${rpi_block_device}" -t complete 2>&1; then
     echo "Error: fwup failed to write system image"
     exit 1
 fi
