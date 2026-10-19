@@ -29,3 +29,10 @@ RDEPENDS:packagegroup-avocado-initramfs-modules:append = " \
     kernel-module-aes-ce-blk-${KERNEL_VERSION} \
     kernel-module-aes-ce-cipher-${KERNEL_VERSION} \
 "
+
+# The boot partition takes its device trees from the same kernel as its Image
+# (avocado-build-rpi stages both from the rootfs /boot), so the image package
+# brings its own trees: a project pinned to a non-default kernel otherwise
+# boots that kernel on the default kernel's trees.
+RDEPENDS:${KERNEL_PACKAGE_NAME}-image:append = " ${KERNEL_PACKAGE_NAME}-devicetree"
+
