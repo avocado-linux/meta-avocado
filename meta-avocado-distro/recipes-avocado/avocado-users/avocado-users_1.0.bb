@@ -27,12 +27,16 @@ S = "${UNPACKDIR}"
 # to start at all - it exits before writing a banner or a log line, so the only
 # symptom is every ssh connection dying at kex_exchange_identification with
 # nothing in the journal to explain it. The entry below mirrors that
-# USERADD_PARAM's home directory and shell; keep them in step.
+# USERADD_PARAM's home directory and shell; keep them in step. The tss account
+# is the same case: it mirrors meta-tpm's tpm2-tss USERADD_PARAM ("--system -M
+# -d /var/lib/tpm -s /bin/false -g tss tss"), and the TPM device udev rules name
+# that user and group.
 #
-# devtool-debt: sshd is hand-copied here rather than the clobber being fixed.
+# devtool-debt: sshd and tss are hand-copied here rather than the clobber being fixed.
 # Ceiling: exactly the packages whose users someone has noticed and transcribed.
-# Upgrade trigger: a second package needs a useradd-created system account, or
-# any account here drifts from the USERADD_PARAM it mirrors. The real fix is to
+# Upgrade trigger: a third package needs a useradd-created system account, or
+# any account here drifts from the USERADD_PARAM it mirrors. The second one, tss,
+# has already arrived, so the follow-up is due. The real fix is to
 # stop shipping a whole /etc/passwd - pin only the uid/gid this distro cares
 # about via sysusers.d or USERADDEXTENSION and let useradd own the rest - which
 # is a change to how every Avocado image gets its users and wants its own
