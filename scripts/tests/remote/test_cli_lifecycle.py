@@ -60,6 +60,7 @@ class Board:
         self.recovery = "none-recorded"
         self.advance_after = None  # status answers write_phase, then 'complete' after this many polls
         self.status_calls = 0
+        self.image_lines = []  # the "images:" line each status poll adds, oldest first; empty means an old board
         self.status_unreadable = False  # after write, status reports the per-run record as unreadable (rc 1)
         self.cat_calls = []
         self.missing = set(missing)
@@ -228,7 +229,10 @@ class Board:
             self.status_calls += 1
             if self.advance_after is not None and self.status_calls > self.advance_after:
                 self.phase = "complete"
-            return RunResult(0, f"status: {self.phase} run={self.run_id} recovery={self.recovery}\n".encode())
+            text = f"status: {self.phase} run={self.run_id} recovery={self.recovery}\n"
+            if self.image_lines:  # a board new enough to name the images, one answer per poll
+                text += f"images: {self.image_lines.pop(0)}\n"
+            return RunResult(0, text.encode())
         return RunResult(0)
 
     def factory(self, host_arg, ssh_opts, batch):
@@ -505,6 +509,29 @@ def test_live_runner_in_non_terminal_phase_keeps_being_followed(images, tmp_path
     assert rc == 0, text
     assert "write COMPLETE" in text
     assert board.status_calls > 8
+
+
+def test_a_followed_write_prints_each_phase_and_image_state_before_it_completes(images, tmp_path):
+    board = Board(tmp_path, write_phase="image-writing")
+    board.runner_alive = True
+    board.advance_after = 2
+    board.image_lines = ["rootfs=writing, var=pending", "rootfs=written, var=writing"]
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text
+    first = text.index("write: image-writing - images: rootfs=writing, var=pending")
+    second = text.index("write: image-writing - images: rootfs=written, var=writing")
+    assert first < second < text.index("write COMPLETE")
+
+
+def test_a_followed_write_against_a_board_that_names_no_images_still_prints_the_phase(images, tmp_path):
+    board = Board(tmp_path, write_phase="image-writing")
+    board.runner_alive = True
+    board.advance_after = 2
+    rc, text = _write(images, tmp_path, board)
+    assert rc == 0, text
+    assert "write: image-writing" in text
+    assert "images:" not in text
+    assert "write COMPLETE" in text
 
 
 def test_live_runner_that_never_finishes_ends_at_wait_seconds_not_as_exited(images, tmp_path):

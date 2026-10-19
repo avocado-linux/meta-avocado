@@ -62,6 +62,8 @@ DEFAULT_PYTHON = "python3"
 
 DEFAULT_TIMEOUT = 600
 TAR_TIMEOUT = 3600
+#: Seconds between the "stage: sent" lines while the tar stream runs, so a long copy does not look stuck.
+PROGRESS_INTERVAL_S = 5.0
 _KILL_GRACE = 5
 
 
@@ -189,8 +191,33 @@ def _terminate(proc) -> None:
             continue
 
 
-def _tar_writer(files: dict, modes: dict) -> Callable[[Any], None]:
+class ByteCount:
+    """Bytes written to a stream so far; the stage reporter reads it from another thread."""
+
+    def __init__(self) -> None:
+        self.n = 0
+
+
+class _CountingFile:
+    """Wrap a writable stream and add the length of every write to a :class:`ByteCount`."""
+
+    def __init__(self, fileobj, count: ByteCount) -> None:
+        self._fileobj = fileobj
+        self._count = count
+
+    def write(self, data):
+        written = self._fileobj.write(data)
+        self._count.n += len(data)
+        return written
+
+    def __getattr__(self, name):
+        return getattr(self._fileobj, name)
+
+
+def _tar_writer(files: dict, modes: dict, sent: Optional[ByteCount] = None) -> Callable[[Any], None]:
     def write(fileobj) -> None:
+        if sent is not None:
+            fileobj = _CountingFile(fileobj, sent)
         with tarfile.open(fileobj=fileobj, mode="w|") as tf:
             for name, src in files.items():
                 ti = tarfile.TarInfo(name)
@@ -232,8 +259,16 @@ class SshTransport(_TransportBase):
         remote, payload = self._wrap(argv_remote, stdin, sudo)
         return self._spawn(self.command_line(remote), payload, timeout)
 
-    def put_tar(self, files: dict, dest_dir: str, modes: Optional[dict] = None, *, timeout: float = TAR_TIMEOUT) -> RunResult:
-        writer = _tar_writer(files, dict(modes or {}))
+    def put_tar(
+        self,
+        files: dict,
+        dest_dir: str,
+        modes: Optional[dict] = None,
+        *,
+        timeout: float = TAR_TIMEOUT,
+        sent: Optional[ByteCount] = None,
+    ) -> RunResult:
+        writer = _tar_writer(files, dict(modes or {}), sent)
         return self.run(["tar", "-C", dest_dir, "-xf", "-"], writer, sudo=False, timeout=timeout)
 
     def _spawn(self, cmd, payload, timeout) -> RunResult:
@@ -333,7 +368,15 @@ class StubTransport(_TransportBase):
         )
         return self._answer(remote, payload, sudo)
 
-    def put_tar(self, files: dict, dest_dir: str, modes: Optional[dict] = None, *, timeout: float = TAR_TIMEOUT) -> RunResult:
+    def put_tar(
+        self,
+        files: dict,
+        dest_dir: str,
+        modes: Optional[dict] = None,
+        *,
+        timeout: float = TAR_TIMEOUT,
+        sent: Optional[ByteCount] = None,
+    ) -> RunResult:
         argv = ["tar", "-C", dest_dir, "-xf", "-"]
         self.calls.append(Call("put_tar", argv, False, files=dict(files), modes=dict(modes or {}), dest_dir=dest_dir))
         return self._answer(argv, None, False)
@@ -760,9 +803,31 @@ def stage(transport, profile, resolved, image_dir, bundle_path, dry_run: bool = 
     files = {name: src for name, src, _s, _h in rows}
     bundle_name = Path(bundle_path).name
     modes = {name: (0o755 if name == bundle_name else 0o644) for name in files}
-    out("stage: transferring as one stream over ssh; no progress is shown until it ends, so a large set can take minutes")
+    out(
+        "stage: transferring as one stream over ssh; "
+        f"a progress line follows every {PROGRESS_INTERVAL_S:g} s, so a large set can take minutes"
+    )
     started = time.monotonic()
-    put = transport.put_tar(files, staging_dir, modes)
+    sent = ByteCount()
+    done = threading.Event()
+
+    # KiB under a mebibyte, so a small set does not print "0 of 0 MiB" for its whole run.
+    unit, size = ("MiB", 1 << 20) if total >= (1 << 20) else ("KiB", 1 << 10)
+
+    def report() -> None:
+        while not done.wait(PROGRESS_INTERVAL_S):
+            out(
+                f"stage: sent {min(sent.n, total) / size:.0f} of {total / size:.0f} {unit}, "
+                f"{time.monotonic() - started:.0f} s"
+            )
+
+    reporter = threading.Thread(target=report, daemon=True)
+    reporter.start()
+    try:
+        put = transport.put_tar(files, staging_dir, modes, sent=sent)
+    finally:
+        done.set()
+        reporter.join(timeout=_KILL_GRACE)
     if put.rc != 0:
         raise HostError(f"copy to the board failed (rc={put.rc})")
     elapsed = time.monotonic() - started
@@ -843,9 +908,20 @@ class Reconciled:
     run_id: Optional[str] = None
     recovery: Optional[str] = None
     raw: str = ""
+    images: dict = field(default_factory=dict)  # image name -> state, from the board's optional "images:" line
 
 
 _STATUS_RE = re.compile(r"^status: (\S+) run=(\S+) recovery=(.*)$")
+_IMAGES_RE = re.compile(r"^images: (.*)$")
+
+
+def _parse_images(text: str) -> dict:
+    """The ``images: name=state, ...`` line of a board's status answer; empty when the board sent none."""
+    for line in text.splitlines():
+        m = _IMAGES_RE.match(line.strip())
+        if m:
+            return dict(item.strip().split("=", 1) for item in m.group(1).split(",") if "=" in item)
+    return {}
 
 
 def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: str, python: str = DEFAULT_PYTHON, run_id: Optional[str] = None) -> Reconciled:
@@ -864,7 +940,7 @@ def reconcile(transport, state_dir: str, bundle_remote_path: str, staging_dir: s
     for line in text.splitlines():
         m = _STATUS_RE.match(line.strip())
         if m:
-            return Reconciled(True, m.group(1), m.group(2), m.group(3).strip(), text)
+            return Reconciled(True, m.group(1), m.group(2), m.group(3).strip(), text, _parse_images(text))
     if "no run recorded" in text:
         return Reconciled(True, raw=text)
     return Reconciled(False, raw=text)
