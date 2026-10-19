@@ -8,4 +8,10 @@ RDEPENDS:${PN}:append = " \
   nativesdk-fwup \
   nativesdk-mkfat \
   nativesdk-rpi-usbboot \
+  nativesdk-avocado-dtc-overlay \
 "
+
+# DEPENDS as well as RDEPENDS: RDEPENDS alone leaves the wrapper out of the
+# build graph, so it never reaches the SDK feed and `avocado sdk install`
+# fails with "No match for argument" once a runtime declares an overlay.
+DEPENDS:append = " nativesdk-avocado-dtc-overlay"
