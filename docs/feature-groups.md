@@ -36,6 +36,11 @@ only.
 except `ai`. No board file includes it; append it explicitly to ship the full
 set (see §3).
 
+`kas/feature/almost-complete.yml` is the same umbrella without the two slow
+web engines: it leaves out `browsers` (chromium) and sets
+`AVOCADO_SKIP_WEB_ENGINES = "1"`, which drops qtwebengine from the `qt` group.
+`complete.yml` keeps its meaning for CI and the build cluster.
+
 ## 2. Feature groups
 
 | Group        | Token         | Adds                                            | Vendor layer            | Requires |
@@ -47,6 +52,7 @@ set (see §3).
 | graphics     | `graphics`    | weston, wayland                                 | meta-wayland            | DISTRO_FEATURES opengl |
 | qt           | `qt`          | Qt5 stack incl. qtwebengine                     | meta-qt5                | DISTRO_FEATURES opengl (wayland) |
 | browsers     | `browsers`    | chromium-ozone-wayland                          | meta-browser            | DISTRO_FEATURES opengl wayland |
+| web-engines  | `web-engines` | chromium-ozone-wayland and qtwebengine only (opt-in, for use with `almost-complete.yml`) | meta-browser, meta-qt5 | DISTRO_FEATURES opengl (wayland for chromium) |
 | cameras      | `cameras`     | librealsense2, Basler pylon                     | meta-intel-realsense, meta-basler-tools | **unavailable on wrynose** |
 | cloud-aws    | `cloud-aws`   | greengrass-bin, aws-iot-device-client           | meta-aws                | **unavailable on wrynose** |
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
@@ -148,6 +154,22 @@ The same append works on any machine:
 
 ```bash
 kas build kas/machine/qemuarm64.yml:kas/feature/complete.yml
+```
+
+### Everything except the slow packages
+
+Chromium and qtwebengine are each a whole-browser compile in one `do_compile`
+task, so they outlast the rest of an umbrella build. To skip both, append
+`almost-complete.yml` instead of `complete.yml`:
+
+```bash
+kas build kas/machine/qemuarm64.yml:kas/feature/almost-complete.yml
+```
+
+To build only those two, stack `web-engines.yml` on a machine file:
+
+```bash
+kas build kas/machine/qemuarm64.yml:kas/feature/web-engines.yml
 ```
 
 ## 4. Notes for maintainers
