@@ -23,4 +23,5 @@ RDEPENDS:${PN} = " \
   python3-gpiozero \
   python3-lgpio \
   ${MACHINE_EXTRA_RRECOMMENDS} \
+  python3-numba \
 "
