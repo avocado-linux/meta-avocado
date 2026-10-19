@@ -35,6 +35,7 @@ RDEPENDS:${PN} = " \
   linuxptp \
   otelcol \
   phytool \
+  python3-rapidfuzz \
   qemu-user-static \
   qemu-user-static-binfmt \
   qemu-guest-agent \
