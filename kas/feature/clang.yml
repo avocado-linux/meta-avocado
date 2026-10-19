@@ -9,3 +9,10 @@ repos:
     branch: master
     layers:
       .:
+
+local_conf_header:
+  feature/clang: |
+    # bindgen, which Rust crates with C bindings run at build time, loads
+    # libclang.so on the build host. The SDK has no clang, so every such build
+    # had to bring its own copy. Ship libclang in the SDK host packages.
+    SDK_PKG_EXTRA_INSTALL:append = " nativesdk-libclang"
