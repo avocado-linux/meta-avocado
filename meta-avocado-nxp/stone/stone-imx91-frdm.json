@@ -156,6 +156,12 @@
           "size_unit": "mebibytes"
         },
         {
+          "name": "tee",
+          "image": "",
+          "size": 32,
+          "size_unit": "mebibytes"
+        },
+        {
           "name": "var",
           "image": "var",
           "expand": "true"

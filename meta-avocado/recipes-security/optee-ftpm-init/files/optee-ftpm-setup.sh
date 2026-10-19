@@ -8,9 +8,10 @@
 # and REE-FS is serviced by tee-supplicant in userspace. So:
 #   * tpm_ftpm_tee is a module (not built-in): loaded here, after tee-supplicant,
 #     rather than probing at kernel init when the supplicant isn't running yet.
-#   * the fTPM NV (the seed the SRK derives from) is kept on the recovery
-#     partition rather than the initramfs tmpfs, at tee-supplicant's compiled-in
-#     path /var/lib/tee.
+#   * the fTPM NV (the seed the SRK derives from) is kept on a small
+#     unencrypted partition outside /var (OPTEE_FTPM_TEE_STORE_DEV: `tee` on
+#     i.MX, `recovery` on qemuarm64) rather than the initramfs tmpfs, at
+#     tee-supplicant's compiled-in path /var/lib/tee.
 #
 # Reboot-survival caveat: OP-TEE's secure storage anti-rollback needs an RPMB
 # counter, and no machine running this uses one yet - qemuarm64 has no RPMB at

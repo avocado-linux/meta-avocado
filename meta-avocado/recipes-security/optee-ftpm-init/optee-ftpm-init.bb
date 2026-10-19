@@ -22,8 +22,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 # key to a publicly known value. So RPMB is deliberately a separate, explicitly
 # confirmed step rather than something a build turns on; see kas/feature/ftpm.yml.
 #
-# Until then the /var/lib/tee store below is persisted on the recovery partition
-# on both machines, so the mechanism is exercised end to end.
+# Until then the /var/lib/tee store below is persisted on a small unencrypted
+# partition outside /var (OPTEE_FTPM_TEE_STORE_DEV), so the mechanism is
+# exercised end to end.
 
 SRC_URI = " \
     file://optee-ftpm-setup.sh \
@@ -109,7 +110,8 @@ COMPATIBLE_MACHINE = "avocado-qemuarm64|avocado-imx93-frdm|tegra"
 
 # Block device holding the persistent REE-FS TEE store (/var/lib/tee). A
 # machine fact: a small, otherwise-unused GPT partition outside the encrypted
-# /var. The generic default is the recovery partition (qemuarm64, imx93-frdm);
+# /var. The generic default is the recovery partition (qemuarm64); imx93-frdm
+# uses the i.MX layout's `tee` partition (avocado-imx93-frdm.conf), and
 # Jetson overrides it in avocado-jetson.inc because its `recovery` partition
 # holds a kernel image. Substituted into the script and unit at install time.
 OPTEE_FTPM_TEE_STORE_DEV ?= "/dev/disk/by-partlabel/recovery"
