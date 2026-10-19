@@ -9,7 +9,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-raspberrypi
     path: meta-raspberrypi
     branch: wrynose
-    commit: f62c67921474370829d24a4fa01ef88543f3906b
+    commit: 6295d0b1d51dd918e6f2ae896e39ea9c8423a93a
     layers:
       .:
 
