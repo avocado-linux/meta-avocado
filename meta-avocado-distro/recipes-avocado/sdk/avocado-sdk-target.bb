@@ -24,6 +24,7 @@ FILES:${PN}   = "\
   ${SDKPATHNATIVE}${bindir}/avocado-build-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}${bindir}/avocado-provision-${MACHINE_SHORT_NAME} \
   ${SDKPATHNATIVE}/stone \
+  ${SDKPATHNATIVE}/environment-setup.d/avocado-target.sh \
 "
 RDEPENDS:${PN}:append = "\
   nativesdk-jq \
@@ -40,4 +41,13 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/avocado-build-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
     install -m 0755 ${UNPACKDIR}/avocado-provision-${MACHINE_SHORT_NAME} ${D}${SDKPATHNATIVE}${bindir}
     install -m 0755 ${UNPACKDIR}/stone-${MACHINE_SHORT_NAME}.json ${D}${SDKPATHNATIVE}/stone/stone-${MACHINE_SHORT_NAME}.json
+
+    # Machine facts the CLI's image scripts read from the SDK environment.
+    install -d ${D}${SDKPATHNATIVE}/environment-setup.d
+    : > ${D}${SDKPATHNATIVE}/environment-setup.d/avocado-target.sh
+    if [ -n "${AVOCADO_EROFS_BLOCK_SIZE}" ]; then
+        echo 'export AVOCADO_EROFS_BLOCK_SIZE="${AVOCADO_EROFS_BLOCK_SIZE}"' \
+            >> ${D}${SDKPATHNATIVE}/environment-setup.d/avocado-target.sh
+    fi
 }
+do_install[vardeps] += "AVOCADO_EROFS_BLOCK_SIZE"
