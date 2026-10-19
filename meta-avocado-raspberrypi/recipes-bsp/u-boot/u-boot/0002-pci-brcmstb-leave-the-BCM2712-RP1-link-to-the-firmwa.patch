@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Sun, 18 Oct 2026 15:51:44 -0400
+Subject: [PATCH] pci: brcmstb: leave the BCM2712 RP1 link to the firmware and
+ Linux
+
+On Raspberry Pi 5 and CM5 one BCM2712 PCIe controller's endpoint is RP1,
+the I/O chip behind Ethernet, USB and GPIO. The Pi firmware brings it up
+and Linux drives it; U-Boot has no RP1 driver. Enumerating that link and
+asserting PERST on it again before booting the OS left RP1 unusable to
+Linux: "BAR 0 ... not claimed; can't enable device", rp1 probe -22, and
+no Ethernet or USB. The device tree marks that controller with the rp1
+node: do not bind it, and enumerate the other controllers as before.
+
+Upstream-Status: Pending
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ drivers/pci/pcie_brcmstb.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/drivers/pci/pcie_brcmstb.c b/drivers/pci/pcie_brcmstb.c
+index 5c4366c306d..49f0cb4e118 100644
+--- a/drivers/pci/pcie_brcmstb.c
++++ b/drivers/pci/pcie_brcmstb.c
+@@ -556,6 +556,24 @@ static int brcm_pcie_post_setup_bcm2712(struct brcm_pcie *pcie)
+ 	return 0;
+ }
+ 
++/*
++ * On BCM2712 (Raspberry Pi 5, CM5) one controller's endpoint is RP1, the I/O
++ * chip behind Ethernet, USB and GPIO. The Pi firmware brings RP1 up and Linux
++ * drives it; U-Boot has no RP1 driver. Enumerating that link and asserting
++ * PERST on it again before booting the OS (remove, DM_FLAG_OS_PREPARE) leaves
++ * RP1 unusable to Linux: "BAR 0 ... not claimed; can't enable device", rp1
++ * probe -22, and no Ethernet or USB. The device tree marks that controller
++ * with the rp1 node, so do not bind it; the other controllers (the M.2 slot)
++ * are enumerated as before.
++ */
++static int brcm_pcie_bind(struct udevice *dev)
++{
++	if (ofnode_valid(dev_read_subnode(dev, "rp1")))
++		return -ENODEV;
++
++	return 0;
++}
++
+ static int brcm_pcie_probe(struct udevice *dev)
+ {
+ 	struct udevice *ctlr = pci_get_controller(dev);
+@@ -840,6 +858,7 @@ U_BOOT_DRIVER(pcie_brcm_base) = {
+ 	.id			= UCLASS_PCI,
+ 	.ops			= &brcm_pcie_ops,
+ 	.of_match		= brcm_pcie_ids,
++	.bind			= brcm_pcie_bind,
+ 	.probe			= brcm_pcie_probe,
+ 	.remove			= brcm_pcie_remove,
+ 	.of_to_plat	= brcm_pcie_of_to_plat,
