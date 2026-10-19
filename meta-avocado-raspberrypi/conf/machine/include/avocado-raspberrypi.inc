@@ -11,14 +11,15 @@ CMDLINE_ROOT_PARTITION = "/dev/mmcblk0p2"
 CMDLINE_ROOT_FSTYPE = "rootfstype=erofs"
 CMDLINE:append = " audit=0"
 
-# What this machine can deliver on the security side. Explicitly nothing, not
-# unset: the declaration is what pulls a capability's tooling into the feed
-# (docs/security-capabilities.md), and encrypted-var is not deliverable here
-# yet - linux-raspberrypi carries no dm-crypt fragment, and the MBR layout
-# (stone/rpi/rootdisk.conf) has no `var` PARTLABEL for cryptsetup-var.service
-# to key on. Declaring it anyway would ship a unit that waits on a device this
-# machine never produces. Declare it once both are wired.
-AVOCADO_SECURITY_CAPABILITIES = ""
+# What this machine can deliver on the security side; the declaration is what
+# pulls a capability's tooling into the feed (docs/security-capabilities.md).
+# encrypted-var: linux-raspberrypi builds dm-crypt as a module and the
+# initramfs carries it (linux-raspberrypi_%.bbappend), and cryptsetup-var opens the MBR var
+# partition by its raw node, AVOCADO_VAR_PART_DEV below
+# (avocado-var-device.bbclass). There is no TPM or key-wrapping engine, so a
+# runtime with var.hardware auto unlocks with the Argon2id key var-key.sh
+# derives from the board serial: encryption at rest, not bound to hardware.
+AVOCADO_SECURITY_CAPABILITIES = "encrypted-var"
 
 # The plaintext var partition; /var mounts /dev/disk/by-avocado/var, which
 # resolves here. A raw node rather than /dev/disk/by-partlabel/var: MBR carries

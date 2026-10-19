@@ -35,6 +35,9 @@ SRC_URI = " \
 RDEPENDS:${PN} = "cryptsetup openssl-bin btrfs-tools gawk sed libdevmapper"
 
 inherit systemd
+# The var partition the unit opens: avocado-var-device.bbclass, shared with
+# avocado-var-grow so both wait for the same device.
+inherit avocado-var-device
 
 SYSTEMD_SERVICE:${PN} = "cryptsetup-var.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
@@ -54,6 +57,9 @@ do_install() {
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/cryptsetup-var.service ${D}${systemd_system_unitdir}/
+    sed -i -e 's|@AVOCADO_VAR_DEVICE@|${AVOCADO_VAR_DEVICE}|g' \
+           -e 's|@AVOCADO_VAR_DEVICE_UNIT@|${@avocado_var_device_unit(d)}|g' \
+        ${D}${systemd_system_unitdir}/cryptsetup-var.service
 
     # Statically enable the unit for the initrd. SYSTEMD_AUTO_ENABLE relies on
     # the preset being applied at image time, but the initramfs rootfs build
