@@ -39,7 +39,20 @@ RDEPENDS:${PN} = " \
   ${DIAGNOSTIC_PACKAGES} \
   ${TEGRA_TEST_PACKAGES} \
   ${SECURITY_PACKAGES} \
+  ${KVM_PACKAGES} \
   swupdate \
+"
+
+# KVM host userspace, feed-only: a project opts in by installing these in an
+# extension. qemu-system-aarch64 is trimmed by kas/feature/kvm-host.yml. dtc
+# builds a guest device tree on the device. kernel-module-avocado-shm is the
+# inter-VM cacheable shared-memory driver (meta-avocado/recipes-kernel/
+# avocado-shm); kas/feature/multi-kernel-jetson.yml builds it for every kernel.
+# vhost_net and vfio-pci need nothing here: every kernel-module-* is in the feed.
+KVM_PACKAGES = " \
+  qemu-system-aarch64 \
+  dtc \
+  kernel-module-avocado-shm \
 "
 
 # Encrypted-/var + fTPM userspace, published to the feed for the machines that

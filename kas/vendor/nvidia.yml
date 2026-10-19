@@ -5,6 +5,9 @@ header:
     # ships an OP-TEE fTPM (OPTEE_ENABLE_FTPM in avocado-jetson.inc).
     - repo: meta-avocado
       file: kas/feature/tpm.yml
+    # Target qemu trimmed for KVM; packagegroup-avocado-tegra-extra ships it.
+    - repo: meta-avocado
+      file: kas/feature/kvm-host.yml
 
 repos:
   meta-tegra:
