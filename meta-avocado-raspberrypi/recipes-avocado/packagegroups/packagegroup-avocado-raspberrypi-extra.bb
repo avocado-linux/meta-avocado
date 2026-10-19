@@ -24,4 +24,6 @@ RDEPENDS:${PN} = " \
   python3-lgpio \
   ${MACHINE_EXTRA_RRECOMMENDS} \
   python3-numba \
+  python3-google-crc32c \
+  python3-pyarrow \
 "
