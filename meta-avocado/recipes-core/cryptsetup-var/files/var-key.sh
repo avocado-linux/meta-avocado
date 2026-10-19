@@ -1,8 +1,11 @@
 #!/bin/sh
 # Derive the /var LUKS key using Argon2id KDF (phase-1: software-derived).
 #
-# Reads a provisioned secret from /var/private/var-key-secret and combines
-# it with a hardware-unique identifier. Output is 64 raw bytes on stdout.
+# The key is bound to a hardware-unique identifier. A secret at
+# /var/private/var-key-secret is mixed in when present, but nothing provisions
+# it and it cannot exist on a first boot (/var is the volume being unlocked),
+# so the identifier alone is the normal case - the same derivation the NXP,
+# qemu and x86-64 providers use. Output is 64 raw bytes on stdout.
 #
 # Phase-2 replaces this with a capability-probe dispatch table:
 #   /dev/tpm0 present -> systemd-cryptenroll (x86, QEMU, fTPM-enabled ARM)
@@ -13,24 +16,40 @@
 set -eu
 
 SECRET_FILE="/var/private/var-key-secret"
-HW_ID_FILE="/sys/firmware/devicetree/base/serial-number"
 
-if [ ! -f "$SECRET_FILE" ]; then
-    echo "var-key: provisioned secret not found at $SECRET_FILE" >&2
+# Hardware-unique identifier, most authoritative first: the SoC UID the kernel
+# reads from the chip, then the serial-number the firmware or bootloader puts
+# in the device tree (the Raspberry Pi firmware does), then /proc/cpuinfo.
+HW_ID=""
+for f in /sys/devices/soc0/serial_number /sys/firmware/devicetree/base/serial-number; do
+    if [ -z "$HW_ID" ] && [ -r "$f" ]; then
+        HW_ID=$(tr -d '\0\n' < "$f")
+    fi
+done
+if [ -z "$HW_ID" ]; then
+    HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || true)
+fi
+
+# Refuse rather than fall back to a constant: a constant would give every board
+# the same /var key, silently. All zeros is what some firmware reports when it
+# has no serial, so it counts as missing.
+case "$HW_ID" in
+    ""|*[!0]*) ;;
+    *) HW_ID="" ;;
+esac
+if [ -z "$HW_ID" ]; then
+    echo "var-key: no hardware-unique identifier (SoC UID, DT serial-number or cpuinfo Serial)" >&2
+    echo "var-key: refusing to derive a key that would not be device-unique" >&2
     exit 1
 fi
 
-# Hardware-unique identifier; fall back to /proc/cpuinfo Serial if DT unavailable.
-if [ -r "$HW_ID_FILE" ]; then
-    HW_ID=$(tr -d '\0' < "$HW_ID_FILE")
+if [ -f "$SECRET_FILE" ]; then
+    PASS=$(printf '%s:%s' "$(cat "$SECRET_FILE")" "$HW_ID")
 else
-    HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || echo "unknown")
+    PASS="$HW_ID"
 fi
 
-SECRET=$(cat "$SECRET_FILE")
-
-# Key derivation: argon2id via openssl 3.x. Combines provisioned secret + hw-id
-# as the password. Salt is SHA-256(hw_id) truncated to 16 bytes - public,
+# Key derivation: argon2id via openssl 3.x. Salt is SHA-256(hw_id) truncated to 16 bytes - public,
 # per-device, non-secret. Parameters: m=65536 (64 MiB), t=3, p=1.
 SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-32)
 
@@ -40,7 +59,7 @@ SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-3
 # than yielding a silent empty key.
 openssl kdf -binary \
     -keylen 64 \
-    -kdfopt pass:"$(printf '%s:%s' "$SECRET" "$HW_ID")" \
+    -kdfopt pass:"$PASS" \
     -kdfopt salt:"$SALT" \
     -kdfopt iter:3 \
     -kdfopt memcost:65536 \
