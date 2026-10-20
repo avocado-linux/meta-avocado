@@ -11,6 +11,49 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"
 }
 
+# Same as rootfs-pre.sh: SWUpdate runs each script on its own, so the two
+# helpers are carried in both.
+#
+# Prints the sysfs directory of the partition / is mounted from, following a
+# device-mapper root down to its single backing partition, or nothing.
+booted_root_part() {
+    majmin=""
+    while read -r _ _ mm _ mnt _; do
+        if [ "$mnt" = "/" ]; then majmin="$mm"; fi
+    done < /proc/self/mountinfo
+    [ -n "$majmin" ] || return 0
+    dir=$(cd "/sys/dev/block/$majmin" 2>/dev/null && pwd -P) || return 0
+    for _ in 1 2 3 4; do
+        if [ -f "$dir/partition" ]; then
+            echo "$dir"
+            return 0
+        fi
+        set -- "$dir"/slaves/*
+        { [ $# -eq 1 ] && [ -e "$1" ]; } || return 0
+        dir=$(cd "$1" && pwd -P) || return 0
+    done
+}
+
+# Prints /dev/<name> for each partition whose GPT name is $1, on the disk $2
+# (a /sys/block name), or on every disk when $2 is empty.
+parts_labelled() {
+    label="$1"
+    if [ -n "$2" ]; then
+        set -- /sys/block/"$2"/*/partition
+    else
+        set -- /sys/class/block/*/partition
+    fi
+    for p in "$@"; do
+        [ -f "$p" ] || continue
+        d="${p%/partition}"
+        while IFS='=' read -r key val; do
+            if [ "$key" = "PARTNAME" ] && [ "$val" = "$label" ]; then
+                echo "/dev/${d##*/}"
+            fi
+        done < "$d/uevent"
+    done
+}
+
 log "=== Tegra A/B Post-install Script ==="
 
 # 1) Load variables saved by preinstall
@@ -47,13 +90,26 @@ if [ ! -b "$TEGRA_TARGET_DEV" ]; then
     exit 1
 fi
 
-# Confirm the device really corresponds to the intended PARTLABEL
-BYLABEL="/dev/disk/by-partlabel/$TEGRA_TARGET_PARTLABEL"
-if [ -L "$BYLABEL" ]; then
-    RESOLVED="$(readlink -f "$BYLABEL" || true)"
-    if [ -n "$RESOLVED" ] && [ "$RESOLVED" != "$TEGRA_TARGET_DEV" ]; then
-        log "WARNING: $BYLABEL resolves to $RESOLVED, but preinstall reported $TEGRA_TARGET_DEV"
-    fi
+# Confirm the device is the target label on the disk the running rootfs lives
+# on (or, when that disk cannot be determined, the only partition carrying
+# the label) before switching the slot. Activating a slot written to another
+# disk would boot the old rootfs under a slot the bootloader thinks is new.
+ROOT_PART="$(booted_root_part)"
+if [ -n "$ROOT_PART" ]; then
+    BOOT_DISK="${ROOT_PART%/*}"
+    BOOT_DISK="${BOOT_DISK##*/}"
+    EXPECTED="$(parts_labelled "$TEGRA_TARGET_PARTLABEL" "$BOOT_DISK")"
+    WHERE="on the booted disk $BOOT_DISK"
+else
+    log "WARNING: cannot tell which disk / is mounted from; checking $TEGRA_TARGET_PARTLABEL by label"
+    EXPECTED="$(parts_labelled "$TEGRA_TARGET_PARTLABEL" "")"
+    WHERE="on any disk"
+fi
+if [ "$EXPECTED" != "$TEGRA_TARGET_DEV" ]; then
+    log "ERROR: preinstall wrote $TEGRA_TARGET_DEV, but the partition labelled"
+    log "       '$TEGRA_TARGET_PARTLABEL' $WHERE is: ${EXPECTED:-none}"
+    log "       Not switching the boot slot."
+    exit 1
 fi
 
 # 4) Optional filesystem sanity (skip if blkid not available)

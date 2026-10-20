@@ -1,7 +1,8 @@
 #!/bin/sh
 # Pre-install script for Tegra A/B rootfs updates
-# Determines inactive slot, resolves target partition by PARTLABEL,
-# and prepares a stable symlink for SWUpdate's raw handler.
+# Determines inactive slot, resolves the target partition on the disk the
+# running rootfs lives on, and prepares a stable symlink for SWUpdate's raw
+# handler.
 
 set -e
 
@@ -13,27 +14,58 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"
 }
 
-resolve_partlabel() {
-    # Resolves /dev/disk/by-partlabel/<LABEL> to the real block device (e.g. /dev/nvme0n1p2)
-    # Falls back to blkid if needed.
-    label="$1"
-    bylabel="/dev/disk/by-partlabel/$label"
-
-    if [ -L "$bylabel" ]; then
-        real="$(readlink -f "$bylabel" || true)"
-        if [ -n "$real" ] && [ -b "$real" ]; then
-            echo "$real"
+# A board can carry APP/APP_b on more than one disk (an SD card and an NVMe,
+# each provisioned). The labels name a role, not a disk, so the slot to write
+# is the target label on the disk the running rootfs came from: that is the
+# disk the initrd booted, and the one the next boot will read.
+#
+# Prints the sysfs directory of the partition / is mounted from, following a
+# device-mapper root down to its single backing partition. Prints nothing
+# when / is not on a partition (an overlay or tmpfs root, or a dm device with
+# several backing devices). Uses only /proc and /sys, no util-linux.
+booted_root_part() {
+    majmin=""
+    while read -r _ _ mm _ mnt _; do
+        if [ "$mnt" = "/" ]; then majmin="$mm"; fi
+    done < /proc/self/mountinfo
+    [ -n "$majmin" ] || return 0
+    dir=$(cd "/sys/dev/block/$majmin" 2>/dev/null && pwd -P) || return 0
+    for _ in 1 2 3 4; do
+        if [ -f "$dir/partition" ]; then
+            echo "$dir"
             return 0
         fi
-    fi
+        set -- "$dir"/slaves/*
+        { [ $# -eq 1 ] && [ -e "$1" ]; } || return 0
+        dir=$(cd "$1" && pwd -P) || return 0
+    done
+}
 
-    # Fallback via blkid
-    real="$(blkid -l -t "PARTLABEL=$label" -o device 2>/dev/null | head -n1 || true)"
-    if [ -n "$real" ] && [ -b "$real" ]; then
-        echo "$real"
-        return 0
+# Prints /dev/<name> for each partition whose GPT name is $1, on the disk $2
+# (a /sys/block name), or on every disk when $2 is empty.
+parts_labelled() {
+    label="$1"
+    if [ -n "$2" ]; then
+        set -- /sys/block/"$2"/*/partition
+    else
+        set -- /sys/class/block/*/partition
     fi
-    return 1
+    for p in "$@"; do
+        [ -f "$p" ] || continue
+        d="${p%/partition}"
+        while IFS='=' read -r key val; do
+            if [ "$key" = "PARTNAME" ] && [ "$val" = "$label" ]; then
+                echo "/dev/${d##*/}"
+            fi
+        done < "$d/uevent"
+    done
+}
+
+# Prints $1 when it holds exactly one word.
+only_one() {
+    # shellcheck disable=SC2086 # one device per word
+    set -- $1
+    if [ $# -eq 1 ]; then echo "$1"; fi
 }
 
 is_mounted() {
@@ -96,10 +128,26 @@ esac
 log "Inactive slot: $INACTIVE_SLOT"
 log "Target partition label: $TARGET_PARTLABEL"
 
-# Resolve target device
-TARGET_DEV="$(resolve_partlabel "$TARGET_PARTLABEL" || true)"
-if [ -z "$TARGET_DEV" ]; then
-    log "ERROR: Could not resolve device for PARTLABEL='$TARGET_PARTLABEL'"
+# Resolve target device on the disk the running rootfs lives on. When that
+# disk cannot be determined, the label alone is used only if exactly one disk
+# carries it; two would be a guess between separate installs.
+ROOT_PART="$(booted_root_part)"
+if [ -n "$ROOT_PART" ]; then
+    BOOT_DISK="${ROOT_PART%/*}"
+    BOOT_DISK="${BOOT_DISK##*/}"
+    ACTIVE_DEV="/dev/${ROOT_PART##*/}"
+    log "Running rootfs: $ACTIVE_DEV on disk $BOOT_DISK"
+    CANDIDATES="$(parts_labelled "$TARGET_PARTLABEL" "$BOOT_DISK")"
+    WHERE="on the booted disk $BOOT_DISK"
+else
+    log "WARNING: cannot tell which disk / is mounted from; resolving $TARGET_PARTLABEL by label"
+    CANDIDATES="$(parts_labelled "$TARGET_PARTLABEL" "")"
+    ACTIVE_DEV="$(only_one "$(parts_labelled "$ACTIVE_PARTLABEL" "")")"
+    WHERE="on any disk"
+fi
+TARGET_DEV="$(only_one "$CANDIDATES")"
+if [ -z "$TARGET_DEV" ] || [ ! -b "$TARGET_DEV" ]; then
+    log "ERROR: need exactly one partition labelled '$TARGET_PARTLABEL' $WHERE, found: ${CANDIDATES:-none}"
     # Show what's available to aid debugging
     ls -l /dev/disk/by-partlabel/ 2>&1 | tee -a "$LOGFILE" || true
     blkid 2>&1 | tee -a "$LOGFILE" || true
@@ -107,7 +155,6 @@ if [ -z "$TARGET_DEV" ]; then
 fi
 
 # Extra sanity: ensure active partition is not selected
-ACTIVE_DEV="$(resolve_partlabel "$ACTIVE_PARTLABEL" || true)"
 if [ -n "$ACTIVE_DEV" ] && [ "$ACTIVE_DEV" = "$TARGET_DEV" ]; then
     log "ERROR: Resolved target device matches active device ($ACTIVE_DEV)"
     exit 1
