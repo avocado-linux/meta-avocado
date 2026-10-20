@@ -54,6 +54,12 @@ KVM_PACKAGES = " \
   dtc \
   kernel-module-avocado-shm \
 "
+# kernel-module-avocado-shm resolves to the kernel's PACKAGES_DYNAMIC
+# (kernel-module-*) when bitbake builds the task graph, so naming it above
+# never builds the avocado-shm recipe: the alt-kernel mcs got the module (they
+# name the recipe in AVOCADO_MULTIKERNEL_MC_RECIPES) and the default kernel did
+# not. Name the recipe for the default mc too.
+do_package_write_rpm[depends] += "avocado-shm:do_package_write_rpm"
 
 # Encrypted-/var + fTPM userspace, published to the feed for the machines that
 # declare the capability (avocado-jetson.inc), so a runtime can opt in with
