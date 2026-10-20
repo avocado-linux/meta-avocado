@@ -19,6 +19,9 @@
 # resolve to this specific kernel's packages.
 
 PACKAGES:append = " packagegroup-avocado-rootfs-modules packagegroup-avocado-initramfs-modules"
+
+# zram's default compressor, when this kernel builds it as a module.
+inherit avocado-zram-compressor
 PKG:packagegroup-avocado-rootfs-modules = "packagegroup-avocado-rootfs-modules-${KERNEL_VERSION}"
 PKG:packagegroup-avocado-initramfs-modules = "packagegroup-avocado-initramfs-modules-${KERNEL_VERSION}"
 ALLOW_EMPTY:packagegroup-avocado-rootfs-modules = "1"
