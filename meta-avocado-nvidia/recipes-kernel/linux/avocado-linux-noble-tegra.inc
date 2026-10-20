@@ -33,11 +33,3 @@ SCMVERSION = "n"
 do_kernel_configme:append() {
     : > ${S}/.scmversion
 }
-
-# zram's compressor. The distro leaves the algorithm to the kernel default
-# (zram-generator.conf, #434), which here is lzo-rle -- and on 6.8, unlike
-# 6.12+, zram reaches it through the crypto API as a module (CRYPTO_LZO=m).
-# Without the module in the rootfs the zram swap setup cannot get a
-# compressor, and this kernel oopses in zcomp_stream_get() under mkswap
-# instead of failing the unit: every L4T boot panicked a few seconds in.
-RDEPENDS:packagegroup-avocado-rootfs-modules:append = " kernel-module-lzo-rle-${KERNEL_VERSION}"
