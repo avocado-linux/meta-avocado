@@ -22,3 +22,12 @@ RDEPENDS:${PN}:remove = "nvidia-kernel-oot-base"
 # packagegroup-avocado-rootfs.bb deliberately does not expand that variable
 # (see above), so it never reached an avocado-built rootfs. Pull it in here.
 RDEPENDS:${PN}:append:tegra = " systemd-jetson-masks"
+
+# nvbootctrl is the slot tool for every Jetson OS update: the stone manifest's
+# slot_detection, activate and rollback actions all call it. Until now it came
+# only from the board's BSP extension (tegra-redundant-boot-base), but rollback
+# runs at boot before extensions merge, so it failed with "Failed to run slot
+# action command: No such file or directory" and left the board on the failed
+# slot. It belongs in the base rootfs, like libubootenv-bin for U-Boot-env
+# boards (packagegroup-avocado-rootfs.bb).
+RDEPENDS:${PN}:append:tegra = " tegra-redundant-boot-base"
