@@ -134,3 +134,6 @@ jobs:
       - name: Tegra A/B swupdate target selection
         shell: bash
         run: bash meta-avocado-nvidia/recipes-core/swupdate/tests/test-rootfs-ab-target.sh
+      - name: Tegra OTA target partition resolution
+        shell: bash
+        run: bash meta-avocado-nvidia/stone/tegra/tests/test-ota-target-resolve.sh
