@@ -28,6 +28,7 @@
 #include <linux/of.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
+#include <linux/version.h>
 
 #define DRV_NAME "avocado-shm"
 
@@ -119,7 +120,13 @@ MODULE_DEVICE_TABLE(of, shm_of_match);
 
 static struct platform_driver shm_driver = {
 	.probe  = shm_probe,
+	/* .remove returns void from 6.11; before that the void form is .remove_new
+	 * (6.3-6.12), which the L4T 6.8 kernel needs. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
+	.remove_new = shm_remove,
+#else
 	.remove = shm_remove,
+#endif
 	.driver = {
 		.name = DRV_NAME,
 		.of_match_table = shm_of_match,
