@@ -13,4 +13,4 @@ header:
 local_conf_header:
   feature/kvm-host: |
     QEMU_TARGETS:pn-qemu = "aarch64"
-    PACKAGECONFIG:pn-qemu = "fdt kvm pie slirp seccomp"
+    PACKAGECONFIG:pn-qemu = "fdt kvm pie slirp seccomp vhost"
