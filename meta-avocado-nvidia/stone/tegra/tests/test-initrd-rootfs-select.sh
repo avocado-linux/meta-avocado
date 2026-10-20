@@ -7,14 +7,25 @@
 # NVMe: both carry APP, the SD controller is up ~2s before PCIe, and the initrd
 # mounted the SD rootfs under the NVMe kernel with nothing logged.
 #
-# This runs the real init script with its /proc, /sys and /dev/disk paths
-# pointed into a scratch tree and blkid/lsblk/mount/hexdump stubbed, then checks
-# which device it mounted on /sysroot.
+# The pin lives only in the boot.img provisioning repacks, so an OTA that writes
+# a build-hook boot.img drops it. Without a pin the init must take the rootfs on
+# the disk firmware booted from, which the BootCurrent entry names by its
+# controller.
+#
+# This runs the real init script with its /proc, /sys, efivars and /dev/disk
+# paths pointed into a scratch tree and blkid/lsblk/mount stubbed, then checks
+# which device it mounted on /sysroot. AVOCADO_TEGRA_INIT runs it against
+# another copy of the script; INIT_SH picks the shell (e.g. "busybox sh").
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="$SCRIPT_DIR/../../../recipes-core/avocado-tegra-init/files/avocado-tegra-init"
+TARGET="${AVOCADO_TEGRA_INIT:-$SCRIPT_DIR/../../../recipes-core/avocado-tegra-init/files/avocado-tegra-init}"
+INIT_SH="${INIT_SH:-sh}"
+REAL_HEXDUMP="$(command -v hexdump)" || {
+  echo "hexdump not found" >&2
+  exit 1
+}
 failures=0
 
 pass() { printf '  ok   %s\n' "$1"; }
@@ -73,11 +84,17 @@ cat > "$work/bin/mount" <<'EOF'
 #!/bin/sh
 echo "$1 $2" >> "$MOUNT_LOG"
 EOF
-# Prints the BootChainOsCurrent pair the case set, as hexdump would.
+# Prints the BootChainOsCurrent pair the case set, as hexdump would; any other
+# efivar is a real file in the scratch tree and goes to the real hexdump.
 cat > "$work/bin/hexdump" <<'EOF'
 #!/bin/sh
-[ -n "${BOOTCHAIN:-}" ] || exit 1
-echo " $BOOTCHAIN"
+case "$*" in
+  *BootChainOsCurrent*)
+    [ -n "${BOOTCHAIN:-}" ] || exit 1
+    echo " $BOOTCHAIN"
+    ;;
+  *) exec "$REAL_HEXDUMP" "$@" ;;
+esac
 EOF
 cat > "$work/bin/sleep" <<'EOF'
 #!/bin/sh
@@ -89,24 +106,68 @@ chmod +x "$work/bin/"*
 sed -e "s,/proc/cmdline,$work/root/cmdline,g" \
   -e "s,/dev/disk/by-partuuid/,$work/root/by-partuuid/,g" \
   -e "s,/sys/block,$work/root/sys/block,g" \
+  -e "s,/sys/class/block,$work/root/sys/class/block,g" \
+  -e "s,/sys/firmware/efi/efivars,$work/root/efivars,g" \
   "$TARGET" > "$work/init"
 
+# Controllers as the platform devices of an Orin: NVMe behind the PCIe
+# controller at 0x14160000, the SD card at 0x3400000, USB disks at 0x3610000.
+controller_of() {
+  case "$1" in
+    nvme*) echo 14160000.pcie ;;
+    mmcblk*) echo 3400000.mmc ;;
+    *) echo 3610000.usb ;;
+  esac
+}
+
+# <hex> as 8 little-endian bytes, printf-escaped.
+le64() {
+  local h i out=""
+  h=$(printf '%016x' "$((0x$1))")
+  for i in 14 12 10 8 6 4 2 0; do out="$out\\x${h:$i:2}"; done
+  printf '%s' "$out"
+}
+
+# efivars BootCurrent=0001 and Boot0001, a disk entry shaped like the Jetson's:
+# VenHw(...)/MemoryMapped(11,<base>,<base>+0x1ffff)/End.
+write_boot_entry() {
+  local g=8be4df61-93ca-11d2-aa0d-00e098032b8c
+  mkdir -p "$work/root/efivars"
+  printf '\x07\x00\x00\x00\x01\x00' > "$work/root/efivars/BootCurrent-$g"
+  printf '%b' "\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x30\\x00N\\x00V\\x00\\x00\\x00" \
+    "\\x01\\x04\\x14\\x00\\x2c\\x43\\x5a\\x1e\\x66\\x04\\x31\\x4d\\xb0\\x09\\xd4\\xd9\\x23\\x92\\x71\\xd3" \
+    "\\x01\\x03\\x18\\x00\\x0b\\x00\\x00\\x00$(le64 "$1")$(le64 "$(printf '%x' $((0x$1 + 0x1ffff)))")" \
+    "\\x7f\\xff\\x04\\x00" > "$work/root/efivars/Boot0001-$g"
+}
+
 # scenario <cmdline> <symlinks: uuid=dev,...> ; table on stdin
+# BOOT_CTRL=<hex base> adds a BootCurrent entry naming that controller.
 # Sets rc, out, rootfs (device mounted on /sysroot, empty if none).
 scenario() {
   rm -rf "$work/root"
-  mkdir -p "$work/root/by-partuuid" "$work/root/sys/block" "$work/root/dev"
+  mkdir -p "$work/root/by-partuuid" "$work/root/sys/block" "$work/root/sys/class/block" "$work/root/dev"
   echo "$1" > "$work/root/cmdline"
   cat > "$work/table"
-  while read -r dev _; do : > "$work/root/dev/$dev"; done < "$work/table"
+  local dev disk part
+  while read -r dev _; do
+    : > "$work/root/dev/$dev"
+    case "$dev" in
+      nvme* | mmcblk*) disk=${dev%p[0-9]*} ;;
+      *) disk=${dev%%[0-9]*} ;;
+    esac
+    part="$work/root/devices/platform/bus@0/$(controller_of "$dev")/x/$disk/$dev"
+    mkdir -p "$part"
+    ln -s "$part" "$work/root/sys/class/block/$dev"
+  done < "$work/table"
   sed -i "s,^,$work/root/dev/," "$work/table"
+  [ -z "${BOOT_CTRL:-}" ] || write_boot_entry "$BOOT_CTRL"
   local link
   for link in ${2//,/ }; do
     ln -s "$work/root/dev/${link#*=}" "$work/root/by-partuuid/${link%%=*}"
   done
   : > "$work/mounts"
   out=$(PATH="$work/bin:$PATH" BLKID_TABLE="$work/table" MOUNT_LOG="$work/mounts" \
-    BOOTCHAIN="${BOOTCHAIN:-}" sh "$work/init" 2>&1)
+    BOOTCHAIN="${BOOTCHAIN:-}" REAL_HEXDUMP="$REAL_HEXDUMP" $INIT_SH "$work/init" 2>&1)
   rc=$?
   rootfs=$(awk '$2=="/sysroot"{print $1}' "$work/mounts")
   rootfs=${rootfs##*/}
@@ -165,12 +226,79 @@ else
   fail "single-disk fallback: mounted '${rootfs}' (rc=$rc)"
 fi
 
-# No pin on the command line (prebuilt boot.img): label discovery as before.
-scenario "" "" <<<"$TWO_DISKS"
-if [ "$rc" -eq 0 ] && [ "$rootfs" = "mmcblk0p1" ]; then
-  pass "without a pin, discovery by label is unchanged"
+# A pin still wins over the boot entry when both are present.
+BOOT_CTRL=3400000 scenario "$CMDLINE" "$pa=nvme0n1p1,$pb=nvme0n1p2" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "the pin wins over a boot entry naming another disk"
 else
-  fail "unpinned: mounted '${rootfs}' (rc=$rc)"
+  fail "pin vs boot entry: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# No pin (an OTA wrote a build-hook boot.img): the disk firmware booted wins
+# over the SD card enumerated first.
+BOOT_CTRL=14160000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "without a pin, the booted NVMe wins over the SD card"
+else
+  fail "unpinned, booted NVMe: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -3)"
+fi
+
+BOOT_CTRL=14160000 BOOTCHAIN="6 1" scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p2" ]; then
+  pass "without a pin, slot B comes from the booted NVMe"
+else
+  fail "unpinned, booted NVMe, slot B: mounted '${rootfs}' (rc=$rc)"
+fi
+
+BOOT_CTRL=3400000 scenario "" "" <<<"nvme0n1p1 APP $pa
+mmcblk0p1 APP $pa-sd"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "mmcblk0p1" ]; then
+  pass "without a pin, a booted SD card wins even when the NVMe is listed first"
+else
+  fail "unpinned, booted SD: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# The pin is on the command line but its partition is gone, and two disks
+# carry APP: the booted disk settles it instead of refusing.
+BOOT_CTRL=14160000 scenario "$CMDLINE" "" <<<"mmcblk0p1 APP x-sd
+nvme0n1p1 APP x-nvme"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ] && echo "$out" | grep -q "disk firmware booted from"; then
+  pass "an absent pin with two APP disks boots the booted one, with a warning"
+else
+  fail "absent pin, booted NVMe: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# The boot entry names a controller with no APP behind it: still ambiguous.
+BOOT_CTRL=3610000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "refusing to guess"; then
+  pass "a boot entry naming neither APP disk stops"
+else
+  fail "boot entry on another controller: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# Two APP disks behind the booted controller: the signal does not decide.
+BOOT_CTRL=3610000 scenario "" "" <<<"sda1 APP u1
+sdb1 APP u2"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "refusing to guess"; then
+  pass "two APP disks behind the booted controller stop"
+else
+  fail "two disks on the booted controller: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# No pin and no boot entry: two APP disks stop instead of taking the first.
+scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "refusing to guess"; then
+  pass "without a pin or a boot entry, two APP disks stop"
+else
+  fail "unpinned, no boot entry: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# No pin and no boot entry, one APP disk: it boots.
+scenario "" "" <<<"nvme0n1p1 APP $pa"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "without a pin or a boot entry, a single APP disk boots"
+else
+  fail "unpinned, single disk: mounted '${rootfs}' (rc=$rc)"
 fi
 
 echo

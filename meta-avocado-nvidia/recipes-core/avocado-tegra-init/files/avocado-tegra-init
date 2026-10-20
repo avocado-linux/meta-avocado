@@ -36,6 +36,65 @@ if [ "$foundslotsfx" != "yes" ]; then
     fi
 fi
 
+# The disk firmware booted, named by the controller behind the BootCurrent
+# entry. Jetson UEFI builds a disk's boot entry as
+# VenHw(...)/MemoryMapped(11,<base>,<end>)/..., and <base> is the address in
+# the Linux platform device name of that controller (14160000.pcie,
+# 3460000.mmc). L4TLauncher reads the kernel partitions only from the disk
+# whose ESP it was started from, so this is the disk the kernel came from.
+# Unlike the pin below it survives an OTA that writes a boot.img without the
+# pin. Prints nothing when the entry has no MemoryMapped node (an FV boot).
+EFIVARS=/sys/firmware/efi/efivars
+EFI_GLOBAL=8be4df61-93ca-11d2-aa0d-00e098032b8c
+efivar_bytes() {
+    hexdump -v -s 4 -e '1/1 "%02x "' "$EFIVARS/$1-$EFI_GLOBAL" 2>/dev/null || true
+}
+boot_controller() {
+    # shellcheck disable=SC2046 # one byte per word
+    set -- $(efivar_bytes BootCurrent)
+    [ $# -eq 2 ] || return 0
+    # shellcheck disable=SC2046
+    set -- $(efivar_bytes "Boot$(echo "$2$1" | tr 'a-f' 'A-F')")
+    # EFI_LOAD_OPTION: Attributes(4) FilePathListLength(2), then a
+    # NUL-terminated UCS-2 description, then the device path.
+    [ $# -gt 6 ] || return 0
+    shift 6
+    while [ $# -ge 2 ]; do
+        c="$1$2"
+        shift 2
+        [ "$c" != "0000" ] || break
+    done
+    # Device path nodes: Type(1) SubType(1) Length(2, little-endian).
+    while [ $# -ge 4 ]; do
+        len=$((0x$4$3))
+        { [ "$len" -ge 4 ] && [ "$len" -le $# ] && [ "$1" != "7f" ]; } || return 0
+        if [ "$1$2" = "0103" ] && [ "$len" -eq 24 ]; then
+            # MemoryMapped: MemoryType(4) StartingAddress(8) EndingAddress(8)
+            (shift 8 && printf '%x\n' "$((0x$8$7$6$5$4$3$2$1))")
+            return 0
+        fi
+        shift "$len"
+    done
+}
+boot_ctrl=$(boot_controller)
+
+# Prints the APP$slotsfx partition behind the booted controller, and nothing
+# unless exactly one is there.
+booted_app() {
+    hit=""
+    [ -n "$boot_ctrl" ] || return 0
+    for dev in $(blkid -t "PARTLABEL=APP$slotsfx" | cut -d: -f1); do
+        phys=$(cd "/sys/class/block/${dev##*/}" 2>/dev/null && pwd -P) || continue
+        case "$phys/" in
+            */"$boot_ctrl".*)
+                [ -z "$hit" ] || return 0
+                hit="$dev"
+                ;;
+        esac
+    done
+    echo "$hit"
+}
+
 # Preferred: the rootfs PARTUUID that provisioning pinned for the medium it
 # wrote, carried on the kernel command line. stone-provision-tegraflash.sh
 # passes both slots because one boot.img serves A_kernel and B_kernel alike.
@@ -90,9 +149,15 @@ if [ -n "$want_partuuid" ]; then
     #
     # Two or more is exactly the case this path exists for. The label names
     # a role, not a disk, so picking one would be guessing between separate
-    # installs; say so and stop.
+    # installs - unless one of them is on the disk firmware booted from.
+    # Otherwise say so and stop.
+    rootdev=$(booted_app)
     appcount=$(blkid -t "PARTLABEL=APP$slotsfx" | wc -l)
-    if [ "$appcount" = "1" ]; then
+    if [ -n "$rootdev" ]; then
+      echo "WARNING: PARTUUID=$want_partuuid is absent. Booting APP$slotsfx on the"
+      echo "         disk firmware booted from ($boot_ctrl): $rootdev"
+      echo "         Re-provision to restore the PARTUUID pin."
+    elif [ "$appcount" = "1" ]; then
       rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
       echo "WARNING: PARTUUID=$want_partuuid is absent, but exactly one disk"
       echo "         carries APP$slotsfx. Booting $rootdev by label."
@@ -108,24 +173,48 @@ if [ -n "$want_partuuid" ]; then
   fi
 fi
 
-# Path 2: locate APP$slotsfx by PARTLABEL. This is the fallback for boards
-# provisioned before the PARTUUID pin existed. Probe every block device first
-# since blkid's label cache may be stale right after a fresh flash.
+# Path 2: no pin on the command line. That is a board provisioned before the
+# pin existed, and also any board after an OTA has written a build-hook
+# boot.img, which carries no pin. Take APP$slotsfx on the disk firmware booted
+# from, and wait for it: PCIe enumerates about two seconds after the SD card.
+# Without that, one APP is unambiguous and boots; two or more stop, as the
+# pinned path does. Probe every block device first since blkid's label cache
+# may be stale right after a fresh flash.
 if [ -z "$rootdev" ]; then
-    message="Waiting for APP$slotsfx partition..."
-    echo -n "$message"
-    for count in $(seq 1 10); do
+    message="Waiting for APP$slotsfx partition${boot_ctrl:+ behind $boot_ctrl}..."
+    printf '%s' "$message"
+    for _ in $(seq 1 20); do
         for dev in $(lsblk -dnpo NAME); do
             blkid --probe "$dev" || true
         done
-        rootdev=$(blkid -l -t PARTLABEL=APP$slotsfx | cut -d: -f1)
-        if [ -n "$rootdev" ]; then
-            echo "[OK: $rootdev]"
+        rootdev=$(booted_app)
+        [ -z "$rootdev" ] || break
+        # With no booted controller to wait for, any APP ends the wait.
+        if [ -z "$boot_ctrl" ] && blkid -t "PARTLABEL=APP$slotsfx" >/dev/null; then
             break
         fi
-        echo -n "."
+        printf '%s' "."
         sleep 0.5
     done
+    appcount=$(blkid -t "PARTLABEL=APP$slotsfx" | wc -l)
+    if [ -n "$rootdev" ]; then
+        echo "[OK: $rootdev]"
+    elif [ "$appcount" = "1" ]; then
+        rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
+        echo "[OK: $rootdev]"
+        [ -z "$boot_ctrl" ] ||
+            echo "WARNING: $rootdev is the only APP$slotsfx, and it is not behind the booted controller $boot_ctrl"
+    elif [ "$appcount" -gt 1 ]; then
+        echo "[FAIL]"
+        echo "Error: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
+        echo "       (controller '${boot_ctrl:-none}') names none of them - refusing to guess."
+        echo "  cmdline: $(cat /proc/cmdline)"
+        blkid || true
+        lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
+        exit 1
+    else
+        echo "[FAIL]"
+    fi
 fi
 
 # Path 3: fall back to root= from /proc/cmdline (mirrors upstream
