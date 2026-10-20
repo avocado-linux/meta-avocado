@@ -33,3 +33,8 @@ SCMVERSION = "n"
 do_kernel_configme:append() {
     : > ${S}/.scmversion
 }
+
+# KVM on Jetson AGX Orin: guests under the 6.8 kernel failed pointer
+# authentication (6.8 loads a guest's PAuth keys lazily, on a trap). Upstream
+# loads them eagerly since 6.10; backported. Both L4T kernels (stock and RT).
+SRC_URI += " file://0001-KVM-arm64-Drop-trapping-of-PAuth-instructions-keys.patch"
