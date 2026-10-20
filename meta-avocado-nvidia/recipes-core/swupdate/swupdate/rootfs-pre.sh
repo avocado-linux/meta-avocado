@@ -129,8 +129,9 @@ log "Inactive slot: $INACTIVE_SLOT"
 log "Target partition label: $TARGET_PARTLABEL"
 
 # Resolve target device on the disk the running rootfs lives on. When that
-# disk cannot be determined, the label alone is used only if exactly one disk
-# carries it; two would be a guess between separate installs.
+# disk cannot be determined, the labels alone are used only if exactly one
+# partition carries the target label and exactly one carries the active one.
+# A second copy of either means a second install, and picking one is a guess.
 ROOT_PART="$(booted_root_part)"
 if [ -n "$ROOT_PART" ]; then
     BOOT_DISK="${ROOT_PART%/*}"
@@ -142,7 +143,12 @@ if [ -n "$ROOT_PART" ]; then
 else
     log "WARNING: cannot tell which disk / is mounted from; resolving $TARGET_PARTLABEL by label"
     CANDIDATES="$(parts_labelled "$TARGET_PARTLABEL" "")"
-    ACTIVE_DEV="$(only_one "$(parts_labelled "$ACTIVE_PARTLABEL" "")")"
+    ACTIVES="$(parts_labelled "$ACTIVE_PARTLABEL" "")"
+    ACTIVE_DEV="$(only_one "$ACTIVES")"
+    if [ -z "$ACTIVE_DEV" ]; then
+        log "ERROR: need exactly one partition labelled '$ACTIVE_PARTLABEL' when the booted disk is unknown, found: ${ACTIVES:-none}"
+        exit 1
+    fi
     WHERE="on any disk"
 fi
 TARGET_DEV="$(only_one "$CANDIDATES")"

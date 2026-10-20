@@ -11,8 +11,9 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"
 }
 
-# Same as rootfs-pre.sh: SWUpdate runs each script on its own, so the two
-# helpers are carried in both.
+# Same as rootfs-pre.sh: SWUpdate runs each script on its own, so the
+# helpers are carried in both, and test-rootfs-ab-target.sh fails if the
+# copies differ.
 #
 # Prints the sysfs directory of the partition / is mounted from, following a
 # device-mapper root down to its single backing partition, or nothing.
@@ -54,6 +55,13 @@ parts_labelled() {
     done
 }
 
+# Prints $1 when it holds exactly one word.
+only_one() {
+    # shellcheck disable=SC2086 # one device per word
+    set -- $1
+    if [ $# -eq 1 ]; then echo "$1"; fi
+}
+
 log "=== Tegra A/B Post-install Script ==="
 
 # 1) Load variables saved by preinstall
@@ -92,8 +100,9 @@ fi
 
 # Confirm the device is the target label on the disk the running rootfs lives
 # on (or, when that disk cannot be determined, the only partition carrying
-# the label) before switching the slot. Activating a slot written to another
-# disk would boot the old rootfs under a slot the bootloader thinks is new.
+# the label, with the active label also on exactly one partition) before
+# switching the slot. Activating a slot written to another disk would boot
+# the old rootfs under a slot the bootloader thinks is new.
 ROOT_PART="$(booted_root_part)"
 if [ -n "$ROOT_PART" ]; then
     BOOT_DISK="${ROOT_PART%/*}"
@@ -104,6 +113,12 @@ else
     log "WARNING: cannot tell which disk / is mounted from; checking $TEGRA_TARGET_PARTLABEL by label"
     EXPECTED="$(parts_labelled "$TEGRA_TARGET_PARTLABEL" "")"
     WHERE="on any disk"
+    ACTIVES="$(parts_labelled "${TEGRA_ACTIVE_PARTLABEL:-}" "")"
+    if [ -z "${TEGRA_ACTIVE_PARTLABEL:-}" ] || [ -z "$(only_one "$ACTIVES")" ]; then
+        log "ERROR: need exactly one partition labelled '${TEGRA_ACTIVE_PARTLABEL:-}' when the booted disk is unknown, found: ${ACTIVES:-none}"
+        log "       Not switching the boot slot."
+        exit 1
+    fi
 fi
 if [ "$EXPECTED" != "$TEGRA_TARGET_DEV" ]; then
     log "ERROR: preinstall wrote $TEGRA_TARGET_DEV, but the partition labelled"

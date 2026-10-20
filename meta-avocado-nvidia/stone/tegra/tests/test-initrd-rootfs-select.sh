@@ -432,6 +432,23 @@ else
   fail "root= names one: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
 fi
 
+# The same, typed in the layout XML's upper case: blkid and udev hold the
+# PARTUUID lower-cased, so the value has to be lowered before matching.
+scenario "root=PARTUUID=$PA" "" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "an upper-case root=PARTUUID= naming one APP disk settles it"
+else
+  fail "upper-case root= names one: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# No APP label anywhere: Path 3 takes root=PARTUUID=, in upper case too.
+scenario "root=PARTUUID=$PA" "" <<<"nvme0n1p1 ROOTFS $pa"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "with no APP label, an upper-case root=PARTUUID= is resolved"
+else
+  fail "Path 3 upper-case root=: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
 # root= that names neither APP disk, or both, still stops.
 scenario "root=PARTUUID=nowhere" "" <<<"$TWO_DISKS"
 if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "refusing to guess"; then

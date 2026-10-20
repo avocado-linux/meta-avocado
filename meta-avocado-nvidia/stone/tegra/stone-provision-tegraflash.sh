@@ -443,10 +443,12 @@ else
         exit 1
     fi
     echo "AVOCADO_PROVISION_KERNEL_IMAGE not set — using prebuilt boot.img from BSP"
-    echo "WARNING: the prebuilt boot.img names no rootfs PARTUUID. The initrd takes"
-    echo "         APP on the disk UEFI booted from (BootCurrent), or the only APP"
-    echo "         when the boot entry names no disk. With no boot signal and two"
-    echo "         or more provisioned disks it refuses to guess and stops."
+    echo "WARNING: the prebuilt boot.img names no rootfs PARTUUID. With a boot signal"
+    echo "         (BootCurrent) the initrd takes APP on the disk UEFI booted from."
+    echo "         With none, the first APP to appear boots, so an SD card that"
+    echo "         enumerates before the NVMe wins. Two or more APP disks are caught"
+    echo "         only if all are present at that moment; then a root= naming"
+    echo "         exactly one of them settles it, and otherwise the initrd stops."
 fi
 
 # Check if any NVIDIA device is in RCM mode (vendor 0955).

@@ -113,7 +113,11 @@ booted_app() {
 root_arg_app() {
     hit=""
     case "$mayberoot" in
-        UUID=*|PARTUUID=*|PARTLABEL=*|LABEL=*)
+        # Lowered for the same reason as want_lower: the layout XML is
+        # upper-case and blkid compares the lower-cased form.
+        PARTUUID=*)
+            named=$(blkid -t "PARTUUID=$(echo "${mayberoot#PARTUUID=}" | tr 'A-F' 'a-f')" | cut -d: -f1) ;;
+        UUID=*|PARTLABEL=*|LABEL=*)
             named=$(blkid -t "$mayberoot" | cut -d: -f1) ;;
         /dev/*)
             named="$mayberoot $(readlink -f "$mayberoot" 2>/dev/null || true)" ;;
@@ -282,7 +286,7 @@ if [ -z "$rootdev" ] && [ -n "$mayberoot" ]; then
     echo "[FAIL] BootChain/PARTLABEL detection failed; trying root=$mayberoot"
     case "$mayberoot" in
         UUID=*)      rootdev=$(blkid -t "UUID=${mayberoot#UUID=}" -l | awk -F: '{print $1}') ;;
-        PARTUUID=*)  rootdev=$(blkid -t "PARTUUID=${mayberoot#PARTUUID=}" -l | awk -F: '{print $1}') ;;
+        PARTUUID=*)  rootdev=$(blkid -t "PARTUUID=$(echo "${mayberoot#PARTUUID=}" | tr 'A-F' 'a-f')" -l | awk -F: '{print $1}') ;;
         PARTLABEL=*) rootdev=$(blkid -t "PARTLABEL=${mayberoot#PARTLABEL=}" -l | awk -F: '{print $1}') ;;
         LABEL=*)     rootdev=$(blkid -t "LABEL=${mayberoot#LABEL=}" -l | awk -F: '{print $1}') ;;
         /dev/*)      rootdev="$mayberoot" ;;
