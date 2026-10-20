@@ -46,19 +46,24 @@ fi
 # pin. Prints nothing when the entry has no MemoryMapped node (an FV boot).
 EFIVARS=/sys/firmware/efi/efivars
 EFI_GLOBAL=8be4df61-93ca-11d2-aa0d-00e098032b8c
+# The whole variable, one hex byte per word, starting with its 4-byte
+# attributes. efivarfs cannot seek, so hexdump -s fails there with "Illegal
+# seek"; read from offset 0 and let the caller shift the attributes off.
 efivar_bytes() {
-    hexdump -v -s 4 -e '1/1 "%02x "' "$EFIVARS/$1-$EFI_GLOBAL" 2>/dev/null || true
+    hexdump -v -e '1/1 "%02x "' "$EFIVARS/$1-$EFI_GLOBAL" 2>/dev/null || true
 }
 boot_controller() {
     # shellcheck disable=SC2046 # one byte per word
     set -- $(efivar_bytes BootCurrent)
-    [ $# -eq 2 ] || return 0
+    [ $# -eq 6 ] || return 0
+    shift 4
     # shellcheck disable=SC2046
     set -- $(efivar_bytes "Boot$(echo "$2$1" | tr 'a-f' 'A-F')")
-    # EFI_LOAD_OPTION: Attributes(4) FilePathListLength(2), then a
-    # NUL-terminated UCS-2 description, then the device path.
-    [ $# -gt 6 ] || return 0
-    shift 6
+    # efivar attributes(4), then EFI_LOAD_OPTION: Attributes(4)
+    # FilePathListLength(2), a NUL-terminated UCS-2 description, then the
+    # device path.
+    [ $# -gt 10 ] || return 0
+    shift 10
     while [ $# -ge 2 ]; do
         c="$1$2"
         shift 2
@@ -76,10 +81,18 @@ boot_controller() {
         shift "$len"
     done
 }
-boot_ctrl=$(boot_controller)
+# Read on first need, in this shell: a boot with the pin present never asks.
+# booted_app runs in $(...), so caching there would not survive the call.
+boot_ctrl=""
+boot_ctrl_read=""
+boot_ctrl_init() {
+    [ -z "$boot_ctrl_read" ] || return 0
+    boot_ctrl=$(boot_controller)
+    boot_ctrl_read=yes
+}
 
 # Prints the APP$slotsfx partition behind the booted controller, and nothing
-# unless exactly one is there.
+# unless exactly one is there. Call boot_ctrl_init first.
 booted_app() {
     hit=""
     [ -n "$boot_ctrl" ] || return 0
@@ -91,6 +104,28 @@ booted_app() {
                 hit="$dev"
                 ;;
         esac
+    done
+    echo "$hit"
+}
+
+# Prints the APP$slotsfx partition that root= on the command line names, and
+# nothing unless it names exactly one of them. Accepts the forms Path 3 does.
+root_arg_app() {
+    hit=""
+    case "$mayberoot" in
+        UUID=*|PARTUUID=*|PARTLABEL=*|LABEL=*)
+            named=$(blkid -t "$mayberoot" | cut -d: -f1) ;;
+        /dev/*)
+            named="$mayberoot $(readlink -f "$mayberoot" 2>/dev/null || true)" ;;
+        *) return 0 ;;
+    esac
+    for dev in $(blkid -t "PARTLABEL=APP$slotsfx" | cut -d: -f1); do
+        for n in $named; do
+            [ "$n" = "$dev" ] || continue
+            [ -z "$hit" ] || return 0
+            hit="$dev"
+            break
+        done
     done
     echo "$hit"
 }
@@ -149,8 +184,10 @@ if [ -n "$want_partuuid" ]; then
     #
     # Two or more is exactly the case this path exists for. The label names
     # a role, not a disk, so picking one would be guessing between separate
-    # installs - unless one of them is on the disk firmware booted from.
-    # Otherwise say so and stop.
+    # installs - unless one of them is on the disk firmware booted from, or
+    # root= on the command line names exactly one of them. Otherwise say so
+    # and stop.
+    boot_ctrl_init
     rootdev=$(booted_app)
     appcount=$(blkid -t "PARTLABEL=APP$slotsfx" | wc -l)
     if [ -n "$rootdev" ]; then
@@ -163,12 +200,19 @@ if [ -n "$want_partuuid" ]; then
       echo "         carries APP$slotsfx. Booting $rootdev by label."
       echo "         Re-provision to restore the PARTUUID pin."
     else
-      echo "Error: rootfs PARTUUID=$want_partuuid (slot '${slotsfx:-a}') never appeared,"
-      echo "       and $appcount disks carry PARTLABEL=APP$slotsfx - refusing to guess."
-      echo "  cmdline: $(cat /proc/cmdline)"
-      blkid || true
-      lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
-      exit 1
+      rootdev=$(root_arg_app)
+      if [ -n "$rootdev" ]; then
+        echo "WARNING: PARTUUID=$want_partuuid is absent and $appcount disks carry"
+        echo "         APP$slotsfx. Booting $rootdev, the one root=$mayberoot names."
+        echo "         Re-provision to restore the PARTUUID pin."
+      else
+        echo "Error: rootfs PARTUUID=$want_partuuid (slot '${slotsfx:-a}') never appeared,"
+        echo "       and $appcount disks carry PARTLABEL=APP$slotsfx - refusing to guess."
+        echo "  cmdline: $(cat /proc/cmdline)"
+        blkid || true
+        lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
+        exit 1
+      fi
     fi
   fi
 fi
@@ -177,10 +221,16 @@ fi
 # pin existed, and also any board after an OTA has written a build-hook
 # boot.img, which carries no pin. Take APP$slotsfx on the disk firmware booted
 # from, and wait for it: PCIe enumerates about two seconds after the SD card.
-# Without that, one APP is unambiguous and boots; two or more stop, as the
-# pinned path does. Probe every block device first since blkid's label cache
-# may be stale right after a fresh flash.
+#
+# With no boot signal (an FV boot, or no efivars) there is nothing to wait
+# for, so the first APP to appear ends the wait and, if it is alone at that
+# moment, boots. That keeps the old race: an SD card that enumerates before
+# the NVMe wins. Two or more APP disks are only caught when they are all
+# present when the wait ends; then root= on the command line may name one,
+# and otherwise this stops, as the pinned path does. Probe every block device
+# first since blkid's label cache may be stale right after a fresh flash.
 if [ -z "$rootdev" ]; then
+    boot_ctrl_init
     message="Waiting for APP$slotsfx partition${boot_ctrl:+ behind $boot_ctrl}..."
     printf '%s' "$message"
     for _ in $(seq 1 20); do
@@ -189,7 +239,8 @@ if [ -z "$rootdev" ]; then
         done
         rootdev=$(booted_app)
         [ -z "$rootdev" ] || break
-        # With no booted controller to wait for, any APP ends the wait.
+        # No boot signal: the first APP seen ends the wait, whether or not
+        # a second disk carrying APP is still enumerating.
         if [ -z "$boot_ctrl" ] && blkid -t "PARTLABEL=APP$slotsfx" >/dev/null; then
             break
         fi
@@ -205,13 +256,21 @@ if [ -z "$rootdev" ]; then
         [ -z "$boot_ctrl" ] ||
             echo "WARNING: $rootdev is the only APP$slotsfx, and it is not behind the booted controller $boot_ctrl"
     elif [ "$appcount" -gt 1 ]; then
-        echo "[FAIL]"
-        echo "Error: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
-        echo "       (controller '${boot_ctrl:-none}') names none of them - refusing to guess."
-        echo "  cmdline: $(cat /proc/cmdline)"
-        blkid || true
-        lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
-        exit 1
+        rootdev=$(root_arg_app)
+        if [ -n "$rootdev" ]; then
+            echo "[OK: $rootdev]"
+            echo "WARNING: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
+            echo "         (controller '${boot_ctrl:-none}') names none of them. Booting"
+            echo "         $rootdev, the one root=$mayberoot names."
+        else
+            echo "[FAIL]"
+            echo "Error: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
+            echo "       (controller '${boot_ctrl:-none}') names none of them - refusing to guess."
+            echo "  cmdline: $(cat /proc/cmdline)"
+            blkid || true
+            lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
+            exit 1
+        fi
     else
         echo "[FAIL]"
     fi

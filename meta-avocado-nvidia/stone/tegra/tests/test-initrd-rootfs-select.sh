@@ -51,8 +51,10 @@ pb=$(echo "$PB" | tr 'A-F' 'a-f')
 
 mkdir -p "$work/bin"
 
-# blkid over a table of "<dev> <PARTLABEL> <PARTUUID>" lines, in the order the
-# kernel enumerated them.
+# blkid over a table of "<dev> <PARTLABEL> <PARTUUID> [<after>]" lines, in the
+# order the kernel enumerated them. A row with <after> stays invisible until
+# the init has slept that many times, which is how a disk that enumerates late
+# (PCIe after SD) is modelled.
 cat > "$work/bin/blkid" <<'EOF'
 #!/bin/sh
 [ "${1:-}" = "--probe" ] && exit 0
@@ -64,11 +66,15 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+ticks=$(wc -l < "$TICKS")
 found=1
-while read -r dev label uuid; do
+while read -r dev label uuid after; do
+  [ "${after:-0}" -le "$ticks" ] || continue
   case "$key" in
+    "") ;;
     PARTLABEL) [ "$label" = "$val" ] || continue ;;
     PARTUUID) [ "$uuid" = "$val" ] || continue ;;
+    *) continue ;;
   esac
   echo "$dev: PARTLABEL=\"$label\" PARTUUID=\"$uuid\""
   found=0
@@ -85,9 +91,19 @@ cat > "$work/bin/mount" <<'EOF'
 echo "$1 $2" >> "$MOUNT_LOG"
 EOF
 # Prints the BootChainOsCurrent pair the case set, as hexdump would; any other
-# efivar is a real file in the scratch tree and goes to the real hexdump.
+# efivar is a real file in the scratch tree and goes to the real hexdump. Like
+# efivarfs, it refuses to seek: hexdump -s there fails with "Illegal seek".
 cat > "$work/bin/hexdump" <<'EOF'
 #!/bin/sh
+echo "$*" >> "$HEXDUMP_LOG"
+for a in "$@"; do
+  case "$a" in
+    -s | -s*)
+      echo "hexdump: $(eval echo "\${$#}"): Illegal seek" >&2
+      exit 1
+      ;;
+  esac
+done
 case "$*" in
   *BootChainOsCurrent*)
     [ -n "${BOOTCHAIN:-}" ] || exit 1
@@ -96,9 +112,10 @@ case "$*" in
   *) exec "$REAL_HEXDUMP" "$@" ;;
 esac
 EOF
+# Each sleep is one tick of the wait loops; blkid reads the count.
 cat > "$work/bin/sleep" <<'EOF'
 #!/bin/sh
-exit 0
+echo >> "$TICKS"
 EOF
 chmod +x "$work/bin/"*
 
@@ -112,11 +129,12 @@ sed -e "s,/proc/cmdline,$work/root/cmdline,g" \
 
 # Controllers as the platform devices of an Orin: NVMe behind the PCIe
 # controller at 0x14160000, the SD card at 0x3400000, USB disks at 0x3610000.
+# CTRL_NVME, CTRL_SD and CTRL_USB override them.
 controller_of() {
   case "$1" in
-    nvme*) echo 14160000.pcie ;;
-    mmcblk*) echo 3400000.mmc ;;
-    *) echo 3610000.usb ;;
+    nvme*) echo "${CTRL_NVME:-14160000.pcie}" ;;
+    mmcblk*) echo "${CTRL_SD:-3400000.mmc}" ;;
+    *) echo "${CTRL_USB:-3610000.usb}" ;;
   esac
 }
 
@@ -128,21 +146,39 @@ le64() {
   printf '%s' "$out"
 }
 
-# efivars BootCurrent=0001 and Boot0001, a disk entry shaped like the Jetson's:
-# VenHw(...)/MemoryMapped(11,<base>,<base>+0x1ffff)/End.
+# efivars BootCurrent=<BOOT_NUM> and Boot<BOOT_NUM>, a disk entry shaped like
+# the Jetson's: VenHw(...)/MemoryMapped(11,<base>,<base>+0x1ffff)/End.
+# BOOT_KIND picks a malformed or signal-less variant:
+#   mm       the disk entry above (default)
+#   nomm     VenHw/FvFile/End, as an FV boot has: no MemoryMapped node
+#   optdata  VenHw/End, then OptionalData that happens to hold a MemoryMapped
+#            node naming <base>; nothing past End is a device path
+#   truncmm  VenHw, then a MemoryMapped node cut off after its start address
+#   short    an entry shorter than the EFI_LOAD_OPTION header
 write_boot_entry() {
-  local g=8be4df61-93ca-11d2-aa0d-00e098032b8c
+  local g=8be4df61-93ca-11d2-aa0d-00e098032b8c num="${BOOT_NUM:-0001}"
+  local head venhw mm end
   mkdir -p "$work/root/efivars"
-  printf '\x07\x00\x00\x00\x01\x00' > "$work/root/efivars/BootCurrent-$g"
-  printf '%b' "\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x30\\x00N\\x00V\\x00\\x00\\x00" \
-    "\\x01\\x04\\x14\\x00\\x2c\\x43\\x5a\\x1e\\x66\\x04\\x31\\x4d\\xb0\\x09\\xd4\\xd9\\x23\\x92\\x71\\xd3" \
-    "\\x01\\x03\\x18\\x00\\x0b\\x00\\x00\\x00$(le64 "$1")$(le64 "$(printf '%x' $((0x$1 + 0x1ffff)))")" \
-    "\\x7f\\xff\\x04\\x00" > "$work/root/efivars/Boot0001-$g"
+  printf '%b' "\\x07\\x00\\x00\\x00\\x${num:2:2}\\x${num:0:2}" > "$work/root/efivars/BootCurrent-$g"
+  head="\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x30\\x00N\\x00V\\x00\\x00\\x00"
+  venhw="\\x01\\x04\\x14\\x00\\x2c\\x43\\x5a\\x1e\\x66\\x04\\x31\\x4d\\xb0\\x09\\xd4\\xd9\\x23\\x92\\x71\\xd3"
+  mm="\\x01\\x03\\x18\\x00\\x0b\\x00\\x00\\x00$(le64 "$1")$(le64 "$(printf '%x' $((0x$1 + 0x1ffff)))")"
+  end="\\x7f\\xff\\x04\\x00"
+  local body
+  case "${BOOT_KIND:-mm}" in
+    mm) body="$head$venhw$mm$end" ;;
+    nomm) body="$head$venhw\\x04\\x06\\x14\\x00\\x2c\\x43\\x5a\\x1e\\x66\\x04\\x31\\x4d\\xb0\\x09\\xd4\\xd9\\x23\\x92\\x71\\xd3$end" ;;
+    optdata) body="$head$venhw$end$mm$end" ;;
+    truncmm) body="$head$venhw\\x01\\x03\\x18\\x00\\x0b\\x00\\x00\\x00$(le64 "$1")" ;;
+    short) body="\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00" ;;
+  esac
+  printf '%b' "$body" > "$work/root/efivars/Boot$num-$g"
 }
 
 # scenario <cmdline> <symlinks: uuid=dev,...> ; table on stdin
 # BOOT_CTRL=<hex base> adds a BootCurrent entry naming that controller.
-# Sets rc, out, rootfs (device mounted on /sysroot, empty if none).
+# Sets rc, out, rootfs (device mounted on /sysroot, empty if none), and
+# leaves every hexdump call in $work/hexdump.log.
 scenario() {
   rm -rf "$work/root"
   mkdir -p "$work/root/by-partuuid" "$work/root/sys/block" "$work/root/sys/class/block" "$work/root/dev"
@@ -166,7 +202,10 @@ scenario() {
     ln -s "$work/root/dev/${link#*=}" "$work/root/by-partuuid/${link%%=*}"
   done
   : > "$work/mounts"
+  : > "$work/ticks"
+  : > "$work/hexdump.log"
   out=$(PATH="$work/bin:$PATH" BLKID_TABLE="$work/table" MOUNT_LOG="$work/mounts" \
+    TICKS="$work/ticks" HEXDUMP_LOG="$work/hexdump.log" \
     BOOTCHAIN="${BOOTCHAIN:-}" REAL_HEXDUMP="$REAL_HEXDUMP" $INIT_SH "$work/init" 2>&1)
   rc=$?
   rootfs=$(awk '$2=="/sysroot"{print $1}' "$work/mounts")
@@ -299,6 +338,122 @@ if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
   pass "without a pin or a boot entry, a single APP disk boots"
 else
   fail "unpinned, single disk: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# A pin that resolves never reads the boot entry.
+BOOT_CTRL=3400000 scenario "$CMDLINE" "$pa=nvme0n1p1,$pb=nvme0n1p2" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ] && ! grep -q -E 'BootCurrent-|Boot[0-9A-F]{4}-' "$work/hexdump.log"; then
+  pass "a resolved pin reads no BootCurrent or Boot#### variable"
+else
+  fail "pinned success read the boot entry: $(grep -E 'BootCurrent-|Boot[0-9A-F]{4}-' "$work/hexdump.log" | head -2)"
+fi
+
+# BootCurrent 0x000A names Boot000A: efivarfs names are upper-case hex.
+BOOT_NUM=000A BOOT_CTRL=14160000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "a BootCurrent with a hex letter finds its upper-case Boot#### entry"
+else
+  fail "BootCurrent 0x000A: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# Unpinned: the booted NVMe enumerates three ticks after the SD card. The init
+# must wait for it rather than settle on the SD card it sees first.
+BOOT_CTRL=14160000 scenario "" "" <<<"mmcblk0p1 APP $pa-sd
+nvme0n1p1 APP $pa 3"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ] && ! echo "$out" | grep -q -e "is absent" -e "not behind"; then
+  pass "without a pin, the init waits for a booted NVMe that enumerates late"
+else
+  fail "unpinned late NVMe: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# Pinned: the pinned partition enumerates three ticks after an SD card APP.
+scenario "$CMDLINE" "" <<<"mmcblk0p1 APP x-sd
+nvme0n1p1 APP $pa 3"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ] && ! echo "$out" | grep -q -e "is absent" -e "not behind"; then
+  pass "the init waits for a pinned partition that enumerates late"
+else
+  fail "pinned late NVMe: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# The only APP is on a disk the boot entry does not name: boot it, but say so.
+BOOT_CTRL=14160000 scenario "" "" <<<"mmcblk0p1 APP $pa-sd"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "mmcblk0p1" ] &&
+  echo "$out" | grep -q "not behind the booted controller 14160000"; then
+  pass "a single APP off the booted controller boots with a warning"
+else
+  fail "single APP off controller: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# The controller match is anchored: 14160000 must not match 114160000.mmc.
+CTRL_SD=114160000.mmc BOOT_CTRL=14160000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "the booted controller matches a whole platform device name only"
+else
+  fail "anchoring: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# An FV boot entry has no MemoryMapped node: no signal, so two APPs stop.
+BOOT_KIND=nomm BOOT_CTRL=14160000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "controller 'none'"; then
+  pass "a boot entry with no MemoryMapped node gives no signal"
+else
+  fail "no MemoryMapped node: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# A MemoryMapped pattern after the End node is OptionalData, not a device path.
+BOOT_KIND=optdata BOOT_CTRL=14160000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "controller 'none'"; then
+  pass "bytes past the device path End node are not read as a node"
+else
+  fail "OptionalData read as a node: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# A MemoryMapped node cut short by the end of the variable is not trusted.
+BOOT_KIND=truncmm BOOT_CTRL=14160000 scenario "" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "controller 'none'"; then
+  pass "a truncated MemoryMapped node gives no signal"
+else
+  fail "truncated MemoryMapped node: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# A Boot#### shorter than its own header must not take the init down.
+BOOT_KIND=short BOOT_CTRL=14160000 scenario "" "" <<<"nvme0n1p1 APP $pa"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ]; then
+  pass "a truncated boot entry falls back to the label rule"
+else
+  fail "short boot entry: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# No boot signal, two APP disks, and root= names one of them: take it.
+scenario "root=PARTUUID=$pa" "" <<<"$TWO_DISKS"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ] && echo "$out" | grep -q "the one root=PARTUUID=$pa names"; then
+  pass "without a pin or a boot entry, root= naming one APP disk settles it"
+else
+  fail "root= names one: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
+fi
+
+# root= that names neither APP disk, or both, still stops.
+scenario "root=PARTUUID=nowhere" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "refusing to guess"; then
+  pass "root= naming neither APP disk stops"
+else
+  fail "root= names neither: mounted '${rootfs}' (rc=$rc)"
+fi
+
+scenario "root=PARTLABEL=APP" "" <<<"$TWO_DISKS"
+if [ "$rc" -ne 0 ] && [ -z "$rootfs" ] && echo "$out" | grep -q "refusing to guess"; then
+  pass "root= naming both APP disks stops"
+else
+  fail "root= names both: mounted '${rootfs}' (rc=$rc)"
+fi
+
+# The pin is absent, two disks carry APP, and root= names one of them.
+scenario "$CMDLINE root=PARTUUID=x-nvme" "" <<<"mmcblk0p1 APP x-sd
+nvme0n1p1 APP x-nvme"
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "nvme0n1p1" ] && echo "$out" | grep -q "WARNING: PARTUUID=$PA is absent and 2"; then
+  pass "an absent pin with two APP disks boots the one root= names, with a warning"
+else
+  fail "absent pin, root= names one: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"
 fi
 
 echo
