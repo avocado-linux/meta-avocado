@@ -10,7 +10,7 @@ When multiple CI jobs run in parallel on the same build machine, they compete fo
 
 The `mirrors.yml` overlay configuration:
 
-1. **Isolates builds**: Each build uses its own `DL_DIR` and `SSTATE_DIR` in `${TMPDIR}`
+1. **Isolates builds**: Each build uses its own `DL_DIR` and `SSTATE_DIR` under its build directory (`${TOPDIR}/tmp`), shared by all of that build's multiconfigs
 2. **Leverages shared cache**: Reads from shared mirror locations populated by regular builds
 3. **Prevents conflicts**: No shared write access between parallel builds
 

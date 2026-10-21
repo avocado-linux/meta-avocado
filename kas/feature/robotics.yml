@@ -3,10 +3,21 @@ header:
   includes:
   # gtsam and the Boost 1.87-compatible websocketpp only exist in meta-ros,
   # so the layer comes from ros.yml rather than a second pin of the same repo
-  # here. This fragment adds only the feature-group token on top.
+  # here. This fragment names what the add-on carries.
   - repo: meta-avocado
     file: kas/feature/ros.yml
 
 local_conf_header:
   feature/robotics: |
-    AVOCADO_FEATURE_GROUPS:append = " robotics"
+    # The robotics group ships in the ros2-jazzy add-on feed, not the base
+    # feed: gtsam and websocketpp come from meta-ros, which the base build
+    # masks (kas/feature/ros.yml). demo-nodes-cpp and rmw-fastrtps-cpp give
+    # the add-on a runnable ROS 2 node graph (talker/listener) to check on
+    # a board.
+    #
+    # Declared per machine, for the machines it has been verified on
+    # (docs/addon-feeds.md, "Rolling an add-on out to more targets"). Every
+    # other machine builds without the multiconfig.
+    BBMULTICONFIG:append:avocado-raspberrypi5 = " ros2-jazzy"
+    AVOCADO_ADDON_FEEDS:append:avocado-raspberrypi5 = " ros2-jazzy"
+    AVOCADO_ADDON_RECIPES[ros2-jazzy] = "packagegroup-avocado-feature-robotics demo-nodes-cpp rmw-fastrtps-cpp"
