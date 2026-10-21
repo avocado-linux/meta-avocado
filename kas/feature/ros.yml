@@ -24,3 +24,11 @@ local_conf_header:
     # meta-ros-common ships 1.52 and meta-avocado-distro ships 2.7 at the same
     # layer priority, so only the version number picks one. Say which.
     PREFERRED_VERSION_geographiclib = "2.7"
+
+    # The default config masks meta-ros, so the base feed builds exactly as
+    # it does without ROS. ROS packages are built by the ros2-jazzy add-on
+    # multiconfig (kas/feature/robotics.yml, docs/addon-feeds.md), which
+    # replaces AVOCADO_ROS_BBMASK to unmask the layers
+    # (meta-avocado-distro/conf/multiconfig/ros2-jazzy.conf).
+    AVOCADO_ROS_BBMASK ?= "/meta-ros/ /meta-avocado-distro/dynamic-layers/ros2-jazzy-layer/"
+    BBMASK += "${AVOCADO_ROS_BBMASK}"

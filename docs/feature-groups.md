@@ -52,13 +52,16 @@ set (see §3).
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
 | observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
-| robotics     | `robotics`    | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers | meta-ros (via `ros.yml`) | -        |
+| robotics     | (add-on `ros2-jazzy`) | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers, ROS 2 Jazzy demo nodes | meta-ros (via `ros.yml`) | `distro.feeds: [ros2-jazzy]` |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
 `python-ai.yml`, `ros.yml`, `virtualization.yml`. `robotics.yml` includes
-`ros.yml` and adds the token, the same way `containers.yml` sits on
-`virtualization.yml`. `complete.yml` lists `robotics.yml` only, not `ros.yml`.
+`ros.yml` the same way `containers.yml` sits on `virtualization.yml`, but
+the robotics group is not in the base feed: it ships in the `ros2-jazzy`
+add-on feed, which a project enables by name (see
+[addon-feeds.md](addon-feeds.md)). `complete.yml` lists `robotics.yml` only,
+not `ros.yml`.
 
 gtsam in the robotics group installs under `/opt/ros/jazzy/{lib,include}`
 (it inherits `ros_opt_prefix`), unlike geographiclib, tinyxml2, asio and

@@ -59,7 +59,7 @@ against other feeds a project lists, such as its own private feed.
 ## How the layer builds one
 
 An add-on is a multiconfig with the add-on's name. `ros2-jazzy` is declared in
-`kas/feature/ros.yml`:
+`kas/feature/robotics.yml`:
 
 ```
 BBMULTICONFIG += "ros2-jazzy"
