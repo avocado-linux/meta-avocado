@@ -23,6 +23,7 @@
 # BBPATH; nothing would notice otherwise, since the leak reaches the base and the
 # add-on alike. Each listed file must resolve into meta-avocado-distro.
 python () {
+    import re
     bbpath = d.getVar('BBPATH')
     for conf in (d.getVar('AVOCADO_ADDON_CONF_SHADOWS') or '').split():
         found = bb.utils.which(bbpath, conf)
@@ -36,9 +37,11 @@ python () {
         if addon not in multiconfigs:
             bb.fatal("avocado-addon-feeds: AVOCADO_ADDON_FEEDS lists '%s' but BBMULTICONFIG "
                      "does not; an add-on is built by the multiconfig of the same name" % addon)
-        if addon == "ext" or addon.endswith(("-ext", "-sdk")):
-            bb.fatal("avocado-addon-feeds: '%s' cannot be an add-on name: <machine>-ext is the "
-                     "extension feed and <addon>-sdk is an add-on's SDK half" % addon)
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", addon) or addon == "ext"
+                or addon.endswith(("-ext", "-sdk"))):
+            bb.fatal("avocado-addon-feeds: '%s' cannot be an add-on name: it must match "
+                     "[A-Za-z0-9][A-Za-z0-9._-]*, and <machine>-ext is the extension feed and "
+                     "<addon>-sdk an add-on's SDK half" % addon)
         recipes = (d.getVarFlag('AVOCADO_ADDON_RECIPES', addon) or '').split()
         if not recipes:
             bb.fatal("avocado-addon-feeds: AVOCADO_ADDON_RECIPES[%s] is empty" % addon)
