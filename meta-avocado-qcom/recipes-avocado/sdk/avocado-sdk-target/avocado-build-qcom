@@ -22,6 +22,20 @@ input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
 manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
+# Hand a rebuilt ESP over to both of its consumers: `stone bundle`, which reads
+# it as the images.efi manifest artifact from the runtime input dir, and
+# provisioning, which reads it from the stone dir (AVOCADO_STONE_DATA_DIR,
+# stone-provision-ufs.sh step 4). The stone dir is what a provision carries
+# away from this build: a Rubicon hub's bundle packs it and not the input dir,
+# so an ESP left only in the input dir never reaches a hub provision.
+# The build empties the stone dir before this hook runs and nothing empties it
+# after, so a copy put here is still there for `stone bundle` and provisioning.
+stage_esp() { # <esp image> <artifact name>
+    cp "$1" "$input_dir/$2"
+    mkdir -p "$output_dir"
+    cp "$1" "$output_dir/$2"
+}
+
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 # shellcheck disable=SC2329 # not called from this script
 build_include_flags() {
@@ -524,8 +538,9 @@ if [ -n "$esp_image" ]; then
         echo "Staged ${artifact} ($(stat -c %s "$uki_dir/uki_${slot}.efi") bytes) as the slot-${slot} update artifact."
     done
 
-    # Hand the rebuilt ESP to stone as the images.efi artifact.
-    cp "$esp_img" "$input_dir/$esp_image"
+    # Hand the rebuilt ESP to stone as the images.efi artifact, and to
+    # provisioning.
+    stage_esp "$esp_img" "$esp_image"
     echo -e "\033[92m[SUCCESS]\033[0m Rebuilt ${esp_image} around kernel ${kver}; it is now a manifest artifact."
 fi
 
