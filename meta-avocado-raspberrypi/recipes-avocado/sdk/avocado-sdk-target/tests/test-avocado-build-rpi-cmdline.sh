@@ -7,6 +7,7 @@ P=$(mktemp -d); trap 'rm -rf "$P"' EXIT
 input_dir=$P/rt; mkdir -p $input_dir/bootfiles
 printf 'console=serial0,115200 root=/dev/mmcblk0p2 rootwait\n' > $input_dir/bootfiles/cmdline.txt
 fail=0; dst=$input_dir/rekeyed/bootfiles/cmdline.txt
+# shellcheck disable=SC2163 # export "$@" exports the VAR=value arguments on purpose
 run() { ( unset AVOCADO_KERNEL_CMDLINE AVOCADO_KERNEL_CMDLINE_EXTRA; export "$@" 2>/dev/null; eval "$snip" ) >/dev/null 2>&1; }
 want() { got=$(cat $dst 2>/dev/null || echo "<none>"); [ "$got" = "$2" ] && echo "ok   $1" || { echo "FAIL $1: got '$got' want '$2'"; fail=1; }; }
 run AVOCADO_KERNEL_CMDLINE_EXTRA="avocado.board_tests=1"; want "extra appends" "console=serial0,115200 root=/dev/mmcblk0p2 rootwait avocado.board_tests=1"
