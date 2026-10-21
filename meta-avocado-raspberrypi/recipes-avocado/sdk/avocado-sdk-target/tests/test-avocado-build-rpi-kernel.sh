@@ -5,11 +5,13 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 snip=$(sed -n "/^# Kernel: the lockfile-pinned kernel/,/^echo .*Device trees from the project's pin/p" "$here/../avocado-build-rpi")
 P=$(mktemp -d); trap 'rm -rf "$P"' EXIT
+# shellcheck disable=SC2034 # read by the eval-ed hook snippet
 AVOCADO_PREFIX=$P; input_dir=$P/rt; mkdir -p $input_dir $P/kernel/6.6 $P/rootfs/boot
 echo default > $input_dir/Image; echo default > $input_dir/bcm2712-rpi-5-b.dtb
 echo pinned66 > $P/kernel/6.6/Image
 echo dtb66 > $P/rootfs/boot/bcm2712-rpi-5-b.dtb; echo ovl66 > $P/rootfs/boot/dwc2.dtbo
 dst=$input_dir/rekeyed; fail=0
+# shellcheck disable=SC2163 # export "$@" exports the VAR=value arguments on purpose
 run() { ( unset AVOCADO_KERNEL_IMAGE; export "$@" 2>/dev/null; eval "$snip" ) >/dev/null 2>&1; }
 check() { [ "$2" = "$3" ] && echo "ok   $1" || { echo "FAIL $1: got '$2' want '$3'"; fail=1; }; }
 run AVOCADO_KERNEL_IMAGE=$P/kernel/6.6/Image; rc=$?
