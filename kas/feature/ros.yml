@@ -26,7 +26,3 @@ local_conf_header:
     # layer priority, so only the version number picks one. Say which.
     PREFERRED_VERSION_geographiclib = "2.7"
 
-    # Fix cross-compilation issues with ROS packages
-    # Ensure proper library paths for target architecture
-    CMAKE_PREFIX_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/jazzy:"
-    PKG_CONFIG_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/jazzy/lib/pkgconfig:"
