@@ -1,0 +1,16 @@
+header:
+  version: 16
+
+# Target qemu as the KVM VMM on an aarch64 host. Included by every vendor whose
+# feed carries qemu-system-aarch64 for KVM (qcom, nvidia); packagegroups name
+# the package, this only shapes the build.
+#
+# Only the host arch is worth building -- the recipe default is 14
+# architectures x (softmmu + linux-user) -- and the default PACKAGECONFIG drags
+# in sdl2, virglrenderer and libepoxy for a display we do not use. `slirp` is
+# kept so a VM gets networking with no bridge setup on the device; `vhost-net`
+# is the kernel side of the accelerated virtio-net path.
+local_conf_header:
+  feature/kvm-host: |
+    QEMU_TARGETS:pn-qemu = "aarch64"
+    PACKAGECONFIG:pn-qemu = "fdt kvm pie slirp seccomp vhost"

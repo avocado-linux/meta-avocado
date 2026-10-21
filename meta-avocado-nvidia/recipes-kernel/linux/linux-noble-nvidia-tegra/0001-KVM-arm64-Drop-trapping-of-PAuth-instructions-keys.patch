@@ -1,0 +1,275 @@
+From 814ad8f96e929fa9c60bd360d2f7bccfc1df0111 Mon Sep 17 00:00:00 2001
+From: Marc Zyngier <maz@kernel.org>
+Date: Fri, 19 Apr 2024 11:29:29 +0100
+Subject: [PATCH] KVM: arm64: Drop trapping of PAuth instructions/keys
+
+We currently insist on disabling PAuth on vcpu_load(), and get to
+enable it on first guest use of an instruction or a key (ignoring
+the NV case for now).
+
+[...] So let's forget this stuff and enable PAuth eagerly if exposed to
+the guest. This results in much simpler code.
+
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=814ad8f96e929fa9c60bd360d2f7bccfc1df0111]
+
+Backported to the L4T 6.8 kernel (6.8.0-1021.21): the arm.c and
+kvm_ptrauth.h halves apply as-is; the removal of the lazy trap path is
+redone against 6.8's simpler kvm_hyp_handle_ptrauth(), which predates the
+NV handling upstream removed alongside it. On Jetson AGX Orin
+(Cortex-A78AE), the lazy path left KVM guests failing pointer
+authentication (a paging fault on a PAC-poisoned address a few ms into
+the guest kernel); eager key switching is what 6.10 and later do.
+
+Signed-off-by: Marc Zyngier <maz@kernel.org>
+---
+diff --git a/arch/arm64/include/asm/kvm_emulate.h b/arch/arm64/include/asm/kvm_emulate.h
+index b804fe832184..fcdd8d0bf5bc 100644
+--- a/arch/arm64/include/asm/kvm_emulate.h
++++ b/arch/arm64/include/asm/kvm_emulate.h
+@@ -130,11 +130,6 @@ static inline void vcpu_ptrauth_enable(struct kvm_vcpu *vcpu)
+ 	vcpu->arch.hcr_el2 |= (HCR_API | HCR_APK);
+ }
+ 
+-static inline void vcpu_ptrauth_disable(struct kvm_vcpu *vcpu)
+-{
+-	vcpu->arch.hcr_el2 &= ~(HCR_API | HCR_APK);
+-}
+-
+ static inline unsigned long vcpu_get_vsesr(struct kvm_vcpu *vcpu)
+ {
+ 	return vcpu->arch.vsesr_el2;
+diff --git a/arch/arm64/include/asm/kvm_ptrauth.h b/arch/arm64/include/asm/kvm_ptrauth.h
+index 0cd0965255d2..d81bac256abc 100644
+--- a/arch/arm64/include/asm/kvm_ptrauth.h
++++ b/arch/arm64/include/asm/kvm_ptrauth.h
+@@ -99,5 +99,26 @@ alternative_else_nop_endif
+ .macro ptrauth_switch_to_hyp g_ctxt, h_ctxt, reg1, reg2, reg3
+ .endm
+ #endif /* CONFIG_ARM64_PTR_AUTH */
++
++#else  /* !__ASSEMBLY */
++
++#define __ptrauth_save_key(ctxt, key)					\
++	do {								\
++		u64 __val;                                              \
++		__val = read_sysreg_s(SYS_ ## key ## KEYLO_EL1);	\
++		ctxt_sys_reg(ctxt, key ## KEYLO_EL1) = __val;		\
++		__val = read_sysreg_s(SYS_ ## key ## KEYHI_EL1);	\
++		ctxt_sys_reg(ctxt, key ## KEYHI_EL1) = __val;		\
++	} while(0)
++
++#define ptrauth_save_keys(ctxt)						\
++	do {								\
++		__ptrauth_save_key(ctxt, APIA);				\
++		__ptrauth_save_key(ctxt, APIB);				\
++		__ptrauth_save_key(ctxt, APDA);				\
++		__ptrauth_save_key(ctxt, APDB);				\
++		__ptrauth_save_key(ctxt, APGA);				\
++	} while(0)
++
+ #endif /* __ASSEMBLY__ */
+ #endif /* __ASM_KVM_PTRAUTH_H */
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 8e552692488d..1de68c655822 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -35,10 +35,11 @@
+ #include <asm/virt.h>
+ #include <asm/kvm_arm.h>
+ #include <asm/kvm_asm.h>
++#include <asm/kvm_emulate.h>
+ #include <asm/kvm_mmu.h>
+ #include <asm/kvm_nested.h>
+ #include <asm/kvm_pkvm.h>
+-#include <asm/kvm_emulate.h>
++#include <asm/kvm_ptrauth.h>
+ #include <asm/sections.h>
+ 
+ #include <kvm/arm_hypercalls.h>
+@@ -448,6 +449,44 @@ void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu)
+ 
+ }
+ 
++static void vcpu_set_pauth_traps(struct kvm_vcpu *vcpu)
++{
++	if (vcpu_has_ptrauth(vcpu)) {
++		/*
++		 * Either we're running running an L2 guest, and the API/APK
++		 * bits come from L1's HCR_EL2, or API/APK are both set.
++		 */
++		if (unlikely(vcpu_has_nv(vcpu) && !is_hyp_ctxt(vcpu))) {
++			u64 val;
++
++			val = __vcpu_sys_reg(vcpu, HCR_EL2);
++			val &= (HCR_API | HCR_APK);
++			vcpu->arch.hcr_el2 &= ~(HCR_API | HCR_APK);
++			vcpu->arch.hcr_el2 |= val;
++		} else {
++			vcpu->arch.hcr_el2 |= (HCR_API | HCR_APK);
++		}
++
++		/*
++		 * Save the host keys if there is any chance for the guest
++		 * to use pauth, as the entry code will reload the guest
++		 * keys in that case.
++		 * Protected mode is the exception to that rule, as the
++		 * entry into the EL2 code eagerly switch back and forth
++		 * between host and hyp keys (and kvm_hyp_ctxt is out of
++		 * reach anyway).
++		 */
++		if (is_protected_kvm_enabled())
++			return;
++
++		if (vcpu->arch.hcr_el2 & (HCR_API | HCR_APK)) {
++			struct kvm_cpu_context *ctxt;
++			ctxt = this_cpu_ptr_hyp_sym(kvm_hyp_ctxt);
++			ptrauth_save_keys(ctxt);
++		}
++	}
++}
++
+ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ {
+ 	struct kvm_s2_mmu *mmu;
+@@ -496,8 +535,8 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ 	else
+ 		vcpu_set_wfx_traps(vcpu);
+ 
+-	if (vcpu_has_ptrauth(vcpu))
+-		vcpu_ptrauth_disable(vcpu);
++	vcpu_set_pauth_traps(vcpu);
++
+ 	kvm_arch_vcpu_load_debug_state_flags(vcpu);
+ 
+ 	if (!cpumask_test_cpu(cpu, vcpu->kvm->arch.supported_cpus))
+diff --git a/arch/arm64/kvm/handle_exit.c b/arch/arm64/kvm/handle_exit.c
+index 617ae6dea5d5..5665d206488d 100644
+--- a/arch/arm64/kvm/handle_exit.c
++++ b/arch/arm64/kvm/handle_exit.c
+@@ -208,8 +208,9 @@ static int handle_sve(struct kvm_vcpu *vcpu)
+ 
+ /*
+  * Guest usage of a ptrauth instruction (which the guest EL1 did not turn into
+- * a NOP). If we get here, it is that we didn't fixup ptrauth on exit, and all
+- * that we can do is give the guest an UNDEF.
++ * a NOP). If we get here, it is because we didn't enable ptrauth for the
++ * guest. This results in an UNDEF, as it isn't supposed to use ptrauth without
++ * being told it could.
+  */
+ static int kvm_handle_ptrauth(struct kvm_vcpu *vcpu)
+ {
+diff --git a/arch/arm64/kvm/hyp/include/hyp/switch.h b/arch/arm64/kvm/hyp/include/hyp/switch.h
+index 4979df725d64..b9fe29516657 100644
+--- a/arch/arm64/kvm/hyp/include/hyp/switch.h
++++ b/arch/arm64/kvm/hyp/include/hyp/switch.h
+@@ -27,6 +27,7 @@
+ #include <asm/kvm_hyp.h>
+ #include <asm/kvm_mmu.h>
+ #include <asm/kvm_nested.h>
++#include <asm/kvm_ptrauth.h>
+ #include <asm/fpsimd.h>
+ #include <asm/debug-monitors.h>
+ #include <asm/processor.h>
+@@ -494,60 +495,6 @@ static inline bool handle_tx2_tvm(struct kvm_vcpu *vcpu)
+ 	return true;
+ }
+ 
+-static inline bool esr_is_ptrauth_trap(u64 esr)
+-{
+-	switch (esr_sys64_to_sysreg(esr)) {
+-	case SYS_APIAKEYLO_EL1:
+-	case SYS_APIAKEYHI_EL1:
+-	case SYS_APIBKEYLO_EL1:
+-	case SYS_APIBKEYHI_EL1:
+-	case SYS_APDAKEYLO_EL1:
+-	case SYS_APDAKEYHI_EL1:
+-	case SYS_APDBKEYLO_EL1:
+-	case SYS_APDBKEYHI_EL1:
+-	case SYS_APGAKEYLO_EL1:
+-	case SYS_APGAKEYHI_EL1:
+-		return true;
+-	}
+-
+-	return false;
+-}
+-
+-#define __ptrauth_save_key(ctxt, key)					\
+-	do {								\
+-	u64 __val;                                                      \
+-	__val = read_sysreg_s(SYS_ ## key ## KEYLO_EL1);                \
+-	ctxt_sys_reg(ctxt, key ## KEYLO_EL1) = __val;                   \
+-	__val = read_sysreg_s(SYS_ ## key ## KEYHI_EL1);                \
+-	ctxt_sys_reg(ctxt, key ## KEYHI_EL1) = __val;                   \
+-} while(0)
+-
+-DECLARE_PER_CPU(struct kvm_cpu_context, kvm_hyp_ctxt);
+-
+-static bool kvm_hyp_handle_ptrauth(struct kvm_vcpu *vcpu, u64 *exit_code)
+-{
+-	struct kvm_cpu_context *ctxt;
+-	u64 val;
+-
+-	if (!vcpu_has_ptrauth(vcpu))
+-		return false;
+-
+-	ctxt = this_cpu_ptr(&kvm_hyp_ctxt);
+-	__ptrauth_save_key(ctxt, APIA);
+-	__ptrauth_save_key(ctxt, APIB);
+-	__ptrauth_save_key(ctxt, APDA);
+-	__ptrauth_save_key(ctxt, APDB);
+-	__ptrauth_save_key(ctxt, APGA);
+-
+-	vcpu_ptrauth_enable(vcpu);
+-
+-	val = read_sysreg(hcr_el2);
+-	val |= (HCR_API | HCR_APK);
+-	write_sysreg(val, hcr_el2);
+-
+-	return true;
+-}
+-
+ static bool kvm_hyp_handle_cntpct(struct kvm_vcpu *vcpu)
+ {
+ 	struct arch_timer_context *ctxt;
+@@ -635,9 +582,6 @@ static inline bool kvm_hyp_handle_sysreg(struct kvm_vcpu *vcpu, u64 *exit_code)
+ 	    __vgic_v3_perform_cpuif_access(vcpu) == 1)
+ 		return true;
+ 
+-	if (esr_is_ptrauth_trap(kvm_vcpu_get_esr(vcpu)))
+-		return kvm_hyp_handle_ptrauth(vcpu, exit_code);
+-
+ 	if (kvm_hyp_handle_cntpct(vcpu))
+ 		return true;
+ 
+diff --git a/arch/arm64/kvm/hyp/nvhe/switch.c b/arch/arm64/kvm/hyp/nvhe/switch.c
+index 945e2ad150ac..286d613f3063 100644
+--- a/arch/arm64/kvm/hyp/nvhe/switch.c
++++ b/arch/arm64/kvm/hyp/nvhe/switch.c
+@@ -228,7 +228,6 @@ static const exit_handler_fn hyp_exit_handlers[] = {
+ 	[ESR_ELx_EC_IABT_LOW]		= kvm_hyp_handle_iabt_low,
+ 	[ESR_ELx_EC_DABT_LOW]		= kvm_hyp_handle_dabt_low,
+ 	[ESR_ELx_EC_WATCHPT_LOW]	= kvm_hyp_handle_watchpt_low,
+-	[ESR_ELx_EC_PAC]		= kvm_hyp_handle_ptrauth,
+ 	[ESR_ELx_EC_MOPS]		= kvm_hyp_handle_mops,
+ };
+ 
+@@ -240,7 +239,6 @@ static const exit_handler_fn pvm_exit_handlers[] = {
+ 	[ESR_ELx_EC_IABT_LOW]		= kvm_hyp_handle_iabt_low,
+ 	[ESR_ELx_EC_DABT_LOW]		= kvm_hyp_handle_dabt_low,
+ 	[ESR_ELx_EC_WATCHPT_LOW]	= kvm_hyp_handle_watchpt_low,
+-	[ESR_ELx_EC_PAC]		= kvm_hyp_handle_ptrauth,
+ 	[ESR_ELx_EC_MOPS]		= kvm_hyp_handle_mops,
+ };
+ 
+diff --git a/arch/arm64/kvm/hyp/vhe/switch.c b/arch/arm64/kvm/hyp/vhe/switch.c
+index b392e0fab495..4aaf40e9069a 100644
+--- a/arch/arm64/kvm/hyp/vhe/switch.c
++++ b/arch/arm64/kvm/hyp/vhe/switch.c
+@@ -182,7 +182,6 @@ static const exit_handler_fn hyp_exit_handlers[] = {
+ 	[ESR_ELx_EC_IABT_LOW]		= kvm_hyp_handle_iabt_low,
+ 	[ESR_ELx_EC_DABT_LOW]		= kvm_hyp_handle_dabt_low,
+ 	[ESR_ELx_EC_WATCHPT_LOW]	= kvm_hyp_handle_watchpt_low,
+-	[ESR_ELx_EC_PAC]		= kvm_hyp_handle_ptrauth,
+ 	[ESR_ELx_EC_MOPS]		= kvm_hyp_handle_mops,
+ };
+ 
