@@ -35,11 +35,11 @@ echo dos > "$w/scheme"; out=$(run); { echo "$out" | grep -q "not on a GPT disk" 
 # naive systemd-escape leaves `dev-disk-by-partlabel-var.device`, which systemd
 # reads back as /dev/disk/by/partlabel/var - a device that never appears, and
 # the boot lands in emergency (imx8mp-evk, 2026-08-30).
-recipe="$here/../avocado-var-grow_1.0.bb"
+recipe="$here/../../../classes/avocado-var-device.bbclass"
 unit_value=$(AVOCADO_RECIPE="$recipe" python3 -c '
 import os, re
 src = open(os.environ["AVOCADO_RECIPE"]).read()
-body = re.search(r"def avocado_var_device_unit.*?\n\ndo_install", src, re.S).group(0)
+body = re.search(r"def avocado_var_device_unit.*?\n\n", src, re.S).group(0)
 dev = "/dev/disk/by-partlabel/var"
 escaped = dev.lstrip("/").replace("-", "\\x2d").replace("/", "-") + ".device"
 print(escaped.replace("\\", "\\\\") if "escaped.replace" in body else escaped)
