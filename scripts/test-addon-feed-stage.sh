@@ -23,9 +23,9 @@ fail() { printf '  FAIL  %s\n' "$1"; failures=$((failures + 1)); }
 check() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (want '$3', got '$2')"; fi; }
 expect() { local what=$1; shift; if "$@"; then pass "$what"; else fail "$what"; fi; }
 
-# mkrpm <dir> <name> <version> [payload]: a noarch RPM, filed under <dir>.
+# mkrpm <dir> <name> <version> [payload] [extra spec line]: a noarch RPM, filed under <dir>.
 mkrpm() {
-    local dir=$1 name=$2 version=$3 payload=${4:-$2}
+    local dir=$1 name=$2 version=$3 payload=${4:-$2} extra=${5:-}
     mkdir -p "$dir" "$WORK/rpmbuild"
     cat > "$WORK/rpmbuild/$name.spec" << EOF
 Name: $name
@@ -34,6 +34,7 @@ Release: r0.0
 Summary: test
 License: MIT
 BuildArch: noarch
+$extra
 %description
 $payload
 %files
@@ -68,25 +69,43 @@ if stage sdk; then pass "sdk half stages"; else fail "sdk half stages: $(cat "$W
 check "sdk half has the add-on's SDK and all_avocadosdk packages" "$(count "$WORK/out-sdk")" 2
 check "sdk half has no target arch" "$(find "$WORK/out-sdk" -name 'rclcpp-*' | wc -l | tr -d ' ')" 0
 
+echo "trailing slashes on the trees"
+"$STAGE" --base "$WORK/base/" --addon "$WORK/addon/" --role target --out "$WORK/out-slash/" >/dev/null
+check "same half with trailing slashes" "$(count "$WORK/out-slash/cortexa76")" 1
+
 echo "no add-on deploy tree for a role"
 "$STAGE" --base "$WORK/base" --addon "$WORK/none" --role sdk --out "$WORK/out-empty" >/dev/null
-expect "empty half is still created" [ -d "$WORK/out-empty" ]
-check "empty half has no packages" "$(count "$WORK/out-empty")" 0
+expect "empty sdk half is still created" [ -d "$WORK/out-empty" ]
+check "empty sdk half has no packages" "$(count "$WORK/out-empty")" 0
+if "$STAGE" --base "$WORK/base" --addon "$WORK/none" --role target --out "$WORK/out-none" 2> "$WORK/err-none"; then
+    fail "a missing target half is refused"
+else
+    pass "a missing target half is refused"
+fi
+expect "missing target half says why" grep -q "was its multiconfig built" "$WORK/err-none"
 
 echo "a rebuilt base package that differs (drift)"
 mv "$WORK/addon/cortexa76/python3-zipp-3.23.0-r0.0.noarch.rpm" "$WORK/zipp.rpm"
 mkrpm "$WORK/drift" python3-zipp 3.23.0 "rebuilt differently"
 cp "$WORK"/drift/*.rpm "$WORK/addon/cortexa76/"
 rm -rf "$WORK/out-target"
+echo previous > "$WORK/out-target-marker"
+mkdir -p "$WORK/out-target" && cp "$WORK/out-target-marker" "$WORK/out-target/"
 if stage target; then fail "drift is refused"; else pass "drift is refused"; fi
 expect "drift names the package" grep -q 'drift: cortexa76/python3-zipp' "$WORK/err-target"
-expect "nothing staged on drift" [ ! -e "$WORK/out-target" ]
+expect "a refused stage leaves the previous output" [ -f "$WORK/out-target/out-target-marker" ]
 mv "$WORK/zipp.rpm" "$WORK/addon/cortexa76/python3-zipp-3.23.0-r0.0.noarch.rpm"
 
 echo "an add-on package named like a base package (shadow)"
 mkrpm "$WORK/addon/cortexa76" python3-zipp 3.24.0
 if stage target; then fail "shadow is refused"; else pass "shadow is refused"; fi
 expect "shadow names the package" grep -q "would replace base package 'python3-zipp'" "$WORK/err-target"
+rm -f "$WORK"/addon/cortexa76/python3-zipp-3.24.0-*.rpm
+
+echo "an add-on package that obsoletes a base package (shadow)"
+mkrpm "$WORK/addon/cortexa76" python3-zipp-ng 1.0 "" "Obsoletes: python3-zipp"
+if stage target; then fail "obsoleting a base package is refused"; else pass "obsoleting a base package is refused"; fi
+expect "obsoletes names the base package" grep -q "would replace base package 'python3-zipp'" "$WORK/err-target"
 
 if [ $failures -gt 0 ]; then
     echo "$failures check(s) failed"

@@ -62,10 +62,13 @@ An add-on is a multiconfig with the add-on's name. `ros2-jazzy` is declared in
 `kas/feature/robotics.yml`:
 
 ```
-BBMULTICONFIG += "ros2-jazzy"
-AVOCADO_ADDON_FEEDS += "ros2-jazzy"
+BBMULTICONFIG:append:avocado-raspberrypi5 = " ros2-jazzy"
+AVOCADO_ADDON_FEEDS:append:avocado-raspberrypi5 = " ros2-jazzy"
 AVOCADO_ADDON_RECIPES[ros2-jazzy] = "packagegroup-avocado-feature-robotics ..."
 ```
+
+The first two lines are per machine, for the machines the add-on has been
+verified on (see "Rolling an add-on out to more targets").
 
 The multiconfig itself is `meta-avocado-distro/conf/multiconfig/ros2-jazzy.conf`.
 It sets its own `TMPDIR`, so its deploy tree is separate from the base's.
@@ -96,8 +99,11 @@ The default config must build exactly as it would without the add-on:
 3. **Replace conf-level changes through BBPATH.** Global settings a layer's
    `layer.conf` requires apply to every multiconfig and cannot be masked. When
    the base already provides what they set, put an empty file at the same
-   path in `meta-avocado-distro`, which comes first in BBPATH. Example:
-   `conf/ros-distro/include/enable-fortran.inc`.
+   path in `meta-avocado-distro`, and list the path in
+   `AVOCADO_ADDON_CONF_SHADOWS`. Example:
+   `conf/ros-distro/include/enable-fortran.inc`. The replacement works only
+   while `meta-avocado-distro` is ahead of the add-on's layers in BBPATH, so
+   `avocado-addon-feeds` fails the parse if a listed file resolves anywhere else.
 
 To check the result, dump task signatures for the default config with and
 without the feature:
@@ -110,8 +116,10 @@ Compare the `tmp/stamps/**/*.sigdata.*` sets the two runs write. Every base
 task must hash the same. Any recipe that changes is a leak; trace it to its
 variable with the two sigdata files.
 
-The publish guard is the second line of defense: it catches what the
-signatures did not, at publish time, as drift or shadow.
+The publish guard is the second line of defense. At publish time it catches a
+recipe-level difference between the two configs, as drift or shadow. It
+cannot see a conf-level leak, which changes the base and the add-on alike;
+only the signature comparison against a build without the add-on shows that.
 
 ## How it is published
 
@@ -124,9 +132,16 @@ scripts/addon-feed-stage.sh --base build-<m>/build/tmp/deploy/rpm \
 ```
 
 It writes `<dir>/<arch_dir>/` with repodata, the same shape as the base feed's
-arch dirs after `bitbake package-index`. The feed pipeline runs it once per
-role for each machine's build, and publishes the result as `target/<m>-<a>`
-and `sdk/<m>-<a>`.
+arch dirs after `bitbake package-index`. The target half must have packages;
+the SDK half may be empty. Package names come from repodata it generates with
+`createrepo_c`, so it needs `createrepo_c` and `python3`, not `rpm`. A package
+that obsoletes a base package counts as shadowing it. On any failure `<dir>`
+is left as it was. The feed pipeline runs it once per role for each machine's
+build, and publishes the result as `target/<m>-<a>` and `sdk/<m>-<a>`.
+
+In CI every multiconfig shares the default config's sstate and download
+directories (`kas/ci/mirrors.yml`), so an add-on's multiconfig reuses the
+base's objects, and the byte-identity check holds there as it does locally.
 
 For a local feed, `scripts/dev-sync-addon-feed.sh` does the same into a dev
 repo after `dev-sync-packages.sh`, and lists the add-on in `targets.json`:
@@ -140,11 +155,13 @@ Tests: `scripts/test-addon-feed-stage.sh`.
 
 ## Rolling an add-on out to more targets
 
-An add-on is built for every machine whose build includes its kas feature.
-`kas/feature/complete.yml` includes `kas/feature/robotics.yml`, so every
-machine that builds the complete feed builds `ros2-jazzy`.
+An add-on is built only for the machines its feature declares it for, with a
+machine override on `BBMULTICONFIG` and `AVOCADO_ADDON_FEEDS`.
+`kas/feature/complete.yml` includes `kas/feature/robotics.yml` for every
+machine, but `ros2-jazzy` is declared for `avocado-raspberrypi5` only; every
+other machine builds as if ROS were absent.
 
-For each new target:
+For each new target, before adding its override:
 1. **Build it once and run the signature check above** for that machine's
    layer set. BSP layers can carry their own bbappends to recipes the add-on
    rebuilds, which shows up as drift or shadow.
@@ -152,9 +169,15 @@ For each new target:
    from a project (`distro.feeds: [<a>]`).
 3. **Boot it on the hardware** and run something from the add-on.
 
-To roll out gradually instead, include the feature from the machine files
-that are ready rather than from `complete.yml`. A target that does not
-publish the add-on refuses it in the CLI by name, listing the targets that do.
+Then add the machine's override:
+
+```
+BBMULTICONFIG:append:avocado-<m> = " ros2-jazzy"
+AVOCADO_ADDON_FEEDS:append:avocado-<m> = " ros2-jazzy"
+```
+
+A target that does not publish the add-on refuses it in the CLI by name,
+listing the targets that do.
 
 ## Adding another add-on
 
@@ -171,7 +194,9 @@ to Qt6, another ROS distribution.
 3. **Run the signature check**, then a local publish, then a project install.
 
 An add-on's name is its multiconfig's name, its repo suffix, and the name
-projects write. It must match `[A-Za-z0-9][A-Za-z0-9._-]*`.
+projects write. It must match `[A-Za-z0-9][A-Za-z0-9._-]*`, must not be `ext`
+or end in `-ext` (the extension feed) or `-sdk` (an add-on's SDK half), and
+must not make `<m>-<a>` the name of another machine.
 
 ### Variants of one stack
 

@@ -15,13 +15,30 @@
 # Unlike avocado-multikernel, nothing crosses into this build's deploy tree:
 # scripts/addon-feed-stage.sh selects the add-on's packages from the add-on's
 # own TMPDIR and refuses any that would shadow a base package.
+#
+# AVOCADO_ADDON_CONF_SHADOWS lists conf files an add-on's layers require from
+# their layer.conf, and so apply to every multiconfig, that meta-avocado-distro
+# replaces with its own copy (docs/addon-feeds.md, "Keeping the base untouched").
+# A replacement works only while meta-avocado-distro is ahead of those layers in
+# BBPATH; nothing would notice otherwise, since the leak reaches the base and the
+# add-on alike. Each listed file must resolve into meta-avocado-distro.
 python () {
+    bbpath = d.getVar('BBPATH')
+    for conf in (d.getVar('AVOCADO_ADDON_CONF_SHADOWS') or '').split():
+        found = bb.utils.which(bbpath, conf)
+        if '/meta-avocado-distro/' not in found:
+            bb.fatal("avocado-addon-feeds: %s resolves to '%s', not meta-avocado-distro's copy; "
+                     "meta-avocado-distro must come before the add-on's layers in BBLAYERS" % (conf, found))
+
     multiconfigs = (d.getVar('BBMULTICONFIG') or '').split()
     deps = []
     for addon in (d.getVar('AVOCADO_ADDON_FEEDS') or '').split():
         if addon not in multiconfigs:
             bb.fatal("avocado-addon-feeds: AVOCADO_ADDON_FEEDS lists '%s' but BBMULTICONFIG "
                      "does not; an add-on is built by the multiconfig of the same name" % addon)
+        if addon == "ext" or addon.endswith(("-ext", "-sdk")):
+            bb.fatal("avocado-addon-feeds: '%s' cannot be an add-on name: <machine>-ext is the "
+                     "extension feed and <addon>-sdk is an add-on's SDK half" % addon)
         recipes = (d.getVarFlag('AVOCADO_ADDON_RECIPES', addon) or '').split()
         if not recipes:
             bb.fatal("avocado-addon-feeds: AVOCADO_ADDON_RECIPES[%s] is empty" % addon)

@@ -48,22 +48,30 @@ for role in target sdk; do
     createrepo_c -q --general-compress-type=gz "$dest"
 done
 
+# The target's fragment too: dev-package-extensions.sh rebuilds targets.json
+# from the fragments, and would otherwise drop the add-on.
 python3 - "$OUT/targets.json" "$REPO_DIR/staging/$RELEASE_ID/fragments" "$TARGET" "$ADDON" << 'PY'
 import glob, json, os, sys
 path, fragments, target, addon = sys.argv[1:]
-index = {}
-if os.path.exists(path):
-    with open(path) as f:
-        index = json.load(f)
-else:
-    for frag in sorted(glob.glob(os.path.join(fragments, "*-fragment.json"))):
-        with open(frag) as f:
-            index.update(json.load(f))
-repos = index.setdefault(target, [])
-for r in (f"target/{target}-{addon}", f"sdk/{target}-{addon}"):
-    if r not in repos:
-        repos.append(r)
-with open(path, "w") as f:
-    json.dump(index, f, indent=2, sort_keys=True)
+add = [f"target/{target}-{addon}", f"sdk/{target}-{addon}"]
+
+def extend(file, seed):
+    doc = seed
+    if os.path.exists(file):
+        with open(file) as f:
+            doc = json.load(f)
+    repos = doc.setdefault(target, [])
+    repos += [r for r in add if r not in repos]
+    with open(file, "w") as f:
+        json.dump(doc, f, indent=2, sort_keys=True)
+
+frag = os.path.join(fragments, f"{target}-fragment.json")
+if os.path.exists(frag):
+    extend(frag, {})
+seed = {}
+for f in sorted(glob.glob(os.path.join(fragments, "*-fragment.json"))):
+    with open(f) as fh:
+        seed.update(json.load(fh))
+extend(path, seed)
 PY
 echo "add-on '$ADDON' published for $TARGET under $OUT"

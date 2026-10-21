@@ -52,7 +52,7 @@ set (see §3).
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
 | observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
-| robotics     | (add-on `ros2-jazzy`) | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers, ROS 2 Jazzy demo nodes | meta-ros (via `ros.yml`) | `distro.feeds: [ros2-jazzy]` |
+| robotics     | (add-on `ros2-jazzy`) | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers, ROS 2 Jazzy demo nodes | meta-ros (via `ros.yml`) | `distro.feeds: [ros2-jazzy]`; Raspberry Pi 5 |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
@@ -60,8 +60,12 @@ content builds against, not image packages directly): `clang.yml`,
 `ros.yml` the same way `containers.yml` sits on `virtualization.yml`, but
 the robotics group is not in the base feed: it ships in the `ros2-jazzy`
 add-on feed, which a project enables by name (see
-[addon-feeds.md](addon-feeds.md)). `complete.yml` lists `robotics.yml` only,
-not `ros.yml`.
+[addon-feeds.md](addon-feeds.md)), and only on the machines the add-on is
+declared for (Raspberry Pi 5 today). That includes GeographicLib, tinyxml2
+and asio, which come from base layers: a project that wants them without ROS
+enables the add-on too. `ros.yml` brings meta-ros into the build but masks it
+in the default config, so on its own it adds nothing to any feed.
+`complete.yml` lists `robotics.yml` only, not `ros.yml`.
 
 gtsam in the robotics group installs under `/opt/ros/jazzy/{lib,include}`
 (it inherits `ros_opt_prefix`), unlike geographiclib, tinyxml2, asio and

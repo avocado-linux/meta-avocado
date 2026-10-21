@@ -32,3 +32,6 @@ local_conf_header:
     # (meta-avocado-distro/conf/multiconfig/ros2-jazzy.conf).
     AVOCADO_ROS_BBMASK ?= "/meta-ros/ /meta-avocado-distro/dynamic-layers/ros2-jazzy-layer/"
     BBMASK += "${AVOCADO_ROS_BBMASK}"
+    # meta-ros-common's layer.conf requires this for every multiconfig;
+    # meta-avocado-distro's empty copy replaces it (avocado-addon-feeds checks).
+    AVOCADO_ADDON_CONF_SHADOWS = "conf/ros-distro/include/enable-fortran.inc"
