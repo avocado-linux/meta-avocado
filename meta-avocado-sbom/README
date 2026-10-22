@@ -78,6 +78,22 @@ an SBOM, because "openssl 3.0.12" plus an advisory feed cannot know this recipe
 carries a backport. Both carry the same packages_digest, which is what proves
 they describe the same build.
 
+A consumer that rejects a document holding one status asks for All instead:
+
+  AVOCADO_CVE_REPORT_STATUS = "All"
+
+One document listing every CVE of every status, each CVE carrying its own in
+"status" (Unpatched, Patched or Ignored). The document's own "status" is then
+All, which is a kind of report and not something cve-check emits. Evidence is
+attributed per CVE, off its own status, as it is in the single-status
+documents. At All, counts.unpatched_cves, patched_cves and ignored_cves count
+what the document lists; at any other status they still count the CVEs of the
+other statuses it left out, and are not derivable from it. So a fix reads as a
+CVE changing status between two builds instead of one disappearing. It is not
+in the default, so the file existing consumers fetch keeps holding what it
+always held; it may also sit beside the single-status documents, as
+"All Unpatched" or "Unpatched All", suffixed like any further status.
+
 The same code can run standalone against a build tree, if needed:
 
   PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
@@ -91,6 +107,8 @@ Variables
                                each, default "Unpatched Patched". The first
                                keeps AVOCADO_CVE_REPORT_FILE verbatim; each
                                further one is suffixed with its status.
+                               "All" lists every status in one document, each
+                               CVE carrying its own; see above
                                Add "Ignored" to audit what
                                cve-extra-exclusions.inc and any local
                                CVE_STATUS declaration suppress; each issue then
@@ -596,6 +614,14 @@ builds counts from its own key list, so a counter missing there is only found
 when someone regenerates the fixture and CI reports it missing. It does import
 HEALTH_COUNTERS from verify rather than restating it, so at least the question
 of which counters must be zero has one answer and not two.
+
+The status "All" is an addition under these rules and not a new major. It is
+requested by name and never in the default, so no document an existing consumer
+fetches carries it; one that meets it rejects it on "status" being a value it
+does not know, which is the check it already makes. What the three per-status
+counters count at All differs from what they count at any other status, which
+the schema says beside each of them: the meaning is a function of the document's
+own "status", and at every status that existed before it is unchanged.
 
 One change was made under these rules that they would otherwise forbid.
 unscanned_recipes originally counted recipes with no cve-check result *and*

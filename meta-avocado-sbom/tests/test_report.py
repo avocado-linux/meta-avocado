@@ -1017,12 +1017,14 @@ class ObsoletePathsTests(unittest.TestCase):
         # Earlier runs suffixed every document, this one names the first
         # r.json, so r-unpatched.json is left describing the same half.
         self.assertEqual(self.paths("/d/r.json", ["Unpatched", "Patched"]),
-                         ["/d/r-ignored.json", "/d/r-unpatched.json"])
+                         ["/d/r-all.json", "/d/r-ignored.json",
+                          "/d/r-unpatched.json"])
 
     def test_going_single_drops_the_suffixed_names(self):
         self.assertEqual(
             self.paths("/d/r.json", ["Unpatched"]),
-            ["/d/r-ignored.json", "/d/r-patched.json", "/d/r-unpatched.json"],
+            ["/d/r-all.json", "/d/r-ignored.json", "/d/r-patched.json",
+             "/d/r-unpatched.json"],
         )
 
     def test_nothing_written_is_ever_listed_for_removal(self):

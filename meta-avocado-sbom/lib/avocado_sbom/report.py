@@ -213,6 +213,12 @@ CVE_SUMMARY_FIELDS = ("summary", "description")
 # match no issue at all and produce an empty, CVE-free-looking report.
 CVE_STATUSES = ("Unpatched", "Patched", "Ignored")
 
+# A report may list one of those, or all three with the status on every CVE.
+# Kept apart from CVE_STATUSES because that tuple is what cve-check emits, and
+# "All" filtered on as though it were one would match no issue at all.
+STATUS_ALL = "All"
+REPORT_STATUSES = CVE_STATUSES + (STATUS_ALL,)
+
 # Kept in step with the recipe's AVOCADO_CVE_REPORT_STATUS: a run prunes the
 # documents its statuses do not cover, so two defaults that disagreed would
 # delete each other's output.
@@ -248,16 +254,20 @@ def _evidence(issue, status, backported):
         return None
     return CVE_EVIDENCE[1] if issue.get("id") in backported else CVE_EVIDENCE[2]
 
-def filtered_counts(counts):
+def filtered_counts(counts, status=None):
     """The counters naming what a document left out, as "N status" phrases.
 
     Shared so the recipe's build log and the standalone run cannot drift into
-    describing the same numbers differently.
+    describing the same numbers differently. At All nothing of the three
+    statuses is left out - those counters name what is listed - so only a
+    status cve-check never emits is.
     """
+    keys = (("unknown_status_cves",) if status == STATUS_ALL
+            else ("unpatched_cves", "patched_cves", "ignored_cves",
+                  "unknown_status_cves"))
     return ", ".join(
         "%d %s" % (counts[k], k[:-len("_cves")].replace("_", " "))
-        for k in ("unpatched_cves", "patched_cves", "ignored_cves",
-                  "unknown_status_cves")
+        for k in keys
         if counts.get(k)
     )
 
@@ -272,13 +282,13 @@ def parse_statuses(value):
     if not statuses:
         raise ValueError(
             "no status given; expected one or more of %s"
-            % ", ".join(CVE_STATUSES)
+            % ", ".join(REPORT_STATUSES)
         )
-    unknown = [st for st in statuses if st not in CVE_STATUSES]
+    unknown = [st for st in statuses if st not in REPORT_STATUSES]
     if unknown:
         raise ValueError(
-            "%s: not a status cve-check emits; expected one or more of %s"
-            % (", ".join(repr(u) for u in unknown), ", ".join(CVE_STATUSES))
+            "%s: not a status a report can list; expected one or more of %s"
+            % (", ".join(repr(u) for u in unknown), ", ".join(REPORT_STATUSES))
         )
     return statuses
 
@@ -330,6 +340,7 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
         if summary
         else tuple(f for f in CVE_FIELDS if f not in CVE_SUMMARY_FIELDS)
     )
+    listed = set(CVE_STATUSES) if status == STATUS_ALL else {status}
     recipes = {}
     scanned = set()
     with_record = set()
@@ -409,7 +420,7 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
             seen_here = set()
             for issue in raw_issues:
                 issue_status = issue.get("status")
-                if issue_status == status:
+                if issue_status in listed:
                     # An id repeated inside one entry is one CVE, the same as
                     # one repeated across two entries - see the merge below.
                     # Dropping it here covers both, and covers the first entry
@@ -418,14 +429,25 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                         continue
                     seen_here.add(issue.get("id"))
                     kept = {k: issue[k] for k in fields if k in issue}
+                    if status == STATUS_ALL:
+                        # One status is implied by the document's own "status"
+                        # at any other value; a document of every status has
+                        # to say which each CVE is.
+                        kept["status"] = issue_status
                     # Read off the raw issue, not off kept: --no-summary drops
-                    # prose, never what decided a status.
-                    evidence = _evidence(issue, status, backports.get(name, ()))
+                    # prose, never what decided a status. Off the issue's own
+                    # status, which is the document's except at All.
+                    evidence = _evidence(issue, issue_status,
+                                         backports.get(name, ()))
                     if evidence:
                         kept["evidence"] = evidence
                     issues.append(kept)
                     continue
 
+                # At All only a status cve-check never emits gets here: the
+                # three are listed, and their counters are taken from the
+                # finished document below, after the repeated ids a merge
+                # drops.
                 counter = _FILTERED_COUNTER.get(issue_status)
                 if counter:
                     stats[counter] += 1
@@ -509,6 +531,14 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                 stats.packaged_cves += len(issues)
 
     stats.recipes = len(recipes)
+    if status == STATUS_ALL:
+        # What the document lists, counted off the document: a CVE repeated
+        # across two entries is one CVE, and a counter taken while reading
+        # would count it twice and disagree with the report it sits in.
+        for record in recipes.values():
+            for each in [record] + record.get("alt_versions", []):
+                for cve in each["cves"]:
+                    stats[_FILTERED_COUNTER[cve["status"]]] += 1
     # cvesInRecord "No" means no record matched, not that none exists:
     # cve-check.bbclass skips the products of a CVE it ignored or found
     # already patched, so at AVOCADO_CVE_REPORT_STATUS "Patched" or "Ignored" a
@@ -622,10 +652,10 @@ def build_report(
     alt_cve_dirs=(),
     overlay_dir=None,
 ):
-    if status not in CVE_STATUSES:
+    if status not in REPORT_STATUSES:
         raise ValueError(
-            "unknown cve-check status %r; expected one of %s"
-            % (status, ", ".join(CVE_STATUSES))
+            "unknown status %r; expected one of %s"
+            % (status, ", ".join(REPORT_STATUSES))
         )
 
     stats = Stats()
@@ -758,7 +788,7 @@ def obsolete_paths(out_path, out_paths):
     written = set(out_paths.values())
     stem, ext = os.path.splitext(out_path)
     candidates = {out_path} | {
-        "%s-%s%s" % (stem, status.lower(), ext) for status in CVE_STATUSES
+        "%s-%s%s" % (stem, status.lower(), ext) for status in REPORT_STATUSES
     }
     return sorted(candidates - written)
 
@@ -941,11 +971,14 @@ def main():
         "--status",
         default=list(DEFAULT_STATUSES),
         nargs="+",
-        choices=CVE_STATUSES,
+        choices=REPORT_STATUSES,
         metavar="STATUS",
-        help="cve-check status(es) to report on: %s. More than one writes one "
-             "document per status, each suffixed onto --output."
-             % ", ".join(CVE_STATUSES),
+        help="status(es) to report on: %s. More than one writes one "
+             "document per status, each suffixed onto --output. All lists "
+             "every status, each CVE carrying its own, and then "
+             "counts.unpatched_cves, patched_cves and ignored_cves count "
+             "what is listed instead of what was left out."
+             % ", ".join(REPORT_STATUSES),
     )
     parser.add_argument(
         "--backports-dir",
@@ -1096,7 +1129,7 @@ def main():
         )
         # In the loop, unlike the counters below: what a document filtered out
         # is the complement of what it kept, so these three move with status.
-        filtered = filtered_counts(counts)
+        filtered = filtered_counts(counts, status)
         if filtered:
             print("  filtered out: %s" % filtered, file=sys.stderr)
         # In the loop for the same reason: a recipe whose every record

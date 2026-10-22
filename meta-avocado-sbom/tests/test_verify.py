@@ -429,11 +429,15 @@ class SchemaTests(unittest.TestCase):
         # The pair the unknown-status warning depends on: do_cve_report warns
         # when cve-check grows a status beyond CVE_STATUSES, but nothing tied
         # that list to the schema's enum, so the two could drift apart in
-        # exactly the release the warning exists to survive.
+        # exactly the release the warning exists to survive. The document's own
+        # status may also be All; a CVE's own never is.
         self.assertEqual(
             sorted(self.schema["properties"]["status"]["enum"]),
-            sorted(verify.CVE_STATUSES),
+            sorted(verify.CVE_STATUSES + ("All",)),
         )
+        cve = (self.schema["properties"]["recipes"]["additionalProperties"]
+               ["properties"]["cves"]["items"]["properties"]["status"]["enum"])
+        self.assertEqual(sorted(cve), sorted(verify.CVE_STATUSES))
 
     def test_schema_evidence_matches_the_generator(self):
         # Same drift risk as the status enum: _evidence() picks from a tuple
