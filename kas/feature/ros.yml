@@ -24,6 +24,15 @@ local_conf_header:
     # meta-ros-common ships 1.52 and meta-avocado-distro ships 2.7 at the same
     # layer priority, so only the version number picks one. Say which.
     PREFERRED_VERSION_geographiclib = "2.7"
+    # meta-ros2-jazzy (priority 12) outranks meta-avocado-distro (priority 10),
+    # so its mavros 2.14.0 wins over the 2.16.0 recipes this repo carries unless
+    # the version is named. 2.14.0's libmavconn does not build against this asio.
+    PREFERRED_VERSION_mavlink = "2026.9.9%"
+    PREFERRED_VERSION_libmavconn = "2.16.0%"
+    PREFERRED_VERSION_mavros = "2.16.0%"
+    PREFERRED_VERSION_mavros-examples = "2.16.0%"
+    PREFERRED_VERSION_mavros-extras = "2.16.0%"
+    PREFERRED_VERSION_mavros-msgs = "2.16.0%"
 
     # The default config masks meta-ros, so the base feed builds exactly as
     # it does without ROS. ROS packages are built by the ros2-jazzy add-on
