@@ -116,3 +116,24 @@ jobs:
           expect DISTRO_CODENAME "$out" '2026/edge'
           expect DISTRO_VERSION "$out" '2026\.17'
           expect BUILD_ID "$out" '17'
+
+  # Host tests for shell scripts that run on the device. They need no build and
+  # do not depend on the composition, so they run once rather than per arch,
+  # in the same image as the parse. test-rootfs-ab-target.sh runs the real
+  # swupdate scripts under the image's /bin/sh (dash).
+  #
+  # Not wired: stone/tegra/tests/test-initrd-rootfs-select.sh needs hexdump,
+  # and this image has none on PATH. Wire it once the image carries hexdump.
+  host-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: avocadolinux/ci-build:ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Tegra A/B swupdate target selection
+        shell: bash
+        run: bash meta-avocado-nvidia/recipes-core/swupdate/tests/test-rootfs-ab-target.sh
+      - name: Tegra OTA target partition resolution
+        shell: bash
+        run: bash meta-avocado-nvidia/stone/tegra/tests/test-ota-target-resolve.sh
