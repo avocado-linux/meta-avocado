@@ -1,17 +1,15 @@
 header:
-# NOT WIRED UP ON WRYNOSE. kas/feature/complete.yml deliberately omits this
-# fragment: its vendor layer(s) below are pinned to a scarthgap branch and the
-# fork has no wrynose equivalent. Including it will fail the layer
-# compatibility check at parse time - loudly, which is the intent. Repin to a
-# wrynose branch and add the include back to complete.yml together.
+# Layer-only: appends no feature token, so including this alone puts nothing
+# in the feed. kas/feature/robotics.yml is the group that ships packages built
+# from these layers.
   version: 16
 
 repos:
   meta-ros:
     url: https://github.com/avocado-linux/vendor-meta-ros.git
     path: meta-ros
-    branch: scarthgap
-    commit: 4aaaf8b98b05374be6ee26d18920f6a5c3e4cbbb
+    branch: wrynose
+    commit: be3e675d84cea0c3455cb574c8f73a14f90d797e
     layers:
       meta-ros-common:
       meta-ros2-jazzy:
@@ -22,10 +20,27 @@ local_conf_header:
     ROS_DISTRO = "jazzy"
     ROS_VERSION = "2"
     ROS_SUPERFLORE_GENERATED_BUILDTOOLS:append = " ${ROS_SUPERFLORE_GENERATED_WORLD_PACKAGES}"
-    DISTRO_FEATURES:append = " ros2"
     PREFERRED_VERSION_octomap = "1.10.0"
+    # meta-ros-common ships 1.52 and meta-avocado-distro ships 2.7 at the same
+    # layer priority, so only the version number picks one. Say which.
+    PREFERRED_VERSION_geographiclib = "2.7"
+    # meta-ros2-jazzy (priority 12) outranks meta-avocado-distro (priority 10),
+    # so its mavros 2.14.0 wins over the 2.16.0 recipes this repo carries unless
+    # the version is named. 2.14.0's libmavconn does not build against this asio.
+    PREFERRED_VERSION_mavlink = "2026.9.9%"
+    PREFERRED_VERSION_libmavconn = "2.16.0%"
+    PREFERRED_VERSION_mavros = "2.16.0%"
+    PREFERRED_VERSION_mavros-examples = "2.16.0%"
+    PREFERRED_VERSION_mavros-extras = "2.16.0%"
+    PREFERRED_VERSION_mavros-msgs = "2.16.0%"
 
-    # Fix cross-compilation issues with ROS packages
-    # Ensure proper library paths for target architecture
-    CMAKE_PREFIX_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/jazzy:"
-    PKG_CONFIG_PATH:prepend = "${STAGING_DIR_HOST}/opt/ros/jazzy/lib/pkgconfig:"
+    # The default config masks meta-ros, so the base feed builds exactly as
+    # it does without ROS. ROS packages are built by the ros2-jazzy add-on
+    # multiconfig (kas/feature/robotics.yml, docs/addon-feeds.md), which
+    # replaces AVOCADO_ROS_BBMASK to unmask the layers
+    # (meta-avocado-distro/conf/multiconfig/ros2-jazzy.conf).
+    AVOCADO_ROS_BBMASK ?= "/meta-ros/ /meta-avocado-distro/dynamic-layers/ros2-jazzy-layer/"
+    BBMASK += "${AVOCADO_ROS_BBMASK}"
+    # meta-ros-common's layer.conf requires this for every multiconfig;
+    # meta-avocado-distro's empty copy replaces it (avocado-addon-feeds checks).
+    AVOCADO_ADDON_CONF_SHADOWS = "conf/ros-distro/include/enable-fortran.inc"

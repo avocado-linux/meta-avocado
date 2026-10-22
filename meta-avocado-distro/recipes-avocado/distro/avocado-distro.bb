@@ -3,7 +3,7 @@ LICENSE = "Apache-2.0"
 
 PV = "${DISTRO_VERSION}"
 
-inherit avocado-repo-map avocado-multikernel
+inherit avocado-repo-map avocado-multikernel avocado-addon-feeds
 
 # Ensure compile task runs after dependencies
 do_compile[depends] += "avocado-core:do_build"

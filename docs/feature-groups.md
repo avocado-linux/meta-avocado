@@ -41,7 +41,7 @@ set (see §3).
 | Group        | Token         | Adds                                            | Vendor layer            | Requires |
 |--------------|---------------|-------------------------------------------------|-------------------------|----------|
 | system-base  | `system-base` | core utilities, cockpit, redis, uv, vim         | (none, oe-core/meta-oe) | -        |
-| networking   | `networking`  | NetworkManager, openssh, bluez5, wireguard      | (none)                  | -        |
+| networking   | `networking`  | NetworkManager, openssh, bluez5, wireguard, cloudflared, caddy | (none)                  | -        |
 | multimedia   | `multimedia`  | GStreamer, opencv, v4l-utils                    | (none)                  | -        |
 | python       | `python`      | python3 runtime set (flask, requests, etc.)     | (none)                  | -        |
 | graphics     | `graphics`    | weston, wayland                                 | meta-wayland            | DISTRO_FEATURES opengl |
@@ -52,10 +52,25 @@ set (see §3).
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
 | observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
+| robotics     | (add-on `ros2-jazzy`) | gtsam, GeographicLib, tinyxml2, asio and websocketpp headers, PROJ, libccd, GraphicsMagick, urdfdom-headers, cpp-semver, the libraries ROS vendor packages build (libyaml, console_bridge, foonathan_memory, orocos_kdl, gz-cmake3, gz-utils2, gz-math7), and ROS 2 Jazzy demo nodes | meta-ros (via `ros.yml`) | `distro.feeds: [ros2-jazzy]`; Raspberry Pi 5 |
 
 Layer-only fragments add a vendor layer but no token (they provide recipes other
 content builds against, not image packages directly): `clang.yml`,
-`python-ai.yml`, `ros.yml`, `virtualization.yml`.
+`python-ai.yml`, `ros.yml`, `virtualization.yml`. `robotics.yml` includes
+`ros.yml` the same way `containers.yml` sits on `virtualization.yml`, but
+the robotics group is not in the base feed: it ships in the `ros2-jazzy`
+add-on feed, which a project enables by name (see
+[addon-feeds.md](addon-feeds.md)), and only on the machines the add-on is
+declared for (Raspberry Pi 5 today). That includes GeographicLib, tinyxml2
+and asio, which come from base layers: a project that wants them without ROS
+enables the add-on too. `ros.yml` brings meta-ros into the build but masks it
+in the default config, so on its own it adds nothing to any feed.
+`complete.yml` lists `robotics.yml` only, not `ros.yml`.
+
+gtsam in the robotics group installs under `/opt/ros/jazzy/{lib,include}`
+(it inherits `ros_opt_prefix`), unlike geographiclib, tinyxml2, asio and
+websocketpp, which install to `/usr`. A consumer needs `/opt/ros/jazzy` in
+`CMAKE_PREFIX_PATH` to find GTSAM at build time.
 
 ### Container Dev Mode
 
@@ -76,14 +91,14 @@ third group, add it there rather than widening the base packagegroup.
 
 ### Groups this branch cannot build
 
-`cameras`, `cloud-aws` and `ros` are in tree but not wired into
-`complete.yml`. Their vendor layers - meta-basler-tools,
-meta-intel-realsense, meta-aws and meta-ros - have no wrynose branch, and each
-declares a `LAYERSERIES_COMPAT` that predates wrynose, so provisioning one fails
-the compatibility check and takes the whole build down rather than skipping a
-group. The fragments keep their scarthgap pins deliberately: including one fails
-loudly at parse rather than silently shipping less than asked for. Repin the
-fragment and add its `complete.yml` line back in the same commit.
+`cameras` and `cloud-aws` are in tree but not wired into `complete.yml`. Their
+vendor layers - meta-basler-tools, meta-intel-realsense and meta-aws - have no
+wrynose branch, and each declares a `LAYERSERIES_COMPAT` that predates
+wrynose, so provisioning one fails the compatibility check and takes the whole
+build down rather than skipping a group. The fragments keep their scarthgap
+pins deliberately: including one fails loudly at parse rather than silently
+shipping less than asked for. Repin the fragment and add its `complete.yml`
+line back in the same commit.
 
 Two members are missing from groups for the same reason: `graphics` drops
 wpewebkit, wpebackend-fdo and cog (meta-webkit), and `system-base` drops
