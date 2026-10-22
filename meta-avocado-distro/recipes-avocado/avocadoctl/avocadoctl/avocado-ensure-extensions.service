@@ -9,6 +9,13 @@ Documentation=https://github.com/flatcar/init/pull/65
 # merge it exists to follow up. systemd evaluates conditions before the BindsTo
 # check, so matching them here suppresses the job without weakening the binding
 # for the case the merge genuinely fails.
+#
+# That includes the initrd skip: avocado-extension.service does not run there
+# (avocado-extension-initrd.service does the merge), so without the same
+# condition this unit's start job fails in the initrd on every boot once
+# /var/lib/avocado is non-empty. The retrigger is for the real root, after
+# switch-root.
+ConditionPathExists=!/etc/initrd-release
 ConditionDirectoryNotEmpty=|/var/lib/avocado
 ConditionCapability=CAP_SYS_ADMIN
 
