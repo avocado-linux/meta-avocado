@@ -144,13 +144,13 @@ fi
 # cryptsetup-var in. Built without it, mkfs.btrfs was simply absent and the
 # format below failed. See optee-ftpm-init.bb.
 #
-# tee-supplicant was built with TEE_FS_PARENT_PATH=/var/lib/tee, so that exact
-# path must be the persistent mount or the fTPM's NV lands on the initramfs
-# tmpfs and is lost on reboot. The mount is made on the initramfs /var and is
-# covered by the real /var moments later, which is why /var/lib/tee does not
-# exist on a running system - see optee-ftpm-setup.service for the ordering
-# that makes that sequence deterministic instead of a race.
-TEE_STORE=/var/lib/tee
+# The store is mounted under /run, which systemd moves into the real root at
+# the switch, mounts included, and every supplicant is given it with -f
+# (--fs-parent-path) instead of tee-supplicant's compiled-in /var/lib/tee.
+# Here that is the initrd's own supplicant; on the running system it is the
+# real root's tee-supplicant.service, through the environment file written
+# below and the drop-in in tee-supplicant-store.conf.
+TEE_STORE=/run/teestore
 mkdir -p "$TEE_STORE"
 # Always mount with the store's type: an untyped mount of a blank partition
 # probes every filesystem, and a failing probe can take the kernel down (the
@@ -188,6 +188,10 @@ if ! mount -t btrfs "$TEE_DEV" "$TEE_STORE" 2>/dev/null; then
     fi
 fi
 
+# The real root's supplicant reads its options from here (tee-supplicant-store.conf).
+mkdir -p /run/optee-ftpm
+echo "OPTARGS=-f $TEE_STORE" > /run/optee-ftpm/supplicant.env
+
 # tee-supplicant services the fTPM's REE-FS storage (and the RPC in general). When the real root ships no supplicant of
 # its own it has to outlive the switch to the real root, which a plain `tee-supplicant -d` does not: systemd sends
 # SIGTERM to every process left in the initrd at the switch, except one whose argv[0] starts with '@'. So in that case
@@ -196,11 +200,17 @@ fi
 if [ "$(supplicant_mode /sysroot)" = survive ]; then
     moved=$(start_supplicant)
     case $? in
-    0) echo "optee-ftpm: tee-supplicant started (pid $moved) and moved out of the unit's cgroup" ;;
+    0)
+        echo "optee-ftpm: tee-supplicant started (pid $moved) and moved out of the unit's cgroup"
+        # It keeps the fTPM alive after the switch, but its root stays in the emptied initramfs (switch-root re-roots
+        # pid 1 only), so nothing the running system writes to the fTPM reaches the store.
+        echo "optee-ftpm: WARNING: the real root ships no tee-supplicant; fTPM state written after boot will not" \
+             "persist. Install optee-ftpm-init in the rootfs as well as the initramfs." >&2
+        ;;
     2)
         # Do not skip the fTPM bring-up over this: the plain start below is what this script always did.
         echo "optee-ftpm: could not start tee-supplicant-initrd.service; starting a plain tee-supplicant" >&2
-        tee-supplicant -d
+        tee-supplicant -d -f "$TEE_STORE"
         ;;
     *)
         echo "optee-ftpm: could not move tee-supplicant out of the unit's cgroup;" \
@@ -209,7 +219,7 @@ if [ "$(supplicant_mode /sysroot)" = survive ]; then
     esac
 else
     echo "optee-ftpm: the real root has its own supplicant (or is not mounted yet); starting a plain tee-supplicant"
-    tee-supplicant -d
+    tee-supplicant -d -f "$TEE_STORE"
 fi
 
 # Load the fTPM driver now that storage is available; it opens a session to the

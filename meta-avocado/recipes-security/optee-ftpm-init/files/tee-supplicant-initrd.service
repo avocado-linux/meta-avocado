@@ -16,4 +16,5 @@ RemainAfterExit=yes
 # (https://systemd.io/ROOT_STORAGE_DAEMONS/). Without the '@' the supplicant is killed at the switch and, when nothing
 # else serves the fTPM's storage, the fTPM trusted application dies (TEE_ERROR_TARGET_DEAD, 0xffff3024) on the first
 # command from the real root.
-ExecStart=@/usr/sbin/tee-supplicant @tee-supplicant -d
+# -f: the persistent store, which optee-ftpm-setup.sh mounts under /run so that it is still there after the switch.
+ExecStart=@/usr/sbin/tee-supplicant @tee-supplicant -d -f /run/teestore
