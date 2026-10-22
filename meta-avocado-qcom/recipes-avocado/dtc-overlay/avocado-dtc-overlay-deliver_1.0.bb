@@ -23,7 +23,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 COMPATIBLE_MACHINE = "(rubikpi3|rb3gen2|q911)"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
-SRC_URI = "file://device-tree-overlay-deliver"
+SRC_URI = " \
+    file://device-tree-overlay-deliver \
+    file://boot-settings.json \
+"
 
 S = "${UNPACKDIR}"
 
@@ -45,13 +48,25 @@ inherit allarch
 # Depending on the target python3 would drag an aarch64 interpreter into the
 # target sysroot that nothing can execute and nothing would use.
 
+# boot-settings.json tells the CLI which kinds of boot setting this board
+# delivers, so a project that declares one it cannot gets a build failure that
+# names the kind, before anything is compiled. This hook takes compiled overlays
+# only (a stock overlay is never staged, and boot_config is never read), and
+# kernel_args is applied by avocado-build-qcom, which is why it is listed even
+# though this hook does not touch it. The test in tests/ checks the file against
+# what the hook does.
 do_install() {
     install -d ${D}${libexecdir}/avocado
     install -m 0755 ${S}/device-tree-overlay-deliver \
         ${D}${libexecdir}/avocado/device-tree-overlay-deliver
+    install -m 0644 ${S}/boot-settings.json \
+        ${D}${libexecdir}/avocado/boot-settings.json
 }
 
-FILES:${PN} = "${libexecdir}/avocado/device-tree-overlay-deliver"
+FILES:${PN} = " \
+    ${libexecdir}/avocado/device-tree-overlay-deliver \
+    ${libexecdir}/avocado/boot-settings.json \
+"
 
 # Nothing else RDEPENDS on this; the CLI installs it by name into the target
 # sysroot when it is needed, so it must exist in the feed whether or not any
