@@ -105,6 +105,7 @@ LIC_FILES_CHKSUM += "\
     file://pkg/mod/github.com/klauspost/compress@v1.20.3/LICENSE;md5=d0fd9ebda39468b51ff4539c9fbb13a8;spdx=BSD-3-Clause \
     file://pkg/mod/github.com/klauspost/compress@v1.20.3/internal/snapref/LICENSE;md5=b8b79c7d4cda128290b98c6a21f9aac6;spdx=BSD-3-Clause \
     file://pkg/mod/github.com/klauspost/compress@v1.20.3/zstd/internal/xxhash/LICENSE.txt;md5=802da049c92a99b4387d3f3d91b00fa9;spdx=MIT \
+    file://pkg/mod/github.com/klauspost/cpuid/v2@v2.3.0/LICENSE;md5=00d6f962401947482d082858f7ba2ff3;spdx=MIT \
     file://pkg/mod/github.com/knadh/koanf/maps@v0.1.3/LICENSE;md5=79708d7c07004029466c51bb93453378;spdx=MIT \
     file://pkg/mod/github.com/knadh/koanf/providers/confmap@v1.0.1/LICENSE;md5=79708d7c07004029466c51bb93453378;spdx=MIT \
     file://pkg/mod/github.com/knadh/koanf/v2@v2.3.8/LICENSE;md5=79708d7c07004029466c51bb93453378;spdx=MIT \

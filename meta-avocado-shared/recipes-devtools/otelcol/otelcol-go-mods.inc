@@ -99,6 +99,7 @@ SRC_URI += "\
     gomod://github.com/iancoleman/strcase;version=v0.3.0;sha256sum=fe8d071a2f64f2fdf24a0b080a7fd277488bc4840503d7475045070fe50c3f58 \
     gomod://github.com/json-iterator/go;version=v1.1.12;sha256sum=d001ea57081afd0e378467c8f4a9b6a51259996bb8bb763f78107eaf12f99501 \
     gomod://github.com/klauspost/compress;version=v1.20.3;sha256sum=1eb710a814c44bf21332a512a19f496fb5c489ca8eb72244bb9c49f80900848f \
+    gomod://github.com/klauspost/cpuid/v2;version=v2.3.0;sha256sum=e6766f75ecfadf12fd045e4bdd9383f2a5bd3f9bd4c88a6db72861c84cf41486 \
     gomod://github.com/knadh/koanf/maps;version=v0.1.3;sha256sum=011eaef67d0befb7a1b30a64d1d8e015111aa8760fdaca4cd36cb6d8dea1407f \
     gomod://github.com/knadh/koanf/providers/confmap;version=v1.0.1;sha256sum=68f32b7a4a6485572860e89c5a325ff94ed4681f97bcd6912769da78ad53e087 \
     gomod://github.com/knadh/koanf/v2;version=v2.3.8;sha256sum=d4ec8d015db66d6d690b470c11b1bec1f3452ca656462aea7679fbfa7c7b9a91 \
