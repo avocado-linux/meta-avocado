@@ -2,6 +2,15 @@ SUMMARY = "Initrd bring-up of the OP-TEE fTPM (tee-supplicant + tpm_ftpm_tee)"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
+# Install this in BOTH the initramfs and the rootfs for an fTPM whose state
+# persists. The initramfs half brings up the store and the fTPM; the rootfs half
+# (it RDEPENDS on optee-client) runs the supplicant that serves the store on the
+# running system, through a drop-in for optee-client's tee-supplicant.service
+# (the L4T unit; meta-arm's tee-supplicant@.service template is not covered). With the initramfs half alone, the initrd's supplicant is kept
+# alive across the switch so the fTPM keeps working, but anything written to the
+# fTPM after boot (SRK, NvPCRs, persistent handles, dictionary-attack state) is
+# lost at reboot, and optee-ftpm-setup.sh says so on the console.
+
 # fTPM seal persistence across reboot needs RPMB, a rollback counter the
 # storage itself enforces. Neither machine here has it in play today, for
 # different reasons, and the shared consequence is the same: the seal is
@@ -32,6 +41,7 @@ SRC_URI = " \
     file://tee-supplicant-initrd.service \
     file://optee-ftpm.conf \
     file://tee-supplicant-initrd.conf \
+    file://tee-supplicant-store.conf \
     file://tee-ftpm-modprobe-initrd.conf \
 "
 
@@ -84,6 +94,9 @@ do_install() {
         install -m 0644 ${UNPACKDIR}/$u-initrd.conf \
             ${D}${systemd_system_unitdir}/$u.service.d/50-optee-ftpm-initrd.conf
     done
+    # On the running system, serve the persistent store from the real root (see the drop-in).
+    install -m 0644 ${UNPACKDIR}/tee-supplicant-store.conf \
+        ${D}${systemd_system_unitdir}/tee-supplicant.service.d/50-optee-ftpm-store.conf
 
     # Statically enable for the initrd (the initramfs build does not apply the
     # preset for a WantedBy=initrd-root-fs.target unit - same as cryptsetup-var).

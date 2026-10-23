@@ -29,8 +29,15 @@ untyped=$(grep -nE '(^|[^a-z])mount +"\$TEE_DEV"' "$script")
 unit=$here/../files/tee-supplicant-initrd.service
 [ -f "$unit" ] && grep -qx 'Type=oneshot' "$unit" && grep -qx 'RemainAfterExit=yes' "$unit" \
     && ok "the initrd supplicant unit is a oneshot that stays active" || bad "supplicant unit missing or not a oneshot"
-[ -f "$unit" ] && grep -qx 'ExecStart=@/usr/sbin/tee-supplicant @tee-supplicant -d' "$unit" \
-    && ok "the unit starts the daemon with argv[0] '@tee-supplicant'" || bad "supplicant unit lacks the '@' argv[0] ExecStart"
+[ -f "$unit" ] && grep -qx 'ExecStart=@/usr/sbin/tee-supplicant @tee-supplicant -d -f /run/teestore' "$unit" \
+    && ok "the unit starts the daemon with argv[0] '@tee-supplicant' on the /run store" || bad "supplicant unit lacks the '@' argv[0] ExecStart on /run/teestore"
+
+# The store must still be the supplicant's after the switch to the real root. A store at the compiled-in /var/lib/tee is
+# mounted on the initramfs /var, the real /var covers it, and the surviving supplicant's path then resolves into the real
+# /var: every fTPM write from the running system is lost at reboot. /run is moved into the real root with its mounts.
+grep -qx 'TEE_STORE=/run/teestore' "$script" && ok "the store is mounted under /run, which survives the switch" || bad "TEE_STORE is not /run/teestore"
+nof=$(grep -vE '^[[:space:]]*#' "$script" | grep -nE '(^|[^@a-z])tee-supplicant -d' | grep -v -- '-f "\$TEE_STORE"')
+[ -z "$nof" ] && ok "every supplicant the script starts is given the store with -f" || bad "supplicant started without -f: $nof"
 
 # Static checks look at code lines only: a comment must not satisfy them.
 code=$(grep -vE '^[[:space:]]*#' "$script")
@@ -133,5 +140,19 @@ for u in tee-supplicant tee-ftpm-modprobe; do
     { grep -qx 'ConditionPathExists=!/etc/initrd-release' "$c" 2>/dev/null && grep -q "$u.service.d" "$recipe"; } \
         && ok "$u.service skips the initrd" || bad "$u.service has no initrd drop-in installed"
 done
+
+# On the running system the store is served by the real root's tee-supplicant.service, never by the initrd's daemon:
+# switch-root re-roots pid 1 only, so a supplicant kept from the initrd resolves the store inside the emptied initramfs.
+# The initrd hands the -f option over in an environment file under /run, and the drop-in reads it and starts the
+# supplicant ahead of the systemd TPM units.
+grep -vE '^[[:space:]]*#' "$script" | grep -qx 'echo "OPTARGS=-f $TEE_STORE" > /run/optee-ftpm/supplicant.env' \
+    && ok "the initrd hands the store to the real root's supplicant" || bad "no supplicant.env written for the real root"
+d=$here/../files/tee-supplicant-store.conf
+{ grep -qx 'EnvironmentFile=-/run/optee-ftpm/supplicant.env' "$d" && grep -qx 'DefaultDependencies=no' "$d" \
+  && grep -qx 'Environment=OPTARGS=-f /run/teestore' "$d" \
+  && grep -qE '^Before=.*systemd-tpm2-setup-early\.service' "$d" && grep -qE '^Before=.*sysinit\.target' "$d"; } 2>/dev/null \
+    && ok "the real root's supplicant reads the store option and starts ahead of the TPM units" || bad "tee-supplicant-store.conf missing or incomplete"
+{ grep -q 'file://tee-supplicant-store.conf' "$recipe" && grep -q 'tee-supplicant.service.d/50-optee-ftpm-store.conf' "$recipe"; } \
+    && ok "the recipe installs the store drop-in" || bad "recipe does not install tee-supplicant-store.conf"
 
 echo "$pass passed, $fail failed"; [ $fail -eq 0 ]

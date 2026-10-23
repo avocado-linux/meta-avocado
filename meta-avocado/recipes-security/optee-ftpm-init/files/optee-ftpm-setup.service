@@ -27,8 +27,9 @@ Before=cryptsetup-var.service initrd-root-fs.target
 #
 # Before=, not After=: After=var.mount deadlocks the encrypted-var case
 # (optee-ftpm-setup -> cryptsetup-var -> dev-mapper-var.device -> var.mount ->
-# optee-ftpm-setup). Moving the store out from under /var is not an option
-# either - tee-supplicant is compiled with TEE_FS_PARENT_PATH=/var/lib/tee.
+# optee-ftpm-setup). The store now mounts under /run, not /var, so the race
+# above no longer applies to it; the ordering stays so /dev/tpm0 is still up
+# before anything on /var is mounted.
 Before=var.mount
 
 [Service]
