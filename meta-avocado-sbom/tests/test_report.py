@@ -27,6 +27,8 @@ from avocado_sbom.report import (  # noqa: E402
     SCOPES,
     Stats,
     OVERLAY_DIRNAME,
+    AltMulticonfigTree,
+    alt_multiconfig_trees,
     build_report,
     default_manifests,
     default_paths,
@@ -1333,6 +1335,40 @@ class DefaultPathsOverlayTest(unittest.TestCase):
 
     def test_flat_layout_stays_flat(self):
         self.assertEqual(default_paths(self.tmp)[0], self.cve)
+
+class AltMulticonfigTreesTest(unittest.TestCase):
+    """The one place both tasks get an alternate multiconfig's trees from.
+
+    do_cve_report and do_rpm_manifest each read pkgdata, and a manifest naming
+    a package the report's "packages" map lacks is rejected downstream, so the
+    two must resolve the same directories for every multiconfig.
+    """
+
+    def test_no_multiconfig_yields_nothing(self):
+        self.assertEqual(alt_multiconfig_trees("/b", "m", None), [])
+        self.assertEqual(alt_multiconfig_trees("/b", "m", ""), [])
+        self.assertEqual(alt_multiconfig_trees("/b", "m", "  "), [])
+
+    def test_tree_layout(self):
+        self.assertEqual(
+            alt_multiconfig_trees("/b", "avocado-jetson", "jp6:linux-jammy-nvidia-tegra"),
+            [AltMulticonfigTree(
+                mc="jp6",
+                pkgdata_dir="/b/tmp-jp6/pkgdata/avocado-jetson",
+                rpm_dir="/b/tmp-jp6/deploy/rpm",
+            )],
+        )
+
+    def test_one_tree_per_multiconfig_in_declared_order(self):
+        trees = alt_multiconfig_trees(
+            "/b", "m", "z:linux-a z:linux-a-dtbs a:linux-b z:linux-c")
+        self.assertEqual([t.mc for t in trees], ["z", "a"])
+
+    def test_entry_without_multiconfig_is_ignored(self):
+        self.assertEqual(
+            [t.mc for t in alt_multiconfig_trees("/b", "m", "linux-a x:linux-b")],
+            ["x"],
+        )
 
 if __name__ == "__main__":
     unittest.main()

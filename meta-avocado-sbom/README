@@ -121,6 +121,8 @@ Variables
                                upstream-wontfix is not) and "description" (the
                                maintainer's rationale), which is the whole
                                point of running that mode
+  AVOCADO_RPM_MANIFEST_FILE    output path of the RPM manifest, see "The RPM
+                               manifest" below
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
   AVOCADO_CVE_REPORT_STRICT    "0" turns a well-formed report that lost data
                                into a warning instead of a build failure -
@@ -830,6 +832,77 @@ AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
                         version; the first pkgdata directory won. Not a health
                         counter: the winner is deterministic and the report is
                         complete, so it is noted rather than failed on
+
+The RPM manifest
+----------------
+
+  bitbake avocado-cve-report
+
+also writes ${DEPLOY_DIR}/avocado-cve/avocado-rpm-manifest-${MACHINE}.json:
+every RPM the build produced, each with the digest of its header. A service
+that keeps a verdict per build needs it, because two builds of one
+name-version-release are different files with different headers, and neither
+Pulp nor the report records which build a file came from. It joins the report
+on the package name and a repository on the header digest.
+
+  {
+    "version": "1",
+    "generated": "2026-10-22T19:38:57Z",
+    "machine": "avocado-raspberrypi5",
+    "distro_version": "2026.0+801.ge5a9500e",
+    "packages": [
+      { "name": "avocadoctl", "epoch": null, "version": "0.14.0",
+        "release": "r0.0", "arch": "cortexa76",
+        "sha256header": "<64 lowercase hex>",
+        "file": "cortexa76/avocadoctl-0.14.0-r0.0.cortexa76.rpm" }
+    ]
+  }
+
+Packages are sorted by name, arch, version and release. epoch is an integer, or
+null when the package has none; zero is an epoch. sha256header is the sha256 of
+the RPM's main header section - rpm's SHA256HEADER, and the byte range Pulp
+reports as rpm_header_start to rpm_header_end - not a digest of the whole file,
+which also covers the payload. file is relative to ${DEPLOY_DIR_RPM}. version
+has a "+" where the upstream version has a "-", because rpm refuses a hyphen
+there.
+
+It lists everything pkgdata names, the -dbg, -dev and -src packages included,
+not only what an image installs: a service rescanning the whole feed, and
+customer runtimes that pull packages the reference image does not have, need
+all of it. Pkgdata says which version and release of each package this build
+made, and ${DEPLOY_DIR_RPM} keeps every release ever built, so each file is
+named from pkgdata's PKGV-PKGR rather than globbed, and takes its arch from the
+directory it sits in. The header found there must then name the same package.
+
+A machine that builds a second kernel in another multiconfig lists that tree
+too, from tmp-<mc>. The two kernels package the same names at different
+versions, so a name is not an identity here; name, arch, version and release
+together are, and two files with that identity but different headers fail the
+build.
+
+A package pkgdata names that holds no files (PKGSIZE 0) and has no RPM is not
+listed and is not a failure: package_rpm writes no RPM for an empty package
+unless ALLOW_EMPTY, while pkgdata still names it - avocado-core-dbg reads this
+way. An empty package that does have an RPM, a packagegroup, is listed. A
+package whose size pkgdata does not state is never excused.
+
+A package that cannot be listed fails the build with every such package named:
+no RPM on disk, a version with no release, an arch that is ambiguous, a file
+whose header names something else, or one whose signature header records a
+different SHA256HEADER than its main header hashes to. Nothing is skipped,
+because a package missing here reads as unassessed downstream. The previous
+build's file is removed first, so a failure leaves no list at all. Pkgdata is
+written before the RPM, so running this while a build is still packaging fails
+for the packages it has not finished.
+
+The same limit as the report's counters applies: pkgdata and ${DEPLOY_DIR_RPM}
+accumulate and nothing prunes either, so a recipe that no longer builds but was
+built once into this TMPDIR is still listed.
+
+The reader is avocado_sbom/rpms.py. It reads the lead and the two headers and
+never the payload, and needs neither rpm nor rpm-native. The contract is
+schema/avocado-rpm-manifest-v1.schema.json, with the same compatibility policy
+as the report: additions do not bump the major.
 
 Publishing SPDX
 ---------------

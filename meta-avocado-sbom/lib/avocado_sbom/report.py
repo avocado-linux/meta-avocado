@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import collections
 import datetime
 import glob
 import hashlib
@@ -933,6 +934,33 @@ def default_manifests(tmpdir, machine=None):
         for image in ("avocado-image-rootfs", "avocado-image-initramfs")
         for path in glob.glob(os.path.join(images, "%s-*.manifest" % image))
     )
+
+AltMulticonfigTree = collections.namedtuple(
+    "AltMulticonfigTree", ("mc", "pkgdata_dir", "rpm_dir"))
+
+def alt_multiconfig_trees(topdir, machine, mc_recipes):
+    """Each alternate multiconfig's pkgdata and RPM deploy directories.
+
+    mc_recipes is AVOCADO_MULTIKERNEL_MC_RECIPES, "<mc>:<recipe>" words; one
+    tree per distinct mc, in declared order. tmp-<mc> under TOPDIR is the
+    layout avocado-multikernel.bbclass already assumes.
+
+    The CVE report and the RPM manifest both read pkgdata from here, and a
+    manifest naming a package the report's "packages" map lacks is rejected
+    downstream, so neither task may derive these paths on its own. Existence is
+    left to the caller: each task refuses a missing directory with a message
+    naming what it was about to write.
+    """
+    mcs = dict.fromkeys(
+        word.partition(":")[0] for word in (mc_recipes or "").split() if ":" in word)
+    return [
+        AltMulticonfigTree(
+            mc=mc,
+            pkgdata_dir=os.path.join(topdir, "tmp-%s" % mc, "pkgdata", machine),
+            rpm_dir=os.path.join(topdir, "tmp-%s" % mc, "deploy", "rpm"),
+        )
+        for mc in mcs
+    ]
 
 def main():
     import argparse
