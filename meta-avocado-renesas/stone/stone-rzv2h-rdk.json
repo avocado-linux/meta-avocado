@@ -1,0 +1,98 @@
+{
+  "runtime": {
+    "platform": "avocado-rzv2h-rdk",
+    "architecture": "arm64",
+    "provision_default": "sd",
+    "update_strategy": "gpt-ab"
+  },
+  "provision": {
+    "envs": {
+      "device_info": {
+        "AVOCADO_DEVICE_CERT": "${AVOCADO_DEVICE_CERT}",
+        "AVOCADO_DEVICE_KEY": "${AVOCADO_DEVICE_KEY}",
+        "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
+      },
+      "cmdline": {
+        "AVOCADO_CMDLINE_EXTRA": "${AVOCADO_CMDLINE_EXTRA}"
+      }
+    },
+    "fields": {
+      "AVOCADO_DEVICE_CERT": {
+        "type": "file",
+        "label": "Device certificate",
+        "description": "X.509 device certificate in PEM format."
+      },
+      "AVOCADO_DEVICE_KEY": {
+        "type": "file",
+        "label": "Device private key",
+        "description": "PEM-encoded private key paired with the device certificate.",
+        "secret": true
+      },
+      "AVOCADO_DEVICE_ID": {
+        "type": "string",
+        "label": "Device ID",
+        "description": "Stable identifier registered with Peridio."
+      },
+      "AVOCADO_CMDLINE_EXTRA": {
+        "type": "multiline",
+        "label": "Extra kernel command-line",
+        "description": "Appended to the default kernel cmdline.",
+        "required": false
+      }
+    },
+    "files": [
+      "build-disk-image.sh"
+    ],
+    "profiles": {
+      "serial": {
+        "script": "stone-provision-serial.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"]
+      },
+      "sd": {
+        "script": "stone-provision-sd.sh",
+        "envs": ["device_info", "cmdline"],
+        "requires": ["usb"]
+      }
+    }
+  },
+  "storage_devices": {
+    "rootdisk": {
+      "out": "avocado-rzv2h-rdk-rootdisk.tar.gz",
+      "devpath": "/dev/mmcblk0",
+      "block_size": 512,
+      "images": {
+        "bl2_spi": "bl2_bp_spi-avocado-rzv2h-rdk.bin",
+        "fip": "fip-avocado-rzv2h-rdk.bin",
+        "flash_writer": "Flash_Writer_SCIF_RZV2H_DEV_INTERNAL_MEMORY.mot",
+        "boot": {
+          "out": "boot.img",
+          "size": 256,
+          "size_unit": "mebibytes",
+          "build_args": {
+            "type": "fat",
+            "variant": "FAT32",
+            "label": "BOOT",
+            "files": [
+              { "in": "Image", "out": "Image" },
+              { "in": "r9a09g057h44-rzv2h-rdk.dtb", "out": "r9a09g057h44-rzv2h-rdk.dtb" },
+              { "in": "avocado-image-initramfs-rzv2h-rdk.cpio.zst", "out": "avocado-image-initramfs-rzv2h-rdk.cpio.zst" },
+              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" }
+            ]
+          }
+        },
+        "rootfs": "avocado-image-rootfs-rzv2h-rdk.erofs-lz4",
+        "var": "avocado-image-var-rzv2h-rdk.btrfs",
+        "initramfs": "avocado-image-initramfs-rzv2h-rdk.cpio.zst",
+        "kernel": "Image"
+      },
+      "partitions": [
+        { "name": "boot-a", "image": "boot", "partition_type": "EF00", "partition_uuid": "ed43cf38-9916-45ed-8bdd-3f34aa85ecb4", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
+        { "name": "boot-b", "partition_type": "EF00", "partition_uuid": "0cd45e47-4a40-4af7-b541-ca562e0784f0", "size": 256, "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "3a126dc9-5f13-4c2a-a59d-9f28b42ecb42", "size": 128, "size_unit": "mebibytes" },
+        { "name": "rootfs-b", "partition_type": "8305", "partition_uuid": "6392f58c-5a60-4a8c-974f-6c761ce81597", "size": 128, "size_unit": "mebibytes" },
+        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "expand": "true" }
+      ]
+    }
+  }
+}

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Shared helper for the rzv2n-sr-som emmc and sd provisioning profiles.
+# Shared helper for the Renesas emmc and sd provisioning profiles. Every value
+# it needs comes from the stone manifest, so it is board-agnostic and lives at
+# the layer's shared stone/ level rather than in a per-board directory.
 # Builds a GPT-formatted disk image from the rootdisk storage_device in the
 # stone manifest. Mirrors the x86-64 pattern: read partition table from JSON,
 # build any FAT images via mtools, then write each partition's image into the
