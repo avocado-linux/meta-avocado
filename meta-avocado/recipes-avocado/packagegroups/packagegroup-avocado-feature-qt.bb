@@ -28,7 +28,7 @@ QT5_PACKAGES = " \
   qtlocation \
   qtnetworkauth \
   qtwebsockets \
-  qtwebengine \
+  ${@'' if d.getVar('AVOCADO_SKIP_WEB_ENGINES') == '1' else 'qtwebengine'} \
   qtxmlpatterns \
   qttools \
   qttools-plugins \

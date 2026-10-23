@@ -1,0 +1,33 @@
+header:
+  version: 16
+
+# Opt-in: chromium and qtwebengine, and nothing else from the browsers and qt
+# groups. almost-complete.yml leaves both out because each is a whole-browser
+# compile that outlasts the rest of an umbrella build. Stack this file on a
+# machine file to build them:
+#   kas build kas/machine/<machine>.yml:kas/feature/web-engines.yml
+#
+# The two repo pins and the qtbase options repeat browsers.yml and qt.yml, so a
+# build that stacks this file with either of them resolves to the same layers.
+# Keep the pins identical when one of them moves.
+repos:
+  meta-browser:
+    url: https://github.com/avocado-linux/vendor-meta-browser.git
+    path: meta-browser
+    commit: c28c854532dcbdcde439bb2461fe5f325a6554ad
+    branch: master
+    layers:
+      meta-chromium:
+
+  meta-qt5:
+    url: https://github.com/avocado-linux/vendor-meta-qt5.git
+    path: meta-qt5
+    commit: 06b898916ddfbf2e758450be737bf4b505eeeeff
+    branch: master
+    layers:
+      .:
+
+local_conf_header:
+  feature/web-engines: |
+    AVOCADO_FEATURE_GROUPS:append = " web-engines"
+    PACKAGECONFIG:append:pn-qtbase = " gles2 eglfs kms gbm harfbuzz"

@@ -1,0 +1,43 @@
+header:
+  version: 16
+
+# complete.yml without the slow packages: the same fragments minus browsers
+# (chromium), and the qt group without qtwebengine. Each of those is a
+# whole-browser compile inside a single do_compile task, so bitbake cannot
+# spread it across its parallel tasks and it sets the wall-clock time of an
+# umbrella build. complete.yml keeps its meaning for CI and the build cluster;
+# use this one for dev builds and feed iterations that do not need a browser.
+#
+# Keep the includes below identical to complete.yml's, minus browsers.yml.
+# meta-avocado/tests/test_feature_umbrellas.py fails when the two drift.
+# Stack kas/feature/web-engines.yml to build chromium and qtwebengine on their
+# own.
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/system-base.yml
+  - repo: meta-avocado
+    file: kas/feature/networking.yml
+  - repo: meta-avocado
+    file: kas/feature/multimedia.yml
+  - repo: meta-avocado
+    file: kas/feature/python.yml
+  - repo: meta-avocado
+    file: kas/feature/graphics.yml
+  - repo: meta-avocado
+    file: kas/feature/qt.yml
+  - repo: meta-avocado
+    file: kas/feature/python-ai.yml
+  - repo: meta-avocado
+    file: kas/feature/clang.yml
+  - repo: meta-avocado
+    file: kas/feature/java.yml
+  - repo: meta-avocado
+    file: kas/feature/containers.yml
+  - repo: meta-avocado
+    file: kas/feature/observability.yml
+  - repo: meta-avocado
+    file: kas/feature/robotics.yml
+
+local_conf_header:
+  feature/almost-complete: |
+    AVOCADO_SKIP_WEB_ENGINES = "1"
