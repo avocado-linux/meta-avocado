@@ -690,11 +690,15 @@ def build_report(
             # the first pkgdata directory - the image's - built. Scored on the
             # bare name, the feed-only kernel reads base-runtime too, which is
             # the one distinction this record exists to make.
-            mine = installed.intersection(
-                n for n in names
-                if record["version"] in package_versions.get(n, ())
-            )
+            own = [n for n in names
+                   if record["version"] in package_versions.get(n, ())]
+            mine = installed.intersection(own)
             record["scope"] = _scope(name, names, mine, declared_boot_chain)
+            # "recipe" is the same for both kernels' packages, so this is what
+            # lets a consumer join a second-kernel module to the second
+            # kernel's CVEs rather than the shipped one's.
+            for n in own:
+                packages[n]["recipe_version"] = record["version"]
 
     # Not a per-scope total but the on-device partition, and keyed on scope
     # rather than pkgdata - the README's "packaged" section has why that is

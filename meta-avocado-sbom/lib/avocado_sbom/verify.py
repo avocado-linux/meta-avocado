@@ -177,6 +177,32 @@ def _check_record(label, entry, fail, per_cve_status=False):
                  "every status" % (label, cve["id"], cve.get("status"),
                                    ", ".join(CVE_STATUSES)))
 
+def _check_recipe_version(name, entry, recipes, fail):
+    """Optional, and a join key when present: it must name a record the
+    document carries for the package's recipe, or the consumer joining on it
+    lands nowhere or on the other version's CVEs.
+    """
+    label = "packages[%r].recipe_version" % name
+    version = entry["recipe_version"]
+    if not isinstance(version, str):
+        fail("%s is %r, expected a string" % (label, version))
+        return
+    recipe = entry.get("recipe")
+    record = (recipes.get(recipe)
+              if isinstance(recipes, dict) and isinstance(recipe, str) else None)
+    if not isinstance(record, dict):
+        fail("%s is %r, but recipes carries no record for %r"
+             % (label, version, entry.get("recipe")))
+        return
+    versions = [record.get("version")] + [
+        a.get("version") for a in (record.get("alt_versions") or ())
+        if isinstance(a, dict)
+    ]
+    if version not in versions:
+        fail("%s is %r, which no record of %r carries (%s)"
+             % (label, version, entry.get("recipe"),
+                ", ".join(str(v) for v in versions)))
+
 def _check_entries(report, fail):
     recipes = report.get("recipes")
     per_cve_status = report.get("status") == STATUS_ALL
@@ -224,6 +250,8 @@ def _check_entries(report, fail):
                     fail("packages[%r] has no string %s" % (name, field))
             if isinstance(entry.get("recipe"), str) and not entry["recipe"]:
                 fail("packages[%r] has an empty recipe" % name)
+            if "recipe_version" in entry:
+                _check_recipe_version(name, entry, recipes, fail)
 
     for key in ("unscanned_recipes", "no_cve_record_recipes"):
         names = report.get(key)

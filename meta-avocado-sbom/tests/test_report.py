@@ -861,6 +861,74 @@ class AltVersionsTests(unittest.TestCase):
         self.assertEqual(len(alts[0]["cves"]), 1)
         self.assertEqual(doc["counts"]["alt_cves"], 1)
 
+    def test_each_package_names_the_record_its_cves_are_on(self):
+        # recipe is the same for both kernels' packages, so without
+        # recipe_version a consumer cannot tell which record's CVEs a
+        # kernel-module of the second kernel ships.
+        self.populate()
+        doc, _ = self.build()
+        packages = doc["packages"]
+        self.assertEqual(packages["kernel-6.12.25"]["recipe_version"], "6.12.25")
+        self.assertEqual(packages["kernel-6.6.63"]["recipe_version"], "6.6.63")
+
+    def test_a_name_both_kernels_package_names_the_version_that_won_it(self):
+        # packages carries the first pkgdata directory's entry for a shared
+        # name, so its recipe_version must be that entry's version too.
+        self.package("kernel", "linux-raspberrypi", "6.12.25")
+        self.package("kernel", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.populate()
+        doc, _ = self.build()
+        self.assertEqual(doc["packages"]["kernel"]["version"], "6.12.25-r0")
+        self.assertEqual(doc["packages"]["kernel"]["recipe_version"], "6.12.25")
+
+    def test_a_package_whose_recipe_has_no_record_names_no_version(self):
+        # Nothing to join to, so the field is absent rather than pointing at
+        # a record the document does not carry.
+        self.populate()
+        self.package("busybox", "busybox", "1.36.1")
+        doc, _ = self.build()
+        self.assertNotIn("busybox", doc["recipes"])
+        self.assertNotIn("recipe_version", doc["packages"]["busybox"])
+
+    def test_a_multi_kernel_report_passes_the_checker(self):
+        self.populate()
+        doc, _ = self.build()
+        self.assertEqual(verify.check_report(doc, health=False), [])
+
+    def test_a_version_with_no_record_at_this_status_names_none(self):
+        # The second kernel carries nothing Unpatched, so no record exists to
+        # join it to. Naming the entry instead would file it under the shipped
+        # kernel's CVEs.
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63",
+            issues=[{"id": "CVE-2026-2", "status": "Patched"}]), alt=True)
+
+        doc, _ = self.build()
+        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
+        self.assertEqual(doc["packages"]["kernel-6.12.25"]["recipe_version"],
+                         "6.12.25")
+        self.assertNotIn("recipe_version", doc["packages"]["kernel-6.6.63"])
+
+    def test_at_all_the_status_counters_include_the_second_version(self):
+        # What the schema's counter descriptions state: "cves" leaves the
+        # alt records out, the three per-status counters do not.
+        self.populate()
+        doc, _ = self.build(status="All")
+        counts = doc["counts"]
+        self.assertEqual((counts["cves"], counts["alt_cves"]), (1, 1))
+        self.assertEqual(
+            counts["unpatched_cves"] + counts["ignored_cves"]
+            + counts["patched_cves"],
+            counts["cves"] + counts["alt_cves"],
+        )
+
 class EvidenceTests(unittest.TestCase):
     """Who decided a status, and the one thing this field must never claim.
 

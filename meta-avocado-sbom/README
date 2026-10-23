@@ -78,21 +78,25 @@ an SBOM, because "openssl 3.0.12" plus an advisory feed cannot know this recipe
 carries a backport. Both carry the same packages_digest, which is what proves
 they describe the same build.
 
-A consumer that rejects a document holding one status asks for All instead:
+A consumer that rejects a document holding one status asks for All, after the
+other two:
 
-  AVOCADO_CVE_REPORT_STATUS = "All"
+  AVOCADO_CVE_REPORT_STATUS = "Unpatched Patched All"
 
-One document listing every CVE of every status, each CVE carrying its own in
-"status" (Unpatched, Patched or Ignored). The document's own "status" is then
-All, which is a kind of report and not something cve-check emits. Evidence is
-attributed per CVE, off its own status, as it is in the single-status
-documents. At All, counts.unpatched_cves, patched_cves and ignored_cves count
-what the document lists; at any other status they still count the CVEs of the
-other statuses it left out, and are not derivable from it. So a fix reads as a
-CVE changing status between two builds instead of one disappearing. It is not
-in the default, so the file existing consumers fetch keeps holding what it
-always held; it may also sit beside the single-status documents, as
-"All Unpatched" or "Unpatched All", suffixed like any further status.
+That adds -all.json: one document listing every CVE of every status, each CVE
+carrying its own in "status" (Unpatched, Patched or Ignored). The document's
+own "status" is then All, which is a kind of report and not something
+cve-check emits. Evidence is attributed per CVE, off its own status, as it is
+in the single-status documents. At All, counts.unpatched_cves, patched_cves
+and ignored_cves count what the document lists, alt_versions records included,
+so on a multi-kernel machine the three sum to cves plus alt_cves rather than to
+cves; at any other status they still count the CVEs of the other statuses it
+left out, and are not derivable from it. So a fix reads as a CVE changing
+status between two builds instead of one disappearing.
+
+All is not in the default, and only a status after the first is suffixed.
+Asked for alone, or first, All takes the unsuffixed name and replaces the
+Unpatched document existing consumers fetch there.
 
 The same code can run standalone against a build tree, if needed:
 
@@ -342,6 +346,25 @@ directory, and that has to be the kernel the image installs. Scope leans on
 the same order: a manifest names a package without a version, so an installed
 name counts for the version that won it, and the feed-only kernel reads "feed"
 rather than base-runtime on a name it shares.
+
+Both kernels' packages name the same recipe, so "recipe" alone cannot join
+kernel-module-*-6.6.63 or kernel-devsrc to the 6.6 record's CVEs. Each package
+whose recipe has a record at its version also carries "recipe_version", the
+version of that record - the entry's or one alt_versions record's - so the join
+is on recipe and recipe_version together:
+
+  "kernel-module-foo-6.6.63": { "recipe": "linux-raspberrypi",
+                                "version": "6.6.63+git-r0",
+                                "origin": "raspberrypi4-64",
+                                "recipe_version": "6.6.63+git" }
+
+It is optional and additive, so the contract stays version 1 and a report
+written before it lacks the key. In a report that writes it, an absent key means
+no record at the package's version is in this document, so no CVE at this
+status belongs to it; falling back to the entry would file a second-kernel
+package under the shipped kernel's CVEs. A name both kernels package names the
+version that won it, as scope does. The check fails a recipe_version that names
+no record of the package's recipe.
 
 Standalone, the same shape needs both directories named:
 
