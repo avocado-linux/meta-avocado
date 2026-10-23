@@ -79,7 +79,12 @@ def trim(full):
     )
     step = max(1, len(others) // EXTRA_PACKAGE_SAMPLE)
     for name in others[::step][:EXTRA_PACKAGE_SAMPLE]:
-        packages[name] = full["packages"][name]
+        # Its recipe's record may be one trimmed above, and a recipe_version
+        # naming a record the fixture no longer carries fails the check.
+        packages[name] = {
+            k: v for k, v in full["packages"][name].items()
+            if k != "recipe_version"
+        }
 
     kept_recipes = {pkg["recipe"] for pkg in packages.values()}
     if "no_cve_record_recipes" not in full:

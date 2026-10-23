@@ -409,6 +409,33 @@ class AltVersionsTests(unittest.TestCase):
         self.report["counts"]["alt_cves"] = 2
         self.assertCaught("repeats version")
 
+    def test_a_package_naming_the_second_version_passes(self):
+        self.report["packages"]["libpng16-tools"]["recipe_version"] = "1.6.44"
+        self.report["packages"]["libpng16-16"]["recipe_version"] = "1.6.42"
+        self.assertEqual(verify.check_report(self.report), [])
+
+    def test_a_package_naming_a_version_no_record_carries(self):
+        # The join would land on nothing, or a consumer falls back to the
+        # entry and files the package under the other kernel's CVEs.
+        self.report["packages"]["libpng16-16"]["recipe_version"] = "1.6.43"
+        self.assertCaught("packages['libpng16-16'].recipe_version")
+
+    def test_a_package_naming_a_version_of_a_recipe_with_no_record(self):
+        name = next(n for n, p in self.report["packages"].items()
+                    if p["recipe"] not in self.report["recipes"])
+        self.report["packages"][name]["recipe_version"] = "1.0"
+        self.assertCaught("packages[%r].recipe_version" % name)
+
+    def test_a_recipe_version_that_is_not_a_string(self):
+        self.report["packages"]["libpng16-16"]["recipe_version"] = 1.6
+        self.assertCaught("packages['libpng16-16'].recipe_version")
+
+    def test_a_report_without_recipe_version_still_passes(self):
+        # Optional: every report written before the field existed omits it.
+        self.assertFalse(any("recipe_version" in p
+                             for p in self.report["packages"].values()))
+        self.assertEqual(verify.check_report(self.report), [])
+
 SCHEMA = os.path.join(
     HERE, "..", "schema", "avocado-cve-report-v1.schema.json"
 )
@@ -429,11 +456,15 @@ class SchemaTests(unittest.TestCase):
         # The pair the unknown-status warning depends on: do_cve_report warns
         # when cve-check grows a status beyond CVE_STATUSES, but nothing tied
         # that list to the schema's enum, so the two could drift apart in
-        # exactly the release the warning exists to survive.
+        # exactly the release the warning exists to survive. The document's own
+        # status may also be All; a CVE's own never is.
         self.assertEqual(
             sorted(self.schema["properties"]["status"]["enum"]),
-            sorted(verify.CVE_STATUSES),
+            sorted(verify.CVE_STATUSES + ("All",)),
         )
+        cve = (self.schema["properties"]["recipes"]["additionalProperties"]
+               ["properties"]["cves"]["items"]["properties"]["status"]["enum"])
+        self.assertEqual(sorted(cve), sorted(verify.CVE_STATUSES))
 
     def test_schema_evidence_matches_the_generator(self):
         # Same drift risk as the status enum: _evidence() picks from a tuple
@@ -579,6 +610,32 @@ class SchemaTests(unittest.TestCase):
         report = load()
         report["counts"]["entries_unreadable"] = 0
         jsonschema.validate(report, self.schema)
+
+    def test_schema_accepts_a_package_naming_its_record(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        report = self.alt_report()
+        report["packages"]["libpng16-tools"]["recipe_version"] = "1.6.44"
+        jsonschema.validate(report, self.schema)
+
+    def test_schema_rejects_a_recipe_version_that_is_not_a_string(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        report = self.alt_report()
+        report["packages"]["libpng16-tools"]["recipe_version"] = 1.6
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(report, self.schema)
+
+    def test_schema_keeps_recipe_version_optional(self):
+        # Required would make every report already published invalid, which
+        # is a major bump, not an addition.
+        package = self.schema["properties"]["packages"]["additionalProperties"]
+        self.assertIn("recipe_version", package["properties"])
+        self.assertNotIn("recipe_version", package["required"])
 
 class SeverityTests(unittest.TestCase):
     """The split the recipe depends on: malformed always fails the build,

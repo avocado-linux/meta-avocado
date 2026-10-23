@@ -78,6 +78,26 @@ an SBOM, because "openssl 3.0.12" plus an advisory feed cannot know this recipe
 carries a backport. Both carry the same packages_digest, which is what proves
 they describe the same build.
 
+A consumer that rejects a document holding one status asks for All, after the
+other two:
+
+  AVOCADO_CVE_REPORT_STATUS = "Unpatched Patched All"
+
+That adds -all.json: one document listing every CVE of every status, each CVE
+carrying its own in "status" (Unpatched, Patched or Ignored). The document's
+own "status" is then All, which is a kind of report and not something
+cve-check emits. Evidence is attributed per CVE, off its own status, as it is
+in the single-status documents. At All, counts.unpatched_cves, patched_cves
+and ignored_cves count what the document lists, alt_versions records included,
+so on a multi-kernel machine the three sum to cves plus alt_cves rather than to
+cves; at any other status they still count the CVEs of the other statuses it
+left out, and are not derivable from it. So a fix reads as a CVE changing
+status between two builds instead of one disappearing.
+
+All is not in the default, and only a status after the first is suffixed.
+Asked for alone, or first, All takes the unsuffixed name and replaces the
+Unpatched document existing consumers fetch there.
+
 The same code can run standalone against a build tree, if needed:
 
   PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
@@ -91,6 +111,8 @@ Variables
                                each, default "Unpatched Patched". The first
                                keeps AVOCADO_CVE_REPORT_FILE verbatim; each
                                further one is suffixed with its status.
+                               "All" lists every status in one document, each
+                               CVE carrying its own; see above
                                Add "Ignored" to audit what
                                cve-extra-exclusions.inc and any local
                                CVE_STATUS declaration suppress; each issue then
@@ -324,6 +346,25 @@ directory, and that has to be the kernel the image installs. Scope leans on
 the same order: a manifest names a package without a version, so an installed
 name counts for the version that won it, and the feed-only kernel reads "feed"
 rather than base-runtime on a name it shares.
+
+Both kernels' packages name the same recipe, so "recipe" alone cannot join
+kernel-module-*-6.6.63 or kernel-devsrc to the 6.6 record's CVEs. Each package
+whose recipe has a record at its version also carries "recipe_version", the
+version of that record - the entry's or one alt_versions record's - so the join
+is on recipe and recipe_version together:
+
+  "kernel-module-foo-6.6.63": { "recipe": "linux-raspberrypi",
+                                "version": "6.6.63+git-r0",
+                                "origin": "raspberrypi4-64",
+                                "recipe_version": "6.6.63+git" }
+
+It is optional and additive, so the contract stays version 1 and a report
+written before it lacks the key. In a report that writes it, an absent key means
+no record at the package's version is in this document, so no CVE at this
+status belongs to it; falling back to the entry would file a second-kernel
+package under the shipped kernel's CVEs. A name both kernels package names the
+version that won it, as scope does. The check fails a recipe_version that names
+no record of the package's recipe.
 
 Standalone, the same shape needs both directories named:
 
@@ -596,6 +637,14 @@ builds counts from its own key list, so a counter missing there is only found
 when someone regenerates the fixture and CI reports it missing. It does import
 HEALTH_COUNTERS from verify rather than restating it, so at least the question
 of which counters must be zero has one answer and not two.
+
+The status "All" is an addition under these rules and not a new major. It is
+requested by name and never in the default, so no document an existing consumer
+fetches carries it; one that meets it rejects it on "status" being a value it
+does not know, which is the check it already makes. What the three per-status
+counters count at All differs from what they count at any other status, which
+the schema says beside each of them: the meaning is a function of the document's
+own "status", and at every status that existed before it is unchanged.
 
 One change was made under these rules that they would otherwise forbid.
 unscanned_recipes originally counted recipes with no cve-check result *and*

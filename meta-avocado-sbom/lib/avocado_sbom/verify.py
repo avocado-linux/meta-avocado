@@ -11,7 +11,13 @@ Run by CI against the fixture and by do_cve_report against every fresh report.
 
 import json
 
-from avocado_sbom.report import CVE_STATUSES, REPORT_VERSION, packages_digest
+from avocado_sbom.report import (
+    CVE_STATUSES,
+    REPORT_STATUSES,
+    REPORT_VERSION,
+    STATUS_ALL,
+    packages_digest,
+)
 
 # Must contain REPORT_VERSION's major, or a fresh report fails its own check.
 SUPPORTED_MAJORS = ("1",)
@@ -110,10 +116,10 @@ def _check_envelope(report, fail):
         )
 
     status = report.get("status")
-    if isinstance(status, str) and status not in CVE_STATUSES:
+    if isinstance(status, str) and status not in REPORT_STATUSES:
         fail(
-            "status %r is not a cve-check status (%s)"
-            % (status, ", ".join(CVE_STATUSES))
+            "status %r is not a cve-check status (%s) or %s"
+            % (status, ", ".join(CVE_STATUSES), STATUS_ALL)
         )
 
     generated = report.get("generated")
@@ -140,10 +146,13 @@ def _check_counts(report, fail):
         elif counts[name] < 0:
             fail("counts.%s is %d, expected a count" % (name, counts[name]))
 
-def _check_record(label, entry, fail):
+def _check_record(label, entry, fail, per_cve_status=False):
     """One recipe-at-a-version: a recipes entry, or an alt_versions record on
     one. Both carry the same four fields, so a consumer reads a version the
     same way wherever it found it.
+
+    per_cve_status is set at All, where the document's own status says nothing
+    about a CVE and each one has to carry its own.
     """
     if not isinstance(entry.get("version"), str):
         fail("%s has no string version" % label)
@@ -163,16 +172,47 @@ def _check_record(label, entry, fail):
             fail("%s has a CVE record that is not an object" % label)
         elif not isinstance(cve.get("id"), str) or not cve["id"]:
             fail("%s has a CVE record with no id" % label)
+        elif per_cve_status and cve.get("status") not in CVE_STATUSES:
+            fail("%s: %s has status %r, expected one of %s in a report of "
+                 "every status" % (label, cve["id"], cve.get("status"),
+                                   ", ".join(CVE_STATUSES)))
+
+def _check_recipe_version(name, entry, recipes, fail):
+    """Optional, and a join key when present: it must name a record the
+    document carries for the package's recipe, or the consumer joining on it
+    lands nowhere or on the other version's CVEs.
+    """
+    label = "packages[%r].recipe_version" % name
+    version = entry["recipe_version"]
+    if not isinstance(version, str):
+        fail("%s is %r, expected a string" % (label, version))
+        return
+    recipe = entry.get("recipe")
+    record = (recipes.get(recipe)
+              if isinstance(recipes, dict) and isinstance(recipe, str) else None)
+    if not isinstance(record, dict):
+        fail("%s is %r, but recipes carries no record for %r"
+             % (label, version, entry.get("recipe")))
+        return
+    versions = [record.get("version")] + [
+        a.get("version") for a in (record.get("alt_versions") or ())
+        if isinstance(a, dict)
+    ]
+    if version not in versions:
+        fail("%s is %r, which no record of %r carries (%s)"
+             % (label, version, entry.get("recipe"),
+                ", ".join(str(v) for v in versions)))
 
 def _check_entries(report, fail):
     recipes = report.get("recipes")
+    per_cve_status = report.get("status") == STATUS_ALL
     if isinstance(recipes, dict):
         for name, entry in recipes.items():
             if not isinstance(entry, dict):
                 fail("recipes[%r] is %s, expected an object"
                      % (name, type(entry).__name__))
                 continue
-            _check_record("recipes[%r]" % name, entry, fail)
+            _check_record("recipes[%r]" % name, entry, fail, per_cve_status)
 
             alt_versions = entry.get("alt_versions")
             if alt_versions is None:
@@ -191,7 +231,7 @@ def _check_entries(report, fail):
                     fail("%s is %s, expected an object"
                          % (label, type(alt).__name__))
                     continue
-                _check_record(label, alt, fail)
+                _check_record(label, alt, fail, per_cve_status)
                 version = alt.get("version")
                 if version in seen:
                     fail("%s repeats version %r, which the report already "
@@ -210,6 +250,8 @@ def _check_entries(report, fail):
                     fail("packages[%r] has no string %s" % (name, field))
             if isinstance(entry.get("recipe"), str) and not entry["recipe"]:
                 fail("packages[%r] has an empty recipe" % name)
+            if "recipe_version" in entry:
+                _check_recipe_version(name, entry, recipes, fail)
 
     for key in ("unscanned_recipes", "no_cve_record_recipes"):
         names = report.get(key)
@@ -267,6 +309,19 @@ def _check_derived(report, fail):
         "alt_recipes": sum(1 for e in entries if e.get("alt_versions")),
         "alt_cves": cve_count(alt_records),
     }
+
+    if report.get("status") == STATUS_ALL:
+        # At one status these three name what was left out, which nothing in
+        # the document can be checked against. At All they name what is
+        # listed, so they can be, and a report whose counters drifted from its
+        # own CVEs would otherwise pass.
+        for status in CVE_STATUSES:
+            derived["%s_cves" % status.lower()] = sum(
+                1
+                for e in entries + alt_records
+                for cve in (e.get("cves") if isinstance(e.get("cves"), list) else ())
+                if isinstance(cve, dict) and cve.get("status") == status
+            )
 
     for name, want in derived.items():
         got = counts.get(name)
