@@ -17,7 +17,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-grinn-astra
     path: meta-grinn-astra
     branch: scarthgap_6.12_v2.2.0
-    commit: c055fad1d8d3b992f4f774fecc7ffc391ec1ebd0
+    commit: dd2918c83a32c292a10346aa8a3ed825e816824d
     layers:
       meta-grinn-astra-bsp:
       meta-grinn-astra-fixes:

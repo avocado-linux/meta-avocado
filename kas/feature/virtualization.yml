@@ -6,6 +6,6 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-virtualization
     path: meta-virtualization
     branch: wrynose
-    commit: 8cfa4881864742296613f99abccc5daea054936c
+    commit: 18d58082b2458cf85438ac6e0f2f1fd0153318cb
     layers:
       .:

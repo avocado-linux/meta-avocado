@@ -5,8 +5,8 @@ repos:
   meta-clang:
     url: https://github.com/avocado-linux/vendor-meta-clang.git
     path: meta-clang
-    commit: b044647662a6916299238e7f2d9476d54f528263
-    branch: master
+    commit: ef0d22f21910a0c30c967eeb17d8f209806e2d81
+    branch: wrynose
     layers:
       .:
 

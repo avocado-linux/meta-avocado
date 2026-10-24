@@ -43,6 +43,7 @@ def get_latest_ref(url, branch):
 def update_refs_in_file(yml_path):
     yaml = YAML()
     yaml.preserve_quotes = True
+    yaml.indent(mapping=2, sequence=4, offset=2)
     with open(yml_path, 'r') as f:
         data = yaml.load(f)
 

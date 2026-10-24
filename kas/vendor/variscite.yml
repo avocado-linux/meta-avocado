@@ -20,7 +20,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-imx.git
     path: meta-variscite-bsp-imx
     branch: wrynose_6.18.20_2.0.0_var01
-    commit: f70a345bd4920e7bf82a03fc06c6c4541ae91d0a
+    commit: b2d2a2dda1f1998413d9ebaa3e823f54f6475797
     layers:
       .:
 
@@ -29,6 +29,6 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-common.git
     path: meta-variscite-bsp-common
     branch: wrynose_var01
-    commit: 6a069e128a201de16bc629332708d1678f428946
+    commit: 233fda88218170ad059f085c89c3620b686dafed
     layers:
       .:

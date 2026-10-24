@@ -18,7 +18,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-solidrun-arm-rzg2lc
     path: meta-solidrun-arm-rzg2lc
     branch: scarthgap_rzv2n_dev
-    commit: 91d0eecba625c4a8beda731c4246be6c7da7c998
+    commit: 0e8a6ce505ac9e7f46960a538837ec073a101825
     layers:
       meta-rzv2n:
       meta:

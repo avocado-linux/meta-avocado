@@ -10,8 +10,8 @@ repos:
   meta-aws:
     url: https://github.com/avocado-linux/vendor-meta-aws.git
     path: meta-aws
-    branch: master
-    commit: 0d79b11ee06ef48c26d5477e34770825f8795afc
+    branch: wrynose
+    commit: a498da240af9a9c80a8a3d4bd494c2e12165c74e
     layers:
       .:
 

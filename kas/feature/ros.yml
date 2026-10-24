@@ -9,7 +9,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-ros.git
     path: meta-ros
     branch: wrynose
-    commit: be3e675d84cea0c3455cb574c8f73a14f90d797e
+    commit: 0ecfd176e806536bdd3d203a86b05cbc4fdd43ed
     layers:
       meta-ros-common:
       meta-ros2-jazzy:

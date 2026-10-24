@@ -21,7 +21,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-bsp-imx8mp.git
     path: meta-bsp-imx8mp
     branch: wrynose-6.18.20-2.0.0
-    commit: 7baa292db55edae827d4ee25f9de5123f238dbb1
+    commit: 1280452795289f22900083d2f7b4d6406113f9f2
     layers:
       .:
 

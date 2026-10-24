@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-security
     path: meta-security
     branch: wrynose
-    commit: 925357d25af4534807647d2a1d99e5b6c6df3af4
+    commit: 2703974d5e2d61b221dffa302c2e059a522adbf3
     layers:
       .:
       meta-tpm:

@@ -5,8 +5,8 @@ repos:
   meta-browser:
     url: https://github.com/avocado-linux/vendor-meta-browser.git
     path: meta-browser
-    commit: c28c854532dcbdcde439bb2461fe5f325a6554ad
-    branch: master
+    commit: 0715454e29ac38fb0a25bdbb1e0e26fdc4dc7ae3
+    branch: wrynose
     layers:
       meta-chromium:
 
