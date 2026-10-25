@@ -165,3 +165,13 @@ python do_create_v8_qemu_wrapper:append:intel-x86-64-v4() {
             'exec %s --library-path %s "$@"' % (loader, ':'.join(qemu_libdirs)),
             '']))
 }
+
+# Chromium's Python build actions size their worker pools from
+# multiprocessing.cpu_count(), which counts every CPU on the host, not the
+# build's share. mojom_parser.py forks one parser per CPU (64 on a 64-CPU
+# host), and with ninja running several mojom targets at once the blink mojom
+# step grows by ~40 GiB within seconds and OOMs a 64 GiB build. ninja already
+# parallelizes the actions, so keep each one to a single process.
+# PYTHON_CPU_COUNT (Python 3.13+) overrides os.cpu_count() and
+# multiprocessing.cpu_count(); python3native supplies 3.14.
+export PYTHON_CPU_COUNT = "1"
