@@ -1,0 +1,55 @@
+From: Josh Schneck <j.schneck@peridio.com>
+Subject: [PATCH] v8: stub WasmModuleCompilation when WebAssembly is disabled
+
+Chromium 152's Blink script streamer (BackgroundWasmStreamManager) uses
+v8::WasmModuleCompilation unconditionally, but V8 defines it only in
+src/wasm/wasm-js.cc, which is not built with v8_enable_webassembly=false.
+api.cc already stubs WasmStreaming for that configuration; add the same for
+WasmModuleCompilation. Without it, linking v8_context_snapshot_generator
+fails with undefined v8::WasmModuleCompilation symbols.
+
+Upstream-Status: Pending
+
+---
+ v8/src/api/api.cc | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/v8/src/api/api.cc b/v8/src/api/api.cc
+--- a/v8/src/api/api.cc
++++ b/v8/src/api/api.cc
+@@ -12329,6 +12329,35 @@
+                                                      Local<Value> value) {
+   FATAL("WebAssembly is disabled");
+ }
++
++// Likewise WasmModuleCompilation, which Blink's script streamer holds for wasm
++// responses. With WebAssembly disabled no module can compile: accept and drop
++// the bytes, and resolve {Finish} with an error.
++class WasmModuleCompilation::Impl {};
++
++WasmModuleCompilation::WasmModuleCompilation() = default;
++
++WasmModuleCompilation::~WasmModuleCompilation() = default;
++
++void WasmModuleCompilation::OnBytesReceived(const uint8_t* bytes, size_t size) {
++}
++
++void WasmModuleCompilation::Finish(
++    Isolate* isolate, const ModuleCachingCallback& caching_callback,
++    const std::function<void(std::variant<Local<WasmModuleObject>, Local<Value>>
++                                 module_or_error)>& resolution_callback) {
++  resolution_callback(Exception::Error(
++      String::NewFromUtf8Literal(isolate, "WebAssembly is disabled")));
++}
++
++void WasmModuleCompilation::Abort() {}
++
++void WasmModuleCompilation::SetHasCompiledModuleBytes() {}
++
++void WasmModuleCompilation::SetMoreFunctionsCanBeSerializedCallback(
++    std::function<void(CompiledWasmModule)>) {}
++
++void WasmModuleCompilation::SetUrl(const char* url, size_t length) {}
+ #endif  // !V8_ENABLE_WEBASSEMBLY
+ 
+ namespace internal {

@@ -15,7 +15,8 @@ require ${THISDIR}/gn-utils.inc
 SRC_URI += "file://0001-rust-fix-mismatched-lifetime-syntaxes-in-qr_code.patch \
         file://0002-fix-use-C-style-octal-literal-instead-of-C-23-0o-pre.patch \
         file://0003-fix-work-around-clang-20-crash-on-defaulted-non-memb.patch \
-        file://0004-fix-include-gfx-Transform-for-unique_ptr-destructor.patch"
+        file://0004-fix-include-gfx-Transform-for-unique_ptr-destructor.patch \
+        file://0005-v8-stub-WasmModuleCompilation-when-WebAssembly-is-disabled.patch"
 
 # meta-qcom-hwe's chromium-browser-layer/.../chromium-ozone-wayland_%.bbappend
 # layers a `fix-chromium-launch-crash.patch` workaround written against an
