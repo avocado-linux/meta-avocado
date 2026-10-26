@@ -721,6 +721,7 @@ wait_for_exported_storage() {
 create_rcm_boot_script() {
   ln -sf "$here/tegrarcm_v2" rcmboot_blob/
   cat >rcm-boot.sh <<EOF
+set -e
 oldwd="\$PWD"
 cd rcmboot_blob
 EOF
@@ -796,16 +797,25 @@ sign_binaries_t234() {
   return 0
 }
 
+# The flash kernel never started if the RCM upload failed, and the board then
+# resets into whatever OS it already has. Say so here: the later wait for the
+# exported USB storage device only reports a timeout, and the upload's own
+# error is otherwise visible only in log.initrd-flash.*.
+report_rcm_boot_failure() {
+  local err
+  err=$(grep 'ERROR' rcm-boot.output 2>/dev/null | tail -n 1)
+  echo "ERR: RCM boot failed, the flash kernel did not start${err:+: $err}" >&2
+}
+
 run_rcm_boot_t234() {
-  if [ -z "$BR_CID" ]; then
-    if ./rcm-boot.sh | tee rcm-boot.output; then
+  if ./rcm-boot.sh | tee rcm-boot.output; then
+    if [ -z "$BR_CID" ]; then
       BR_CID=$(grep BR_CID: rcm-boot.output | cut -d: -f2)
-      return 0
-    else
-      return 1
     fi
+    return 0
   fi
-  ./rcm-boot.sh || return 1
+  report_rcm_boot_failure
+  return 1
 }
 
 copy_bootloader_files_t234() {
