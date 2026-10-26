@@ -56,7 +56,7 @@ B=AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE
 # The substitution block runs at top level in the provision script, so lift it
 # out rather than running a flash.
 awk '/^if \[ -n "\$app_partuuid" \]; then$/{f=1} f{print} f&&/^fi$/{exit}' \
-  "$PROVISION" > "$work/subst.sh"
+  "$PROVISION" >"$work/subst.sh"
 if ! grep -q 'APPUUID' "$work/subst.sh"; then
   fail "could not extract the PARTUUID substitution block"
   echo "test-rootfs-partuuid-pin: FAIL (1)"
@@ -69,7 +69,7 @@ fill_layout() {
   sed -e "s,LNXFILE_b,boot.img," -e "s,LNXFILE,boot.img," -e "s,LNXSIZE,67108864," \
     -e "s,APPSIZE,67108864,g" -e "s,EXT_NUM_SECTORS,4194304," -e "s,INT_NUM_SECTORS,4194304," \
     -e "s,RECNAME,recovery," -e "s,RECSIZE,1048576,g" -e "s,RECDTB-NAME,recovery-dtb," \
-    -e "s,ESP_FILE,esp.img," -e "/RECFILE/d" -e "/RECDTB-FILE/d" "$1" > "$2"
+    -e "s,ESP_FILE,esp.img," -e "/RECFILE/d" -e "/RECDTB-FILE/d" "$1" >"$2"
 }
 
 # run_subst <layout> [slot-A uuid] [slot-B uuid] -> rc; runs the block the way
@@ -79,10 +79,11 @@ run_subst() {
     build_dir="$work/build"
     mkdir -p "$build_dir"
     cp "$1" "$build_dir/external-flash.xml.in"
-    # Read by the sourced block below.
-    # shellcheck disable=SC2034
+    # Read by the sourced block below; the subshell keeps them out of later
+    # cases on purpose.
+    # shellcheck disable=SC2034,SC2030
     app_partuuid="${2-$A}"
-    # shellcheck disable=SC2034
+    # shellcheck disable=SC2034,SC2030
     app_b_partuuid="${3-$B}"
     # shellcheck disable=SC1091
     . "$work/subst.sh"
@@ -119,7 +120,7 @@ done
 # that disagree with the command line. APPUUID_b contains APPUUID, so each
 # placeholder has to be checked on its own.
 sed 's,<unique_guid> APPUUID </unique_guid>,<unique_guid> </unique_guid>,' \
-  "$work/external-flash.xml" > "$work/no-a.xml"
+  "$work/external-flash.xml" >"$work/no-a.xml"
 if grep -q 'APPUUID_b' "$work/no-a.xml" && ! grep -q 'APPUUID ' "$work/no-a.xml"; then
   if run_subst "$work/no-a.xml"; then
     fail "a layout missing only the slot-A placeholder was accepted"
@@ -130,7 +131,7 @@ else
   fail "could not build the slot-A-less layout"
 fi
 
-sed 's,APPUUID_b,,' "$work/external-flash.xml" > "$work/no-b.xml"
+sed 's,APPUUID_b,,' "$work/external-flash.xml" >"$work/no-b.xml"
 if run_subst "$work/no-b.xml"; then
   fail "a layout missing the slot-B placeholder was accepted"
 else
@@ -154,7 +155,7 @@ fi
 # Through to the disk: nvflashxmlparse -> make_partitions -> sgdisk -> GPT.
 run_subst "$work/external-flash.xml" || fail "substitution for the GPT check failed"
 awk '/^(find_finalpart|make_partitions)\(\) \{/{f=1} f{print} f&&/^\}$/{f=0}' \
-  "$HELPERS/make-sdcard.sh" > "$work/mkparts.sh"
+  "$HELPERS/make-sdcard.sh" >"$work/mkparts.sh"
 truncate -s 2G "$work/disk.img"
 if bash -c '
   . "$1"
@@ -182,7 +183,9 @@ fi
 # The command line and the layout must name the same values. Run the block that
 # generates the pins and composes the command line, and compare what it exports
 # with the PARTUUIDs it generated, which the layout substitution above consumes.
-sed -n '/^    app_partuuid=\$(tr/,/^    export AVOCADO_KERNEL_CMDLINE_EXTRA/p' "$PROVISION" > "$work/pin.sh"
+# The $( is a literal in the sed address, matched against the script's source.
+# shellcheck disable=SC2016
+sed -n '/^    app_partuuid=\$(tr/,/^    export AVOCADO_KERNEL_CMDLINE_EXTRA/p' "$PROVISION" >"$work/pin.sh"
 if ! grep -q 'export AVOCADO_KERNEL_CMDLINE_EXTRA' "$work/pin.sh"; then
   fail "could not extract the command line pin block"
 else
@@ -191,6 +194,8 @@ else
       if [ -n "$1" ]; then AVOCADO_KERNEL_CMDLINE_EXTRA="$1"; else unset AVOCADO_KERNEL_CMDLINE_EXTRA; fi
       # shellcheck disable=SC1091
       . "$work/pin.sh"
+      # pin.sh, sourced in this same subshell, sets both; run_subst's copies are unrelated.
+      # shellcheck disable=SC2031
       printf '%s|%s|%s' "$app_partuuid" "$app_b_partuuid" "$AVOCADO_KERNEL_CMDLINE_EXTRA"
     )
   }

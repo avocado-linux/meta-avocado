@@ -20,15 +20,15 @@ SOC_UID_FILE="/sys/devices/soc0/serial_number"
 
 HW_ID=""
 if [ -r "$DT_SERIAL_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$DT_SERIAL_FILE")
+  HW_ID=$(tr -d '\0\n' <"$DT_SERIAL_FILE")
 fi
 if [ -z "$HW_ID" ] && [ -r "$SOC_UID_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
+  HW_ID=$(tr -d '\0\n' <"$SOC_UID_FILE")
 fi
 if [ -z "$HW_ID" ]; then
-    echo "var-key: no SoC serial at $DT_SERIAL_FILE or $SOC_UID_FILE" >&2
-    echo "var-key: refusing to derive a key that would not be device-unique" >&2
-    exit 1
+  echo "var-key: no SoC serial at $DT_SERIAL_FILE or $SOC_UID_FILE" >&2
+  echo "var-key: refusing to derive a key that would not be device-unique" >&2
+  exit 1
 fi
 
 # Salt is SHA-256(hw_id) truncated to 16 bytes - public, per-device, non-secret.
@@ -37,10 +37,10 @@ SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-3
 # 64 raw key bytes on stdout; stderr stays attached so a KDF failure trips
 # set -e in the caller instead of yielding a silent empty key.
 openssl kdf -binary \
-    -keylen 64 \
-    -kdfopt pass:"$HW_ID" \
-    -kdfopt salt:"$SALT" \
-    -kdfopt iter:3 \
-    -kdfopt memcost:65536 \
-    -kdfopt lanes:1 \
-    ARGON2ID
+  -keylen 64 \
+  -kdfopt pass:"$HW_ID" \
+  -kdfopt salt:"$SALT" \
+  -kdfopt iter:3 \
+  -kdfopt memcost:65536 \
+  -kdfopt lanes:1 \
+  ARGON2ID

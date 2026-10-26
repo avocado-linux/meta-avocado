@@ -55,7 +55,7 @@ mkdir -p "$work/bin"
 # order the kernel enumerated them. A row with <after> stays invisible until
 # the init has slept that many times, which is how a disk that enumerates late
 # (PCIe after SD) is modelled.
-cat > "$work/bin/blkid" <<'EOF'
+cat >"$work/bin/blkid" <<'EOF'
 #!/bin/sh
 [ "${1:-}" = "--probe" ] && exit 0
 first=; key=; val=
@@ -82,18 +82,18 @@ while read -r dev label uuid after; do
 done < "$BLKID_TABLE"
 exit $found
 EOF
-cat > "$work/bin/lsblk" <<'EOF'
+cat >"$work/bin/lsblk" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-cat > "$work/bin/mount" <<'EOF'
+cat >"$work/bin/mount" <<'EOF'
 #!/bin/sh
 echo "$1 $2" >> "$MOUNT_LOG"
 EOF
 # Prints the BootChainOsCurrent pair the case set, as hexdump would; any other
 # efivar is a real file in the scratch tree and goes to the real hexdump. Like
 # efivarfs, it refuses to seek: hexdump -s there fails with "Illegal seek".
-cat > "$work/bin/hexdump" <<'EOF'
+cat >"$work/bin/hexdump" <<'EOF'
 #!/bin/sh
 echo "$*" >> "$HEXDUMP_LOG"
 for a in "$@"; do
@@ -113,7 +113,7 @@ case "$*" in
 esac
 EOF
 # Each sleep is one tick of the wait loops; blkid reads the count.
-cat > "$work/bin/sleep" <<'EOF'
+cat >"$work/bin/sleep" <<'EOF'
 #!/bin/sh
 echo >> "$TICKS"
 EOF
@@ -125,7 +125,7 @@ sed -e "s,/proc/cmdline,$work/root/cmdline,g" \
   -e "s,/sys/block,$work/root/sys/block,g" \
   -e "s,/sys/class/block,$work/root/sys/class/block,g" \
   -e "s,/sys/firmware/efi/efivars,$work/root/efivars,g" \
-  "$TARGET" > "$work/init"
+  "$TARGET" >"$work/init"
 
 # Controllers as the platform devices of an Orin: NVMe behind the PCIe
 # controller at 0x14160000, the SD card at 0x3400000, USB disks at 0x3610000.
@@ -159,7 +159,7 @@ write_boot_entry() {
   local g=8be4df61-93ca-11d2-aa0d-00e098032b8c num="${BOOT_NUM:-0001}"
   local head venhw mm end
   mkdir -p "$work/root/efivars"
-  printf '%b' "\\x07\\x00\\x00\\x00\\x${num:2:2}\\x${num:0:2}" > "$work/root/efivars/BootCurrent-$g"
+  printf '%b' "\\x07\\x00\\x00\\x00\\x${num:2:2}\\x${num:0:2}" >"$work/root/efivars/BootCurrent-$g"
   head="\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x30\\x00N\\x00V\\x00\\x00\\x00"
   venhw="\\x01\\x04\\x14\\x00\\x2c\\x43\\x5a\\x1e\\x66\\x04\\x31\\x4d\\xb0\\x09\\xd4\\xd9\\x23\\x92\\x71\\xd3"
   mm="\\x01\\x03\\x18\\x00\\x0b\\x00\\x00\\x00$(le64 "$1")$(le64 "$(printf '%x' $((0x$1 + 0x1ffff)))")"
@@ -172,7 +172,7 @@ write_boot_entry() {
     truncmm) body="$head$venhw\\x01\\x03\\x18\\x00\\x0b\\x00\\x00\\x00$(le64 "$1")" ;;
     short) body="\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00" ;;
   esac
-  printf '%b' "$body" > "$work/root/efivars/Boot$num-$g"
+  printf '%b' "$body" >"$work/root/efivars/Boot$num-$g"
 }
 
 # scenario <cmdline> <symlinks: uuid=dev,...> ; table on stdin
@@ -182,11 +182,11 @@ write_boot_entry() {
 scenario() {
   rm -rf "$work/root"
   mkdir -p "$work/root/by-partuuid" "$work/root/sys/block" "$work/root/sys/class/block" "$work/root/dev"
-  echo "$1" > "$work/root/cmdline"
-  cat > "$work/table"
+  echo "$1" >"$work/root/cmdline"
+  cat >"$work/table"
   local dev disk part
   while read -r dev _; do
-    : > "$work/root/dev/$dev"
+    : >"$work/root/dev/$dev"
     case "$dev" in
       nvme* | mmcblk*) disk=${dev%p[0-9]*} ;;
       *) disk=${dev%%[0-9]*} ;;
@@ -194,16 +194,16 @@ scenario() {
     part="$work/root/devices/platform/bus@0/$(controller_of "$dev")/x/$disk/$dev"
     mkdir -p "$part"
     ln -s "$part" "$work/root/sys/class/block/$dev"
-  done < "$work/table"
+  done <"$work/table"
   sed -i "s,^,$work/root/dev/," "$work/table"
   [ -z "${BOOT_CTRL:-}" ] || write_boot_entry "$BOOT_CTRL"
   local link
   for link in ${2//,/ }; do
     ln -s "$work/root/dev/${link#*=}" "$work/root/by-partuuid/${link%%=*}"
   done
-  : > "$work/mounts"
-  : > "$work/ticks"
-  : > "$work/hexdump.log"
+  : >"$work/mounts"
+  : >"$work/ticks"
+  : >"$work/hexdump.log"
   out=$(PATH="$work/bin:$PATH" BLKID_TABLE="$work/table" MOUNT_LOG="$work/mounts" \
     TICKS="$work/ticks" HEXDUMP_LOG="$work/hexdump.log" \
     BOOTCHAIN="${BOOTCHAIN:-}" REAL_HEXDUMP="$REAL_HEXDUMP" $INIT_SH "$work/init" 2>&1)
@@ -377,8 +377,8 @@ fi
 
 # The only APP is on a disk the boot entry does not name: boot it, but say so.
 BOOT_CTRL=14160000 scenario "" "" <<<"mmcblk0p1 APP $pa-sd"
-if [ "$rc" -eq 0 ] && [ "$rootfs" = "mmcblk0p1" ] &&
-  echo "$out" | grep -q "not behind the booted controller 14160000"; then
+if [ "$rc" -eq 0 ] && [ "$rootfs" = "mmcblk0p1" ] \
+  && echo "$out" | grep -q "not behind the booted controller 14160000"; then
   pass "a single APP off the booted controller boots with a warning"
 else
   fail "single APP off controller: mounted '${rootfs}' (rc=$rc): $(echo "$out" | tail -2)"

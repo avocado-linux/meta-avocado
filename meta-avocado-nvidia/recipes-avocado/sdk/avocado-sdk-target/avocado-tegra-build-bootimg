@@ -18,7 +18,10 @@
 #     on disk before `stone bundle` runs.
 set -eu
 
-[ $# -eq 3 ] || { echo "usage: $0 <input dir> <initramfs image> <boot image>" >&2; exit 2; }
+[ $# -eq 3 ] || {
+  echo "usage: $0 <input dir> <initramfs image> <boot image>" >&2
+  exit 2
+}
 input_dir=$1 initramfs_image=$2 boot_image=$3
 
 # The pinned kernel: the rootfs sysroot holds exactly one /boot/Image-<kver>
@@ -33,18 +36,18 @@ input_dir=$1 initramfs_image=$2 boot_image=$3
 # cmdline_extra need a repack, and so a kernel; fail like provision does.
 set -- "$AVOCADO_PREFIX"/rootfs/boot/Image-*
 if [ $# -eq 1 ] && [ ! -e "$1" ]; then
-    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
-        echo "ERROR: kernel.cmdline / cmdline_extra is set, but no kernel is pinned in" >&2
-        echo "       $AVOCADO_PREFIX/rootfs/boot to repack $boot_image with it." >&2
-        exit 1
-    fi
-    cp "$input_dir/tegraflash-bsp/boot.img" "$input_dir/$boot_image"
-    echo "No pinned kernel: $boot_image is the BSP boot.img as built"
-    exit 0
+  if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    echo "ERROR: kernel.cmdline / cmdline_extra is set, but no kernel is pinned in" >&2
+    echo "       $AVOCADO_PREFIX/rootfs/boot to repack $boot_image with it." >&2
+    exit 1
+  fi
+  cp "$input_dir/tegraflash-bsp/boot.img" "$input_dir/$boot_image"
+  echo "No pinned kernel: $boot_image is the BSP boot.img as built"
+  exit 0
 fi
 [ $# -eq 1 ] || {
-    echo "ERROR: expected one pinned kernel in $AVOCADO_PREFIX/rootfs/boot, found: $*" >&2
-    exit 1
+  echo "ERROR: expected one pinned kernel in $AVOCADO_PREFIX/rootfs/boot, found: $*" >&2
+  exit 1
 }
 kver=${1##*/Image-}
 kernel="$AVOCADO_PREFIX/kernel/$kver/Image"
@@ -52,9 +55,12 @@ kernel="$AVOCADO_PREFIX/kernel/$kver/Image"
 
 mkbootimg_bin="$input_dir/tegraflash-tools/mkbootimg"
 [ -x "$mkbootimg_bin" ] || mkbootimg_bin=$(command -v mkbootimg || true)
-[ -n "$mkbootimg_bin" ] || { echo "ERROR: mkbootimg not found ($input_dir/tegraflash-tools or PATH)" >&2; exit 1; }
+[ -n "$mkbootimg_bin" ] || {
+  echo "ERROR: mkbootimg not found ($input_dir/tegraflash-tools or PATH)" >&2
+  exit 1
+}
 
 echo "Assembling $boot_image from kernel $kver for the kernel A/B partitions"
 avocado-tegra-bootimg "$mkbootimg_bin" "$input_dir/tegraflash-bsp/boot.img" \
-    "$kernel" "$input_dir/$initramfs_image" "$input_dir/$boot_image"
+  "$kernel" "$input_dir/$initramfs_image" "$input_dir/$boot_image"
 echo "Assembled $boot_image ($(stat -c%s "$input_dir/$boot_image") bytes)"

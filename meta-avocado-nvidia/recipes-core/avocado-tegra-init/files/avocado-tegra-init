@@ -6,16 +6,19 @@ mayberoot=""
 foundslotsfx="no"
 partuuid_a=""
 partuuid_b=""
-for bootarg in `cat /proc/cmdline`; do
-    case "$bootarg" in
-        boot.slot_suffix=*) slotsfx="${bootarg##boot.slot_suffix=}"; foundslotsfx="yes" ;;
-        root=*) mayberoot="${bootarg##root=}" ;;
-        avocado.root_partuuid=*) partuuid_a="${bootarg##avocado.root_partuuid=}" ;;
-        avocado.root_partuuid_b=*) partuuid_b="${bootarg##avocado.root_partuuid_b=}" ;;
-        ro) opt="ro" ;;
-        rootwait) wait="yes" ;;
-        rootfstype=*) fstype="${bootarg##rootfstype=}" ;;
-    esac
+# The kernel command line is whitespace-separated words, so word splitting is
+# the intended parse.
+# shellcheck disable=SC2013
+for bootarg in $(cat /proc/cmdline); do
+  case "$bootarg" in
+    boot.slot_suffix=*)
+      slotsfx="${bootarg##boot.slot_suffix=}"
+      foundslotsfx="yes"
+      ;;
+    root=*) mayberoot="${bootarg##root=}" ;;
+    avocado.root_partuuid=*) partuuid_a="${bootarg##avocado.root_partuuid=}" ;;
+    avocado.root_partuuid_b=*) partuuid_b="${bootarg##avocado.root_partuuid_b=}" ;;
+  esac
 done
 
 rootdev=""
@@ -27,13 +30,16 @@ rootdev=""
 # usually 7 (NV+BS+RT) on T26x where the firmware sets NON_VOLATILE, and 6
 # (BS+RT) on older T23x - accept either.
 if [ "$foundslotsfx" != "yes" ]; then
-    bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null) || true)
-    bctype=$(echo "$bcdata" | cut -d' ' -f1)
-    if [ "$bctype" = "6" ] || [ "$bctype" = "7" ]; then
-        slotnum=$(echo "$bcdata" | cut -d' ' -f2)
-        [ "$slotnum" != "1" ] || slotsfx="_b"
-        foundslotsfx="yes"
-    fi
+  # The unquoted echo collapses hexdump's leading and repeated spaces so cut
+  # -d' ' -f1 below sees the attribute word first.
+  # shellcheck disable=SC2046,SC2005
+  bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null) || true)
+  bctype=$(echo "$bcdata" | cut -d' ' -f1)
+  if [ "$bctype" = "6" ] || [ "$bctype" = "7" ]; then
+    slotnum=$(echo "$bcdata" | cut -d' ' -f2)
+    [ "$slotnum" != "1" ] || slotsfx="_b"
+    foundslotsfx="yes"
+  fi
 fi
 
 # The disk firmware booted, named by the controller behind the BootCurrent
@@ -50,88 +56,91 @@ EFI_GLOBAL=8be4df61-93ca-11d2-aa0d-00e098032b8c
 # attributes. efivarfs cannot seek, so hexdump -s fails there with "Illegal
 # seek"; read from offset 0 and let the caller shift the attributes off.
 efivar_bytes() {
-    hexdump -v -e '1/1 "%02x "' "$EFIVARS/$1-$EFI_GLOBAL" 2>/dev/null || true
+  hexdump -v -e '1/1 "%02x "' "$EFIVARS/$1-$EFI_GLOBAL" 2>/dev/null || true
 }
 boot_controller() {
-    # shellcheck disable=SC2046 # one byte per word
-    set -- $(efivar_bytes BootCurrent)
-    [ $# -eq 6 ] || return 0
-    shift 4
-    # shellcheck disable=SC2046
-    set -- $(efivar_bytes "Boot$(echo "$2$1" | tr 'a-f' 'A-F')")
-    # efivar attributes(4), then EFI_LOAD_OPTION: Attributes(4)
-    # FilePathListLength(2), a NUL-terminated UCS-2 description, then the
-    # device path.
-    [ $# -gt 10 ] || return 0
-    shift 10
-    while [ $# -ge 2 ]; do
-        c="$1$2"
-        shift 2
-        [ "$c" != "0000" ] || break
-    done
-    # Device path nodes: Type(1) SubType(1) Length(2, little-endian).
-    while [ $# -ge 4 ]; do
-        len=$((0x$4$3))
-        { [ "$len" -ge 4 ] && [ "$len" -le $# ] && [ "$1" != "7f" ]; } || return 0
-        if [ "$1$2" = "0103" ] && [ "$len" -eq 24 ]; then
-            # MemoryMapped: MemoryType(4) StartingAddress(8) EndingAddress(8)
-            (shift 8 && printf '%x\n' "$((0x$8$7$6$5$4$3$2$1))")
-            return 0
-        fi
-        shift "$len"
-    done
+  # shellcheck disable=SC2046 # one byte per word
+  set -- $(efivar_bytes BootCurrent)
+  [ $# -eq 6 ] || return 0
+  shift 4
+  # shellcheck disable=SC2046
+  set -- $(efivar_bytes "Boot$(echo "$2$1" | tr 'a-f' 'A-F')")
+  # efivar attributes(4), then EFI_LOAD_OPTION: Attributes(4)
+  # FilePathListLength(2), a NUL-terminated UCS-2 description, then the
+  # device path.
+  [ $# -gt 10 ] || return 0
+  shift 10
+  while [ $# -ge 2 ]; do
+    c="$1$2"
+    shift 2
+    [ "$c" != "0000" ] || break
+  done
+  # Device path nodes: Type(1) SubType(1) Length(2, little-endian).
+  while [ $# -ge 4 ]; do
+    len=$((0x$4$3))
+    { [ "$len" -ge 4 ] && [ "$len" -le $# ] && [ "$1" != "7f" ]; } || return 0
+    if [ "$1$2" = "0103" ] && [ "$len" -eq 24 ]; then
+      # MemoryMapped: MemoryType(4) StartingAddress(8) EndingAddress(8)
+      (shift 8 && printf '%x\n' "$((0x$8$7$6$5$4$3$2$1))")
+      return 0
+    fi
+    shift "$len"
+  done
 }
 # Read on first need, in this shell: a boot with the pin present never asks.
 # booted_app runs in $(...), so caching there would not survive the call.
 boot_ctrl=""
 boot_ctrl_read=""
 boot_ctrl_init() {
-    [ -z "$boot_ctrl_read" ] || return 0
-    boot_ctrl=$(boot_controller)
-    boot_ctrl_read=yes
+  [ -z "$boot_ctrl_read" ] || return 0
+  boot_ctrl=$(boot_controller)
+  boot_ctrl_read=yes
 }
 
 # Prints the APP$slotsfx partition behind the booted controller, and nothing
 # unless exactly one is there. Call boot_ctrl_init first.
 booted_app() {
-    hit=""
-    [ -n "$boot_ctrl" ] || return 0
-    for dev in $(blkid -t "PARTLABEL=APP$slotsfx" | cut -d: -f1); do
-        phys=$(cd "/sys/class/block/${dev##*/}" 2>/dev/null && pwd -P) || continue
-        case "$phys/" in
-            */"$boot_ctrl".*)
-                [ -z "$hit" ] || return 0
-                hit="$dev"
-                ;;
-        esac
-    done
-    echo "$hit"
+  hit=""
+  [ -n "$boot_ctrl" ] || return 0
+  for dev in $(blkid -t "PARTLABEL=APP$slotsfx" | cut -d: -f1); do
+    phys=$(cd "/sys/class/block/${dev##*/}" 2>/dev/null && pwd -P) || continue
+    case "$phys/" in
+      */"$boot_ctrl".*)
+        [ -z "$hit" ] || return 0
+        hit="$dev"
+        ;;
+    esac
+  done
+  echo "$hit"
 }
 
 # Prints the APP$slotsfx partition that root= on the command line names, and
 # nothing unless it names exactly one of them. Accepts the forms Path 3 does.
 root_arg_app() {
-    hit=""
-    case "$mayberoot" in
-        # Lowered for the same reason as want_lower: the layout XML is
-        # upper-case and blkid compares the lower-cased form.
-        PARTUUID=*)
-            named=$(blkid -t "PARTUUID=$(echo "${mayberoot#PARTUUID=}" | tr 'A-F' 'a-f')" | cut -d: -f1) ;;
-        UUID=*|PARTLABEL=*|LABEL=*)
-            named=$(blkid -t "$mayberoot" | cut -d: -f1) ;;
-        /dev/*)
-            named="$mayberoot $(readlink -f "$mayberoot" 2>/dev/null || true)" ;;
-        *) return 0 ;;
-    esac
-    for dev in $(blkid -t "PARTLABEL=APP$slotsfx" | cut -d: -f1); do
-        for n in $named; do
-            [ "$n" = "$dev" ] || continue
-            [ -z "$hit" ] || return 0
-            hit="$dev"
-            break
-        done
+  hit=""
+  case "$mayberoot" in
+    # Lowered for the same reason as want_lower: the layout XML is
+    # upper-case and blkid compares the lower-cased form.
+    PARTUUID=*)
+      named=$(blkid -t "PARTUUID=$(echo "${mayberoot#PARTUUID=}" | tr 'A-F' 'a-f')" | cut -d: -f1)
+      ;;
+    UUID=* | PARTLABEL=* | LABEL=*)
+      named=$(blkid -t "$mayberoot" | cut -d: -f1)
+      ;;
+    /dev/*)
+      named="$mayberoot $(readlink -f "$mayberoot" 2>/dev/null || true)"
+      ;;
+    *) return 0 ;;
+  esac
+  for dev in $(blkid -t "PARTLABEL=APP$slotsfx" | cut -d: -f1); do
+    for n in $named; do
+      [ "$n" = "$dev" ] || continue
+      [ -z "$hit" ] || return 0
+      hit="$dev"
+      break
     done
-    echo "$hit"
+  done
+  echo "$hit"
 }
 
 # Preferred: the rootfs PARTUUID that provisioning pinned for the medium it
@@ -234,88 +243,88 @@ fi
 # and otherwise this stops, as the pinned path does. Probe every block device
 # first since blkid's label cache may be stale right after a fresh flash.
 if [ -z "$rootdev" ]; then
-    boot_ctrl_init
-    message="Waiting for APP$slotsfx partition${boot_ctrl:+ behind $boot_ctrl}..."
-    printf '%s' "$message"
-    for _ in $(seq 1 20); do
-        for dev in $(lsblk -dnpo NAME); do
-            blkid --probe "$dev" || true
-        done
-        rootdev=$(booted_app)
-        [ -z "$rootdev" ] || break
-        # No boot signal: the first APP seen ends the wait, whether or not
-        # a second disk carrying APP is still enumerating.
-        if [ -z "$boot_ctrl" ] && blkid -t "PARTLABEL=APP$slotsfx" >/dev/null; then
-            break
-        fi
-        printf '%s' "."
-        sleep 0.5
+  boot_ctrl_init
+  message="Waiting for APP$slotsfx partition${boot_ctrl:+ behind $boot_ctrl}..."
+  printf '%s' "$message"
+  for _ in $(seq 1 20); do
+    for dev in $(lsblk -dnpo NAME); do
+      blkid --probe "$dev" || true
     done
-    appcount=$(blkid -t "PARTLABEL=APP$slotsfx" | wc -l)
-    if [ -n "$rootdev" ]; then
-        echo "[OK: $rootdev]"
-    elif [ "$appcount" = "1" ]; then
-        rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
-        echo "[OK: $rootdev]"
-        [ -z "$boot_ctrl" ] ||
-            echo "WARNING: $rootdev is the only APP$slotsfx, and it is not behind the booted controller $boot_ctrl"
-    elif [ "$appcount" -gt 1 ]; then
-        rootdev=$(root_arg_app)
-        if [ -n "$rootdev" ]; then
-            echo "[OK: $rootdev]"
-            echo "WARNING: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
-            echo "         (controller '${boot_ctrl:-none}') names none of them. Booting"
-            echo "         $rootdev, the one root=$mayberoot names."
-        else
-            echo "[FAIL]"
-            echo "Error: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
-            echo "       (controller '${boot_ctrl:-none}') names none of them - refusing to guess."
-            echo "  cmdline: $(cat /proc/cmdline)"
-            blkid || true
-            lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
-            exit 1
-        fi
-    else
-        echo "[FAIL]"
+    rootdev=$(booted_app)
+    [ -z "$rootdev" ] || break
+    # No boot signal: the first APP seen ends the wait, whether or not
+    # a second disk carrying APP is still enumerating.
+    if [ -z "$boot_ctrl" ] && blkid -t "PARTLABEL=APP$slotsfx" >/dev/null; then
+      break
     fi
+    printf '%s' "."
+    sleep 0.5
+  done
+  appcount=$(blkid -t "PARTLABEL=APP$slotsfx" | wc -l)
+  if [ -n "$rootdev" ]; then
+    echo "[OK: $rootdev]"
+  elif [ "$appcount" = "1" ]; then
+    rootdev=$(blkid -l -t "PARTLABEL=APP$slotsfx" | cut -d: -f1)
+    echo "[OK: $rootdev]"
+    [ -z "$boot_ctrl" ] \
+      || echo "WARNING: $rootdev is the only APP$slotsfx, and it is not behind the booted controller $boot_ctrl"
+  elif [ "$appcount" -gt 1 ]; then
+    rootdev=$(root_arg_app)
+    if [ -n "$rootdev" ]; then
+      echo "[OK: $rootdev]"
+      echo "WARNING: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
+      echo "         (controller '${boot_ctrl:-none}') names none of them. Booting"
+      echo "         $rootdev, the one root=$mayberoot names."
+    else
+      echo "[FAIL]"
+      echo "Error: $appcount disks carry PARTLABEL=APP$slotsfx and the boot entry"
+      echo "       (controller '${boot_ctrl:-none}') names none of them - refusing to guess."
+      echo "  cmdline: $(cat /proc/cmdline)"
+      blkid || true
+      lsblk -o NAME,PARTLABEL,PARTUUID,SIZE || true
+      exit 1
+    fi
+  else
+    echo "[FAIL]"
+  fi
 fi
 
 # Path 3: fall back to root= from /proc/cmdline (mirrors upstream
 # meta-tegra/recipes-core/initrdscripts/tegra-minimal-init/platform-preboot.sh).
 if [ -z "$rootdev" ] && [ -n "$mayberoot" ]; then
-    echo "[FAIL] BootChain/PARTLABEL detection failed; trying root=$mayberoot"
-    case "$mayberoot" in
-        UUID=*)      rootdev=$(blkid -t "UUID=${mayberoot#UUID=}" -l | awk -F: '{print $1}') ;;
-        PARTUUID=*)  rootdev=$(blkid -t "PARTUUID=$(echo "${mayberoot#PARTUUID=}" | tr 'A-F' 'a-f')" -l | awk -F: '{print $1}') ;;
-        PARTLABEL=*) rootdev=$(blkid -t "PARTLABEL=${mayberoot#PARTLABEL=}" -l | awk -F: '{print $1}') ;;
-        LABEL=*)     rootdev=$(blkid -t "LABEL=${mayberoot#LABEL=}" -l | awk -F: '{print $1}') ;;
-        /dev/*)      rootdev="$mayberoot" ;;
-        *)           rootdev="$mayberoot" ;;
-    esac
+  echo "[FAIL] BootChain/PARTLABEL detection failed; trying root=$mayberoot"
+  case "$mayberoot" in
+    UUID=*) rootdev=$(blkid -t "UUID=${mayberoot#UUID=}" -l | awk -F: '{print $1}') ;;
+    PARTUUID=*) rootdev=$(blkid -t "PARTUUID=$(echo "${mayberoot#PARTUUID=}" | tr 'A-F' 'a-f')" -l | awk -F: '{print $1}') ;;
+    PARTLABEL=*) rootdev=$(blkid -t "PARTLABEL=${mayberoot#PARTLABEL=}" -l | awk -F: '{print $1}') ;;
+    LABEL=*) rootdev=$(blkid -t "LABEL=${mayberoot#LABEL=}" -l | awk -F: '{print $1}') ;;
+    /dev/*) rootdev="$mayberoot" ;;
+    *) rootdev="$mayberoot" ;;
+  esac
 fi
 
 # Path 4: last-ditch scan — any disk that has an APP / APP_b PARTLABEL.
 if [ -z "$rootdev" ]; then
-    echo "[FAIL] root= fallback empty; scanning all disks for APP partitions"
-    for label in APP APP_b; do
-        cand=$(blkid -l -t "PARTLABEL=$label" | cut -d: -f1)
-        if [ -n "$cand" ]; then
-            rootdev="$cand"
-            slotsfx="${label#APP}"
-            echo "Found $label at $rootdev"
-            break
-        fi
-    done
+  echo "[FAIL] root= fallback empty; scanning all disks for APP partitions"
+  for label in APP APP_b; do
+    cand=$(blkid -l -t "PARTLABEL=$label" | cut -d: -f1)
+    if [ -n "$cand" ]; then
+      rootdev="$cand"
+      slotsfx="${label#APP}"
+      echo "Found $label at $rootdev"
+      break
+    fi
+  done
 fi
 
 if [ -z "$rootdev" ]; then
-    echo "Error: could not locate APP rootfs partition"
-    echo "  cmdline: $(cat /proc/cmdline)"
-    echo "  blkid:"
-    blkid || true
-    echo "  lsblk:"
-    lsblk -o NAME,PARTLABEL,SIZE || true
-    exit 1
+  echo "Error: could not locate APP rootfs partition"
+  echo "  cmdline: $(cat /proc/cmdline)"
+  echo "  blkid:"
+  blkid || true
+  echo "  lsblk:"
+  lsblk -o NAME,PARTLABEL,SIZE || true
+  exit 1
 fi
 
 mount "$rootdev" /sysroot
@@ -326,53 +335,55 @@ mount "$rootdev" /sysroot
 
 # Helper: scan a disk's partitions for DATAPART_EXPAND via sysfs uevent
 find_datapart_on_disk() {
-    local diskname="$1"
-    for partdir in /sys/block/$diskname/${diskname}p*; do
-        [ -d "$partdir" ] || continue
-        if [ -f "$partdir/uevent" ]; then
-            while IFS='=' read -r key val; do
-                if [ "$key" = "PARTNAME" ] && [ "$val" = "DATAPART_EXPAND" ]; then
-                    echo "/dev/$(basename "$partdir")"
-                    return 0
-                fi
-            done < "$partdir/uevent"
+  # The initramfs /bin/sh (busybox ash) supports local.
+  # shellcheck disable=SC3043
+  local diskname="$1"
+  for partdir in /sys/block/"$diskname"/"${diskname}"p*; do
+    [ -d "$partdir" ] || continue
+    if [ -f "$partdir/uevent" ]; then
+      while IFS='=' read -r key val; do
+        if [ "$key" = "PARTNAME" ] && [ "$val" = "DATAPART_EXPAND" ]; then
+          echo "/dev/$(basename "$partdir")"
+          return 0
         fi
-    done
-    return 1
+      done <"$partdir/uevent"
+    fi
+  done
+  return 1
 }
 
 case "$rootdev" in
-  /dev/nvme*|/dev/mmc*) rootdisk="${rootdev%p*}" ;;
-  /dev/sd*)             rootdisk="${rootdev%[0-9]*}" ;;
-  *)                    rootdisk="" ;;
+  /dev/nvme* | /dev/mmc*) rootdisk="${rootdev%p*}" ;;
+  /dev/sd*) rootdisk="${rootdev%[0-9]*}" ;;
+  *) rootdisk="" ;;
 esac
 
 vardev=""
 
 # First: check the same disk as rootfs (preferred for single-disk installs)
 if [ -n "$rootdisk" ]; then
-    rootdiskname=$(basename "$rootdisk")
-    echo "Looking for DATAPART_EXPAND on rootfs disk ($rootdiskname)..."
-    vardev=$(find_datapart_on_disk "$rootdiskname") || true
+  rootdiskname=$(basename "$rootdisk")
+  echo "Looking for DATAPART_EXPAND on rootfs disk ($rootdiskname)..."
+  vardev=$(find_datapart_on_disk "$rootdiskname") || true
 fi
 
 # Second: if not found on rootfs disk, search all other block devices
 # This supports split layouts (e.g. OS on eMMC, data on NVMe)
 if [ -z "$vardev" ]; then
-    echo "DATAPART_EXPAND not on rootfs disk, scanning other disks..."
-    for disk in /sys/block/*; do
-        diskname=$(basename "$disk")
-        # Skip non-storage devices (loop, ram, zram) and the rootfs disk
-        case "$diskname" in
-            loop*|ram*|zram*|mtd*) continue ;;
-        esac
-        [ "$diskname" = "${rootdiskname:-}" ] && continue
-        vardev=$(find_datapart_on_disk "$diskname") || true
-        if [ -n "$vardev" ]; then
-            echo "Found DATAPART_EXPAND on $diskname"
-            break
-        fi
-    done
+  echo "DATAPART_EXPAND not on rootfs disk, scanning other disks..."
+  for disk in /sys/block/*; do
+    diskname=$(basename "$disk")
+    # Skip non-storage devices (loop, ram, zram) and the rootfs disk
+    case "$diskname" in
+      loop* | ram* | zram* | mtd*) continue ;;
+    esac
+    [ "$diskname" = "${rootdiskname:-}" ] && continue
+    vardev=$(find_datapart_on_disk "$diskname") || true
+    if [ -n "$vardev" ]; then
+      echo "Found DATAPART_EXPAND on $diskname"
+      break
+    fi
+  done
 fi
 
 # Persistent fTPM: when the runtime carries optee-ftpm-init, bring up its
@@ -387,8 +398,8 @@ fi
 # stop the initrd before /var is mounted.
 FTPM_SETUP=/usr/libexec/optee-ftpm/optee-ftpm-setup.sh
 if [ -x "$FTPM_SETUP" ]; then
-    "$FTPM_SETUP" "${rootdiskname:-}" ||
-        echo "avocado-tegra-init: optee-ftpm-setup exited $?, continuing without a persistent fTPM store"
+  "$FTPM_SETUP" "${rootdiskname:-}" \
+    || echo "avocado-tegra-init: optee-ftpm-setup exited $?, continuing without a persistent fTPM store"
 fi
 
 # Encrypted /var: a per-runtime opt-in. avocado-cli drops the marker into the
@@ -403,22 +414,22 @@ fi
 ENC_MARKER=/etc/avocado/var-encrypt
 CRYPT_SH=/usr/libexec/cryptsetup-var/cryptsetup-var.sh
 if [ -e "$ENC_MARKER" ]; then
-    if [ -z "$vardev" ]; then
-        echo "ERROR: $ENC_MARKER set but DATAPART_EXPAND not found on any disk"
-        exit 1
-    fi
-    if [ ! -x "$CRYPT_SH" ]; then
-        echo "ERROR: $ENC_MARKER set but $CRYPT_SH is not in this initramfs"
-        exit 1
-    fi
-    echo "Encrypted var requested: unlocking $vardev"
-    "$CRYPT_SH" "$vardev"
-    vardev=/dev/mapper/var
+  if [ -z "$vardev" ]; then
+    echo "ERROR: $ENC_MARKER set but DATAPART_EXPAND not found on any disk"
+    exit 1
+  fi
+  if [ ! -x "$CRYPT_SH" ]; then
+    echo "ERROR: $ENC_MARKER set but $CRYPT_SH is not in this initramfs"
+    exit 1
+  fi
+  echo "Encrypted var requested: unlocking $vardev"
+  "$CRYPT_SH" "$vardev"
+  vardev=/dev/mapper/var
 fi
 
 if [ -n "$vardev" ]; then
-    echo "Mounting var partition: $vardev"
-    mount "$vardev" /sysroot/var
+  echo "Mounting var partition: $vardev"
+  mount "$vardev" /sysroot/var
 else
-    echo "WARNING: DATAPART_EXPAND not found on any disk"
+  echo "WARNING: DATAPART_EXPAND not found on any disk"
 fi

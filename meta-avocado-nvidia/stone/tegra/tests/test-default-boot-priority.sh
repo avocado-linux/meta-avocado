@@ -79,9 +79,9 @@ d="$work/link"
 mkdir -p "$d"
 make_dtbo "$work/staged.dtbo" "$STOCK"
 ln -s "$work/staged.dtbo" "$d/L4TConfiguration.dtbo"
-if run_block "$d" sd && [ ! -L "$d/L4TConfiguration.dtbo" ] &&
-  [ "$(fdtget -t s "$work/staged.dtbo" "$NODE" data)" = "$STOCK" ] &&
-  [ "$(fdtget -t s "$d/L4TConfiguration.dtbo" "$NODE" data)" = "sd,usb,nvme,emmc,ufs" ]; then
+if run_block "$d" sd && [ ! -L "$d/L4TConfiguration.dtbo" ] \
+  && [ "$(fdtget -t s "$work/staged.dtbo" "$NODE" data)" = "$STOCK" ] \
+  && [ "$(fdtget -t s "$d/L4TConfiguration.dtbo" "$NODE" data)" = "sd,usb,nvme,emmc,ufs" ]; then
   pass "a linked dtbo is edited as a copy; the staged one stays stock"
 else
   fail "linked dtbo: $(cat "$work/out")"
