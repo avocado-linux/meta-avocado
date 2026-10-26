@@ -40,6 +40,14 @@ grep -q -- '-n 1:65536:327679 ' "$w/calls" && ok "boot-a spans 65536-327679 (128
 grep -q -- '-n 2:327680:589823 ' "$w/calls" && ok "boot-b spans 327680-589823 (128 MiB)" ||
   bad "boot-b extent: $(grep -o -- '-n 2:[^ ]*' "$w/calls")"
 
+# No fixed partition GUIDs: two Avocado disks in one board (eMMC + microSD)
+# must not share them, so sgdisk picks fresh ones on every provision and
+# U-Boot names the booted disk's root by PARTUUID.
+jq -e '[.storage_devices.rootdisk.partitions[] | select(has("partition_uuid"))] | length == 0' "$manifest" >/dev/null &&
+  ok "the manifest pins no partition GUIDs" || bad "the manifest pins partition GUIDs"
+grep -q -- ' -u ' "$w/calls" && bad "sgdisk is given fixed GUIDs: $(grep -o -- '-u [^ ]*' "$w/calls")" ||
+  ok "sgdisk generates every partition GUID"
+
 # The U-Boot environment: written at 16 MiB, where U-Boot and fw_env read it.
 echo "$out" | grep -q 'writing uboot-env from uboot.env at sector 32768' && ok "uboot.env written at 16 MiB" ||
   bad "uboot-env placement: $(echo "$out" | grep uboot-env)"

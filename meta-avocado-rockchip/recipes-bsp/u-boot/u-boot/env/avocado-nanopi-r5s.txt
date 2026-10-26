@@ -1,9 +1,11 @@
 # Saved environment for the uboot-env area (mkenvimage -r), written by stone
 # at provision time. avocadoctl flips avocado_boot_slot with fw_setenv.
 #
-# boot-a/boot-b are GPT partitions 1/2; each carries the same
-# extlinux/extlinux.conf, whose APPEND says root=PARTLABEL=rootfs-${avocado_boot_slot}
-# (U-Boot expands it), so the slot picks the kernel partition and the root.
+# boot-a/boot-b/rootfs-a/rootfs-b are GPT partitions 1-4 on whichever disk
+# booted. Both boot partitions carry the same extlinux/extlinux.conf, whose
+# APPEND says root=PARTUUID=${avocado_root_partuuid} (U-Boot expands it), so
+# the slot picks the kernel partition and the root, on the disk that booted;
+# /var and OTA targets then follow the root's disk.
 avocado_boot_slot=a
 
 # Load addresses from U-Boot's default env (include/configs/rk3568_common.h,
@@ -61,6 +63,7 @@ avocado_boot_init=\
   if test "${avocado_boot_slot}" = "b"; then\
     echo "Booting B";\
     setenv bootpart 2;\
+    setenv rootpart 4;\
   else\
     if test "${avocado_boot_slot}" != "a"; then\
       echo "avocado_boot_slot=${avocado_boot_slot} unset or invalid";\
@@ -68,7 +71,9 @@ avocado_boot_init=\
     fi;\
     echo "Booting A";\
     setenv bootpart 1;\
-  fi;
+    setenv rootpart 3;\
+  fi;\
+  part uuid mmc ${devnum}:${rootpart} avocado_root_partuuid;
 
 avocado_boot=sysboot mmc ${devnum}:${bootpart} any ${scriptaddr} /extlinux/extlinux.conf
 

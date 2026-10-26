@@ -192,7 +192,6 @@
           "name": "boot-a",
           "image": "boot",
           "partition_type": "EF00",
-          "partition_uuid": "a924f3b4-83c4-41f8-900a-ace71d20140c",
           "offset": 32,
           "offset_unit": "mebibytes",
           "size": 128,
@@ -201,7 +200,6 @@
         {
           "name": "boot-b",
           "partition_type": "EF00",
-          "partition_uuid": "200fdb1b-0458-45fc-935e-6dbcd5757b22",
           "size": 128,
           "size_unit": "mebibytes"
         },
@@ -209,14 +207,12 @@
           "name": "rootfs-a",
           "image": "rootfs",
           "partition_type": "8305",
-          "partition_uuid": "26de86c9-07f6-4708-82c8-95a21ff6b38d",
           "size": 320,
           "size_unit": "mebibytes"
         },
         {
           "name": "rootfs-b",
           "partition_type": "8305",
-          "partition_uuid": "3a37df8d-529c-4ff3-a479-b4dd6fef34ab",
           "size": 320,
           "size_unit": "mebibytes"
         },
@@ -224,7 +220,6 @@
           "name": "var",
           "image": "var",
           "partition_type": "8300",
-          "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d",
           "expand": "true"
         }
       ]
