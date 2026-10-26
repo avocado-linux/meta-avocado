@@ -5,8 +5,12 @@ After=syslog.target
 
 [Service]
 Type=forking
+# PIDFile and Restart as in NVIDIA's sample unit (nvidia-persistenced/init/
+# systemd); /run rather than its legacy /var/run.
+PIDFile=/run/nvidia-persistenced/nvidia-persistenced.pid
+Restart=always
 ExecStart=/usr/bin/nvidia-persistenced --user nobody --persistence-mode
-ExecStopPost=/bin/rm -f /var/run/nvidia-persistenced/nvidia-persistenced.pid
+ExecStopPost=/bin/rm -f /run/nvidia-persistenced/nvidia-persistenced.pid
 
 [Install]
 WantedBy=multi-user.target
