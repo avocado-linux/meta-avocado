@@ -329,11 +329,20 @@ fvl_assert_in_target() {
 # Requires cryptsetup in the initramfs and a var partition with a LUKS2 header.
 fvl_assert_luks_var() {
   fvl_qga --run "cryptsetup status var >/dev/null 2>&1" \
-    || { printf 'luks-var: dm-crypt mapping not active\n' >&2; return 1; }
+    || {
+      printf 'luks-var: dm-crypt mapping not active\n' >&2
+      return 1
+    }
   fvl_qga --run "findmnt -n -o SOURCE /var 2>/dev/null | grep -q mapper/var" \
-    || { printf 'luks-var: /var not mounted from dm-crypt\n' >&2; return 1; }
+    || {
+      printf 'luks-var: /var not mounted from dm-crypt\n' >&2
+      return 1
+    }
   fvl_qga --run "cryptsetup isLuks /dev/disk/by-partlabel/var 2>/dev/null" \
-    || { printf 'luks-var: no LUKS2 header on var partition\n' >&2; return 1; }
+    || {
+      printf 'luks-var: no LUKS2 header on var partition\n' >&2
+      return 1
+    }
   return 0
 }
 
@@ -343,7 +352,10 @@ fvl_assert_luks_var() {
 fvl_assert_luks_var_tpm() {
   fvl_assert_luks_var || return 1
   fvl_qga --run "cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -q 'systemd-tpm2'" \
-    || { printf 'luks-var-tpm: no TPM2 token in LUKS header\n' >&2; return 1; }
+    || {
+      printf 'luks-var-tpm: no TPM2 token in LUKS header\n' >&2
+      return 1
+    }
   return 0
 }
 
@@ -353,9 +365,15 @@ fvl_assert_luks_var_tpm() {
 # matches the root hash embedded in the kernel or passed at boot.
 fvl_assert_dm_verity() {
   fvl_qga --run "dmsetup status 2>/dev/null | grep -q '^vroot.*verity'" \
-    || { printf 'dm-verity: vroot verity device not active\n' >&2; return 1; }
+    || {
+      printf 'dm-verity: vroot verity device not active\n' >&2
+      return 1
+    }
   fvl_qga --run "findmnt -n -o SOURCE / 2>/dev/null | grep -q mapper/vroot" \
-    || { printf 'dm-verity: rootfs not mounted from dm-verity device\n' >&2; return 1; }
+    || {
+      printf 'dm-verity: rootfs not mounted from dm-verity device\n' >&2
+      return 1
+    }
   return 0
 }
 

@@ -14,7 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    cat << EOF
+  cat <<EOF
 Usage: $0 -r REPO_DIR -d CODENAME -i ID -b BUILD_DIR -a ADDON TARGET
 
     -r  dev repo directory (the one dev-sync-packages.sh wrote)
@@ -27,30 +27,36 @@ EOF
 
 REPO_DIR='' CODENAME='' RELEASE_ID='' BUILD_DIR='' ADDON=''
 while getopts "r:d:i:b:a:h" o; do
-    case $o in
-        r) REPO_DIR=$OPTARG ;; d) CODENAME=$OPTARG ;; i) RELEASE_ID=$OPTARG ;;
-        b) BUILD_DIR=$OPTARG ;; a) ADDON=$OPTARG ;;
-        *) usage; exit 1 ;;
-    esac
+  case $o in
+    r) REPO_DIR=$OPTARG ;; d) CODENAME=$OPTARG ;; i) RELEASE_ID=$OPTARG ;;
+    b) BUILD_DIR=$OPTARG ;; a) ADDON=$OPTARG ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
 done
 shift $((OPTIND - 1))
 TARGET=${1:-}
 for v in REPO_DIR CODENAME RELEASE_ID BUILD_DIR ADDON TARGET; do
-    [ -n "${!v}" ] || { usage; exit 1; }
+  [ -n "${!v}" ] || {
+    usage
+    exit 1
+  }
 done
 
 OUT=$REPO_DIR/releases/$CODENAME/$RELEASE_ID
 for role in target sdk; do
-    dest=$OUT/$role/$TARGET-$ADDON
-    "$SCRIPT_DIR/addon-feed-stage.sh" --base "$BUILD_DIR/build/tmp/deploy/rpm" \
-        --addon "$BUILD_DIR/build/tmp-$ADDON/deploy/rpm" --role "$role" --out "$dest"
-    # One repo per root, like the base feed's per-machine repos.
-    createrepo_c -q --general-compress-type=gz "$dest"
+  dest=$OUT/$role/$TARGET-$ADDON
+  "$SCRIPT_DIR/addon-feed-stage.sh" --base "$BUILD_DIR/build/tmp/deploy/rpm" \
+    --addon "$BUILD_DIR/build/tmp-$ADDON/deploy/rpm" --role "$role" --out "$dest"
+  # One repo per root, like the base feed's per-machine repos.
+  createrepo_c -q --general-compress-type=gz "$dest"
 done
 
 # The target's fragment too: dev-package-extensions.sh rebuilds targets.json
 # from the fragments, and would otherwise drop the add-on.
-python3 - "$OUT/targets.json" "$REPO_DIR/staging/$RELEASE_ID/fragments" "$TARGET" "$ADDON" << 'PY'
+python3 - "$OUT/targets.json" "$REPO_DIR/staging/$RELEASE_ID/fragments" "$TARGET" "$ADDON" <<'PY'
 import glob, json, os, sys
 path, fragments, target, addon = sys.argv[1:]
 add = [f"target/{target}-{addon}", f"sdk/{target}-{addon}"]

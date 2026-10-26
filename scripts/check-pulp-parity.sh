@@ -31,15 +31,15 @@ MANIFEST_DIR="${BUILD_DIR}/tmp/deploy/pulp-uploads"
 MAP_FILE="${RPM_DIR}/avocado-repo.map"
 
 if [ ! -f "${MAP_FILE}" ]; then
-    echo "ERROR: no avocado-repo.map at ${MAP_FILE}" >&2
-    echo "Run a full build (e.g. \`kas build ... --target avocado-distro\`) first." >&2
-    exit 1
+  echo "ERROR: no avocado-repo.map at ${MAP_FILE}" >&2
+  echo "Run a full build (e.g. \`kas build ... --target avocado-distro\`) first." >&2
+  exit 1
 fi
 
 if [ ! -d "${MANIFEST_DIR}" ]; then
-    echo "ERROR: no manifest dir at ${MANIFEST_DIR}" >&2
-    echo "Either the bbclass did not run, or the build failed before do_package_write_rpm." >&2
-    exit 1
+  echo "ERROR: no manifest dir at ${MANIFEST_DIR}" >&2
+  echo "Either the bbclass did not run, or the build failed before do_package_write_rpm." >&2
+  exit 1
 fi
 
 echo "=== Pulp upload parity check ==="
