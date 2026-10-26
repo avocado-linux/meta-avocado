@@ -647,6 +647,14 @@ CONFIG_VT=y
 CONFIG_VT_CONSOLE=y
 ```
 
+arm64 UEFI systems (ACPI servers and workstations: Grace, DGX Spark, Neoverse)
+use the generic `meta-avocado-arm64` machines rather than a machine per board,
+as x86-64 does: `avocado-arm64-uefi-v9` (Armv9-A) builds linux-yocto from the
+in-tree arm64 `defconfig` with `KCONFIG_MODE = "alldefconfig"`. Without that
+mode, kernel-yocto merges the savedefconfig-form defconfig with allnoconfig and
+USB, mlx5 and Wi-Fi silently drop out. A board on such a machine is a BSP
+extension, not a new machine.
+
 ### Build Drivers as Modules
 
 Avocado's design separates the minimal rootfs from installable extensions.

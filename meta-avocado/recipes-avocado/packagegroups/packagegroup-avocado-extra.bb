@@ -31,6 +31,7 @@ RDEPENDS:${PN} = " \
   avocado-img-var \
   avocado-pkg-rootfs \
   avocado-pkg-initramfs \
+  fwupd \
   linux-firmware \
   linuxptp \
   nats-server \
@@ -47,6 +48,7 @@ RDEPENDS:${PN} = " \
   qemu-user-static \
   qemu-user-static-binfmt \
   qemu-guest-agent \
+  rdma-core \
   sudo \
 "
 

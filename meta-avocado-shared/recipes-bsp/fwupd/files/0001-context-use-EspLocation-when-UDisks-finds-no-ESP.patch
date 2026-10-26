@@ -1,0 +1,46 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] context: use EspLocation when UDisks finds no ESP
+
+fwupd.conf(5) describes EspLocation as the ESP path to use when UDisks
+cannot identify it, but the ESP list is only ever built from UDisks, so on
+a system without UDisks (it needs polkit) EspLocation is never consulted
+and the UEFI capsule plugin reports "UEFI ESP partition not detected", which
+makes every capsule-on-disk device non-updatable.
+
+When no ESP was found, fall back to a volume at EspLocation if it is a
+mounted ESP (has an EFI directory), as the FWUPD_UEFI_ESP_PATH test path
+already does.
+
+Upstream-Status: Pending
+---
+--- a/libfwupdplugin/fu-context.c	2026-10-25 22:07:47.573655542 -0400
++++ b/libfwupdplugin/fu-context.c	2026-10-25 22:07:57.866803587 -0400
+@@ -1705,6 +1705,9 @@
+ 	return priv->esp_location;
+ }
+ 
++static gboolean
++fu_context_is_esp(FuVolume *esp);
++
+ /**
+  * fu_context_get_esp_volumes:
+  * @self: a #FuContext
+@@ -1779,6 +1782,18 @@
+ 	if (priv->esp_volumes->len == 0) {
+ 		g_autoptr(GPtrArray) devices = NULL;
+ 
++		/* no UDisks to identify the ESP: trust the configured EspLocation
++		 * when it is a mounted ESP, as fwupd.conf(5) describes it */
++		if (priv->esp_location != NULL) {
++			g_autoptr(FuVolume) vol = fu_volume_new_from_mount_path(priv->esp_location);
++			fu_volume_set_partition_kind(vol, FU_VOLUME_KIND_ESP);
++			if (fu_context_is_esp(vol)) {
++				fu_context_add_esp_volume(self, vol);
++				return g_ptr_array_ref(priv->esp_volumes);
++			}
++			g_debug("EspLocation %s is not an ESP", priv->esp_location);
++		}
++
+ 		/* check if udisks2 is working */
+ 		devices = fu_common_get_block_devices(error);
+ 		if (devices == NULL)

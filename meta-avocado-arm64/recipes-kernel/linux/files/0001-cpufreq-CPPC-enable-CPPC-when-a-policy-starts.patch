@@ -1,0 +1,38 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] cpufreq: CPPC: enable CPPC when a policy starts
+
+_CPC's CPPC Enable register is optional, but where a platform defines it,
+the platform may ignore every Desired/Min/Max/EPP write until the OS sets
+it. cppc_cpufreq never does (only amd-pstate calls cppc_set_enable()), so
+on NVIDIA GB10 (DGX Spark) every core stays at Lowest Performance in
+every governor and in autonomous mode: 1.38 GHz instead of up to 3.9 GHz,
+and 37 vs 55 GB/s single-thread memcpy against DGX OS.
+
+Enable CPPC in cppc_cpufreq_cpu_init(), as NVIDIA's kernel does in
+"NVIDIA: SAUCE: cpufreq: CPPC: add autonomous mode boot parameter
+support". A platform without the register returns -EOPNOTSUPP and is
+unaffected.
+
+Upstream-Status: Inappropriate [backport of NVIDIA SAUCE, not in mainline as of v7.3]
+---
+ drivers/cpufreq/cppc_cpufreq.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/cpufreq/cppc_cpufreq.c b/drivers/cpufreq/cppc_cpufreq.c
+--- a/drivers/cpufreq/cppc_cpufreq.c
++++ b/drivers/cpufreq/cppc_cpufreq.c
+@@ -597,6 +597,14 @@ static int cppc_cpufreq_cpu_init(struct cpufreq_policy *policy)
+ 	caps = &cpu_data->perf_caps;
+ 	policy->driver_data = cpu_data;
+ 
++	/*
++	 * Enable CPPC for both OS-driven and autonomous modes.
++	 * The Enable register is optional - some platforms may not support it
++	 */
++	ret = cppc_set_enable(cpu, true);
++	if (ret && ret != -EOPNOTSUPP)
++		pr_warn("Failed to enable CPPC for CPU%d (%d)\n", cpu, ret);
++
+ 	/*
+ 	 * Set min to lowest nonlinear perf to avoid any efficiency penalty (see
+ 	 * Section 8.4.7.1.1.5 of ACPI 6.1 spec)
