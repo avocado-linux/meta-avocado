@@ -36,10 +36,11 @@ MODULES_MODULE_SYMVERS_LOCATION = "kernel-open"
 # but OE's LDFLAGS holds compiler-driver flags (-Wl,-O1 ...) that a bare `ld`
 # rejects ("unrecognized option '-Wl,-O1'"). The .ko files are linked by kbuild
 # with the kernel's own flags, so clearing LDFLAGS here is correct.
-# ARCH='x86_64': OE exports the kernel ARCH ('x86' -- Linux puts 32/64-bit x86
-# under arch/x86), but NVIDIA's kernel-open/Makefile only accepts its own arch
-# names (x86_64/aarch64/...) and errors "Unsupported architecture x86". The
-# kernel Makefile maps ARCH=x86_64 -> SRCARCH=x86, so this satisfies both.
+# ARCH: NVIDIA's kernel-open/Makefile accepts x86_64/i386/arm64/riscv. On arm64
+# that is the kernel ARCH OE already exports; on x86 OE exports 'x86' (Linux
+# puts 32/64-bit x86 under arch/x86), which it rejects with "Unsupported
+# architecture x86". The kernel Makefile maps ARCH=x86_64 -> SRCARCH=x86, so
+# x86_64 satisfies both. TARGET_ARCH uses NVIDIA's names, which are OE's.
 # CC='${KERNEL_CC}' (not ${CC}): KERNEL_CC carries the -ffile-prefix-map pair for
 # STAGING_KERNEL_DIR/STAGING_KERNEL_BUILDDIR (kernel-arch.bbclass), which module.bbclass
 # passes for the builds it drives itself. This recipe supplies its own do_compile, so a
@@ -48,8 +49,8 @@ MODULES_MODULE_SYMVERS_LOCATION = "kernel-open"
 # the avocado distro treats as fatal. Only shows up on 6.18: file_ref.h and ucopysize.h
 # are new headers that inline such macros, so the 6.6 build never tripped it.
 EXTRA_OEMAKE += " \
-    ARCH='x86_64' \
-    TARGET_ARCH='x86_64' \
+    ARCH='${NVIDIA_KERNEL_ARCH}' \
+    TARGET_ARCH='${TARGET_ARCH}' \
     SYSSRC='${STAGING_KERNEL_DIR}' \
     SYSOUT='${STAGING_KERNEL_BUILDDIR}' \
     CC='${KERNEL_CC}' \
@@ -58,6 +59,9 @@ EXTRA_OEMAKE += " \
     LDFLAGS='' \
     NV_VERBOSE=1 \
 "
+
+NVIDIA_KERNEL_ARCH = "${ARCH}"
+NVIDIA_KERNEL_ARCH:x86-64 = "x86_64"
 
 # Build the open modules via the top-level Makefile target
 do_compile() {
@@ -109,8 +113,9 @@ RDEPENDS:kernel-module-nvidia-drm = "kernel-module-nvidia kernel-module-nvidia-m
 RDEPENDS:kernel-module-nvidia-uvm = "kernel-module-nvidia"
 RDEPENDS:kernel-module-nvidia-peermem = "kernel-module-nvidia"
 
-# x86-64 only -- the open kernel modules require x86_64
-COMPATIBLE_HOST = "x86_64.*-linux"
+COMPATIBLE_HOST = "(x86_64|aarch64).*-linux"
+# Jetson builds its GPU modules from meta-tegra's nvidia-kernel-oot.
+COMPATIBLE_MACHINE:tegra = "^$"
 
 # Parallel build
 PARALLEL_MAKE = ""
