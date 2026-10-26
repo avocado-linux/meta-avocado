@@ -26,7 +26,7 @@ bad() {
   fail=$((fail + 1))
 }
 
-for fn in create_rcm_boot_script run_rcm_boot_t234 report_rcm_boot_failure; do
+for fn in create_rcm_boot_script ensure_rcm_boot_errexit run_rcm_boot_t234 report_rcm_boot_failure; do
   eval "$(awk -v f="$fn" '$0 ~ "^"f"\\(\\) \\{" {p=1} p {print} p && /^\}/ {exit}' "$script")"
   if ! declare -f "$fn" >/dev/null; then
     echo "FAIL - could not extract $fn from $script"
@@ -76,6 +76,34 @@ rc=$?
 setup 0 "BR_CID: 0x1234"
 run_rcm_boot_t234 >/dev/null 2>&1
 [ "$BR_CID" = " 0x1234" ] && ok "BR_CID is still read from the upload output" || bad "BR_CID='$BR_CID'"
+
+# A pre-signed bundle made before the fix carries an rcm-boot.sh with no
+# set -e, and sign_binaries_t234 reuses it as found.
+legacy_rcm_boot_script() { sed -i '/^set -e$/d' rcm-boot.sh; }
+
+setup 3 "ERROR: might be timeout in USB write."
+legacy_rcm_boot_script
+ensure_rcm_boot_errexit
+msg=$(run_rcm_boot_t234 2>&1)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$msg" | grep -q 'ERR: RCM boot failed'; } \
+  && ok "a reused legacy rcm-boot.sh fails the step once set -e is added" \
+  || bad "legacy reuse: rc=$rc $msg"
+
+ensure_rcm_boot_errexit
+[ "$(grep -cx 'set -e' rcm-boot.sh)" = 1 ] \
+  && ok "adding set -e twice leaves one" || bad "set -e count: $(grep -cx 'set -e' rcm-boot.sh)"
+[ -x rcm-boot.sh ] && ok "the reused script stays executable" || bad "rcm-boot.sh lost its mode"
+
+setup 3 "ERROR: might be timeout in USB write."
+{
+  echo '#!/bin/bash'
+  sed -n '2,$p' rcm-boot.sh
+} >rcm-boot.new && cat rcm-boot.new >rcm-boot.sh
+ensure_rcm_boot_errexit
+{ [ "$(sed -n 1p rcm-boot.sh)" = '#!/bin/bash' ] && [ "$(sed -n 2p rcm-boot.sh)" = 'set -e' ]; } \
+  && ok "a shebang stays on the first line, set -e follows it" \
+  || bad "shebang layout: $(head -n 2 rcm-boot.sh | tr '\n' '|')"
 
 echo
 echo "passed: $pass  failed: $fail"

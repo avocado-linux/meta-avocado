@@ -732,6 +732,30 @@ EOF
   chmod +x rcm-boot.sh
 }
 
+# A pre-signed bundle made before create_rcm_boot_script started with `set -e`
+# ships an rcm-boot.sh that exits 0 whatever tegrarcm_v2 returned, and
+# sign_binaries_t234 reuses it as found. Add the line so those bundles fail the
+# RCM step too. The script is rewritten in place to keep its mode.
+ensure_rcm_boot_errexit() {
+  local tmp
+  grep -qx 'set -e' rcm-boot.sh && return 0
+  tmp=$(mktemp rcm-boot.XXXXXX) || return 1
+  if head -n 1 rcm-boot.sh | grep -q '^#!'; then
+    {
+      head -n 1 rcm-boot.sh
+      echo 'set -e'
+      tail -n +2 rcm-boot.sh
+    } >"$tmp"
+  else
+    {
+      echo 'set -e'
+      cat rcm-boot.sh
+    } >"$tmp"
+  fi
+  cat "$tmp" >rcm-boot.sh
+  rm -f "$tmp"
+}
+
 sign_binaries_t234() {
   if [ -n "$PRESIGNED" ]; then
     cp doflash.sh flash_signed.sh
@@ -744,7 +768,8 @@ sign_binaries_t234() {
       return 1
     fi
     if [ -e rcm-boot.sh ]; then
-      return 0
+      ensure_rcm_boot_errexit
+      return $?
     fi
     if [ ! -e rcmboot_blob/rcmbootcmd.txt ]; then
       echo "ERR: missing RCM boot blob in pre-signed binaries" >&2
