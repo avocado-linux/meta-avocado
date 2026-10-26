@@ -17,10 +17,10 @@ set -eu
 # initramfs. product_uuid is per-board unique; fall back to product_serial.
 HW_ID=""
 for f in /sys/class/dmi/id/product_uuid /sys/class/dmi/id/product_serial; do
-    if [ -r "$f" ]; then
-        HW_ID=$(tr -d '\0\n' < "$f")
-        [ -n "$HW_ID" ] && break
-    fi
+  if [ -r "$f" ]; then
+    HW_ID=$(tr -d '\0\n' <"$f")
+    [ -n "$HW_ID" ] && break
+  fi
 done
 
 # Whitebox/OEM boards commonly ship these exact placeholder strings in DMI
@@ -30,14 +30,14 @@ done
 # disk opening on another - the fleet-wide-key failure this provider exists
 # to avoid in the first place.
 case "$HW_ID" in
-    ""|"Default string"|"To Be Filled By O.E.M."|"System Serial Number"|\
-    "Not Specified"|"None"|"N/A"|"0123456789"|"00000000-0000-0000-0000-000000000000"|\
+  "" | "Default string" | "To Be Filled By O.E.M." | "System Serial Number" | \
+    "Not Specified" | "None" | "N/A" | "0123456789" | "00000000-0000-0000-0000-000000000000" | \
     "0000000000")
-        echo "var-key: no usable DMI identifier (product_uuid/product_serial" >&2
-        echo "var-key: read a placeholder value: '${HW_ID}')" >&2
-        echo "var-key: refusing to derive a key that would not be device-unique" >&2
-        exit 1
-        ;;
+    echo "var-key: no usable DMI identifier (product_uuid/product_serial" >&2
+    echo "var-key: read a placeholder value: '${HW_ID}')" >&2
+    echo "var-key: refusing to derive a key that would not be device-unique" >&2
+    exit 1
+    ;;
 esac
 
 # Salt: first 32 hex chars of SHA-256(hw_id). openssl CLI only (no xxd, which the
@@ -48,10 +48,10 @@ SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-3
 # conversion is needed. stderr is left attached so a KDF failure surfaces rather
 # than yielding a silent empty key.
 openssl kdf -binary \
-    -keylen 64 \
-    -kdfopt pass:"$HW_ID" \
-    -kdfopt salt:"$SALT" \
-    -kdfopt iter:3 \
-    -kdfopt memcost:65536 \
-    -kdfopt lanes:1 \
-    ARGON2ID
+  -keylen 64 \
+  -kdfopt pass:"$HW_ID" \
+  -kdfopt salt:"$SALT" \
+  -kdfopt iter:3 \
+  -kdfopt memcost:65536 \
+  -kdfopt lanes:1 \
+  ARGON2ID

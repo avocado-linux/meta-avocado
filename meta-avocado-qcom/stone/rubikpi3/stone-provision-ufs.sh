@@ -18,9 +18,8 @@ set -o pipefail
 # at runtime — extensions applied, users configured — and injected here so the
 # device flashes the runtime-correct images, not the yocto-pristine ones.
 bootfiles_name=$(jq -r .storage_devices.rootdisk.images.bootfiles "$AVOCADO_STONE_MANIFEST")
-rootfs_name=$(jq    -r .storage_devices.rootdisk.images.rootfs    "$AVOCADO_STONE_MANIFEST")
-var_name=$(jq       -r .storage_devices.rootdisk.images.var       "$AVOCADO_STONE_MANIFEST")
-initramfs_name=$(jq -r .storage_devices.rootdisk.images.initramfs "$AVOCADO_STONE_MANIFEST")
+rootfs_name=$(jq -r .storage_devices.rootdisk.images.rootfs "$AVOCADO_STONE_MANIFEST")
+var_name=$(jq -r .storage_devices.rootdisk.images.var "$AVOCADO_STONE_MANIFEST")
 # Declared in object form ({out,size,...}) so `stone validate` does not demand
 # a file the build hook has not written yet, so the name is under .out.
 efi_name=$(jq -r '(.storage_devices.rootdisk.images.efi // empty) | if type == "object" then (.out // empty) else . end' "$AVOCADO_STONE_MANIFEST")
@@ -67,35 +66,37 @@ cp "$var_file" "$var_name"
 #    Fail closed. Flashing the tarball's ESP instead is not a degraded mode,
 #    it is a board that boots a kernel nobody asked for.
 if [ -n "$efi_name" ]; then
-    # Three places, in order of how directly they belong to this provision.
-    #
-    # The third is the runtime input directory, which is where the build hook
-    # writes it. That used to be unnecessary: with no `update` block in the
-    # manifest, `stone bundle` staged every declared image into the data dir.
-    # Once os_artifacts exists, the data dir's images/ holds the UPDATE
-    # artifacts only -- the boot entry -- and the ESP image, which no update
-    # ships, stops being copied there at all. Deriving the input dir keeps the
-    # provisioned ESP the one the build produced rather than silently falling
-    # back to the pristine one in the bootfiles tarball, which carries the
-    # default multiconfig's kernel.
-    input_dir_guess=$(printf '%s' "$AVOCADO_STONE_DATA_DIR" \
-        | sed -e 's#/output/runtimes/#/runtimes/#' -e 's#/stone$##')
-    efi_file=""
-    for candidate in \
-        "${AVOCADO_STONE_DATA_DIR}/${efi_name}" \
-        "${AVOCADO_STONE_DATA_DIR}/images/${efi_name}" \
-        "${input_dir_guess}/${efi_name}"
-    do
-        [ -f "$candidate" ] && { efi_file="$candidate"; break; }
-    done
-    if [ -z "$efi_file" ]; then
-        echo "ERROR: manifest declares images.efi as '$efi_name' but no such file" >&2
-        echo "       under ${AVOCADO_STONE_DATA_DIR}[/images] or ${input_dir_guess}." >&2
-        echo "       Did the avocado-build hook run?" >&2
-        exit 1
-    fi
-    echo "Injecting build-time ESP as efi.bin ($(stat -c%s "$efi_file") bytes)"
-    cp "$efi_file" efi.bin
+  # Three places, in order of how directly they belong to this provision.
+  #
+  # The third is the runtime input directory, which is where the build hook
+  # writes it. That used to be unnecessary: with no `update` block in the
+  # manifest, `stone bundle` staged every declared image into the data dir.
+  # Once os_artifacts exists, the data dir's images/ holds the UPDATE
+  # artifacts only -- the boot entry -- and the ESP image, which no update
+  # ships, stops being copied there at all. Deriving the input dir keeps the
+  # provisioned ESP the one the build produced rather than silently falling
+  # back to the pristine one in the bootfiles tarball, which carries the
+  # default multiconfig's kernel.
+  input_dir_guess=$(printf '%s' "$AVOCADO_STONE_DATA_DIR" \
+    | sed -e 's#/output/runtimes/#/runtimes/#' -e 's#/stone$##')
+  efi_file=""
+  for candidate in \
+    "${AVOCADO_STONE_DATA_DIR}/${efi_name}" \
+    "${AVOCADO_STONE_DATA_DIR}/images/${efi_name}" \
+    "${input_dir_guess}/${efi_name}"; do
+    [ -f "$candidate" ] && {
+      efi_file="$candidate"
+      break
+    }
+  done
+  if [ -z "$efi_file" ]; then
+    echo "ERROR: manifest declares images.efi as '$efi_name' but no such file" >&2
+    echo "       under ${AVOCADO_STONE_DATA_DIR}[/images] or ${input_dir_guess}." >&2
+    echo "       Did the avocado-build hook run?" >&2
+    exit 1
+  fi
+  echo "Injecting build-time ESP as efi.bin ($(stat -c%s "$efi_file") bytes)"
+  cp "$efi_file" efi.bin
 fi
 
 # 4b. Select which XBL hypervisor config is flashed as xbl_config.elf. The
@@ -113,44 +114,44 @@ fi
 #     A/B OS updates (both slots share xbl_config).
 hypervisor="${AVOCADO_HYPERVISOR:-gunyah}"
 case "$hypervisor" in
-    gunyah|none) xbl_variant=gunyah ;;
-    kvm)         xbl_variant=kvm ;;
-    *)
-        echo "ERROR: AVOCADO_HYPERVISOR must be gunyah, kvm, or none (got '$hypervisor')" >&2
-        exit 1
-        ;;
+  gunyah | none) xbl_variant=gunyah ;;
+  kvm) xbl_variant=kvm ;;
+  *)
+    echo "ERROR: AVOCADO_HYPERVISOR must be gunyah, kvm, or none (got '$hypervisor')" >&2
+    exit 1
+    ;;
 esac
 if [ -f "xbl_config_${xbl_variant}.elf" ]; then
-    echo "Selecting XBL config: ${xbl_variant} (AVOCADO_HYPERVISOR=${hypervisor})"
-    cp "xbl_config_${xbl_variant}.elf" xbl_config.elf
+  echo "Selecting XBL config: ${xbl_variant} (AVOCADO_HYPERVISOR=${hypervisor})"
+  cp "xbl_config_${xbl_variant}.elf" xbl_config.elf
 else
-    echo "WARNING: xbl_config_${xbl_variant}.elf not in bootfiles; flashing xbl_config.elf as-is" >&2
+  echo "WARNING: xbl_config_${xbl_variant}.elf not in bootfiles; flashing xbl_config.elf as-is" >&2
 fi
 
 # 5. Wait for QDL device on USB
 echo "Waiting for QDL device..."
 for i in {1..30}; do
-    if lsusb | grep -q "05c6:9008"; then
-        echo "QDL device found"
-        sleep 1  # let it settle
-        break
+  if lsusb | grep -q "05c6:9008"; then
+    echo "QDL device found"
+    sleep 1 # let it settle
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "ERROR: no QDL device (05c6:9008) after 30 seconds, aborting" >&2
+    # 05c6:900e is the SoC's dload/ramdump mode, which is where the board
+    # lands after a failed boot and where `reboot edl` from Linux puts it.
+    # It looks like EDL and is not: qdl always starts with a Sahara
+    # handshake and has no flag to skip it (see `qdl` usage), so a 900e
+    # board cannot be flashed. Only a physical power cycle into EDL gets
+    # back to 9008. Worth saying out loud -- otherwise this reads as a
+    # missing cable or a udev problem.
+    if lsusb | grep -q "05c6:900e"; then
+      echo "       Board is in dload/ramdump mode (05c6:900e), not EDL." >&2
+      echo "       qdl cannot flash that -- power cycle the board into EDL." >&2
     fi
-    if [ $i -eq 30 ]; then
-        echo "ERROR: no QDL device (05c6:9008) after 30 seconds, aborting" >&2
-        # 05c6:900e is the SoC's dload/ramdump mode, which is where the board
-        # lands after a failed boot and where `reboot edl` from Linux puts it.
-        # It looks like EDL and is not: qdl always starts with a Sahara
-        # handshake and has no flag to skip it (see `qdl` usage), so a 900e
-        # board cannot be flashed. Only a physical power cycle into EDL gets
-        # back to 9008. Worth saying out loud -- otherwise this reads as a
-        # missing cable or a udev problem.
-        if lsusb | grep -q "05c6:900e"; then
-            echo "       Board is in dload/ramdump mode (05c6:900e), not EDL." >&2
-            echo "       qdl cannot flash that -- power cycle the board into EDL." >&2
-        fi
-        exit 1
-    fi
-    sleep 1
+    exit 1
+  fi
+  sleep 1
 done
 
 # 6. Flash via firehose programmer + rawprogram XMLs

@@ -44,18 +44,18 @@ echo "--- Boot artifacts (TFTP) ---"
 
 # Kernel
 if [ -f "${DATA_DIR}/${KERNEL_IMAGE}" ]; then
-    cp -v "${DATA_DIR}/${KERNEL_IMAGE}" "${PXE_OUT}/bzImage"
+  cp -v "${DATA_DIR}/${KERNEL_IMAGE}" "${PXE_OUT}/bzImage"
 else
-    echo "ERROR: Kernel not found: ${DATA_DIR}/${KERNEL_IMAGE}"
-    exit 1
+  echo "ERROR: Kernel not found: ${DATA_DIR}/${KERNEL_IMAGE}"
+  exit 1
 fi
 
 # Initramfs
 if [ -f "${DATA_DIR}/${INITRAMFS_IMAGE}" ]; then
-    cp -v "${DATA_DIR}/${INITRAMFS_IMAGE}" "${PXE_OUT}/initramfs.cpio.zst"
+  cp -v "${DATA_DIR}/${INITRAMFS_IMAGE}" "${PXE_OUT}/initramfs.cpio.zst"
 else
-    echo "ERROR: Initramfs not found: ${DATA_DIR}/${INITRAMFS_IMAGE}"
-    exit 1
+  echo "ERROR: Initramfs not found: ${DATA_DIR}/${INITRAMFS_IMAGE}"
+  exit 1
 fi
 
 # =============================================================================
@@ -66,17 +66,17 @@ echo "--- System images (HTTP/NFS) ---"
 
 # EFI bootloader
 if [ -f "${DATA_DIR}/${BOOTLOADER_IMAGE}" ]; then
-    cp -v "${DATA_DIR}/${BOOTLOADER_IMAGE}" "${PXE_OUT}/"
+  cp -v "${DATA_DIR}/${BOOTLOADER_IMAGE}" "${PXE_OUT}/"
 fi
 
 # Rootfs
 if [ -f "${DATA_DIR}/${ROOTFS_IMAGE}" ]; then
-    cp -v "${DATA_DIR}/${ROOTFS_IMAGE}" "${PXE_OUT}/"
+  cp -v "${DATA_DIR}/${ROOTFS_IMAGE}" "${PXE_OUT}/"
 fi
 
 # Var
 if [ -f "${DATA_DIR}/${VAR_IMAGE}" ]; then
-    cp -v "${DATA_DIR}/${VAR_IMAGE}" "${PXE_OUT}/"
+  cp -v "${DATA_DIR}/${VAR_IMAGE}" "${PXE_OUT}/"
 fi
 
 # =============================================================================
@@ -85,7 +85,7 @@ fi
 echo ""
 echo "--- Generating iPXE boot script ---"
 
-cat > "${PXE_OUT}/boot.ipxe" <<'IPXE'
+cat >"${PXE_OUT}/boot.ipxe" <<'IPXE'
 #!ipxe
 # Avocado OS PXE Boot Script
 # Serve this file from your HTTP server and chainload from iPXE
@@ -106,7 +106,7 @@ echo "  Created boot.ipxe"
 # =============================================================================
 mkdir -p "${PXE_OUT}/pxelinux.cfg"
 
-cat > "${PXE_OUT}/pxelinux.cfg/default" <<PXECFG
+cat >"${PXE_OUT}/pxelinux.cfg/default" <<PXECFG
 DEFAULT avocado
 PROMPT 0
 TIMEOUT 50

@@ -22,31 +22,31 @@ SECRET_FILE="/var/private/var-key-secret"
 # in the device tree (the Raspberry Pi firmware does), then /proc/cpuinfo.
 HW_ID=""
 for f in /sys/devices/soc0/serial_number /sys/firmware/devicetree/base/serial-number; do
-    if [ -z "$HW_ID" ] && [ -r "$f" ]; then
-        HW_ID=$(tr -d '\0\n' < "$f")
-    fi
+  if [ -z "$HW_ID" ] && [ -r "$f" ]; then
+    HW_ID=$(tr -d '\0\n' <"$f")
+  fi
 done
 if [ -z "$HW_ID" ]; then
-    HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || true)
+  HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || true)
 fi
 
 # Refuse rather than fall back to a constant: a constant would give every board
 # the same /var key, silently. All zeros is what some firmware reports when it
 # has no serial, so it counts as missing.
 case "$HW_ID" in
-    ""|*[!0]*) ;;
-    *) HW_ID="" ;;
+  "" | *[!0]*) ;;
+  *) HW_ID="" ;;
 esac
 if [ -z "$HW_ID" ]; then
-    echo "var-key: no hardware-unique identifier (SoC UID, DT serial-number or cpuinfo Serial)" >&2
-    echo "var-key: refusing to derive a key that would not be device-unique" >&2
-    exit 1
+  echo "var-key: no hardware-unique identifier (SoC UID, DT serial-number or cpuinfo Serial)" >&2
+  echo "var-key: refusing to derive a key that would not be device-unique" >&2
+  exit 1
 fi
 
 if [ -f "$SECRET_FILE" ]; then
-    PASS=$(printf '%s:%s' "$(cat "$SECRET_FILE")" "$HW_ID")
+  PASS=$(printf '%s:%s' "$(cat "$SECRET_FILE")" "$HW_ID")
 else
-    PASS="$HW_ID"
+  PASS="$HW_ID"
 fi
 
 # Key derivation: argon2id via openssl 3.x. Salt is SHA-256(hw_id) truncated to 16 bytes - public,
@@ -58,10 +58,10 @@ SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-3
 # a KDF failure surfaces in the journal and trips set -e in the caller rather
 # than yielding a silent empty key.
 openssl kdf -binary \
-    -keylen 64 \
-    -kdfopt pass:"$PASS" \
-    -kdfopt salt:"$SALT" \
-    -kdfopt iter:3 \
-    -kdfopt memcost:65536 \
-    -kdfopt lanes:1 \
-    ARGON2ID
+  -keylen 64 \
+  -kdfopt pass:"$PASS" \
+  -kdfopt salt:"$SALT" \
+  -kdfopt iter:3 \
+  -kdfopt memcost:65536 \
+  -kdfopt lanes:1 \
+  ARGON2ID

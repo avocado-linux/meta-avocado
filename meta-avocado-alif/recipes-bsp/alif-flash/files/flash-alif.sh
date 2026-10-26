@@ -21,7 +21,7 @@ set -o pipefail
 ALIF_FLASH_TOOL="${AVOCADO_ALIF_FLASH_TOOL:-app-write-mram}"
 
 if ! command -v "$ALIF_FLASH_TOOL" >/dev/null 2>&1; then
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 ERROR: Alif flash tool '${ALIF_FLASH_TOOL}' not found on PATH.
 
 The Alif Ensemble OSPI is programmed via Alif SETOOLS, which is proprietary
@@ -31,7 +31,7 @@ and must be installed into the SDK container manually. See:
 
 To override the tool name, set AVOCADO_ALIF_FLASH_TOOL=<name>.
 EOF
-    exit 1
+  exit 1
 fi
 
 : "${TFA_BIN:?TFA_BIN must point to bl32.bin}"
@@ -40,10 +40,10 @@ fi
 : "${ATOC_TEMPLATE:?ATOC_TEMPLATE must point to the ATOC JSON template}"
 
 for f in "$TFA_BIN" "$KERNEL_DTB" "$KERNEL_BIN" "$ATOC_TEMPLATE"; do
-    if [ ! -f "$f" ]; then
-        echo "ERROR: artifact not found: $f" >&2
-        exit 1
-    fi
+  if [ ! -f "$f" ]; then
+    echo "ERROR: artifact not found: $f" >&2
+    exit 1
+  fi
 done
 
 WORK_DIR=$(mktemp -d)
@@ -51,10 +51,10 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 ATOC_RESOLVED="${WORK_DIR}/atoc.json"
 sed \
-    -e "s|\${TFA_BIN}|${TFA_BIN}|g" \
-    -e "s|\${KERNEL_DTB}|${KERNEL_DTB}|g" \
-    -e "s|\${KERNEL_BIN}|${KERNEL_BIN}|g" \
-    "$ATOC_TEMPLATE" > "$ATOC_RESOLVED"
+  -e "s|\${TFA_BIN}|${TFA_BIN}|g" \
+  -e "s|\${KERNEL_DTB}|${KERNEL_DTB}|g" \
+  -e "s|\${KERNEL_BIN}|${KERNEL_BIN}|g" \
+  "$ATOC_TEMPLATE" >"$ATOC_RESOLVED"
 
 echo "=== Flashing Alif Ensemble OSPI via ${ALIF_FLASH_TOOL} ==="
 echo "  TF-A:   ${TFA_BIN}"

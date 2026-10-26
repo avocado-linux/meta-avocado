@@ -22,22 +22,36 @@
 set -u
 set -o pipefail
 
-fail() { echo "[ERROR] avocado-dtc-overlay: $*" >&2; exit 1; }
+fail() {
+  echo "[ERROR] avocado-dtc-overlay: $*" >&2
+  exit 1
+}
 
-name=""; src=""; out=""
+name=""
+src=""
+out=""
 while [ $# -gt 0 ]; do
-    case "$1" in
-        --name) name="${2:?--name needs a value}"; shift 2 ;;
-        --src)  src="${2:?--src needs a value}";   shift 2 ;;
-        --out)  out="${2:?--out needs a value}";   shift 2 ;;
-        *) fail "unknown argument: $1" ;;
-    esac
+  case "$1" in
+    --name)
+      name="${2:?--name needs a value}"
+      shift 2
+      ;;
+    --src)
+      src="${2:?--src needs a value}"
+      shift 2
+      ;;
+    --out)
+      out="${2:?--out needs a value}"
+      shift 2
+      ;;
+    *) fail "unknown argument: $1" ;;
+  esac
 done
 
 [ -n "$name" ] || fail "--name is required"
-[ -n "$src" ]  || fail "--src is required"
-[ -n "$out" ]  || fail "--out is required"
-[ -f "$src" ]  || fail "$name: source $src does not exist"
+[ -n "$src" ] || fail "--src is required"
+[ -n "$out" ] || fail "--out is required"
+[ -f "$src" ] || fail "$name: source $src does not exist"
 
 command -v dtc >/dev/null 2>&1 || fail "dtc is not in the SDK (need nativesdk-dtc)"
 
@@ -49,17 +63,19 @@ command -v dtc >/dev/null 2>&1 || fail "dtc is not in the SDK (need nativesdk-dt
 # constants, so refuse instead of picking.
 bindings="${AVOCADO_DT_BINDINGS_DIR:-}"
 if [ -z "$bindings" ]; then
-    sysroot="${OECORE_TARGET_SYSROOT:-}"
-    [ -n "$sysroot" ] || fail "$name: OECORE_TARGET_SYSROOT is not set and AVOCADO_DT_BINDINGS_DIR was not given"
+  sysroot="${OECORE_TARGET_SYSROOT:-}"
+  [ -n "$sysroot" ] || fail "$name: OECORE_TARGET_SYSROOT is not set and AVOCADO_DT_BINDINGS_DIR was not given"
 
-    found=""
-    for inc in "$sysroot"/usr/lib/modules/*/build/include; do
-        [ -d "$inc/dt-bindings" ] || continue
-        found="$found $inc"
-    done
-    set -- $found
-    case $# in
-        0) fail "$name: no dt-bindings under $sysroot/usr/lib/modules/*/build/include.
+  found=""
+  for inc in "$sysroot"/usr/lib/modules/*/build/include; do
+    [ -d "$inc/dt-bindings" ] || continue
+    found="$found $inc"
+  done
+  # found is a space-separated path list; splitting it is how $# counts kernels.
+  # shellcheck disable=SC2086
+  set -- $found
+  case $# in
+    0) fail "$name: no dt-bindings under $sysroot/usr/lib/modules/*/build/include.
        The extension declaring this overlay must pull the kernel headers into
        the target-dev sysroot, e.g.
 
@@ -70,11 +86,11 @@ if [ -z "$bindings" ]; then
                    kernel-devsrc: '*'
 
        and reference that compile section from the extension." ;;
-        1) bindings="$1" ;;
-        *) fail "$name: dt-bindings found for more than one kernel under $sysroot ($*).
+    1) bindings="$1" ;;
+    *) fail "$name: dt-bindings found for more than one kernel under $sysroot ($*).
        Two kernels define different constants, so which to compile against is
        not this tool's guess to make; set AVOCADO_DT_BINDINGS_DIR." ;;
-    esac
+  esac
 fi
 [ -d "$bindings/dt-bindings" ] || fail "$name: $bindings holds no dt-bindings directory"
 
@@ -100,28 +116,28 @@ trap 'rm -rf "$work"' EXIT
 #                        on PATH.
 cpp_cmd=""
 for cand in "${CROSS_COMPILE:-}cpp" cpp; do
-    case "$cand" in cpp|*-cpp) ;; *) continue ;; esac
-    if command -v "$cand" >/dev/null 2>&1; then
-        cpp_cmd="$cand"
-        break
-    fi
+  case "$cand" in cpp | *-cpp) ;; *) continue ;; esac
+  if command -v "$cand" >/dev/null 2>&1; then
+    cpp_cmd="$cand"
+    break
+  fi
 done
 if [ -z "$cpp_cmd" ] && [ -n "${CPP:-}" ]; then
-    # Word-split deliberately: $CPP carries its own flags.
-    # shellcheck disable=SC2086
-    set -- $CPP
-    if command -v "$1" >/dev/null 2>&1; then
-        cpp_cmd="$CPP"
-    fi
+  # Word-split deliberately: $CPP carries its own flags.
+  # shellcheck disable=SC2086
+  set -- $CPP
+  if command -v "$1" >/dev/null 2>&1; then
+    cpp_cmd="$CPP"
+  fi
 fi
 [ -n "$cpp_cmd" ] || fail "$name: no C preprocessor in the SDK (tried \${CROSS_COMPILE}cpp, cpp, \$CPP)"
 
 # shellcheck disable=SC2086
 $cpp_cmd -nostdinc -undef -D__DTS__ -x assembler-with-cpp \
-    -I "$bindings" \
-    -I "$(dirname "$src")" \
-    "$src" -o "$work/pp.dts" \
-    || fail "$name: preprocessing $src failed"
+  -I "$bindings" \
+  -I "$(dirname "$src")" \
+  "$src" -o "$work/pp.dts" \
+  || fail "$name: preprocessing $src failed"
 
 # Stage 2: compile. -@ emits __symbols__, without which the overlay cannot
 # resolve the &labels it targets and fdtoverlay would reject it later -- a
@@ -129,12 +145,12 @@ $cpp_cmd -nostdinc -undef -D__DTS__ -x assembler-with-cpp \
 dtc -@ -I dts -O dtb -o "$out" "$work/pp.dts" 2>"$work/dtc.err"
 rc=$?
 if [ $rc -ne 0 ]; then
-    sed 's/^/    /' "$work/dtc.err" >&2
-    fail "$name: dtc failed compiling $src"
+  sed 's/^/    /' "$work/dtc.err" >&2
+  fail "$name: dtc failed compiling $src"
 fi
 # dtc warns liberally on overlays; surface them without failing the build.
 if [ -s "$work/dtc.err" ]; then
-    sed 's/^/    /' "$work/dtc.err" >&2
+  sed 's/^/    /' "$work/dtc.err" >&2
 fi
 
 [ -s "$out" ] || fail "$name: dtc produced no output at $out"

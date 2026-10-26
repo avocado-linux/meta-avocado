@@ -23,21 +23,21 @@ OUT=${AVOCADO_INITRAMFS_ID_OUT:-/run/avocado/initramfs-build-id}
 ROOT=${AVOCADO_INITRAMFS_ID_ROOT:-}
 
 for f in "$ROOT/etc/initrd-release" "$ROOT/usr/lib/initrd-release" "$ROOT/usr/lib/os-release-initrd"; do
-    [ -r "$f" ] || continue
-    id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -n 1)
-    [ -n "$id" ] || continue
-    if ! mkdir -p "${OUT%/*}"; then
-        echo "avocado-initramfs-id: cannot create ${OUT%/*}; not publishing"
-        exit 0
-    fi
-    if printf '%s\n' "$id" > "$OUT"; then
-        # Name the source file: when this went wrong the id was missing from the
-        # image entirely, and one boot log line would have said so.
-        echo "avocado-initramfs-id: $id (from $f)"
-    else
-        echo "avocado-initramfs-id: cannot write $OUT; not publishing"
-    fi
+  [ -r "$f" ] || continue
+  id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -n 1)
+  [ -n "$id" ] || continue
+  if ! mkdir -p "${OUT%/*}"; then
+    echo "avocado-initramfs-id: cannot create ${OUT%/*}; not publishing"
     exit 0
+  fi
+  if printf '%s\n' "$id" >"$OUT"; then
+    # Name the source file: when this went wrong the id was missing from the
+    # image entirely, and one boot log line would have said so.
+    echo "avocado-initramfs-id: $id (from $f)"
+  else
+    echo "avocado-initramfs-id: cannot write $OUT; not publishing"
+  fi
+  exit 0
 done
 
 echo "avocado-initramfs-id: no AVOCADO_OS_BUILD_ID in the initramfs release files; not publishing"

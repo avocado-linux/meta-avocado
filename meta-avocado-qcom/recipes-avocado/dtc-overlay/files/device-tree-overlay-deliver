@@ -45,7 +45,10 @@
 set -u
 set -o pipefail
 
-fail() { echo "[ERROR] device-tree-overlay-deliver: $*" >&2; exit 1; }
+fail() {
+  echo "[ERROR] device-tree-overlay-deliver: $*" >&2
+  exit 1
+}
 
 : "${AVOCADO_DTBO_STAGING:?not set by the caller}"
 : "${AVOCADO_OVERLAYS_MANIFEST:?not set by the caller}"
@@ -143,7 +146,7 @@ PYEOF
 # No fragment: see the header. Remove a stale one so a previous build's
 # fragment cannot be picked up by this one.
 if [ -n "${AVOCADO_DELIVERY_FRAGMENT:-}" ] && [ -e "$AVOCADO_DELIVERY_FRAGMENT" ]; then
-    rm -f "$AVOCADO_DELIVERY_FRAGMENT" || fail "could not remove stale fragment $AVOCADO_DELIVERY_FRAGMENT"
+  rm -f "$AVOCADO_DELIVERY_FRAGMENT" || fail "could not remove stale fragment $AVOCADO_DELIVERY_FRAGMENT"
 fi
 
 exit 0

@@ -14,14 +14,14 @@ set -u
 set -o pipefail
 
 if [ "${AVOCADO_USB_PASSTHROUGH:-1}" != "1" ]; then
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 ERROR: serial provisioning requires USB-UART passthrough into the SDK
 container. AVOCADO_USB_PASSTHROUGH=${AVOCADO_USB_PASSTHROUGH:-} indicates
 the SDK was launched without /dev/ttyUSB* access (likely Docker Desktop on
 macOS/Windows). Run avocado provision on a Linux host or expose the UART
 device explicitly.
 EOF
-    exit 1
+  exit 1
 fi
 
 MANIFEST="$AVOCADO_STONE_MANIFEST"
@@ -32,19 +32,19 @@ FIP=$(jq -r '.storage_devices.rootdisk.images.fip' "$MANIFEST")
 FW=$(jq -r '.storage_devices.rootdisk.images.flash_writer' "$MANIFEST")
 
 for f in "$BL2" "$FIP" "$FW"; do
-    if [ ! -f "${DATA_DIR}/${f}" ]; then
-        echo "ERROR: missing artifact ${DATA_DIR}/${f}" >&2
-        exit 1
-    fi
+  if [ ! -f "${DATA_DIR}/${f}" ]; then
+    echo "ERROR: missing artifact ${DATA_DIR}/${f}" >&2
+    exit 1
+  fi
 done
 
 PORT="${AVOCADO_RZ_SERIAL_PORT:-/dev/ttyUSB0}"
 SPEED="${AVOCADO_RZ_SERIAL_SPEED:-921600}"
 
 if [ ! -e "$PORT" ]; then
-    echo "ERROR: serial port $PORT not present in the SDK container." >&2
-    echo "Set AVOCADO_RZ_SERIAL_PORT to the correct /dev/ttyUSB* node." >&2
-    exit 1
+  echo "ERROR: serial port $PORT not present in the SDK container." >&2
+  echo "Set AVOCADO_RZ_SERIAL_PORT to the correct /dev/ttyUSB* node." >&2
+  exit 1
 fi
 
 cat <<EOF
@@ -66,12 +66,12 @@ EOF
 read -r _
 
 rz-flash-writer-tool \
-    --target spi \
-    --fw    "${DATA_DIR}/${FW}" \
-    --bl2   "${DATA_DIR}/${BL2}" \
-    --fip   "${DATA_DIR}/${FIP}" \
-    --port  "$PORT" \
-    --speed "$SPEED"
+  --target spi \
+  --fw "${DATA_DIR}/${FW}" \
+  --bl2 "${DATA_DIR}/${BL2}" \
+  --fip "${DATA_DIR}/${FIP}" \
+  --port "$PORT" \
+  --speed "$SPEED"
 
 cat <<EOF
 

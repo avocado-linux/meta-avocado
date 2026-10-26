@@ -35,13 +35,13 @@ SOC_UID_FILE="/sys/devices/soc0/serial_number"
 
 HW_ID=""
 if [ -r "$SOC_UID_FILE" ]; then
-    HW_ID=$(tr -d '\0\n' < "$SOC_UID_FILE")
+  HW_ID=$(tr -d '\0\n' <"$SOC_UID_FILE")
 fi
 if [ -z "$HW_ID" ] && [ -r /sys/firmware/devicetree/base/serial-number ]; then
-    # Some u-boot configurations publish the same UID into the DT. Secondary
-    # only: it is set by the bootloader rather than read from the SoC, so it is
-    # the less authoritative of the two.
-    HW_ID=$(tr -d '\0\n' < /sys/firmware/devicetree/base/serial-number)
+  # Some u-boot configurations publish the same UID into the DT. Secondary
+  # only: it is set by the bootloader rather than read from the SoC, so it is
+  # the less authoritative of the two.
+  HW_ID=$(tr -d '\0\n' </sys/firmware/devicetree/base/serial-number)
 fi
 
 # Fail rather than fall back to a constant. The qemu provider substitutes a
@@ -51,9 +51,9 @@ fi
 # one device's disk opening on another. A missing UID means this machine cannot
 # derive a device-bound key, and refusing is the only safe answer.
 if [ -z "$HW_ID" ]; then
-    echo "var-key: no SoC UID at $SOC_UID_FILE (is CONFIG_SOC_IMX8M / CONFIG_SOC_IMX9 enabled?)" >&2
-    echo "var-key: refusing to derive a key that would not be device-unique" >&2
-    exit 1
+  echo "var-key: no SoC UID at $SOC_UID_FILE (is CONFIG_SOC_IMX8M / CONFIG_SOC_IMX9 enabled?)" >&2
+  echo "var-key: refusing to derive a key that would not be device-unique" >&2
+  exit 1
 fi
 
 # Deterministic 16-byte salt = first 32 hex chars of SHA-256(HW_ID). Public and
@@ -64,10 +64,10 @@ SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-3
 # stdout, so no hex<->binary conversion (xxd) is needed - the minimal initramfs
 # does not ship it. Parameters match the other providers: m=64MiB, t=3, p=1.
 openssl kdf -binary \
-    -keylen 64 \
-    -kdfopt pass:"$HW_ID" \
-    -kdfopt salt:"$SALT" \
-    -kdfopt iter:3 \
-    -kdfopt memcost:65536 \
-    -kdfopt lanes:1 \
-    ARGON2ID
+  -keylen 64 \
+  -kdfopt pass:"$HW_ID" \
+  -kdfopt salt:"$SALT" \
+  -kdfopt iter:3 \
+  -kdfopt memcost:65536 \
+  -kdfopt lanes:1 \
+  ARGON2ID

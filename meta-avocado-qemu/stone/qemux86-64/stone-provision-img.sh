@@ -28,8 +28,8 @@ BLOCK_SIZE=$(jq -r '.storage_devices.rootdisk.block_size // 512' "$MANIFEST")
 # produces a silently mis-laid-out image rather than an error. Guard it, the
 # way meta-avocado-rockchip/stone/orangepi-5-plus/build-disk-image.sh does.
 if [ "$BLOCK_SIZE" != "512" ]; then
-    echo "ERROR: only 512-byte blocks supported (manifest declares ${BLOCK_SIZE})" >&2
-    exit 1
+  echo "ERROR: only 512-byte blocks supported (manifest declares ${BLOCK_SIZE})" >&2
+  exit 1
 fi
 
 echo "=== Creating disk image for ${PLATFORM} ==="
@@ -44,22 +44,25 @@ echo "  Build directory: ${BUILD_DIR}"
 
 NUM_PARTITIONS=$(jq '.storage_devices.rootdisk.partitions | length' "$MANIFEST")
 if [ "$NUM_PARTITIONS" -eq 0 ]; then
-    echo "ERROR: No partitions defined in manifest"
-    exit 1
+  echo "ERROR: No partitions defined in manifest"
+  exit 1
 fi
 
 echo "  Partitions: ${NUM_PARTITIONS}"
 
 # Convert size_unit to MiB multiplier
 size_to_mib() {
-    local size="$1"
-    local unit="$2"
-    case "$unit" in
-        mebibytes|MiB) echo "$size" ;;
-        kibibytes|KiB) echo $(( size / 1024 )) ;;
-        gibibytes|GiB) echo $(( size * 1024 )) ;;
-        *) echo "ERROR: Unknown size unit: $unit" >&2; exit 1 ;;
-    esac
+  local size="$1"
+  local unit="$2"
+  case "$unit" in
+    mebibytes | MiB) echo "$size" ;;
+    kibibytes | KiB) echo $((size / 1024)) ;;
+    gibibytes | GiB) echo $((size * 1024)) ;;
+    *)
+      echo "ERROR: Unknown size unit: $unit" >&2
+      exit 1
+      ;;
+  esac
 }
 
 # Build partition info arrays
@@ -67,40 +70,40 @@ declare -a PART_NAMES PART_SIZES_MIB PART_TYPES PART_UUIDS PART_IMAGES PART_OFFS
 GPT_START_MIB=1
 CURSOR_MIB=${GPT_START_MIB}
 
-for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
-    name=$(jq -r ".storage_devices.rootdisk.partitions[$i].name // \"\"" "$MANIFEST")
-    size=$(jq -r ".storage_devices.rootdisk.partitions[$i].size" "$MANIFEST")
-    size_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].size_unit" "$MANIFEST")
-    ptype=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_type // \"8300\"" "$MANIFEST")
-    puuid=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_uuid // \"\"" "$MANIFEST")
-    image=$(jq -r ".storage_devices.rootdisk.partitions[$i].image // \"\"" "$MANIFEST")
-    offset=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset // \"\"" "$MANIFEST")
-    offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
-    expand=$(jq -r ".storage_devices.rootdisk.partitions[$i].expand // \"\"" "$MANIFEST")
+for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+  name=$(jq -r ".storage_devices.rootdisk.partitions[$i].name // \"\"" "$MANIFEST")
+  size=$(jq -r ".storage_devices.rootdisk.partitions[$i].size" "$MANIFEST")
+  size_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].size_unit" "$MANIFEST")
+  ptype=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_type // \"8300\"" "$MANIFEST")
+  puuid=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_uuid // \"\"" "$MANIFEST")
+  image=$(jq -r ".storage_devices.rootdisk.partitions[$i].image // \"\"" "$MANIFEST")
+  offset=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset // \"\"" "$MANIFEST")
+  offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
+  expand=$(jq -r ".storage_devices.rootdisk.partitions[$i].expand // \"\"" "$MANIFEST")
 
-    size_mib=$(size_to_mib "$size" "$size_unit")
+  size_mib=$(size_to_mib "$size" "$size_unit")
 
-    # Use explicit offset if provided, otherwise use cursor
-    if [ -n "$offset" ]; then
-        offset_mib=$(size_to_mib "$offset" "$offset_unit")
-        CURSOR_MIB=$offset_mib
-    fi
+  # Use explicit offset if provided, otherwise use cursor
+  if [ -n "$offset" ]; then
+    offset_mib=$(size_to_mib "$offset" "$offset_unit")
+    CURSOR_MIB=$offset_mib
+  fi
 
-    PART_NAMES+=("$name")
-    PART_SIZES_MIB+=("$size_mib")
-    PART_TYPES+=("$ptype")
-    PART_UUIDS+=("$puuid")
-    PART_IMAGES+=("$image")
-    PART_OFFSETS_MIB+=("$CURSOR_MIB")
-    PART_EXPAND+=("$expand")
+  PART_NAMES+=("$name")
+  PART_SIZES_MIB+=("$size_mib")
+  PART_TYPES+=("$ptype")
+  PART_UUIDS+=("$puuid")
+  PART_IMAGES+=("$image")
+  PART_OFFSETS_MIB+=("$CURSOR_MIB")
+  PART_EXPAND+=("$expand")
 
-    echo "  Partition $((i+1)): ${name:-unnamed}  offset=${CURSOR_MIB}MiB  size=${size_mib}MiB  type=${ptype}${puuid:+  uuid=${puuid}}${image:+  image=${image}}"
+  echo "  Partition $((i + 1)): ${name:-unnamed}  offset=${CURSOR_MIB}MiB  size=${size_mib}MiB  type=${ptype}${puuid:+  uuid=${puuid}}${image:+  image=${image}}"
 
-    CURSOR_MIB=$(( CURSOR_MIB + size_mib ))
+  CURSOR_MIB=$((CURSOR_MIB + size_mib))
 done
 
 # Total image size (partitions + 1 MiB GPT tail)
-TOTAL_MIB=$(( CURSOR_MIB + 1 ))
+TOTAL_MIB=$((CURSOR_MIB + 1))
 
 IMAGE_NAME="avocado-os-${PLATFORM}.img"
 IMAGE_FILE="${BUILD_DIR}/${IMAGE_NAME}"
@@ -122,20 +125,20 @@ echo "=== Creating GPT partition table ==="
 sgdisk --zap-all "$IMAGE_FILE"
 
 SGDISK_ARGS=""
-for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
-    pnum=$((i + 1))
-    start_sector=$(( ${PART_OFFSETS_MIB[$i]} * 2048 ))
-    size_sectors=$(( ${PART_SIZES_MIB[$i]} * 2048 ))
-    SGDISK_ARGS="${SGDISK_ARGS} -n ${pnum}:${start_sector}:+$((size_sectors - 1))"
-    SGDISK_ARGS="${SGDISK_ARGS} -t ${pnum}:${PART_TYPES[$i]}"
+for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+  pnum=$((i + 1))
+  start_sector=$((${PART_OFFSETS_MIB[$i]} * 2048))
+  size_sectors=$((${PART_SIZES_MIB[$i]} * 2048))
+  SGDISK_ARGS="${SGDISK_ARGS} -n ${pnum}:${start_sector}:+$((size_sectors - 1))"
+  SGDISK_ARGS="${SGDISK_ARGS} -t ${pnum}:${PART_TYPES[$i]}"
 
-    if [ -n "${PART_NAMES[$i]}" ]; then
-        SGDISK_ARGS="${SGDISK_ARGS} -c ${pnum}:${PART_NAMES[$i]}"
-    fi
+  if [ -n "${PART_NAMES[$i]}" ]; then
+    SGDISK_ARGS="${SGDISK_ARGS} -c ${pnum}:${PART_NAMES[$i]}"
+  fi
 
-    if [ -n "${PART_UUIDS[$i]}" ]; then
-        SGDISK_ARGS="${SGDISK_ARGS} -u ${pnum}:${PART_UUIDS[$i]}"
-    fi
+  if [ -n "${PART_UUIDS[$i]}" ]; then
+    SGDISK_ARGS="${SGDISK_ARGS} -u ${pnum}:${PART_UUIDS[$i]}"
+  fi
 done
 
 # shellcheck disable=SC2086
@@ -147,14 +150,14 @@ echo "  Partition table created"
 # Returns the image "out" filename for Object images, or the string directly
 # =============================================================================
 resolve_image_filename() {
-    local image_key="$1"
-    local img_type
-    img_type=$(jq -r ".storage_devices.rootdisk.images.\"${image_key}\" | type" "$MANIFEST")
-    if [ "$img_type" = "string" ]; then
-        jq -r ".storage_devices.rootdisk.images.\"${image_key}\"" "$MANIFEST"
-    else
-        jq -r ".storage_devices.rootdisk.images.\"${image_key}\".out" "$MANIFEST"
-    fi
+  local image_key="$1"
+  local img_type
+  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${image_key}\" | type" "$MANIFEST")
+  if [ "$img_type" = "string" ]; then
+    jq -r ".storage_devices.rootdisk.images.\"${image_key}\"" "$MANIFEST"
+  else
+    jq -r ".storage_devices.rootdisk.images.\"${image_key}\".out" "$MANIFEST"
+  fi
 }
 
 # =============================================================================
@@ -162,54 +165,54 @@ resolve_image_filename() {
 # =============================================================================
 # Check if any partition has an image that is a FAT build object
 BOOT_IMAGE_KEY=""
-for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
-    img_key="${PART_IMAGES[$i]}"
-    if [ -z "$img_key" ]; then continue; fi
+for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+  img_key="${PART_IMAGES[$i]}"
+  if [ -z "$img_key" ]; then continue; fi
 
-    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
-    if [ "$build_type" = "fat" ]; then
-        BOOT_IMAGE_KEY="$img_key"
-        break
-    fi
+  build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+  if [ "$build_type" = "fat" ]; then
+    BOOT_IMAGE_KEY="$img_key"
+    break
+  fi
 done
 
 if [ -n "$BOOT_IMAGE_KEY" ]; then
-    echo "=== Creating FAT boot image (${BOOT_IMAGE_KEY}) ==="
+  echo "=== Creating FAT boot image (${BOOT_IMAGE_KEY}) ==="
 
-    BOOT_IMG_OUT=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
-    BOOT_IMG_SIZE=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".size" "$MANIFEST")
-    BOOT_IMG="${BUILD_DIR}/${BOOT_IMG_OUT}"
+  BOOT_IMG_OUT=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
+  BOOT_IMG_SIZE=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".size" "$MANIFEST")
+  BOOT_IMG="${BUILD_DIR}/${BOOT_IMG_OUT}"
 
-    truncate -s "${BOOT_IMG_SIZE}M" "$BOOT_IMG"
-    mkfs.fat -F 32 -n "BOOT" "$BOOT_IMG"
+  truncate -s "${BOOT_IMG_SIZE}M" "$BOOT_IMG"
+  mkfs.fat -F 32 -n "BOOT" "$BOOT_IMG"
 
-    if ! command -v mcopy >/dev/null 2>&1; then
-        echo "ERROR: mtools (mcopy) not found - required for FAT image creation"
-        exit 1
+  if ! command -v mcopy >/dev/null 2>&1; then
+    echo "ERROR: mtools (mcopy) not found - required for FAT image creation"
+    exit 1
+  fi
+
+  # Copy each file listed in build_args.files
+  NUM_FILES=$(jq ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files | length" "$MANIFEST")
+  for j in $(seq 0 $((NUM_FILES - 1))); do
+    file_in=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].\"in\"" "$MANIFEST")
+    file_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].out" "$MANIFEST")
+
+    # Create parent directories
+    dir_path=$(dirname "$file_out")
+    if [ "$dir_path" != "." ]; then
+      IFS='/' read -ra DIR_PARTS <<<"$dir_path"
+      current=""
+      for part in "${DIR_PARTS[@]}"; do
+        current="${current}/${part}"
+        mmd -i "$BOOT_IMG" "::${current}" 2>/dev/null || true
+      done
     fi
 
-    # Copy each file listed in build_args.files
-    NUM_FILES=$(jq ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files | length" "$MANIFEST")
-    for j in $(seq 0 $(( NUM_FILES - 1 ))); do
-        file_in=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].\"in\"" "$MANIFEST")
-        file_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].out" "$MANIFEST")
+    echo "  Adding: ${file_in} -> ${file_out}"
+    mcopy -i "$BOOT_IMG" "${DATA_DIR}/${file_in}" "::${file_out}"
+  done
 
-        # Create parent directories
-        dir_path=$(dirname "$file_out")
-        if [ "$dir_path" != "." ]; then
-            IFS='/' read -ra DIR_PARTS <<< "$dir_path"
-            current=""
-            for part in "${DIR_PARTS[@]}"; do
-                current="${current}/${part}"
-                mmd -i "$BOOT_IMG" "::${current}" 2>/dev/null || true
-            done
-        fi
-
-        echo "  Adding: ${file_in} -> ${file_out}"
-        mcopy -i "$BOOT_IMG" "${DATA_DIR}/${file_in}" "::${file_out}"
-    done
-
-    echo "  FAT boot image created: ${BOOT_IMG}"
+  echo "  FAT boot image created: ${BOOT_IMG}"
 fi
 
 # =============================================================================
@@ -217,34 +220,34 @@ fi
 # =============================================================================
 echo "=== Writing partition images ==="
 
-for i in $(seq 0 $(( NUM_PARTITIONS - 1 ))); do
-    img_key="${PART_IMAGES[$i]}"
-    if [ -z "$img_key" ]; then continue; fi
+for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+  img_key="${PART_IMAGES[$i]}"
+  if [ -z "$img_key" ]; then continue; fi
 
-    # Resolve the actual image file path
-    build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
-    if [ "$build_type" = "fat" ]; then
-        # FAT image was built above
-        img_out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$MANIFEST")
-        img_file="${BUILD_DIR}/${img_out}"
-    else
-        img_filename=$(resolve_image_filename "$img_key")
-        img_file="${DATA_DIR}/${img_filename}"
-    fi
+  # Resolve the actual image file path
+  build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+  if [ "$build_type" = "fat" ]; then
+    # FAT image was built above
+    img_out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$MANIFEST")
+    img_file="${BUILD_DIR}/${img_out}"
+  else
+    img_filename=$(resolve_image_filename "$img_key")
+    img_file="${DATA_DIR}/${img_filename}"
+  fi
 
-    if [ ! -f "$img_file" ]; then
-        echo "ERROR: Image file not found: ${img_file}"
-        exit 1
-    fi
+  if [ ! -f "$img_file" ]; then
+    echo "ERROR: Image file not found: ${img_file}"
+    exit 1
+  fi
 
-    echo "  Writing ${PART_NAMES[$i]}: ${img_file} @ offset ${PART_OFFSETS_MIB[$i]} MiB"
-    dd if="$img_file" of="$IMAGE_FILE" bs=1M seek="${PART_OFFSETS_MIB[$i]}" conv=notrunc status=progress
+  echo "  Writing ${PART_NAMES[$i]}: ${img_file} @ offset ${PART_OFFSETS_MIB[$i]} MiB"
+  dd if="$img_file" of="$IMAGE_FILE" bs=1M seek="${PART_OFFSETS_MIB[$i]}" conv=notrunc status=progress
 done
 
 # Cleanup built images
 if [ -n "$BOOT_IMAGE_KEY" ]; then
-    img_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
-    rm -f "${BUILD_DIR}/${img_out}"
+  img_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".out" "$MANIFEST")
+  rm -f "${BUILD_DIR}/${img_out}"
 fi
 
 echo ""
@@ -253,7 +256,7 @@ echo "  Size: $(du -h "$IMAGE_FILE" | cut -f1)"
 
 # Copy to output directory if specified
 if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then
-    mkdir -p "$AVOCADO_PROVISION_OUT"
-    cp -v "$IMAGE_FILE" "$AVOCADO_PROVISION_OUT/"
-    echo "  Copied to: ${AVOCADO_PROVISION_OUT}/${IMAGE_NAME}"
+  mkdir -p "$AVOCADO_PROVISION_OUT"
+  cp -v "$IMAGE_FILE" "$AVOCADO_PROVISION_OUT/"
+  echo "  Copied to: ${AVOCADO_PROVISION_OUT}/${IMAGE_NAME}"
 fi

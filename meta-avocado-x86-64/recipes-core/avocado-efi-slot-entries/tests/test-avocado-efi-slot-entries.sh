@@ -280,7 +280,12 @@ setup
 for n in 1 2; do
   mkdir -p "$w/sys/sdb/sdb$n"
   echo "$n" >"$w/sys/sdb/sdb$n/partition"
-  u=$UA; l=boot-a; [ "$n" = 2 ] && { u=$UB; l=boot-b; }
+  u=$UA
+  l=boot-a
+  [ "$n" = 2 ] && {
+    u=$UB
+    l=boot-b
+  }
   printf 'DEVNAME=sdb%s\nPARTN=%s\nPARTNAME=%s\nPARTUUID=%s\n' "$n" "$n" "$l" "$u" >"$w/sys/sdb/sdb$n/uevent"
   ln -s "sdb/sdb$n" "$w/sys/sdb$n"
   : >"$w/dev/sdb$n"
