@@ -108,6 +108,76 @@ else
   bad "hook failed on valid input: $(cat "$work/run.err")"
 fi
 
+# Multi-overlay: the list the boot script iterates must carry every name in
+# manifest order, and every blob must be delivered. One overlay cannot catch a
+# regression in the join, the order, or per-overlay delivery.
+staging2="$work/staging2"
+mkdir -p "$staging2"
+: >"$staging2/alpha.dtbo"
+: >"$staging2/beta.dtbo"
+cat >"$staging2/overlays.manifest.json" <<'EOF2'
+{
+  "version": 1,
+  "overlays": [
+    {"name": "alpha", "file": "alpha.dtbo", "params": {}, "claimed_by": null},
+    {"name": "beta", "file": "beta.dtbo", "params": {}, "claimed_by": null}
+  ]
+}
+EOF2
+if AVOCADO_DTBO_STAGING="$staging2" \
+  AVOCADO_OVERLAYS_MANIFEST="$staging2/overlays.manifest.json" \
+  AVOCADO_DELIVERY_FRAGMENT="$work/frag-multi.json" \
+  AVOCADO_STONE_MANIFEST="$work/stone.json" \
+  "$hook" >"$work/multi.out" 2>"$work/multi.err"; then
+  fa='.storage_devices.rootdisk.images.boot.build_args.files_append'
+  if [[ "$(jq -r "${fa} | length" "$work/frag-multi.json")" == "3" ]] \
+    && jq -e "${fa}[] | select(.out == \"overlays/alpha.dtbo\" and .in == \"alpha.dtbo\")" "$work/frag-multi.json" >/dev/null \
+    && jq -e "${fa}[] | select(.out == \"overlays/beta.dtbo\" and .in == \"beta.dtbo\")" "$work/frag-multi.json" >/dev/null; then
+    ok "multi-overlay fragment appends both blobs and the list"
+  else
+    bad "multi-overlay files_append is wrong: $(jq -c "$fa" "$work/frag-multi.json")"
+  fi
+  if grep -qx 'avocado_fdt_overlays=alpha beta' "$staging2/avocado-overlays.txt"; then
+    ok "multi-overlay list names both overlays in manifest order"
+  else
+    bad "multi-overlay list wrong: [$(cat "$staging2/avocado-overlays.txt" 2>/dev/null)]"
+  fi
+  if grep -q 'alpha, beta' "$work/multi.out" && ! grep -qi 'delivery only' "$work/multi.out"; then
+    ok "run message lists the overlays and no longer says delivery only"
+  else
+    bad "run message wrong: $(cat "$work/multi.out")"
+  fi
+else
+  bad "hook failed on valid multi-overlay input: $(cat "$work/multi.err")"
+fi
+
+# Negative: the boot script loads overlays/<name>.dtbo, so a file that is not
+# <name>.dtbo would be delivered under a path the boot script never reads.
+staging3="$work/staging3"
+mkdir -p "$staging3"
+: >"$staging3/my-spi-v2.dtbo"
+cat >"$staging3/overlays.manifest.json" <<'EOF3'
+{
+  "version": 1,
+  "overlays": [
+    {"name": "my-spi", "file": "my-spi-v2.dtbo", "params": {}, "claimed_by": null}
+  ]
+}
+EOF3
+if AVOCADO_DTBO_STAGING="$staging3" \
+  AVOCADO_OVERLAYS_MANIFEST="$staging3/overlays.manifest.json" \
+  AVOCADO_DELIVERY_FRAGMENT="$work/frag-mismatch.json" \
+  AVOCADO_STONE_MANIFEST="$work/stone.json" \
+  "$hook" >/dev/null 2>"$work/mismatch.err"; then
+  bad "overlay whose file differs from <name>.dtbo was accepted"
+else
+  if grep -q 'my-spi-v2.dtbo' "$work/mismatch.err"; then
+    ok "file/name mismatch is a hard error naming the file"
+  else
+    bad "mismatch failed without a clear message: $(cat "$work/mismatch.err")"
+  fi
+fi
+
 # Negative: a stone manifest whose FAT ships no kernel is a hard error.
 cat >"$work/stone-nokernel.json" <<'EOF'
 {"runtime": {"platform": "x"}, "storage_devices": {"d": {"images": {"boot": {"build_args": {"type": "fat", "files": ["config.txt"]}}}}}}

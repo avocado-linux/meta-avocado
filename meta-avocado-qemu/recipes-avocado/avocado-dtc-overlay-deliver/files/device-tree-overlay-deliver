@@ -97,6 +97,13 @@ def main():
     dev_key, img_key = find_boot_fat(stone)
     platform = stone.get("runtime", {}).get("platform", "qemu")
 
+    # The boot script loads overlays/<name>.dtbo, so the delivered path and the
+    # name in the list must agree or the overlay is silently skipped at boot.
+    for ov in overlays:
+        if ov["file"] != f"{ov['name']}.dtbo":
+            die(f"overlay '{ov['name']}' ships as '{ov['file']}', but the boot "
+                f"script loads overlays/{ov['name']}.dtbo; file must be <name>.dtbo")
+
     files_append = [
         {"in": ov["file"], "out": f"overlays/{ov['file']}"} for ov in overlays
     ]
@@ -105,9 +112,9 @@ def main():
     # `env import -t`-able line next to the kernel; the script iterates it and
     # applies overlays/<name>.dtbo for each. Names, not filenames, so the boot
     # script owns the overlays/ prefix and the .dtbo suffix in one place.
-    names = " ".join(ov["name"] for ov in overlays)
+    overlay_list_value = " ".join(ov["name"] for ov in overlays)
     with open(os.path.join(staging, OVERLAY_LIST_FILE), "w") as f:
-        f.write(f"avocado_fdt_overlays={names}\n")
+        f.write(f"avocado_fdt_overlays={overlay_list_value}\n")
     files_append.append({"in": OVERLAY_LIST_FILE, "out": OVERLAY_LIST_FILE})
 
     fragment = {
@@ -123,10 +130,10 @@ def main():
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
-    names = ", ".join(ov["name"] for ov in overlays)
+    logged_names = ", ".join(ov["name"] for ov in overlays)
     print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) to "
-          f"{dev_key}/{img_key} for {platform}: {names} "
-          f"(delivery only; boot-time application is wired separately)")
+          f"{dev_key}/{img_key} for {platform}: {logged_names} "
+          f"(overlay list written; applied at boot by avocado_apply_overlays)")
 
 
 if __name__ == "__main__":

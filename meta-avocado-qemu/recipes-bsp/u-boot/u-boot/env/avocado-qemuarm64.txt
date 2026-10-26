@@ -65,14 +65,16 @@ overlay_env_addr=0x49000000
 # fdt_addr is where QEMU places that DTB - the base of RAM on the virt machine -
 # so it is a real tree to apply onto rather than an address nothing wrote.
 # resize first: applying into an unpadded tree fails once the fragment does not
-# fit. A failure to apply one overlay is reported and does not stop the boot;
+# fit. 0x40000 matches the NXP env files and is shared by every overlay in the
+# loop. The import names the one variable so a stray line in the list file
+# cannot overwrite bootargs or bootcmd. A failure to apply one overlay is reported and does not stop the boot;
 # the overlay is additive, and refusing to boot the machine over it would be a
 # worse outcome than booting without it.
 avocado_apply_overlays=\
   if load ${devtype} ${devnum}:${bootpart} ${overlay_env_addr} avocado-overlays.txt; then\
-    env import -t ${overlay_env_addr} ${filesize};\
+    env import -t ${overlay_env_addr} ${filesize} avocado_fdt_overlays;\
     fdt addr ${fdt_addr};\
-    fdt resize 8192;\
+    fdt resize 0x40000;\
     for ov in ${avocado_fdt_overlays}; do\
       if load ${devtype} ${devnum}:${bootpart} ${overlay_addr} overlays/${ov}.dtbo; then\
         if fdt apply ${overlay_addr}; then\
