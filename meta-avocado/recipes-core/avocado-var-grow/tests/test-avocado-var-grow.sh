@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2015  # ok() always succeeds, so "A && ok || bad" is an if/else here
 # Host test with stubbed blkid/sgdisk/partx and a fake /sys + /dev tree: the
 # grow runs only when GPT attribute 56 is set and the partition is short of the
 # disk end; it preserves start/type/guid/name and re-sets the attribute.
@@ -68,13 +69,13 @@ unit_value=$(AVOCADO_RECIPE="$recipe" python3 -c '
 import os, re
 src = open(os.environ["AVOCADO_RECIPE"]).read()
 body = re.search(r"def avocado_var_device_unit.*?\n\n", src, re.S).group(0)
-dev = "/dev/disk/by-partlabel/var"
+dev = "/dev/disk/by-avocado/var-partition"
 escaped = dev.lstrip("/").replace("-", "\\x2d").replace("/", "-") + ".device"
 print(escaped.replace("\\", "\\\\") if "escaped.replace" in body else escaped)
 ')
 printf 'Requires=@AVOCADO_VAR_DEVICE_UNIT@\n' >"$w/unit"
 sed -i -e "s|@AVOCADO_VAR_DEVICE_UNIT@|$unit_value|g" "$w/unit"
-[ "$(cat "$w/unit")" = 'Requires=dev-disk-by\x2dpartlabel-var.device' ] \
+[ "$(cat "$w/unit")" = 'Requires=dev-disk-by\x2davocado-var\x2dpartition.device' ] \
   && ok "the device unit survives sed with its \\x2d escape intact" \
   || bad "unit substitution mangled: $(cat "$w/unit")"
 
