@@ -16,14 +16,14 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-freescale.git
     path: meta-freescale
     branch: wrynose
-    commit: 2e2fc69da5e2187f191e8fe16873b8f921fd3e73
+    commit: 0d494991c90f33a16b9a39cd11bc817518aada03
     layers:
       .:
   meta-freescale-3rdparty:
     url: https://github.com/avocado-linux/vendor-meta-freescale-3rdparty.git
     path: meta-freescale-3rdparty
     branch: wrynose
-    commit: 26d8b36a72acf1458a2520e4e9f4d654a4ba77e4
+    commit: 7e3ed43df05bb1218d4768f5396a9d9af66b3ec4
     layers:
       .:
 

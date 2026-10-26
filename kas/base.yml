@@ -46,7 +46,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
     branch: wrynose
-    commit: 420222862f5a6d95023b8f5f3b7e1808b2264ef9
+    commit: f28a144aa0a0ae05ca2ee91e1aef6aa05f6a12db
     layers:
       meta-oe:
       meta-perl:
@@ -95,22 +95,22 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-erlang
     path: meta-erlang
     branch: wrynose
-    commit: e731185522a2da73e40929761e323ff2f8c20abc
+    commit: efea9cc108bbf703842de482d0b665582b8450cc
     layers:
       .:
 
   meta-fwup:
     url: https://github.com/avocado-linux/vendor-meta-fwup.git
     path: meta-fwup
-    commit: 0998acc313c44662410f397243eccec3936c8395
+    commit: 3a2397cf0a8a71895783c59c2a8e92dd96a24859
     branch: wrynose-avocado
     layers:
-      .:
+      meta-fwup:
 
   meta-swupdate:
     url: https://github.com/avocado-linux/vendor-meta-swupdate.git
     path: meta-swupdate
-    commit: 6616d4ec7c5e4fb44ce44bc4a6499f3969c35833
+    commit: b5dcb9511266bc62f9b2277f95bbd67ae995e79e
     branch: wrynose
     layers:
       .:
@@ -122,7 +122,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openjdk-temurin.git
     path: meta-openjdk-temurin
     branch: main
-    commit: 01b411f4c1f45d9a18182f1ca3d6ce5db90f5f6a
+    commit: 8237818761c77132486ec40f2a3026dfac059fd2
     layers:
       .:
 
@@ -141,11 +141,6 @@ local_conf_header:
   git-lfs: |
     HOSTTOOLS += "git-lfs"
     FETCHCMD_git = "git -c core.fsyncobjectfiles=0"
-
-  extra-openjdk: |
-    PREFERRED_VERSION_openjdk-17-jdk ?= "17.0.12+7"
-    PREFERRED_VERSION_openjdk-17-jre ?= "17.0.12+7"
-    PREFERRED_VERSION_openjdk-17-jdk-native ?= "17.0.12+7"
 
   meta-avocado: |
     # buildhistory's version-going-backwards QA check compares each package's

@@ -5,8 +5,8 @@ repos:
   meta-qt5:
     url: https://github.com/avocado-linux/vendor-meta-qt5.git
     path: meta-qt5
-    commit: 06b898916ddfbf2e758450be737bf4b505eeeeff
-    branch: master
+    commit: 4967c88083a9a385136252faeaf0ca04b701e892
+    branch: wrynose
     layers:
       .:
 

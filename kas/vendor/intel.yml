@@ -6,7 +6,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-intel.git
     path: meta-intel
     branch: wrynose
-    commit: 79a9681ce83f6bf36aede3aeb8c1707d29bca329
+    commit: fcd2544222aa8e2f6caf100b854971cf1618a8fe
     layers:
       .:
 

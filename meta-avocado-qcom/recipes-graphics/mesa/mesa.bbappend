@@ -1,35 +1,31 @@
-# Drop two of meta-qcom's three freedreno backports: oe-core's mesa already has them.
+# Drop meta-qcom's freedreno/turnip backports: oe-core's mesa already has them.
 #
-# meta-qcom's mesa.bbappend adds all three unconditionally for :qcom, with no
-# version guard. Against oe-core's mesa 26.1.0 the UBWC one is already upstream,
-# so quilt refuses it and takes the whole do_patch down -- which fails every
-# build that pulls graphics (i.e. everything, once kas/feature/complete.yml is
-# stacked):
+# meta-qcom's wrynose mesa.bbappend adds them unconditionally for :qcom, with
+# no version guard, so once oe-core's mesa carries a backport, quilt refuses
+# it and takes the whole do_patch down. That fails every build that pulls
+# graphics (i.e. everything, once kas/feature/complete.yml is stacked), e.g.
+# against 26.2.5:
 #
-#   Hunk #1 FAILED at 34. ... 2 out of 2 hunks FAILED
-#   Patch 0001-freedreno-layout-tu-Fix-UBWC-block-sizes-for-PIPE_FO.patch
-#     can be reverse-applied
+#   Patch 0001-freedreno-Add-support-for-A704.patch
+#   Hunk #1 FAILED at 693. 1 out of 1 hunk FAILED
 #
-# The patch says so itself -- Upstream-Status: Backport [mesa fb2646e527e9] --
-# and 26.1.0 carries it: src/freedreno/fdl/fd6_layout.c already tests
-# layout->format == PIPE_FORMAT_R8_G8B8_420_UNORM against layout->plane.
-#
-# oe-core's mesa 26.1.5 then picked up the reg_size_vec4 fix for a608/a612
-# too (src/freedreno/common/freedreno_devices.py gives that group
-# GPUProps(reg_size_vec4 = 32)), and the second patch fails the same way:
-# "2 out of 2 hunks FAILED". meta-qcom master already dropped it for that
-# reason (e27a31154f, a revert of the backport); its wrynose branch has not.
-#
-# Against the 26.1.5 tarball:
-#   0001-freedreno-Add-support-for-A704.patch                  applies -> keep
-#   0001-freedreno-Modify-reg_size_vec4-for-a608-and-a612-...  already in -> drop
-#   0001-freedreno-layout-tu-Fix-UBWC-block-sizes-...          already in -> drop
+# Every patch is a Backport, and oe-core's mesa 26.2.5 carries each change:
+#   A704 GPUId                  freedreno_devices.py "Adreno (TM) 704"
+#   A702 reg_size_vec4 = 64     freedreno_devices.py
+#   a608/a612 reg_size_vec4     freedreno_devices.py a6xx_gen1_low_magic_regs
+#   UBWC block sizes for NV12   fdl/fd6_layout.c plane 0/1 cases
+#   small-renderpass autotune   vulkan/tu_autotune.cc (now the TUNE_SMALL flag)
+# meta-qcom master already dropped the A704 one for the same reason
+# (3b6c4af8); its wrynose branch has not.
 #
 # Removed here rather than in the vendored layer: the real fix is a version
 # guard upstream in meta-qcom, since the mismatch hits anyone pairing its
 # wrynose branch with a newer oe-core. Revisit on the next meta-qcom repin --
-# if upstream drops or guards the patch, this becomes a no-op and can go.
+# a patch meta-qcom drops makes its line here a no-op, and it can go.
 SRC_URI:remove = " \
+    file://0001-freedreno-Add-support-for-A704.patch \
+    file://0001-freedreno-Increase-reg_size_vec4-for-A702.patch \
     file://0001-freedreno-layout-tu-Fix-UBWC-block-sizes-for-PIPE_FO.patch \
     file://0001-freedreno-Modify-reg_size_vec4-for-a608-and-a612-to-32.patch \
+    file://0001-tu-autotune-Disable-autotuning-for-small-renderpasse.patch \
 "

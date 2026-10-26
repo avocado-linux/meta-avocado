@@ -19,7 +19,7 @@ repos:
     # 2.18): carries the cgroup-aware scheduler regulation, see
     # BB_MAX_MEMORY_USAGE in kas/ci/mirrors.yml.
     branch: "2.18-avocado"
-    commit: 3792554ff774a7eb072c29fbbdf1f727054b7aeb
+    commit: fddbc84cc79ee3f1a9b5e14f8c49b99ffbb328ea
     layers:
       .: disabled
 
@@ -27,7 +27,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-openembedded-core
     path: openembedded-core
     branch: wrynose-avocado
-    commit: 0c69588b1d06111911aa91fd8c0dd28c18edcb08
+    commit: b8f28334e0815b78d9e6811665b7e66627b8c900
     layers:
       meta:
 

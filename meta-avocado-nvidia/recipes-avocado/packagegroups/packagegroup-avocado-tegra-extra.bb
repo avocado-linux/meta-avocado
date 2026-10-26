@@ -138,11 +138,11 @@ CONTAINER_PACKAGES = " \
 "
 
 # TensorRT runtime + Python bindings + trtexec + samples. python3-tensorrt
-# pulls tensorrt-core (libnvinfer); the prebuilt trtexec gives a working
+# pulls tensorrt (libnvinfer); the prebuilt trtexec gives a working
 # binary without the long samples source build (tensorrt-trtexec, dropped to
 # avoid a duplicate-trtexec file conflict -- add it back for scarthgap parity).
 TENSORRT_PACKAGES = " \
-  tensorrt-core \
+  tensorrt \
   python3-tensorrt \
   tensorrt-plugins-prebuilt \
   tensorrt-trtexec-prebuilt \
@@ -197,7 +197,7 @@ FRAMEWORK_PACKAGES = " \
 # group used to exclude DEPENDed on libnvvpi3, which the wrynose fork does not
 # carry. 9.1 DEPENDS on libnvvpi4 (shipped below in VPI_HPC_PACKAGES), and the
 # 7.1 recipe is gone from the layer entirely. Everything else it needs --
-# tensorrt-core, tensorrt-plugins, libcufft, libcublas, libnpp -- is already
+# tensorrt, tensorrt-plugins, libcufft, libcublas, libnpp -- is already
 # here. yaml-cpp-080 and opentelemetry-cpp-1230 arrive as its RDEPENDS.
 #
 # This is a large source build. It lands in PKG_EXTRA_INSTALL, so it enters the
