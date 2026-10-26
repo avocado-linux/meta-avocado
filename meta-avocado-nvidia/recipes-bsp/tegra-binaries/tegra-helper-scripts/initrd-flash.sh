@@ -721,6 +721,7 @@ wait_for_exported_storage() {
 create_rcm_boot_script() {
   ln -sf "$here/tegrarcm_v2" rcmboot_blob/
   cat >rcm-boot.sh <<EOF
+set -e
 oldwd="\$PWD"
 cd rcmboot_blob
 EOF
@@ -729,6 +730,30 @@ EOF
 cd "\$oldwd"
 EOF
   chmod +x rcm-boot.sh
+}
+
+# A pre-signed bundle made before create_rcm_boot_script started with `set -e`
+# ships an rcm-boot.sh that exits 0 whatever tegrarcm_v2 returned, and
+# sign_binaries_t234 reuses it as found. Add the line so those bundles fail the
+# RCM step too. The script is rewritten in place to keep its mode.
+ensure_rcm_boot_errexit() {
+  local tmp
+  grep -qx 'set -e' rcm-boot.sh && return 0
+  tmp=$(mktemp rcm-boot.XXXXXX) || return 1
+  if head -n 1 rcm-boot.sh | grep -q '^#!'; then
+    {
+      head -n 1 rcm-boot.sh
+      echo 'set -e'
+      tail -n +2 rcm-boot.sh
+    } >"$tmp"
+  else
+    {
+      echo 'set -e'
+      cat rcm-boot.sh
+    } >"$tmp"
+  fi
+  cat "$tmp" >rcm-boot.sh
+  rm -f "$tmp"
 }
 
 sign_binaries_t234() {
@@ -743,7 +768,8 @@ sign_binaries_t234() {
       return 1
     fi
     if [ -e rcm-boot.sh ]; then
-      return 0
+      ensure_rcm_boot_errexit
+      return $?
     fi
     if [ ! -e rcmboot_blob/rcmbootcmd.txt ]; then
       echo "ERR: missing RCM boot blob in pre-signed binaries" >&2
@@ -796,16 +822,25 @@ sign_binaries_t234() {
   return 0
 }
 
+# The flash kernel never started if the RCM upload failed, and the board then
+# resets into whatever OS it already has. Say so here: the later wait for the
+# exported USB storage device only reports a timeout, and the upload's own
+# error is otherwise visible only in log.initrd-flash.*.
+report_rcm_boot_failure() {
+  local err
+  err=$(grep 'ERROR' rcm-boot.output 2>/dev/null | tail -n 1)
+  echo "ERR: RCM boot failed, the flash kernel did not start${err:+: $err}" >&2
+}
+
 run_rcm_boot_t234() {
-  if [ -z "$BR_CID" ]; then
-    if ./rcm-boot.sh | tee rcm-boot.output; then
+  if ./rcm-boot.sh | tee rcm-boot.output; then
+    if [ -z "$BR_CID" ]; then
       BR_CID=$(grep BR_CID: rcm-boot.output | cut -d: -f2)
-      return 0
-    else
-      return 1
     fi
+    return 0
   fi
-  ./rcm-boot.sh || return 1
+  report_rcm_boot_failure
+  return 1
 }
 
 copy_bootloader_files_t234() {
