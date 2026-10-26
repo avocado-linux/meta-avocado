@@ -35,7 +35,7 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/avocado-var-grow ${D}${libexecdir}/avocado-var-grow
     install -d ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants
     install -m 0644 ${UNPACKDIR}/avocado-var-grow.service ${D}${systemd_system_unitdir}/
-    sed -i -e 's|@AVOCADO_VAR_PART_DEV@|${AVOCADO_VAR_PART_DEV}|g' \
+    sed -i -e 's|@AVOCADO_VAR_DEVICE@|${AVOCADO_VAR_DEVICE}|g' \
            -e 's|@AVOCADO_VAR_DEVICE_UNIT@|${@avocado_var_device_unit(d)}|g' \
         ${D}${libexecdir}/avocado-var-grow ${D}${systemd_system_unitdir}/avocado-var-grow.service
     # Same as cryptsetup-var: the initramfs image applies no preset for
@@ -43,7 +43,7 @@ do_install() {
     ln -sf ../avocado-var-grow.service ${D}${systemd_system_unitdir}/initrd-root-fs.target.wants/avocado-var-grow.service
 }
 
-# do_install bakes AVOCADO_VAR_PART_DEV into both the unit and the helper via
+# do_install bakes AVOCADO_VAR_DEVICE (from AVOCADO_VAR_PART_DEV) into both the unit and the helper via
 # sed, so the task's signature has to depend on it. Without this, changing the
 # variable leaves the signature untouched, sstate hands back the previously
 # built package, and the unit keeps pointing at the OLD partition -- while

@@ -1,0 +1,35 @@
+#!/bin/sh
+# avocado-on-root-disk <partition>: succeed when <partition> (a kernel name,
+# e.g. mmcblk1p5) is on the disk the root filesystem comes from.
+#
+# 61-avocado-var.rules calls this before it names the var partition, so that
+# with two Avocado disks in one machine (an eMMC and a microSD, an NVMe and a
+# USB stick: same partition labels on both) /var is the booted disk's, the
+# same rule avocadoctl applies to OTA targets ("the disk / is on").
+#
+# The bootloader says which root it booted with root=PARTUUID=<uuid>. Without
+# one (root=PARTLABEL=, a /dev node, a dm device) there is no disk to scope
+# to and every candidate passes: exactly the behaviour before this check.
+# Reads only sysfs, which the kernel fills when it scans the partition table,
+# so the answer does not depend on the order udev processes the partitions.
+part=$1
+sys=${AVOCADO_SYSFS:-/sys}
+cmdline=${AVOCADO_CMDLINE:-/proc/cmdline}
+
+root=""
+read -r line <"$cmdline" || true
+for arg in $line; do
+  case "$arg" in
+    root=PARTUUID=*) root=${arg#root=PARTUUID=} ;;
+  esac
+done
+[ -n "$root" ] || exit 0
+root=$(printf '%s' "$root" | tr 'ABCDEF' 'abcdef')
+
+disk=$(basename "$(readlink -f "$sys/class/block/$part/..")")
+for uevent in "$sys/block/$disk/$disk"*/uevent; do
+  [ -f "$uevent" ] || continue
+  uuid=$(sed -n 's/^PARTUUID=//p' "$uevent" | tr 'ABCDEF' 'abcdef')
+  [ "$uuid" = "$root" ] && exit 0
+done
+exit 1

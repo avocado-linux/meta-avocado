@@ -137,3 +137,12 @@ jobs:
       - name: Tegra OTA target partition resolution
         shell: bash
         run: bash meta-avocado-nvidia/stone/tegra/tests/test-ota-target-resolve.sh
+      - name: /var on the root's disk (avocado-on-root-disk)
+        shell: bash
+        run: sh meta-avocado-distro/recipes-core/base-files/tests/test-avocado-on-root-disk.sh
+      - name: /var udev match and device per AVOCADO_VAR_PART_DEV form
+        shell: bash
+        run: sh meta-avocado-distro/recipes-core/base-files/tests/test-var-udev-match.sh
+      - name: avocado-var-grow
+        shell: bash
+        run: bash meta-avocado/recipes-core/avocado-var-grow/tests/test-avocado-var-grow.sh

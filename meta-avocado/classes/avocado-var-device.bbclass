@@ -3,18 +3,20 @@
 # /dev/disk/by-avocado/var (base-files), which stops naming the raw partition
 # once it carries a LUKS header, so these units need the partition's own path.
 #
-# AVOCADO_VAR_PART_DEV names it when it is a GPT label path
-# (/dev/disk/by-partlabel/<name>) or a raw node (/dev/mmcblk0p3 on Raspberry
-# Pi's MBR disk). Anything else - "none" (Jetson, where avocado-tegra-init
-# mounts /var), a PARTUUID, unset - falls back to the label every GPT layout
-# gives its var partition.
+# A GPT label path (/dev/disk/by-partlabel/<name>) or a PARTUUID is resolved
+# through /dev/disk/by-avocado/var-partition, which base-files' 61-avocado-var
+# rule gives that partition only on the disk the root comes from: two Avocado
+# disks in one machine both carry the label. A raw node (/dev/mmcblk0p3 on
+# Raspberry Pi's MBR disk) already names one disk and is used as is. Anything
+# else - "none" (Jetson, where avocado-tegra-init mounts /var), unset - falls
+# back to the label every GPT layout gives its var partition.
 
 AVOCADO_VAR_PART_DEV ??= ""
 
 def avocado_var_device(d):
     dev = d.getVar('AVOCADO_VAR_PART_DEV') or ''
-    if dev.startswith('/dev/disk/by-partlabel/'):
-        return dev
+    if dev.startswith('/dev/disk/by-partlabel/') or dev.startswith('/dev/disk/by-partuuid/') or dev.startswith('PARTUUID='):
+        return '/dev/disk/by-avocado/var-partition'
     if dev.startswith('/dev/') and '/' not in dev[len('/dev/'):]:
         return dev
     return '/dev/disk/by-partlabel/var'

@@ -16,9 +16,12 @@ set -eu
 GROW_BIT_MASK=0x0100000000000000
 devdir=${AVOCADO_VAR_GROW_DEVDIR:-/dev}
 sysblock=${AVOCADO_VAR_GROW_SYSBLOCK:-/sys/class/block}
-# The machine's var partition (AVOCADO_VAR_PART_DEV, substituted at build), so a
-# machine whose label is not "var" (rubikpi3: "avocado") is served too.
-vardev=${AVOCADO_VAR_GROW_DEV:-@AVOCADO_VAR_PART_DEV@}
+# The machine's var partition on the disk the root comes from
+# (AVOCADO_VAR_DEVICE from avocado-var-device.bbclass, substituted at build:
+# /dev/disk/by-avocado/var-partition for a label), so a machine whose label is
+# not "var" (rubikpi3: "avocado") is served too, and a second Avocado disk's
+# var partition is never the one grown.
+vardev=${AVOCADO_VAR_GROW_DEV:-@AVOCADO_VAR_DEVICE@}
 
 part=$(readlink -f "$vardev" 2>/dev/null) || { echo "avocado-var-grow: no var partition at $vardev, nothing to do"; exit 0; }
 pname=$(basename "$part")
@@ -58,7 +61,7 @@ sgdisk -d "$partno" -n "$partno:$start:0" -t "$partno:$type" -u "$partno:$guid" 
 partx --update --nr "$partno" "$diskdev"
 # partx re-creates the partition node; udev drops and re-adds its symlinks in
 # the process. Anything ordered after this unit (cryptsetup-var, var.mount)
-# must find /dev/disk/by-partlabel/var back in place, so wait for udev to
+# must find the var partition's link back in place, so wait for udev to
 # finish before reporting done - a first boot on imx8mp-evk saw cryptsetup-var
 # evaluate its device check in that gap and get skipped straight to a
 # plaintext mount.
