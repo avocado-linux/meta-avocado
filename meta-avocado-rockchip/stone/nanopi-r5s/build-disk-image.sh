@@ -114,7 +114,10 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   pnum=$((pnum + 1))
   start=${P_OFFSET_SEC[i]}
   size=${P_SIZE_SEC[i]}
-  SGDISK_ARGS+=("-n" "${pnum}:${start}:+$((size - 1))")
+  # An explicit end sector: sgdisk reads "+N" as a length, so the old
+  # "+$((size - 1))" made every partition one sector short and a full-size
+  # boot image no longer fit its slot on OTA.
+  SGDISK_ARGS+=("-n" "${pnum}:${start}:$((start + size - 1))")
   SGDISK_ARGS+=("-t" "${pnum}:${P_TYPE[i]}")
   if [ -n "${P_NAME[i]}" ]; then
     SGDISK_ARGS+=("-c" "${pnum}:${P_NAME[i]}")

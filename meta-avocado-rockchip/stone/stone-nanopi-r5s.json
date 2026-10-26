@@ -32,7 +32,8 @@
         "set": {
           "avocado_boot_slot": "{inactive_slot}",
           "{inactive_slot}.avocado_platform": "{platform}",
-          "{inactive_slot}.avocado_architecture": "{architecture}"
+          "{inactive_slot}.avocado_architecture": "{architecture}",
+          "avocado_boot_tries": "3"
         }
       }
     ],
@@ -40,7 +41,16 @@
       {
         "type": "uboot-env",
         "set": {
-          "avocado_boot_slot": "{previous_slot}"
+          "avocado_boot_slot": "{previous_slot}",
+          "avocado_boot_tries": ""
+        }
+      }
+    ],
+    "commit": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_tries": ""
         }
       }
     ]
@@ -71,6 +81,9 @@
         "description": "Stable identifier registered with Peridio."
       }
     },
+    "files": [
+      "build-disk-image.sh"
+    ],
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh"
@@ -92,6 +105,15 @@
         "requires": [
           "usb"
         ]
+      },
+      "sd-usb": {
+        "script": "stone-provision-ums.sh",
+        "envs": [
+          "device_info"
+        ],
+        "requires": [
+          "usb"
+        ]
       }
     }
   },
@@ -103,6 +125,8 @@
       "images": {
         "idbloader": "idbloader.img",
         "uboot_itb": "u-boot.itb",
+        "usb_loader": "rockchip-usb-loader.bin",
+        "uboot_env": "uboot.env",
         "boot": {
           "out": "boot.img",
           "size": 128,
@@ -153,6 +177,15 @@
           "offset_unit": "sectors",
           "size": 16384,
           "size_unit": "sectors",
+          "in-partition-table": "false"
+        },
+        {
+          "name": "uboot-env",
+          "image": "uboot_env",
+          "offset": 16,
+          "offset_unit": "mebibytes",
+          "size": 512,
+          "size_unit": "kibibytes",
           "in-partition-table": "false"
         },
         {

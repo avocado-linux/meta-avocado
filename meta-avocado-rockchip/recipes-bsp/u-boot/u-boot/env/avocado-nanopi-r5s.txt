@@ -1,0 +1,75 @@
+# Saved environment for the uboot-env area (mkenvimage -r), written by stone
+# at provision time. avocadoctl flips avocado_boot_slot with fw_setenv.
+#
+# boot-a/boot-b are GPT partitions 1/2; each carries the same
+# extlinux/extlinux.conf, whose APPEND says root=PARTLABEL=rootfs-${avocado_boot_slot}
+# (U-Boot expands it), so the slot picks the kernel partition and the root.
+avocado_boot_slot=a
+
+# Load addresses from U-Boot's default env (include/configs/rk3568_common.h,
+# deployed as u-boot-initial-env). A saved environment replaces the default one
+# whole, so sysboot and the extlinux loader find none of these unless they are
+# here: "Specify a filename" from sysboot is ${scriptaddr} expanding to nothing.
+# ponytail: copied, not generated; diff against u-boot-initial-env on a U-Boot
+# bump, or generate this file from it if it ever drifts.
+scriptaddr=0x00c00000
+pxefile_addr_r=0x00e00000
+kernel_addr_r=0x02000000
+kernel_comp_addr_r=0x0a000000
+kernel_comp_size=0x8000000
+fdt_addr_r=0x12000000
+fdtoverlay_addr_r=0x12100000
+ramdisk_addr_r=0x12180000
+fdtfile=rockchip/rk3568-nanopi-r5s.dtb
+
+# The disk SPL booted from, per /chosen/u-boot,spl-boot-device: the SD
+# controller (mmc1 in U-Boot) or the eMMC (mmc0). The same image is written to
+# either, so it can't be a constant here.
+avocado_boot_dev=\
+  setenv devnum 0;\
+  if fdt addr ${fdtcontroladdr}; then\
+    if fdt get value spl_dev /chosen u-boot,spl-boot-device; then\
+      if test "${spl_dev}" = "/mmc@fe2b0000"; then\
+        setenv devnum 1;\
+      fi;\
+    fi;\
+  fi;\
+  echo "avocado: boot disk mmc ${devnum}";
+
+# Boot counting for a freshly activated slot. avocadoctl's activate sets
+# avocado_boot_tries=3 with the new slot and its commit clears it once the new
+# OS verifies; a slot that never gets that far is abandoned here after three
+# tries, before any userspace exists to roll it back.
+avocado_bootcount=\
+  if test -n "${avocado_boot_tries}"; then\
+    if test "${avocado_boot_tries}" -le 0; then\
+      echo "avocado: slot ${avocado_boot_slot} never committed, rolling back";\
+      if test "${avocado_boot_slot}" = "b"; then\
+        setenv avocado_boot_slot a;\
+      else\
+        setenv avocado_boot_slot b;\
+      fi;\
+      setenv avocado_boot_tries;\
+    else\
+      setexpr avocado_boot_tries ${avocado_boot_tries} - 1;\
+    fi;\
+    saveenv;\
+  fi;\
+  true;
+
+avocado_boot_init=\
+  if test "${avocado_boot_slot}" = "b"; then\
+    echo "Booting B";\
+    setenv bootpart 2;\
+  else\
+    if test "${avocado_boot_slot}" != "a"; then\
+      echo "avocado_boot_slot=${avocado_boot_slot} unset or invalid";\
+      setenv avocado_boot_slot a;\
+    fi;\
+    echo "Booting A";\
+    setenv bootpart 1;\
+  fi;
+
+avocado_boot=sysboot mmc ${devnum}:${bootpart} any ${scriptaddr} /extlinux/extlinux.conf
+
+bootcmd=run avocado_boot_dev avocado_bootcount avocado_boot_init avocado_boot

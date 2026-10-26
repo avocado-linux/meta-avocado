@@ -8,7 +8,6 @@ target="$AVOCADO_TARGET"
 RUNTIME_NAME="$1"
 
 input_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
-manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
 
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 build_include_flags() {
@@ -57,6 +56,8 @@ include_flags=$(build_include_flags "$input_dir")
 var_image="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME/avocado-image-var-${target}.btrfs"
 var_image_bytes=$(stat -c%s "$var_image")
 
+# include_flags is a string of -i "<dir>" pairs built for eval to split.
+# shellcheck disable=SC2086
 eval stone provision $include_flags --partition-size \"var=$var_image_bytes\"
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."

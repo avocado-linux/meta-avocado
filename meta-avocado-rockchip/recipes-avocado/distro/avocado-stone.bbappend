@@ -31,6 +31,9 @@ SRC_URI += " \
 SRC_URI:append:stone-emmc = " \
     file://stone-provision-emmc.sh \
 "
+SRC_URI:append:stone-sd-usb = " \
+    file://stone-provision-ums.sh \
+"
 
 do_deploy:append() {
     install -d ${DEPLOYDIR}
@@ -40,4 +43,13 @@ do_deploy:append() {
 do_deploy:append:stone-emmc() {
     install -d ${DEPLOYDIR}
     install -m 0755 ${UNPACKDIR}/stone-provision-emmc.sh ${DEPLOYDIR}/stone-provision-emmc.sh
+}
+
+# rkdeveloptool needs rkbin's packed USB loader to reach the eMMC from
+# MaskROM; the stone manifest lists it as usb_loader.
+do_compile[depends] += "${@bb.utils.contains('STONE_PROVISIONING', 'emmc', 'rockchip-rkbin-usb-loader:do_deploy', '', d)}"
+
+do_deploy:append:stone-sd-usb() {
+    install -d ${DEPLOYDIR}
+    install -m 0755 ${UNPACKDIR}/stone-provision-ums.sh ${DEPLOYDIR}/stone-provision-ums.sh
 }

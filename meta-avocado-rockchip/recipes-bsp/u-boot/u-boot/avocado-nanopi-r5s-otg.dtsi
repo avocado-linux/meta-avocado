@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * U-Boot's control DT only: the "USB 3.0/MASK" port as OTG, which U-Boot's
+ * dwc3 binds as a gadget, so `rockusb` (and `ums`) can expose the eMMC or the
+ * microSD on it. The upstream tree says dr_mode = "host" and Linux keeps that.
+ */
+&usb_host0_xhci {
+	dr_mode = "otg";
+};

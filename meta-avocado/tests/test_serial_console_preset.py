@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WIRING = {
     "meta-avocado-raspberrypi/recipes-avocado/packagegroups/packagegroup-avocado-rootfs.bbappend": "rpi",
     "meta-avocado-qcom/recipes-avocado/packagegroups/packagegroup-avocado-rootfs.bbappend": "rubikpi3",
+    "meta-avocado-rockchip/recipes-avocado/packagegroups/packagegroup-avocado-rockchip-rootfs.bb": "nanopi-r5s",
 }
 
 

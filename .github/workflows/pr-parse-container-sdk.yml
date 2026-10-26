@@ -146,3 +146,6 @@ jobs:
       - name: avocado-var-grow
         shell: bash
         run: bash meta-avocado/recipes-core/avocado-var-grow/tests/test-avocado-var-grow.sh
+      - name: NanoPi R5S disk image layout and U-Boot env offsets
+        shell: bash
+        run: sh meta-avocado-rockchip/stone/nanopi-r5s/tests/test-build-disk-image.sh
