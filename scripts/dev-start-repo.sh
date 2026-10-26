@@ -23,7 +23,7 @@ DEFAULT_GROUP_ID="$(id -g)"
 
 # Function to show usage
 usage() {
-    cat << EOF
+  cat <<EOF
 Usage: $0 [OPTIONS]
 
 Start a development package repository server using Docker.
@@ -74,172 +74,206 @@ EOF
 
 # Function to check if container exists
 container_exists() {
-    docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"
+  docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"
 }
 
 # Function to check if container is running
 container_running() {
-    docker ps --filter "name=^${CONTAINER_NAME}$" --filter "status=running" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"
+  docker ps --filter "name=^${CONTAINER_NAME}$" --filter "status=running" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"
 }
 
 # Function to check if network exists
 network_exists() {
-    docker network ls --filter "name=^${NETWORK_NAME}$" --format "{{.Name}}" | grep -q "^${NETWORK_NAME}$"
+  docker network ls --filter "name=^${NETWORK_NAME}$" --format "{{.Name}}" | grep -q "^${NETWORK_NAME}$"
 }
 
 # Function to create network if it doesn't exist
 ensure_network() {
-    if ! network_exists; then
-        echo "Creating Docker network: $NETWORK_NAME"
-        docker network create "$NETWORK_NAME"
-    else
-        echo "Using existing Docker network: $NETWORK_NAME"
-    fi
+  if ! network_exists; then
+    echo "Creating Docker network: $NETWORK_NAME"
+    docker network create "$NETWORK_NAME"
+  else
+    echo "Using existing Docker network: $NETWORK_NAME"
+  fi
 }
 
 # Function to build the package-repo image if it doesn't exist
 ensure_image() {
-    if ! docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${LOCAL_REPO_IMAGE}$"; then
-        echo "Building package-repo Docker image ($LOCAL_REPO_IMAGE)..."
-        docker build -f "$LOCAL_REPO_IMAGE_DIR/Containerfile-local" -t "$LOCAL_REPO_IMAGE" "$LOCAL_REPO_IMAGE_DIR"
-    else
-        echo "Using existing package-repo Docker image"
-    fi
+  if ! docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${LOCAL_REPO_IMAGE}$"; then
+    echo "Building package-repo Docker image ($LOCAL_REPO_IMAGE)..."
+    docker build -f "$LOCAL_REPO_IMAGE_DIR/Containerfile-local" -t "$LOCAL_REPO_IMAGE" "$LOCAL_REPO_IMAGE_DIR"
+  else
+    echo "Using existing package-repo Docker image"
+  fi
 }
 
 # Function to stop container
 stop_container() {
-    if container_running; then
-        echo "Stopping container: $CONTAINER_NAME"
-        docker stop "$CONTAINER_NAME"
-    fi
-    
-    if container_exists; then
-        echo "Removing container: $CONTAINER_NAME"
-        docker rm "$CONTAINER_NAME"
-    fi
+  if container_running; then
+    echo "Stopping container: $CONTAINER_NAME"
+    docker stop "$CONTAINER_NAME"
+  fi
+
+  if container_exists; then
+    echo "Removing container: $CONTAINER_NAME"
+    docker rm "$CONTAINER_NAME"
+  fi
 }
 
 # Function to start container
 start_container() {
-    # Validate repository directory
-    if [ ! -d "$REPO_DIR" ]; then
-        echo "Error: Repository directory '$REPO_DIR' not found" >&2
-        echo "Create it first or use dev-sync-packages.sh to populate it." >&2
-        exit 1
-    fi
-    
-    # Set up directory paths
-    PACKAGES_PATH="$REPO_DIR/packages"
-    RELEASES_PATH="$REPO_DIR/releases"
-    
-    # Create required directory structure if it doesn't exist
-    mkdir -p "$PACKAGES_PATH"
-    mkdir -p "$RELEASES_PATH"
-    
-    # Find the most recent release directory for the distro codename
-    DISTRO_RELEASES_PATH="$RELEASES_PATH/$DISTRO_CODENAME"
-    
-    if [ -n "$RELEASE_ID" ] && [ -d "$DISTRO_RELEASES_PATH/$RELEASE_ID" ]; then
-        # Explicit release id requested: mount exactly that release as latest.
-        LATEST_MOUNT_PATH="$DISTRO_RELEASES_PATH/$RELEASE_ID"
-        echo "Mounting requested release: $DISTRO_CODENAME/$RELEASE_ID"
-    elif [ -n "$RELEASE_ID" ]; then
-        echo "Warning: requested release '$DISTRO_CODENAME/$RELEASE_ID' not found, falling back to most recent"
-        RELEASE_ID=""
-    fi
+  # Validate repository directory
+  if [ ! -d "$REPO_DIR" ]; then
+    echo "Error: Repository directory '$REPO_DIR' not found" >&2
+    echo "Create it first or use dev-sync-packages.sh to populate it." >&2
+    exit 1
+  fi
 
-    if [ -z "${LATEST_MOUNT_PATH:-}" ]; then
-        if [ -d "$DISTRO_RELEASES_PATH" ]; then
-            # Find the most recently modified directory
-            LATEST_DIR=$(find "$DISTRO_RELEASES_PATH" -maxdepth 1 -type d -not -path "$DISTRO_RELEASES_PATH" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
-            if [ -n "$LATEST_DIR" ] && [ -d "$LATEST_DIR" ]; then
-                LATEST_MOUNT_PATH="$LATEST_DIR"
-                echo "Found most recent release: $(basename "$LATEST_DIR")"
-            else
-                echo "No release subdirs found, will mount releases root"
-                LATEST_MOUNT_PATH="$RELEASES_PATH"
-            fi
-        else
-            echo "No releases found for $DISTRO_CODENAME, will mount releases root"
-            LATEST_MOUNT_PATH="$RELEASES_PATH"
-        fi
-    fi
-    
-    # Ensure network and image exist
-    ensure_network
-    ensure_image
-    
-    # Stop existing container if running
-    if container_running; then
-        echo "Container $CONTAINER_NAME is already running"
-        echo "Use --restart to restart it or --stop to stop it"
-        return 0
-    fi
-    
-    # Remove existing stopped container
-    if container_exists; then
-        echo "Removing existing stopped container: $CONTAINER_NAME"
-        docker rm "$CONTAINER_NAME"
-    fi
-    
-    echo "Starting package repository server..."
-    echo "Repository directory: $REPO_DIR"
-    echo "Distro codename: $DISTRO_CODENAME"
-    echo "Container name: $CONTAINER_NAME"
-    echo "Network: $NETWORK_NAME"
-    echo "Port: $PORT"
-    echo ""
-            echo "Volume mounts (production-style):"
-        echo "  Packages: $PACKAGES_PATH -> /avocado-repo/packages"
-        echo "  Releases: $RELEASES_PATH -> /avocado-repo/releases"
-        if [ "$LATEST_MOUNT_PATH" != "$RELEASES_PATH" ]; then
-            echo "  Latest: $LATEST_MOUNT_PATH -> /avocado-repo/$DISTRO_CODENAME"
-        else
-            echo "  Latest: Will be created by build process at /avocado-repo/$DISTRO_CODENAME"
-        fi
-    
-    # Start the container with production-style volume mounts
-    if [ "$LATEST_MOUNT_PATH" != "$RELEASES_PATH" ]; then
-        # Mount specific timestamped release as latest
-        docker run -d --rm \
-            --name "$CONTAINER_NAME" \
-            --network "$NETWORK_NAME" \
-            -p "$PORT:80" \
-            -e USER_ID="$USER_ID" \
-            -e GROUP_ID="$GROUP_ID" \
-            -v "$PACKAGES_PATH:/avocado-repo/packages" \
-            -v "$RELEASES_PATH:/avocado-repo/releases" \
-            -v "$LATEST_MOUNT_PATH:/avocado-repo/$DISTRO_CODENAME" \
-            "$LOCAL_REPO_IMAGE"
+  # Set up directory paths
+  PACKAGES_PATH="$REPO_DIR/packages"
+  RELEASES_PATH="$REPO_DIR/releases"
+
+  # Create required directory structure if it doesn't exist
+  mkdir -p "$PACKAGES_PATH"
+  mkdir -p "$RELEASES_PATH"
+
+  # Find the most recent release directory for the distro codename
+  DISTRO_RELEASES_PATH="$RELEASES_PATH/$DISTRO_CODENAME"
+
+  if [ -n "$RELEASE_ID" ] && [ -d "$DISTRO_RELEASES_PATH/$RELEASE_ID" ]; then
+    # Explicit release id requested: mount exactly that release as latest.
+    LATEST_MOUNT_PATH="$DISTRO_RELEASES_PATH/$RELEASE_ID"
+    echo "Mounting requested release: $DISTRO_CODENAME/$RELEASE_ID"
+  elif [ -n "$RELEASE_ID" ]; then
+    echo "Warning: requested release '$DISTRO_CODENAME/$RELEASE_ID' not found, falling back to most recent"
+    RELEASE_ID=""
+  fi
+
+  if [ -z "${LATEST_MOUNT_PATH:-}" ]; then
+    if [ -d "$DISTRO_RELEASES_PATH" ]; then
+      # Find the most recently modified directory
+      LATEST_DIR=$(find "$DISTRO_RELEASES_PATH" -maxdepth 1 -type d -not -path "$DISTRO_RELEASES_PATH" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
+      if [ -n "$LATEST_DIR" ] && [ -d "$LATEST_DIR" ]; then
+        LATEST_MOUNT_PATH="$LATEST_DIR"
+        echo "Found most recent release: $(basename "$LATEST_DIR")"
+      else
+        echo "No release subdirs found, will mount releases root"
+        LATEST_MOUNT_PATH="$RELEASES_PATH"
+      fi
     else
-        # No specific release found, let build process create structure
-        docker run -d --rm \
-            --name "$CONTAINER_NAME" \
-            --network "$NETWORK_NAME" \
-            -p "$PORT:80" \
-            -e USER_ID="$USER_ID" \
-            -e GROUP_ID="$GROUP_ID" \
-            -v "$PACKAGES_PATH:/avocado-repo/packages" \
-            -v "$RELEASES_PATH:/avocado-repo/releases" \
-            "$LOCAL_REPO_IMAGE"
+      echo "No releases found for $DISTRO_CODENAME, will mount releases root"
+      LATEST_MOUNT_PATH="$RELEASES_PATH"
     fi
-    
-    echo "✓ Container started successfully"
-    
-    # Wait for nginx to start
-    echo "Waiting for nginx to start..."
-    sleep 3
-    
-    # Verify container is still running
-    if ! container_running; then
-        echo "✗ Container failed to start or exited unexpectedly" >&2
-        echo "Container logs:" >&2
-        docker logs "$CONTAINER_NAME" >&2
-        exit 1
-    fi
-    
-    echo "✓ Package repository server is running"
+  fi
+
+  # Ensure network and image exist
+  ensure_network
+  ensure_image
+
+  # Stop existing container if running
+  if container_running; then
+    echo "Container $CONTAINER_NAME is already running"
+    echo "Use --restart to restart it or --stop to stop it"
+    return 0
+  fi
+
+  # Remove existing stopped container
+  if container_exists; then
+    echo "Removing existing stopped container: $CONTAINER_NAME"
+    docker rm "$CONTAINER_NAME"
+  fi
+
+  echo "Starting package repository server..."
+  echo "Repository directory: $REPO_DIR"
+  echo "Distro codename: $DISTRO_CODENAME"
+  echo "Container name: $CONTAINER_NAME"
+  echo "Network: $NETWORK_NAME"
+  echo "Port: $PORT"
+  echo ""
+  echo "Volume mounts (production-style):"
+  echo "  Packages: $PACKAGES_PATH -> /avocado-repo/packages"
+  echo "  Releases: $RELEASES_PATH -> /avocado-repo/releases"
+  if [ "$LATEST_MOUNT_PATH" != "$RELEASES_PATH" ]; then
+    echo "  Latest: $LATEST_MOUNT_PATH -> /avocado-repo/$DISTRO_CODENAME"
+  else
+    echo "  Latest: Will be created by build process at /avocado-repo/$DISTRO_CODENAME"
+  fi
+
+  # Start the container with production-style volume mounts
+  if [ "$LATEST_MOUNT_PATH" != "$RELEASES_PATH" ]; then
+    # Mount specific timestamped release as latest
+    docker run -d --rm \
+      --name "$CONTAINER_NAME" \
+      --network "$NETWORK_NAME" \
+      -p "$PORT:80" \
+      -e USER_ID="$USER_ID" \
+      -e GROUP_ID="$GROUP_ID" \
+      -v "$PACKAGES_PATH:/avocado-repo/packages" \
+      -v "$RELEASES_PATH:/avocado-repo/releases" \
+      -v "$LATEST_MOUNT_PATH:/avocado-repo/$DISTRO_CODENAME" \
+      "$LOCAL_REPO_IMAGE"
+  else
+    # No specific release found, let build process create structure
+    docker run -d --rm \
+      --name "$CONTAINER_NAME" \
+      --network "$NETWORK_NAME" \
+      -p "$PORT:80" \
+      -e USER_ID="$USER_ID" \
+      -e GROUP_ID="$GROUP_ID" \
+      -v "$PACKAGES_PATH:/avocado-repo/packages" \
+      -v "$RELEASES_PATH:/avocado-repo/releases" \
+      "$LOCAL_REPO_IMAGE"
+  fi
+
+  echo "✓ Container started successfully"
+
+  # Wait for nginx to start
+  echo "Waiting for nginx to start..."
+  sleep 3
+
+  # Verify container is still running
+  if ! container_running; then
+    echo "✗ Container failed to start or exited unexpectedly" >&2
+    echo "Container logs:" >&2
+    docker logs "$CONTAINER_NAME" >&2
+    exit 1
+  fi
+
+  echo "✓ Package repository server is running"
+  echo ""
+  echo "Repository URLs:"
+  echo "  Root: http://localhost:$PORT/"
+  echo "  Packages: http://localhost:$PORT/packages/"
+  echo "  Releases: http://localhost:$PORT/releases/"
+  echo "  Latest ($DISTRO_CODENAME): http://localhost:$PORT/$DISTRO_CODENAME/"
+  echo ""
+  echo "Container name: $CONTAINER_NAME"
+  echo "Network name: $NETWORK_NAME"
+  echo ""
+  echo "Environment variables for avocado CLI:"
+  echo "  export AVOCADO_SDK_REPO_URL=\"http://$CONTAINER_NAME\""
+  echo "  export AVOCADO_CONTAINER_NETWORK=\"$NETWORK_NAME\""
+  echo "  export AVOCADO_SDK_REPO_RELEASE=\"$DISTRO_CODENAME\""
+  echo ""
+  echo "⚠ IMPORTANT: Make sure to export these environment variables before running avocado commands!"
+  echo "The avocado CLI containers must use the container name ($CONTAINER_NAME) as hostname,"
+  echo "NOT localhost:$PORT which is only accessible from the host machine."
+  echo ""
+  echo "Example avocado commands (with network decoration):"
+  echo "  avocado ext install -e avocado-ext-EXTENSION -f --target TARGET --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
+  echo "  avocado ext build -e avocado-ext-EXTENSION --target TARGET --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
+  echo "  avocado ext package -e avocado-ext-EXTENSION --target TARGET --out-dir OUTPUT --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
+  echo ""
+  echo "Use 'docker logs $CONTAINER_NAME' to view logs"
+  echo "Use '$0 --status' to see this information again"
+  echo "Use '$0 --stop' to stop the server"
+}
+
+# Function to show container status
+show_status() {
+  if container_running; then
+    echo "✓ Container $CONTAINER_NAME is running"
+    docker ps --filter "name=^${CONTAINER_NAME}$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
     echo ""
     echo "Repository URLs:"
     echo "  Root: http://localhost:$PORT/"
@@ -263,69 +297,35 @@ start_container() {
     echo "  avocado ext install -e avocado-ext-EXTENSION -f --target TARGET --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
     echo "  avocado ext build -e avocado-ext-EXTENSION --target TARGET --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
     echo "  avocado ext package -e avocado-ext-EXTENSION --target TARGET --out-dir OUTPUT --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
-    echo ""
-    echo "Use 'docker logs $CONTAINER_NAME' to view logs"
-    echo "Use '$0 --status' to see this information again"
-    echo "Use '$0 --stop' to stop the server"
-}
-
-# Function to show container status
-show_status() {
-    if container_running; then
-        echo "✓ Container $CONTAINER_NAME is running"
-        docker ps --filter "name=^${CONTAINER_NAME}$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-        echo ""
-        echo "Repository URLs:"
-        echo "  Root: http://localhost:$PORT/"
-        echo "  Packages: http://localhost:$PORT/packages/"
-        echo "  Releases: http://localhost:$PORT/releases/"
-        echo "  Latest ($DISTRO_CODENAME): http://localhost:$PORT/$DISTRO_CODENAME/"
-        echo ""
-        echo "Container name: $CONTAINER_NAME"
-        echo "Network name: $NETWORK_NAME"
-        echo ""
-        echo "Environment variables for avocado CLI:"
-        echo "  export AVOCADO_SDK_REPO_URL=\"http://$CONTAINER_NAME\""
-        echo "  export AVOCADO_CONTAINER_NETWORK=\"$NETWORK_NAME\""
-        echo "  export AVOCADO_SDK_REPO_RELEASE=\"$DISTRO_CODENAME\""
-        echo ""
-        echo "⚠ IMPORTANT: Make sure to export these environment variables before running avocado commands!"
-        echo "The avocado CLI containers must use the container name ($CONTAINER_NAME) as hostname,"
-        echo "NOT localhost:$PORT which is only accessible from the host machine."
-        echo ""
-        echo "Example avocado commands (with network decoration):"
-        echo "  avocado ext install -e avocado-ext-EXTENSION -f --target TARGET --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
-        echo "  avocado ext build -e avocado-ext-EXTENSION --target TARGET --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
-        echo "  avocado ext package -e avocado-ext-EXTENSION --target TARGET --out-dir OUTPUT --container-arg \"--network\" --container-arg \"$NETWORK_NAME\""
-    elif container_exists; then
-        echo "⚠ Container $CONTAINER_NAME exists but is not running"
-        docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "table {{.Names}}\t{{.Status}}"
-    else
-        echo "✗ Container $CONTAINER_NAME does not exist"
-    fi
+  elif container_exists; then
+    echo "⚠ Container $CONTAINER_NAME exists but is not running"
+    docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "table {{.Names}}\t{{.Status}}"
+  else
+    echo "✗ Container $CONTAINER_NAME does not exist"
+  fi
 }
 
 # Function to show logs
 show_logs() {
-    if container_exists; then
-        docker logs -f "$CONTAINER_NAME"
-    else
-        echo "Error: Container $CONTAINER_NAME does not exist" >&2
-        exit 1
-    fi
+  if container_exists; then
+    docker logs -f "$CONTAINER_NAME"
+  else
+    echo "Error: Container $CONTAINER_NAME does not exist" >&2
+    exit 1
+  fi
 }
 
 # Function to export environment variables
 export_env() {
-    if ! container_running; then
-        echo "Error: Container $CONTAINER_NAME is not running" >&2
-        echo "Start the container first with: $0" >&2
-        exit 1
-    fi
-    
-    ENV_FILE=".avocado-dev-env"
-    
-    cat > "$ENV_FILE" << EOF
+  if ! container_running; then
+    echo "Error: Container $CONTAINER_NAME is not running" >&2
+    echo "Start the container first with: $0" >&2
+    exit 1
+  fi
+
+  ENV_FILE=".avocado-dev-env"
+
+  cat >"$ENV_FILE" <<EOF
 # Avocado Development Environment Variables
 # Source this file with: source $ENV_FILE
 
@@ -354,17 +354,17 @@ echo "⚠ IMPORTANT: Avocado CLI containers will connect to '$CONTAINER_NAME', n
 echo "Use 'avocado_dev' instead of 'avocado' for network-decorated commands"
 echo "Example: avocado_dev ext install -e avocado-ext-EXTENSION -f --target TARGET"
 EOF
-    
-    echo "✓ Environment variables exported to $ENV_FILE"
-    echo ""
-    echo "To use these variables, run:"
-    echo "  source $ENV_FILE"
-    echo ""
-    echo "Then you can use 'avocado_dev' instead of 'avocado' for network-decorated commands"
-    echo ""
-    echo "To test the connection, try:"
-    echo "  curl http://$CONTAINER_NAME/$DISTRO_CODENAME/ --connect-to $CONTAINER_NAME:80:localhost:$PORT"
-    echo "  (This simulates how avocado CLI containers will connect)"
+
+  echo "✓ Environment variables exported to $ENV_FILE"
+  echo ""
+  echo "To use these variables, run:"
+  echo "  source $ENV_FILE"
+  echo ""
+  echo "Then you can use 'avocado_dev' instead of 'avocado' for network-decorated commands"
+  echo ""
+  echo "To test the connection, try:"
+  echo "  curl http://$CONTAINER_NAME/$DISTRO_CODENAME/ --connect-to $CONTAINER_NAME:80:localhost:$PORT"
+  echo "  (This simulates how avocado CLI containers will connect)"
 }
 
 # Parse command line arguments
@@ -379,74 +379,74 @@ GROUP_ID="$DEFAULT_GROUP_ID"
 ACTION="start"
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        -r|--repo-dir)
-            REPO_DIR="$2"
-            shift 2
-            ;;
-        -p|--port)
-            PORT="$2"
-            shift 2
-            ;;
-        -n|--name)
-            CONTAINER_NAME="$2"
-            shift 2
-            ;;
-        --network)
-            NETWORK_NAME="$2"
-            shift 2
-            ;;
-        -d|--distro)
-            DISTRO_CODENAME="$2"
-            shift 2
-            ;;
-        -i|--release-id)
-            RELEASE_ID="$2"
-            shift 2
-            ;;
-        --user-id)
-            USER_ID="$2"
-            shift 2
-            ;;
-        --group-id)
-            GROUP_ID="$2"
-            shift 2
-            ;;
-        --stop)
-            ACTION="stop"
-            shift
-            ;;
-        --restart)
-            ACTION="restart"
-            shift
-            ;;
-        --logs)
-            ACTION="logs"
-            shift
-            ;;
-        --status)
-            ACTION="status"
-            shift
-            ;;
-        --env)
-            ACTION="env"
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        -*)
-            echo "Error: Unknown option $1" >&2
-            usage >&2
-            exit 1
-            ;;
-        *)
-            echo "Error: Unexpected argument $1" >&2
-            usage >&2
-            exit 1
-            ;;
-    esac
+  case $1 in
+    -r | --repo-dir)
+      REPO_DIR="$2"
+      shift 2
+      ;;
+    -p | --port)
+      PORT="$2"
+      shift 2
+      ;;
+    -n | --name)
+      CONTAINER_NAME="$2"
+      shift 2
+      ;;
+    --network)
+      NETWORK_NAME="$2"
+      shift 2
+      ;;
+    -d | --distro)
+      DISTRO_CODENAME="$2"
+      shift 2
+      ;;
+    -i | --release-id)
+      RELEASE_ID="$2"
+      shift 2
+      ;;
+    --user-id)
+      USER_ID="$2"
+      shift 2
+      ;;
+    --group-id)
+      GROUP_ID="$2"
+      shift 2
+      ;;
+    --stop)
+      ACTION="stop"
+      shift
+      ;;
+    --restart)
+      ACTION="restart"
+      shift
+      ;;
+    --logs)
+      ACTION="logs"
+      shift
+      ;;
+    --status)
+      ACTION="status"
+      shift
+      ;;
+    --env)
+      ACTION="env"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Error: Unknown option $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      echo "Error: Unexpected argument $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
 done
 
 # Convert relative path to absolute path
@@ -455,28 +455,28 @@ REPO_DIR="$(realpath "$REPO_DIR")"
 echo "=== Avocado Development Repository Server ==="
 
 case $ACTION in
-    start)
-        start_container
-        ;;
-    stop)
-        stop_container
-        echo "✓ Repository server stopped"
-        ;;
-    restart)
-        stop_container
-        start_container
-        ;;
-    logs)
-        show_logs
-        ;;
-    status)
-        show_status
-        ;;
-    env)
-        export_env
-        ;;
-    *)
-        echo "Error: Unknown action $ACTION" >&2
-        exit 1
-        ;;
+  start)
+    start_container
+    ;;
+  stop)
+    stop_container
+    echo "✓ Repository server stopped"
+    ;;
+  restart)
+    stop_container
+    start_container
+    ;;
+  logs)
+    show_logs
+    ;;
+  status)
+    show_status
+    ;;
+  env)
+    export_env
+    ;;
+  *)
+    echo "Error: Unknown action $ACTION" >&2
+    exit 1
+    ;;
 esac

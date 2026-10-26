@@ -21,8 +21,14 @@ VAR_DEV="${1:-}"
 MAP_NAME="var"
 MAPPER="/dev/mapper/${MAP_NAME}"
 
-[ -z "$VAR_DEV" ] && { echo "Usage: $0 <block-device>" >&2; exit 1; }
-[ -b "$VAR_DEV" ] || { echo "Not a block device: $VAR_DEV" >&2; exit 1; }
+[ -z "$VAR_DEV" ] && {
+  echo "Usage: $0 <block-device>" >&2
+  exit 1
+}
+[ -b "$VAR_DEV" ] || {
+  echo "Not a block device: $VAR_DEV" >&2
+  exit 1
+}
 
 # Refuse to touch a mounted partition. Every path below (shrink, reencrypt,
 # luksFormat, open) assumes exclusive ownership; if fstab got there first the
@@ -30,8 +36,8 @@ MAPPER="/dev/mapper/${MAP_NAME}"
 # live filesystem being resized under the mount. (No grep in the initrd; awk.)
 _var_real=$(readlink -f "$VAR_DEV")
 if awk -v d="$_var_real" '$1==d {f=1} END {exit !f}' "${AVOCADO_PROC_MOUNTS:-/proc/mounts}"; then
-    echo "cryptsetup-var: $VAR_DEV ($_var_real) is already mounted - refusing to encrypt a live filesystem" >&2
-    exit 1
+  echo "cryptsetup-var: $VAR_DEV ($_var_real) is already mounted - refusing to encrypt a live filesystem" >&2
+  exit 1
 fi
 
 # Fail-closed pre-flight: refuse before any luksFormat/luksOpen attempt if
@@ -44,25 +50,25 @@ CAPABILITIES_FILE="/etc/avocado-security-capabilities"
 REQUIRED_CAPABILITY="encrypted-var"
 
 check_capability_declared() {
-    if [ ! -f "$CAPABILITIES_FILE" ]; then
-        echo "cryptsetup-var: $CAPABILITIES_FILE is absent - this device's base image never declared $REQUIRED_CAPABILITY" >&2
-        exit 1
-    fi
-    declared="$(cat "$CAPABILITIES_FILE")"
-    for token in $declared; do
-        [ "$token" = "$REQUIRED_CAPABILITY" ] && return 0
-    done
-    echo "cryptsetup-var: $REQUIRED_CAPABILITY is missing from this device's AVOCADO_SECURITY_CAPABILITIES declaration (declares: ${declared:-<empty>})" >&2
+  if [ ! -f "$CAPABILITIES_FILE" ]; then
+    echo "cryptsetup-var: $CAPABILITIES_FILE is absent - this device's base image never declared $REQUIRED_CAPABILITY" >&2
     exit 1
+  fi
+  declared="$(cat "$CAPABILITIES_FILE")"
+  for token in $declared; do
+    [ "$token" = "$REQUIRED_CAPABILITY" ] && return 0
+  done
+  echo "cryptsetup-var: $REQUIRED_CAPABILITY is missing from this device's AVOCADO_SECURITY_CAPABILITIES declaration (declares: ${declared:-<empty>})" >&2
+  exit 1
 }
 
 check_dmcrypt_available() {
-    [ -e /sys/module/dm_crypt ] && return 0
-    if command -v modprobe >/dev/null 2>&1 && modprobe dm-crypt 2>/dev/null; then
-        return 0
-    fi
-    echo "cryptsetup-var: this device's kernel cannot deliver dm-crypt - /var encryption is unavailable" >&2
-    exit 1
+  [ -e /sys/module/dm_crypt ] && return 0
+  if command -v modprobe >/dev/null 2>&1 && modprobe dm-crypt 2>/dev/null; then
+    return 0
+  fi
+  echo "cryptsetup-var: this device's kernel cannot deliver dm-crypt - /var encryption is unavailable" >&2
+  exit 1
 }
 
 check_capability_declared
@@ -79,13 +85,13 @@ KEY_SCRIPT="${SCRIPT_DIR}/var-key.sh"
 # (RAM-only, never swapped or remounted) - the right place for transient secrets.
 KEY_FILE=$(mktemp -p /run)
 trap 'rm -f "$KEY_FILE"' EXIT
-"$KEY_SCRIPT" > "$KEY_FILE"
+"$KEY_SCRIPT" >"$KEY_FILE"
 
 # Return 0 if the LUKS header already carries a systemd-tpm2 token. The initrd
 # has no grep, and gawk mishandles raw binary under some locales, so match the
 # token type via awk over luksDump.
 has_tpm2_token() {
-    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/systemd-tpm2/{f=1} END{exit !f}'
+  cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/systemd-tpm2/{f=1} END{exit !f}'
 }
 
 # Optional hardware key backend: var-hwkey.sh next to this script, installed by
@@ -134,50 +140,56 @@ TPM_DEV="${TPM_DEV:-/dev/tpm0}"
 # and luksAddKey needs it to add the hardware slot. That case is distinguished
 # by the absence of the token, not by the mode.
 fail_closed() { # fail_closed <reason>
-    echo "cryptsetup-var: var.hardware=$VAR_HARDWARE but $1 - refusing to leave /var on the derived key" >&2
-    # Unconditional: a close with nothing open is a no-op, and guarding on
-    # [ -b "$MAPPER" ] would skip the teardown in exactly the odd states where
-    # it matters most. (The preflight refusal has its own exit and never gets
-    # here, so nothing is touched when the requirement fails before the open.)
-    cryptsetup luksClose "$MAP_NAME" 2>/dev/null || true
-    exit 1
+  echo "cryptsetup-var: var.hardware=$VAR_HARDWARE but $1 - refusing to leave /var on the derived key" >&2
+  # Unconditional: a close with nothing open is a no-op, and guarding on
+  # [ -b "$MAPPER" ] would skip the teardown in exactly the odd states where
+  # it matters most. (The preflight refusal has its own exit and never gets
+  # here, so nothing is touched when the requirement fails before the open.)
+  cryptsetup luksClose "$MAP_NAME" 2>/dev/null || true
+  exit 1
 }
 
 # A hardware unlock or enrolment that did not work out: fatal when that engine
 # is the explicitly required one, a reported degradation under "auto".
 degrade_or_fail() { # degrade_or_fail <mode-that-requires-it> <reason>
-    if [ "$VAR_HARDWARE" = "$1" ]; then
-        fail_closed "$2"
-    fi
-    echo "cryptsetup-var: $2 - retaining Argon2id keyslot" >&2
+  if [ "$VAR_HARDWARE" = "$1" ]; then
+    fail_closed "$2"
+  fi
+  echo "cryptsetup-var: $2 - retaining Argon2id keyslot" >&2
 }
 
 # Fail closed when an explicitly required engine is not usable. Runs before the
 # container is touched so an unmet requirement never opens /var on the
 # derived key; OnFailure= takes the boot to emergency.
 check_required_hardware() {
-    case "$VAR_HARDWARE" in
-        caam)
-            if ! hwkey_available; then
-                echo "cryptsetup-var: var.hardware=caam but the CAAM key backend is not usable on this device - refusing to fall back to the derived key" >&2
-                exit 1
-            fi ;;
-        tpm2)
-            i=0
-            while [ ! -e "$TPM_DEV" ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
-            if [ ! -e "$TPM_DEV" ]; then
-                echo "cryptsetup-var: var.hardware=tpm2 but no TPM device appeared - refusing to fall back to the derived key" >&2
-                exit 1
-            fi ;;
-        auto|none) ;;
-        *)
-            echo "cryptsetup-var: unknown var.hardware '$VAR_HARDWARE' - refusing to guess" >&2
-            exit 1 ;;
-    esac
+  case "$VAR_HARDWARE" in
+    caam)
+      if ! hwkey_available; then
+        echo "cryptsetup-var: var.hardware=caam but the CAAM key backend is not usable on this device - refusing to fall back to the derived key" >&2
+        exit 1
+      fi
+      ;;
+    tpm2)
+      i=0
+      while [ ! -e "$TPM_DEV" ] && [ "$i" -lt 15 ]; do
+        i=$((i + 1))
+        sleep 1
+      done
+      if [ ! -e "$TPM_DEV" ]; then
+        echo "cryptsetup-var: var.hardware=tpm2 but no TPM device appeared - refusing to fall back to the derived key" >&2
+        exit 1
+      fi
+      ;;
+    auto | none) ;;
+    *)
+      echo "cryptsetup-var: unknown var.hardware '$VAR_HARDWARE' - refusing to guess" >&2
+      exit 1
+      ;;
+  esac
 }
 
 has_recovery_token() {
-    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk -v t="$RECOVERY_TOKEN_TYPE" '
+  cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk -v t="$RECOVERY_TOKEN_TYPE" '
         /^Tokens:/ {s=1; next}
         /^[A-Za-z]/ {s=0}
         s && $2==t {f=1}
@@ -188,7 +200,7 @@ has_recovery_token() {
 # the provisioned secret). With an operator recovery slot enrolled it is the
 # one remaining key anyone who can read the UID could derive, so retire it.
 untokened_keyslots() {
-    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '
+  cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '
         /^Keyslots:/ {s=1; next}
         /^Tokens:/ {s=2; next}
         /^[A-Za-z]/ {s=0}
@@ -198,24 +210,24 @@ untokened_keyslots() {
 }
 
 hwkey_available() {
-    [ -x "$HWKEY_SCRIPT" ] && "$HWKEY_SCRIPT" probe >/dev/null 2>&1
+  [ -x "$HWKEY_SCRIPT" ] && "$HWKEY_SCRIPT" probe >/dev/null 2>&1
 }
 
 # Id of the avocado-hwkey token in the header, empty when there is none.
 hwkey_token_id() {
-    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk -v t="$HWKEY_TOKEN_TYPE" '
+  cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk -v t="$HWKEY_TOKEN_TYPE" '
         /^Tokens:/ {s=1; next}
         /^[A-Za-z]/ {s=0}
         s && $2==t {sub(":","",$1); print $1; exit}'
 }
 
 has_hwkey_token() {
-    [ -n "$(hwkey_token_id)" ]
+  [ -n "$(hwkey_token_id)" ]
 }
 
 # First unused keyslot number, for luksAddKey --new-key-slot.
 free_keyslot() {
-    cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '
+  cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '
         /^Keyslots:/ {s=1; next}
         /^[A-Za-z]/ {s=0}
         s && /^  [0-9]+: / {sub(":","",$1); u[$1]=1}
@@ -225,17 +237,17 @@ free_keyslot() {
 # Write the passphrase the token blob yields on this device to $1. Non-zero when
 # there is no token, the engine refuses the blob, or the backend printed nothing.
 hwkey_passphrase_to() {
-    _id=$(hwkey_token_id)
-    [ -n "$_id" ] || return 1
-    _blob=$(mktemp -p /run)
-    cryptsetup token export --token-id "$_id" "$VAR_DEV" 2>/dev/null \
-        | sed -n 's/.*"blob" *: *"\([^"]*\)".*/\1/p' > "$_blob"
-    _rc=1
-    if [ -s "$_blob" ] && "$HWKEY_SCRIPT" derive "$_blob" > "$1" 2>/dev/null && [ -s "$1" ]; then
-        _rc=0
-    fi
-    rm -f "$_blob"
-    return $_rc
+  _id=$(hwkey_token_id)
+  [ -n "$_id" ] || return 1
+  _blob=$(mktemp -p /run)
+  cryptsetup token export --token-id "$_id" "$VAR_DEV" 2>/dev/null \
+    | sed -n 's/.*"blob" *: *"\([^"]*\)".*/\1/p' >"$_blob"
+  _rc=1
+  if [ -s "$_blob" ] && "$HWKEY_SCRIPT" derive "$_blob" >"$1" 2>/dev/null && [ -s "$1" ]; then
+    _rc=0
+  fi
+  rm -f "$_blob"
+  return $_rc
 }
 
 # Some firmware TPMs keep no NV state across boots. Measured on Jetson Orin
@@ -249,15 +261,15 @@ hwkey_passphrase_to() {
 # value. Best-effort and silent where tpm2-tools are absent or the TPM is not
 # in lockout.
 ensure_tpm2_unlocked() {
-    [ -e "$TPM_DEV" ] || return 0
-    command -v tpm2_getcap >/dev/null 2>&1 || return 0
-    if tpm2_getcap properties-variable 2>/dev/null | awk '/inLockout:/{f=($2==1)} END{exit !f}'; then
-        echo "cryptsetup-var: TPM is in dictionary-attack lockout at boot - resetting"
-        tpm2_dictionarylockout --clear-lockout 2>/dev/null \
-            && tpm2_dictionarylockout --setup-parameters --max-tries=32 \
-                   --recovery-time=600 --lockout-recovery-time=86400 2>/dev/null \
-            || echo "cryptsetup-var: TPM lockout reset failed - TPM2 unlock will fall back to the recovery key" >&2
-    fi
+  [ -e "$TPM_DEV" ] || return 0
+  command -v tpm2_getcap >/dev/null 2>&1 || return 0
+  if tpm2_getcap properties-variable 2>/dev/null | awk '/inLockout:/{f=($2==1)} END{exit !f}'; then
+    echo "cryptsetup-var: TPM is in dictionary-attack lockout at boot - resetting"
+    tpm2_dictionarylockout --clear-lockout 2>/dev/null \
+      && tpm2_dictionarylockout --setup-parameters --max-tries=32 \
+        --recovery-time=600 --lockout-recovery-time=86400 2>/dev/null \
+      || echo "cryptsetup-var: TPM lockout reset failed - TPM2 unlock will fall back to the recovery key" >&2
+  fi
 }
 
 # Which keyslot actually opened /var this boot. Recorded because it is the one
@@ -277,37 +289,37 @@ POSTURE_FILE="/run/avocado-var-posture"
 # Best-effort by construction: posture reporting must never be the reason /var
 # fails to open, so every write is guarded and the function always succeeds.
 write_posture() {
-    _tpm2_token=no
-    if has_tpm2_token; then
-        _tpm2_token=yes
-    fi
+  _tpm2_token=no
+  if has_tpm2_token; then
+    _tpm2_token=yes
+  fi
 
-    _tpm_dev=no
-    if [ -e "$TPM_DEV" ]; then
-        _tpm_dev=yes
-    fi
+  _tpm_dev=no
+  if [ -e "$TPM_DEV" ]; then
+    _tpm_dev=yes
+  fi
 
-    _hwkey_token=no
-    _hwkey_backend=none
-    if has_hwkey_token; then
-        _hwkey_token=yes
-        _hwkey_backend=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
-    fi
+  _hwkey_token=no
+  _hwkey_backend=none
+  if has_hwkey_token; then
+    _hwkey_token=yes
+    _hwkey_backend=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
+  fi
 
-    _recovery=soc-uid
-    if has_recovery_token; then
-        _recovery=key
-    fi
+  _recovery=soc-uid
+  if has_recovery_token; then
+    _recovery=key
+  fi
 
-    {
-        echo "VAR_HARDWARE=${VAR_HARDWARE}"
-        echo "VAR_RECOVERY=${_recovery}"
-        echo "VAR_UNLOCK_METHOD=${VAR_UNLOCK_METHOD}"
-        echo "VAR_TPM2_TOKEN=${_tpm2_token}"
-        echo "VAR_TPM_DEVICE=${_tpm_dev}"
-        echo "VAR_HWKEY_TOKEN=${_hwkey_token}"
-        echo "VAR_HWKEY_BACKEND=${_hwkey_backend}"
-    } > "$POSTURE_FILE" 2>/dev/null || true
+  {
+    echo "VAR_HARDWARE=${VAR_HARDWARE}"
+    echo "VAR_RECOVERY=${_recovery}"
+    echo "VAR_UNLOCK_METHOD=${VAR_UNLOCK_METHOD}"
+    echo "VAR_TPM2_TOKEN=${_tpm2_token}"
+    echo "VAR_TPM_DEVICE=${_tpm_dev}"
+    echo "VAR_HWKEY_TOKEN=${_hwkey_token}"
+    echo "VAR_HWKEY_BACKEND=${_hwkey_backend}"
+  } >"$POSTURE_FILE" 2>/dev/null || true
 }
 
 # Open the container as /dev/mapper/var: the TPM2-sealed keyslot first (PCR 7),
@@ -317,80 +329,92 @@ write_posture() {
 # fail; the recovery key then keeps /var reachable instead of locking it out
 # permanently.
 open_var() {
-    echo "cryptsetup-var: opening LUKS2 container on $VAR_DEV"
+  echo "cryptsetup-var: opening LUKS2 container on $VAR_DEV"
 
-    # An explicit mode may only be opened by the engine it names. A device that
-    # was enrolled under `auto` can carry both tokens, and trying them in a
-    # fixed order lets a working CAAM slot satisfy var.hardware=tpm2 - the open
-    # returns before TPM2 is attempted, ensure_tpm2_enroll then returns because
-    # a token exists, and the boot succeeds without the required engine ever
-    # being exercised. `auto` still tries both; `none` neither.
-    _try_hwkey=yes
-    _try_tpm2=yes
-    case "$VAR_HARDWARE" in
-        tpm2) _try_hwkey=no ;;
-        auto) ;;
-        none) _try_hwkey=no; _try_tpm2=no ;;
-        *)    _try_tpm2=no ;;
-    esac
+  # An explicit mode may only be opened by the engine it names. A device that
+  # was enrolled under `auto` can carry both tokens, and trying them in a
+  # fixed order lets a working CAAM slot satisfy var.hardware=tpm2 - the open
+  # returns before TPM2 is attempted, ensure_tpm2_enroll then returns because
+  # a token exists, and the boot succeeds without the required engine ever
+  # being exercised. `auto` still tries both; `none` neither.
+  _try_hwkey=yes
+  _try_tpm2=yes
+  case "$VAR_HARDWARE" in
+    tpm2) _try_hwkey=no ;;
+    auto) ;;
+    none)
+      _try_hwkey=no
+      _try_tpm2=no
+      ;;
+    *) _try_tpm2=no ;;
+  esac
 
-    if [ "$_try_hwkey" = yes ] && has_hwkey_token; then
-        _hwpass=$(mktemp -p /run)
-        if hwkey_available && hwkey_passphrase_to "$_hwpass" \
-                && cryptsetup luksOpen $VK_LINK --key-file "$_hwpass" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
-            rm -f "$_hwpass"
-            echo "cryptsetup-var: opened via hardware key ($("$HWKEY_SCRIPT" name))"
-            VAR_UNLOCK_METHOD="hwkey"
-            return 0
-        fi
-        rm -f "$_hwpass"
-        # A hardware token exists, so this is not the first-enrolment boot and
-        # the Argon2id open below is the fallback caam mode refuses.
-        if [ "$VAR_HARDWARE" = caam ]; then
-            fail_closed "the hardware keyslot did not open /var"
-        fi
-        echo "cryptsetup-var: hardware key unavailable - trying the other keyslots" >&2
+  if [ "$_try_hwkey" = yes ] && has_hwkey_token; then
+    _hwpass=$(mktemp -p /run)
+    # VK_LINK is an argument list (flag plus keyring spec) and must word-split.
+    # shellcheck disable=SC2086
+    if hwkey_available && hwkey_passphrase_to "$_hwpass" \
+      && cryptsetup luksOpen $VK_LINK --key-file "$_hwpass" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+      rm -f "$_hwpass"
+      echo "cryptsetup-var: opened via hardware key ($("$HWKEY_SCRIPT" name))"
+      VAR_UNLOCK_METHOD="hwkey"
+      return 0
     fi
-    if [ "$_try_tpm2" = yes ] && has_tpm2_token; then
-        # A token exists, so a TPM is expected. On a fast reboot we can reach the
-        # open before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall
-        # back to Argon2id. Wait briefly for the device before deciding.
-        i=0
-        while [ ! -e "$TPM_DEV" ] && [ "$i" -lt 15 ]; do i=$((i + 1)); sleep 1; done
-
-        # The token open needs the libcryptsetup TPM2 plugin, not the
-        # systemd-cryptenroll binary - so probe capability by just attempting it
-        # and letting it fall through to the Argon2id recovery key on failure.
-        if [ -e "$TPM_DEV" ] && cryptsetup open $VK_LINK --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
-            echo "cryptsetup-var: opened via TPM2 token"
-            VAR_UNLOCK_METHOD="tpm2"
-            return 0
-        fi
-        # Same rule as the hardware key above: a token exists, so the derived
-        # key is a fallback, not the first-enrolment path.
-        if [ "$VAR_HARDWARE" = tpm2 ]; then
-            fail_closed "the TPM2 keyslot did not open /var"
-        fi
-        echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
+    rm -f "$_hwpass"
+    # A hardware token exists, so this is not the first-enrolment boot and
+    # the Argon2id open below is the fallback caam mode refuses.
+    if [ "$VAR_HARDWARE" = caam ]; then
+      fail_closed "the hardware keyslot did not open /var"
     fi
+    echo "cryptsetup-var: hardware key unavailable - trying the other keyslots" >&2
+  fi
+  if [ "$_try_tpm2" = yes ] && has_tpm2_token; then
+    # A token exists, so a TPM is expected. On a fast reboot we can reach the
+    # open before udev has created /dev/tpm0 (seen ~9s in) and wrongly fall
+    # back to Argon2id. Wait briefly for the device before deciding.
+    i=0
+    while [ ! -e "$TPM_DEV" ] && [ "$i" -lt 15 ]; do
+      i=$((i + 1))
+      sleep 1
+    done
 
-    # The selected engine had no token to try at all. On a first-enrolment boot
-    # that is expected - the derived key is how the container opens before the
-    # hardware keyslot exists - so only refuse once a token of the OTHER kind
-    # proves this device is already enrolled, just under the wrong engine.
-    case "$VAR_HARDWARE" in
-        tpm2) has_hwkey_token && ! has_tpm2_token \
-                  && fail_closed "the device is enrolled with a hardware key, not the required TPM2" ;;
-        auto|none) ;;
-        *) has_tpm2_token && ! has_hwkey_token \
-               && fail_closed "the device is enrolled with TPM2, not the required hardware key" ;;
-    esac
-
-    if ! cryptsetup luksOpen $VK_LINK --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
-        echo "cryptsetup-var: Argon2id open failed on $VAR_DEV" >&2
-        exit 1
+    # The token open needs the libcryptsetup TPM2 plugin, not the
+    # systemd-cryptenroll binary - so probe capability by just attempting it
+    # and letting it fall through to the Argon2id recovery key on failure.
+    # VK_LINK is an argument list (flag plus keyring spec) and must word-split.
+    # shellcheck disable=SC2086
+    if [ -e "$TPM_DEV" ] && cryptsetup open $VK_LINK --token-only "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+      echo "cryptsetup-var: opened via TPM2 token"
+      VAR_UNLOCK_METHOD="tpm2"
+      return 0
     fi
-    VAR_UNLOCK_METHOD="argon2id"
+    # Same rule as the hardware key above: a token exists, so the derived
+    # key is a fallback, not the first-enrolment path.
+    if [ "$VAR_HARDWARE" = tpm2 ]; then
+      fail_closed "the TPM2 keyslot did not open /var"
+    fi
+    echo "cryptsetup-var: TPM2 unseal unavailable - opening with the Argon2id recovery key" >&2
+  fi
+
+  # The selected engine had no token to try at all. On a first-enrolment boot
+  # that is expected - the derived key is how the container opens before the
+  # hardware keyslot exists - so only refuse once a token of the OTHER kind
+  # proves this device is already enrolled, just under the wrong engine.
+  case "$VAR_HARDWARE" in
+    tpm2) has_hwkey_token && ! has_tpm2_token \
+      && fail_closed "the device is enrolled with a hardware key, not the required TPM2" ;;
+    auto | none) ;;
+    *) has_tpm2_token && ! has_hwkey_token \
+      && fail_closed "the device is enrolled with TPM2, not the required hardware key" ;;
+  esac
+
+  # VK_LINK is an argument list (flag plus keyring spec) and must word-split.
+  # shellcheck disable=SC2086
+  if ! cryptsetup luksOpen $VK_LINK --key-file "$KEY_FILE" "$VAR_DEV" "$MAP_NAME" 2>/dev/null; then
+    echo "cryptsetup-var: Argon2id open failed on $VAR_DEV" >&2
+    exit 1
+  fi
+  VAR_UNLOCK_METHOD="argon2id"
 }
 
 # Ensure a filesystem exists inside the opened container (the in-place path
@@ -405,15 +429,15 @@ open_var() {
 # close-after-write uevent flips SYSTEMD_READY to 1, the path a clean first boot
 # relies on.
 ensure_fs() {
-    if blkid -p "$MAPPER" >/dev/null 2>&1; then
-        return 0
-    fi
-    command -v mkfs.btrfs >/dev/null 2>&1 || {
-        echo "cryptsetup-var: mkfs.btrfs missing; cannot create the /var filesystem" >&2
-        exit 1
-    }
-    echo "cryptsetup-var: no filesystem on $MAPPER - creating BTRFS (first boot or resumed provisioning)"
-    mkfs.btrfs "$MAPPER"
+  if blkid -p "$MAPPER" >/dev/null 2>&1; then
+    return 0
+  fi
+  command -v mkfs.btrfs >/dev/null 2>&1 || {
+    echo "cryptsetup-var: mkfs.btrfs missing; cannot create the /var filesystem" >&2
+    exit 1
+  }
+  echo "cryptsetup-var: no filesystem on $MAPPER - creating BTRFS (first boot or resumed provisioning)"
+  mkfs.btrfs "$MAPPER"
 }
 
 # Ensure a hardware-key keyslot + token exist when a backend is installed and
@@ -426,45 +450,45 @@ ensure_fs() {
 # PBKDF2 like systemd-cryptenroll does for TPM2 slots; the Argon2id cost stays
 # on the recovery slot where the input is a derived secret.
 ensure_hwkey_enroll() {
-    [ "$VAR_HARDWARE" != none ] || return 0
-    if [ ! -x "$HWKEY_SCRIPT" ]; then
-        # Silent under auto: most machines ship no backend at all.
-        if [ "$VAR_HARDWARE" = caam ]; then
-            fail_closed "no hardware key backend is installed"
-        fi
-        return 0
+  [ "$VAR_HARDWARE" != none ] || return 0
+  if [ ! -x "$HWKEY_SCRIPT" ]; then
+    # Silent under auto: most machines ship no backend at all.
+    if [ "$VAR_HARDWARE" = caam ]; then
+      fail_closed "no hardware key backend is installed"
     fi
-    has_hwkey_token && return 0
-    if ! hwkey_available; then
-        degrade_or_fail caam "the hardware key engine is not usable"
-        return 0
-    fi
-    _blob=$(mktemp -p /run)
-    _pass=$(mktemp -p /run)
-    _name=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
-    echo "cryptsetup-var: enrolling hardware keyslot ($_name)"
-    if "$HWKEY_SCRIPT" new "$_blob" && "$HWKEY_SCRIPT" derive "$_blob" > "$_pass" && [ -s "$_pass" ]; then
-        _slot=$(free_keyslot)
-        if cryptsetup luksAddKey --key-file "$KEY_FILE" --new-keyfile "$_pass" \
-                --new-key-slot "$_slot" --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
-                --batch-mode "$VAR_DEV"; then
-            printf '{"type":"%s","keyslots":["%s"],"backend":"%s","blob":"%s"}\n' \
-                "$HWKEY_TOKEN_TYPE" "$_slot" "$_name" "$(tr -d '[:space:]' < "$_blob")" > "$_blob.json"
-            if cryptsetup token import --json-file "$_blob.json" "$VAR_DEV"; then
-                echo "cryptsetup-var: hardware keyslot $_slot enrolled ($_name)"
-            else
-                echo "cryptsetup-var: token import failed - removing keyslot $_slot" >&2
-                cryptsetup luksKillSlot --key-file "$KEY_FILE" --batch-mode "$VAR_DEV" "$_slot" 2>/dev/null || true
-                degrade_or_fail caam "the hardware key token import failed"
-            fi
-        else
-            degrade_or_fail caam "the hardware keyslot add failed"
-        fi
-    else
-        degrade_or_fail caam "the hardware key backend could not produce a blob"
-    fi
-    rm -f "$_blob" "$_blob.json" "$_pass"
     return 0
+  fi
+  has_hwkey_token && return 0
+  if ! hwkey_available; then
+    degrade_or_fail caam "the hardware key engine is not usable"
+    return 0
+  fi
+  _blob=$(mktemp -p /run)
+  _pass=$(mktemp -p /run)
+  _name=$("$HWKEY_SCRIPT" name 2>/dev/null || echo unknown)
+  echo "cryptsetup-var: enrolling hardware keyslot ($_name)"
+  if "$HWKEY_SCRIPT" new "$_blob" && "$HWKEY_SCRIPT" derive "$_blob" >"$_pass" && [ -s "$_pass" ]; then
+    _slot=$(free_keyslot)
+    if cryptsetup luksAddKey --key-file "$KEY_FILE" --new-keyfile "$_pass" \
+      --new-key-slot "$_slot" --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
+      --batch-mode "$VAR_DEV"; then
+      printf '{"type":"%s","keyslots":["%s"],"backend":"%s","blob":"%s"}\n' \
+        "$HWKEY_TOKEN_TYPE" "$_slot" "$_name" "$(tr -d '[:space:]' <"$_blob")" >"$_blob.json"
+      if cryptsetup token import --json-file "$_blob.json" "$VAR_DEV"; then
+        echo "cryptsetup-var: hardware keyslot $_slot enrolled ($_name)"
+      else
+        echo "cryptsetup-var: token import failed - removing keyslot $_slot" >&2
+        cryptsetup luksKillSlot --key-file "$KEY_FILE" --batch-mode "$VAR_DEV" "$_slot" 2>/dev/null || true
+        degrade_or_fail caam "the hardware key token import failed"
+      fi
+    else
+      degrade_or_fail caam "the hardware keyslot add failed"
+    fi
+  else
+    degrade_or_fail caam "the hardware key backend could not produce a blob"
+  fi
+  rm -f "$_blob" "$_blob.json" "$_pass"
+  return 0
 }
 
 # Once the operator has enrolled a recovery keyslot (avocadoctl var-key, token
@@ -473,14 +497,14 @@ ensure_hwkey_enroll() {
 # Only when this boot did not depend on it - if the hardware slot failed and
 # the derived key is what opened /var, keep it and let posture shout.
 retire_derived_keyslot() {
-    [ "$VAR_UNLOCK_METHOD" != argon2id ] || return 0
-    has_recovery_token || return 0
-    for _slot in $(untokened_keyslots); do
-        echo "cryptsetup-var: recovery keyslot present - retiring derived keyslot $_slot"
-        cryptsetup luksKillSlot --batch-mode "$VAR_DEV" "$_slot" \
-            || echo "cryptsetup-var: could not retire keyslot $_slot" >&2
-    done
-    return 0
+  [ "$VAR_UNLOCK_METHOD" != argon2id ] || return 0
+  has_recovery_token || return 0
+  for _slot in $(untokened_keyslots); do
+    echo "cryptsetup-var: recovery keyslot present - retiring derived keyslot $_slot"
+    cryptsetup luksKillSlot --batch-mode "$VAR_DEV" "$_slot" \
+      || echo "cryptsetup-var: could not retire keyslot $_slot" >&2
+  done
+  return 0
 }
 
 # Ensure a TPM2 keyslot sealed to PCR 7 exists, keeping the Argon2id keyslot
@@ -491,32 +515,32 @@ retire_derived_keyslot() {
 # those is fatal. Running on every boot also enrolls a device whose first boot
 # happened before the TPM device existed.
 ensure_tpm2_enroll() {
-    [ "$VAR_HARDWARE" != none ] || return 0
-    has_tpm2_token && return 0
-    if [ ! -e "$TPM_DEV" ]; then
-        if [ "$VAR_HARDWARE" = tpm2 ]; then
-            fail_closed "no TPM device is present"
-        fi
-        return 0
-    fi
-    if ! command -v systemd-cryptenroll >/dev/null 2>&1; then
-        if [ "$VAR_HARDWARE" = tpm2 ]; then
-            fail_closed "systemd-cryptenroll is not present to enrol the TPM2 keyslot"
-        fi
-        return 0
-    fi
-
-    echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
-    # --unlock-key-file is required: without it systemd-cryptenroll prompts for a
-    # passphrase and blocks forever in the initrd (no controlling tty), and the
-    # raw binary key cannot pass through $PASSWORD (which cannot carry NULs).
-    if systemd-cryptenroll --unlock-key-file="$KEY_FILE" \
-            --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"; then
-        echo "cryptsetup-var: TPM2 PCR-7 keyslot enrolled"
-    else
-        degrade_or_fail tpm2 "the TPM2 PCR-7 enrol failed (firmware measured boot may be unavailable)"
+  [ "$VAR_HARDWARE" != none ] || return 0
+  has_tpm2_token && return 0
+  if [ ! -e "$TPM_DEV" ]; then
+    if [ "$VAR_HARDWARE" = tpm2 ]; then
+      fail_closed "no TPM device is present"
     fi
     return 0
+  fi
+  if ! command -v systemd-cryptenroll >/dev/null 2>&1; then
+    if [ "$VAR_HARDWARE" = tpm2 ]; then
+      fail_closed "systemd-cryptenroll is not present to enrol the TPM2 keyslot"
+    fi
+    return 0
+  fi
+
+  echo "cryptsetup-var: enrolling TPM2 keyslot (PCR 7)"
+  # --unlock-key-file is required: without it systemd-cryptenroll prompts for a
+  # passphrase and blocks forever in the initrd (no controlling tty), and the
+  # raw binary key cannot pass through $PASSWORD (which cannot carry NULs).
+  if systemd-cryptenroll --unlock-key-file="$KEY_FILE" \
+    --tpm2-device=auto --tpm2-pcrs=7 "$VAR_DEV"; then
+    echo "cryptsetup-var: TPM2 PCR-7 keyslot enrolled"
+  else
+    degrade_or_fail tpm2 "the TPM2 PCR-7 enrol failed (firmware measured boot may be unavailable)"
+  fi
+  return 0
 }
 
 # Grow the LUKS container to fill the partition (e.g. after avocado-grow-var).
@@ -525,22 +549,22 @@ ensure_tpm2_enroll() {
 # mounted-fs-only ioctl and cannot run against the not-yet-mounted mapper in the
 # initrd).
 maybe_resize() {
-    PARTITION_SECTORS=$(blockdev --getsz "$VAR_DEV")
-    DATA_OFFSET=$(dmsetup table "$MAP_NAME" 2>/dev/null | awk '{print $8}')
-    if [ -z "$DATA_OFFSET" ]; then
-        # dmsetup missing, or the table query failed/returned nothing. /var is
-        # already open and formatted at this point - skip the resize rather
-        # than let a malformed arithmetic expression fail the unit on the
-        # last step of an otherwise-successful unlock.
-        echo "cryptsetup-var: could not read dm-crypt data offset - skipping resize check" >&2
-        return 0
-    fi
-    DM_SECTORS=$(blockdev --getsz "$MAPPER")
-    EXPECTED_DM=$(( PARTITION_SECTORS - DATA_OFFSET ))
-    if [ "$DM_SECTORS" -lt "$EXPECTED_DM" ]; then
-        echo "cryptsetup-var: resizing LUKS container to fill partition"
-        cryptsetup resize --key-file "$KEY_FILE" "$MAP_NAME"
-    fi
+  PARTITION_SECTORS=$(blockdev --getsz "$VAR_DEV")
+  DATA_OFFSET=$(dmsetup table "$MAP_NAME" 2>/dev/null | awk '{print $8}')
+  if [ -z "$DATA_OFFSET" ]; then
+    # dmsetup missing, or the table query failed/returned nothing. /var is
+    # already open and formatted at this point - skip the resize rather
+    # than let a malformed arithmetic expression fail the unit on the
+    # last step of an otherwise-successful unlock.
+    echo "cryptsetup-var: could not read dm-crypt data offset - skipping resize check" >&2
+    return 0
+  fi
+  DM_SECTORS=$(blockdev --getsz "$MAPPER")
+  EXPECTED_DM=$((PARTITION_SECTORS - DATA_OFFSET))
+  if [ "$DM_SECTORS" -lt "$EXPECTED_DM" ]; then
+    echo "cryptsetup-var: resizing LUKS container to fill partition"
+    cryptsetup resize --key-file "$KEY_FILE" "$MAP_NAME"
+  fi
 }
 
 # Encrypt a pre-seeded plaintext filesystem in place instead of formatting over
@@ -569,7 +593,7 @@ maybe_resize() {
 # migration is the same; it just starts from a filesystem that no longer ends
 # at the partition's last sector.
 btrfs_total_bytes() {
-    btrfs inspect-internal dump-super "$VAR_DEV" 2>/dev/null | awk '/^total_bytes/{print $2}'
+  btrfs inspect-internal dump-super "$VAR_DEV" 2>/dev/null | awk '/^total_bytes/{print $2}'
 }
 
 # Shrink to what is actually allocated (plus room to relocate), not just by the
@@ -585,98 +609,98 @@ btrfs_total_bytes() {
 # Allocated + 1.5 GiB leaves one full chunk set to relocate into. If btrfs still
 # refuses, fall back to the minimal 32 MiB shrink rather than fail the unlock.
 shrink_btrfs_for_header() {
-    shrink_mib="$1"
-    mnt=/run/cryptsetup-var-shrink
-    mkdir -p "$mnt"
-    if ! mount -t btrfs "$VAR_DEV" "$mnt"; then
-        echo "cryptsetup-var: cannot mount $VAR_DEV to shrink it - cannot encrypt in place" >&2
-        exit 1
+  shrink_mib="$1"
+  mnt=/run/cryptsetup-var-shrink
+  mkdir -p "$mnt"
+  if ! mount -t btrfs "$VAR_DEV" "$mnt"; then
+    echo "cryptsetup-var: cannot mount $VAR_DEV to shrink it - cannot encrypt in place" >&2
+    exit 1
+  fi
+  alloc_bytes=$(btrfs filesystem usage -b "$mnt" 2>/dev/null | awk '/^ *Device allocated:/{print $3; exit}')
+  total_bytes=$(btrfs_total_bytes)
+  minimal="-${shrink_mib}M"
+  resize_arg="$minimal"
+  if [ -n "$alloc_bytes" ] && [ "$alloc_bytes" -gt 0 ] 2>/dev/null; then
+    target_mib=$(((alloc_bytes + 1610612736 + 1048575) / 1048576))
+    minimal_mib=$((total_bytes / 1048576 - shrink_mib))
+    if [ "$target_mib" -lt "$minimal_mib" ]; then
+      resize_arg="${target_mib}M"
     fi
-    alloc_bytes=$(btrfs filesystem usage -b "$mnt" 2>/dev/null | awk '/^ *Device allocated:/{print $3; exit}')
-    total_bytes=$(btrfs_total_bytes)
-    minimal="-${shrink_mib}M"
-    resize_arg="$minimal"
-    if [ -n "$alloc_bytes" ] && [ "$alloc_bytes" -gt 0 ] 2>/dev/null; then
-        target_mib=$(( (alloc_bytes + 1610612736 + 1048575) / 1048576 ))
-        minimal_mib=$(( total_bytes / 1048576 - shrink_mib ))
-        if [ "$target_mib" -lt "$minimal_mib" ]; then
-            resize_arg="${target_mib}M"
-        fi
+  fi
+  echo "cryptsetup-var: btrfs on $VAR_DEV fills the partition - resizing it (${resize_arg}) to make room for the LUKS2 header and keep the conversion to the data in use"
+  if ! btrfs filesystem resize "$resize_arg" "$mnt"; then
+    if [ "$resize_arg" = "$minimal" ]; then
+      umount "$mnt"
+      echo "cryptsetup-var: btrfs refused to resize to ${resize_arg} (tail in use or too full) - cannot encrypt in place" >&2
+      exit 1
     fi
-    echo "cryptsetup-var: btrfs on $VAR_DEV fills the partition - resizing it (${resize_arg}) to make room for the LUKS2 header and keep the conversion to the data in use"
-    if ! btrfs filesystem resize "$resize_arg" "$mnt"; then
-        if [ "$resize_arg" = "$minimal" ]; then
-            umount "$mnt"
-            echo "cryptsetup-var: btrfs refused to resize to ${resize_arg} (tail in use or too full) - cannot encrypt in place" >&2
-            exit 1
-        fi
-        echo "cryptsetup-var: btrfs refused ${resize_arg}; shrinking by the 32 MiB header only (the whole filesystem will be converted)" >&2
-        if ! btrfs filesystem resize "$minimal" "$mnt"; then
-            umount "$mnt"
-            echo "cryptsetup-var: btrfs refused to shrink by ${shrink_mib} MiB (tail in use or too full) - cannot encrypt in place" >&2
-            exit 1
-        fi
+    echo "cryptsetup-var: btrfs refused ${resize_arg}; shrinking by the 32 MiB header only (the whole filesystem will be converted)" >&2
+    if ! btrfs filesystem resize "$minimal" "$mnt"; then
+      umount "$mnt"
+      echo "cryptsetup-var: btrfs refused to shrink by ${shrink_mib} MiB (tail in use or too full) - cannot encrypt in place" >&2
+      exit 1
     fi
-    umount "$mnt"
+  fi
+  umount "$mnt"
 }
 
 encrypt_in_place() {
-    fstype="$1"
-    part_bytes=$(blockdev --getsize64 "$VAR_DEV")
-    fs_bytes=""
-    if [ "$fstype" = "btrfs" ] && command -v btrfs >/dev/null 2>&1; then
-        fs_bytes=$(btrfs_total_bytes)
-        if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null \
-           && [ $(( part_bytes - fs_bytes )) -lt 33554432 ]; then
-            shrink_btrfs_for_header $(( (33554432 - (part_bytes - fs_bytes) + 1048575) / 1048576 ))
-            fs_bytes=$(btrfs_total_bytes)
-        fi
+  fstype="$1"
+  part_bytes=$(blockdev --getsize64 "$VAR_DEV")
+  fs_bytes=""
+  if [ "$fstype" = "btrfs" ] && command -v btrfs >/dev/null 2>&1; then
+    fs_bytes=$(btrfs_total_bytes)
+    if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null \
+      && [ $((part_bytes - fs_bytes)) -lt 33554432 ]; then
+      shrink_btrfs_for_header $(((33554432 - (part_bytes - fs_bytes) + 1048575) / 1048576))
+      fs_bytes=$(btrfs_total_bytes)
     fi
-    size_opt=""
-    if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null; then
-        # The data to convert is the filesystem, rounded up to whole MiB; it and
-        # the 32 MiB shift must still fit the partition.
-        want_mib=$(( (fs_bytes + 1048575) / 1048576 ))
-        if [ $(( want_mib * 1048576 + 33554432 )) -le "$part_bytes" ]; then
-            size_opt="--device-size ${want_mib}M"
-        fi
+  fi
+  size_opt=""
+  if [ -n "$fs_bytes" ] && [ "$fs_bytes" -gt 0 ] 2>/dev/null; then
+    # The data to convert is the filesystem, rounded up to whole MiB; it and
+    # the 32 MiB shift must still fit the partition.
+    want_mib=$(((fs_bytes + 1048575) / 1048576))
+    if [ $((want_mib * 1048576 + 33554432)) -le "$part_bytes" ]; then
+      size_opt="--device-size ${want_mib}M"
     fi
-    if [ -z "$size_opt" ] && [ $(( part_bytes - 33554432 )) -lt "${fs_bytes:-0}" ]; then
-        echo "cryptsetup-var: $fstype on $VAR_DEV leaves no 32 MiB for a LUKS header - cannot encrypt in place" >&2
-        exit 1
-    fi
-    # Tell whoever is watching the console what is about to happen: a seeded
-    # /var can be tens of GiB, so this step can run for many minutes with
-    # nothing else on screen. It is a one-time migration and resumable after a
-    # power cut (resume_reencrypt). Periodic progress needs cryptsetup >= 2.4.
-    if [ -n "$size_opt" ]; then work_mib=$want_mib; else work_mib=$(( part_bytes / 1048576 )); fi
-    progress_opt=""
-    if cryptsetup --help 2>&1 | grep -q -- --progress-frequency; then
-        progress_opt="--progress-frequency 30"
-    fi
-    echo "cryptsetup-var: first boot - encrypting existing $fstype on $VAR_DEV in place${size_opt:+ ($size_opt)}"
-    echo "cryptsetup-var: ${work_mib} MiB to convert - one-time migration, resumes after a power cut${progress_opt:+, progress every 30 s}"
-    # shellcheck disable=SC2086 # size_opt / progress_opt are two words on purpose
-    cryptsetup reencrypt --encrypt \
-        --type luks2 \
-        --cipher aes-xts-plain64 \
-        --key-size 512 \
-        --hash sha256 \
-        --reduce-device-size 32M \
-        $size_opt \
-        $progress_opt \
-        --key-file "$KEY_FILE" \
-        --batch-mode \
-        "$VAR_DEV"
+  fi
+  if [ -z "$size_opt" ] && [ $((part_bytes - 33554432)) -lt "${fs_bytes:-0}" ]; then
+    echo "cryptsetup-var: $fstype on $VAR_DEV leaves no 32 MiB for a LUKS header - cannot encrypt in place" >&2
+    exit 1
+  fi
+  # Tell whoever is watching the console what is about to happen: a seeded
+  # /var can be tens of GiB, so this step can run for many minutes with
+  # nothing else on screen. It is a one-time migration and resumable after a
+  # power cut (resume_reencrypt). Periodic progress needs cryptsetup >= 2.4.
+  if [ -n "$size_opt" ]; then work_mib=$want_mib; else work_mib=$((part_bytes / 1048576)); fi
+  progress_opt=""
+  if cryptsetup --help 2>&1 | grep -q -- --progress-frequency; then
+    progress_opt="--progress-frequency 30"
+  fi
+  echo "cryptsetup-var: first boot - encrypting existing $fstype on $VAR_DEV in place${size_opt:+ ($size_opt)}"
+  echo "cryptsetup-var: ${work_mib} MiB to convert - one-time migration, resumes after a power cut${progress_opt:+, progress every 30 s}"
+  # shellcheck disable=SC2086 # size_opt / progress_opt are two words on purpose
+  cryptsetup reencrypt --encrypt \
+    --type luks2 \
+    --cipher aes-xts-plain64 \
+    --key-size 512 \
+    --hash sha256 \
+    --reduce-device-size 32M \
+    $size_opt \
+    $progress_opt \
+    --key-file "$KEY_FILE" \
+    --batch-mode \
+    "$VAR_DEV"
 }
 
 # Resume a reencryption a previous boot did not finish. Idempotent: fails fast
 # when no reencryption is recorded, which is the normal case.
 resume_reencrypt() {
-    if cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/online-reencrypt/{f=1} END{exit !f}'; then
-        echo "cryptsetup-var: resuming interrupted reencryption on $VAR_DEV"
-        cryptsetup reencrypt --resume-only --key-file "$KEY_FILE" --batch-mode "$VAR_DEV"
-    fi
+  if cryptsetup luksDump "$VAR_DEV" 2>/dev/null | awk '/online-reencrypt/{f=1} END{exit !f}'; then
+    echo "cryptsetup-var: resuming interrupted reencryption on $VAR_DEV"
+    cryptsetup reencrypt --resume-only --key-file "$KEY_FILE" --batch-mode "$VAR_DEV"
+  fi
 }
 
 # 0. An explicitly required engine must be usable before anything is touched.
@@ -685,26 +709,29 @@ check_required_hardware
 # 1. Ensure the LUKS2 container exists: encrypt a flashed filesystem in place,
 #    or format a blank partition on first boot.
 cryptsetup isLuks "$VAR_DEV" 2>/dev/null || {
-    existing_fs=$(blkid -p -s TYPE -o value "$VAR_DEV" 2>/dev/null || true)
-    if [ -n "$existing_fs" ]; then
-        encrypt_in_place "$existing_fs"
-    else
-        echo "cryptsetup-var: first boot - formatting $VAR_DEV as LUKS2"
-        cryptsetup luksFormat \
-            --type luks2 \
-            --cipher aes-xts-plain64 \
-            --key-size 512 \
-            --hash sha256 \
-            --key-file "$KEY_FILE" \
-            --batch-mode \
-            "$VAR_DEV"
-    fi
+  existing_fs=$(blkid -p -s TYPE -o value "$VAR_DEV" 2>/dev/null || true)
+  if [ -n "$existing_fs" ]; then
+    encrypt_in_place "$existing_fs"
+  else
+    echo "cryptsetup-var: first boot - formatting $VAR_DEV as LUKS2"
+    cryptsetup luksFormat \
+      --type luks2 \
+      --cipher aes-xts-plain64 \
+      --key-size 512 \
+      --hash sha256 \
+      --key-file "$KEY_FILE" \
+      --batch-mode \
+      "$VAR_DEV"
+  fi
 }
 
 # 2. Ensure it is open as /dev/mapper/var (finishing any interrupted
 #    reencryption first - the Argon2id key is the only one it can have then).
 ensure_tpm2_unlocked
-[ -b "$MAPPER" ] || { resume_reencrypt; open_var; }
+[ -b "$MAPPER" ] || {
+  resume_reencrypt
+  open_var
+}
 
 # 3. Ensure a filesystem exists (self-heal a first boot interrupted before mkfs).
 ensure_fs

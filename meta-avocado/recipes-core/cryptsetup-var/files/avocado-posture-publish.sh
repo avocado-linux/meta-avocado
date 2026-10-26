@@ -60,8 +60,8 @@ KEY_ENCRYPTED="avocado_var_encrypted"
 # there is nothing to publish to, and that is not an error worth failing a boot
 # over - posture is an observation, not a control.
 if ! command -v fw_printenv >/dev/null 2>&1 || ! command -v fw_setenv >/dev/null 2>&1; then
-    echo "avocado-posture: libubootenv tools absent - nothing to publish to" >&2
-    exit 0
+  echo "avocado-posture: libubootenv tools absent - nothing to publish to" >&2
+  exit 0
 fi
 
 # Write only when the value actually changes. The KV backend is a U-Boot
@@ -70,33 +70,33 @@ fi
 # wear for no new information. A change is also the interesting event - the
 # first enroll, or the day a device silently drops to the recovery slot.
 put_if_changed() {
-    _key="$1"
-    _new="$2"
+  _key="$1"
+  _new="$2"
 
-    # An absent key reads as empty, which compares unequal to any real value and
-    # so publishes on first boot. A failed read must not be mistaken for "absent"
-    # and trigger a needless write, so treat a non-zero fw_printenv as unknown
-    # and skip rather than guess.
-    if ! _cur=$(fw_printenv -n "$_key" 2>/dev/null); then
-        _cur=""
-    fi
+  # An absent key reads as empty, which compares unequal to any real value and
+  # so publishes on first boot. A failed read must not be mistaken for "absent"
+  # and trigger a needless write, so treat a non-zero fw_printenv as unknown
+  # and skip rather than guess.
+  if ! _cur=$(fw_printenv -n "$_key" 2>/dev/null); then
+    _cur=""
+  fi
 
-    [ "$_cur" = "$_new" ] && return 0
+  [ "$_cur" = "$_new" ] && return 0
 
-    if fw_setenv "$_key" "$_new" 2>/dev/null; then
-        echo "avocado-posture: ${_key} ${_cur:-<unset>} -> ${_new}"
-    else
-        echo "avocado-posture: failed to publish ${_key}" >&2
-    fi
-    return 0
+  if fw_setenv "$_key" "$_new" 2>/dev/null; then
+    echo "avocado-posture: ${_key} ${_cur:-<unset>} -> ${_new}"
+  else
+    echo "avocado-posture: failed to publish ${_key}" >&2
+  fi
+  return 0
 }
 
 # Facts the initramfs observed and userspace cannot reconstruct. Absent when
 # cryptsetup-var.sh did not run at all (an unencrypted build), in which case
 # there is no /var posture to report and the script is a no-op.
 if [ ! -r "$POSTURE_FILE" ]; then
-    echo "avocado-posture: no $POSTURE_FILE - /var encryption not in this image" >&2
-    exit 0
+  echo "avocado-posture: no $POSTURE_FILE - /var encryption not in this image" >&2
+  exit 0
 fi
 
 VAR_UNLOCK_METHOD=unknown
@@ -114,9 +114,9 @@ VAR_RECOVERY=unknown
 # opened in the initrd while /var mounted from the raw partition underneath it.
 var_encrypted=no
 if _src=$(findmnt -no SOURCE /var 2>/dev/null); then
-    case "$_src" in
-        /dev/mapper/*) var_encrypted=yes ;;
-    esac
+  case "$_src" in
+    /dev/mapper/*) var_encrypted=yes ;;
+  esac
 fi
 
 put_if_changed "$KEY_UNLOCK" "$VAR_UNLOCK_METHOD"
@@ -134,8 +134,8 @@ put_if_changed "$KEY_ENCRYPTED" "$var_encrypted"
 # to go looking at; this is the line that shows up in journalctl -p warning on a
 # device that is encrypted but no longer TPM-bound.
 if [ "$var_encrypted" = yes ] && [ "$VAR_TPM2_TOKEN" = yes ] && [ "$VAR_UNLOCK_METHOD" = argon2id ]; then
-    echo "avocado-posture: /var has a TPM2 keyslot but opened with the Argon2id recovery key - PCR 7 no longer matches what was sealed" >&2
+  echo "avocado-posture: /var has a TPM2 keyslot but opened with the Argon2id recovery key - PCR 7 no longer matches what was sealed" >&2
 fi
 if [ "$var_encrypted" = yes ] && [ "$VAR_HWKEY_TOKEN" = yes ] && [ "$VAR_UNLOCK_METHOD" != hwkey ]; then
-    echo "avocado-posture: /var has a ${VAR_HWKEY_BACKEND} keyslot but opened with ${VAR_UNLOCK_METHOD} - the key engine refused its blob or was unavailable" >&2
+  echo "avocado-posture: /var has a ${VAR_HWKEY_BACKEND} keyslot but opened with ${VAR_UNLOCK_METHOD} - the key engine refused its blob or was unavailable" >&2
 fi

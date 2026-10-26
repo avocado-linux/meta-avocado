@@ -26,32 +26,50 @@
 set -euo pipefail
 
 usage() {
-    echo "usage: $0 --base DIR --addon DIR --role target|sdk --out DIR" >&2
-    exit 2
+  echo "usage: $0 --base DIR --addon DIR --role target|sdk --out DIR" >&2
+  exit 2
 }
 
 BASE='' ADDON='' ROLE='' OUT=''
 while [ $# -gt 0 ]; do
-    case $1 in
-        --base) BASE=$2; shift 2 ;;
-        --addon) ADDON=$2; shift 2 ;;
-        --role) ROLE=$2; shift 2 ;;
-        --out) OUT=$2; shift 2 ;;
-        *) usage ;;
-    esac
+  case $1 in
+    --base)
+      BASE=$2
+      shift 2
+      ;;
+    --addon)
+      ADDON=$2
+      shift 2
+      ;;
+    --role)
+      ROLE=$2
+      shift 2
+      ;;
+    --out)
+      OUT=$2
+      shift 2
+      ;;
+    *) usage ;;
+  esac
 done
 [ -n "$BASE" ] && [ -n "$ADDON" ] && [ -n "$OUT" ] || usage
-case $ROLE in target|sdk) ;; *) usage ;; esac
+case $ROLE in target | sdk) ;; *) usage ;; esac
 BASE=${BASE%/} ADDON=${ADDON%/} OUT=${OUT%/}
 for tool in createrepo_c python3; do
-    command -v "$tool" >/dev/null || { echo "error: $tool is required" >&2; exit 1; }
+  command -v "$tool" >/dev/null || {
+    echo "error: $tool is required" >&2
+    exit 1
+  }
 done
-[ -d "$BASE" ] || { echo "error: base deploy tree $BASE does not exist" >&2; exit 1; }
+[ -d "$BASE" ] || {
+  echo "error: base deploy tree $BASE does not exist" >&2
+  exit 1
+}
 if [ ! -d "$ADDON" ]; then
-    if [ "$ROLE" = target ]; then
-        echo "error: add-on deploy tree $ADDON does not exist; was its multiconfig built?" >&2
-        exit 1
-    fi
+  if [ "$ROLE" = target ]; then
+    echo "error: add-on deploy tree $ADDON does not exist; was its multiconfig built?" >&2
+    exit 1
+  fi
 fi
 
 work=$(mktemp -d)
@@ -59,15 +77,15 @@ trap 'rm -rf "$work"' EXIT
 
 # <tree> -> lines "<path relative to tree>\t<name>\t<obsoleted names, space-separated>"
 packages() {
-    local tree=$1 md=$2
-    mkdir -p "$md"
-    if ! createrepo_c -q --general-compress-type=gz --excludes 'repodata/*' \
-            --outputdir "$md" "$tree" 2> "$md.err"; then
-        echo "error: cannot index $tree:" >&2
-        cat "$md.err" >&2
-        exit 1
-    fi
-    python3 - "$md" << 'PY'
+  local tree=$1 md=$2
+  mkdir -p "$md"
+  if ! createrepo_c -q --general-compress-type=gz --excludes 'repodata/*' \
+    --outputdir "$md" "$tree" 2>"$md.err"; then
+    echo "error: cannot index $tree:" >&2
+    cat "$md.err" >&2
+    exit 1
+  fi
+  python3 - "$md" <<'PY'
 import glob, gzip, sys
 import xml.etree.ElementTree as ET
 ns = {"c": "http://linux.duke.edu/metadata/common", "rpm": "http://linux.duke.edu/metadata/rpm"}
@@ -79,57 +97,57 @@ PY
 }
 
 in_role() {
-    case $1 in
-        repodata|sdk_provides_dummy*) return 1 ;;
-        *_avocadosdk) [ "$ROLE" = sdk ] ;;
-        *) [ "$ROLE" = target ] ;;
-    esac
+  case $1 in
+    repodata | sdk_provides_dummy*) return 1 ;;
+    *_avocadosdk) [ "$ROLE" = sdk ] ;;
+    *) [ "$ROLE" = target ] ;;
+  esac
 }
 
-packages "$BASE" "$work/base-md" | cut -f2 | sort -u > "$work/base-names"
+packages "$BASE" "$work/base-md" | cut -f2 | sort -u >"$work/base-names"
 
 mkdir -p "$work/out"
 drift=0 shadow=0 staged=0
 if [ -d "$ADDON" ]; then
-    packages "$ADDON" "$work/addon-md" > "$work/addon-pkgs"
-    while IFS=$'\t' read -r rel name obsoletes; do
-        arch_dir=${rel%%/*}
-        if [ "$arch_dir" = "$rel" ]; then
-            echo "error: $ADDON/$rel is not in an arch dir" >&2
-            exit 1
-        fi
-        in_role "$arch_dir" || continue
-        if [ -e "$BASE/$rel" ]; then
-            if ! cmp -s "$ADDON/$rel" "$BASE/$rel"; then
-                echo "drift: $rel differs from the base build's copy" >&2
-                drift=$((drift + 1))
-            fi
-            continue
-        fi
-        for n in $name $obsoletes; do
-            if grep -qxF -- "$n" "$work/base-names"; then
-                echo "shadow: $rel would replace base package '$n'" >&2
-                shadow=$((shadow + 1))
-                continue 2
-            fi
-        done
-        mkdir -p "$work/out/$arch_dir"
-        cp -p "$ADDON/$rel" "$work/out/$arch_dir/"
-        staged=$((staged + 1))
-    done < "$work/addon-pkgs"
+  packages "$ADDON" "$work/addon-md" >"$work/addon-pkgs"
+  while IFS=$'\t' read -r rel name obsoletes; do
+    arch_dir=${rel%%/*}
+    if [ "$arch_dir" = "$rel" ]; then
+      echo "error: $ADDON/$rel is not in an arch dir" >&2
+      exit 1
+    fi
+    in_role "$arch_dir" || continue
+    if [ -e "$BASE/$rel" ]; then
+      if ! cmp -s "$ADDON/$rel" "$BASE/$rel"; then
+        echo "drift: $rel differs from the base build's copy" >&2
+        drift=$((drift + 1))
+      fi
+      continue
+    fi
+    for n in $name $obsoletes; do
+      if grep -qxF -- "$n" "$work/base-names"; then
+        echo "shadow: $rel would replace base package '$n'" >&2
+        shadow=$((shadow + 1))
+        continue 2
+      fi
+    done
+    mkdir -p "$work/out/$arch_dir"
+    cp -p "$ADDON/$rel" "$work/out/$arch_dir/"
+    staged=$((staged + 1))
+  done <"$work/addon-pkgs"
 fi
 
 if [ $drift -gt 0 ] || [ $shadow -gt 0 ]; then
-    echo "error: $drift drifted and $shadow shadowing package(s); add-on $ROLE half not staged" >&2
-    exit 1
+  echo "error: $drift drifted and $shadow shadowing package(s); add-on $ROLE half not staged" >&2
+  exit 1
 fi
 if [ "$ROLE" = target ] && [ $staged -eq 0 ]; then
-    echo "error: the add-on's target half is empty; nothing in $ADDON is the add-on's own" >&2
-    exit 1
+  echo "error: the add-on's target half is empty; nothing in $ADDON is the add-on's own" >&2
+  exit 1
 fi
 
 for d in "$work/out"/*/; do
-    [ -d "$d" ] && createrepo_c -q --general-compress-type=gz "$d"
+  [ -d "$d" ] && createrepo_c -q --general-compress-type=gz "$d"
 done
 mkdir -p "$(dirname "$OUT")"
 rm -rf "$OUT"

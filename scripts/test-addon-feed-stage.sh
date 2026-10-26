@@ -19,15 +19,22 @@ trap 'rm -rf "$WORK"' EXIT
 
 failures=0
 pass() { printf '  PASS  %s\n' "$1"; }
-fail() { printf '  FAIL  %s\n' "$1"; failures=$((failures + 1)); }
+fail() {
+  printf '  FAIL  %s\n' "$1"
+  failures=$((failures + 1))
+}
 check() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (want '$3', got '$2')"; fi; }
-expect() { local what=$1; shift; if "$@"; then pass "$what"; else fail "$what"; fi; }
+expect() {
+  local what=$1
+  shift
+  if "$@"; then pass "$what"; else fail "$what"; fi
+}
 
 # mkrpm <dir> <name> <version> [payload] [extra spec line]: a noarch RPM, filed under <dir>.
 mkrpm() {
-    local dir=$1 name=$2 version=$3 payload=${4:-$2} extra=${5:-}
-    mkdir -p "$dir" "$WORK/rpmbuild"
-    cat > "$WORK/rpmbuild/$name.spec" << EOF
+  local dir=$1 name=$2 version=$3 payload=${4:-$2} extra=${5:-}
+  mkdir -p "$dir" "$WORK/rpmbuild"
+  cat >"$WORK/rpmbuild/$name.spec" <<EOF
 Name: $name
 Version: $version
 Release: r0.0
@@ -39,12 +46,12 @@ $extra
 $payload
 %files
 EOF
-    rpmbuild -bb --quiet --define "_topdir $WORK/rpmbuild" --define "_rpmdir $WORK/rpmbuild/out" \
-        "$WORK/rpmbuild/$name.spec" >/dev/null 2>&1
-    mv "$WORK"/rpmbuild/out/noarch/"$name"-*.rpm "$dir/"
+  rpmbuild -bb --quiet --define "_topdir $WORK/rpmbuild" --define "_rpmdir $WORK/rpmbuild/out" \
+    "$WORK/rpmbuild/$name.spec" >/dev/null 2>&1
+  mv "$WORK"/rpmbuild/out/noarch/"$name"-*.rpm "$dir/"
 }
 
-stage() { "$STAGE" --base "$WORK/base" --addon "$WORK/addon" --role "$1" --out "$WORK/out-$1" 2> "$WORK/err-$1"; }
+stage() { "$STAGE" --base "$WORK/base" --addon "$WORK/addon" --role "$1" --out "$WORK/out-$1" 2>"$WORK/err-$1"; }
 count() { find "$1" -name '*.rpm' 2>/dev/null | wc -l | tr -d ' '; }
 
 # The base feed: one target package and one SDK package.
@@ -77,10 +84,10 @@ echo "no add-on deploy tree for a role"
 "$STAGE" --base "$WORK/base" --addon "$WORK/none" --role sdk --out "$WORK/out-empty" >/dev/null
 expect "empty sdk half is still created" [ -d "$WORK/out-empty" ]
 check "empty sdk half has no packages" "$(count "$WORK/out-empty")" 0
-if "$STAGE" --base "$WORK/base" --addon "$WORK/none" --role target --out "$WORK/out-none" 2> "$WORK/err-none"; then
-    fail "a missing target half is refused"
+if "$STAGE" --base "$WORK/base" --addon "$WORK/none" --role target --out "$WORK/out-none" 2>"$WORK/err-none"; then
+  fail "a missing target half is refused"
 else
-    pass "a missing target half is refused"
+  pass "a missing target half is refused"
 fi
 expect "missing target half says why" grep -q "was its multiconfig built" "$WORK/err-none"
 
@@ -89,7 +96,7 @@ mv "$WORK/addon/cortexa76/python3-zipp-3.23.0-r0.0.noarch.rpm" "$WORK/zipp.rpm"
 mkrpm "$WORK/drift" python3-zipp 3.23.0 "rebuilt differently"
 cp "$WORK"/drift/*.rpm "$WORK/addon/cortexa76/"
 rm -rf "$WORK/out-target"
-echo previous > "$WORK/out-target-marker"
+echo previous >"$WORK/out-target-marker"
 mkdir -p "$WORK/out-target" && cp "$WORK/out-target-marker" "$WORK/out-target/"
 if stage target; then fail "drift is refused"; else pass "drift is refused"; fi
 expect "drift names the package" grep -q 'drift: cortexa76/python3-zipp' "$WORK/err-target"
@@ -108,7 +115,7 @@ if stage target; then fail "obsoleting a base package is refused"; else pass "ob
 expect "obsoletes names the base package" grep -q "would replace base package 'python3-zipp'" "$WORK/err-target"
 
 if [ $failures -gt 0 ]; then
-    echo "$failures check(s) failed"
-    exit 1
+  echo "$failures check(s) failed"
+  exit 1
 fi
 echo "all checks passed"

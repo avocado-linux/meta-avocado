@@ -15,7 +15,7 @@ IMAGE_FILE="$DEPLOY_DIR/$IMAGE_NAME"
 QEMU_BIOS="${DEPLOY_DIR}/flash.bin"
 QEMU_EXEC="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64"
 QEMU_IMG="$BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-img"
-LIB_PATH=$("$SCRIPT_DIR/find-library-path" $QEMU_EXEC $SYSROOT_COMPONENTS_DIR $SYSROOT_UNINATIVE_DIR)
+LIB_PATH=$("$SCRIPT_DIR/find-library-path" "$QEMU_EXEC" "$SYSROOT_COMPONENTS_DIR" "$SYSROOT_UNINATIVE_DIR")
 echo "LIB_PATH=$LIB_PATH"
 echo "Starting QEMU ARM64..."
 echo "-------------------------------------"

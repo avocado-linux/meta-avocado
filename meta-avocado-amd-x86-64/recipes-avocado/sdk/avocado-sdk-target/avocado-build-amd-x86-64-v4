@@ -10,7 +10,10 @@ RUNTIME_NAME="${1:-}"
 # The name becomes a path component under output/runtimes/; refuse anything
 # that would be empty or step outside it.
 case "$RUNTIME_NAME" in
-    ''|.|..|*/*) echo "ERROR: invalid runtime name '${RUNTIME_NAME}'" >&2; exit 1 ;;
+  '' | . | .. | */*)
+    echo "ERROR: invalid runtime name '${RUNTIME_NAME}'" >&2
+    exit 1
+    ;;
 esac
 
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
@@ -23,48 +26,48 @@ manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.js
 # Build include path flags from AVOCADO_STONE_INCLUDE_PATHS
 # shellcheck disable=SC2329 # orphaned by 35124cb's stone-bundle move; kept for parity with the Intel template this was copied from, not currently called
 build_include_flags() {
-    local main_input_dir="$1"
-    local include_flags=""
-    
-    # Add SDK stone directory for BSP files
-    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
-        include_flags="$include_flags -i \"$AVOCADO_SDK_PREFIX/stone\""
-    fi
-    
-    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
-        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
-        for path in "${PATHS[@]}"; do
-            if [ -n "$path" ]; then
-                include_flags="$include_flags -i \"$path\""
-            fi
-        done
-    fi
-    
-    include_flags="$include_flags -i \"$main_input_dir\""
-    echo "$include_flags"
+  local main_input_dir="$1"
+  local include_flags=""
+
+  # Add SDK stone directory for BSP files
+  if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+    include_flags="$include_flags -i \"$AVOCADO_SDK_PREFIX/stone\""
+  fi
+
+  if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+    IFS=':' read -ra PATHS <<<"$AVOCADO_STONE_INCLUDE_PATHS"
+    for path in "${PATHS[@]}"; do
+      if [ -n "$path" ]; then
+        include_flags="$include_flags -i \"$path\""
+      fi
+    done
+  fi
+
+  include_flags="$include_flags -i \"$main_input_dir\""
+  echo "$include_flags"
 }
 
 # Build display string of all include paths
 # shellcheck disable=SC2329 # orphaned by 35124cb's stone-bundle move; kept for parity with the Intel template this was copied from, not currently called
 build_include_display() {
-    local main_input_dir="$1"
-    local display=""
-    
-    if [ -n "$AVOCADO_SDK_PREFIX" ]; then
-        display="${display}\n    - ${AVOCADO_SDK_PREFIX}/stone"
-    fi
-    
-    if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
-        IFS=':' read -ra PATHS <<< "$AVOCADO_STONE_INCLUDE_PATHS"
-        for path in "${PATHS[@]}"; do
-            if [ -n "$path" ]; then
-                display="${display}\n    - ${path}"
-            fi
-        done
-    fi
-    
-    display="${display}\n    - ${main_input_dir}"
-    echo -e "$display"
+  local main_input_dir="$1"
+  local display=""
+
+  if [ -n "$AVOCADO_SDK_PREFIX" ]; then
+    display="${display}\n    - ${AVOCADO_SDK_PREFIX}/stone"
+  fi
+
+  if [ -n "${AVOCADO_STONE_INCLUDE_PATHS:-}" ]; then
+    IFS=':' read -ra PATHS <<<"$AVOCADO_STONE_INCLUDE_PATHS"
+    for path in "${PATHS[@]}"; do
+      if [ -n "$path" ]; then
+        display="${display}\n    - ${path}"
+      fi
+    done
+  fi
+
+  display="${display}\n    - ${main_input_dir}"
+  echo -e "$display"
 }
 
 # Extract image names from manifest

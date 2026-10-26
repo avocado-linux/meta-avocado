@@ -17,27 +17,27 @@ set -u
 set -o pipefail
 
 if [ "${AVOCADO_USB_PASSTHROUGH:-1}" != "1" ]; then
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 ERROR: serial provisioning requires USB device passthrough into the SDK so
 SETOOLS can talk to the DevKit over its USB CDC interface.
 AVOCADO_USB_PASSTHROUGH=${AVOCADO_USB_PASSTHROUGH:-} indicates the SDK was
 launched without USB access (likely Docker Desktop). Run on a Linux host or
 expose the USB device to the container explicitly.
 EOF
-    exit 1
+  exit 1
 fi
 
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 
 resolve_image() {
-    local key="$1" img_type
-    img_type=$(jq -r ".storage_devices.ospi.images.\"${key}\" | type" "$MANIFEST")
-    if [ "$img_type" = "string" ]; then
-        jq -r ".storage_devices.ospi.images.\"${key}\"" "$MANIFEST"
-    else
-        jq -r ".storage_devices.ospi.images.\"${key}\".out" "$MANIFEST"
-    fi
+  local key="$1" img_type
+  img_type=$(jq -r ".storage_devices.ospi.images.\"${key}\" | type" "$MANIFEST")
+  if [ "$img_type" = "string" ]; then
+    jq -r ".storage_devices.ospi.images.\"${key}\"" "$MANIFEST"
+  else
+    jq -r ".storage_devices.ospi.images.\"${key}\".out" "$MANIFEST"
+  fi
 }
 
 TFA_REL=$(resolve_image tfa)
@@ -49,10 +49,10 @@ KERNEL_BIN="${DATA_DIR}/${KERNEL_REL}"
 KERNEL_DTB="${DATA_DIR}/${DTB_REL}"
 
 for f in "$TFA_BIN" "$KERNEL_BIN" "$KERNEL_DTB"; do
-    if [ ! -f "$f" ]; then
-        echo "ERROR: missing artifact: $f" >&2
-        exit 1
-    fi
+  if [ ! -f "$f" ]; then
+    echo "ERROR: missing artifact: $f" >&2
+    exit 1
+  fi
 done
 
 # nativesdk-alif-flash deploys flash-alif.sh as bindir/avocado-alif-flash
@@ -61,12 +61,12 @@ WRAPPER="${AVOCADO_ALIF_FLASH_WRAPPER:-avocado-alif-flash}"
 ATOC_TEMPLATE="${AVOCADO_ALIF_ATOC_TEMPLATE:-/usr/share/avocado-alif-flash/atoc-alif-e8-devkit.json}"
 
 if ! command -v "$WRAPPER" >/dev/null 2>&1; then
-    echo "ERROR: $WRAPPER not on PATH; nativesdk-alif-flash may not be installed in the SDK container." >&2
-    exit 1
+  echo "ERROR: $WRAPPER not on PATH; nativesdk-alif-flash may not be installed in the SDK container." >&2
+  exit 1
 fi
 if [ ! -f "$ATOC_TEMPLATE" ]; then
-    echo "ERROR: ATOC template not found at $ATOC_TEMPLATE; override with AVOCADO_ALIF_ATOC_TEMPLATE=." >&2
-    exit 1
+  echo "ERROR: ATOC template not found at $ATOC_TEMPLATE; override with AVOCADO_ALIF_ATOC_TEMPLATE=." >&2
+  exit 1
 fi
 
 cat <<EOF
@@ -87,10 +87,10 @@ EOF
 read -r _
 
 TFA_BIN="$TFA_BIN" \
-KERNEL_BIN="$KERNEL_BIN" \
-KERNEL_DTB="$KERNEL_DTB" \
-ATOC_TEMPLATE="$ATOC_TEMPLATE" \
-    "$WRAPPER"
+  KERNEL_BIN="$KERNEL_BIN" \
+  KERNEL_DTB="$KERNEL_DTB" \
+  ATOC_TEMPLATE="$ATOC_TEMPLATE" \
+  "$WRAPPER"
 
 cat <<EOF
 

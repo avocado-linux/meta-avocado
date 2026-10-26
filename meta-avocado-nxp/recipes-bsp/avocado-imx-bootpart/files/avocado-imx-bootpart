@@ -23,42 +23,54 @@ set -eu
 devdir=${AVOCADO_IMX_BOOTPART_DEVDIR:-/dev}
 disk=${AVOCADO_IMX_BOOTPART_DISK:-}
 if [ -z "$disk" ]; then
-    part=$(readlink -f /dev/disk/by-partlabel/var) || { echo "avocado-imx-bootpart: no var partition to locate the boot disk from" >&2; exit 1; }
-    disk=$(basename "$(readlink -f "/sys/class/block/$(basename "$part")/..")")
+  part=$(readlink -f /dev/disk/by-partlabel/var) || {
+    echo "avocado-imx-bootpart: no var partition to locate the boot disk from" >&2
+    exit 1
+  }
+  disk=$(basename "$(readlink -f "/sys/class/block/$(basename "$part")/..")")
 fi
 dev=$devdir/$disk
 
 # PARTITION_CONFIG: bit 6 = BOOT_ACK, bits 5:3 = boot partition (1 = boot0,
 # 2 = boot1, 7 = user area, 0 = none).
 partition_config() {
-    cfg=$(mmc extcsd read "$dev" | sed -n 's/.*PARTITION_CONFIG: 0x\([0-9A-Fa-f]*\).*/\1/p' | head -1)
-    [ -n "$cfg" ] || { echo "avocado-imx-bootpart: cannot read PARTITION_CONFIG from $dev" >&2; exit 1; }
-    echo "$cfg"
+  cfg=$(mmc extcsd read "$dev" | sed -n 's/.*PARTITION_CONFIG: 0x\([0-9A-Fa-f]*\).*/\1/p' | head -1)
+  [ -n "$cfg" ] || {
+    echo "avocado-imx-bootpart: cannot read PARTITION_CONFIG from $dev" >&2
+    exit 1
+  }
+  echo "$cfg"
 }
 
 current() {
-    case $(( (0x$(partition_config) >> 3) & 7 )) in
-        1) echo a ;;
-        2) echo b ;;
-        7) echo user ;;
-        *) echo none ;;
-    esac
+  case $(((0x$(partition_config) >> 3) & 7)) in
+    1) echo a ;;
+    2) echo b ;;
+    7) echo user ;;
+    *) echo none ;;
+  esac
 }
 
 case "${1:-}" in
-    status|a|b) ;;
-    *) echo "usage: avocado-imx-bootpart <a|b|status>" >&2; exit 2 ;;
+  status | a | b) ;;
+  *)
+    echo "usage: avocado-imx-bootpart <a|b|status>" >&2
+    exit 2
+    ;;
 esac
 
 if [ ! -e "$devdir/${disk}boot0" ]; then
-    echo "avocado-imx-bootpart: $disk has no eMMC hardware boot partitions (SD card or other medium) - bootloader selection does not apply here, nothing to do"
-    exit 0
+  echo "avocado-imx-bootpart: $disk has no eMMC hardware boot partitions (SD card or other medium) - bootloader selection does not apply here, nothing to do"
+  exit 0
 fi
 
 case "$1" in
-    status) current; exit 0 ;;
-    a) n=1 ;;
-    b) n=2 ;;
+  status)
+    current
+    exit 0
+    ;;
+  a) n=1 ;;
+  b) n=2 ;;
 esac
 
 bootdev="$devdir/${disk}boot$((n - 1))"
@@ -71,21 +83,27 @@ bootdev="$devdir/${disk}boot$((n - 1))"
 # length free.
 sig=$(dd if="$bootdev" bs=4 count=1 2>/dev/null | head -c 4 | od -A n -t x1 | tr -d ' ')
 case "$sig" in
-    d1????41) ;;
-    ??????87) ;;
-    *) echo "avocado-imx-bootpart: refusing to enable $bootdev: no i.MX boot image there (first bytes: ${sig:-none})" >&2; exit 1 ;;
+  d1????41) ;;
+  ??????87) ;;
+  *)
+    echo "avocado-imx-bootpart: refusing to enable $bootdev: no i.MX boot image there (first bytes: ${sig:-none})" >&2
+    exit 1
+    ;;
 esac
 
 before=$(current)
 if [ "$before" = "$1" ]; then
-    echo "avocado-imx-bootpart: slot $1 ($bootdev) already enabled"
-    exit 0
+  echo "avocado-imx-bootpart: slot $1 ($bootdev) already enabled"
+  exit 0
 fi
 # Preserve BOOT_ACK (the second argument) as provisioning left it rather than
 # forcing it on: it is part of the boot protocol the ROM and U-Boot were
 # provisioned with, and this tool only moves the partition selection.
-ack=$(( (0x$(partition_config) >> 6) & 1 ))
+ack=$(((0x$(partition_config) >> 6) & 1))
 mmc bootpart enable "$n" "$ack" "$dev"
 after=$(current)
-[ "$after" = "$1" ] || { echo "avocado-imx-bootpart: enable did not take: PARTITION_CONFIG still selects '$after'" >&2; exit 1; }
+[ "$after" = "$1" ] || {
+  echo "avocado-imx-bootpart: enable did not take: PARTITION_CONFIG still selects '$after'" >&2
+  exit 1
+}
 echo "avocado-imx-bootpart: $dev now boots slot $1 from $bootdev (was $before)"

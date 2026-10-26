@@ -4,35 +4,65 @@
 # and an ambiguous pin fails instead of picking one. With no pin it carries the
 # BSP boot.img as built (the provision rule), unless kernel.cmdline or
 # cmdline_extra asks for a repack it cannot do.
-set -u
-here=$(cd "$(dirname "$0")" && pwd); script=$here/../avocado-tegra-build-bootimg
-w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
-pass=0; fail=0; ok(){ echo "  ok   - $1"; pass=$((pass+1)); }; bad(){ echo "  FAIL - $1"; fail=$((fail+1)); }
-P=$w/prefix; in=$w/in
-mkdir -p "$P/rootfs/boot" "$P/kernel/6.8.12-l4t" "$P/kernel/6.18.35-yocto" "$in/tegraflash-tools" "$in/tegraflash-bsp" "$w/bin"
-printf 'BSP-BOOTIMG' > "$in/tegraflash-bsp/boot.img"
-: > "$P/kernel/6.8.12-l4t/Image"; : > "$P/kernel/6.18.35-yocto/Image"; : > "$in/initrd"
-printf '#!/bin/sh\n' > "$in/tegraflash-tools/mkbootimg"; chmod +x "$in/tegraflash-tools/mkbootimg"
-# Fake packer: records the kernel it was handed.
-printf '#!/bin/sh\necho "$3" > "$5"\n' > "$w/bin/avocado-tegra-bootimg"; chmod +x "$w/bin/avocado-tegra-bootimg"
-run(){ rm -f "$in/boot.img"; env -u AVOCADO_KERNEL_CMDLINE -u AVOCADO_KERNEL_CMDLINE_EXTRA AVOCADO_PREFIX=$P PATH="$w/bin:$PATH" "$@" sh "$script" "$in" initrd boot.img 2>&1; }
 
-: > "$P/rootfs/boot/Image-6.18.35-yocto"
-msg=$(run); rc=$?
+# ok and bad only echo and increment, so `cond && ok || bad` cannot run both.
+# shellcheck disable=SC2015
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+script=$here/../avocado-tegra-build-bootimg
+w=$(mktemp -d)
+trap 'rm -rf "$w"' EXIT
+pass=0
+fail=0
+ok() {
+  echo "  ok   - $1"
+  pass=$((pass + 1))
+}
+bad() {
+  echo "  FAIL - $1"
+  fail=$((fail + 1))
+}
+P=$w/prefix
+in=$w/in
+mkdir -p "$P/rootfs/boot" "$P/kernel/6.8.12-l4t" "$P/kernel/6.18.35-yocto" "$in/tegraflash-tools" "$in/tegraflash-bsp" "$w/bin"
+printf 'BSP-BOOTIMG' >"$in/tegraflash-bsp/boot.img"
+: >"$P/kernel/6.8.12-l4t/Image"
+: >"$P/kernel/6.18.35-yocto/Image"
+: >"$in/initrd"
+printf '#!/bin/sh\n' >"$in/tegraflash-tools/mkbootimg"
+chmod +x "$in/tegraflash-tools/mkbootimg"
+# Fake packer: records the kernel it was handed.
+# The $3 and $5 belong to the generated script, not this one.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "$3" > "$5"\n' >"$w/bin/avocado-tegra-bootimg"
+chmod +x "$w/bin/avocado-tegra-bootimg"
+run() {
+  rm -f "$in/boot.img"
+  env -u AVOCADO_KERNEL_CMDLINE -u AVOCADO_KERNEL_CMDLINE_EXTRA AVOCADO_PREFIX="$P" PATH="$w/bin:$PATH" "$@" sh "$script" "$in" initrd boot.img 2>&1
+}
+
+: >"$P/rootfs/boot/Image-6.18.35-yocto"
+msg=$(run)
+rc=$?
 { [ $rc -eq 0 ] && [ "$(cat "$in/boot.img")" = "$P/kernel/6.18.35-yocto/Image" ]; } && ok "the rootfs pin selects its kernel sysroot over a stale one" || bad "pin: rc=$rc $msg"
 
 rm -rf "$P/kernel/6.18.35-yocto"
-msg=$(run); rc=$?
+msg=$(run)
+rc=$?
 { [ $rc -eq 0 ] && [ "$(cat "$in/boot.img")" = "$P/rootfs/boot/Image-6.18.35-yocto" ]; } && ok "falls back to the rootfs copy when the kernel sysroot is absent" || bad "fallback: rc=$rc $msg"
 
-: > "$P/rootfs/boot/Image-6.8.12-l4t"
-msg=$(run); rc=$?
+: >"$P/rootfs/boot/Image-6.8.12-l4t"
+msg=$(run)
+rc=$?
 { [ $rc -ne 0 ] && [ ! -e "$in/boot.img" ]; } && ok "two kernels in the rootfs fail instead of picking one" || bad "ambiguous: rc=$rc $msg"
 
 rm -f "$P/rootfs/boot/"Image-*
-msg=$(run); rc=$?
+msg=$(run)
+rc=$?
 { [ $rc -eq 0 ] && [ "$(cat "$in/boot.img")" = "BSP-BOOTIMG" ]; } && ok "no pinned kernel carries the BSP boot.img, as provision flashes" || bad "none: rc=$rc $msg"
-msg=$(run AVOCADO_KERNEL_CMDLINE_EXTRA=quiet); rc=$?
+msg=$(run AVOCADO_KERNEL_CMDLINE_EXTRA=quiet)
+rc=$?
 { [ $rc -ne 0 ] && [ ! -e "$in/boot.img" ]; } && ok "no pinned kernel with cmdline_extra fails, as provision does" || bad "none+extra: rc=$rc $msg"
 
-echo "$pass passed, $fail failed"; [ $fail -eq 0 ]
+echo "$pass passed, $fail failed"
+[ $fail -eq 0 ]

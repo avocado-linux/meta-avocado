@@ -12,61 +12,67 @@
 
 # Ensure the kas/machine.yml file is provided
 if [ -z "$1" ]; then
-    echo "Usage: $0 /path/to/kas/machine.yml [build_dir]"
-    exit 1
+  echo "Usage: $0 /path/to/kas/machine.yml [build_dir]"
+  exit 1
 fi
 
 KAS_MACHINE_FILE="$1"
 KAS_MACHINE_FILE_ABS="$(realpath "$KAS_MACHINE_FILE")"
 
 if [ ! -f "$KAS_MACHINE_FILE" ]; then
-    echo "Error: File '$KAS_MACHINE_FILE' does not exist."
-    exit 1
+  echo "Error: File '$KAS_MACHINE_FILE' does not exist."
+  exit 1
 fi
 
 # Determine default build directory if not provided
 if [ -z "$2" ]; then
-    BASENAME=$(basename "$KAS_MACHINE_FILE" .yml)
-    BUILD_DIR="$(pwd)/build-${BASENAME}"
+  BASENAME=$(basename "$KAS_MACHINE_FILE" .yml)
+  BUILD_DIR="$(pwd)/build-${BASENAME}"
 else
-    # Make BUILD_DIR absolute if it's not already
-    if [[ "$2" = /* ]]; then
-        BUILD_DIR="$2"
-    else
-        BUILD_DIR="$(pwd)/$2"
-    fi
+  # Make BUILD_DIR absolute if it's not already
+  if [[ "$2" = /* ]]; then
+    BUILD_DIR="$2"
+  else
+    BUILD_DIR="$(pwd)/$2"
+  fi
 fi
 
 # Determine the repository directory.
 # Handle both direct execution and sourcing (with dot command)
 if [[ "$0" == *"init-build"* ]]; then
-    # Script is being executed directly
-    REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+  # Script is being executed directly
+  REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 else
-    # Script is being sourced
-    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # Script is being sourced
+  REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 echo "Repository directory: $REPO_DIR"
 
 # Create the build directory if it doesn't exist
-mkdir -p "$BUILD_DIR" || { echo "Error: Could not create directory $BUILD_DIR"; exit 1; }
+mkdir -p "$BUILD_DIR" || {
+  echo "Error: Could not create directory $BUILD_DIR"
+  exit 1
+}
 
 # Change into the build directory
-cd "$BUILD_DIR" || { echo "Error: Could not change directory to $BUILD_DIR"; exit 1; }
+cd "$BUILD_DIR" || {
+  echo "Error: Could not change directory to $BUILD_DIR"
+  exit 1
+}
 
 # Create a relative symlink to meta-avocado (the repository root) if it doesn't already exist.
 if [ ! -e "meta-avocado" ]; then
-    # Compute the relative path from the build directory to the repository directory.
-    REL_PATH=$(realpath --relative-to="$PWD" "$REPO_DIR")
-    ln -s "$REL_PATH" meta-avocado
-    echo "Created symlink 'meta-avocado' -> $REL_PATH"
+  # Compute the relative path from the build directory to the repository directory.
+  REL_PATH=$(realpath --relative-to="$PWD" "$REPO_DIR")
+  ln -s "$REL_PATH" meta-avocado
+  echo "Created symlink 'meta-avocado' -> $REL_PATH"
 else
-    echo "Symlink 'meta-avocado' already exists"
+  echo "Symlink 'meta-avocado' already exists"
 fi
 # Convert the kas machine file to an absolute path
 KAS_MACHINE_FILE_REL="$(realpath --relative-to="$PWD" "$KAS_MACHINE_FILE_ABS")"
 # Create an .envrc file with KAS_YML pointing to the absolute path of the kas machine file.
-cat <<EOF > .envrc
+cat <<EOF >.envrc
 export KAS_YML="$KAS_MACHINE_FILE_REL"
 EOF
 echo "Created .envrc file with KAS_YML set to $KAS_MACHINE_FILE_REL"

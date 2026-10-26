@@ -14,10 +14,10 @@
 set -eu
 
 if [ -r /sys/firmware/devicetree/base/serial-number ]; then
-    HW_ID=$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number)
+  HW_ID=$(tr -d '\0' </sys/firmware/devicetree/base/serial-number)
 else
-    HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || echo "qemu-no-serial")
-    [ -n "$HW_ID" ] || HW_ID="qemu-no-serial"
+  HW_ID=$(awk '/^Serial/ {print $3}' /proc/cpuinfo 2>/dev/null || echo "qemu-no-serial")
+  [ -n "$HW_ID" ] || HW_ID="qemu-no-serial"
 fi
 
 # Deterministic 16-byte salt = first 32 hex chars of SHA-256(HW_ID).
@@ -26,10 +26,10 @@ SALT=$(printf '%s' "$HW_ID" | openssl dgst -sha256 | sed 's/.*= *//' | cut -c1-3
 # Emit exactly 64 raw key bytes via Argon2id. -binary writes raw bytes to
 # stdout, so no hex<->binary conversion (xxd) is needed.
 openssl kdf -binary \
-    -keylen 64 \
-    -kdfopt pass:"$HW_ID" \
-    -kdfopt salt:"$SALT" \
-    -kdfopt iter:3 \
-    -kdfopt memcost:65536 \
-    -kdfopt lanes:1 \
-    ARGON2ID
+  -keylen 64 \
+  -kdfopt pass:"$HW_ID" \
+  -kdfopt salt:"$SALT" \
+  -kdfopt iter:3 \
+  -kdfopt memcost:65536 \
+  -kdfopt lanes:1 \
+  ARGON2ID

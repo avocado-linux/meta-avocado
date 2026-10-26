@@ -23,41 +23,50 @@ set -eu
 ESP_LABEL="${AVOCADO_ESP_LABEL:-efi}"
 ENTRY_DIR="EFI/Linux"
 
-die() { echo "avocado-bls: $*" >&2; exit 1; }
+die() {
+  echo "avocado-bls: $*" >&2
+  exit 1
+}
 
 # The running OS's build id. Also the value baked into the .osrel of the UKI
 # that booted it, which is the link this script relies on.
 running_build_id() {
-    for f in /etc/os-release /usr/lib/os-release; do
-        [ -f "$f" ] || continue
-        id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -1)
-        [ -n "$id" ] && { echo "$id"; return 0; }
-    done
-    return 1
+  for f in /etc/os-release /usr/lib/os-release; do
+    [ -f "$f" ] || continue
+    id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -1)
+    [ -n "$id" ] && {
+      echo "$id"
+      return 0
+    }
+  done
+  return 1
 }
 
 # Mount the ESP if it is not already mounted, and print the mount point.
 # Reuses an existing mount: two concurrent read-write mounts of one FAT
 # filesystem corrupt it.
 esp_mount() {
-    dev=$(readlink -f "/dev/disk/by-partlabel/${ESP_LABEL}" 2>/dev/null) \
-        || die "no partition labeled '${ESP_LABEL}'"
-    [ -b "$dev" ] || die "no partition labeled '${ESP_LABEL}'"
-    existing=$(awk -v d="$dev" '$1 == d { print $2; exit }' /proc/mounts)
-    if [ -n "$existing" ]; then
-        echo "$existing"
-        return 0
-    fi
-    mp="/run/avocado-bls-esp"
-    mkdir -p "$mp"
-    mount "$dev" "$mp" || die "cannot mount $dev at $mp"
-    echo "MOUNTED:$mp"
+  dev=$(readlink -f "/dev/disk/by-partlabel/${ESP_LABEL}" 2>/dev/null) \
+    || die "no partition labeled '${ESP_LABEL}'"
+  [ -b "$dev" ] || die "no partition labeled '${ESP_LABEL}'"
+  existing=$(awk -v d="$dev" '$1 == d { print $2; exit }' /proc/mounts)
+  if [ -n "$existing" ]; then
+    echo "$existing"
+    return 0
+  fi
+  mp="/run/avocado-bls-esp"
+  mkdir -p "$mp"
+  mount "$dev" "$mp" || die "cannot mount $dev at $mp"
+  echo "MOUNTED:$mp"
 }
 
 esp_unmount() {
-    case "$1" in
-        MOUNTED:*) umount "${1#MOUNTED:}" || true; rmdir "${1#MOUNTED:}" 2>/dev/null || true ;;
-    esac
+  case "$1" in
+    MOUNTED:*)
+      umount "${1#MOUNTED:}" || true
+      rmdir "${1#MOUNTED:}" 2>/dev/null || true
+      ;;
+  esac
 }
 
 mp_of() { echo "${1#MOUNTED:}"; }
@@ -87,97 +96,110 @@ mp_of() { echo "${1#MOUNTED:}"; }
 # appear -- if firmware ever appends to it, the exact match stops working, and
 # an entry still under assessment is a better guess than the first id match.
 entry_for_running_system() {
-    mp="$1"; want="$2"
-    cmdline=$(tr -d '\n' < /proc/cmdline)
+  mp="$1"
+  want="$2"
+  cmdline=$(tr -d '\n' </proc/cmdline)
 
-    for f in "$mp/$ENTRY_DIR"/*.efi; do
-        [ -f "$f" ] || continue
-        grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null || continue
-        if [ -n "$cmdline" ] && grep -aqF "$cmdline" "$f" 2>/dev/null; then
-            echo "$f"
-            return 0
-        fi
-    done
+  for f in "$mp/$ENTRY_DIR"/*.efi; do
+    [ -f "$f" ] || continue
+    grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null || continue
+    if [ -n "$cmdline" ] && grep -aqF "$cmdline" "$f" 2>/dev/null; then
+      echo "$f"
+      return 0
+    fi
+  done
 
-    # No command-line match: prefer an entry that is still being assessed, as
-    # that is the one a commit is for.
-    fallback=""
-    for f in "$mp/$ENTRY_DIR"/*.efi; do
-        [ -f "$f" ] || continue
-        grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null || continue
-        case "$(basename "$f")" in
-            *+*) echo "$f"; return 0 ;;
-            *)   [ -n "$fallback" ] || fallback="$f" ;;
-        esac
-    done
-    [ -n "$fallback" ] && { echo "$fallback"; return 0; }
-    return 1
+  # No command-line match: prefer an entry that is still being assessed, as
+  # that is the one a commit is for.
+  fallback=""
+  for f in "$mp/$ENTRY_DIR"/*.efi; do
+    [ -f "$f" ] || continue
+    grep -aq "AVOCADO_OS_BUILD_ID=\"\?${want}" "$f" 2>/dev/null || continue
+    case "$(basename "$f")" in
+      *+*)
+        echo "$f"
+        return 0
+        ;;
+      *) [ -n "$fallback" ] || fallback="$f" ;;
+    esac
+  done
+  [ -n "$fallback" ] && {
+    echo "$fallback"
+    return 0
+  }
+  return 1
 }
 
 # `name+2-1.efi` -> `name`. An entry with no counter returns its own stem.
 entry_stem() {
-    b=$(basename "$1" .efi)
-    echo "${b%%+*}"
+  b=$(basename "$1" .efi)
+  echo "${b%%+*}"
 }
 
 cmd_current_slot() {
-    id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
-    m=$(esp_mount); mp=$(mp_of "$m")
-    slot=""
-    if entry=$(entry_for_running_system "$mp" "$id"); then
-        # Entries are named avocado-<slot>, so the slot is the trailing field.
-        stem=$(entry_stem "$entry")
-        slot="${stem##*-}"
-    fi
-    esp_unmount "$m"
-    [ -n "$slot" ] || die "no entry in $ENTRY_DIR carries AVOCADO_OS_BUILD_ID=$id"
-    echo "$slot"
+  id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
+  m=$(esp_mount)
+  mp=$(mp_of "$m")
+  slot=""
+  if entry=$(entry_for_running_system "$mp" "$id"); then
+    # Entries are named avocado-<slot>, so the slot is the trailing field.
+    stem=$(entry_stem "$entry")
+    slot="${stem##*-}"
+  fi
+  esp_unmount "$m"
+  [ -n "$slot" ] || die "no entry in $ENTRY_DIR carries AVOCADO_OS_BUILD_ID=$id"
+  echo "$slot"
 }
 
 cmd_bless() {
-    id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
-    m=$(esp_mount); mp=$(mp_of "$m")
-    rc=0
-    if entry=$(entry_for_running_system "$mp" "$id"); then
-        base=$(basename "$entry")
-        case "$base" in
-            *+*)
-                stem=$(entry_stem "$entry")
-                mv "$entry" "$(dirname "$entry")/${stem}.efi" \
-                    && sync \
-                    && echo "avocado-bls: blessed ${base} -> ${stem}.efi"
-                ;;
-            *) echo "avocado-bls: ${base} carries no boot counter, nothing to bless" ;;
-        esac
-    else
-        echo "avocado-bls: no entry carries AVOCADO_OS_BUILD_ID=$id" >&2
-        rc=1
-    fi
-    esp_unmount "$m"
-    return $rc
+  id=$(running_build_id) || die "no AVOCADO_OS_BUILD_ID in os-release"
+  m=$(esp_mount)
+  mp=$(mp_of "$m")
+  rc=0
+  if entry=$(entry_for_running_system "$mp" "$id"); then
+    base=$(basename "$entry")
+    case "$base" in
+      *+*)
+        stem=$(entry_stem "$entry")
+        mv "$entry" "$(dirname "$entry")/${stem}.efi" \
+          && sync \
+          && echo "avocado-bls: blessed ${base} -> ${stem}.efi"
+        ;;
+      *) echo "avocado-bls: ${base} carries no boot counter, nothing to bless" ;;
+    esac
+  else
+    echo "avocado-bls: no entry carries AVOCADO_OS_BUILD_ID=$id" >&2
+    rc=1
+  fi
+  esp_unmount "$m"
+  return $rc
 }
 
 # Mark an entry unbootable without deleting it, by exhausting its counter.
 # Used as a rollback action: the OS booted but failed verification, so the
 # entry must stop being chosen while its bytes stay available for inspection.
 cmd_demote() {
-    slot="${1:?usage: avocado-bls demote <slot>}"
-    m=$(esp_mount); mp=$(mp_of "$m")
-    rc=1
-    for f in "$mp/$ENTRY_DIR/avocado-${slot}"*.efi; do
-        [ -f "$f" ] || continue
-        stem=$(entry_stem "$f")
-        mv "$f" "$(dirname "$f")/${stem}+0-9.efi" && sync
-        echo "avocado-bls: demoted $(basename "$f") -> ${stem}+0-9.efi"
-        rc=0
-    done
-    esp_unmount "$m"
-    return $rc
+  slot="${1:?usage: avocado-bls demote <slot>}"
+  m=$(esp_mount)
+  mp=$(mp_of "$m")
+  rc=1
+  for f in "$mp/$ENTRY_DIR/avocado-${slot}"*.efi; do
+    [ -f "$f" ] || continue
+    stem=$(entry_stem "$f")
+    mv "$f" "$(dirname "$f")/${stem}+0-9.efi" && sync
+    echo "avocado-bls: demoted $(basename "$f") -> ${stem}+0-9.efi"
+    rc=0
+  done
+  esp_unmount "$m"
+  return $rc
 }
 
 case "${1:-}" in
-    current-slot) cmd_current_slot ;;
-    bless)        cmd_bless ;;
-    demote)       shift; cmd_demote "$@" ;;
-    *) die "usage: avocado-bls {current-slot|bless|demote <slot>}" ;;
+  current-slot) cmd_current_slot ;;
+  bless) cmd_bless ;;
+  demote)
+    shift
+    cmd_demote "$@"
+    ;;
+  *) die "usage: avocado-bls {current-slot|bless|demote <slot>}" ;;
 esac

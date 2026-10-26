@@ -9,19 +9,25 @@
 set -euo pipefail
 
 BUILD_DIR="$(pwd)/build"
-[ -d "$BUILD_DIR/tmp" ] || { echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"; exit 1; }
+[ -d "$BUILD_DIR/tmp" ] || {
+  echo "Error: $BUILD_DIR/tmp not found - run from the kas work directory"
+  exit 1
+}
 SYSROOT_COMPONENTS_DIR="$BUILD_DIR/tmp/sysroots-components/x86_64"
 SYSROOT_UNINATIVE_DIR="$BUILD_DIR/tmp/sysroots-uninative"
 
 SWTPM_BIN="$SYSROOT_COMPONENTS_DIR/swtpm-native/usr/bin/swtpm"
-[ -x "$SWTPM_BIN" ] || { echo "Error: swtpm-native not staged at $SWTPM_BIN"; exit 1; }
+[ -x "$SWTPM_BIN" ] || {
+  echo "Error: swtpm-native not staged at $SWTPM_BIN"
+  exit 1
+}
 
 TPM_DIR="$BUILD_DIR/tmp/tpm-state"
 TPM_SOCK="$TPM_DIR/swtpm-sock"
 
 mkdir -p "$TPM_DIR"
 # Publish the socket path for the QEMU runner to read.
-echo "$TPM_SOCK" > "$TPM_DIR/socket-path"
+echo "$TPM_SOCK" >"$TPM_DIR/socket-path"
 [ -S "$TPM_SOCK" ] && rm -f "$TPM_SOCK"
 
 # Bitbake native binaries use the uninative glibc loader as their ELF interpreter.
@@ -31,12 +37,12 @@ LIB_PATH=$(find "$SYSROOT_COMPONENTS_DIR" -maxdepth 3 -name "lib" -type d 2>/dev
 LIB_PATH="${SYSROOT_UNINATIVE_DIR}/x86_64-linux/lib:${LIB_PATH%:}"
 
 run_native() {
-    "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
+  "$UNINATIVE_LOADER" --library-path "$LIB_PATH" "$@"
 }
 
 echo "Starting swtpm with socket at $TPM_SOCK"
 run_native "$SWTPM_BIN" socket \
-    --tpmstate dir="$TPM_DIR" \
-    --ctrl type=unixio,path="$TPM_SOCK" \
-    --log level=20 \
-    --tpm2
+  --tpmstate dir="$TPM_DIR" \
+  --ctrl type=unixio,path="$TPM_SOCK" \
+  --log level=20 \
+  --tpm2
