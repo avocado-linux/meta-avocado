@@ -57,5 +57,71 @@ build_include_display() {
 # now the pre-bundle seam only: stage artifacts the manifest references that the
 # generic pipeline cannot build, and let stone bundle consume them.
 
+# Kernel command line from the project (kernel.cmdline / kernel.cmdline_extra,
+# exported by avocado-cli as AVOCADO_KERNEL_CMDLINE / _EXTRA). The firmware
+# hands U-Boot and the kernel whatever bootfiles/cmdline.txt holds, on SD and
+# NVMe alike, so compose it here from the BSP's copy. The result goes to the
+# runtime's rekeyed/ dir, which stone searches before the runtime dir: the BSP's
+# package-owned file is never written, and both provisioning and the OS bundle
+# pick the composed one up. Removed when the project sets neither, so dropping
+# cmdline_extra from avocado.yaml takes effect on the next build.
+cmdline_src="$input_dir/bootfiles/cmdline.txt"
+cmdline_dst="$input_dir/rekeyed/bootfiles/cmdline.txt"
+rm -f "$cmdline_dst"
+if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}" ]; then
+        cmdline="$AVOCADO_KERNEL_CMDLINE"
+    elif [ -f "$cmdline_src" ]; then
+        cmdline=$(tr '\n' ' ' < "$cmdline_src" | sed 's/[[:space:]]*$//')
+    else
+        echo "[ERROR] $cmdline_src not found: cannot append kernel.cmdline_extra" >&2
+        exit 1
+    fi
+    [ -z "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ] || cmdline="$cmdline $AVOCADO_KERNEL_CMDLINE_EXTRA"
+    mkdir -p "$(dirname "$cmdline_dst")"
+    printf '%s\n' "$cmdline" > "$cmdline_dst"
+    echo -e "\033[94m[INFO]\033[0m Kernel command line from project config: $cmdline"
+fi
+
+# Kernel: the lockfile-pinned kernel (AVOCADO_KERNEL_IMAGE, exported by
+# avocado-cli), not the Image the bootfiles package carries. The bootfiles copy
+# is the build's default kernel, so a project pinned to another kernel (6.6 on a
+# 6.12-default feed) booted the default while its rootfs held the pinned
+# kernel's modules: no modular driver loaded and nothing said why. Staged into
+# rekeyed/ like the cmdline, which stone searches first. Fail closed: boot and
+# modules disagreeing is worse than not building.
+kernel_dst="$input_dir/rekeyed/Image"
+rm -f "$kernel_dst"
+if [ -z "${AVOCADO_KERNEL_IMAGE:-}" ]; then
+    echo "[ERROR] AVOCADO_KERNEL_IMAGE not set: needs an avocado-cli that exports the pinned kernel to build hooks" >&2
+    exit 1
+fi
+if [ ! -f "$AVOCADO_KERNEL_IMAGE" ]; then
+    echo "[ERROR] pinned kernel $AVOCADO_KERNEL_IMAGE does not exist; run 'avocado install'" >&2
+    exit 1
+fi
+mkdir -p "$(dirname "$kernel_dst")"
+cp -f "$AVOCADO_KERNEL_IMAGE" "$kernel_dst"
+echo -e "\033[94m[INFO]\033[0m Kernel from the project's pin: $AVOCADO_KERNEL_IMAGE"
+
+# Device trees and overlays from the same pin. The kernel image package pulls
+# in its kernel-devicetree, which installs them flat into the rootfs /boot next
+# to the Image the CLI staged from; the bootfiles copies are the default
+# kernel's, and a 6.6 kernel rejects the 6.12 trees (PCIe fails to probe, so
+# RP1 and everything behind it is gone).
+dtb_src="$AVOCADO_PREFIX/rootfs/boot"
+rm -f "$input_dir"/rekeyed/*.dtb "$input_dir"/rekeyed/*.dtbo
+n=0
+for f in "$dtb_src"/*.dtb "$dtb_src"/*.dtbo; do
+    [ -f "$f" ] || continue
+    cp -f "$f" "$input_dir/rekeyed/"
+    n=$((n + 1))
+done
+if [ "$n" -eq 0 ]; then
+    echo "[ERROR] no device trees in $dtb_src for the pinned kernel; is its kernel-devicetree installed?" >&2
+    exit 1
+fi
+echo -e "\033[94m[INFO]\033[0m Device trees from the project's pin: $n files"
+
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
 exit 0
