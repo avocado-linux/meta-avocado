@@ -78,7 +78,9 @@ fi
 if [[ "$AVOCADO_SDK_TARGET" =~ x86-64$ ]]; then
   QEMU_ARCH="x86_64"
   QEMU_BINARY="qemu-system-x86_64"
-  QEMU_BIOS_FILE="u-boot.rom"
+  # The image boots systemd-boot from its ESP, so the firmware is UEFI (OVMF)
+  # from QEMU's own data dir rather than a file stone stages.
+  QEMU_BIOS_FILE=""
   QEMU_CPU="max"
   QEMU_MACHINE=""
 elif [[ "$AVOCADO_SDK_TARGET" =~ arm64$ ]]; then
@@ -117,27 +119,69 @@ fi
 STONE_DATA_DIR="${AVOCADO_PREFIX}/output/runtimes/${RUNTIME}/stone"
 STONE_BUILD_DIR="${STONE_DATA_DIR}/_build"
 
-# Check if the image file exists
-IMAGE_FILE="${STONE_BUILD_DIR}/avocado-os-${AVOCADO_SDK_TARGET}.img"
-if [ ! -f "$IMAGE_FILE" ]; then
-  echo "Error: Image file not found: $IMAGE_FILE"
-  echo "Please build the image first using: avocado-build image"
+# The provision scripts name the image differently: qemuarm64's after the
+# manifest's rootdisk out (avocado-os-qemuarm64.img), qemux86-64's after the
+# platform (avocado-os-avocado-qemux86-64.img).
+IMAGE_FILE=""
+for name in "avocado-os-${AVOCADO_SDK_TARGET}.img" "avocado-os-avocado-${AVOCADO_SDK_TARGET}.img"; do
+  if [ -f "${STONE_BUILD_DIR}/${name}" ]; then
+    IMAGE_FILE="${STONE_BUILD_DIR}/${name}"
+    break
+  fi
+done
+if [ -z "$IMAGE_FILE" ]; then
+  echo "Error: no avocado-os-${AVOCADO_SDK_TARGET}.img or avocado-os-avocado-${AVOCADO_SDK_TARGET}.img in ${STONE_BUILD_DIR}"
+  echo "Please provision the runtime first: avocado provision ${RUNTIME}"
   exit 1
 fi
 
-qemu-img resize -f raw "$IMAGE_FILE" 1024M
-
-QEMU_BIOS="${STONE_DATA_DIR}/${QEMU_BIOS_FILE}"
-
-# Build QEMU command arguments
 # The commas below belong to QEMU's own option syntax (sd-card,drive=mmc and
 # the -drive property list); they are not array element separators.
 # shellcheck disable=SC2054
-QEMU_ARGS=(
-  -bios "${QEMU_BIOS}"
-  -device sdhci-pci
-  -device sd-card,drive=mmc
-  -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc
+if [ -n "$QEMU_BIOS_FILE" ]; then
+  # QEMU's sd-card device requires a power-of-two backing size, so pad the
+  # image up to one: the smallest power-of-two MiB at least the image size,
+  # with a 1 GiB floor. Never shrink: qemu-img refuses to shrink a raw image
+  # without --shrink, which would abort here under set -e.
+  image_bytes=$(stat -c %s "$IMAGE_FILE")
+  resize_mib=1024
+  while [ $((resize_mib * 1024 * 1024)) -lt "$image_bytes" ]; do
+    resize_mib=$((resize_mib * 2))
+  done
+  if [ "$image_bytes" -ne $((resize_mib * 1024 * 1024)) ]; then
+    qemu-img resize -f raw "$IMAGE_FILE" "${resize_mib}M"
+  fi
+
+  QEMU_ARGS=(
+    -bios "${STONE_DATA_DIR}/${QEMU_BIOS_FILE}"
+    -device sdhci-pci
+    -device sd-card,drive=mmc
+    -drive file="${IMAGE_FILE}",if=none,format=raw,id=mmc
+  )
+else
+  # OVMF from the QEMU this SDK ships, beside its binary. The variable store is
+  # a writable copy per image, kept across runs so the boot entries an A/B
+  # update writes survive a restart. Delete it to start from empty variables.
+  QEMU_DATA_DIR="$(dirname "$(command -v "$QEMU_BINARY")")/../share/qemu"
+  OVMF_CODE="${QEMU_DATA_DIR}/edk2-x86_64-code.fd"
+  OVMF_VARS="${IMAGE_FILE%.img}-efivars.fd"
+  if [ ! -f "$OVMF_CODE" ]; then
+    echo "Error: UEFI firmware not found: $OVMF_CODE"
+    exit 1
+  fi
+  if [ ! -f "$OVMF_VARS" ]; then
+    cp "${QEMU_DATA_DIR}/edk2-i386-vars.fd" "$OVMF_VARS"
+  fi
+
+  # The manifest's rootdisk is /dev/vda: a virtio disk.
+  QEMU_ARGS=(
+    -drive if=pflash,format=raw,readonly=on,file="${OVMF_CODE}"
+    -drive if=pflash,format=raw,file="${OVMF_VARS}"
+    -drive file="${IMAGE_FILE}",if=virtio,format=raw
+  )
+fi
+
+QEMU_ARGS+=(
   -m "${MEMORY}"
   -smp "${SMP}"
   -cpu "${QEMU_CPU}"
