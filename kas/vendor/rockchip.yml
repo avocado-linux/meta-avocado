@@ -26,5 +26,6 @@ repos:
 local_conf_header:
   vendor-rockchip: |
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-rockchip-extra"
+    ROOTFS_IMAGE_EXTRA_INSTALL:append = " packagegroup-avocado-rockchip-rootfs"
     SDK_PKG_EXTRA_INSTALL:append = " packagegroup-avocado-rockchip-sdk"
     DISTRO_FEATURES_EXTRA:append = " opengl wayland seccomp virtualization"
