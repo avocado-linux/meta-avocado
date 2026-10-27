@@ -95,3 +95,14 @@ A board without a hook fails a project that declares an overlay or
 `boot_config` at `avocado install`, as it always has. Boards that honour
 `kernel.cmdline_extra` without a hook (NVIDIA Jetson, the NXP FIT path) have no
 capability file yet, so they give no warning either way.
+
+## Raspberry Pi: a `boot_config` line may need a driver
+
+A `boot_config` line reaches `config.txt` and the firmware acts on it, but the
+kernel still needs a driver to use the result. The base Raspberry Pi 5 rootfs
+carries no I2C controller driver, so `dtparam=i2c_arm=on` alone gives a device
+tree node that the firmware marks `okay` and nothing binds. Verified on a Pi 5
+from a current wrynose feed: with the line and an extension that also installs
+`kernel-module-i2c-designware-platform`, RP1's `i2c@74000` bound and `i2c-1`
+appeared. Install the driver module in the same extension that declares the
+line.
