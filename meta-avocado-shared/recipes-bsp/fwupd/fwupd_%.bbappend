@@ -12,3 +12,9 @@ do_install:append() {
     sed -i '/^\[fwupd\]$/a EspLocation=/boot' ${D}${sysconfdir}/fwupd/fwupd.conf
     grep -q '^EspLocation=/boot$' ${D}${sysconfdir}/fwupd/fwupd.conf
 }
+
+# With the ptest distro feature fwupd's tests are on, and meson setup runs the
+# gcab fwupd just built for the target. Without qemu-usermode (x86-64-v4: QEMU
+# cannot run AVX-512) meson has no exe_wrapper and setup fails, so build those
+# machines without the tests; their ptests could not run under QEMU anyway.
+PACKAGECONFIG:remove = "${@bb.utils.contains('MACHINE_FEATURES', 'qemu-usermode', '', 'tests', d)}"
