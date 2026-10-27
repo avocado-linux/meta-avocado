@@ -5,6 +5,12 @@ COMPATIBLE_MACHINE:avocado-amd-x86-64 = "avocado-amd-x86-64-v4"
 
 # Use upstream x86_64 defconfig as base, then layer our .cfg fragments on top
 KBUILD_DEFCONFIG:avocado-x86-64 = "x86_64_defconfig"
+# The in-tree defconfig is in savedefconfig form: it omits every option left at
+# its Kconfig default. kernel-yocto merges a defconfig with allnoconfig unless
+# told otherwise, which turns all of those off - UNIX among them, so systemd in
+# the initrd cannot open its notification socket and freezes before the root
+# is mounted. The AMD note below is the same failure.
+KCONFIG_MODE:avocado-x86-64 = "alldefconfig"
 
 SRC_URI:append:avocado-x86-64 = " \
     file://avocado-core.cfg \
