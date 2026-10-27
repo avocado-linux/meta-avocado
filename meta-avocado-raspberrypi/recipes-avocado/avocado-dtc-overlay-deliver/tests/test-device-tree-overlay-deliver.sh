@@ -309,6 +309,51 @@ if run_case chain-case '{"version": 1, "overlays": [], "boot_config": ["KERNEL =
 else
   ok "a boot-chain key is refused whatever its case or spacing"
 fi
+# Directives that take a space-separated value, not `key=value`, are boot-chain
+# keys too: the seeed machines append `initramfs <file> followkernel`, and the
+# key of such a line is its first word. The other keys here replace the code
+# that runs before the kernel (armstub), name the kernel command line file
+# (cmdline) or pull in a file the check never sees (include).
+i=0
+for line in 'initramfs other.cpio.zst followkernel' 'initramfs=other.cpio.zst' \
+  'ramfsfile=other.cpio.zst' 'armstub=armstub8.bin' 'cmdline=other.txt' \
+  'include other.txt' '  INITRAMFS other.cpio.zst followkernel'; do
+  i=$((i + 1))
+  name="chain-word-$i"
+  manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
+  if run_case "$name" "$manifest" "$stone_plain"; then
+    bad "hook accepted boot-chain line '$line'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]]; then
+      ok "boot_config '$line' is refused by line, with nothing written"
+    else
+      bad "'$line' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# A section header stays in effect for the rest of config.txt, and the boards
+# append their own lines after `include avocado-overlays.txt`, so a `[pi4]` or
+# `[none]` line would filter those out. Any line that opens a section is refused.
+i=0
+for line in '[pi4]' '[none]' '  [all]'; do
+  i=$((i + 1))
+  name="section-$i"
+  manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
+  if run_case "$name" "$manifest" "$stone_plain"; then
+    bad "hook accepted section header '$line'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]]; then
+      ok "section header '$line' is refused by line, with nothing written"
+    else
+      bad "'$line' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
 
 # Matching is on the whole key: device_tree_address is a different setting from
 # device_tree and must still be delivered.

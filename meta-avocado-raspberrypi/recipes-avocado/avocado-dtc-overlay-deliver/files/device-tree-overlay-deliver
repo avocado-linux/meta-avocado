@@ -24,6 +24,7 @@
 
 import json
 import os
+import re
 import sys
 
 
@@ -83,18 +84,40 @@ def overlay_line(overlay):
 
 # config.txt keys that decide what the firmware boots. One of these in an
 # extension makes the firmware bypass the image's own boot setup (A/B selection,
-# verified boot), so none may arrive through boot_config.
+# verified boot), so none may arrive through boot_config. `initramfs` and
+# `include` take a space-separated value rather than `=`, which is why a line's
+# key ends at the first `=` or whitespace.
 BOOT_CHAIN_KEYS = frozenset(
-    ["kernel", "os_prefix", "boot_partition", "device_tree", "start_file", "fixup_file"]
+    [
+        "kernel",
+        "os_prefix",
+        "boot_partition",
+        "device_tree",
+        "start_file",
+        "fixup_file",
+        "initramfs",
+        "ramfsfile",
+        "armstub",
+        "cmdline",
+        "include",
+    ]
 )
 
 
 def refuse_boot_chain_keys(boot_config):
     """The manifest carries boot_config as bare lines with no extension name,
     so the error names the line and its position; the CLI's own validation is
-    where a line is tied to its extension."""
+    where a line is tied to its extension.
+
+    A section header (`[pi4]`, `[none]`) is refused as well. It stays in effect
+    for the rest of config.txt, and the boards append their own lines after
+    `include avocado-overlays.txt`, so a header here would filter those out."""
     for idx, line in enumerate(boot_config):
-        key = line.partition("=")[0].strip().lower()
+        text = line.strip()
+        if text.startswith("["):
+            die(f"boot_config[{idx}] '{line}': a section header stays in effect "
+                "for the rest of config.txt, past this file; remove it")
+        key = re.split(r"[=\s]", text, maxsplit=1)[0].lower()
         if key in BOOT_CHAIN_KEYS:
             die(f"boot_config[{idx}] '{line}': '{key}' changes what the firmware "
                 "boots and would bypass the image's own boot setup; remove it")
