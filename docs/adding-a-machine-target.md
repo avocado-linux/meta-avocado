@@ -71,6 +71,7 @@ kas/machine/<machine>.yml          KAS build entry point
 | 12 | Kernel bbappend with avocado boilerplate | `meta-avocado-<target>/recipes-kernel/linux/<kernel>_%.bbappend` | Yes — see [Section 10](#10-kernel-configuration) |
 | 13 | BSP extension | `bsp/<machine-short-name>/avocado.yaml` | Recommended |
 | 14 | Security capability declaration | `AVOCADO_SECURITY_CAPABILITIES` in the machine conf | Yes — `""` if the machine delivers none; see [Security capabilities](#security-capabilities) |
+| 15 | Boot settings hook and capability file | a recipe for the package `avocado-dtc-overlay-deliver` in `meta-avocado-<target>/recipes-avocado/` (the Raspberry Pi layer and the Qualcomm layer each have one) | Only if the board can deliver device-tree overlays or `boot_config`; the capability file ships in that package. See [boot-settings.md](boot-settings.md) |
 
 ---
 
