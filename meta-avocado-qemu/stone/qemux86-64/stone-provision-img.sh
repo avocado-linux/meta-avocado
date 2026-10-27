@@ -160,6 +160,13 @@ resolve_image_filename() {
   fi
 }
 
+# Return an image's build_args.type, or "" when the image is a plain filename
+# string (jq errors if you index a string with .build_args, and `//` does not
+# rescue an error -- only null/false).
+image_build_type() {
+  jq -r --arg k "$1" '.storage_devices.rootdisk.images[$k] | if type == "object" then (.build_args.type // "") else "" end' "$MANIFEST"
+}
+
 # =============================================================================
 # Build boot image (FAT32 ESP) if needed
 # =============================================================================
@@ -169,7 +176,7 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   img_key="${PART_IMAGES[$i]}"
   if [ -z "$img_key" ]; then continue; fi
 
-  build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+  build_type=$(image_build_type "$img_key")
   if [ "$build_type" = "fat" ]; then
     BOOT_IMAGE_KEY="$img_key"
     break
@@ -191,25 +198,32 @@ if [ -n "$BOOT_IMAGE_KEY" ]; then
     exit 1
   fi
 
-  # Copy each file listed in build_args.files
+  # Copy each file listed in build_args.files. Track directories we've already
+  # created: running `mmd` on an existing directory makes mtools prompt on
+  # /dev/tty (hanging a non-interactive provision), so create each unique dir
+  # exactly once. stdin is redirected from /dev/null as a backstop.
+  declare -A CREATED_DIRS=()
   NUM_FILES=$(jq ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files | length" "$MANIFEST")
   for j in $(seq 0 $((NUM_FILES - 1))); do
     file_in=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].\"in\"" "$MANIFEST")
     file_out=$(jq -r ".storage_devices.rootdisk.images.\"${BOOT_IMAGE_KEY}\".build_args.files[$j].out" "$MANIFEST")
 
-    # Create parent directories
+    # Create parent directories (each unique path once, parents first)
     dir_path=$(dirname "$file_out")
     if [ "$dir_path" != "." ]; then
       IFS='/' read -ra DIR_PARTS <<<"$dir_path"
       current=""
       for part in "${DIR_PARTS[@]}"; do
         current="${current}/${part}"
-        mmd -i "$BOOT_IMG" "::${current}" 2>/dev/null || true
+        if [ -z "${CREATED_DIRS[$current]:-}" ]; then
+          mmd -i "$BOOT_IMG" "::${current}" </dev/null >/dev/null 2>&1 || true
+          CREATED_DIRS[$current]=1
+        fi
       done
     fi
 
     echo "  Adding: ${file_in} -> ${file_out}"
-    mcopy -i "$BOOT_IMG" "${DATA_DIR}/${file_in}" "::${file_out}"
+    mcopy -i "$BOOT_IMG" "${DATA_DIR}/${file_in}" "::${file_out}" </dev/null
   done
 
   echo "  FAT boot image created: ${BOOT_IMG}"
@@ -225,7 +239,7 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   if [ -z "$img_key" ]; then continue; fi
 
   # Resolve the actual image file path
-  build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".build_args.type // \"\"" "$MANIFEST")
+  build_type=$(image_build_type "$img_key")
   if [ "$build_type" = "fat" ]; then
     # FAT image was built above
     img_out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$MANIFEST")
