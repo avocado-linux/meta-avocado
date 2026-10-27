@@ -120,7 +120,9 @@ jobs:
   # Host tests for shell scripts that run on the device. They need no build and
   # do not depend on the composition, so they run once rather than per arch,
   # in the same image as the parse. test-rootfs-ab-target.sh runs the real
-  # swupdate scripts under the image's /bin/sh (dash).
+  # swupdate scripts under the image's /bin/sh (dash). The stone
+  # provision-img tests run the whole script against real sgdisk, mkfs.fat and
+  # mtools, which the image does not carry, so the job installs them.
   #
   # Not wired: stone/tegra/tests/test-initrd-rootfs-select.sh needs hexdump,
   # and this image has none on PATH. Wire it once the image carries hexdump.
@@ -149,3 +151,14 @@ jobs:
       - name: NanoPi R5S disk image layout and U-Boot env offsets
         shell: bash
         run: sh meta-avocado-rockchip/stone/nanopi-r5s/tests/test-build-disk-image.sh
+      - name: Install disk image tools for the stone provision-img tests
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gdisk dosfstools mtools
+      - name: amd-x86-64-v4 stone provision-img
+        shell: bash
+        run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh
+      - name: qemux86-64 stone provision-img
+        shell: bash
+        run: bash meta-avocado-qemu/stone/qemux86-64/tests/test-stone-provision-img.sh
