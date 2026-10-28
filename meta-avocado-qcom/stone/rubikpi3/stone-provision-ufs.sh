@@ -99,21 +99,22 @@ if [ -n "$efi_name" ]; then
   cp "$efi_file" efi.bin
 fi
 
-# 4b. Select which XBL hypervisor config is flashed as xbl_config.elf. The
-#     bootfiles carry xbl_config_gunyah.elf and xbl_config_kvm.elf (same size);
-#     the rawprogram XMLs flash whatever sits at xbl_config.elf.
-#       gunyah (default): Gunyah owns EL2 but is dormant -- no /dev/kvm, no guest
-#         VMs -- and the DSP/GPU secure firmware (PAS: cdsp/adsp, a660 zap) loads
-#         and authenticates. This is the right default for GPU/NPU images.
-#       kvm: Linux owns EL2, /dev/kvm and guest VMs work, but PAS auth fails
-#         (-22) -- KVM does not provide the Qualcomm secure-memory mediation the
-#         TZ expects, so cdsp/adsp/gpu-zap will not load.
-#     Override per-provision with AVOCADO_HYPERVISOR, e.g.
-#       avocado provision --env AVOCADO_HYPERVISOR=kvm
+# 4b. The XBL hypervisor config flashed as xbl_config.elf. The bootfiles carry
+#     xbl_config_gunyah.elf and xbl_config_kvm.elf, and xbl_config.elf is the
+#     one the build chose (QCOM_XBL_CONFIG_VARIANT; kvm on qcs6490, where the
+#     kernel's device tree carries the kodiak-el2 overlay for Linux at EL2).
+#     The rawprogram XMLs flash whatever sits at xbl_config.elf, so by default
+#     this flashes the build's choice: a config that disagrees with the image's
+#     device tree leaves the board silent after "UEFI End".
+#       gunyah: Gunyah owns EL2, no /dev/kvm or guest VMs.
+#       kvm:    Linux owns EL2; /dev/kvm and guest VMs work.
+#     AVOCADO_HYPERVISOR overrides it per provision, e.g.
+#       avocado provision --env AVOCADO_HYPERVISOR=gunyah
 #     This is a boot-partition choice written at flash time; it is orthogonal to
 #     A/B OS updates (both slots share xbl_config).
-hypervisor="${AVOCADO_HYPERVISOR:-gunyah}"
+hypervisor="${AVOCADO_HYPERVISOR:-}"
 case "$hypervisor" in
+  "") xbl_variant="" ;;
   gunyah | none) xbl_variant=gunyah ;;
   kvm) xbl_variant=kvm ;;
   *)
@@ -121,11 +122,14 @@ case "$hypervisor" in
     exit 1
     ;;
 esac
-if [ -f "xbl_config_${xbl_variant}.elf" ]; then
+if [ -z "$xbl_variant" ]; then
+  echo "XBL config: the build's xbl_config.elf (AVOCADO_HYPERVISOR unset)"
+elif [ -f "xbl_config_${xbl_variant}.elf" ]; then
   echo "Selecting XBL config: ${xbl_variant} (AVOCADO_HYPERVISOR=${hypervisor})"
   cp "xbl_config_${xbl_variant}.elf" xbl_config.elf
 else
-  echo "WARNING: xbl_config_${xbl_variant}.elf not in bootfiles; flashing xbl_config.elf as-is" >&2
+  echo "ERROR: AVOCADO_HYPERVISOR=${hypervisor}, but xbl_config_${xbl_variant}.elf is not in the bootfiles" >&2
+  exit 1
 fi
 
 # 5. Wait for QDL device on USB
