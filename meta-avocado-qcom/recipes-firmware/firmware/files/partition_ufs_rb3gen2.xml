@@ -55,7 +55,7 @@
 		<!-- These are the 'A' partition's needed for the A/B boot/ota update feature. A and B partitions must have differrent GUID's.  -->
         <partition label="aop_a" 			size_in_kb="512" 		type="D69E90A5-4CAB-0071-F6DF-AB977F141A7F" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="aop.mbn"/>
 		<partition label="dtb_a" 			size_in_kb="65536" 		type="2A1A52FC-AA0B-401C-A808-5EA0F91068F8" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="dtb.bin"/>
-		<partition label="apdp_a" 			size_in_kb="256" 		type="E6E98DA2-E22A-4D12-AB33-169E7DEAA507" bootable="false" readonly=" false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="apdp_a" 			size_in_kb="256" 		type="E6E98DA2-E22A-4D12-AB33-169E7DEAA507" bootable="false" readonly=" false" 	system="true" dontautomount="true" filename="zeros_33sectors.bin"/>
 		<partition label="xbl_ramdump_a" 	size_in_kb="2048" 		type="0382F197-E41F-4E84-B18B-0B564AEAD875" bootable="false" readonly="false" 	system="true" dontautomount="true" filename="XblRamdump.elf"/>
 		<partition label="uefi_a" 			size_in_kb="5120" 		type="400FFDCD-22E0-47E7-9A23-F16ED9382388" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="uefi.elf"/>
 		<partition label="tz_a" 			size_in_kb="4096" 		type="A053AA7F-40B8-4B1C-BA08-2F68AC71A4F4" bootable="false" readonly="true" 	system="true" dontautomount="true" filename="tz.mbn"/>
@@ -74,7 +74,7 @@
 		<!-- These are the 'B' partition's needed for the A/B bo	ot/ota UPDATE FEATURE. A AND B PARTITIONS must have differrent GUID's.  -->	
 		
 		<partition label="aop_b" 			size_in_kb="512" 		type="B8B27C4C-4B5B-8AB2-502F-A792B590A896" bootable="false" readonly="false" 	system="true" dontautomount="true" filename=""/>
-		<partition label="apdp_b" 			size_in_kb="256" 		type="110F198D-8174-4193-9AF1-5DA94CDC59C9" bootable="false" readonly=" false" 	system="true" dontautomount="true" filename=""/>
+		<partition label="apdp_b" 			size_in_kb="256" 		type="110F198D-8174-4193-9AF1-5DA94CDC59C9" bootable="false" readonly=" false" 	system="true" dontautomount="true" filename="zeros_33sectors.bin"/>
         <partition label="dtb_b" 			size_in_kb="65536" 		type="A166F11A-2B39-4FAA-B7E7-F8AA080D0587" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
 		<partition label="xbl_ramdump_b" 	size_in_kb="2048" 		type="FF608BF6-AEDF-4084-BEC5-C92AB4E4534D" bootable="false" readonly="false"	system="true" dontautomount="true" filename=""/>
 		<partition label="uefi_b" 			size_in_kb="5120" 		type="9F234B5B-0EFB-4313-8E4C-0AF1F605536B" bootable="false" readonly="true" 	system="true" dontautomount="true" filename=""/>
