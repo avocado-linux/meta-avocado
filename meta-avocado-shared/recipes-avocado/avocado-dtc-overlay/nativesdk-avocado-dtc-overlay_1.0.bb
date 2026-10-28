@@ -5,9 +5,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 # The package name is a contract: avocado-cli installs exactly
 # `nativesdk-avocado-dtc-overlay` into the SDK when a runtime declares
-# device_tree_overlays and calls exactly `avocado-dtc-overlay`. The Qualcomm
-# layer ships its own wrapper under the same name; the two never share a build
-# because only one BSP's layers are present in a machine build.
+# device_tree_overlays and calls exactly `avocado-dtc-overlay`. It lives here,
+# not in a BSP layer, because compiling an overlay is the same on every board:
+# each BSP's SDK pulls it in from its avocado-sdk-target.bbappend.
 
 SRC_URI = "file://avocado-dtc-overlay"
 

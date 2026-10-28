@@ -95,12 +95,35 @@ Claims themselves are unchanged: one per overlay, and one for the whole
 |---|---|---|---|
 | Raspberry Pi | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
 | Qualcomm | yes | yes | `dt_overlay`, `kernel_args` |
+| NXP i.MX, loose-file U-Boot boot (ucm-imx8m-plus) | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
 | All others | no | no | not stated; unchanged behaviour |
 
 A board without a hook fails a project that declares an overlay or
 `boot_config` at `avocado install`, as it always has. Boards that honour
 `kernel.cmdline_extra` without a hook (NVIDIA Jetson, the NXP FIT path) have no
 capability file yet, so they give no warning either way.
+
+## NXP i.MX: overlays and the base device tree through U-Boot
+
+On the NXP boards whose U-Boot env boots loose files from the slot's boot FAT,
+the hook puts each project overlay under `overlays/<name>.dtbo` and writes
+`avocado-overlays.txt` beside the kernel. The env imports exactly two variables
+from it at boot and applies the overlays in the order the project lists them:
+
+```text
+avocado_fdt_overlays=overlays/my-spi.dtbo ucm-imx8m-plus-can.dtbo
+avocado_devicetree_file=iot-gate-imx8plus.dtb
+```
+
+A stock overlay the BSP already places on the boot FAT is applied from where it
+is. `boot_config` takes only `devicetree_file=<a .dtb the boot FAT ships>`,
+which picks the base tree for a carrier (the CompuLab gateway, say) without a
+separate machine; any other key is refused, because every U-Boot variable can
+change what boots. Overlay `params` are refused too: `fdt apply` takes none.
+
+Boards that boot a signed FIT (imx8mp-evk, imx93-frdm) are not served: their
+device tree travels inside the FIT, and a loose overlay would be applied
+outside its signature. Overlays there belong in the FIT the CLI rebuilds.
 
 ## Raspberry Pi: a `boot_config` line may need a driver
 

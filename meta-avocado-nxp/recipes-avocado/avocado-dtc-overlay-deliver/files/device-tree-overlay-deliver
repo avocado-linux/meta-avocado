@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+
+# NXP i.MX device-tree overlay delivery hook, for boards whose U-Boot env boots
+# loose files (Image, a .dtb and the initramfs) from the slot's boot FAT.
+#
+# The avocado CLI stages compiled .dtbo files plus an overlays.manifest.json and
+# then runs this hook (the single fixed-path hook at
+# usr/libexec/avocado/device-tree-overlay-deliver) before `stone bundle`. Only
+# one BSP's implementation of this path is ever installed in a given machine
+# build.
+#
+# Delivery is additive, never a rewrite of a shipped file:
+#   1. each declared <name>.dtbo -> the boot FAT under overlays/<name>.dtbo;
+#      a stock overlay (one the BSP builds) is used where the FAT already
+#      carries it, and added under overlays/ otherwise;
+#   2. avocado-overlays.txt -> the boot FAT root, holding
+#        avocado_fdt_overlays=<boot FAT path> ...
+#        avocado_devicetree_file=<base .dtb>        (only if boot_config sets it)
+#      The machine's U-Boot env imports exactly those two variables from it
+#      (avocado_import_overlays), loads avocado_devicetree_file in place of its
+#      default devicetree_file, and fdt-applies each path in order
+#      (apply_overlays). Nothing else in the file can reach the environment.
+#
+# Both land through a stone `files_append` manifest fragment that the CLI passes
+# to `stone bundle --overlay`. The hook records `claimed_by` so the CLI can fail
+# a build in which a declared overlay went undelivered.
+#
+# A board that boots a FIT (imx8mp-evk, imx93-frdm) is refused: its device tree
+# travels inside the signed FIT, so a loose .dtbo on the FAT would be applied
+# outside the signature. Overlays there have to go into the FIT.
+
+import json
+import os
+import re
+import sys
+
+KERNEL_NAMES = ("Image", "Image.gz", "zImage")
+OVERLAY_LIST_FILE = "avocado-overlays.txt"
+
+# boot_config keys this board takes, mapped to the U-Boot variable they set.
+# An allowlist, not a denylist: every U-Boot variable can be run as a script,
+# so anything not named here could change what boots.
+BOOT_CONFIG_KEYS = {"devicetree_file": "avocado_devicetree_file"}
+
+SAFE_PATH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
+
+
+def die(msg):
+    sys.exit(f"[ERROR] device-tree-overlay-deliver (nxp): {msg}")
+
+
+def env(name):
+    value = os.environ.get(name)
+    if not value:
+        die(f"missing required environment variable {name}")
+    return value
+
+
+def fat_outputs(img):
+    """Every output path a FAT image already ships."""
+    outs = []
+    for entry in img.get("build_args", {}).get("files", []):
+        outs.append(entry.get("out") if isinstance(entry, dict) else entry)
+    return outs
+
+
+def find_boot_fat(stone):
+    """Locate the FAT image that carries the kernel, returning
+    (device_key, image_key, image). Every match is collected rather than the
+    first returned: a second kernel-bearing FAT would otherwise decide the
+    delivery target by where it happens to sit in the file."""
+    matches = []
+    for dev_key, dev in stone.get("storage_devices", {}).items():
+        for img_key, img in (dev.get("images") or {}).items():
+            if not isinstance(img, dict):
+                continue
+            if img.get("build_args", {}).get("type") != "fat":
+                continue
+            names = [str(out).rsplit("/", 1)[-1] for out in fat_outputs(img)]
+            if "fitImage" in names:
+                die(f"{dev_key}/{img_key} boots a FIT, which carries the device "
+                    "tree under its signature; this hook only places loose "
+                    "overlays and cannot deliver into a FIT")
+            if any(n in KERNEL_NAMES for n in names):
+                matches.append((dev_key, img_key, img))
+    if not matches:
+        die("no FAT image ships a kernel in the stone manifest; cannot place overlays")
+    if len(matches) > 1:
+        named = ", ".join(f"{d}/{i}" for d, i, _ in matches)
+        die(f"more than one FAT image ships a kernel ({named}); "
+            "cannot tell which is the boot FAT")
+    return matches[0]
+
+
+def parse_boot_config(boot_config, shipped):
+    """Turn boot_config lines into U-Boot variables. Each line is key=value with
+    a key from BOOT_CONFIG_KEYS; the value is a path the boot FAT already
+    ships, so a typo fails the build instead of the boot."""
+    variables = {}
+    for idx, line in enumerate(boot_config):
+        key, sep, value = line.strip().partition("=")
+        key, value = key.strip(), value.strip()
+        if not sep or key not in BOOT_CONFIG_KEYS:
+            allowed = ", ".join(sorted(BOOT_CONFIG_KEYS))
+            die(f"boot_config[{idx}] '{line}': this board takes only "
+                f"key=value lines with a key from: {allowed}")
+        if not SAFE_PATH.match(value) or any(p in (".", "..") for p in value.split("/")):
+            die(f"boot_config[{idx}] '{line}': '{value}' is not a plain path")
+        if value not in shipped:
+            die(f"boot_config[{idx}] '{line}': the boot FAT ships no '{value}'")
+        if BOOT_CONFIG_KEYS[key] in variables:
+            die(f"boot_config[{idx}] '{line}': {key} is set more than once")
+        variables[BOOT_CONFIG_KEYS[key]] = value
+    return variables
+
+
+def main():
+    staging = env("AVOCADO_DTBO_STAGING")
+    manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
+    fragment_path = env("AVOCADO_DELIVERY_FRAGMENT")
+    stone_path = env("AVOCADO_STONE_MANIFEST")
+
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    if manifest.get("version") != 1:
+        die("overlays.manifest.json: unsupported version")
+    overlays = manifest.get("overlays", [])
+    boot_config = manifest.get("boot_config", [])
+    if not overlays and not boot_config:
+        die("hook invoked with no overlays or boot_config to deliver")
+
+    with open(stone_path) as f:
+        stone = json.load(f)
+    dev_key, img_key, boot_img = find_boot_fat(stone)
+    platform = stone.get("runtime", {}).get("platform", "nxp")
+    shipped = set(fat_outputs(boot_img))
+
+    variables = parse_boot_config(boot_config, shipped)
+
+    # U-Boot applies overlays/<name>.dtbo only if that is where the blob went.
+    for ov in overlays:
+        if ov.get("params"):
+            die(f"overlay '{ov['name']}' has params; U-Boot's fdt apply takes "
+                "no parameters, so set them in the overlay source")
+        if not ov.get("stock") and ov["file"] != f"{ov['name']}.dtbo":
+            die(f"overlay '{ov['name']}' ships as '{ov['file']}'; "
+                "file must be <name>.dtbo")
+
+    files_append = []
+    paths = []
+    for ov in overlays:
+        if ov.get("stock") and ov["file"] in shipped:
+            paths.append(ov["file"])
+            continue
+        out = f"overlays/{ov['file']}"
+        if not ov.get("stock") and out in shipped:
+            die(f"{ov['name']}: the BSP already ships {out} on the boot FAT; "
+                "rename the overlay")
+        files_append.append({"in": ov["file"], "out": out})
+        paths.append(out)
+
+    lines = []
+    if paths:
+        lines.append(f"avocado_fdt_overlays={' '.join(paths)}")
+    lines += [f"{var}={value}" for var, value in sorted(variables.items())]
+    with open(os.path.join(staging, OVERLAY_LIST_FILE), "w") as f:
+        f.write("".join(line + "\n" for line in lines))
+    files_append.append({"in": OVERLAY_LIST_FILE, "out": OVERLAY_LIST_FILE})
+
+    fragment = {
+        "storage_devices": {
+            dev_key: {"images": {img_key: {"build_args": {"files_append": files_append}}}}
+        }
+    }
+    with open(fragment_path, "w") as f:
+        json.dump(fragment, f, indent=2)
+
+    for ov in overlays:
+        ov["claimed_by"] = platform
+    if boot_config:
+        manifest["boot_config_claimed_by"] = platform
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) and "
+          f"{len(boot_config)} boot_config line(s) to {dev_key}/{img_key} "
+          f"for {platform}: {' '.join(paths) or '-'}")
+
+
+if __name__ == "__main__":
+    main()
