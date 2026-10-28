@@ -16,7 +16,13 @@ an image that quietly ignores it.
 
 The ids are the contract with avocado-cli. `boot_config` lines are written
 verbatim, so what a line means is the board's decision; on a Raspberry Pi they
-go into `avocado-overlays.txt`, which `config.txt` includes.
+go into `avocado-overlays.txt`, which `config.txt` includes. The Raspberry Pi
+hook refuses the keys that choose what the firmware boots (`kernel`,
+`os_prefix`, `boot_partition`, `device_tree`, `start_file`, `fixup_file`,
+`initramfs`, `ramfsfile`, `armstub`, `cmdline`, `include`), since one of them
+bypasses the image's own boot setup, and any line that opens a section
+(`[pi4]`, `[none]`), which would stay in effect for the lines `config.txt`
+carries after the include. It names the offending line and position.
 
 ## The capability file
 

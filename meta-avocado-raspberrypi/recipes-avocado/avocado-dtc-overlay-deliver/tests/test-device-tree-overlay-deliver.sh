@@ -282,6 +282,89 @@ else
   bad "hook refused a stock overlay the BSP already ships: $(cat "$work/case-shipped/err")"
 fi
 
+# A boot_config line that changes the boot chain would make the firmware bypass
+# the image's own boot setup (A/B selection, verified boot), so the hook refuses
+# each such key, names the line, and writes nothing.
+for line in 'kernel=other.img' 'os_prefix=alt/' 'boot_partition=2' \
+  'device_tree=other.dtb' 'start_file=start_x.elf' 'fixup_file=fixup_x.dat'; do
+  key="${line%%=*}"
+  name="chain-$key"
+  if run_case "$name" "{\"version\": 1, \"overlays\": [], \"boot_config\": [\"dtparam=i2c_arm=on\", \"$line\"], \"boot_config_claimed_by\": null}" "$stone_plain"; then
+    bad "hook accepted boot-chain key '$key'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]] \
+      && [[ "$(jq -r '.boot_config_claimed_by' "$d/overlays.manifest.json")" == "null" ]]; then
+      ok "boot_config '$key=' is refused by line, with nothing written or claimed"
+    else
+      bad "'$key=' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# Case and surrounding space do not get a boot-chain key past the check.
+if run_case chain-case '{"version": 1, "overlays": [], "boot_config": ["KERNEL = other.img"], "boot_config_claimed_by": null}' "$stone_plain"; then
+  bad "hook accepted 'KERNEL = other.img'"
+else
+  ok "a boot-chain key is refused whatever its case or spacing"
+fi
+# Directives that take a space-separated value, not `key=value`, are boot-chain
+# keys too: the seeed machines append `initramfs <file> followkernel`, and the
+# key of such a line is its first word. The other keys here replace the code
+# that runs before the kernel (armstub), name the kernel command line file
+# (cmdline) or pull in a file the check never sees (include).
+i=0
+for line in 'initramfs other.cpio.zst followkernel' 'initramfs=other.cpio.zst' \
+  'ramfsfile=other.cpio.zst' 'armstub=armstub8.bin' 'cmdline=other.txt' \
+  'include other.txt' '  INITRAMFS other.cpio.zst followkernel'; do
+  i=$((i + 1))
+  name="chain-word-$i"
+  manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
+  if run_case "$name" "$manifest" "$stone_plain"; then
+    bad "hook accepted boot-chain line '$line'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]]; then
+      ok "boot_config '$line' is refused by line, with nothing written"
+    else
+      bad "'$line' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# A section header stays in effect for the rest of config.txt, and the boards
+# append their own lines after `include avocado-overlays.txt`, so a `[pi4]` or
+# `[none]` line would filter those out. Any line that opens a section is refused.
+i=0
+for line in '[pi4]' '[none]' '  [all]'; do
+  i=$((i + 1))
+  name="section-$i"
+  manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
+  if run_case "$name" "$manifest" "$stone_plain"; then
+    bad "hook accepted section header '$line'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]]; then
+      ok "section header '$line' is refused by line, with nothing written"
+    else
+      bad "'$line' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# Matching is on the whole key: device_tree_address is a different setting from
+# device_tree and must still be delivered.
+if run_case chain-near '{"version": 1, "overlays": [], "boot_config": ["device_tree_address=0x2000000", "kernel_address=0x80000"], "boot_config_claimed_by": null}' "$stone_plain" \
+  && grep -qx 'device_tree_address=0x2000000' "$work/case-chain-near/avocado-overlays.txt" \
+  && grep -qx 'kernel_address=0x80000' "$work/case-chain-near/avocado-overlays.txt"; then
+  ok "keys that only share a prefix with a boot-chain key are delivered"
+else
+  bad "a near-miss key was refused or not written: $(cat "$work/case-chain-near/err" 2>/dev/null)"
+fi
+
 # Nothing to deliver is an invocation error, not a silent success.
 if run_case empty '{"version": 1, "overlays": [], "boot_config": [], "boot_config_claimed_by": null}' "$stone_plain"; then
   bad "hook accepted a manifest with neither overlays nor boot_config"
