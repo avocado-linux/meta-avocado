@@ -162,3 +162,6 @@ jobs:
       - name: qemux86-64 stone provision-img
         shell: bash
         run: bash meta-avocado-qemu/stone/qemux86-64/tests/test-stone-provision-img.sh
+      - name: QEMU SDK vm helper
+        shell: bash
+        run: bash meta-avocado-qemu/recipes-avocado/sdk/tests/test-vm.sh
