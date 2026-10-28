@@ -16,3 +16,12 @@ RDEPENDS:${PN}:append = " \
 RDEPENDS:${PN}:append:mx8m-generic-bsp = " nativesdk-imx-mkimage-tools nativesdk-lz4"
 RDEPENDS:${PN}:append:mx91-generic-bsp = " nativesdk-imx-mkimage-tools"
 RDEPENDS:${PN}:append:mx93-generic-bsp = " nativesdk-imx-mkimage-tools"
+
+# Compiles the device-tree overlays a project declares with a `src`, on the
+# boards that deliver them (avocado-dtc-overlay-deliver in their feed). DEPENDS
+# as well as RDEPENDS: RDEPENDS alone leaves the wrapper out of the build, and
+# the SDK install then fails on a package the feed does not have.
+RDEPENDS:${PN}:append:ucm-imx8m-plus = " nativesdk-avocado-dtc-overlay"
+DEPENDS:append:ucm-imx8m-plus = " nativesdk-avocado-dtc-overlay"
+RDEPENDS:${PN}:append:imx95-frdm = " nativesdk-avocado-dtc-overlay"
+DEPENDS:append:imx95-frdm = " nativesdk-avocado-dtc-overlay"

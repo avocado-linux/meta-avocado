@@ -17,6 +17,7 @@ rootdev=/dev/mmcblk${mmcblk}p5
 image_addr=0x80200000
 fdt_addr=0x83000000
 fdt_overlay_addr=0x83100000
+overlay_env_addr=0x83f00000
 ramdisk_addr=0x84000000
 
 # Slot A/B only: no recovery partition. An unset or invalid slot boots A.
@@ -36,17 +37,38 @@ avocado_boot_init=\
   setenv bootargs audit=0 console=${console} root=${rootdev} rootwait;
 
 load_image=load ${devtype} ${devnum}:${bootpart} ${image_addr} ${kernel_file}
-load_devicetree=load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file}
+# The project's choices from avocado.yaml, delivered at build time by the
+# device-tree-overlay-deliver hook as avocado-overlays.txt on this slot's boot
+# FAT: avocado_fdt_overlays (boot FAT paths of .dtbo files) and
+# avocado_devicetree_file (a base .dtb in place of devicetree_file). The import
+# names those two variables, so no other line in the file can reach the
+# environment, and it clears them first, so a slot without the file (no
+# overlays declared, the common case) boots the machine defaults.
+avocado_import_overlays=\
+  setenv avocado_fdt_overlays;\
+  setenv avocado_devicetree_file;\
+  if load ${devtype} ${devnum}:${bootpart} ${overlay_env_addr} avocado-overlays.txt; then\
+    env import -t ${overlay_env_addr} ${filesize} avocado_fdt_overlays avocado_devicetree_file;\
+  fi;\
+  true
+
+load_devicetree=\
+  if test -n "${avocado_devicetree_file}"; then\
+    load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${avocado_devicetree_file};\
+  else\
+    load ${devtype} ${devnum}:${bootpart} ${fdt_addr} ${devicetree_file};\
+  fi
 load_initramfs=load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr} ${initramfs_file}
 
-# Apply each overlay in ${fdt_overlays} onto the loaded base DTB. Needs the base
+# Apply each overlay onto the loaded base DTB: first the project's
+# (avocado_fdt_overlays), then any selected on the device (fdt_overlays). Needs the base
 # built with -@ (symbols) and u-boot CONFIG_OF_LIBFDT_OVERLAY (see avocado.cfg).
 # resize gives libfdt headroom for the overlay fragments; a missing/bad overlay
 # warns and is skipped rather than aborting the boot.
 apply_overlays=\
   fdt addr ${fdt_addr};\
   fdt resize 0x40000;\
-  for ov in ${fdt_overlays}; do\
+  for ov in ${avocado_fdt_overlays} ${fdt_overlays}; do\
     echo "Applying DT overlay ${ov}";\
     if load ${devtype} ${devnum}:${bootpart} ${fdt_overlay_addr} ${ov}; then\
       fdt apply ${fdt_overlay_addr} || echo "WARN: fdt apply ${ov} failed";\
@@ -57,4 +79,4 @@ apply_overlays=\
 
 avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
 
-bootcmd=run avocado_boot_init load_image load_devicetree apply_overlays load_initramfs avocado_boot
+bootcmd=run avocado_boot_init avocado_import_overlays load_image load_devicetree apply_overlays load_initramfs avocado_boot
