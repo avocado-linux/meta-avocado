@@ -120,10 +120,17 @@ RDEPENDS:${PN}:append:rubikpi3 = " \
 # Wifi and Bluetooth are WCN6750 on this board, not the part the qcm6490 block's
 # firmware covers.
 #
-# Deliberately NOT here: the Hexagon DSP binaries, the QAIRT SDK and
-# camxfirmware-kodiak. Those are the compute and camera stacks, they are large,
-# and the camera path on an upstream kernel needs CamX -- which is the harder
-# half of Vision Kit support and is not attempted by naming a firmware package.
+# hexagon-dsp-binaries-thundercomm-rb3gen2-cdsp is the CDSP's FastRPC shell
+# (fastrpc_shell_3 and its unsigned twin) plus the conf.d entry that maps this
+# board's DT model to it. The CDSP boots without it, but every FastRPC session
+# fails (0x80000600), so nothing can run on the NPU. It pins
+# linux-firmware-qcom-qcm6490-compute to its own version, which keeps the shell
+# matched to the cdsp.mbn it runs on.
+#
+# Deliberately NOT here: the QAIRT SDK and camxfirmware-kodiak. Those are the
+# NN runtime and camera stacks, they are large, and the camera path on an
+# upstream kernel needs CamX -- which is the harder half of Vision Kit support
+# and is not attempted by naming a firmware package.
 # The RubikPi needs the same shared-memory driver as the RB3 Gen 2: `vmm` is
 # one extension shared by every target of the inter-VM reference, and it names
 # kernel-module-avocado-shm unconditionally. Without this the RubikPi fails
@@ -142,6 +149,7 @@ RDEPENDS:${PN}:append:rubikpi3 = " kernel-module-avocado-shm"
 # file -- the extension decides what lands on the device. exmp-q911 gets the
 # same package through its own bbappend.
 RDEPENDS:${PN}:append:rb3gen2 = " \
+    hexagon-dsp-binaries-thundercomm-rb3gen2-cdsp \
     qps615-dlkm \
     qps615-firmware \
     kernel-module-avocado-shm \
