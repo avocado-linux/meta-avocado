@@ -155,7 +155,10 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gdisk dosfstools mtools
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gdisk dosfstools mtools device-tree-compiler cpp
+      - name: avocado-dtc-overlay (SDK overlay compiler)
+        shell: bash
+        run: bash meta-avocado-shared/recipes-avocado/avocado-dtc-overlay/tests/test-avocado-dtc-overlay.sh
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh
