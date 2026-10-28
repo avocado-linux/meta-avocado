@@ -34,3 +34,10 @@ local_conf_header:
     # nxp-demo-experience comes from meta-imx-demo, which Avocado does not
     # vendor, so the CompuLab append has nothing to attach to.
     BBMASK += "meta-bsp-imx8mp/recipes-nxp-demo-experience/"
+    # meta-bsp-imx8mp builds u-boot and the kernel from CompuLab's branch tips
+    # (AUTOREV): every parse runs `git ls-remote` and every build takes
+    # whatever was pushed last. Pin them; bump together with the layer above.
+    SRCREV:pn-u-boot-compulab = "a6efdcc99eb71a14f7778187ad97f11a153c6a80"
+    SRCREV:pn-compulab-bootloader = "a6efdcc99eb71a14f7778187ad97f11a153c6a80"
+    SRCREV:pn-linux-compulab = "88176b86a91ae88c434f57fcca2e4081bb3ca65a"
+    SRCREV:pn-linux-compulab-mfgtool = "88176b86a91ae88c434f57fcca2e4081bb3ca65a"
