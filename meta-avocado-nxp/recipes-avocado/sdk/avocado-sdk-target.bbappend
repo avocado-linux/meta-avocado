@@ -23,3 +23,5 @@ RDEPENDS:${PN}:append:mx93-generic-bsp = " nativesdk-imx-mkimage-tools"
 # the SDK install then fails on a package the feed does not have.
 RDEPENDS:${PN}:append:ucm-imx8m-plus = " nativesdk-avocado-dtc-overlay"
 DEPENDS:append:ucm-imx8m-plus = " nativesdk-avocado-dtc-overlay"
+RDEPENDS:${PN}:append:imx95-frdm = " nativesdk-avocado-dtc-overlay"
+DEPENDS:append:imx95-frdm = " nativesdk-avocado-dtc-overlay"

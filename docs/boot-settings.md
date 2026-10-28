@@ -95,7 +95,7 @@ Claims themselves are unchanged: one per overlay, and one for the whole
 |---|---|---|---|
 | Raspberry Pi | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
 | Qualcomm | yes | yes | `dt_overlay`, `kernel_args` |
-| NXP i.MX, loose-file U-Boot boot (ucm-imx8m-plus) | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
+| NXP i.MX, loose-file U-Boot boot (ucm-imx8m-plus, imx95-frdm) | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
 | All others | no | no | not stated; unchanged behaviour |
 
 A board without a hook fails a project that declares an overlay or

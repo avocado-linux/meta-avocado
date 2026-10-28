@@ -38,6 +38,10 @@ SRC_URI:append:imx91-frdm = "${@bb.utils.contains('DISTRO_FEATURES', 'ahab', ' f
 # the same symbols are on in the imx8mp-evk, imx91/93/95-frdm defconfigs alike.
 SRC_URI:append:class-target = " file://disable-unused-vendor-features.cfg"
 
+# dt-overlays.cfg: the U-Boot commands that apply a project's device-tree
+# overlays at boot, on the loose-file boards whose env does so.
+SRC_URI:append:imx95-frdm = " file://dt-overlays.cfg"
+
 # fit.cfg enables base FIT container support (CONFIG_FIT) on every u-boot-imx
 # board. Capability, not policy: it is already =y in the stock imx8m/imx9
 # defconfigs and costs nothing where the env still boots loose files, and a

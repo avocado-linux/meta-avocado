@@ -45,3 +45,8 @@ RDEPENDS:${PN} = " \
   kernel-modules \
   wireless-regdb-static \
 "
+
+# avocado-dtc-overlay-deliver: the device-tree overlay hook avocado-cli installs
+# when a project declares device_tree_overlays or boot_config. Only on boards
+# whose U-Boot env applies the overlays it delivers.
+RDEPENDS:${PN}:append:imx95-frdm = " avocado-dtc-overlay-deliver"
