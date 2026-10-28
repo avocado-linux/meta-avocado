@@ -60,6 +60,7 @@ python do_compile() {
     pkg_archs = (d.getVar('PACKAGE_ARCHS') or "").split()
     sdk_pkg_archs = (d.getVar('SDK_PACKAGE_ARCHS') or "").split()
     gpg_check = d.getVar('AVOCADO_REPO_GPGCHECK') or '0'
+    pertarget = (d.getVar('AVOCADO_PERTARGET_REPOS') or '0') == '1'
     sdk_repo_archs = (d.getVar('AVOCADO_SDK_REPO_ARCHS') or "").split()
     sdk_repo_archs_underscore = (d.getVar('AVOCADO_SDK_REPO_ARCHS_UNDERSCORE') or "").split()
 
@@ -110,9 +111,15 @@ python do_compile() {
 
         arch_dir = arch.replace('-', '_')
 
-        # Only include archs that have directories in DEPLOY_DIR_RPM
+        # Legacy pooled layout: one repo per arch, so skip archs with nothing
+        # deployed rather than advertise an empty repo. Under per-target repos
+        # every target arch is the one [<machine>-target] section, which a feed
+        # always has; gating it on DEPLOY_DIR_RPM made the section depend on
+        # build order (this task can run before any target package is deployed,
+        # and sstate then keeps that output, since the deploy dir is not in the
+        # task hash), and an SDK without it finds no kernel at install.
         check_dir = os.path.join(deploy_dir_rpm, arch_dir)
-        if not os.path.isdir(check_dir):
+        if not pertarget and not os.path.isdir(check_dir):
             bb.note(f"Skipping arch '{arch}' - directory '{check_dir}' does not exist")
             return priority
 
