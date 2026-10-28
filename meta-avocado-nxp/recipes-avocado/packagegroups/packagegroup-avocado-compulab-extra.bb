@@ -17,3 +17,9 @@ RDEPENDS:${PN} = " \
   wireless-regdb-static \
   avocado-devicetree \
 "
+
+# avocado-dtc-overlay-deliver is the device-tree overlay hook: avocado-cli
+# installs it into the target sysroot when a project declares
+# device_tree_overlays or boot_config, and runs it before `stone bundle`. It has
+# to be in this machine's feed for that install to find it.
+RDEPENDS:${PN} += "avocado-dtc-overlay-deliver"
