@@ -97,6 +97,55 @@ done
   && ok "plain-string images are written at their partition offsets" \
   || bad "rootfs/var not at their offsets"
 
+# 5. A var with no size is sized from its image, rounded up to a whole MiB, and
+# the backup GPT still sits past it.
+u="$w/unsized"
+mkdir -p "$u/data" "$u/build"
+head -c 4096 /dev/urandom >"$u/data/r.img"
+head -c $((2 * 1048576 + 1)) /dev/urandom >"$u/data/v.img"
+cat >"$u/m.json" <<'J'
+{"runtime": {"platform": "t"},
+ "storage_devices": {"rootdisk": {
+   "images": {"rootfs": "r.img", "var": "v.img"},
+   "partitions": [
+     {"name": "boot-a", "partition_type": "EF00", "offset": 1, "offset_unit": "mebibytes", "size": 1, "size_unit": "mebibytes"},
+     {"name": "rootfs-a", "image": "rootfs", "partition_type": "8304", "size": 1, "size_unit": "mebibytes"},
+     {"name": "var", "image": "var", "partition_type": "8300", "expand": "true"}]}}}
+J
+out=$(AVOCADO_STONE_MANIFEST="$u/m.json" AVOCADO_STONE_DATA_DIR="$u/data" \
+  AVOCADO_STONE_BUILD_DIR="$u/build" bash "$script" </dev/null 2>&1)
+rc=$?
+uimg="$u/build/avocado-os-t.img"
+{ [ $rc -eq 0 ] \
+  && sgdisk -i 3 "$uimg" | grep -q "Partition size: 6144 sectors" \
+  && cmp -s -n $((2 * 1048576 + 1)) -i 0:$((3 * 1048576)) "$u/data/v.img" "$uimg" \
+  && sgdisk -v "$uimg" | grep -q "No problems found"; } \
+  && ok "an unsized var is sized from its image and written at its offset" \
+  || bad "unsized var: rc=$rc out=[$out] p3=[$(sgdisk -i 3 "$uimg" 2>&1)] verify=[$(sgdisk -v "$uimg" 2>&1)]"
+
+# 6. An image one byte larger than its partition is refused, not written over
+# whatever follows it.
+o="$w/oversized"
+mkdir -p "$o/data" "$o/build"
+head -c $((1048576 + 1)) /dev/urandom >"$o/data/r.img"
+head -c 4096 /dev/urandom >"$o/data/v.img"
+cat >"$o/m.json" <<'J'
+{"runtime": {"platform": "t"},
+ "storage_devices": {"rootdisk": {
+   "images": {"rootfs": "r.img", "var": "v.img"},
+   "partitions": [
+     {"name": "rootfs-a", "image": "rootfs", "partition_type": "8304", "offset": 1, "offset_unit": "mebibytes", "size": 1, "size_unit": "mebibytes"},
+     {"name": "var", "image": "var", "partition_type": "8300", "size": 1, "size_unit": "mebibytes"}]}}}
+J
+out=$(AVOCADO_STONE_MANIFEST="$o/m.json" AVOCADO_STONE_DATA_DIR="$o/data" \
+  AVOCADO_STONE_BUILD_DIR="$o/build" bash "$script" </dev/null 2>&1)
+rc=$?
+# rootfs-a's region, and the byte past it, must still be zero: nothing was written.
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "rootfs-a image is" \
+  && cmp -s -n $((1048576 + 1)) -i 1048576:0 "$o/build/avocado-os-t.img" /dev/zero; } \
+  && ok "an image one byte larger than its partition is refused before it is written" \
+  || bad "too big: rc=$rc out=[$out]"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/4 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 4 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/6 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 6 ]

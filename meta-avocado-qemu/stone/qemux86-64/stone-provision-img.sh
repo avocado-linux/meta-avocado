@@ -65,6 +65,21 @@ size_to_mib() {
   esac
 }
 
+# =============================================================================
+# Resolve image filenames from manifest
+# Returns the image "out" filename for Object images, or the string directly
+# =============================================================================
+resolve_image_filename() {
+  local image_key="$1"
+  local img_type
+  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${image_key}\" | type" "$MANIFEST")
+  if [ "$img_type" = "string" ]; then
+    jq -r ".storage_devices.rootdisk.images.\"${image_key}\"" "$MANIFEST"
+  else
+    jq -r ".storage_devices.rootdisk.images.\"${image_key}\".out" "$MANIFEST"
+  fi
+}
+
 # Build partition info arrays
 declare -a PART_NAMES PART_SIZES_MIB PART_TYPES PART_UUIDS PART_IMAGES PART_OFFSETS_MIB PART_EXPAND
 GPT_START_MIB=1
@@ -81,7 +96,27 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
   expand=$(jq -r ".storage_devices.rootdisk.partitions[$i].expand // \"\"" "$MANIFEST")
 
-  size_mib=$(size_to_mib "$size" "$size_unit")
+  # An explicit size always wins. Only a partition with no size (e.g. var) is
+  # sized from its own image, rounded up to a whole MiB. "expand" does not
+  # decide the flashed size: it tells stone to grow the partition to fill the
+  # disk on the target after flashing, so a manifest can give var headroom
+  # with both "size" and "expand".
+  if [ "$size" = "null" ] || [ -z "$size" ]; then
+    if [ -z "$image" ] || [ "$image" = "null" ]; then
+      echo "ERROR: partition '${name}' has no size and no image to size from" >&2
+      exit 1
+    fi
+    img_filename=$(resolve_image_filename "$image")
+    img_path="${DATA_DIR}/${img_filename}"
+    if [ ! -f "$img_path" ]; then
+      echo "ERROR: cannot size expand partition '${name}': image not found: ${img_path}" >&2
+      exit 1
+    fi
+    img_bytes=$(stat -c%s "$img_path")
+    size_mib=$(((img_bytes + 1048575) / 1048576))
+  else
+    size_mib=$(size_to_mib "$size" "$size_unit")
+  fi
 
   # Use explicit offset if provided, otherwise use cursor
   if [ -n "$offset" ]; then
@@ -129,7 +164,11 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   pnum=$((i + 1))
   start_sector=$((${PART_OFFSETS_MIB[$i]} * 2048))
   size_sectors=$((${PART_SIZES_MIB[$i]} * 2048))
-  SGDISK_ARGS="${SGDISK_ARGS} -n ${pnum}:${start_sector}:+$((size_sectors - 1))"
+  # sgdisk's "+N" end means N sectors (end = start + N - 1). Using size_sectors-1
+  # here made every partition one sector short -- harmless for images smaller
+  # than their partition, but fatal for var, whose btrfs is sized to the exact
+  # partition (btrfs then reports "device total_bytes should be at most ...").
+  SGDISK_ARGS="${SGDISK_ARGS} -n ${pnum}:${start_sector}:+${size_sectors}"
   SGDISK_ARGS="${SGDISK_ARGS} -t ${pnum}:${PART_TYPES[$i]}"
 
   if [ -n "${PART_NAMES[$i]}" ]; then
@@ -144,21 +183,6 @@ done
 # shellcheck disable=SC2086
 sgdisk $SGDISK_ARGS "$IMAGE_FILE"
 echo "  Partition table created"
-
-# =============================================================================
-# Resolve image filenames from manifest
-# Returns the image "out" filename for Object images, or the string directly
-# =============================================================================
-resolve_image_filename() {
-  local image_key="$1"
-  local img_type
-  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${image_key}\" | type" "$MANIFEST")
-  if [ "$img_type" = "string" ]; then
-    jq -r ".storage_devices.rootdisk.images.\"${image_key}\"" "$MANIFEST"
-  else
-    jq -r ".storage_devices.rootdisk.images.\"${image_key}\".out" "$MANIFEST"
-  fi
-}
 
 # Return an image's build_args.type, or "" when the image is a plain filename
 # string (jq errors if you index a string with .build_args, and `//` does not
@@ -255,6 +279,13 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   fi
 
   echo "  Writing ${PART_NAMES[$i]}: ${img_file} @ offset ${PART_OFFSETS_MIB[$i]} MiB"
+  # dd would run straight past the partition into the next one while the GPT
+  # still describes the old boundaries, and the image would look fine.
+  img_bytes=$(stat -c%s "$img_file")
+  if [ "$img_bytes" -gt $((${PART_SIZES_MIB[$i]} * 1048576)) ]; then
+    echo "ERROR: ${PART_NAMES[$i]} image is ${img_bytes} bytes, larger than its ${PART_SIZES_MIB[$i]} MiB partition" >&2
+    exit 1
+  fi
   dd if="$img_file" of="$IMAGE_FILE" bs=1M seek="${PART_OFFSETS_MIB[$i]}" conv=notrunc status=progress
 done
 
