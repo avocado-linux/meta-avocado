@@ -362,10 +362,17 @@ For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
 When sd / emmc / serial all need the same GPT image, factor the partition-
 table walk into a `build-disk-image.sh` helper alongside the per-profile
 scripts and ship it via `avocado-stone.bbappend` (see Section 8a).
-[meta-avocado-renesas/stone/rzv2n-sr-som/build-disk-image.sh](../meta-avocado-renesas/stone/rzv2n-sr-som/build-disk-image.sh)
-and
 [meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh](../meta-avocado-stm/stone/stm32mp25-dk/build-disk-image.sh)
-are the reference implementations.
+is the reference implementation.
+
+`stone.bbclass` puts both `<layer>/stone/<board>/` and `<layer>/stone/` on
+`FILESEXTRAPATHS`, the per-board directory first. A helper that reads every
+value it needs from the manifest can therefore sit at the shared level and
+serve every board in the layer, with a per-board copy still able to shadow it.
+[meta-avocado-renesas/stone/build-disk-image.sh](../meta-avocado-renesas/stone/build-disk-image.sh)
+is shared that way between rzv2n-sr-som and rzv2h-rdk. Put the helper in the
+per-board directory when it encodes anything board-specific, as
+meta-avocado-rockchip's does.
 
 ---
 
@@ -533,6 +540,37 @@ initramfs (block drivers, network for early boot, etc.), append them to
 the auto-emitted packagegroup with versioned NAMEs — see
 [multi-kernel.md](multi-kernel.md) for the pattern.
 
+### Carrying a device tree the vendor BSP does not ship
+
+Nearly every target's device tree arrives inside a vendor BSP layer, and that is
+the shape to prefer. When a board's dts exists only downstream, or has to be
+forward-ported onto a newer kernel than the vendor targeted, two shapes work and
+they fail differently:
+
+| Shape | Use when | Failure mode |
+|---|---|---|
+| One patch carrying both the dts and its `Makefile` entry | The dts is close to final, or is a straight backport | `do_patch` fails loudly on any drift in either half |
+| A loose `.dts` in `SRC_URI` installed at `do_configure`, plus a patch for the `Makefile` entry only | The dts is a first cut under active revision, and reviewers need to diff it against the vendor source | Silent: the install overwrites whatever is at that path |
+
+The second shape keeps the dts reviewable as a file rather than as patch context,
+which is worth having while a board is being brought up. It also has a trap that
+the first does not: `install` will happily clobber a dts the kernel starts
+shipping later, hiding the divergence, and the `Makefile` patch then fails on a
+duplicate entry pointing nowhere near the cause. Guard it:
+
+```bitbake
+do_configure:prepend:<machine>() {
+    if [ -e ${S}/arch/arm64/boot/dts/<vendor>/<board>.dts ]; then
+        bbfatal "linux-<vendor> now ships <board>.dts. Drop the dts and Makefile patch from this bbappend and use the vendor copy."
+    fi
+    install -m 0644 ${WORKDIR}/<board>.dts \
+        ${S}/arch/arm64/boot/dts/<vendor>/<board>.dts
+}
+```
+
+`meta-avocado-renesas/recipes-kernel/linux/linux-renesas_%.bbappend` is the
+worked example. Fold the dts into the patch once the board stops moving.
+
 ### Required Kernel Options for Avocado
 
 Every Avocado target **must** include the following kernel config options in
@@ -661,7 +699,7 @@ To add a new machine called `acme-widget`:
 2. **Create the machine config**: `meta-avocado-acme/conf/machine/avocado-acme-widget.conf` (set `STONE_PROVISIONING ?= "..."`, `MACHINEOVERRIDES`, then `require conf/machine/include/avocado.inc`)
 3. **Create the KAS config**: `kas/machine/acme-widget.yml`
 4. **Create the stone manifest**: `meta-avocado-acme/stone/stone-acme-widget.json`
-5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-*.sh` and (if shared) `build-disk-image.sh`
+5. **Create provisioning scripts**: `meta-avocado-acme/stone/acme-widget/stone-provision-*.sh`, plus `build-disk-image.sh` in the same directory if it encodes anything board-specific, or in `meta-avocado-acme/stone/` if it is manifest-driven and other boards in the layer will reuse it
 6. **Create distro `avocado-stone.bbappend`** (only if you declared profiles outside the base set): `meta-avocado-acme/recipes-avocado/distro/avocado-stone.bbappend`
 7. **Create SDK target append**: `meta-avocado-acme/recipes-avocado/sdk/avocado-sdk-target.bbappend` plus the two SDK lifecycle scripts (`avocado-build-acme-widget`, `avocado-provision-acme-widget`) under `${PN}/`
 8. **Create extra packagegroup**: `meta-avocado-acme/recipes-avocado/packagegroups/packagegroup-avocado-acme-extra.bb`
