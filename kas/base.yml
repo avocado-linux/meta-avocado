@@ -46,7 +46,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-openembedded
     path: meta-openembedded
     branch: scarthgap
-    commit: bec755063a8b5da65df626f5749496aadaa4f4bb
+    commit: 0f00f8b9a21950640da8c5707343e5540133f86e
     layers:
       meta-oe:
       meta-perl:
@@ -60,7 +60,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-lts-mixins
     path: meta-lts-mixins
     branch: scarthgap/rust
-    commit: c19b6da5a3afd3c892b3b1b44983e993ac6d5308
+    commit: eedcdc7486ff15c3510c2ceff68c87d9db141312
     layers:
       .:
 
@@ -84,7 +84,7 @@ repos:
   meta-erlang:
     url: https://github.com/avocado-linux/vendor-meta-erlang
     path: meta-erlang
-    commit: 62acd0499dc3fc1022b8edcd6f7785fd4255a8c1
+    commit: daa0f2c521a6192522039500eacb07aa537ec42d
     branch: scarthgap
     layers:
       .:
@@ -100,7 +100,7 @@ repos:
   meta-swupdate:
     url: https://github.com/avocado-linux/vendor-meta-swupdate.git
     path: meta-swupdate
-    commit: 8c08983e9c4b47779bfe0f730b210366965afb9d
+    commit: d4208016c450295f3c8289267738905eef2f0b1a
     branch: scarthgap
     layers:
       .:

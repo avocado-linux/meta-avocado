@@ -22,7 +22,7 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-imx.git
     path: meta-variscite-bsp-imx
     branch: scarthgap_6.6.52-2.2.2_var01
-    commit: e403babc8727cff8523f2173e5ec72f642bbdf81
+    commit: 7f39cc029dd3e06c5f7f2818f66d8bd750120e0a
     layers:
       .:
 
@@ -31,6 +31,6 @@ repos:
     url: https://github.com/avocado-linux/vendor-meta-variscite-bsp-common.git
     path: meta-variscite-bsp-common
     branch: scarthgap_6.6.52-2.2.2_var01
-    commit: 8fa83af3b9c8d3894597cf75a7b2806957d1358a
+    commit: 68d4cb9e6793539e370db340d6e8935a48442df1
     layers:
       .:
