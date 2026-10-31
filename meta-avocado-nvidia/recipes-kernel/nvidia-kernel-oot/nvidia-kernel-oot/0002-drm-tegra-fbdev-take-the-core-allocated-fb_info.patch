@@ -1,0 +1,42 @@
+From: Avocado Linux <info@avocadolinux.org>
+Subject: [PATCH] drm/tegra: fbdev: take the core-allocated fb_info when the allocator is private
+
+linux-yocto 6.6.151 carries the stable backport that moves fb_info
+allocation into the fbdev core: __drm_fb_helper_initial_config_and_unlock()
+allocates helper->info before calling the driver's fb_probe, and
+drm_fb_helper_alloc_info() became static in drm_fb_helper.c. The in-tree
+tegra driver now just reads helper->info.
+
+The OOT driver chose between drm_fb_helper_alloc_info() (Linux v6.2+)
+and drm_fb_helper_alloc_fbi() (older) only. With the first now private,
+the conftest reports it absent and the build falls through to the
+pre-6.2 name, which no longer exists either:
+
+    fbdev.c:129:16: error: implicit declaration of function
+    'drm_fb_helper_alloc_fbi'
+
+Add a middle case keyed on the existing NV_DRM_FB_HELPER_STRUCT_HAS_INFO_ARG
+conftest (struct drm_fb_helper has .info, Linux v6.2+): when the
+allocator is not exported there, the core has already allocated
+fb_info, so take helper->info. Kernels that still export the allocator
+keep using it, and pre-6.2 kernels keep drm_fb_helper_alloc_fbi(). Probed
+rather than version-checked because it arrived as a stable backport.
+
+Upstream-Status: Pending
+
+--- a/nvidia-oot/drivers/gpu/drm/tegra/fbdev.c
++++ b/nvidia-oot/drivers/gpu/drm/tegra/fbdev.c
+@@ -125,6 +125,13 @@
+ 
+ #if defined(NV_DRM_FB_HELPER_ALLOC_INFO_PRESENT) /* Linux v6.2 */
+ 	info = drm_fb_helper_alloc_info(helper);
++#elif defined(NV_DRM_FB_HELPER_STRUCT_HAS_INFO_ARG) /* allocated by the core */
++	/*
++	 * The fbdev core allocates fb_info before calling the probe and made
++	 * drm_fb_helper_alloc_info() static; the in-tree driver takes
++	 * helper->info the same way.
++	 */
++	info = helper->info;
+ #else
+ 	info = drm_fb_helper_alloc_fbi(helper);
+ #endif
