@@ -37,3 +37,8 @@ local_conf_header:
     PKG_EXTRA_INSTALL:append = " packagegroup-avocado-imx-ml"
     BB_GIT_SHALLOW:pn-nativesdk-uuu = "0"
     BB_GIT_SHALLOW_DEPTH:pn-nativesdk-uuu = "0"
+    # oe-core's scarthgap-avocado ships openssl 3.5; every meta-imx scarthgap
+    # release appends only openssl_3.2.%, so the append dangles and stops the
+    # parse on every NXP machine. Its kTLS and cryptodev offload patches are
+    # written against 3.2; masking leaves openssl at oe-core's configuration.
+    BBMASK += "meta-imx/meta-imx-bsp/recipes-connectivity/openssl/openssl_3.2.%.bbappend"

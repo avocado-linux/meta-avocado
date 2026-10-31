@@ -36,6 +36,9 @@ QEMUVERSION:mx93-nxp-bsp = "8.2.2.imx"
 QEMUVERSION:mx91-nxp-bsp = "8.2.2.imx"
 
 BBMASK += "meta-freescale/recipes-multimedia/gstreamer"
+# That mask removes gstreamer1.0-plugins-imx, the only provider of this layer's
+# PACKAGE_ARCH append for it, so the append dangles and stops the parse.
+BBMASK += "meta-avocado-nxp/recipes-multimedia/gstreamer/gstreamer1.0-plugins-imx_%.bbappend"
 BBMASK += "meta-arm/meta-arm/recipes-kernel/linux/linux-yocto_5.15%.bbappend"
 
 BBMASK += "meta-imx/meta-imx-bsp/recipes-kernel/cryptodev/cryptodev-linux_1.13.bbappend"
