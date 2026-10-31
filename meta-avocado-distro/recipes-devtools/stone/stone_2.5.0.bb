@@ -1,4 +1,8 @@
-inherit cargo cargo-update-recipe-crates
+inherit cargo cargo-update-recipe-crates pkgconfig
+
+# The cargo class exports ZSTD_SYS_USE_PKG_CONFIG, so zstd-sys links the
+# system libzstd through pkg-config instead of building its bundled copy.
+DEPENDS += "zstd"
 
 SRCBRANCH = "main"
 SRCREV = "1514f5575f674fed26a345843640cdc0b207e499"
