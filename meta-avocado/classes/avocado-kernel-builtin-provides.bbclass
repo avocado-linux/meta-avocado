@@ -128,26 +128,9 @@ python avocado_kernel_emit_builtin_provides() {
             % (len(provides), base_pkg))
 }
 
-# Insert our function immediately before emit_pkgdata in PACKAGEFUNCS.
-# emit_pkgdata is the function that snapshots the datastore RPROVIDES into
-# the per-package pkgdata files; anything that runs after it is invisible
-# to the rpm builder. PACKAGEFUNCS:append puts us at the end (after
-# emit_pkgdata — too late). The :remove + :append trick doesn't work
-# either because bitbake applies :remove *last* and removes *every*
-# occurrence — including the one we tried to re-append, so emit_pkgdata
-# vanishes from the run entirely and per-package rpms aren't emitted.
-# A Python anonymous function lets us splice into the list at a precise
-# index after parse, with no operator-ordering surprises.
-python __anonymous() {
-    pf = (d.getVar("PACKAGEFUNCS") or "").split()
-    if "avocado_kernel_emit_builtin_provides" in pf:
-        return
-    if "emit_pkgdata" not in pf:
-        bb.warn("avocado-kernel-builtin-provides: emit_pkgdata not in PACKAGEFUNCS; "
-                "skipping insertion")
-        return
-    idx = pf.index("emit_pkgdata")
-    pf.insert(idx, "avocado_kernel_emit_builtin_provides")
-    d.setVar("PACKAGEFUNCS", " ".join(pf))
-}
+# emit_pkgdata snapshots RPROVIDES into the per-package pkgdata the rpm
+# builder reads, so this must run before it. oe-core's do_package runs
+# emit_pkgdata after every PACKAGEFUNCS entry (package.bbclass, "hardcode
+# emit_pkgdata to run last"), so a plain append is early enough.
+PACKAGEFUNCS += "avocado_kernel_emit_builtin_provides"
 
