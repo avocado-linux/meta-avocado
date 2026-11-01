@@ -23,18 +23,30 @@ SRC_URI:remove = "file://fw_env.config"
 
 MKENVIMAGE_EXTRA_ARGS = "-r"
 
-# The defconfig we append our fragments to is whatever the vendor machine conf
-# named in UBOOT_CONFIG[sd], minus the optional ",<image-fstype>" suffix
-# (imx8mp-var-dart: "imx8mp_var_dart_config", imx95-var-dart:
-# "imx95_var_dart_defconfig"). Derived rather than hardcoded so a new Variscite
-# machine cannot silently inherit another board's defconfig; one that sets no
-# UBOOT_CONFIG[sd] fails loudly here instead.
-UBOOT_DEFCONFIG = "${@d.getVarFlag('UBOOT_CONFIG', 'sd').split(',')[0]}"
+# u-boot-common.inc gained `DEPENDS += "bison-native efitools-native"` in the
+# 2026-09 layer bump. efitools is only packaged in meta-imx/meta-imx-sdk, which
+# Avocado deliberately does not include, so the dependency is unbuildable here
+# and fails the whole target at parse:
+#   Nothing PROVIDES 'efitools-native' ... required by u-boot-variscite.bb
+# The only consumer is the EFI capsule ESL step, which avocado.cfg turns off
+# (see CONFIG_EFI_CAPSULE_AUTHENTICATE there) because capsule update is not how
+# Avocado updates these boards. Dropping the dep and the feature together beats
+# pulling in the whole SDK layer for one native tool. If a Variscite board ever
+# needs capsule authentication, add meta-imx-sdk and revert BOTH changes.
+DEPENDS:remove = "efitools-native"
 
-do_configure:append:class-target () {
-  cat ${UNPACKDIR}/avocado.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
-  cat ${UNPACKDIR}/env-mmc.cfg >> ${S}/configs/${UBOOT_DEFCONFIG}
-}
+# NOTE: there is deliberately no UBOOT_DEFCONFIG / do_configure:append here.
+# Listing avocado.cfg and env-mmc.cfg in SRC_URI is sufficient -- cml1.bbclass
+# collects the .cfg entries and u-boot.inc merges them with
+# `merge_config.sh -m -O <builddir> .config <fragments>` before oldconfig.
+# An earlier `cat ... >> ${S}/configs/${UBOOT_DEFCONFIG}` ran *after* that merge,
+# so it never affected the build: on imx8mp-var-dart UBOOT_CONFIG[sd] is
+# "imx8mp_var_dart_config" (a make alias, not a file -- make maps it to
+# configs/imx8mp_var_dart_defconfig) so it only created a stray file, and on
+# imx95-var-dart it appended the fragments into the vendor's real defconfig
+# again on every configure. Verified in the built .config: CONFIG_ENV_OFFSET,
+# CONFIG_ENV_REDUNDANT, CONFIG_ENV_OFFSET_REDUND and CONFIG_ENV_IS_IN_MMC all
+# arrive via merge_config.sh alone.
 
 require recipes-bsp/u-boot/u-boot-env.inc
 
