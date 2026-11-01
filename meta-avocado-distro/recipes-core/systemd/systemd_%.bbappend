@@ -1,8 +1,26 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI:append = " file://zram-generator.conf"
+SRC_URI:append = " file://wait-online-any.conf"
 
 do_install:append () {
     install -m 0644 ${WORKDIR}/zram-generator.conf ${D}${sysconfdir}/systemd/
+
+    # Stop network-online.target waiting 120s for an unconnected port.
+    #
+    # The drop-in's ExecStart carries a placeholder rather than a literal
+    # /usr/lib/systemd or /lib/systemd path: which one is correct depends on
+    # whether usrmerge is in DISTRO_FEATURES. systemd_unitdir (bitbake.conf)
+    # carries that answer; rootlibexecdir is set only inside the systemd
+    # recipe's meson call and expands to nothing here.
+    install -d ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d
+    install -m 0644 ${WORKDIR}/wait-online-any.conf \
+        ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/
+    sed -i "s|@SYSTEMD_UNITDIR@|${systemd_unitdir}|" \
+        ${D}${sysconfdir}/systemd/system/systemd-networkd-wait-online.service.d/wait-online-any.conf
+    if [ -e ${D}${systemd_system_unitdir}/systemd-networkd-wait-online.service ] && \
+       [ ! -x ${D}${systemd_unitdir}/systemd-networkd-wait-online ]; then
+        bbfatal "wait-online-any.conf points ExecStart at ${systemd_unitdir}/systemd-networkd-wait-online, which this build does not install"
+    fi
 
     # Mask upstream systemd-sysext/confext units.
     # Avocado replaces these with avocado-extension.service and
