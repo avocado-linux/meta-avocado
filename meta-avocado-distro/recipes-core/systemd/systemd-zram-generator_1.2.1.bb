@@ -22,7 +22,7 @@ B = "${S}"
 CARGO_SRC_DIR = ""
 
 # Substitute 'frozen' with 'offline'
-CARGO_BUILD_FLAGS = "-v --offline --target ${RUST_HOST_SYS} ${BUILD_MODE} --manifest-path=${CARGO_MANIFEST_PATH}"
+CARGO_BUILD_FLAGS = "-v --offline --target ${RUST_HOST_SYS} --profile=${CARGO_PROFILE} --manifest-path=${CARGO_MANIFEST_PATH}"
 do_update_crates[depends] = "cargo-native:do_populate_sysroot"
 do_update_crates:prepend() {
 	${CARGO} fetch --manifest-path ${CARGO_MANIFEST_PATH}
@@ -36,7 +36,7 @@ do_compile() {
 }
 
 do_install() {
-	oe_runmake install NOBUILD=true NOMAN=true BUILDTYPE="${RUST_HOST_SYS}/release" DESTDIR="${D}" PREFIX="${prefix}"
+	oe_runmake install NOBUILD=true NOMAN=true BUILDTYPE="${CARGO_TARGET_SUBDIR}" DESTDIR="${D}" PREFIX="${prefix}"
 
 	install -d ${D}${sysconfdir}/modules-load.d
 	install -m 0644 ${WORKDIR}/zram.conf ${D}${sysconfdir}/modules-load.d/zram.conf

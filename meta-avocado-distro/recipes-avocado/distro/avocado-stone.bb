@@ -47,6 +47,23 @@ do_stone_validate[nostamp] = "1"
 do_stone_bundle[nostamp] = "1"
 do_stone_provision[nostamp] = "1"
 
+# The stone tasks run the stone tool from this recipe's native sysroot. Being
+# nostamp they rerun every build, including one where do_deploy and everything
+# before it came from sstate, so do_prepare_recipe_sysroot never ran and the
+# native sysroot is empty ("stone: not found"). Each task installs what it
+# needs itself.
+do_stone_validate[depends] += "stone-native:do_populate_sysroot"
+do_stone_bundle[depends] += "stone-native:do_populate_sysroot"
+do_stone_provision[depends] += "stone-native:do_populate_sysroot"
+do_stone_validate[prefuncs] += "extend_recipe_sysroot"
+do_stone_bundle[prefuncs] += "extend_recipe_sysroot"
+do_stone_provision[prefuncs] += "extend_recipe_sysroot"
+
+# rm_work is ordered only against the normal task chain, so it races the stone
+# tasks (added after do_deploy, pulled in by do_build) and deletes the work dir
+# and sysroot while they use it. They rerun every build anyway; keep the dir.
+RM_WORK_EXCLUDE += "${PN}"
+
 do_configure() {
     # Clean out existing stone directory
     if [ -d "${DEPLOY_DIR}/stone" ]; then

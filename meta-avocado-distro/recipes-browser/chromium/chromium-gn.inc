@@ -14,6 +14,12 @@ def rust_is_newer_than_190(d):
     rustver = d.getVar('RUSTVERSION').split('.')
     return int(rustver[0]) > 1 or (int(rustver[0]) == 1 and int(rustver[1]) > 90)
 
+# Rust 1.95 removed core::simd::LaneCount; older compilers still need the
+# bound that the bytemuck backport below restores.
+def rust_has_lanecount(d):
+    rustver = d.getVar('RUSTVERSION').split('.')
+    return int(rustver[0]) == 1 and int(rustver[1]) < 95
+
 # Backported patches.
 # None currently \o/
 
@@ -35,7 +41,7 @@ SRC_URI += "\
     file://fix-SYS_SECCOMP-redefinition.patch \
     file://use-adler2.patch \
     file://chromium-145-zip_ffi_glue-use-edition2024.patch \
-    file://chromium146_backport-Remove-now-obsolete-invalid-patch-on-bytemuck-v1.patch \
+    ${@ 'file://chromium146_backport-Remove-now-obsolete-invalid-patch-on-bytemuck-v1.patch' if rust_has_lanecount(d) else ''} \
 "
 
 # ARM/AArch64-specific patches.
