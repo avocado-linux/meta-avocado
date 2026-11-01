@@ -470,7 +470,19 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
     fi
   fi
 
-  [ -z "$prebuilt_cmdline" ] || boot_cmdline="$prebuilt_cmdline $boot_cmdline"
+  # The project's kernel line (kernel.cmdline / cmdline_extra, exported by
+  # avocado-cli as AVOCADO_KERNEL_CMDLINE / _EXTRA): kernel.cmdline replaces
+  # the BSP's line, cmdline_extra is appended to it. Checked before the extras
+  # go on, so cmdline_extra alone never stands in for a missing base line (no
+  # console= or root=: the board flashes and the console stays dead).
+  base_cmdline="${AVOCADO_KERNEL_CMDLINE:-$prebuilt_cmdline}"
+  if [ -z "$base_cmdline" ] && [ -n "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    echo "ERROR: kernel.cmdline_extra is set, but there is no base command line to"
+    echo "       append it to (the prebuilt boot.img carries none, and kernel.cmdline is unset)."
+    exit 1
+  fi
+  [ -z "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ] || base_cmdline="$base_cmdline $AVOCADO_KERNEL_CMDLINE_EXTRA"
+  [ -z "$base_cmdline" ] || boot_cmdline="$base_cmdline $boot_cmdline"
 
   # mkbootimg does not reject an over-long command line for a v0-v2 header, it
   # SPLITS it: the first 511 bytes stay in cmdline and the rest goes to the
@@ -493,6 +505,11 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
     --output "$build_dir/boot.img"
   echo "boot.img repacked at provision time"
 else
+  if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    echo "ERROR: kernel.cmdline / cmdline_extra is set, but no kernel Image was staged"
+    echo "       (AVOCADO_PROVISION_KERNEL_IMAGE) to repack boot.img with it."
+    exit 1
+  fi
   echo "AVOCADO_PROVISION_KERNEL_IMAGE not set — using prebuilt boot.img from BSP"
   echo "WARNING: the prebuilt boot.img names no rootfs PARTUUID, so the initrd"
   echo "         locates APP by label. On a board that also carries another"
