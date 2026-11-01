@@ -60,7 +60,10 @@ overlay_env_addr=0x49000000
 # Merge each declared device-tree overlay into the DTB QEMU generated. The
 # delivery hook writes avocado-overlays.txt next to the kernel, holding one
 # avocado_fdt_overlays=<names> line; absent it (no overlays declared) the first
-# load fails and the whole block is skipped, which is the common case.
+# load fails and the whole block is skipped, which is the common case. The
+# else branch matters: bootcmd runs these steps with one `run`, which stops at
+# the first step that returns non-zero, and an if whose test fails with no else
+# returns that failure, so without it every overlay-less boot ends at the prompt.
 #
 # fdt_addr is where QEMU places that DTB - the base of RAM on the virt machine -
 # so it is a real tree to apply onto rather than an address nothing wrote.
@@ -86,6 +89,8 @@ avocado_apply_overlays=\
         echo "overlay missing on the boot partition: ${ov}.dtbo";\
       fi;\
     done;\
+  else\
+    echo "no device-tree overlays";\
   fi;
 
 avocado_boot=booti ${image_addr} ${ramdisk_addr}:${filesize} ${fdt_addr};
