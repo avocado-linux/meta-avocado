@@ -7,6 +7,11 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # check, because it arrived as a stable backport.
 SRC_URI += "file://0001-nvdisplay-nv-pci-handle-pci_resize_resource-exclude_bars.patch"
 
+# linux-yocto 6.6.151 backported the fbdev core allocating fb_info itself
+# and made drm_fb_helper_alloc_info() static; the OOT tegra-drm fbdev fell
+# through to the pre-6.2 drm_fb_helper_alloc_fbi() and failed to build.
+SRC_URI += "file://0002-drm-tegra-fbdev-take-the-core-allocated-fb_info.patch"
+
 # nvidia-kernel-oot is built in both the default mc (linux-yocto 6.6) and the
 # jetson-l4t alt mc (linux-jammy-nvidia-tegra 5.15). Both builds share a single
 # PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION
