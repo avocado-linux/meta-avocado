@@ -15,14 +15,13 @@ already-inline btmtk_set_bdaddr stub directly above them.
 Upstream-Status: Backport [23e88450bb04]
 Signed-off-by: Justin Schneck <j.schneck@peridio.com>
 ---
- drivers/bluetooth/btmtk.h | 14 +++++++-------
- 1 file changed, 7 insertions(+), 7 deletions(-)
+ drivers/bluetooth/btmtk.h | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
 
 diff --git a/drivers/bluetooth/btmtk.h b/drivers/bluetooth/btmtk.h
-index 3055b97..ae26b5f 100644
 --- a/drivers/bluetooth/btmtk.h
 +++ b/drivers/bluetooth/btmtk.h
-@@ -196,39 +196,39 @@ static inline int btmtk_set_bdaddr(struct hci_dev *hdev,
+@@ -202,49 +202,49 @@
  	return -EOPNOTSUPP;
  }
  
@@ -64,11 +63,20 @@ index 3055b97..ae26b5f 100644
  {
  }
  
--static int btmtk_usb_hci_wmt_sync(struct hci_dev *hdev,
-+static inline int btmtk_usb_hci_wmt_sync(struct hci_dev *hdev,
- 				  struct btmtk_hci_wmt_params *wmt_params)
+-static int btmtk_usb_subsys_reset(struct hci_dev *hdev, u32 dev_id)
++static inline int btmtk_usb_subsys_reset(struct hci_dev *hdev, u32 dev_id)
  {
  	return -EOPNOTSUPP;
--- 
-2.55.0
-
+ }
+ 
+-static int btmtk_usb_setup(struct hci_dev *hdev)
++static inline int btmtk_usb_setup(struct hci_dev *hdev)
+ {
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static int btmtk_usb_shutdown(struct hci_dev *hdev)
++static inline int btmtk_usb_shutdown(struct hci_dev *hdev)
+ {
+ 	return -EOPNOTSUPP;
+ }
