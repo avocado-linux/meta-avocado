@@ -63,6 +63,14 @@ EXTRA_OEMAKE += " \
 NVIDIA_KERNEL_ARCH = "${ARCH}"
 NVIDIA_KERNEL_ARCH:x86-64 = "x86_64"
 
+# FCF_SUPPORTED=1: src/nvidia and src/nvidia-modeset add -fcf-protection=branch
+# (ENDBR landing pads) only when nv-compiler.sh says gcc >= 9.4. That script
+# reads the version from its third argument, so with the multi-word KERNEL_CC
+# above it gets "-fuse-ld=bfd", fails, and nv-kernel.o is built without ENDBR.
+# On an IBT kernel (X86_KERNEL_IBT=y) nvidia.ko then dies at load in
+# exc_control_protection. Our gcc is always newer than 9.4.
+EXTRA_OEMAKE:append:x86-64 = " FCF_SUPPORTED=1"
+
 # Build the open modules via the top-level Makefile target
 do_compile() {
     # Let the kernel's objtool find libelf.so.1 (from elfutils-native) -- its own
