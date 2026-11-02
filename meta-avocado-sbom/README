@@ -409,30 +409,41 @@ because the kernel CNA assigns none. A consumer gating on severity has to decide
 what an unscored kernel finding means; the report states the absence rather than
 inventing a score.
 
-Three settings arm it, all in kas/feature/cve-check.yml, and the task says so
+These settings arm it, all in kas/feature/cve-check.yml, and the task says so
 when one is missing rather than quietly filtering nothing:
 
   KERNEL_EXTRA_FEATURES:append = " features/debug/debug-kernel.scc"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
   AVOCADO_CVE_KERNEL_VULNS_DIR = "${DL_DIR}/kernel-vulns"
 
 The first is load-bearing: without kernel DWARF the debugsources hold 351
-binaries and zero sources, and the filter cuts nothing. The second is :pn-scoped
-because SPDX_INCLUDE_COMPILED_SOURCES sets SPDX_INCLUDE_SOURCES in that recipe's
-datastore alone (spdx-common.bbclass:44). Tree-wide it measured 5.36 GB of SPDX
-and ~50-70 GB to parse; kernel-only it costs 63 MB. The third points at a clone
-of the CNA data and pulls in avocado-cve-kernel-vulns-native to keep it current.
+binaries and zero sources, and the filter cuts nothing. Only the linux-yocto
+recipes read KERNEL_EXTRA_FEATURES. linux-raspberrypi ignores it, so its DWARF
+comes from a config fragment (avocado-cve-debug.cfg) that its bbappend in
+meta-avocado-raspberrypi adds when AVOCADO_CVE_KERNEL_VULNS_DIR is set. The
+SPDX lines are :pn-scoped because SPDX_INCLUDE_COMPILED_SOURCES sets
+SPDX_INCLUDE_SOURCES in that recipe's datastore alone (spdx-common.bbclass:44).
+Tree-wide it measured 5.36 GB of SPDX and ~50-70 GB to parse; kernel-only it
+costs 63 MB. The last line points at a clone of the CNA data and pulls in
+avocado-cve-kernel-vulns-native to keep it current.
 
-All three are commented out until the pinned oe-core carries the fix for
-improve_kernel_cve_report.py's unguarded cve_data[cve]['detail'] read: the stock
-script raises KeyError on any real cve-check input, and the task treats a
-failing script as fatal. They go together - the first two on their own would
-cost every build a kernel debug rebuild for a filter that is off.
+Measured on a Pi 5 (avocado-raspberrypi5, linux-raspberrypi 6.12.25),
+Unpatched Patched All, 2026-10-28: the shipped kernel's Unpatched count fell
+from 3,314 to 1,710, with 6,378 CVEs ignored as not compiled. All 6,919 CVEs the
+script adds carry no CVSS score, 923 of them Unpatched.
 
-Unset, the task notes the absence and the report carries cve-check's own kernel
-results. That is also what a vendor kernel gets: KERNEL_EXTRA_FEATURES is a
-kernel-yocto mechanism, so linux-imx and friends produce no DWARF, and the task
-warns and leaves their scan alone rather than filtering it on an empty list.
+The task runs the script with bitbake's interpreter, which under buildtools has
+no packaging module, so the recipe depends on python3-packaging-native and
+extends PYTHONPATH. It also hands the script a copy of the cve-check JSON with
+the "1_" prefix meta-raspberrypi puts on its kernel PV removed, because
+packaging.Version rejects it.
+
+Where the settings are unset, the task notes the absence and the report carries
+cve-check's own kernel results. That is also what a vendor kernel gets: neither
+KERNEL_EXTRA_FEATURES nor the fragment reaches linux-imx and friends, so they
+produce no DWARF, and the task warns and leaves their scan alone rather than
+filtering it on an empty list.
 
 The improved results are written to ${CVE_CHECK_DIR}/kernel-improved/ and read
 as an overlay: a file there replaces the same-named file from CVE_CHECK_DIR.

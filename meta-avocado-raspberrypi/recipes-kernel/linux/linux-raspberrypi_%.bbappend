@@ -5,6 +5,13 @@ SRC_URI:append = " \
   file://avocado-extra.cfg \
 "
 
+# DWARF for the kernel CVE filter (do_kernel_cve_improve in meta-avocado-sbom).
+# linux-raspberrypi never reads KERNEL_EXTRA_FEATURES, which only the
+# linux-yocto recipes consume, so the debug feature the filter needs arrives as
+# a config fragment. Tied to the variable that arms the filter, so a build that
+# does not filter does not pay for a debug-info kernel.
+SRC_URI:append = " ${@'file://avocado-cve-debug.cfg' if d.getVar('AVOCADO_CVE_KERNEL_VULNS_DIR') else ''}"
+
 SRC_URI:append:reterminal = " file://reterminal.cfg"
 SRC_URI:append:reterminal-dm = " file://reterminal.cfg"
 
