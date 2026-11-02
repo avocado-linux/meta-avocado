@@ -1,8 +1,8 @@
 header:
   version: 16
 
-# Target qemu as the KVM VMM on an aarch64 host. Included by every vendor whose
-# feed carries qemu-system-aarch64 for KVM (qcom, nvidia); packagegroups name
+# Target qemu as the KVM VMM on an aarch64 host. Included by every machine whose
+# feed carries qemu-system-aarch64 for KVM (qcom, nvidia, arm64-uefi); packagegroups name
 # the package, this only shapes the build.
 #
 # Only the host arch is worth building -- the recipe default is 14
