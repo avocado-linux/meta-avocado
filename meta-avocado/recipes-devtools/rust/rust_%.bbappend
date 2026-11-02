@@ -85,11 +85,26 @@ do_rust_setup_snapshot:append () {
         if [ "$found" = 0 ]; then
             bbwarn "rust-snapshot/lib holds no shared libraries: the libz.so.1 edge this append closes is reached through libLLVM's RUNPATH, so a snapshot without them needs a re-audit rather than a silent skip"
         fi
+
+        # The 1.98 snapshot's bootstrap links with its own rust-lld, which links
+        # libLLVM and so needs libz.so.1 itself. Its RUNPATH ($ORIGIN/../../../
+        # and $ORIGIN/../lib) reaches the snapshot's lib/ and nothing staged, and
+        # the recipe's own loop repoints it at the uninative loader, so without
+        # this the link step dies with "rust-lld: error while loading shared
+        # libraries: libz.so.1". The gcc-ld wrappers beside it get the same path;
+        # one that is not an ELF is skipped by the helper.
+        for lld in ${WORKDIR}/rust-snapshot/lib/rustlib/*/bin/rust-lld \
+                   ${WORKDIR}/rust-snapshot/lib/rustlib/*/bin/gcc-ld/*; do
+            [ -f "$lld" ] || continue
+            rust_snapshot_ensure_rpath "$lld" "${STAGING_LIBDIR_NATIVE}"
+        done
     fi
 }
 
-# Deliberately limited to bin/ and the top-level lib/. readelf -d on the 1.94.1
-# snapshot puts the rest out of reach of this bug rather than out of mind:
+# Limited to bin/, the top-level lib/ and rust-lld. readelf -d on the 1.94.1
+# snapshot put the rest out of reach of this bug rather than out of mind. That
+# reading missed rust-lld, which the 1.98.1 snapshot's bootstrap runs and which
+# NEEDS libz.so.1, so it has its own loop above:
 #
 #   lib/rustlib/*/lib/libstd-*.so  NEEDED is libgcc_s, librt, libpthread, libdl,
 #                                  libc, ld-linux - all shipped by uninative.
