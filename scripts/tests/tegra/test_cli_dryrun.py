@@ -262,6 +262,30 @@ def test_template_profile_without_script_is_a_problem_not_a_key_error(deploy_tre
     assert "Traceback" not in err
 
 
+def test_template_without_the_nvme_profile_is_refused_before_the_usb_listing(deploy_tree, tmp_path, capsys):
+    _edit_template(deploy_tree, lambda d: d["provision"]["profiles"].pop("tegraflash-nvme"))
+    for extra in (["--dry-run"], ["--assume-yes"]):
+        rc, runner = run(deploy_tree, tmp_path, extra)
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert runner.captured == []
+        assert runner.streamed == []
+        assert "tegraflash-nvme" in err
+        assert "Traceback" not in err
+
+
+def test_a_script_that_cannot_start_is_one_error_line_not_a_traceback(deploy_tree, tmp_path, capsys):
+    class Unstartable(FakeRunner):
+        def stream(self, invocation, log_path, echo=print):
+            raise cli.FlashError(f"cannot start x (work directory: {log_path.parent}, log: {log_path})")
+
+    rc, runner = run(deploy_tree, tmp_path, ["--assume-yes"], runner=Unstartable())
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert str(tmp_path / "work") in err and "flash.log" in err
+    assert "Traceback" not in err
+
+
 def test_template_without_tegraflash_tools_is_a_problem_not_a_key_error(deploy_tree, tmp_path, capsys):
     _edit_template(
         deploy_tree,

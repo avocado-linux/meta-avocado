@@ -11,6 +11,7 @@ from avocado_flash_tegra import FlashError
 from avocado_flash_tegra.inputs import PROFILE
 
 AGENT_SOCK_VAR = "AVOCADO_AGENT_SOCK"
+SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,17 @@ class Invocation:
     argv: tuple[str, ...]
     env: dict[str, str]
     cwd: Path
+
+
+def safe_path(caller_path: str) -> str:
+    """The caller's PATH with only its absolute components.
+
+    An empty or relative component means the current directory, which for the
+    script is the deploy directory: root could then resolve jq, cpp or fdtget
+    from a directory the caller does not control.
+    """
+    parts = [p for p in caller_path.split(":") if p.startswith("/")]
+    return ":".join(parts) if parts else SYSTEM_PATH
 
 
 def build_invocation(
@@ -47,8 +59,7 @@ def build_invocation(
     path_parts = [str(helper_dir)]
     if extra_path_dir is not None:
         path_parts.append(str(extra_path_dir))
-    if caller_path:
-        path_parts.append(caller_path)
+    path_parts.append(safe_path(caller_path))
     env = {
         "AVOCADO_STONE_MANIFEST": str(manifest),
         "AVOCADO_STONE_DATA_DIR": str(images_dir),

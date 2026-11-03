@@ -83,7 +83,7 @@ def _stage_helper(ctx: FlashContext, stat_fn=os.lstat) -> Path:
     except OSError as exc:
         raise FlashError(f"cannot stage the boot image helper in {bin_dir}: {exc}") from exc
 
-    cpp = _resolve_cpp(os.environ.get("PATH", ""))
+    cpp = _resolve_cpp(plan.safe_path(os.environ.get("PATH", "")))
     alias = bin_dir / _cpp_alias_name()
     try:
         try:
@@ -123,13 +123,6 @@ def _prepare(ctx: FlashContext, host, runner, assume_yes: bool, is_root: bool, h
     """Everything that must pass before the script starts."""
     _print_warning()
 
-    # Authenticate before the confirmation and the recheck: a password prompt
-    # inside the script's own run leaves an unbounded gap after the recheck.
-    if not is_root and have_sudo:
-        rc, _ = runner.capture(["sudo", "-v"])
-        if rc != 0:
-            raise FlashError("could not obtain root: sudo authentication failed")
-
     if not assume_yes:
         payload = f"the Avocado OS image for {ctx.machine} (NVMe, QSPI firmware, UEFI variables)"
         # The shared prompt only says "the target"; the path it compares
@@ -139,6 +132,13 @@ def _prepare(ctx: FlashContext, host, runner, assume_yes: bool, is_root: bool, h
             host.confirm_destructive(ctx.pinned.path, payload, False, False)
         except host.fatal as exc:
             raise FlashError(str(exc)) from exc
+
+    # After the confirmation, so a prompt left open past sudo's timeout cannot
+    # leave the script's own sudo asking for a password after the recheck.
+    if not is_root and have_sudo:
+        rc, _ = runner.capture(["sudo", "-v"])
+        if rc != 0:
+            raise FlashError("could not obtain root: sudo authentication failed")
 
     # Only after the confirmation: a board attached while the prompt waited
     # must not be flashed.
@@ -174,6 +174,11 @@ def flash(ctx: FlashContext, host, runner, *, assume_yes: bool) -> None:
     except Interrupted:
         _print_kept(ctx, "interrupted")
         raise
+    except KeyboardInterrupt as exc:
+        # The runner absorbs SIGINT while it waits; this is the backstop for a
+        # runner that does not.
+        _print_kept(ctx, "interrupted")
+        raise Interrupted("interrupted while the provisioning script ran") from exc
 
     if rc != 0:
         _print_kept(ctx, f"the provisioning script exited {rc}")

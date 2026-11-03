@@ -259,3 +259,91 @@ def test_creation_failure_is_a_flash_error(tmp_path):
     for default in (False, True):
         with pytest.raises(FlashError):
             workdir.create_workdir(blocker / "w", default=default)
+
+
+# ---- every ancestor of the work directory is part of the trust boundary ----
+
+
+def _ancestor_tree(tmp_path, mode):
+    ancestor = tmp_path / "anc"
+    ancestor.mkdir()
+    (ancestor / "mid").mkdir(mode=0o700)
+    os.chmod(ancestor, mode)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - test builds an unsafe directory on purpose
+    return ancestor
+
+
+@pytest.mark.parametrize("mode", [0o770, 0o707, 0o777])
+def test_a_group_or_world_writable_ancestor_is_refused_by_name(tmp_path, mode):
+    ancestor = _ancestor_tree(tmp_path, mode)
+    with pytest.raises(FlashError, match="writable") as exc:
+        workdir.create_workdir(ancestor / "mid" / "w")
+    assert str(ancestor) in str(exc.value)
+    assert not (ancestor / "mid" / "w").exists()
+
+
+def test_an_existing_work_directory_under_an_unsafe_ancestor_is_refused(tmp_path):
+    ancestor = _ancestor_tree(tmp_path, 0o770)
+    existing = ancestor / "mid"
+    with pytest.raises(FlashError, match="writable") as exc:
+        workdir.create_workdir(existing)
+    assert str(ancestor) in str(exc.value)
+
+
+def test_a_default_path_under_an_unsafe_ancestor_is_refused_too(tmp_path):
+    ancestor = _ancestor_tree(tmp_path, 0o770)
+    with pytest.raises(FlashError, match="writable"):
+        workdir.create_workdir(ancestor / "mid" / "w", default=True)
+    assert not (ancestor / "mid" / "w").exists()
+
+
+def test_a_world_writable_sticky_ancestor_is_accepted(tmp_path):
+    ancestor = _ancestor_tree(tmp_path, 0o1777)
+    wd = workdir.create_workdir(ancestor / "mid" / "w")
+    assert wd.created_by_tool is True
+
+
+def test_an_ancestor_owned_by_someone_else_is_refused_by_name(tmp_path):
+    ancestor = _ancestor_tree(tmp_path, 0o755)
+    real_lstat = os.lstat
+
+    def stat_fn(path):
+        st = real_lstat(path)
+        if str(path) == str(ancestor):
+            return SimpleNamespace(st_mode=st.st_mode, st_uid=424242)
+        return st
+
+    with pytest.raises(FlashError, match="owned") as exc:
+        workdir.create_workdir(ancestor / "mid" / "w", stat_fn=stat_fn)
+    assert str(ancestor) in str(exc.value)
+
+
+def test_an_ancestor_owned_by_root_is_accepted(tmp_path):
+    ancestor = _ancestor_tree(tmp_path, 0o755)
+    real_lstat = os.lstat
+
+    def stat_fn(path):
+        st = real_lstat(path)
+        if str(path) == str(ancestor):
+            return SimpleNamespace(st_mode=st.st_mode, st_uid=0)
+        return st
+
+    wd = workdir.create_workdir(ancestor / "mid" / "w", stat_fn=stat_fn)
+    assert wd.created_by_tool is True
+
+
+def test_a_symlinked_ancestor_is_resolved_and_its_target_checked(tmp_path):
+    unsafe = _ancestor_tree(tmp_path, 0o770)
+    link = tmp_path / "link"
+    link.symlink_to(unsafe)
+    with pytest.raises(FlashError, match="writable") as exc:
+        workdir.create_workdir(link / "mid" / "w")
+    assert str(unsafe) in str(exc.value)
+
+
+def test_a_symlinked_ancestor_to_a_safe_directory_is_accepted(tmp_path):
+    safe = _ancestor_tree(tmp_path, 0o755)
+    link = tmp_path / "link"
+    link.symlink_to(safe)
+    wd = workdir.create_workdir(link / "mid" / "w")
+    assert (safe / "mid" / "w").is_dir()
+    assert wd.created_by_tool is True

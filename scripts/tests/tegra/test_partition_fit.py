@@ -218,3 +218,161 @@ def test_real_layout_parses_and_has_a_numeric_app_size():
     assert error is None
     assert isinstance(sizes["APP"], int) and sizes["APP"] > 0
     assert isinstance(sizes["esp"], int)
+
+
+# ---- the layout must be plain UTF-8/ASCII before the entity search means anything ----
+
+
+def _entity_layout(make_layout):
+    valid = make_layout({"esp": 67108864, "APP": APP_BYTES})
+    return '<!DOCTYPE x [<!ENTITY a "aaaa">]>\n' + valid
+
+
+def _write_bytes(tree, data, name="external-flash.xml"):
+    (tree.bsp_dir / name).write_bytes(data)
+
+
+@pytest.mark.parametrize(
+    "label,encode",
+    [
+        ("utf-16 with BOM", lambda s: s.encode("utf-16")),
+        ("utf-16-le without BOM", lambda s: s.encode("utf-16-le")),
+        ("utf-16-be without BOM", lambda s: s.encode("utf-16-be")),
+        ("utf-32 with BOM", lambda s: s.encode("utf-32")),
+        ("utf-32-le without BOM", lambda s: s.encode("utf-32-le")),
+    ],
+)
+def test_a_non_utf8_layout_with_an_entity_is_refused(deploy_tree, template, make_layout, label, encode):
+    _write_bytes(deploy_tree, encode(_entity_layout(make_layout)))
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1, label
+    assert "UTF-8" in problems[0].what, label
+    assert problems[0].target == "tegraflash-bsp"
+
+
+def test_a_clean_utf16_layout_is_refused_too(deploy_tree, template, make_layout):
+    _write_bytes(deploy_tree, make_layout({"esp": 67108864, "APP": APP_BYTES}).encode("utf-16"))
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1 and "UTF-8" in problems[0].what
+
+
+def test_a_layout_declaring_latin1_is_refused(deploy_tree, template, make_layout):
+    xml = make_layout({"esp": 67108864, "APP": APP_BYTES}).replace(
+        '<?xml version="1.0"?>', "<?xml version='1.0' encoding='ISO-8859-1'?>"
+    )
+    _set_layout(deploy_tree, xml)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "ISO-8859-1" in problems[0].what
+    assert problems[0].target == "tegraflash-bsp"
+
+
+@pytest.mark.parametrize("enc", ["UTF-8", "utf-8", "US-ASCII"])
+def test_a_utf8_or_ascii_declaration_is_accepted(deploy_tree, template, make_layout, enc):
+    xml = make_layout({"esp": 67108864, "APP": APP_BYTES}).replace(
+        '<?xml version="1.0"?>', f'<?xml version="1.0" encoding="{enc}"?>'
+    )
+    _set_layout(deploy_tree, xml)
+    assert _check(deploy_tree, template) == []
+
+
+def test_invalid_utf8_bytes_are_refused(deploy_tree, template, make_layout):
+    valid = make_layout({"esp": 67108864, "APP": APP_BYTES}).encode()
+    _write_bytes(deploy_tree, valid.replace(b"<?xml", b"\xff<?xml"))
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1 and "UTF-8" in problems[0].what
+
+
+def test_a_mixed_case_doctype_in_utf8_is_still_refused(deploy_tree, template, make_layout):
+    valid = make_layout({"esp": 67108864, "APP": APP_BYTES})
+    _set_layout(deploy_tree, '<!DocType x [<!EnTiTy a "aaaa">]>\n' + valid)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1 and "DOCTYPE or entity declaration" in problems[0].what
+
+
+# ---- which layout file counts: the one the provisioning script reads ----
+
+
+def _write_layout(tree, name, sizes, make_layout):
+    (tree.bsp_dir / name).write_text(make_layout(sizes))
+
+
+def test_an_oversized_image_is_judged_against_the_in_file(deploy_tree, template, make_layout):
+    _write_layout(deploy_tree, "external-flash.xml", {"esp": 67108864, "APP": APP_BYTES}, make_layout)
+    _write_layout(deploy_tree, "external-flash.xml.in", {"esp": 67108864, "APP": APP_BYTES // 2}, make_layout)
+    _size_rootfs(deploy_tree, template, APP_BYTES)
+    problems = _check(deploy_tree, template)
+    assert any("does not fit partition APP" in p.what and str(APP_BYTES // 2) in p.what for p in problems)
+
+
+def test_disagreeing_layouts_are_a_problem(deploy_tree, template, make_layout):
+    _write_layout(deploy_tree, "external-flash.xml", {"esp": 67108864, "APP": APP_BYTES * 2}, make_layout)
+    _write_layout(deploy_tree, "external-flash.xml.in", {"esp": 67108864, "APP": APP_BYTES}, make_layout)
+    problems = _check(deploy_tree, template)
+    assert any("disagree" in p.what and "APP" in p.what for p in problems)
+    assert all(p.target == "tegraflash-bsp" for p in problems)
+
+
+def test_agreeing_layouts_are_clean(deploy_tree, template, make_layout):
+    for name in ("external-flash.xml", "external-flash.xml.in"):
+        _write_layout(deploy_tree, name, {"esp": 67108864, "APP": APP_BYTES}, make_layout)
+    assert _check(deploy_tree, template) == []
+
+
+def test_the_xml_file_is_used_when_the_in_file_is_absent(deploy_tree, template, make_layout):
+    _write_layout(deploy_tree, "external-flash.xml", {"esp": 4, "APP": APP_BYTES}, make_layout)
+    (deploy_tree.images_dir / _entries(template)["tegraflash_esp"]).write_bytes(b"12345")
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1 and "esp" in problems[0].what
+
+
+# ---- a checked partition name must be unambiguous ----
+
+
+def _two_devices(app_first, app_second):
+    return (
+        '<?xml version="1.0"?>\n<partition_layout version="01.00.0000">\n'
+        '<device type="external" instance="0">\n'
+        f'<partition name="APP" type="data"><size> {app_first} </size></partition>\n'
+        '<partition name="esp" type="data"><size> 67108864 </size></partition>\n'
+        "</device>\n"
+        '<device type="internal" instance="3">\n'
+        f'<partition name="APP" type="data"><size> {app_second} </size></partition>\n'
+        "</device>\n</partition_layout>\n"
+    )
+
+
+def test_a_checked_name_listed_twice_is_ambiguous_and_refused(deploy_tree, template):
+    _set_layout(deploy_tree, _two_devices(APP_BYTES, 1))
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "APP" in problems[0].what and "more than once" in problems[0].what
+    assert problems[0].target == "tegraflash-bsp"
+
+
+def test_a_duplicate_with_equal_sizes_is_refused_too(deploy_tree, template):
+    _set_layout(deploy_tree, _two_devices(APP_BYTES, APP_BYTES))
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1 and "more than once" in problems[0].what
+
+
+def test_an_unchecked_duplicate_name_is_ignored(deploy_tree, template, make_layout):
+    xml = make_layout({"esp": 67108864, "APP": APP_BYTES}).replace(
+        "</device>",
+        '<partition name="other" type="data"><size> 1 </size></partition>'
+        '<partition name="other" type="data"><size> 2 </size></partition></device>',
+    )
+    _set_layout(deploy_tree, xml)
+    assert _check(deploy_tree, template) == []
+
+
+@pytest.mark.skipif(not REAL_LAYOUT.is_file(), reason="no deployed layout on this host")
+def test_real_layout_lists_each_checked_name_exactly_once_and_both_files_agree():
+    for name in ("external-flash.xml", "external-flash.xml.in"):
+        path = REAL_LAYOUT.with_name(name)
+        if not path.is_file():
+            continue
+        sizes, error = prereqs.parse_partition_sizes(path)
+        assert error is None, name
+        for _key, part in prereqs.FIT_PAIRS:
+            assert isinstance(sizes[part], int), (name, part)

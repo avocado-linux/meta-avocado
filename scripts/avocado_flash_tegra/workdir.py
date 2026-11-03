@@ -78,12 +78,42 @@ def require_private_dir(path, stat_fn=os.lstat) -> None:
         raise FlashError(f"{path} is writable by group or others")
 
 
+def require_safe_ancestors(path, stat_fn=os.lstat) -> None:
+    """Refuse when a directory above ``path`` could be swapped by someone else.
+
+    The helper under ``path`` runs as root, so whoever can write a directory
+    on the way down could replace the work directory with one of their own.
+    Symlinks are resolved first and the real ancestors are checked. Each must
+    be owned by root or the current user and not writable by group or others,
+    unless its sticky bit is set (``/tmp`` and ``/var/tmp``, where others
+    cannot rename or remove what they do not own). Ancestors that do not exist
+    yet are skipped; the caller checks again after creating them.
+    """
+    real = Path(os.path.realpath(Path(path).parent))
+    for ancestor in (real, *real.parents):
+        try:
+            st = stat_fn(ancestor)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise FlashError(f"cannot inspect {ancestor}: {exc}") from exc
+        if st.st_uid not in (0, _geteuid()):
+            raise FlashError(
+                f"{ancestor}, above the work directory {path}, is not owned by root or the current user"
+            )
+        if st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX:
+            raise FlashError(
+                f"{ancestor}, above the work directory {path}, is writable by group or others"
+            )
+
+
 def create_workdir(path, *, default=False, stat_fn=os.lstat) -> Workdir:
     """Create the work directory, or accept an existing explicit one.
 
     A default (tool-chosen) path is predictable, so it must not exist yet.
     """
     path = Path(path)
+    require_safe_ancestors(path, stat_fn)
     if os.path.lexists(path):
         if default:
             raise FlashError(f"the work directory {path} already exists; refusing to reuse it")
@@ -98,6 +128,12 @@ def create_workdir(path, *, default=False, stat_fn=os.lstat) -> Workdir:
         os.chmod(path, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - private on purpose; 0o700 is stricter than the 0o644 the rule suggests
     except OSError as exc:
         raise FlashError(f"cannot create the work directory {path}: {exc}") from exc
+    try:
+        # makedirs creates missing parents with the umask's mode, not 0700.
+        require_safe_ancestors(path, stat_fn)
+    except FlashError:
+        os.rmdir(path)
+        raise
     return Workdir(path, True)
 
 

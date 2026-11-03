@@ -101,3 +101,47 @@ def test_child_sees_only_the_invocation_environment(tmp_path, monkeypatch):
     assert "AVOCADO_AGENT_SOCK" not in text
     assert "SECRET_X" not in text
     assert "hunter2" not in text
+
+
+def test_signals_during_the_wait_are_absorbed_and_raise_interrupted_once(tmp_path):
+    import signal
+
+    marker = tmp_path / "done.marker"
+    script = _script(
+        tmp_path,
+        "echo first\n"
+        "i=0\n"
+        "while [ $i -lt 200000 ]; do i=$((i+1)); done\n"
+        f': > "{marker}"\n'
+        "echo last\n",
+    )
+    log = tmp_path / "run.log"
+    sent = []
+
+    def echo(line):
+        # Three interrupts in a row, delivered while the parent waits. None may
+        # surface as an exception here: the wait must absorb every one.
+        for _ in range(3):
+            os.kill(os.getpid(), signal.SIGINT)
+            sent.append(line)
+
+    before = signal.getsignal(signal.SIGINT)
+    with pytest.raises(Interrupted):
+        SubprocessRunner().stream(_inv(tmp_path, script), log, echo=echo)
+    assert sent == ["first"] * 3
+    assert marker.exists()
+    assert log.read_text() == "first\nlast\n"
+    assert signal.getsignal(signal.SIGINT) is before
+
+
+def test_unstartable_script_is_a_flash_error_naming_workdir_and_log(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    log = work / "flash.log"
+    inv = Inv(argv=[str(tmp_path / "no-such-script")], env={}, cwd=str(work))
+    with pytest.raises(FlashError) as exc:
+        SubprocessRunner().stream(inv, log, echo=lambda line: None)
+    assert not isinstance(exc.value, Interrupted)
+    assert str(work) in str(exc.value)
+    assert str(log) in str(exc.value)
+    assert "no-such-script" in str(exc.value)

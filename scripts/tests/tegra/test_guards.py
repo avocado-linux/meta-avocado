@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from avocado_flash_tegra import FlashError, InputInfo, Problem, format_problems
+from avocado_flash_tegra import InputInfo, Problem, format_problems
 
 REMOTE_TESTS = pathlib.Path(__file__).resolve().parents[1] / "remote"
 DIR_KEYS = {"tegraflash_bsp", "tegraflash_tools", "tegraflash_carrier_bsp"}
@@ -120,8 +120,9 @@ def test_format_problems_appends_the_build_target():
     assert "build" not in lines[1].lower()
 
 
-def test_flash_error_and_input_info_are_shaped():
-    assert issubclass(FlashError, Exception)
+def test_input_info_is_a_frozen_record():
     info = InputInfo(name="n", key="k", size=3, mtime=1.5)
-    with pytest.raises(Exception):
+    assert (info.name, info.key, info.size, info.mtime) == ("n", "k", 3, 1.5)
+    with pytest.raises(AttributeError):  # frozen dataclass
         info.size = 4
+    assert info.size == 3

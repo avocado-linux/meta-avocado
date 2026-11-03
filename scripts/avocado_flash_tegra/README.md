@@ -111,13 +111,20 @@ it created it.
 ## If it fails
 
 Before any USB action the run compares the rootfs and ESP images with their
-partitions in the deployed `tegraflash-bsp/external-flash.xml`, and refuses when
-an image is larger than its partition, the partition is absent, or its size is
-not a number (a missing or unreadable layout also refuses). For a rootfs that
-does not fit, rebuild with a larger `ROOTFSPART_SIZE_DEFAULT`.
+partitions in the deployed `tegraflash-bsp/external-flash.xml.in` (the layout the
+provisioning script applies; `external-flash.xml` is used only when that file is
+absent), and refuses when an image is larger than its partition, the partition is
+absent or listed more than once, its size is not a number, the two layout files
+disagree, or the layout is not plain UTF-8 text (a missing or unreadable layout
+also refuses). For a rootfs that does not fit, rebuild with a larger
+`ROOTFSPART_SIZE_DEFAULT`.
 
 The work directory and `flash.log` are kept, and their paths are printed. The
 board may be mid-write, so enter recovery mode again before retrying.
+
+Do not put a second board into recovery mode until the flash finishes: the
+check that the one pinned board is still the only one runs before the script
+starts, and the script's own recovery wait does not repeat it.
 
 The script runs as root, so files in the work directory are root-owned. The
 tool never passes `AVOCADO_AGENT_SOCK` to the script: it builds the

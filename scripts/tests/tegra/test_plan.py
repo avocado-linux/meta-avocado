@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from avocado_flash_tegra import FlashError
-from avocado_flash_tegra.plan import Invocation, build_invocation, describe
+from avocado_flash_tegra.plan import Invocation, build_invocation, describe, safe_path
 
 EXPECTED_KEYS = {
     "AVOCADO_STONE_MANIFEST",
@@ -159,3 +159,38 @@ def test_root_argv_keeps_the_absolute_script_path():
         script=Path("/deploy=x/images/provision.sh"),
     )
     assert inv.argv == ("/deploy=x/images/provision.sh",)
+
+
+def _path_entries(inv):
+    return inv.env["PATH"].split(":")
+
+
+def test_relative_and_empty_caller_path_components_are_dropped():
+    inv = make(caller_path="/usr/bin::.:rel/bin:/opt/x:")
+    assert _path_entries(inv) == ["/helpers", "/usr/bin", "/opt/x"]
+
+
+def test_dropped_components_are_absent_from_the_sudo_env_assignment_too():
+    inv = make(caller_path="/usr/bin::.:rel/bin")
+    assignment = next(a for a in inv.argv if a.startswith("PATH="))
+    assert assignment == "PATH=/helpers:/usr/bin"
+
+
+@pytest.mark.parametrize("caller", ["", ":", "rel:.:", "::"])
+def test_a_caller_path_with_nothing_absolute_falls_back_to_the_system_path(caller):
+    inv = make(caller_path=caller, extra_path_dir=Path("/tools"))
+    assert _path_entries(inv) == [
+        "/helpers",
+        "/tools",
+        "/usr/local/sbin",
+        "/usr/local/bin",
+        "/usr/sbin",
+        "/usr/bin",
+        "/sbin",
+        "/bin",
+    ]
+
+
+def test_safe_path_keeps_only_absolute_components_in_order():
+    assert safe_path("/b::.:/a:rel") == "/b:/a"
+    assert safe_path("") == "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

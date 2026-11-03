@@ -4,6 +4,7 @@ Standard library only. Nothing here starts a process.
 """
 
 import os
+import re
 import shutil
 import xml.etree.ElementTree as ET  # nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 from pathlib import Path
@@ -92,15 +93,52 @@ def check_executables(images_dir, template) -> list[Problem]:
     return problems
 
 
-LAYOUT_NAMES = ("external-flash.xml", "external-flash.xml.in")
+# The provisioning script reads external-flash.xml.in (it copies the BSP into
+# its build directory and applies that file), so it is the layout that counts;
+# external-flash.xml is only a fallback when the .in file is absent.
+LAYOUT_NAMES = ("external-flash.xml.in", "external-flash.xml")
 # manifest image key -> partition name in the deployed layout. Only pairs
 # whose partition is visible in the real external-flash.xml are listed.
 FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
 MAX_LAYOUT_BYTES = 4 * 1024 * 1024
+_PLAIN_ENCODINGS = ("utf-8", "us-ascii")
+_ENCODING_DECL = re.compile(
+    r"""^\s*<\?xml[^>]*?\sencoding\s*=\s*["']([^"']*)["']""", re.IGNORECASE
+)
+
+
+class _Duplicate:
+    """Marks a partition name listed more than once in a layout."""
+
+
+DUPLICATE = _Duplicate()
+
+
+def _plain_text(data: bytes) -> tuple[str | None, str | None]:
+    """Return the layout as text, or a reason it is not plain UTF-8/ASCII.
+
+    An entity declaration is found by searching the text, which only works if
+    the bytes are what the XML parser will read: a UTF-16 or UTF-32 document
+    hides ``<!DOCTYPE`` from a byte search, so those are refused outright.
+    """
+    not_plain = "will not parse a layout that is not plain UTF-8 or ASCII text"
+    if b"\x00" in data or data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return None, f"{not_plain} (UTF-16/UTF-32 or binary content)"
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None, f"{not_plain} (invalid UTF-8)"
+    declared = _ENCODING_DECL.match(text.lstrip(chr(0xFEFF)))  # a UTF-8 BOM is plain UTF-8
+    if declared and declared.group(1).lower() not in _PLAIN_ENCODINGS:
+        return None, f"{not_plain} (the XML declaration names {declared.group(1)})"
+    return text, None
 
 
 def parse_partition_sizes(path) -> tuple[dict, str | None]:
-    """Map partition name to its size, an int or the raw text when not numeric."""
+    """Map partition name to its size, an int or the raw text when not numeric.
+
+    A name listed more than once maps to ``DUPLICATE``: its size is ambiguous.
+    """
     try:
         with open(path, "rb") as fh:
             data = fh.read(MAX_LAYOUT_BYTES + 1)
@@ -108,26 +146,41 @@ def parse_partition_sizes(path) -> tuple[dict, str | None]:
         return {}, str(exc)
     if len(data) > MAX_LAYOUT_BYTES:
         return {}, f"the layout is larger than {MAX_LAYOUT_BYTES} bytes"
-    lowered = data.lower()
-    if b"<!doctype" in lowered or b"<!entity" in lowered:
+    text, reason = _plain_text(data)
+    if text is None:
+        return {}, reason
+    lowered = text.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
         return {}, "will not parse a layout with a DOCTYPE or entity declaration"
     try:
-        # The layout is untrusted; this parse only runs after the size cap and
-        # the DOCTYPE/ENTITY refusal above, so no entity can be defined.
+        # The layout is untrusted; this parse only runs after the size cap, the
+        # plain-text check and the DOCTYPE/ENTITY refusal above, so no entity
+        # can be defined.
         root = ET.fromstring(data)  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
     except ET.ParseError as exc:
         return {}, str(exc)
     sizes: dict = {}
     for part in root.iter("partition"):
         name = part.get("name")
-        if name is None or name in sizes:
+        if name is None:
             continue
-        text = (part.findtext("size") or "").strip()
+        if name in sizes:
+            sizes[name] = DUPLICATE
+            continue
+        raw = (part.findtext("size") or "").strip()
         try:
-            sizes[name] = int(text, 0)
+            sizes[name] = int(raw, 0)
         except ValueError:
-            sizes[name] = text
+            sizes[name] = raw
     return sizes, None
+
+
+def _disagreements(primary: dict, other: dict) -> list[str]:
+    return [
+        part
+        for _key, part in FIT_PAIRS
+        if part in primary and part in other and primary[part] != other[part]
+    ]
 
 
 def fit_report(images_dir, template, entries) -> tuple[list[Problem], list[str]]:
@@ -139,24 +192,47 @@ def fit_report(images_dir, template, entries) -> tuple[list[Problem], list[str]]
     images_dir = Path(images_dir)
     bsp_dir = images_dir / entries.get("tegraflash_bsp", "tegraflash-bsp")
     target = BUILD_TARGETS["tegraflash_bsp"]
-    layout = next((bsp_dir / n for n in LAYOUT_NAMES if (bsp_dir / n).is_file()), None)
-    if layout is None:
+    found = [bsp_dir / n for n in LAYOUT_NAMES if (bsp_dir / n).is_file()]
+    if not found:
         return [
             Problem(
-                f"the partition fit cannot be verified: no {LAYOUT_NAMES[0]} in {bsp_dir}",
+                f"the partition fit cannot be verified: none of {', '.join(LAYOUT_NAMES)} in {bsp_dir}",
                 target,
             )
         ], []
+    layout = found[0]
     sizes, error = parse_partition_sizes(layout)
     if error is not None:
         return [Problem(f"the partition fit cannot be verified: {layout} is unreadable ({error})", target)], []
 
     problems: list[Problem] = []
     lines: list[str] = []
+    if len(found) > 1:
+        other_sizes, other_error = parse_partition_sizes(found[1])
+        if other_error is None:
+            for part in _disagreements(sizes, other_sizes):
+                problems.append(
+                    Problem(
+                        f"the layouts disagree on partition {part}: {layout.name} says "
+                        f"{sizes[part]!r} but {found[1].name} says {other_sizes[part]!r}; "
+                        f"the provisioning script applies {layout.name}",
+                        target,
+                    )
+                )
+    for _key, part in FIT_PAIRS:
+        if sizes.get(part) is DUPLICATE:
+            problems.append(
+                Problem(
+                    f"partition {part} is listed more than once in {layout}, so its size is ambiguous",
+                    target,
+                )
+            )
     for key, part in FIT_PAIRS:
         name = entries.get(key)
         if name is None or not (images_dir / name).is_file():
             continue  # a missing image is reported by check_images
+        if sizes.get(part) is DUPLICATE:
+            continue  # reported above
         if part not in sizes:
             problems.append(
                 Problem(f"partition {part} is absent from the deployed layout {layout}, so {key} {name} cannot be checked", target)

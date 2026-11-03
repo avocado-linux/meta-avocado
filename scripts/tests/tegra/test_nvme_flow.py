@@ -228,17 +228,40 @@ def test_non_root_with_sudo_runs_through_sudo(ctx, events, non_root):
     assert runner.streamed[0][0].argv[0] == "sudo"
 
 
-def test_non_root_authenticates_sudo_before_confirming_the_board(ctx, events, non_root):
+def test_non_root_authenticates_sudo_after_confirming_and_before_the_recheck(ctx, events, non_root):
     flow.flash(ctx, FakeHost(events), FakeRunner(events), assume_yes=False)
-    assert events[:4] == ["sudo-v", "confirm", "list", "stream"]
+    assert events[:4] == ["confirm", "sudo-v", "list", "stream"]
 
 
-def test_failed_sudo_authentication_never_confirms_or_streams(ctx, events, non_root):
+def test_failed_sudo_authentication_never_rechecks_or_streams(ctx, events, non_root):
     runner = FakeRunner(events, sudo_rc=1)
     with pytest.raises(FlashError, match="could not obtain root: sudo authentication failed"):
         flow.flash(ctx, FakeHost(events), runner, assume_yes=False)
-    assert events == ["sudo-v"]
+    assert events == ["confirm", "sudo-v"]
     assert runner.streamed == []
+
+
+def test_a_refused_confirmation_never_asks_for_sudo(ctx, events, non_root):
+    with pytest.raises(FlashError, match="mismatch"):
+        flow.flash(ctx, FakeHost(events, fail=True), FakeRunner(events), assume_yes=False)
+    assert events == ["confirm"]
+
+
+def test_keyboard_interrupt_escaping_the_runner_is_reported_as_interrupted(ctx, events, capsys):
+    runner = FakeRunner(events, raises=KeyboardInterrupt())
+    with pytest.raises(Interrupted):
+        flow.flash(ctx, FakeHost(events), runner, assume_yes=True)
+    out = capsys.readouterr().out
+    assert ctx.workdir.path.is_dir()
+    assert "recovery mode again" in out
+    assert str(ctx.workdir.path) in out and str(ctx.workdir.log) in out
+
+
+def test_a_script_that_cannot_start_surfaces_as_a_flash_error_keeping_the_directory(ctx, events):
+    runner = FakeRunner(events, raises=FlashError(f"cannot start x (work directory: {ctx.workdir.path})"))
+    with pytest.raises(FlashError, match="cannot start"):
+        flow.flash(ctx, FakeHost(events), runner, assume_yes=True)
+    assert ctx.workdir.path.is_dir()
 
 
 def test_root_caller_makes_no_sudo_call(ctx, events):
@@ -369,6 +392,14 @@ def test_resolve_cpp_refuses_when_absent(monkeypatch):
     monkeypatch.setattr(flow.shutil, "which", lambda name, path=None: None)
     with pytest.raises(FlashError, match="cpp"):
         REAL_RESOLVE_CPP("/nowhere")
+
+
+def test_stage_helper_looks_for_cpp_only_on_absolute_path_components(ctx, monkeypatch):
+    seen = []
+    monkeypatch.setenv("PATH", "/usr/bin::.:rel/bin")
+    monkeypatch.setattr(flow, "_resolve_cpp", lambda caller_path: seen.append(caller_path) or "/bin/true")
+    flow._stage_helper(ctx)
+    assert seen == ["/usr/bin"]
 
 
 def test_stage_helper_refuses_without_a_host_cpp(ctx, monkeypatch):
