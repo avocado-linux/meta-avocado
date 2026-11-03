@@ -1,10 +1,12 @@
 """Flow tests: fakes for the host and the runner; no process is started."""
 
+import os
 import stat
+from types import SimpleNamespace
 
 import pytest
 
-from avocado_flash_tegra import FlashError, InputInfo, flow, rcm, workdir
+from avocado_flash_tegra import FlashError, flow, rcm, workdir
 from avocado_flash_tegra.runner import Interrupted
 
 PINNED_LINE = "Bus 001 Device 004: ID 0955:7523 NVIDIA Corp. APX"
@@ -30,8 +32,9 @@ class FakeHost:
 
 
 class FakeRunner:
-    def __init__(self, events, listing=PINNED_LINE, rc=0, raises=None):
+    def __init__(self, events, listing=PINNED_LINE, rc=0, raises=None, sudo_rc=0):
         self.events = events
+        self.sudo_rc = sudo_rc
         self.listing = listing
         self.rc = rc
         self.raises = raises
@@ -41,6 +44,9 @@ class FakeRunner:
         if argv[0] == "lsusb":
             self.events.append("list")
             return 0, f"{self.listing}\n"
+        if list(argv) == ["sudo", "-v"]:
+            self.events.append("sudo-v")
+            return self.sudo_rc, ""
         # The success cleanup removes the root-owned tegraflash dir via sudo.
         self.events.append("cleanup")
         return 0, ""
@@ -51,6 +57,18 @@ class FakeRunner:
         if self.raises:
             raise self.raises
         return self.rc
+
+
+@pytest.fixture(autouse=True)
+def as_root(monkeypatch):
+    """Default caller is root; tests that need sudo override this."""
+    monkeypatch.setattr(flow.os, "geteuid", lambda: 0)
+
+
+@pytest.fixture
+def non_root(monkeypatch):
+    monkeypatch.setattr(flow.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(flow.shutil, "which", lambda name: "/usr/bin/sudo")
 
 
 @pytest.fixture
@@ -78,7 +96,6 @@ def ctx(tmp_path):
         extra_path_dir=None,
         expected_id="0955:7523",
         pinned=pinned,
-        infos=[InputInfo("manifest", "m", 10, 0.0)],
         workdir=wd,
     )
 
@@ -194,9 +211,104 @@ def test_interrupt_keeps_work_directory_and_reraises(ctx, events, capsys):
     assert "recovery mode again" in out
 
 
-def test_non_root_with_sudo_runs_through_sudo(ctx, events, monkeypatch):
-    monkeypatch.setattr(flow.os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(flow.shutil, "which", lambda name: "/usr/bin/sudo")
+def test_non_root_with_sudo_runs_through_sudo(ctx, events, non_root):
     runner = FakeRunner(events)
     flow.flash(ctx, FakeHost(events), runner, assume_yes=True)
     assert runner.streamed[0][0].argv[0] == "sudo"
+
+
+def test_non_root_authenticates_sudo_before_confirming_the_board(ctx, events, non_root):
+    flow.flash(ctx, FakeHost(events), FakeRunner(events), assume_yes=False)
+    assert events[:4] == ["sudo-v", "confirm", "list", "stream"]
+
+
+def test_failed_sudo_authentication_never_confirms_or_streams(ctx, events, non_root):
+    runner = FakeRunner(events, sudo_rc=1)
+    with pytest.raises(FlashError, match="could not obtain root: sudo authentication failed"):
+        flow.flash(ctx, FakeHost(events), runner, assume_yes=False)
+    assert events == ["sudo-v"]
+    assert runner.streamed == []
+
+
+def test_root_caller_makes_no_sudo_call(ctx, events):
+    flow.flash(ctx, FakeHost(events), FakeRunner(events), assume_yes=False)
+    assert "sudo-v" not in events
+
+
+def _foreign_owner(path):
+    real = os.lstat(path)
+    return SimpleNamespace(st_mode=real.st_mode, st_uid=real.st_uid + 1)
+
+
+def test_stage_helper_creates_bin_private(ctx):
+    bin_dir = flow._stage_helper(ctx)
+    assert stat.S_IMODE(os.stat(bin_dir).st_mode) == 0o700
+
+
+def test_stage_helper_replaces_a_planted_symlink_without_following_it(ctx, tmp_path):
+    victim = tmp_path / "victim"
+    victim.write_text("precious")
+    (ctx.workdir.path / "bin").mkdir(mode=0o700)
+    (ctx.workdir.path / "bin" / flow.HELPER_NAME).symlink_to(victim)
+    bin_dir = flow._stage_helper(ctx)
+    staged = bin_dir / flow.HELPER_NAME
+    assert victim.read_text() == "precious"
+    assert not staged.is_symlink()
+    assert staged.read_text() == "#!/bin/sh\n"
+    assert stat.S_IMODE(staged.stat().st_mode) == 0o755
+
+
+def test_stage_helper_refuses_a_symlinked_bin(ctx, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir(mode=0o700)
+    (ctx.workdir.path / "bin").symlink_to(other)
+    with pytest.raises(FlashError):
+        flow._stage_helper(ctx)
+    assert list(other.iterdir()) == []
+
+
+def test_stage_helper_refuses_a_bin_owned_by_someone_else(ctx):
+    (ctx.workdir.path / "bin").mkdir(mode=0o700)
+    with pytest.raises(FlashError, match="owned"):
+        flow._stage_helper(ctx, stat_fn=_foreign_owner)
+
+
+def test_stage_helper_refuses_a_group_writable_bin(ctx):
+    (ctx.workdir.path / "bin").mkdir()
+    os.chmod(ctx.workdir.path / "bin", 0o770)
+    with pytest.raises(FlashError, match="writable"):
+        flow._stage_helper(ctx)
+
+
+def _empty_workdir(ctx):
+    (ctx.workdir.path / "tegraflash").rmdir()
+
+
+def test_refused_confirmation_removes_the_directory_the_tool_created(ctx, events):
+    _empty_workdir(ctx)
+    with pytest.raises(FlashError):
+        flow.flash(ctx, FakeHost(events, fail=True), FakeRunner(events), assume_yes=False)
+    assert not ctx.workdir.path.exists()
+
+
+def test_changed_device_set_removes_the_staged_directory_too(ctx, events):
+    _empty_workdir(ctx)
+    runner = FakeRunner(events, listing=PINNED_LINE + "\n" + SECOND_LINE)
+    with pytest.raises(rcm.DeviceSetChanged):
+        flow.flash(ctx, FakeHost(events), runner, assume_yes=False)
+    assert not ctx.workdir.path.exists()
+
+
+def test_refusal_never_removes_a_directory_the_tool_did_not_create(ctx, events):
+    _empty_workdir(ctx)
+    ctx.workdir = workdir.Workdir(ctx.workdir.path, False)
+    with pytest.raises(FlashError):
+        flow.flash(ctx, FakeHost(events, fail=True), FakeRunner(events), assume_yes=False)
+    assert ctx.workdir.path.is_dir()
+
+
+def test_failed_script_keeps_the_directory(ctx, events):
+    _empty_workdir(ctx)
+    with pytest.raises(FlashError):
+        flow.flash(ctx, FakeHost(events), FakeRunner(events, rc=2), assume_yes=True)
+    assert ctx.workdir.path.is_dir()

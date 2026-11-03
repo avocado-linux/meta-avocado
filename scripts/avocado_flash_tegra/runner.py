@@ -1,8 +1,11 @@
 """The only module that starts processes.
 
-Standard library only. Nothing here uses a shell, and nothing here signals
-a child: an interrupt waits for the flash script to finish, because killing
-it mid-write could leave the board half-flashed.
+Standard library only. Nothing here uses a shell. ``stream`` runs the flash
+script and never signals it: an interrupt waits for the script to finish,
+because killing it mid-write could leave the board half-flashed. ``capture``
+is for short commands only; ``subprocess.run`` kills its child on
+KeyboardInterrupt, which is acceptable for a listing or a sudo refresh and
+which the CLI reports as an interrupted run.
 """
 
 import subprocess

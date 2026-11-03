@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import FlashError, format_problems, inputs, machines, plan, prereqs, rcm, workdir
+from . import FlashError, Problem, format_problems, inputs, machines, plan, prereqs, rcm, workdir
 from .flow import FlashContext, flash
 from .runner import Interrupted, SubprocessRunner
 
@@ -69,17 +69,19 @@ def _run(argv, host, runner) -> int:
     inputs.require_profile(template, machine)
 
     is_root = os.geteuid() == 0
-    if not is_root and shutil.which("sudo") is None:
-        raise FlashError("the flash needs root: run as root or install sudo")
 
     entries = inputs.image_entries(template)
     problems = list(inputs.check_images(images_dir, entries))
+    if not is_root and shutil.which("sudo") is None:
+        problems.append(Problem("the flash needs root: run as root or install sudo"))
     problems += prereqs.check_executables(images_dir, template)
     helper = prereqs.find_bootimg_helper(LAYER_ROOT)
     helper_issue = prereqs.helper_problem(helper)
     if helper_issue is not None:
         problems.append(helper_issue)
-    mk_problems, extra_path_dir = prereqs.check_mkbootimg(images_dir)
+    mk_problems, extra_path_dir = prereqs.check_mkbootimg(
+        images_dir, tools_dirname=prereqs.tools_dir_name(template) or prereqs.TOOLS_DIRNAME
+    )
     problems += mk_problems
     problems += prereqs.check_host_tools()
     if problems:
@@ -99,7 +101,7 @@ def _run(argv, host, runner) -> int:
     print(f"pinned: {pinned.path} {pinned.vid}:{pinned.pid}")
 
     manifest = images_dir / inputs.template_name(machine)
-    script = images_dir / template["provision"]["profiles"][inputs.PROFILE]["script"]
+    script = images_dir / prereqs.script_name(template)
     kernel_image = images_dir / "Image"
 
     if args.dry_run:
@@ -133,8 +135,7 @@ def _run(argv, host, runner) -> int:
         extra_path_dir=extra_path_dir,
         expected_id=expected_id,
         pinned=pinned,
-        infos=infos,
-        workdir=workdir.create_workdir(planned),
+        workdir=workdir.create_workdir(planned, default=args.workdir is None),
     )
     flash(ctx, host, runner, assume_yes=args.assume_yes)
     return 0
@@ -153,6 +154,16 @@ def main(argv, host, runner=None) -> int:
     except Interrupted as exc:
         print(f"avocado-flash: {exc}", file=sys.stderr)
         return 130
+    except KeyboardInterrupt:
+        print("avocado-flash: interrupted", file=sys.stderr)
+        return 130
+    except EOFError:
+        print(
+            "avocado-flash: no terminal to read the confirmation from; "
+            "pass --assume-yes to skip it",
+            file=sys.stderr,
+        )
+        return 1
     except FlashError as exc:
         print(f"avocado-flash: {exc}", file=sys.stderr)
         return 1

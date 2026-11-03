@@ -57,7 +57,7 @@ def test_extra_path_dir_between_helper_and_caller_path():
 def test_non_root_caller_gets_sudo_argv_with_explicit_assignments():
     inv = make()
     assert inv.argv[:4] == ("sudo", "env", "-u", "AVOCADO_AGENT_SOCK")
-    assert inv.argv[-1] == "/deploy/images/provision.sh"
+    assert inv.argv[-1] == "./provision.sh"
     assignments = inv.argv[4:-1]
     assert sorted(assignments) == sorted(f"{k}={v}" for k, v in inv.env.items())
 
@@ -121,3 +121,41 @@ def test_describe_root_has_no_sudo():
     text = describe(make(is_root=True, have_sudo=False))
     assert "sudo" not in text
     assert "provision.sh" in text
+
+
+def test_sudo_argv_names_the_script_relative_to_cwd_when_the_path_has_an_equals_sign():
+    # env reads any operand containing "=" as another assignment, runs nothing
+    # and exits 0.
+    inv = make(
+        images_dir=Path("/deploy=x/images"),
+        script=Path("/deploy=x/images/provision.sh"),
+    )
+    command = inv.argv[-1]
+    assert "=" not in command
+    assert command == "./provision.sh"
+    assert inv.cwd == Path("/deploy=x/images")
+
+
+def test_sudo_argv_refuses_a_script_outside_cwd_with_an_equals_sign():
+    with pytest.raises(FlashError, match="="):
+        make(script=Path("/elsewhere=x/provision.sh"))
+
+
+def test_sudo_argv_keeps_an_absolute_script_outside_cwd_without_an_equals_sign():
+    inv = make(script=Path("/elsewhere/provision.sh"))
+    assert inv.argv[-1] == "/elsewhere/provision.sh"
+
+
+def test_sudo_argv_refuses_a_script_name_with_an_equals_sign():
+    with pytest.raises(FlashError):
+        make(script=Path("/deploy/images/a=b.sh"))
+
+
+def test_root_argv_keeps_the_absolute_script_path():
+    inv = make(
+        is_root=True,
+        have_sudo=False,
+        images_dir=Path("/deploy=x/images"),
+        script=Path("/deploy=x/images/provision.sh"),
+    )
+    assert inv.argv == ("/deploy=x/images/provision.sh",)

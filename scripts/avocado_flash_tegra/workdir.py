@@ -7,6 +7,7 @@ privileged removal goes through the runner it is handed.
 import datetime
 import os
 import shutil
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,9 @@ from pathlib import Path
 from . import FlashError
 
 _TEGRAFLASH = "tegraflash"
+# Bound at import so a test that patches os.geteuid to fake "not root" for the
+# sudo path does not change who counts as the owner of a directory.
+_geteuid = os.geteuid
 
 
 @dataclass(frozen=True)
@@ -34,10 +38,12 @@ def required_bytes(infos) -> int:
 
 def planned_workdir(explicit, machine, base=Path("/var/tmp"), now=None) -> Path:
     """The path the run will use; creates nothing."""
+    # The script runs with cwd=images_dir, so a relative path would resolve
+    # against the deploy directory there.
     if explicit is not None:
-        return Path(explicit)
+        return Path(os.path.abspath(explicit))
     stamp = (now or datetime.datetime.now()).strftime("%Y%m%d-%H%M%S")
-    return Path(base) / f"avocado-flash-{machine}-{stamp}"
+    return Path(os.path.abspath(base)) / f"avocado-flash-{machine}-{stamp}"
 
 
 def require_space(path, needed, disk_usage=shutil.disk_usage) -> None:
@@ -53,13 +59,45 @@ def require_space(path, needed, disk_usage=shutil.disk_usage) -> None:
         )
 
 
-def create_workdir(path) -> Workdir:
+def require_private_dir(path, stat_fn=os.lstat) -> None:
+    """Refuse unless ``path`` is a real directory we own that only we can write.
+
+    The helper staged inside runs as root, so a directory another user could
+    pre-create or write to would let them choose what root executes.
+    """
     path = Path(path)
-    if path.is_dir():
+    try:
+        st = stat_fn(path)
+    except OSError as exc:
+        raise FlashError(f"cannot inspect {path}: {exc}") from exc
+    if not stat.S_ISDIR(st.st_mode):
+        raise FlashError(f"{path} is not a directory (a symlink or other file is refused)")
+    if st.st_uid != _geteuid():
+        raise FlashError(f"{path} is not owned by the current user")
+    if st.st_mode & 0o022:
+        raise FlashError(f"{path} is writable by group or others")
+
+
+def create_workdir(path, *, default=False, stat_fn=os.lstat) -> Workdir:
+    """Create the work directory, or accept an existing explicit one.
+
+    A default (tool-chosen) path is predictable, so it must not exist yet.
+    """
+    path = Path(path)
+    if os.path.lexists(path):
+        if default:
+            raise FlashError(f"the work directory {path} already exists; refusing to reuse it")
+        require_private_dir(path, stat_fn)
         return Workdir(path, False)
-    os.makedirs(path, mode=0o700)
-    # makedirs honours the umask; a leaf must be 0700 whatever it is.
-    os.chmod(path, 0o700)
+    try:
+        if default:
+            os.mkdir(path, 0o700)
+        else:
+            os.makedirs(path, mode=0o700)
+        # mkdir honours the umask; a leaf must be 0700 whatever it is.
+        os.chmod(path, 0o700)
+    except OSError as exc:
+        raise FlashError(f"cannot create the work directory {path}: {exc}") from exc
     return Workdir(path, True)
 
 
@@ -86,8 +124,6 @@ def cleanup(workdir, success, runner, is_root):
                 else:
                     shutil.rmtree(tegraflash)
             else:
-                if tegraflash != workdir.path / _TEGRAFLASH:
-                    raise FlashError(f"refusing to remove {tegraflash}")
                 rc, out = runner.capture(
                     ["sudo", "rm", "-rf", "--one-file-system", "--", str(tegraflash)]
                 )

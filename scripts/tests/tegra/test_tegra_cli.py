@@ -50,7 +50,8 @@ def stubs(tmp_path):
     _stub(bindir / "lsusb", log + f'echo "{LISTING}"\n')
     for name in ("jq", "fdtget", "fdtput", "cpp", "mkbootimg"):
         _stub(bindir / name, log)
-    _stub(bindir / "sudo", log + 'exec "$@"\n')
+    # `sudo -v` only refreshes the credential cache; the stub has none to ask for.
+    _stub(bindir / "sudo", log + '[ "$1" = "-v" ] && exit 0\nexec "$@"\n')
     for name in ("env", "sh"):
         (bindir / name).symlink_to(shutil.which(name))
     return bindir, calls
@@ -73,7 +74,7 @@ def _record_script(tree, record):
     tree.script.chmod(0o755)
 
 
-def run_launcher(stubs, tmp_path, args):
+def run_launcher(stubs, tmp_path, args, stdin_text=None):
     bindir, _ = stubs
     env = {
         "PATH": str(bindir),
@@ -83,7 +84,8 @@ def run_launcher(stubs, tmp_path, args):
     return subprocess.run(
         [sys.executable, str(LAUNCHER), *args],
         env=env,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL if stdin_text is None else None,
+        input=stdin_text,
         capture_output=True,
         text=True,
         timeout=60,
@@ -127,6 +129,62 @@ def test_real_run_executes_script_with_five_variables(deploy_tree, stubs, tmp_pa
     helpers = [ln for ln in text.splitlines() if ln.startswith("HELPER ")]
     work_bin = str(tmp_path / "work" / "bin")
     assert [h for h in helpers if h.startswith(f"HELPER {work_bin}/")], text
+
+
+def _pinned_path(stubs, tmp_path, tree):
+    proc = run_launcher(stubs, tmp_path, nvme_args(tree, tmp_path, "--dry-run"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("pinned: "))
+    return line.split()[1]
+
+
+def _without_sudo(calls):
+    return [c for c in tool_calls(calls) if c != "sudo"]
+
+
+def test_wrong_retype_aborts_before_the_script_runs(deploy_tree, stubs, tmp_path):
+    _, calls = stubs
+    record = tmp_path / "record.txt"
+    _record_script(deploy_tree, record)
+    calls.write_text("")
+
+    proc = run_launcher(
+        stubs, tmp_path, nvme_args(deploy_tree, tmp_path), stdin_text="not-the-device\n"
+    )
+
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "mismatch" in proc.stderr
+    assert not record.exists()
+    assert _without_sudo(calls) == ["lsusb"]
+
+
+def test_correct_retype_runs_the_script(deploy_tree, stubs, tmp_path):
+    _, calls = stubs
+    record = tmp_path / "record.txt"
+    _record_script(deploy_tree, record)
+    pinned = _pinned_path(stubs, tmp_path, deploy_tree)
+    calls.write_text("")
+
+    proc = run_launcher(
+        stubs, tmp_path, nvme_args(deploy_tree, tmp_path), stdin_text=pinned + "\n"
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "AVOCADO_PROVISION_PROFILE" in record.read_text()
+    # One listing to pin, one to recheck after the confirmation.
+    assert _without_sudo(calls) == ["lsusb", "lsusb"]
+
+
+def test_closed_stdin_at_the_retype_is_refused_cleanly(deploy_tree, stubs, tmp_path):
+    record = tmp_path / "record.txt"
+    _record_script(deploy_tree, record)
+
+    proc = run_launcher(stubs, tmp_path, nvme_args(deploy_tree, tmp_path))
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "pass --assume-yes" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not record.exists()
 
 
 def test_dry_run_runs_only_lsusb(deploy_tree, stubs, tmp_path):

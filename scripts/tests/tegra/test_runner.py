@@ -87,3 +87,17 @@ def test_interrupt_waits_for_child_then_raises(tmp_path):
     assert isinstance(exc.value, FlashError)
     assert marker.exists()
     assert log.read_text() == "first\nlast\n"
+
+
+def test_child_sees_only_the_invocation_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("AVOCADO_AGENT_SOCK", "/run/leak.sock")
+    monkeypatch.setenv("SECRET_X", "hunter2")
+    out = tmp_path / "child-env.txt"
+    script = _script(tmp_path, f'export -p > "{out}"\n')
+    inv = Inv(argv=[str(script)], env={"MARK": "kept"}, cwd=str(tmp_path))
+    assert SubprocessRunner().stream(inv, tmp_path / "l.log", echo=lambda line: None) == 0
+    text = out.read_text()
+    assert "MARK" in text
+    assert "AVOCADO_AGENT_SOCK" not in text
+    assert "SECRET_X" not in text
+    assert "hunter2" not in text

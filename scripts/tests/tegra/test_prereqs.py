@@ -215,3 +215,28 @@ def test_default_path_is_the_process_path(tmp_path, monkeypatch):
     assert prereqs.check_host_tools() == []
     monkeypatch.setenv("PATH", os.fspath(tmp_path / "nowhere"))
     assert len(prereqs.check_host_tools()) == len(HOST_TOOLS)
+
+
+def test_check_mkbootimg_looks_in_the_tools_directory_the_template_names(deploy_tree, tmp_path):
+    _exe(deploy_tree.images_dir / "custom-tools" / "mkbootimg")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    problems, extra = prereqs.check_mkbootimg(
+        deploy_tree.images_dir, path=str(empty), tools_dirname="custom-tools"
+    )
+    assert problems == []
+    assert extra == deploy_tree.images_dir / "custom-tools"
+
+
+def test_missing_script_key_is_a_problem_naming_the_key_and_target(deploy_tree, template):
+    del template["provision"]["profiles"]["tegraflash-nvme"]["script"]
+    problems = prereqs.check_executables(deploy_tree.images_dir, template)
+    assert [p.target for p in problems] == ["avocado-stone"]
+    assert "script" in problems[0].what
+
+
+def test_missing_tools_key_is_a_problem_naming_the_key_and_target(deploy_tree, template):
+    del template["storage_devices"]["rootdisk"]["images"]["tegraflash_tools"]
+    problems = prereqs.check_executables(deploy_tree.images_dir, template)
+    assert [p.target for p in problems] == ["avocado-stone"]
+    assert "tegraflash_tools" in problems[0].what

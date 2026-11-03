@@ -5,6 +5,7 @@ import os
 import pathlib
 import stat
 from collections import namedtuple
+from types import SimpleNamespace
 
 import pytest
 
@@ -57,6 +58,21 @@ def test_planned_workdir_returns_explicit_path_untouched(tmp_path):
     explicit = tmp_path / "mine"
     assert workdir.planned_workdir(explicit, "avocado-m") == explicit
     assert not explicit.exists()
+
+
+def test_planned_workdir_makes_a_relative_explicit_path_absolute(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = workdir.planned_workdir(pathlib.Path("rel/work"), "avocado-m")
+    assert path == tmp_path / "rel" / "work"
+    assert path.is_absolute()
+
+
+def test_planned_workdir_makes_a_relative_default_base_absolute(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    now = datetime.datetime(2026, 11, 3, 4, 5, 6)
+    path = workdir.planned_workdir(None, "avocado-m", base=pathlib.Path("rel"), now=now)
+    assert path.is_absolute()
+    assert path == tmp_path / "rel" / "avocado-flash-avocado-m-20261103-040506"
 
 
 def test_planned_workdir_default_name_and_no_creation(tmp_path):
@@ -186,3 +202,60 @@ def test_removal_failure_warns_and_does_not_raise(tmp_path, capsys):
     assert result == wd.path
     assert (wd.path / "tegraflash").is_dir()
     assert str(wd.path) in capsys.readouterr().err
+
+
+def _foreign_owner(path):
+    real = os.lstat(path)
+    return SimpleNamespace(st_mode=real.st_mode, st_uid=real.st_uid + 1)
+
+
+def test_create_refuses_an_existing_symlink_to_a_directory(tmp_path):
+    target = tmp_path / "real"
+    target.mkdir(mode=0o700)
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(FlashError, match="symlink|not a directory"):
+        workdir.create_workdir(link)
+
+
+def test_create_refuses_an_existing_directory_writable_by_others(tmp_path):
+    wd = tmp_path / "w"
+    wd.mkdir()
+    os.chmod(wd, 0o770)
+    with pytest.raises(FlashError, match="writable"):
+        workdir.create_workdir(wd)
+
+
+def test_create_refuses_an_existing_directory_owned_by_someone_else(tmp_path):
+    wd = tmp_path / "w"
+    wd.mkdir(mode=0o700)
+    with pytest.raises(FlashError, match="owned"):
+        workdir.create_workdir(wd, stat_fn=_foreign_owner)
+
+
+def test_create_refuses_an_existing_regular_file(tmp_path):
+    f = tmp_path / "f"
+    f.write_text("x")
+    with pytest.raises(FlashError, match="not a directory"):
+        workdir.create_workdir(f)
+
+
+def test_default_path_is_created_with_mkdir_0700(tmp_path):
+    wd = workdir.create_workdir(tmp_path / "d", default=True)
+    assert wd.created_by_tool is True
+    assert stat.S_IMODE(os.stat(wd.path).st_mode) == 0o700
+
+
+def test_default_path_that_already_exists_is_never_reused(tmp_path):
+    pre = tmp_path / "d"
+    pre.mkdir(mode=0o700)
+    with pytest.raises(FlashError, match="exists"):
+        workdir.create_workdir(pre, default=True)
+
+
+def test_creation_failure_is_a_flash_error(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    for default in (False, True):
+        with pytest.raises(FlashError):
+            workdir.create_workdir(blocker / "w", default=default)

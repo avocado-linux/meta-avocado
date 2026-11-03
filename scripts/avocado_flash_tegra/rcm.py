@@ -9,8 +9,8 @@ import re
 from dataclasses import dataclass
 
 from . import FlashError
+from .machines import NVIDIA_VENDOR
 
-NVIDIA_VENDOR = "0955"
 # A Jetson running Linux in USB device mode, not waiting in recovery mode.
 DEVICE_MODE_ID = "0955:7020"
 

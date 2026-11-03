@@ -132,6 +132,17 @@ def test_dry_run_without_root_or_sudo_refuses_before_lsusb(deploy_tree, tmp_path
     assert "inputs: all present" not in captured.out
 
 
+def test_missing_sudo_is_reported_together_with_the_other_problems(deploy_tree, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: None if name == "sudo" else f"/stub/{name}")
+    (deploy_tree.images_dir / "tegra-espimage-avocado-jetson-orin-nano.esp").unlink()
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert runner.captured == []
+    assert "install sudo" in err
+    assert "tegra-espimage" in err
+
+
 def test_dry_run_as_root_without_sudo_proceeds(deploy_tree, tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name, path=None: None if name == "sudo" else f"/stub/{name}")
     monkeypatch.setattr(os, "geteuid", lambda: 0)
@@ -207,3 +218,82 @@ def test_host_fatal_is_reported_and_returns_1(deploy_tree, tmp_path, capsys):
     assert rc == 1
     assert "avocado-flash: no deploy here" in capsys.readouterr().err
     assert runner.captured == []
+
+
+def test_keyboard_interrupt_returns_130_with_a_message(deploy_tree, tmp_path, capsys):
+    class Raising(FakeRunner):
+        def capture(self, argv):
+            raise KeyboardInterrupt
+
+    rc, _ = run(deploy_tree, tmp_path, ["--dry-run"], runner=Raising())
+    assert rc == 130
+    assert "avocado-flash: interrupted" in capsys.readouterr().err
+
+
+def test_closed_stdin_at_the_confirmation_returns_1_with_advice(deploy_tree, tmp_path, capsys):
+    host = make_host(deploy_tree)
+
+    def eof(target, payload, dry_run, assume_yes):
+        raise EOFError
+
+    host.confirm_destructive = eof
+    rc, runner = run(deploy_tree, tmp_path, [], host=host)
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert runner.streamed == []
+    assert "no terminal to read the confirmation from; pass --assume-yes to skip it" in err
+
+
+def _edit_template(tree, edit):
+    import json
+
+    data = json.loads(tree.template.read_text())
+    edit(data)
+    tree.template.write_text(json.dumps(data))
+
+
+def test_template_profile_without_script_is_a_problem_not_a_key_error(deploy_tree, tmp_path, capsys):
+    _edit_template(deploy_tree, lambda d: d["provision"]["profiles"]["tegraflash-nvme"].pop("script"))
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert runner.captured == []
+    assert "script" in err and "avocado-stone" in err
+    assert "Traceback" not in err
+
+
+def test_template_without_tegraflash_tools_is_a_problem_not_a_key_error(deploy_tree, tmp_path, capsys):
+    _edit_template(
+        deploy_tree,
+        lambda d: d["storage_devices"]["rootdisk"]["images"].pop("tegraflash_tools"),
+    )
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "tegraflash_tools" in err and "avocado-stone" in err
+
+
+def test_relative_workdir_reaches_the_script_as_absolute_paths(deploy_tree, tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    argv = ["--deploy", str(deploy_tree.images_dir.parent.parent), "--dry-run", "--workdir", "rel-work"]
+    assert cli.main(argv, make_host(deploy_tree), FakeRunner()) == 0
+    out = capsys.readouterr().out
+    want = tmp_path / "rel-work"
+    assert f"AVOCADO_STONE_BUILD_DIR={want}\n" in out
+    assert f"PATH={want}/bin:" in out
+
+
+def test_default_workdir_is_created_new_and_refused_when_it_exists(deploy_tree, tmp_path, monkeypatch):
+    base = tmp_path / "base"
+    base.mkdir()
+    real = cli.workdir.planned_workdir
+    monkeypatch.setattr(
+        cli.workdir, "planned_workdir", lambda explicit, machine: real(explicit, machine, base=base)
+    )
+    argv = ["--deploy", str(deploy_tree.images_dir.parent.parent), "-y"]
+    assert cli.main(argv, make_host(deploy_tree), FakeRunner()) == 0
+    # A pre-created default path (what an attacker would plant) is never reused.
+    planted = base / "planted"
+    planted.mkdir(mode=0o700)
+    monkeypatch.setattr(cli.workdir, "planned_workdir", lambda explicit, machine: planted)
+    assert cli.main(argv, make_host(deploy_tree), FakeRunner()) == 1

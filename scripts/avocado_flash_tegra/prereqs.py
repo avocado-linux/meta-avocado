@@ -8,8 +8,8 @@ import shutil
 from pathlib import Path
 
 from . import Problem
+from .inputs import PROFILE
 
-PROFILE = "tegraflash-nvme"
 HELPER_REL = Path(
     "meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/avocado-tegra-bootimg"
 )
@@ -22,30 +22,63 @@ def _is_executable_file(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
+def _lookup(template, *keys):
+    node = template
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node if isinstance(node, str) else None
+
+
+def script_name(template) -> str | None:
+    return _lookup(template, "provision", "profiles", PROFILE, "script")
+
+
+def tools_dir_name(template) -> str | None:
+    return _lookup(template, "storage_devices", "rootdisk", "images", "tegraflash_tools")
+
+
 def check_executables(images_dir, template) -> list[Problem]:
     images_dir = Path(images_dir)
     problems: list[Problem] = []
 
-    script_name = template["provision"]["profiles"][PROFILE]["script"]
-    script = images_dir / script_name
-    if not _is_executable_file(script):
+    name = script_name(template)
+    if name is None:
         problems.append(
             Problem(
-                f"the provisioning script {script_name} is missing or not "
+                f"the manifest template names no provisioning script "
+                f"(provision.profiles.{PROFILE}.script is missing)",
+                "avocado-stone",
+            )
+        )
+    elif not _is_executable_file(images_dir / name):
+        problems.append(
+            Problem(
+                f"the provisioning script {name} is missing or not "
                 f"executable in {images_dir}",
                 "avocado-stone",
             )
         )
 
-    tools_name = template["storage_devices"]["rootdisk"]["images"]["tegraflash_tools"]
-    initrd_flash = images_dir / tools_name / "initrd-flash"
-    if not _is_executable_file(initrd_flash):
+    tools_name = tools_dir_name(template)
+    if tools_name is None:
         problems.append(
             Problem(
-                f"{initrd_flash} is missing or not executable",
-                "tegraflash-tools-deploy",
+                "the manifest template names no tegraflash tools directory "
+                "(storage_devices.rootdisk.images.tegraflash_tools is missing)",
+                "avocado-stone",
             )
         )
+    else:
+        initrd_flash = images_dir / tools_name / "initrd-flash"
+        if not _is_executable_file(initrd_flash):
+            problems.append(
+                Problem(
+                    f"{initrd_flash} is missing or not executable",
+                    "tegraflash-tools-deploy",
+                )
+            )
 
     kernel = images_dir / "Image"
     if not kernel.is_file() or kernel.stat().st_size == 0:
@@ -80,11 +113,11 @@ def helper_problem(helper) -> Problem | None:
     )
 
 
-def check_mkbootimg(images_dir, path=None) -> tuple[list[Problem], Path | None]:
+def check_mkbootimg(images_dir, path=None, tools_dirname=TOOLS_DIRNAME) -> tuple[list[Problem], Path | None]:
     """Return problems and the directory to prepend to PATH, if one is needed."""
     if shutil.which("mkbootimg", path=path):
         return [], None
-    tools_dir = Path(images_dir) / TOOLS_DIRNAME
+    tools_dir = Path(images_dir) / tools_dirname
     if _is_executable_file(tools_dir / "mkbootimg"):
         return [], tools_dir
     return (

@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from avocado_flash_tegra import FlashError
+from avocado_flash_tegra.inputs import PROFILE
 
 AGENT_SOCK_VAR = "AVOCADO_AGENT_SOCK"
-PROFILE = "tegraflash-nvme"
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,19 @@ def build_invocation(
         argv = (str(script),)
     else:
         assignments = tuple(f"{k}={v}" for k, v in env.items())
-        argv = ("sudo", "env", "-u", AGENT_SOCK_VAR, *assignments, str(script))
+        # env reads any operand containing "=" as another assignment, prints
+        # the environment and exits 0, so the command operand must not have one.
+        # The child runs in images_dir, so a script there is named relative to it.
+        if script.parent == images_dir:
+            command = f"./{script.name}"
+        else:
+            command = str(script)
+        if "=" in command:
+            raise FlashError(
+                f"cannot run {script} through sudo env: the path contains '='; "
+                "deploy the images under a path without one"
+            )
+        argv = ("sudo", "env", "-u", AGENT_SOCK_VAR, *assignments, command)
     return Invocation(argv=argv, env=env, cwd=images_dir)
 
 
