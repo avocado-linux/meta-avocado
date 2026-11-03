@@ -118,6 +118,12 @@ tool never passes `AVOCADO_AGENT_SOCK` to the script: it builds the
 environment from scratch and tells `sudo` to unset the variable. The run needs
 root, directly or through `sudo`.
 
+Host tools: the run needs a host `cpp`. The provisioning script's own fallback
+writes a `cpp` wrapper that executes `cpp` and so calls itself forever, so the
+tool stages a `<machine>-avocadosdk-linux-cpp` symlink to your real `cpp` in
+the work directory and the script uses that instead. The run is refused when
+no `cpp` is on `PATH`.
+
 Exit codes: 0 success, 1 a refusal or a failed flash, 2 a usage error, 130
 interrupted.
 
