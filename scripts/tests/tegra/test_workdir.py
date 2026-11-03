@@ -1,0 +1,188 @@
+"""Tests for the work directory, free-space check and cleanup."""
+
+import datetime
+import os
+import pathlib
+import stat
+from collections import namedtuple
+
+import pytest
+
+from avocado_flash_tegra import FlashError, InputInfo
+from avocado_flash_tegra import workdir
+
+Usage = namedtuple("Usage", "total used free")
+
+
+class FakeRunner:
+    def __init__(self, returncode=0, on_capture=None):
+        self.calls = []
+        self.returncode = returncode
+        self.on_capture = on_capture
+
+    def capture(self, argv):
+        self.calls.append(list(argv))
+        if self.on_capture:
+            self.on_capture(argv)
+        return self.returncode, ""
+
+
+def _info(size):
+    return InputInfo(name="x", key="k", size=size, mtime=0.0)
+
+
+def _usage_recorder(free):
+    seen = []
+
+    def disk_usage(path):
+        seen.append(pathlib.Path(path))
+        return Usage(free * 2, free, free)
+
+    return disk_usage, seen
+
+
+def test_required_bytes_adds_one_tenth_rounded_up():
+    assert workdir.required_bytes([_info(100), _info(5)]) == 116
+
+
+def test_required_bytes_exact_tenth_is_not_rounded():
+    assert workdir.required_bytes([_info(1000)]) == 1100
+
+
+def test_required_bytes_empty_is_zero():
+    assert workdir.required_bytes([]) == 0
+
+
+def test_planned_workdir_returns_explicit_path_untouched(tmp_path):
+    explicit = tmp_path / "mine"
+    assert workdir.planned_workdir(explicit, "avocado-m") == explicit
+    assert not explicit.exists()
+
+
+def test_planned_workdir_default_name_and_no_creation(tmp_path):
+    now = datetime.datetime(2026, 11, 3, 4, 5, 6)
+    path = workdir.planned_workdir(None, "avocado-m", base=tmp_path, now=now)
+    assert path == tmp_path / "avocado-flash-avocado-m-20261103-040506"
+    assert not path.exists()
+
+
+def test_require_space_equal_to_need_passes(tmp_path):
+    du, _ = _usage_recorder(500)
+    workdir.require_space(tmp_path, 500, disk_usage=du)
+
+
+def test_require_space_one_byte_less_refuses(tmp_path):
+    du, _ = _usage_recorder(499)
+    with pytest.raises(FlashError):
+        workdir.require_space(tmp_path, 500, disk_usage=du)
+
+
+def test_refusal_states_both_sizes(tmp_path):
+    du, _ = _usage_recorder(1234)
+    with pytest.raises(FlashError) as exc:
+        workdir.require_space(tmp_path, 99999, disk_usage=du)
+    text = str(exc.value)
+    assert "99999" in text
+    assert "1234" in text
+
+
+def test_missing_path_is_measured_on_nearest_existing_ancestor_and_not_created(tmp_path):
+    target = tmp_path / "a" / "b" / "work"
+    du, seen = _usage_recorder(10)
+    workdir.require_space(target, 5, disk_usage=du)
+    assert seen == [tmp_path]
+    assert not (tmp_path / "a").exists()
+
+
+def test_existing_path_is_measured_itself(tmp_path):
+    du, seen = _usage_recorder(10)
+    workdir.require_space(tmp_path, 5, disk_usage=du)
+    assert seen == [tmp_path]
+
+
+def test_create_new_directory_is_mode_0700_and_tool_created(tmp_path):
+    wd = workdir.create_workdir(tmp_path / "w")
+    assert wd.created_by_tool is True
+    assert wd.path == tmp_path / "w"
+    assert wd.log == tmp_path / "w" / "flash.log"
+    assert stat.S_IMODE(os.stat(wd.path).st_mode) == 0o700
+
+
+def test_create_missing_nested_path_creates_it(tmp_path):
+    wd = workdir.create_workdir(tmp_path / "a" / "w")
+    assert wd.path.is_dir()
+    assert wd.created_by_tool is True
+    assert stat.S_IMODE(os.stat(wd.path).st_mode) == 0o700
+
+
+def test_create_existing_directory_is_used_as_is(tmp_path):
+    os.chmod(tmp_path, 0o755)
+    wd = workdir.create_workdir(tmp_path)
+    assert wd.created_by_tool is False
+    assert stat.S_IMODE(os.stat(tmp_path).st_mode) == 0o755
+
+
+def test_success_removes_created_directory_as_root(tmp_path):
+    wd = workdir.create_workdir(tmp_path / "w")
+    (wd.path / "tegraflash").mkdir()
+    (wd.path / "tegraflash" / "f").write_text("x")
+    runner = FakeRunner()
+    assert workdir.cleanup(wd, True, runner, is_root=True) is None
+    assert not wd.path.exists()
+    assert runner.calls == []
+
+
+def test_success_non_root_removes_tegraflash_through_exact_sudo_argv(tmp_path):
+    wd = workdir.create_workdir(tmp_path / "w")
+    tf = wd.path / "tegraflash"
+    tf.mkdir()
+
+    def fake_sudo(argv):
+        os.rmdir(argv[-1])
+
+    runner = FakeRunner(on_capture=fake_sudo)
+    workdir.cleanup(wd, True, runner, is_root=False)
+    assert runner.calls == [["sudo", "rm", "-rf", "--one-file-system", "--", str(tf)]]
+    assert not wd.path.exists()
+
+
+def test_failure_keeps_created_directory_and_returns_path(tmp_path):
+    wd = workdir.create_workdir(tmp_path / "w")
+    (wd.path / "tegraflash").mkdir()
+    runner = FakeRunner()
+    assert workdir.cleanup(wd, False, runner, is_root=False) == wd.path
+    assert (wd.path / "tegraflash").is_dir()
+    assert runner.calls == []
+
+
+def test_explicit_existing_directory_survives_success(tmp_path):
+    sentinel = tmp_path / "keep.txt"
+    sentinel.write_text("mine")
+    wd = workdir.create_workdir(tmp_path)
+    (tmp_path / "tegraflash").mkdir()
+    workdir.cleanup(wd, True, FakeRunner(), is_root=True)
+    assert tmp_path.is_dir()
+    assert sentinel.read_text() == "mine"
+    assert not (tmp_path / "tegraflash").exists()
+
+
+def test_explicit_existing_directory_non_root_only_tegraflash_goes_through_sudo(tmp_path):
+    wd = workdir.create_workdir(tmp_path)
+    tf = tmp_path / "tegraflash"
+    tf.mkdir()
+    (tmp_path / "keep.txt").write_text("mine")
+    runner = FakeRunner(on_capture=lambda argv: os.rmdir(argv[-1]))
+    workdir.cleanup(wd, True, runner, is_root=False)
+    assert runner.calls == [["sudo", "rm", "-rf", "--one-file-system", "--", str(tf)]]
+    assert (tmp_path / "keep.txt").exists()
+    assert tmp_path.is_dir()
+
+
+def test_removal_failure_warns_and_does_not_raise(tmp_path, capsys):
+    wd = workdir.create_workdir(tmp_path / "w")
+    (wd.path / "tegraflash").mkdir()
+    runner = FakeRunner(returncode=1)
+    result = workdir.cleanup(wd, True, runner, is_root=False)
+    assert result == wd.path
+    assert (wd.path / "tegraflash").is_dir()
+    assert str(wd.path) in capsys.readouterr().err
