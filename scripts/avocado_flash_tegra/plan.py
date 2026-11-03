@@ -1,0 +1,76 @@
+"""Build the command line and environment for the provisioning script.
+
+Standard library only.
+"""
+
+import shlex
+from dataclasses import dataclass
+from pathlib import Path
+
+from avocado_flash_tegra import FlashError
+
+AGENT_SOCK_VAR = "AVOCADO_AGENT_SOCK"
+PROFILE = "tegraflash-nvme"
+
+
+@dataclass(frozen=True)
+class Invocation:
+    argv: tuple[str, ...]
+    env: dict[str, str]
+    cwd: Path
+
+
+def build_invocation(
+    *,
+    images_dir: Path,
+    manifest: Path,
+    script: Path,
+    build_dir: Path,
+    kernel_image: Path,
+    helper_dir: Path,
+    extra_path_dir: Path | None,
+    is_root: bool,
+    have_sudo: bool,
+    caller_path: str,
+) -> Invocation:
+    """Return the argv, explicit environment and cwd for the script.
+
+    The environment is built from scratch so nothing of the caller's leaks
+    in; the USB-reset agent socket variable is never added, and sudo is told
+    to unset it as well in case a sudo policy would carry it over.
+    """
+    if not is_root and not have_sudo:
+        raise FlashError(
+            "the flash needs root: run as root or install sudo (the recovery-mode "
+            "flash writes USB devices and root-owned files)"
+        )
+    path_parts = [str(helper_dir)]
+    if extra_path_dir is not None:
+        path_parts.append(str(extra_path_dir))
+    if caller_path:
+        path_parts.append(caller_path)
+    env = {
+        "AVOCADO_STONE_MANIFEST": str(manifest),
+        "AVOCADO_STONE_DATA_DIR": str(images_dir),
+        "AVOCADO_STONE_BUILD_DIR": str(build_dir),
+        "AVOCADO_PROVISION_PROFILE": PROFILE,
+        "AVOCADO_PROVISION_KERNEL_IMAGE": str(kernel_image),
+        "PATH": ":".join(path_parts),
+    }
+    if is_root:
+        argv = (str(script),)
+    else:
+        assignments = tuple(f"{k}={v}" for k, v in env.items())
+        argv = ("sudo", "env", "-u", AGENT_SOCK_VAR, *assignments, str(script))
+    return Invocation(argv=argv, env=env, cwd=images_dir)
+
+
+def describe(invocation: Invocation) -> str:
+    """Render the command, environment variables and working directory."""
+    lines = ["command: " + " ".join(shlex.quote(a) for a in invocation.argv)]
+    lines.append(f"working directory: {invocation.cwd}")
+    lines.append("environment:")
+    for key, value in invocation.env.items():
+        lines.append(f"  {key}={value}")
+    lines.append(f"  ({AGENT_SOCK_VAR} is removed)")
+    return "\n".join(lines)
