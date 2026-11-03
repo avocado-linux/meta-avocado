@@ -132,7 +132,7 @@ def test_create_missing_nested_path_creates_it(tmp_path):
 
 
 def test_create_existing_directory_is_used_as_is(tmp_path):
-    os.chmod(tmp_path, 0o755)
+    os.chmod(tmp_path, 0o755)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - test builds an unsafe directory on purpose
     wd = workdir.create_workdir(tmp_path)
     assert wd.created_by_tool is False
     assert stat.S_IMODE(os.stat(tmp_path).st_mode) == 0o755
@@ -221,7 +221,7 @@ def test_create_refuses_an_existing_symlink_to_a_directory(tmp_path):
 def test_create_refuses_an_existing_directory_writable_by_others(tmp_path):
     wd = tmp_path / "w"
     wd.mkdir()
-    os.chmod(wd, 0o770)
+    os.chmod(wd, 0o770)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - test builds an unsafe directory on purpose
     with pytest.raises(FlashError, match="writable"):
         workdir.create_workdir(wd)
 

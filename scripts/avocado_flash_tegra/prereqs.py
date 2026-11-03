@@ -5,7 +5,7 @@ Standard library only. Nothing here starts a process.
 
 import os
 import shutil
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 from pathlib import Path
 
 from . import Problem
@@ -96,13 +96,26 @@ LAYOUT_NAMES = ("external-flash.xml", "external-flash.xml.in")
 # manifest image key -> partition name in the deployed layout. Only pairs
 # whose partition is visible in the real external-flash.xml are listed.
 FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
+MAX_LAYOUT_BYTES = 4 * 1024 * 1024
 
 
 def parse_partition_sizes(path) -> tuple[dict, str | None]:
     """Map partition name to its size, an int or the raw text when not numeric."""
     try:
-        root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError) as exc:
+        with open(path, "rb") as fh:
+            data = fh.read(MAX_LAYOUT_BYTES + 1)
+    except OSError as exc:
+        return {}, str(exc)
+    if len(data) > MAX_LAYOUT_BYTES:
+        return {}, f"the layout is larger than {MAX_LAYOUT_BYTES} bytes"
+    lowered = data.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        return {}, "will not parse a layout with a DOCTYPE or entity declaration"
+    try:
+        # The layout is untrusted; this parse only runs after the size cap and
+        # the DOCTYPE/ENTITY refusal above, so no entity can be defined.
+        root = ET.fromstring(data)  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
+    except ET.ParseError as exc:
         return {}, str(exc)
     sizes: dict = {}
     for part in root.iter("partition"):

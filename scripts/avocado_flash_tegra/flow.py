@@ -79,7 +79,7 @@ def _stage_helper(ctx: FlashContext, stat_fn=os.lstat) -> Path:
         fd = os.open(staged, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o755)
         with os.fdopen(fd, "wb") as out:
             out.write(ctx.helper_source.read_bytes())
-            os.fchmod(out.fileno(), 0o755)
+            os.fchmod(out.fileno(), 0o755)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - helper must be executable by the root-run script; its directory is private 0o700
     except OSError as exc:
         raise FlashError(f"cannot stage the boot image helper in {bin_dir}: {exc}") from exc
 

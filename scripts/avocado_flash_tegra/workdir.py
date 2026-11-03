@@ -95,7 +95,7 @@ def create_workdir(path, *, default=False, stat_fn=os.lstat) -> Workdir:
         else:
             os.makedirs(path, mode=0o700)
         # mkdir honours the umask; a leaf must be 0700 whatever it is.
-        os.chmod(path, 0o700)
+        os.chmod(path, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - private on purpose; 0o700 is stricter than the 0o644 the rule suggests
     except OSError as exc:
         raise FlashError(f"cannot create the work directory {path}: {exc}") from exc
     return Workdir(path, True)

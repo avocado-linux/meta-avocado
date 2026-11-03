@@ -286,7 +286,7 @@ def test_stage_helper_refuses_a_bin_owned_by_someone_else(ctx):
 
 def test_stage_helper_refuses_a_group_writable_bin(ctx):
     (ctx.workdir.path / "bin").mkdir()
-    os.chmod(ctx.workdir.path / "bin", 0o770)
+    os.chmod(ctx.workdir.path / "bin", 0o770)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - test builds an unsafe directory on purpose
     with pytest.raises(FlashError, match="writable"):
         flow._stage_helper(ctx)
 

@@ -137,6 +137,40 @@ def test_unparseable_layout_is_a_problem(deploy_tree, template):
     assert "cannot be verified" in problems[0].what
 
 
+def test_layout_with_a_doctype_and_entity_is_refused(deploy_tree, template, make_layout):
+    valid = make_layout({"esp": 67108864, "APP": APP_BYTES})
+    _set_layout(deploy_tree, '<!DOCTYPE x [<!ENTITY a "aaaa">]>\n' + valid)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "DOCTYPE or entity declaration" in problems[0].what
+    assert problems[0].target == "tegraflash-bsp"
+
+
+def test_billion_laughs_layout_is_refused_without_expansion(deploy_tree, template, make_layout):
+    valid = make_layout({"esp": 67108864, "APP": APP_BYTES})
+    bomb = '<!DOCTYPE lolz [<!ENTITY a "aaaaaaaaaa">'
+    prev = "a"
+    for i in range(9):
+        cur = f"b{i}"
+        bomb += f'<!ENTITY {cur} "' + f"&{prev};" * 10 + '">'
+        prev = cur
+    bomb += "]>\n"
+    _set_layout(deploy_tree, bomb + valid)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "DOCTYPE or entity declaration" in problems[0].what
+
+
+def test_layout_over_the_size_cap_is_refused(deploy_tree, template, make_layout):
+    valid = make_layout({"esp": 67108864, "APP": APP_BYTES})
+    padding = "<!--" + "x" * (prereqs.MAX_LAYOUT_BYTES + 1) + "-->"
+    _set_layout(deploy_tree, valid + padding)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "larger than" in problems[0].what
+    assert problems[0].target == "tegraflash-bsp"
+
+
 def test_non_numeric_size_is_a_refusal(deploy_tree, template, make_layout):
     _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": "ROOTFSPART_SIZE"}))
     problems = _check(deploy_tree, template)
