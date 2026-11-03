@@ -347,3 +347,28 @@ def test_a_symlinked_ancestor_to_a_safe_directory_is_accepted(tmp_path):
     wd = workdir.create_workdir(link / "mid" / "w")
     assert (safe / "mid" / "w").is_dir()
     assert wd.created_by_tool is True
+
+
+@pytest.fixture
+def umask_002():
+    old = os.umask(0o002)
+    yield
+    os.umask(old)
+
+
+def test_new_nested_workdir_under_a_group_writable_umask_is_created(tmp_path, umask_002):
+    target = tmp_path / "a" / "b" / "w"
+    wd = workdir.create_workdir(target)
+    assert wd.created_by_tool is True
+    assert stat.S_IMODE(os.stat(target).st_mode) == 0o700
+    for parent in (tmp_path / "a", tmp_path / "a" / "b"):
+        assert stat.S_IMODE(os.stat(parent).st_mode) == 0o700
+
+
+def test_a_preexisting_group_writable_ancestor_is_still_refused(tmp_path, umask_002):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o775)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - test builds an unsafe directory on purpose
+    with pytest.raises(FlashError, match="writable by group or others"):
+        workdir.create_workdir(shared / "x" / "w")
+    assert not (shared / "x").exists()

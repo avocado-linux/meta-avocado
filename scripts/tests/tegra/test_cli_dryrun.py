@@ -321,3 +321,19 @@ def test_default_workdir_is_created_new_and_refused_when_it_exists(deploy_tree, 
     planted.mkdir(mode=0o700)
     monkeypatch.setattr(cli.workdir, "planned_workdir", lambda explicit, machine: planted)
     assert cli.main(argv, make_host(deploy_tree), FakeRunner()) == 1
+
+
+def test_preflight_resolves_tools_on_the_same_path_the_script_gets(deploy_tree, tmp_path, monkeypatch):
+    seen = []
+
+    def which(name, path=None):
+        seen.append((name, path))
+        return f"/stub/{name}"
+
+    monkeypatch.setattr(shutil, "which", which)
+    monkeypatch.setenv("PATH", "bin:/usr/bin:/bin")
+    rc, _runner = run(deploy_tree, tmp_path, ["--dry-run"])
+    assert rc == 0
+    checked = [(n, p) for n, p in seen if n in ("mkbootimg", "jq")]
+    assert checked
+    assert all(p == "/usr/bin:/bin" for _n, p in checked), checked

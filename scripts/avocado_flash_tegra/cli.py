@@ -79,11 +79,15 @@ def _run(argv, host, runner) -> int:
     helper_issue = prereqs.helper_problem(helper)
     if helper_issue is not None:
         problems.append(helper_issue)
+    # The root script resolves tools on plan.safe_path, so the pre-flight must too.
+    search_path = plan.safe_path(os.environ.get("PATH", ""))
     mk_problems, extra_path_dir = prereqs.check_mkbootimg(
-        images_dir, tools_dirname=prereqs.tools_dir_name(template) or prereqs.TOOLS_DIRNAME
+        images_dir,
+        path=search_path,
+        tools_dirname=prereqs.tools_dir_name(template) or prereqs.TOOLS_DIRNAME,
     )
     problems += mk_problems
-    problems += prereqs.check_host_tools()
+    problems += prereqs.check_host_tools(path=search_path)
     fit_problems, fit_lines = prereqs.fit_report(images_dir, template, entries)
     problems += fit_problems
     if problems:

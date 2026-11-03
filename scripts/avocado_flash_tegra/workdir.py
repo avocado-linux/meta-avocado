@@ -119,20 +119,37 @@ def create_workdir(path, *, default=False, stat_fn=os.lstat) -> Workdir:
             raise FlashError(f"the work directory {path} already exists; refusing to reuse it")
         require_private_dir(path, stat_fn)
         return Workdir(path, False)
+    missing = [path]
+    for parent in path.parents:
+        if os.path.lexists(parent):
+            break
+        missing.append(parent)
+    created: list[Path] = []
+
+    def undo():
+        for made in reversed(created):
+            try:
+                os.rmdir(made)
+            except OSError:
+                pass  # best effort: it holds something we did not put there
+
     try:
-        if default:
-            os.mkdir(path, 0o700)
-        else:
-            os.makedirs(path, mode=0o700)
-        # mkdir honours the umask; a leaf must be 0700 whatever it is.
-        os.chmod(path, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - private on purpose; 0o700 is stricter than the 0o644 the rule suggests
+        # Each missing component is made 0700 by hand: makedirs would give
+        # the parents the umask's mode, and a 0775 parent is then refused by
+        # the re-check below, stranding it for every retry.
+        for component in reversed(missing):
+            os.mkdir(component, 0o700)
+            created.append(component)
+            # mkdir honours the umask; each one must be 0700 whatever it is.
+            os.chmod(component, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - private on purpose; 0o700 is stricter than the 0o644 the rule suggests
     except OSError as exc:
+        undo()
         raise FlashError(f"cannot create the work directory {path}: {exc}") from exc
     try:
-        # makedirs creates missing parents with the umask's mode, not 0700.
+        # Ancestors that pre-existed are held to the rule; ours are 0700.
         require_safe_ancestors(path, stat_fn)
     except FlashError:
-        os.rmdir(path)
+        undo()
         raise
     return Workdir(path, True)
 

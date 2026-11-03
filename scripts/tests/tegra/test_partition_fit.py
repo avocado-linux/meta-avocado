@@ -376,3 +376,14 @@ def test_real_layout_lists_each_checked_name_exactly_once_and_both_files_agree()
         assert error is None, name
         for _key, part in prereqs.FIT_PAIRS:
             assert isinstance(sizes[part], int), (name, part)
+
+
+def test_a_duplicate_against_a_single_listing_prints_a_word_not_an_object(deploy_tree, template, make_layout):
+    _set_layout(deploy_tree, _two_devices(APP_BYTES, APP_BYTES))
+    _write_layout(deploy_tree, "external-flash.xml.in", {"esp": 67108864, "APP": APP_BYTES}, make_layout)
+    problems = _check(deploy_tree, template)
+    disagree = [p for p in problems if "disagree" in p.what]
+    assert disagree
+    for p in disagree:
+        assert "object at 0x" not in p.what
+        assert "listed more than once" in p.what

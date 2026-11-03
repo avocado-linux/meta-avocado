@@ -175,6 +175,10 @@ def parse_partition_sizes(path) -> tuple[dict, str | None]:
     return sizes, None
 
 
+def _describe_size(value) -> str:
+    return "it is listed more than once" if value is DUPLICATE else repr(value)
+
+
 def _disagreements(primary: dict, other: dict) -> list[str]:
     return [
         part
@@ -214,7 +218,7 @@ def fit_report(images_dir, template, entries) -> tuple[list[Problem], list[str]]
                 problems.append(
                     Problem(
                         f"the layouts disagree on partition {part}: {layout.name} says "
-                        f"{sizes[part]!r} but {found[1].name} says {other_sizes[part]!r}; "
+                        f"{_describe_size(sizes[part])} but {found[1].name} says {_describe_size(other_sizes[part])}; "
                         f"the provisioning script applies {layout.name}",
                         target,
                     )
