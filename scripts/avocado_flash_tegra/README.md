@@ -110,6 +110,12 @@ it created it.
 
 ## If it fails
 
+Before any USB action the run compares the rootfs and ESP images with their
+partitions in the deployed `tegraflash-bsp/external-flash.xml`, and refuses when
+an image is larger than its partition, the partition is absent, or its size is
+not a number (a missing or unreadable layout also refuses). For a rootfs that
+does not fit, rebuild with a larger `ROOTFSPART_SIZE_DEFAULT`.
+
 The work directory and `flash.log` are kept, and their paths are printed. The
 board may be mid-write, so enter recovery mode again before retrying.
 

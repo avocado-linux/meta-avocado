@@ -84,6 +84,8 @@ def _run(argv, host, runner) -> int:
     )
     problems += mk_problems
     problems += prereqs.check_host_tools()
+    fit_problems, fit_lines = prereqs.fit_report(images_dir, template, entries)
+    problems += fit_problems
     if problems:
         raise FlashError(format_problems(problems))
 
@@ -91,6 +93,8 @@ def _run(argv, host, runner) -> int:
     print("inputs: all present")
     for info in infos:
         print(f"  {info.name}  {info.size} bytes  {_fmt_mtime(info.mtime)}")
+    for line in fit_lines:
+        print(f"  {line}")
 
     expected_id = machines.expected_rcm_id(machine, args.rcm_id)
 

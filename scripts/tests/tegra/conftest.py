@@ -83,6 +83,34 @@ def _no_subprocess(request, monkeypatch):
     monkeypatch.setattr(os, "system", _refuse_spawn("os.system"))
 
 
+def layout_xml(sizes: dict) -> str:
+    """A partition layout in the deployed external-flash.xml shape.
+
+    A value that is not an int is written verbatim, so a test can plant a
+    placeholder such as ``DATASIZE``.
+    """
+    parts = "".join(
+        f'        <partition name="{name}" type="data">\n'
+        "            <allocation_policy> sequential </allocation_policy>\n"
+        f"            <size> {size} </size>\n"
+        "        </partition>\n"
+        for name, size in sizes.items()
+    )
+    return (
+        '<?xml version="1.0"?>\n'
+        '<partition_layout version="01.00.0000">\n'
+        '    <device type="external" instance="0" sector_size="512" num_sectors="119537664" >\n'
+        f"{parts}"
+        "    </device>\n"
+        "</partition_layout>\n"
+    )
+
+
+@pytest.fixture
+def make_layout():
+    return layout_xml
+
+
 @dataclasses.dataclass(frozen=True)
 class DeployTree:
     images_dir: pathlib.Path
@@ -114,6 +142,9 @@ def deploy_tree(tmp_path):
             dirs[key] = path
         else:
             path.write_bytes(b"image-" + key.encode() + b"\n")
+    (dirs["tegraflash_bsp"] / "external-flash.xml").write_text(
+        layout_xml({"esp": 67108864, "APP": 268435456, "APP_b": 268435456})
+    )
     tools = dirs["tegraflash_tools"]
     initrd = tools / "initrd-flash"
     initrd.write_text("#!/bin/sh\nexit 0\n")

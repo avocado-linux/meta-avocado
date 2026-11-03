@@ -136,6 +136,7 @@ def test_symlinked_file_and_directory_count_present(deploy_tree, tmp_path):
     (real_dir / "f").write_text("x")
     dlink = deploy_tree.images_dir / entries["tegraflash_bsp"]
     (dlink / "placeholder").unlink()
+    (dlink / "external-flash.xml").unlink()
     dlink.rmdir()
     os.symlink(real_dir, dlink)
     assert inputs.check_images(deploy_tree.images_dir, entries) == []
@@ -180,6 +181,7 @@ def test_describe_inputs_sizes_files_and_directories(deploy_tree, tmp_path):
     real_dir.mkdir()
     (real_dir / "a").write_bytes(b"abc")
     (deploy_tree.bsp_dir / "placeholder").unlink()
+    (deploy_tree.bsp_dir / "external-flash.xml").unlink()
     deploy_tree.bsp_dir.rmdir()
     os.symlink(real_dir, deploy_tree.bsp_dir)
     infos = {i.key: i for i in inputs.describe_inputs(deploy_tree.images_dir, entries)}
