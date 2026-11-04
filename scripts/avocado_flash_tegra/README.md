@@ -41,6 +41,7 @@ Options:
 | `-y`, `--assume-yes` | skip the typed confirmation |
 | `--workdir` | work directory for the run (kept on failure) |
 | `--rcm-id` | recovery-mode USB id `vvvv:pppp` for another board |
+| `--boot-media` | `nvme` (default) or `sd`: the medium to write and boot |
 
 ## Build the flash inputs
 
@@ -108,6 +109,20 @@ The device pin is checked again after the confirmation, so a board attached
 while the prompt waited is not flashed. The work directory is
 `/var/tmp/avocado-flash-<machine>-<timestamp>` unless `--workdir` is given.
 Use `--rcm-id` for another board's recovery-mode id.
+
+## Flash the SD card instead
+
+`--boot-media sd` selects the script's `tegraflash-sd` profile. The card must
+sit in the board's SD slot before the board enters recovery mode: the flash
+writes it from the board, over the same USB cable, and nothing is written from
+the host's own card reader. The warning then names the SD card, not the NVMe.
+
+The script does not pass `--erase-nvme` for this profile, so an OS already on
+the NVMe is left in place (read from the script, not yet run on hardware). The
+UEFI variable store is still reset and the SD class goes first in the boot
+priority, so the board boots the card and falls back to the NVMe. Use it to
+run an image from the card until it works, then flash it to the NVMe with the
+default medium.
 
 ## After the flash
 

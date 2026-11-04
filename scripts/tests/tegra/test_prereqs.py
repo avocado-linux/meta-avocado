@@ -401,3 +401,10 @@ def test_python_floor_agrees_with_the_provisioning_shim():
     floors = re.findall(r"sys\.version_info < \((\d+), (\d+)\)", shim.read_text())
     assert len(floors) == 1, "the shim must state its python floor exactly once"
     assert tuple(int(p) for p in floors[0]) == prereqs.MIN_PYTHON
+
+
+def test_script_name_reads_the_requested_profile(template):
+    assert prereqs.script_name(template, "tegraflash-sd") == prereqs.script_name(template)
+    del template["provision"]["profiles"]["tegraflash-sd"]["script"]
+    assert prereqs.script_name(template, "tegraflash-sd") is None
+    assert prereqs.script_name(template) is not None

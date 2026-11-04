@@ -38,24 +38,24 @@ def _lookup(template, *keys):
     return node if isinstance(node, str) else None
 
 
-def script_name(template) -> str | None:
-    return _lookup(template, "provision", "profiles", PROFILE, "script")
+def script_name(template, profile: str = PROFILE) -> str | None:
+    return _lookup(template, "provision", "profiles", profile, "script")
 
 
 def tools_dir_name(template) -> str | None:
     return image_entries(template).get("tegraflash_tools")
 
 
-def check_executables(images_dir, template) -> list[Problem]:
+def check_executables(images_dir, template, profile: str = PROFILE) -> list[Problem]:
     images_dir = Path(images_dir)
     problems: list[Problem] = []
 
-    name = script_name(template)
+    name = script_name(template, profile)
     if name is None:
         problems.append(
             Problem(
                 f"the manifest template names no provisioning script "
-                f"(provision.profiles.{PROFILE}.script is missing)",
+                f"(provision.profiles.{profile}.script is missing)",
                 "avocado-stone",
             )
         )

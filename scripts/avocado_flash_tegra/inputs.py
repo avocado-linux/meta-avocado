@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import FlashError, InputInfo, Problem
 
+BOOT_MEDIA = ("nvme", "sd")
 PROFILE = "tegraflash-nvme"
 DIR_KEYS = ("tegraflash_bsp", "tegraflash_engine", "tegraflash_tools", "tegraflash_carrier_bsp")
 DEFAULT_TARGET = "avocado-stone"
@@ -59,12 +60,16 @@ def image_entries(template: dict) -> dict[str, str]:
     return {k: v for k, v in node.items() if isinstance(v, str)}
 
 
-def require_profile(template: dict, machine: str) -> None:
+def profile_for(media: str) -> str:
+    return f"tegraflash-{media}"
+
+
+def require_profile(template: dict, machine: str, profile: str = PROFILE) -> None:
     profiles = template.get("provision", {}).get("profiles", {})
-    if PROFILE not in profiles:
+    if profile not in profiles:
         raise FlashError(
-            f"the manifest template for {machine} has no {PROFILE} profile; "
-            "this machine cannot be flashed to NVMe by this tool"
+            f"the manifest template for {machine} has no {profile} profile; "
+            "this machine cannot be flashed this way by this tool"
         )
 
 

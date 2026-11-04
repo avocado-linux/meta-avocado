@@ -1,5 +1,6 @@
 """Flow tests: fakes for the host and the runner; no process is started."""
 
+import dataclasses
 import os
 import stat
 from pathlib import Path
@@ -377,3 +378,27 @@ def test_confirmation_prompt_names_the_pinned_path_before_asking(ctx, events, ca
 def test_assume_yes_prints_no_confirm_line(ctx, events, capsys):
     flow.flash(ctx, FakeHost(events), FakeRunner(events), assume_yes=True)
     assert "To confirm, type" not in capsys.readouterr().out
+
+
+def test_sd_media_warns_about_the_card_and_not_the_nvme(ctx, events, capsys):
+    ctx = dataclasses.replace(ctx, media="sd")
+    flow.flash(ctx, FakeHost(events), FakeRunner(events), assume_yes=True)
+    out = capsys.readouterr().out
+    assert "the SD card will be erased" in out
+    assert "NVMe will be erased" not in out
+    assert "QSPI firmware" in out and "UEFI variables" in out
+
+
+def test_sd_media_names_the_card_in_the_confirmation_payload(ctx, events):
+    ctx = dataclasses.replace(ctx, media="sd")
+    host = FakeHost(events)
+    flow.flash(ctx, host, FakeRunner(events), assume_yes=False)
+    assert "SD card" in host.calls[0][1]
+    assert "NVMe" not in host.calls[0][1]
+
+
+def test_sd_media_runs_the_script_with_the_sd_profile(ctx, events):
+    ctx = dataclasses.replace(ctx, media="sd")
+    runner = FakeRunner(events)
+    flow.flash(ctx, FakeHost(events), runner, assume_yes=True)
+    assert runner.streamed[0][0].env["AVOCADO_PROVISION_PROFILE"] == "tegraflash-sd"

@@ -45,7 +45,7 @@ class _Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     p = _Parser(
         prog=PROG,
-        description="Flash a Jetson Orin Nano's NVMe in USB recovery mode.",
+        description="Flash a Jetson Orin Nano's NVMe or SD card in USB recovery mode.",
     )
     p.add_argument("-m", "--machine", help="machine name (default: the one built)")
     p.add_argument("-d", "--deploy", type=Path, help="Yocto deploy directory")
@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-y", "--assume-yes", action="store_true", help="skip the typed confirmation")
     p.add_argument("--workdir", type=Path, help="work directory for the run (kept on failure)")
     p.add_argument("--rcm-id", help="recovery-mode USB id vvvv:pppp for another board")
+    p.add_argument(
+        "--boot-media",
+        choices=inputs.BOOT_MEDIA,
+        default="nvme",
+        help="medium to write and boot: the NVMe (default) or the SD card in the board's slot",
+    )
     return p
 
 
@@ -69,7 +75,8 @@ def _run(argv, host, runner) -> int:
     images_dir = Path(deploy) / "images" / machine
 
     template = inputs.load_template(images_dir, machine)
-    inputs.require_profile(template, machine)
+    profile = inputs.profile_for(args.boot_media)
+    inputs.require_profile(template, machine, profile)
     inputs.require_engine(template, machine)
 
     is_root = os.geteuid() == 0
@@ -78,7 +85,7 @@ def _run(argv, host, runner) -> int:
     problems = list(inputs.check_images(images_dir, entries))
     if not is_root and shutil.which("sudo") is None:
         problems.append(Problem("the flash needs root: run as root or install sudo"))
-    problems += prereqs.check_executables(images_dir, template)
+    problems += prereqs.check_executables(images_dir, template, profile)
     helper = prereqs.find_bootimg_helper(LAYER_ROOT)
     helper_issue = prereqs.helper_problem(helper)
     if helper_issue is not None:
@@ -113,7 +120,7 @@ def _run(argv, host, runner) -> int:
     print(f"pinned: {pinned.path} {pinned.vid}:{pinned.pid}")
 
     manifest = images_dir / inputs.template_name(machine)
-    script = images_dir / prereqs.script_name(template)
+    script = images_dir / prereqs.script_name(template, profile)
     kernel_image = images_dir / "Image"
 
     if args.dry_run:
@@ -128,8 +135,10 @@ def _run(argv, host, runner) -> int:
             is_root=is_root,
             have_sudo=shutil.which("sudo") is not None,
             caller_path=os.environ.get("PATH", ""),
+            profile=profile,
         )
         print(f"machine: {machine}")
+        print(f"boot media: {args.boot_media}")
         print(f"deploy directory: {deploy}")
         print(f"manifest: {manifest}")
         print(f"boot image helper: {helper}")
@@ -148,6 +157,7 @@ def _run(argv, host, runner) -> int:
         expected_id=expected_id,
         pinned=pinned,
         workdir=workdir.create_workdir(planned, default=args.workdir is None),
+        media=args.boot_media,
     )
     flash(ctx, host, runner, assume_yes=args.assume_yes)
     return 0

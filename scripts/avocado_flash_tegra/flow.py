@@ -9,7 +9,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import FlashError, plan, rcm, workdir
+from . import FlashError, inputs, plan, rcm, workdir
 from .runner import Interrupted
 
 HELPER_NAME = "avocado-tegra-bootimg"
@@ -27,10 +27,14 @@ class FlashContext:
     expected_id: str
     pinned: rcm.UsbDevice
     workdir: workdir.Workdir
+    media: str = "nvme"
 
 
-def _print_warning() -> None:
-    print("WARNING: the NVMe will be erased entirely.")
+MEDIA_LABEL = {"nvme": "NVMe", "sd": "SD card"}
+
+
+def _print_warning(media: str) -> None:
+    print(f"WARNING: the {MEDIA_LABEL[media]} will be erased entirely.")
     print("WARNING: QSPI firmware and UEFI variables will be rewritten.")
     print(
         "The current firmware version cannot be read in recovery mode; it "
@@ -92,10 +96,10 @@ def _print_kept(ctx: FlashContext, what: str) -> None:
 
 def _prepare(ctx: FlashContext, host, runner, assume_yes: bool, is_root: bool, have_sudo: bool):
     """Everything that must pass before the script starts."""
-    _print_warning()
+    _print_warning(ctx.media)
 
     if not assume_yes:
-        payload = f"the Avocado OS image for {ctx.machine} (NVMe, QSPI firmware, UEFI variables)"
+        payload = f"the Avocado OS image for {ctx.machine} ({MEDIA_LABEL[ctx.media]}, QSPI firmware, UEFI variables)"
         # The shared prompt only says "the target"; the path it compares
         # against otherwise appears once, in the banner above it.
         print(f"To confirm, type: {ctx.pinned.path}")
@@ -127,6 +131,7 @@ def _prepare(ctx: FlashContext, host, runner, assume_yes: bool, is_root: bool, h
         is_root=is_root,
         have_sudo=have_sudo,
         caller_path=os.environ.get("PATH", ""),
+        profile=inputs.profile_for(ctx.media),
     )
 
 

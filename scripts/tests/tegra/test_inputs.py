@@ -388,3 +388,21 @@ def test_cli_engine_present_lists_it_among_the_inputs(deploy_tree, tmp_path, mon
     assert rc == 0
     assert runner.captured == [["lsusb"]]
     assert f"  {ENGINE}  " in out
+
+
+def test_require_profile_refuses_template_without_the_requested_sd_profile(deploy_tree):
+    template, _ = _entries(deploy_tree)
+    del template["provision"]["profiles"]["tegraflash-sd"]
+    with pytest.raises(FlashError) as exc:
+        inputs.require_profile(template, deploy_tree.machine, profile="tegraflash-sd")
+    assert "tegraflash-sd" in str(exc.value)
+
+
+def test_require_profile_accepts_the_sd_profile_of_the_real_template(deploy_tree):
+    template, _ = _entries(deploy_tree)
+    inputs.require_profile(template, deploy_tree.machine, profile="tegraflash-sd")
+
+
+def test_profile_for_maps_each_boot_media_to_its_profile():
+    assert inputs.profile_for("nvme") == "tegraflash-nvme"
+    assert inputs.profile_for("sd") == "tegraflash-sd"
