@@ -44,6 +44,7 @@ def build_invocation(
     is_root: bool,
     have_sudo: bool,
     caller_path: str,
+    profile: str = PROFILE,
 ) -> Invocation:
     """Return the argv, explicit environment and cwd for the script.
 
@@ -64,7 +65,7 @@ def build_invocation(
         "AVOCADO_STONE_MANIFEST": str(manifest),
         "AVOCADO_STONE_DATA_DIR": str(images_dir),
         "AVOCADO_STONE_BUILD_DIR": str(build_dir),
-        "AVOCADO_PROVISION_PROFILE": PROFILE,
+        "AVOCADO_PROVISION_PROFILE": profile,
         "AVOCADO_PROVISION_KERNEL_IMAGE": str(kernel_image),
         "PATH": ":".join(path_parts),
     }

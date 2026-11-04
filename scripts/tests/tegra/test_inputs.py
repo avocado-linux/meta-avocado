@@ -193,3 +193,21 @@ def test_describe_inputs_sizes_files_and_directories(deploy_tree, tmp_path):
     tools_size = len("#!/bin/sh\nexit 0\n") + len("x\n") + 5
     assert infos["tegraflash_tools"].size == tools_size
     assert infos["tegraflash_bsp"].size == 3
+
+
+def test_require_profile_refuses_template_without_the_requested_sd_profile(deploy_tree):
+    template, _ = _entries(deploy_tree)
+    del template["provision"]["profiles"]["tegraflash-sd"]
+    with pytest.raises(FlashError) as exc:
+        inputs.require_profile(template, deploy_tree.machine, profile="tegraflash-sd")
+    assert "tegraflash-sd" in str(exc.value)
+
+
+def test_require_profile_accepts_the_sd_profile_of_the_real_template(deploy_tree):
+    template, _ = _entries(deploy_tree)
+    inputs.require_profile(template, deploy_tree.machine, profile="tegraflash-sd")
+
+
+def test_profile_for_maps_each_boot_media_to_its_profile():
+    assert inputs.profile_for("nvme") == "tegraflash-nvme"
+    assert inputs.profile_for("sd") == "tegraflash-sd"

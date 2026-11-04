@@ -194,3 +194,11 @@ def test_a_caller_path_with_nothing_absolute_falls_back_to_the_system_path(calle
 def test_safe_path_keeps_only_absolute_components_in_order():
     assert safe_path("/b::.:/a:rel") == "/b:/a"
     assert safe_path("") == "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def test_profile_argument_selects_the_provisioning_profile():
+    assert make(profile="tegraflash-sd").env["AVOCADO_PROVISION_PROFILE"] == "tegraflash-sd"
+
+
+def test_profile_defaults_to_nvme():
+    assert make().env["AVOCADO_PROVISION_PROFILE"] == "tegraflash-nvme"

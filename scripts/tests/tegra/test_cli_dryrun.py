@@ -337,3 +337,46 @@ def test_preflight_resolves_tools_on_the_same_path_the_script_gets(deploy_tree, 
     checked = [(n, p) for n, p in seen if n in ("mkbootimg", "jq")]
     assert checked
     assert all(p == "/usr/bin:/bin" for _n, p in checked), checked
+
+
+def test_dry_run_with_boot_media_sd_selects_the_sd_profile_and_says_sd(deploy_tree, tmp_path, capsys):
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run", "--boot-media", "sd"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert runner.captured == [["lsusb"]]
+    assert "AVOCADO_PROVISION_PROFILE=tegraflash-sd" in out
+    assert "tegraflash-nvme" not in out
+    assert "boot media: sd" in out
+
+
+def test_dry_run_default_boot_media_is_nvme(deploy_tree, tmp_path, capsys):
+    rc, _ = run(deploy_tree, tmp_path, ["--dry-run"])
+    assert "boot media: nvme" in capsys.readouterr().out
+    assert rc == 0
+
+
+def test_unknown_boot_media_is_a_usage_error_before_any_usb_action(deploy_tree, tmp_path, capsys):
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run", "--boot-media", "emmc"])
+    assert rc == 2
+    assert runner.captured == []
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_template_without_the_sd_profile_is_refused_for_sd_only(deploy_tree, tmp_path, capsys):
+    _edit_template(deploy_tree, lambda d: d["provision"]["profiles"].pop("tegraflash-sd"))
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run", "--boot-media", "sd"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert runner.captured == []
+    assert "tegraflash-sd" in err
+    rc, _ = run(deploy_tree, tmp_path, ["--dry-run"])
+    assert rc == 0
+
+
+def test_real_sd_run_streams_the_sd_profile_and_warns_about_the_card(deploy_tree, tmp_path, capsys):
+    rc, runner = run(deploy_tree, tmp_path, ["--assume-yes", "--boot-media", "sd"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert runner.streamed[0].env["AVOCADO_PROVISION_PROFILE"] == "tegraflash-sd"
+    assert "the SD card will be erased" in out
+    assert "NVMe will be erased" not in out

@@ -240,3 +240,10 @@ def test_missing_tools_key_is_a_problem_naming_the_key_and_target(deploy_tree, t
     problems = prereqs.check_executables(deploy_tree.images_dir, template)
     assert [p.target for p in problems] == ["avocado-stone"]
     assert "tegraflash_tools" in problems[0].what
+
+
+def test_script_name_reads_the_requested_profile(template):
+    assert prereqs.script_name(template, "tegraflash-sd") == prereqs.script_name(template)
+    del template["provision"]["profiles"]["tegraflash-sd"]["script"]
+    assert prereqs.script_name(template, "tegraflash-sd") is None
+    assert prereqs.script_name(template) is not None
