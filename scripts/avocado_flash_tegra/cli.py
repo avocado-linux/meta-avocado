@@ -59,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="nvme",
         help="medium to write and boot: the NVMe (default) or the SD card in the board's slot",
     )
+    p.add_argument(
+        "--kernel-cmdline-extra",
+        help="extra kernel arguments appended to the boot image's command line (for example systemd.mask=UNIT)",
+    )
     return p
 
 
@@ -69,6 +73,9 @@ def _fmt_mtime(ts: float) -> str:
 def _run(argv, host, runner) -> int:
     args = build_parser().parse_args(argv)
     boards.all_boards()  # a bad registry entry refuses here, before any USB action
+    cmdline_extra = None
+    if args.kernel_cmdline_extra is not None:
+        cmdline_extra = inputs.validate_cmdline_extra(args.kernel_cmdline_extra)
 
     deploy = host.resolve_deploy_dir(args.deploy)
     machine = host.resolve_machine(deploy, args.machine)
@@ -136,6 +143,7 @@ def _run(argv, host, runner) -> int:
             have_sudo=shutil.which("sudo") is not None,
             caller_path=os.environ.get("PATH", ""),
             profile=profile,
+            cmdline_extra=cmdline_extra,
         )
         print(f"machine: {machine}")
         print(f"boot media: {args.boot_media}")
@@ -158,6 +166,7 @@ def _run(argv, host, runner) -> int:
         pinned=pinned,
         workdir=workdir.create_workdir(planned, default=args.workdir is None),
         media=args.boot_media,
+        cmdline_extra=cmdline_extra,
     )
     flash(ctx, host, runner, assume_yes=args.assume_yes)
     return 0

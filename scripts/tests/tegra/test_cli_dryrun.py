@@ -410,3 +410,37 @@ def test_real_sd_run_streams_the_sd_profile_and_warns_about_the_card(deploy_tree
     assert runner.streamed[0].env["AVOCADO_PROVISION_PROFILE"] == "tegraflash-sd"
     assert "the SD card will be erased" in out
     assert "NVMe will be erased" not in out
+
+
+def test_real_run_streams_the_kernel_cmdline_extra_to_the_script(deploy_tree, tmp_path):
+    rc, runner = run(deploy_tree, tmp_path, ["--assume-yes", "--kernel-cmdline-extra", "systemd.mask=x.service"])
+    assert rc == 0
+    assert runner.streamed[0].env["AVOCADO_KERNEL_CMDLINE_EXTRA"] == "systemd.mask=x.service"
+
+
+def test_real_run_without_the_option_streams_no_kernel_cmdline_variable(deploy_tree, tmp_path):
+    rc, runner = run(deploy_tree, tmp_path, ["--assume-yes"])
+    assert rc == 0
+    assert "AVOCADO_KERNEL_CMDLINE_EXTRA" not in runner.streamed[0].env
+
+
+def test_dry_run_prints_the_kernel_cmdline_extra_it_would_pass(deploy_tree, tmp_path, capsys):
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run", "--kernel-cmdline-extra", "systemd.mask=x.service"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert runner.captured == [["lsusb"]]
+    assert "AVOCADO_KERNEL_CMDLINE_EXTRA=systemd.mask=x.service" in out
+
+
+def test_dry_run_without_the_option_passes_no_kernel_cmdline_variable(deploy_tree, tmp_path, capsys):
+    rc, _ = run(deploy_tree, tmp_path, ["--dry-run"])
+    assert rc == 0
+    assert "AVOCADO_KERNEL_CMDLINE_EXTRA" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "a\nb", "a\rb", "a\x00b", "a\x1bb"])
+def test_dry_run_refuses_a_malformed_kernel_cmdline_extra_before_the_runner(deploy_tree, tmp_path, capsys, bad):
+    rc, runner = run(deploy_tree, tmp_path, ["--dry-run", "--kernel-cmdline-extra", bad])
+    assert rc == 1
+    assert runner.captured == []
+    assert "invalid --kernel-cmdline-extra" in capsys.readouterr().err

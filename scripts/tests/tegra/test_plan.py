@@ -202,3 +202,26 @@ def test_profile_argument_selects_the_provisioning_profile():
 
 def test_profile_defaults_to_nvme():
     assert make().env["AVOCADO_PROVISION_PROFILE"] == "tegraflash-nvme"
+
+
+def test_cmdline_extra_is_added_as_one_variable_with_the_exact_value():
+    value = "systemd.mask=a.service systemd.mask=b.service"
+    inv = make(cmdline_extra=value)
+    assert inv.env["AVOCADO_KERNEL_CMDLINE_EXTRA"] == value
+    assert set(inv.env) == EXPECTED_KEYS | {"AVOCADO_KERNEL_CMDLINE_EXTRA"}
+
+
+def test_cmdline_extra_survives_sudo_env_as_a_single_operand_with_its_spaces():
+    value = "systemd.mask=a.service systemd.mask=b.service"
+    inv = make(cmdline_extra=value)
+    assert f"AVOCADO_KERNEL_CMDLINE_EXTRA={value}" in inv.argv
+
+
+def test_cmdline_extra_is_absent_by_default():
+    assert "AVOCADO_KERNEL_CMDLINE_EXTRA" not in make().env
+
+
+def test_cmdline_extra_is_exported_to_the_script_when_root():
+    inv = make(is_root=True, cmdline_extra="quiet")
+    assert inv.env["AVOCADO_KERNEL_CMDLINE_EXTRA"] == "quiet"
+    assert inv.argv == ("/deploy/images/provision.sh",)

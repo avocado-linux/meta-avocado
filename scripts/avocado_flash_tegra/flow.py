@@ -28,6 +28,7 @@ class FlashContext:
     pinned: rcm.UsbDevice
     workdir: workdir.Workdir
     media: str = "nvme"
+    cmdline_extra: str | None = None
 
 
 MEDIA_LABEL = {"nvme": "NVMe", "sd": "SD card"}
@@ -132,6 +133,7 @@ def _prepare(ctx: FlashContext, host, runner, assume_yes: bool, is_root: bool, h
         have_sudo=have_sudo,
         caller_path=os.environ.get("PATH", ""),
         profile=inputs.profile_for(ctx.media),
+        cmdline_extra=ctx.cmdline_extra,
     )
 
 

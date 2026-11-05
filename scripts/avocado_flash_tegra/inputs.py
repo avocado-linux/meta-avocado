@@ -30,6 +30,19 @@ BUILD_TARGETS = {
 }
 
 
+def validate_cmdline_extra(value: str) -> str:
+    """Return the extra kernel arguments unchanged, or refuse a value the boot image cannot carry.
+
+    The text is written into a boot image's command line by a script that runs as root, so a newline
+    or another control character would be read as more than arguments.
+    """
+    if not value.strip():
+        raise FlashError("invalid --kernel-cmdline-extra: it is empty")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
+        raise FlashError("invalid --kernel-cmdline-extra: it contains a control character or a newline")
+    return value
+
+
 def template_name(machine: str) -> str:
     return f"stone-{machine.removeprefix('avocado-')}.json"
 

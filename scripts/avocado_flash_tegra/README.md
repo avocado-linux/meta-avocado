@@ -42,6 +42,7 @@ Options:
 | `--workdir` | work directory for the run (kept on failure) |
 | `--rcm-id` | recovery-mode USB id `vvvv:pppp` for another board |
 | `--boot-media` | `nvme` (default) or `sd`: the medium to write and boot |
+| `--kernel-cmdline-extra` | extra kernel arguments appended to the boot image's command line |
 
 ## Build the flash inputs
 
@@ -123,6 +124,17 @@ UEFI variable store is still reset and the SD class goes first in the boot
 priority, so the board boots the card and falls back to the NVMe. Use it to
 run an image from the card until it works, then flash it to the NVMe with the
 default medium.
+
+## Extra kernel arguments
+
+`--kernel-cmdline-extra "<arguments>"` hands the text to the script as
+`AVOCADO_KERNEL_CMDLINE_EXTRA`, which the script appends to the boot image's
+command line next to its own root-partition pins. Use it to test a boot change
+without rebuilding, for example `systemd.mask=systemd-tpm2-setup-early.service`.
+The value is passed as one argument, spaces included. An empty value, or one
+with a newline or another control character, is refused before any USB action.
+The option applies to both media, and a dry run prints the variable it would
+set.
 
 ## After the flash
 
