@@ -50,6 +50,7 @@ def test_image_entries_skips_object_valued_boot(deploy_tree):
         "tegraflash_esp",
         "tegraflash_tos",
         "tegraflash_bsp",
+        "tegraflash_engine",
         "tegraflash_tools",
         "tegraflash_carrier_bsp",
     }

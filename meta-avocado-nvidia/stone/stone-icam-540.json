@@ -81,6 +81,7 @@
         "tegraflash_esp": "tegra-espimage-avocado-icam-540.esp",
         "tegraflash_tos": "tos-avocado-icam-540.img",
         "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_engine": "tegraflash-engine",
         "tegraflash_tools": "tegraflash-tools"
       },
       "tegraflash": {
