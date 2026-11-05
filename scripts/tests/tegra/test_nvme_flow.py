@@ -2,6 +2,7 @@
 
 import os
 import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +10,6 @@ import pytest
 from avocado_flash_tegra import FlashError, flow, rcm, workdir
 from avocado_flash_tegra.runner import Interrupted
 
-REAL_RESOLVE_CPP = flow._resolve_cpp
 PINNED_LINE = "Bus 001 Device 004: ID 0955:7523 NVIDIA Corp. APX"
 SECOND_LINE = "Bus 001 Device 005: ID 0955:7523 NVIDIA Corp. APX"
 
@@ -70,16 +70,6 @@ def as_root(monkeypatch):
 def non_root(monkeypatch):
     monkeypatch.setattr(flow.os, "geteuid", lambda: 1000)
     monkeypatch.setattr(flow.shutil, "which", lambda name, **kw: "/usr/bin/sudo")
-
-
-@pytest.fixture(autouse=True)
-def host_cpp(tmp_path, monkeypatch):
-    """A stand-in host preprocessor so staging never depends on the machine."""
-    real = tmp_path / "host-cpp-real"
-    real.write_text("#!/bin/sh\n")
-    real.chmod(0o755)
-    monkeypatch.setattr(flow, "_resolve_cpp", lambda caller_path: str(real))
-    return real
 
 
 @pytest.fixture
@@ -348,81 +338,25 @@ def test_failed_script_keeps_the_directory(ctx, events):
     assert ctx.workdir.path.is_dir()
 
 
-# ---- the staged preprocessor alias (the script's own fallback loops) ----
+# ---- the engine writes its own absolute-path preprocessor wrapper ----
 
 
-def test_stage_helper_stages_a_cpp_alias_named_for_the_machine(ctx, monkeypatch, host_cpp):
-    monkeypatch.setattr(flow.platform, "machine", lambda: "aarch64")
+def test_stage_helper_leaves_only_the_boot_image_helper_in_bin(ctx):
     bin_dir = flow._stage_helper(ctx)
-    alias = bin_dir / "aarch64-avocadosdk-linux-cpp"
-    assert alias.is_symlink()
-    assert os.path.realpath(alias) == os.path.realpath(host_cpp)
+    assert sorted(p.name for p in bin_dir.iterdir()) == [flow.HELPER_NAME]
 
 
-def test_stage_helper_replaces_a_planted_cpp_alias_without_following_it(
-    ctx, tmp_path, monkeypatch
-):
-    monkeypatch.setattr(flow.platform, "machine", lambda: "x86_64")
-    victim = tmp_path / "victim"
-    victim.write_text("precious")
-    (ctx.workdir.path / "bin").mkdir(mode=0o700)
-    (ctx.workdir.path / "bin" / "x86_64-avocadosdk-linux-cpp").symlink_to(victim)
-    bin_dir = flow._stage_helper(ctx)
-    assert victim.read_text() == "precious"
-    assert os.path.realpath(bin_dir / "x86_64-avocadosdk-linux-cpp") != str(victim)
-
-
-def test_resolve_cpp_returns_the_realpath_of_the_caller_path_hit(tmp_path, monkeypatch):
-    real = tmp_path / "real-cpp"
-    real.write_text("")
-    link = tmp_path / "cpp"
-    link.symlink_to(real)
-    seen = {}
-
-    def fake_which(name, path=None):
-        seen["args"] = (name, path)
-        return str(link)
-
-    monkeypatch.setattr(flow.shutil, "which", fake_which)
-    assert REAL_RESOLVE_CPP("/a:/b") == str(real)
-    assert seen["args"] == ("cpp", "/a:/b")
-
-
-def test_resolve_cpp_refuses_when_absent(monkeypatch):
-    monkeypatch.setattr(flow.shutil, "which", lambda name, path=None: None)
-    with pytest.raises(FlashError, match="cpp"):
-        REAL_RESOLVE_CPP("/nowhere")
-
-
-def test_stage_helper_looks_for_cpp_only_on_absolute_path_components(ctx, monkeypatch):
-    seen = []
-    monkeypatch.setenv("PATH", "/usr/bin::.:rel/bin")
-    monkeypatch.setattr(flow, "_resolve_cpp", lambda caller_path: seen.append(caller_path) or "/bin/true")
-    flow._stage_helper(ctx)
-    assert seen == ["/usr/bin"]
-
-
-def test_stage_helper_refuses_without_a_host_cpp(ctx, monkeypatch):
-    def refuse(caller_path):
-        raise FlashError("no C preprocessor (cpp) found")
-
-    monkeypatch.setattr(flow, "_resolve_cpp", refuse)
-    with pytest.raises(FlashError, match="cpp"):
-        flow._stage_helper(ctx)
-
-
-def test_discard_removes_the_alias_and_bin(ctx, monkeypatch):
-    _empty_workdir(ctx)
-    monkeypatch.setattr(flow.platform, "machine", lambda: "aarch64")
-    flow._stage_helper(ctx)
-    flow._discard_workdir(ctx)
-    assert not ctx.workdir.path.exists()
-
-
-def test_success_cleanup_leaves_no_alias(ctx, events, monkeypatch):
-    monkeypatch.setattr(flow.platform, "machine", lambda: "aarch64")
-    flow.flash(ctx, FakeHost(events), FakeRunner(events), assume_yes=True)
-    assert not ctx.workdir.path.exists()
+def test_no_script_references_the_removed_preprocessor_alias_helpers():
+    # Names are built from parts so this file does not match its own scan.
+    names = ("_cpp_alias" + "_name", "_resolve" + "_cpp")
+    scripts = Path(__file__).resolve().parents[2]
+    hits = [
+        f"{path}: {name}"
+        for path in scripts.rglob("*.py")
+        for name in names
+        if name in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert hits == []
 
 
 # ---- the confirmation names the target (incident 12.1-1) ----

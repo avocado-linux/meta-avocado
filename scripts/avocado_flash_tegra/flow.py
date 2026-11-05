@@ -5,7 +5,6 @@ through the injected runner.
 """
 
 import os
-import platform
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,22 +38,6 @@ def _print_warning() -> None:
     )
 
 
-def _cpp_alias_name() -> str:
-    # The provisioning script looks for exactly this name on PATH first; its own
-    # fallback writes a `cpp` wrapper that execs `cpp`, which loops forever.
-    return f"{platform.machine()}-avocadosdk-linux-cpp"
-
-
-def _resolve_cpp(caller_path: str) -> str:
-    found = shutil.which("cpp", path=caller_path)
-    if found is None:
-        raise FlashError(
-            "no C preprocessor (cpp) found on PATH; the provisioning script "
-            "needs one to preprocess device trees"
-        )
-    return os.path.realpath(found)
-
-
 def _stage_helper(ctx: FlashContext, stat_fn=os.lstat) -> Path:
     """Place the boot image helper where root will execute it from.
 
@@ -82,17 +65,6 @@ def _stage_helper(ctx: FlashContext, stat_fn=os.lstat) -> Path:
             os.fchmod(out.fileno(), 0o755)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions - helper must be executable by the root-run script; its directory is private 0o700
     except OSError as exc:
         raise FlashError(f"cannot stage the boot image helper in {bin_dir}: {exc}") from exc
-
-    cpp = _resolve_cpp(plan.safe_path(os.environ.get("PATH", "")))
-    alias = bin_dir / _cpp_alias_name()
-    try:
-        try:
-            os.unlink(alias)
-        except FileNotFoundError:
-            pass
-        os.symlink(cpp, alias)
-    except OSError as exc:
-        raise FlashError(f"cannot stage the preprocessor alias in {bin_dir}: {exc}") from exc
     return bin_dir
 
 
@@ -103,7 +75,6 @@ def _discard_workdir(ctx: FlashContext) -> None:
     bin_dir = ctx.workdir.path / "bin"
     for remove, target in (
         (os.unlink, bin_dir / HELPER_NAME),
-        (os.unlink, bin_dir / _cpp_alias_name()),
         (os.rmdir, bin_dir),
         (os.rmdir, ctx.workdir.path),
     ):
