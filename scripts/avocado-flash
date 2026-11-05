@@ -1058,8 +1058,20 @@ def dispatch_nvme(argv: list[str]) -> int:
     return cli.main(argv, host=host)
 
 
+def dispatch_boards(argv: list[str]) -> int:
+    """List the known boards; see dispatch_ssh_emmc for why this skips the parser."""
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from avocado_flash_boards import cli
+
+    return cli.main(argv)
+
+
 def main() -> int:
-    # ssh-emmc and nvme must be the first argument; every other invocation is untouched.
+    # ssh-emmc, nvme and boards must be the first argument; every other invocation is untouched.
+    if len(sys.argv) > 1 and sys.argv[1] == "boards":
+        return dispatch_boards(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "ssh-emmc":
         return dispatch_ssh_emmc(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "nvme":
