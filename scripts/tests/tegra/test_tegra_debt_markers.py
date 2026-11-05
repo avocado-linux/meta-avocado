@@ -5,7 +5,6 @@ import re
 
 PKG = pathlib.Path(__file__).resolve().parents[2] / "avocado_flash_tegra"
 MARKER = "devtool-debt:"
-EXPECTED_MARKERS = 1
 
 
 def markers_in(text, name="<text>"):
@@ -22,8 +21,8 @@ def markers_in(text, name="<text>"):
         yield name, i + 1, " ".join(block)
 
 
-def markers():
-    for path in sorted(PKG.glob("*.py")):
+def markers(pkg=PKG):
+    for path in sorted(pkg.glob("*.py")):
         yield from markers_in(path.read_text(), path.name)
 
 
@@ -37,17 +36,21 @@ def problems(found):
     return bad
 
 
-def test_markers_exist():
-    found = list(markers())
-    assert len(found) == EXPECTED_MARKERS, [f"{f}:{n}" for f, n, _ in found]
+def test_the_scan_reads_the_package_files():
+    assert len(list(PKG.glob("*.py"))) > 1
+
+
+def test_the_package_carries_no_marker():
+    assert [f"{f}:{n}" for f, n, _ in markers()] == []
+
+
+def test_the_scan_of_a_package_dir_reports_a_seeded_marker_without_a_trigger(tmp_path):
+    (tmp_path / "m.py").write_text("# devtool-debt: a table.\n# Ceiling: one.\nX = {}\n")
+    assert problems(markers(tmp_path)) == ["m.py:1 has no upgrade trigger"]
 
 
 def test_every_marker_names_a_ceiling_and_an_upgrade_trigger():
     assert not problems(markers())
-
-
-def test_the_machine_table_carries_the_marker():
-    assert [f for f, _, _ in markers()] == ["machines.py"]
 
 
 def test_a_marker_without_an_upgrade_trigger_is_reported():
@@ -69,10 +72,3 @@ def test_a_complete_marker_is_clean_and_counted_once():
     text = "# devtool-debt: a table.\n# Ceiling: one.\n# Upgrade trigger: two.\nX = {}\n"
     found = list(markers_in(text, "m.py"))
     assert len(found) == 1 and problems(found) == []
-
-
-def test_deleting_the_marker_changes_the_count():
-    real = (PKG / "machines.py").read_text()
-    stripped = "\n".join(l for l in real.splitlines() if MARKER not in l)
-    assert len(list(markers_in(real))) == EXPECTED_MARKERS
-    assert len(list(markers_in(stripped))) == 0 != EXPECTED_MARKERS

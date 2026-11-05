@@ -8,8 +8,10 @@ starts a process itself.
 import re
 from dataclasses import dataclass
 
+import avocado_flash_boards as boards
+from avocado_flash_boards import NVIDIA_VENDOR
+
 from . import FlashError
-from .machines import NVIDIA_VENDOR
 
 # A Jetson running Linux in USB device mode, not waiting in recovery mode.
 DEVICE_MODE_ID = "0955:7020"
@@ -65,6 +67,31 @@ def list_usb(runner) -> list[UsbDevice]:
             bus, dev, vid, pid, desc = m.groups()
             found.append(UsbDevice(bus, dev, vid.lower(), pid.lower(), desc))
     return found
+
+
+def parse_rcm_id(text: str) -> str:
+    """Validate a ``--rcm-id`` override; refusals surface as FlashError."""
+    try:
+        return boards.parse_recovery_id(text)
+    except boards.BoardError as exc:
+        raise FlashError(str(exc)) from None
+
+
+def expected_rcm_id(machine: str, override: str | None) -> str:
+    """The recovery-mode USB id to pin for ``machine``; an override wins."""
+    if override is not None:
+        return parse_rcm_id(override)
+    try:
+        board = boards.lookup(machine)
+    except boards.BoardError:
+        board = None
+    if board is None or board.rcm_id is None:
+        why = "has no registry entry" if board is None else "has no recorded recovery-mode USB id"
+        raise FlashError(
+            f"machine {machine} {why}; pass the id with --rcm-id vvvv:pppp "
+            "(`avocado-flash boards` lists the recorded ids)"
+        )
+    return board.rcm_id
 
 
 def _candidates(devices) -> list[UsbDevice]:

@@ -1,17 +1,11 @@
 import pytest
 
 from avocado_flash_tegra import FlashError
-from avocado_flash_tegra.machines import (
-    NVIDIA_VENDOR,
-    RCM_IDS,
-    expected_rcm_id,
-    parse_rcm_id,
-)
+from avocado_flash_tegra.rcm import NVIDIA_VENDOR, expected_rcm_id, parse_rcm_id
 
 
 def test_recorded_orin_nano_id():
     assert NVIDIA_VENDOR == "0955"
-    assert RCM_IDS == {"avocado-jetson-orin-nano": "0955:7523"}
     assert expected_rcm_id("avocado-jetson-orin-nano", None) == "0955:7523"
 
 
@@ -37,12 +31,23 @@ def test_non_nvidia_override_refused_through_expected():
         expected_rcm_id("avocado-jetson-orin-nano", "1fc9:0146")
 
 
-def test_unknown_machine_without_override_names_machine_and_option():
+def test_machine_without_entry_and_without_override_names_machine_and_both_options():
     with pytest.raises(FlashError) as exc:
-        expected_rcm_id("avocado-jetson-agx-orin", None)
-    assert "avocado-jetson-agx-orin" in str(exc.value)
-    assert "--rcm-id" in str(exc.value)
+        expected_rcm_id("avocado-jetson-nonexistent", None)
+    msg = str(exc.value)
+    assert "avocado-jetson-nonexistent" in msg
+    assert "--rcm-id" in msg
+    assert "avocado-flash boards" in msg
+
+
+def test_machine_without_recorded_id_refuses_naming_both_options():
+    with pytest.raises(FlashError) as exc:
+        expected_rcm_id("avocado-jetson-orin-nx", None)
+    msg = str(exc.value)
+    assert "avocado-jetson-orin-nx" in msg
+    assert "--rcm-id" in msg
+    assert "avocado-flash boards" in msg
 
 
 def test_unknown_machine_with_override_uses_override():
-    assert expected_rcm_id("avocado-jetson-agx-orin", "0955:7023") == "0955:7023"
+    assert expected_rcm_id("avocado-jetson-nonexistent", "0955:7023") == "0955:7023"

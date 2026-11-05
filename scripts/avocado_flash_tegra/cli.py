@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import FlashError, Problem, format_problems, inputs, machines, plan, prereqs, rcm, workdir
+from . import FlashError, Problem, format_problems, inputs, plan, prereqs, rcm, workdir
 from .flow import FlashContext, flash
 from .runner import Interrupted, SubprocessRunner
 
@@ -100,7 +100,7 @@ def _run(argv, host, runner) -> int:
     for line in fit_lines:
         print(f"  {line}")
 
-    expected_id = machines.expected_rcm_id(machine, args.rcm_id)
+    expected_id = rcm.expected_rcm_id(machine, args.rcm_id)
 
     planned = workdir.planned_workdir(args.workdir, machine)
     workdir.require_space(planned, workdir.required_bytes(infos))
