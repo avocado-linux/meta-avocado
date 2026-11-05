@@ -4,14 +4,18 @@ from avocado_tegraflash import EngineError, Media
 from avocado_tegraflash.cli import main
 
 
-def test_prepare_only_with_unwired_stages_reports_error_and_returns_1(capsys):
+def test_prepare_only_with_a_missing_variable_returns_1_naming_it(capsys):
     rc = main(["--prepare-only"], environ={}, euid=0)
     assert rc == 1
-    assert capsys.readouterr().err == "ERROR: engine stages are not wired\n"
+    assert capsys.readouterr().err == "ERROR: AVOCADO_STONE_MANIFEST is not set\n"
 
 
-def test_no_arguments_never_returns_0_while_stages_unwired(capsys):
+def test_no_arguments_with_an_empty_environment_never_returns_0(capsys):
     assert main([], environ={}) != 0
+
+
+def test_non_root_caller_never_returns_0(capsys):
+    assert main([], environ={}, euid=1000) != 0
 
 
 @pytest.mark.parametrize("argv", [["--bogus"], ["--prepare-only", "extra"], ["-h"], ["--help"], ["--prepare-only=1"]])
