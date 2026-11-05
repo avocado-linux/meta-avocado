@@ -45,6 +45,7 @@ def build_invocation(
     have_sudo: bool,
     caller_path: str,
     profile: str = PROFILE,
+    cmdline_extra: str | None = None,
 ) -> Invocation:
     """Return the argv, explicit environment and cwd for the script.
 
@@ -69,6 +70,9 @@ def build_invocation(
         "AVOCADO_PROVISION_KERNEL_IMAGE": str(kernel_image),
         "PATH": ":".join(path_parts),
     }
+    if cmdline_extra is not None:
+        # The provisioning script appends its own root-partition pins to this, so it only adds arguments.
+        env["AVOCADO_KERNEL_CMDLINE_EXTRA"] = cmdline_extra
     if is_root:
         argv = (str(script),)
     else:
