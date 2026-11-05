@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+import avocado_flash_boards as boards
+
 from . import FlashError, Problem, format_problems, inputs, plan, prereqs, rcm, workdir
 from .flow import FlashContext, flash
 from .runner import Interrupted, SubprocessRunner
@@ -60,6 +62,7 @@ def _fmt_mtime(ts: float) -> str:
 
 def _run(argv, host, runner) -> int:
     args = build_parser().parse_args(argv)
+    boards.all_boards()  # a bad registry entry refuses here, before any USB action
 
     deploy = host.resolve_deploy_dir(args.deploy)
     machine = host.resolve_machine(deploy, args.machine)
@@ -67,6 +70,7 @@ def _run(argv, host, runner) -> int:
 
     template = inputs.load_template(images_dir, machine)
     inputs.require_profile(template, machine)
+    inputs.require_engine(template, machine)
 
     is_root = os.geteuid() == 0
 
@@ -172,7 +176,7 @@ def main(argv, host, runner=None) -> int:
             file=sys.stderr,
         )
         return 1
-    except FlashError as exc:
+    except (FlashError, boards.BoardError) as exc:
         print(f"avocado-flash: {exc}", file=sys.stderr)
         return 1
     except host.fatal as exc:

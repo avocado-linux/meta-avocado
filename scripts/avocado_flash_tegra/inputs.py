@@ -10,8 +10,10 @@ from pathlib import Path
 from . import FlashError, InputInfo, Problem
 
 PROFILE = "tegraflash-nvme"
-DIR_KEYS = ("tegraflash_bsp", "tegraflash_tools", "tegraflash_carrier_bsp")
+DIR_KEYS = ("tegraflash_bsp", "tegraflash_engine", "tegraflash_tools", "tegraflash_carrier_bsp")
 DEFAULT_TARGET = "avocado-stone"
+ENGINE_DIRNAME = "tegraflash-engine"
+ENGINE_ENTRY = "avocado_tegraflash/__main__.py"
 
 BUILD_TARGETS = {
     "rootfs": "avocado-image-rootfs",
@@ -21,6 +23,7 @@ BUILD_TARGETS = {
     "tegraflash_esp": "tegra-espimage",
     "tegraflash_tos": "tos-optee",
     "tegraflash_bsp": "tegraflash-bsp",
+    "tegraflash_engine": "tegraflash-engine",
     "tegraflash_tools": "tegraflash-tools-deploy",
     "tegraflash_carrier_bsp": "tegraflash-bsp",
 }
@@ -47,8 +50,13 @@ def load_template(images_dir, machine: str) -> dict:
 
 
 def image_entries(template: dict) -> dict[str, str]:
-    images = template.get("storage_devices", {}).get("rootdisk", {}).get("images", {})
-    return {k: v for k, v in images.items() if isinstance(v, str)}
+    """The string-valued entries of storage_devices.rootdisk.images; a malformed template yields none."""
+    node = template
+    for section in ("storage_devices", "rootdisk", "images"):
+        node = node.get(section) if isinstance(node, dict) else None
+    if not isinstance(node, dict):
+        return {}
+    return {k: v for k, v in node.items() if isinstance(v, str)}
 
 
 def require_profile(template: dict, machine: str) -> None:
@@ -60,7 +68,27 @@ def require_profile(template: dict, machine: str) -> None:
         )
 
 
+def require_engine(template: dict, machine: str) -> None:
+    value = image_entries(template).get("tegraflash_engine")
+    if value is None:
+        raise FlashError(
+            f"the manifest template {template_name(machine)} for {machine} predates "
+            "the engine: it does not name the tegraflash_engine directory, so the "
+            f"image tree was built before the engine existed; rebuild it with the "
+            f"{DEFAULT_TARGET} target"
+        )
+    if value != ENGINE_DIRNAME:
+        # The provisioning shim looks for exactly this name in the data directory.
+        raise FlashError(
+            f"the manifest template {template_name(machine)} for {machine} names the "
+            f"engine directory {value}, but the provisioning script only looks for "
+            f"{ENGINE_DIRNAME}; rebuild the image tree with the {DEFAULT_TARGET} target"
+        )
+
+
 def _present(path: Path, key: str) -> bool:
+    if key == "tegraflash_engine":
+        return (path / ENGINE_ENTRY).is_file()
     if key in DIR_KEYS:
         return path.is_dir()
     return path.is_file() and path.stat().st_size > 0
@@ -72,9 +100,14 @@ def check_images(images_dir, entries: dict[str, str]) -> list[Problem]:
         if _present(Path(images_dir) / name, key):
             continue
         kind = "directory" if key in DIR_KEYS else "image"
+        hint = (
+            f" (it must hold {ENGINE_ENTRY}); the {DEFAULT_TARGET} target deploys it"
+            if key == "tegraflash_engine"
+            else ""
+        )
         problems.append(
             Problem(
-                f"{kind} {name} ({key}) is missing, empty or not a {'directory' if key in DIR_KEYS else 'regular file'} in {images_dir}",
+                f"{kind} {name} ({key}) is missing, empty or not a {'directory' if key in DIR_KEYS else 'regular file'} in {images_dir}{hint}",
                 BUILD_TARGETS.get(key, DEFAULT_TARGET),
             )
         )

@@ -24,7 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 REPO_ROOT = SCRIPTS_DIR.parent
 REAL_TEMPLATE = REPO_ROOT / "meta-avocado-nvidia" / "stone" / "stone-jetson-orin-nano.json"
 MACHINE = "avocado-jetson-orin-nano"
-DIR_KEYS = ("tegraflash_bsp", "tegraflash_tools", "tegraflash_carrier_bsp")
+DIR_KEYS = ("tegraflash_bsp", "tegraflash_engine", "tegraflash_tools", "tegraflash_carrier_bsp")
 
 _STUB_SCRIPT = """#!/bin/sh
 {

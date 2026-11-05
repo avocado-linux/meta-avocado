@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 
 import pytest
 
@@ -120,6 +121,7 @@ def test_all_mapped_build_targets():
         "tegraflash_esp": "tegra-espimage",
         "tegraflash_tos": "tos-optee",
         "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_engine": "tegraflash-engine",
         "tegraflash_tools": "tegraflash-tools-deploy",
         "tegraflash_carrier_bsp": "tegraflash-bsp",
     }
@@ -194,3 +196,195 @@ def test_describe_inputs_sizes_files_and_directories(deploy_tree, tmp_path):
     tools_size = len("#!/bin/sh\nexit 0\n") + len("x\n") + 5
     assert infos["tegraflash_tools"].size == tools_size
     assert infos["tegraflash_bsp"].size == 3
+
+
+# --- The provisioning engine directory is a required input ---------------
+
+ENGINE = "tegraflash-engine"
+
+
+def _remove_engine(tree):
+    engine = tree.images_dir / ENGINE
+    shutil.rmtree(engine)
+    return engine
+
+
+def test_engine_key_is_a_directory_key_with_its_own_build_target():
+    assert "tegraflash_engine" in inputs.DIR_KEYS
+    assert inputs.BUILD_TARGETS["tegraflash_engine"] == ENGINE
+
+
+def test_engine_absent_names_the_engine_and_the_stone_target(deploy_tree):
+    """Scenario: Engine absent."""
+    _, entries = _entries(deploy_tree)
+    _remove_engine(deploy_tree)
+    problems = inputs.check_images(deploy_tree.images_dir, entries)
+    assert [p.target for p in problems] == [ENGINE]
+    assert ENGINE in problems[0].what
+    assert "avocado-stone" in problems[0].what
+
+
+def test_engine_as_a_plain_file_counts_absent(deploy_tree):
+    _, entries = _entries(deploy_tree)
+    _remove_engine(deploy_tree).write_bytes(b"not a dir")
+    problems = inputs.check_images(deploy_tree.images_dir, entries)
+    assert [p.target for p in problems] == [ENGINE]
+
+
+def test_engine_present_passes_and_is_described_as_a_directory_input(deploy_tree):
+    """Scenario: Engine present."""
+    template, entries = _entries(deploy_tree)
+    inputs.require_engine(template, deploy_tree.machine)
+    assert inputs.check_images(deploy_tree.images_dir, entries) == []
+    infos = {i.key: i for i in inputs.describe_inputs(deploy_tree.images_dir, entries)}
+    assert infos["tegraflash_engine"].name == ENGINE
+
+
+def test_require_engine_refuses_a_template_that_does_not_name_it(deploy_tree):
+    """Scenario: Template does not name the engine."""
+    template, _ = _entries(deploy_tree)
+    del template["storage_devices"]["rootdisk"]["images"]["tegraflash_engine"]
+    with pytest.raises(FlashError) as exc:
+        inputs.require_engine(template, deploy_tree.machine)
+    text = str(exc.value)
+    assert "predates the engine" in text
+    assert deploy_tree.machine in text
+    assert "avocado-stone" in text
+
+
+def test_require_engine_refuses_a_non_string_engine_entry(deploy_tree):
+    template, _ = _entries(deploy_tree)
+    template["storage_devices"]["rootdisk"]["images"]["tegraflash_engine"] = {"out": "x"}
+    with pytest.raises(FlashError):
+        inputs.require_engine(template, deploy_tree.machine)
+
+
+def test_require_engine_accepts_the_name_the_shim_looks_for(deploy_tree):
+    template, _ = _entries(deploy_tree)
+    assert template["storage_devices"]["rootdisk"]["images"]["tegraflash_engine"] == ENGINE
+    inputs.require_engine(template, deploy_tree.machine)
+
+
+def test_require_engine_refuses_a_misnamed_engine_directory(deploy_tree):
+    """The shim looks for tegraflash-engine in the data directory, whatever the template says."""
+    template, _ = _entries(deploy_tree)
+    template["storage_devices"]["rootdisk"]["images"]["tegraflash_engine"] = "my-engine"
+    with pytest.raises(FlashError) as exc:
+        inputs.require_engine(template, deploy_tree.machine)
+    assert ENGINE in str(exc.value)
+    assert "my-engine" in str(exc.value)
+
+
+@pytest.mark.parametrize("section", ["storage_devices", "rootdisk", "images"])
+@pytest.mark.parametrize("bad", [None, "text", []])
+def test_require_engine_refuses_a_template_with_a_malformed_section(deploy_tree, section, bad):
+    template, _ = _entries(deploy_tree)
+    holder = template if section == "storage_devices" else template["storage_devices"]
+    if section == "images":
+        holder = template["storage_devices"]["rootdisk"]
+    holder[section] = bad
+    with pytest.raises(FlashError):
+        inputs.require_engine(template, deploy_tree.machine)
+
+
+def test_engine_directory_without_the_entry_point_counts_missing(deploy_tree):
+    _, entries = _entries(deploy_tree)
+    (deploy_tree.images_dir / ENGINE / "avocado_tegraflash" / "__main__.py").unlink()
+    problems = inputs.check_images(deploy_tree.images_dir, entries)
+    assert [p.target for p in problems] == [ENGINE]
+    assert "avocado_tegraflash/__main__.py" in problems[0].what
+    assert "avocado-stone" in problems[0].what
+
+
+def test_empty_engine_directory_counts_missing(deploy_tree):
+    _, entries = _entries(deploy_tree)
+    engine = _remove_engine(deploy_tree)
+    engine.mkdir()
+    problems = inputs.check_images(deploy_tree.images_dir, entries)
+    assert [p.target for p in problems] == [ENGINE]
+
+
+def test_engine_entry_point_that_is_a_directory_counts_missing(deploy_tree):
+    _, entries = _entries(deploy_tree)
+    main = deploy_tree.images_dir / ENGINE / "avocado_tegraflash" / "__main__.py"
+    main.unlink()
+    main.mkdir()
+    problems = inputs.check_images(deploy_tree.images_dir, entries)
+    assert [p.target for p in problems] == [ENGINE]
+
+
+# CLI ordering: each refusal comes before any USB listing.
+
+
+class _Fatal(Exception):
+    pass
+
+
+class _RecordingRunner:
+    def __init__(self):
+        self.captured = []
+        self.streamed = []
+
+    def capture(self, argv):
+        self.captured.append(list(argv))
+        return 0, "Bus 001 Device 004: ID 0955:7523 NVIDIA Corp. APX\n"
+
+    def stream(self, invocation, log_path, echo=print):
+        self.streamed.append(invocation)
+        return 0
+
+
+def _cli(tree, tmp_path, monkeypatch):
+    import shutil
+
+    from avocado_flash_tegra import cli
+
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: f"/stub/{name}")
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    deploy = tree.images_dir.parent.parent
+    host = cli.Host(
+        resolve_deploy_dir=lambda explicit: explicit or deploy,
+        resolve_machine=lambda d, explicit: explicit or tree.machine,
+        confirm_destructive=lambda *a: None,
+        fatal=_Fatal,
+    )
+    runner = _RecordingRunner()
+    argv = ["--deploy", str(deploy), "--workdir", str(tmp_path / "work"), "--dry-run"]
+    return cli.main(argv, host, runner), runner
+
+
+def test_cli_engine_directory_absent_refuses_before_any_usb_action(
+    deploy_tree, tmp_path, monkeypatch, capsys
+):
+    _remove_engine(deploy_tree)
+    rc, runner = _cli(deploy_tree, tmp_path, monkeypatch)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert runner.captured == []
+    assert ENGINE in captured.err and "avocado-stone" in captured.err
+    assert "inputs: all present" not in captured.out
+    assert "pinned:" not in captured.out
+
+
+def test_cli_template_without_the_engine_entry_refuses_before_any_usb_action(
+    deploy_tree, tmp_path, monkeypatch, capsys
+):
+    data = json.loads(deploy_tree.template.read_text())
+    del data["storage_devices"]["rootdisk"]["images"]["tegraflash_engine"]
+    deploy_tree.template.write_text(json.dumps(data))
+    rc, runner = _cli(deploy_tree, tmp_path, monkeypatch)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert runner.captured == []
+    assert "predates the engine" in captured.err
+    assert deploy_tree.template.name in captured.err
+    assert "inputs: all present" not in captured.out
+    assert "pinned:" not in captured.out
+
+
+def test_cli_engine_present_lists_it_among_the_inputs(deploy_tree, tmp_path, monkeypatch, capsys):
+    rc, runner = _cli(deploy_tree, tmp_path, monkeypatch)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert runner.captured == [["lsusb"]]
+    assert f"  {ENGINE}  " in out

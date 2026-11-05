@@ -12,7 +12,7 @@ import pytest
 from avocado_flash_tegra import InputInfo, Problem, format_problems
 
 REMOTE_TESTS = pathlib.Path(__file__).resolve().parents[1] / "remote"
-DIR_KEYS = {"tegraflash_bsp", "tegraflash_tools", "tegraflash_carrier_bsp"}
+DIR_KEYS = {"tegraflash_bsp", "tegraflash_engine", "tegraflash_tools", "tegraflash_carrier_bsp"}
 
 
 def test_socket_connect_fails_the_test():
