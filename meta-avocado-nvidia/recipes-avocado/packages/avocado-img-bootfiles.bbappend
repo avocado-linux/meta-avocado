@@ -2,6 +2,10 @@
 # Use do_compile[depends] so files are deployed before do_collect_artifacts runs
 do_compile[depends] += "tegraflash-bsp:do_deploy"
 do_compile[depends] += "tegraflash-tools-deploy:do_deploy"
+# The provisioning engine ships through this RPM. do_collect_artifacts bundles
+# everything in DEPLOY_DIR_IMAGE, so the engine gets its own explicit ordering
+# edge here instead of relying on an indirect path through avocado-stone.
+do_compile[depends] += "tegraflash-engine:do_deploy"
 # Depend on tegra-initrd-flash-initramfs for tegraflash provisioning (needed by SDK)
 do_compile[depends] += "tegra-initrd-flash-initramfs:do_image_complete"
 AVOCADO_IMG_BOOTFILES_SKIP_EXTRA += " modules"
