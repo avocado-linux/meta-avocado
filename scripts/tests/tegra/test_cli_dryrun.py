@@ -99,14 +99,14 @@ def test_dry_run_with_a_missing_input_refuses_and_runs_nothing(deploy_tree, tmp_
 
 
 def test_dry_run_reports_a_missing_host_tool_in_the_same_message(deploy_tree, tmp_path, capsys, monkeypatch):
-    real = lambda name, path=None: None if name in ("jq", "mkbootimg") else f"/stub/{name}"  # noqa: E731
+    real = lambda name, path=None: None if name in ("cpp", "mkbootimg") else f"/stub/{name}"  # noqa: E731
     monkeypatch.setattr(shutil, "which", real)
     (deploy_tree.images_dir / "tegra-espimage-avocado-jetson-orin-nano.esp").unlink()
     rc, runner = run(deploy_tree, tmp_path, ["--dry-run"])
     err = capsys.readouterr().err
     assert rc == 1
     assert runner.captured == []
-    assert "jq" in err
+    assert "cpp" in err
     assert "mkbootimg" in err
     assert "tegra-espimage" in err
 
@@ -334,6 +334,36 @@ def test_preflight_resolves_tools_on_the_same_path_the_script_gets(deploy_tree, 
     monkeypatch.setenv("PATH", "bin:/usr/bin:/bin")
     rc, _runner = run(deploy_tree, tmp_path, ["--dry-run"])
     assert rc == 0
-    checked = [(n, p) for n, p in seen if n in ("mkbootimg", "jq")]
+    checked = [(n, p) for n, p in seen if n in ("mkbootimg", "cpp")]
     assert checked
     assert all(p == "/usr/bin:/bin" for _n, p in checked), checked
+
+
+@pytest.mark.parametrize("version", [(3, 8), None], ids=["old-python3", "unreadable-python3"])
+@pytest.mark.parametrize("extra", [["--dry-run"], ["--assume-yes"]])
+def test_old_or_unreadable_python3_refuses_before_any_usb_action(deploy_tree, tmp_path, capsys, monkeypatch, version, extra):
+    from avocado_flash_tegra import prereqs
+
+    monkeypatch.setattr(prereqs, "python_version", lambda path: version)
+    rc, runner = run(deploy_tree, tmp_path, extra)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert runner.captured == [] and runner.streamed == []
+    assert "python3" in captured.err and "3.10" in captured.err
+    assert "pinned:" not in captured.out
+
+
+def test_bad_registry_entry_is_a_clean_refusal_before_any_usb_action(deploy_tree, tmp_path, capsys, monkeypatch):
+    import avocado_flash_boards as boards_pkg
+
+    monkeypatch.setattr(boards_pkg.tegra, "BOARDS", [boards_pkg.Board("avocado-x", "tegar")])
+    boards_pkg._registry.cache_clear()
+    try:
+        rc, runner = run(deploy_tree, tmp_path, ["--dry-run"])
+    finally:
+        monkeypatch.undo()
+        boards_pkg._registry.cache_clear()
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert runner.captured == []
+    assert "avocado-x" in captured.err and "Traceback" not in captured.err

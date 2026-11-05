@@ -191,7 +191,7 @@ def test_absent_partition_is_a_problem(deploy_tree, template, make_layout):
 def test_cli_reports_the_fit_problem_in_the_single_refusal(deploy_tree, tmp_path, capsys, make_layout, monkeypatch):
     _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": APP_BYTES}))
     _size_rootfs(deploy_tree, json.loads(deploy_tree.template.read_text()), ROOTFS_BYTES)
-    monkeypatch.setattr(shutil, "which", lambda name, path=None: None if name == "jq" else f"/stub/{name}")
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: None if name == "cpp" else f"/stub/{name}")
     runner = FakeRunner()
     argv = ["--deploy", str(deploy_tree.images_dir.parent.parent), "--workdir", str(tmp_path / "w"), "--dry-run"]
     rc = cli.main(argv, make_host(deploy_tree), runner)
@@ -199,7 +199,7 @@ def test_cli_reports_the_fit_problem_in_the_single_refusal(deploy_tree, tmp_path
     assert rc == 1
     assert runner.captured == []
     assert "does not fit partition APP" in err
-    assert "jq" in err
+    assert "cpp" in err
 
 
 def test_cli_dry_run_prints_a_fit_line_per_checked_pair(deploy_tree, tmp_path, capsys):

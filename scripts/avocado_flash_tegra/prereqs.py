@@ -1,23 +1,28 @@
 """Checks for the executables, helper and host tools the flash needs.
 
-Standard library only. Nothing here starts a process.
+Standard library only. The only process started is the one-line version probe
+of the python3 found on the search path.
 """
 
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 import xml.etree.ElementTree as ET  # nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 from pathlib import Path
 
 from . import Problem
-from .inputs import BUILD_TARGETS, PROFILE
+from .inputs import BUILD_TARGETS, PROFILE, image_entries
 
 HELPER_REL = Path(
     "meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/avocado-tegra-bootimg"
 )
 HELPER_SHEBANG = "#!/bin/sh"
 TOOLS_DIRNAME = "tegraflash-tools"
-HOST_TOOLS = ("jq", "fdtget", "fdtput", "cpp", "lsusb")
+HOST_TOOLS = ("python3", "fdtget", "fdtput", "cpp", "lsusb")
+MIN_PYTHON = (3, 10)
+VERSION_PROBE_TIMEOUT = 10
 
 
 def _is_executable_file(path: Path) -> bool:
@@ -38,7 +43,7 @@ def script_name(template) -> str | None:
 
 
 def tools_dir_name(template) -> str | None:
-    return _lookup(template, "storage_devices", "rootdisk", "images", "tegraflash_tools")
+    return image_entries(template).get("tegraflash_tools")
 
 
 def check_executables(images_dir, template) -> list[Problem]:
@@ -307,9 +312,58 @@ def check_mkbootimg(images_dir, path=None, tools_dirname=TOOLS_DIRNAME) -> tuple
     )
 
 
-def check_host_tools(path=None) -> list[Problem]:
-    return [
-        Problem(f"host tool {tool} is not on the search path")
-        for tool in HOST_TOOLS
-        if shutil.which(tool, path=path) is None
-    ]
+def python_version(python3) -> tuple[int, int] | None:
+    """The (major, minor) of the given interpreter, or None when it cannot say."""
+    code = "import sys; print('%d.%d' % sys.version_info[:2])"
+    with tempfile.TemporaryFile() as out:
+        try:
+            done = subprocess.run(
+                [os.fspath(python3), "-I", "-c", code],
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.DEVNULL,
+                timeout=VERSION_PROBE_TIMEOUT,
+                start_new_session=True,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode != 0:
+            return None
+        out.seek(0)
+        text = out.read().decode("ascii", errors="replace").strip()
+    match = re.fullmatch(r"(\d+)\.(\d+)", text)
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _version_text(version) -> str:
+    return ".".join(str(part) for part in version)
+
+
+def check_host_tools(path=None, version_of=None) -> list[Problem]:
+    """Check every host tool, and that the python3 found is new enough.
+
+    The version is read from the python3 on ``path`` (the one the provisioning
+    shim will run), not from the interpreter running this tool.
+    """
+    version_of = version_of or python_version  # looked up late so tests can swap the probe
+    problems: list[Problem] = []
+    python3 = None
+    for tool in HOST_TOOLS:
+        found = shutil.which(tool, path=path)
+        if found is None:
+            problems.append(Problem(f"host tool {tool} is not on the search path"))
+        elif tool == "python3":
+            python3 = found
+    if python3 is not None:
+        version = version_of(python3)
+        needed = _version_text(MIN_PYTHON)
+        if version is None:
+            problems.append(
+                Problem(f"the version of {python3} could not be read; python3 {needed} or newer is needed")
+            )
+        elif tuple(version) < MIN_PYTHON:
+            problems.append(
+                Problem(f"python3 {_version_text(version)} found at {python3}; python3 {needed} or newer is needed")
+            )
+    return problems

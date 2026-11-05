@@ -22,6 +22,15 @@ It also checks the kernel `Image` and the `avocado-tegra-bootimg` helper
 (which pins the rootfs partition identifiers into the boot image), so the
 board cannot boot a different disk and look like a successful flash.
 
+The provisioning flow runs as the Python engine `tegraflash-engine`, installed
+in the stone data directory next to the manifest template, behind the stone
+provision script. `--prepare-only` on the engine prepares a work tree and
+contacts no board.
+
+`avocado-flash boards` lists the machines the tool knows, with their family
+and recorded recovery id, or `none recorded` when no id is recorded. It is not
+listed in `--help`.
+
 Options:
 
 | Option | Meaning |
@@ -52,9 +61,13 @@ The other manifest entries map to `avocado-image-rootfs`,
 `tegraflash-bsp` (also the carrier BSP). An entry with no mapping falls back
 to `avocado-stone`.
 
-The host also needs `jq`, `fdtget`, `fdtput`, `cpp` and `lsusb`, and a
-`mkbootimg` either on the search path or executable inside the deployed
-`tegraflash-tools` directory.
+The host also needs `python3` 3.10 or newer, `fdtget`, `fdtput`, `cpp` and
+`lsusb`, and a `mkbootimg` either on the search path or executable inside the
+deployed `tegraflash-tools` directory. The version is read from the `python3`
+the provisioning script will find on its search path, which is not necessarily
+the interpreter running `avocado-flash`. `jq` is no longer needed on the host.
+A missing tool, or a `python3` older than 3.10, is refused before any USB
+action, and every problem is listed in one message.
 
 ## Enter recovery mode
 
@@ -131,11 +144,9 @@ tool never passes `AVOCADO_AGENT_SOCK` to the script: it builds the
 environment from scratch and tells `sudo` to unset the variable. The run needs
 root, directly or through `sudo`.
 
-Host tools: the run needs a host `cpp`. The provisioning script's own fallback
-writes a `cpp` wrapper that executes `cpp` and so calls itself forever, so the
-tool stages a `<machine>-avocadosdk-linux-cpp` symlink to your real `cpp` in
-the work directory and the script uses that instead. The run is refused when
-no `cpp` is on `PATH`.
+Host tools: the run needs a host `cpp` on `PATH`. The provisioning engine
+resolves it to an absolute path and writes a wrapper that runs that path, so
+the wrapper cannot call itself. The run is refused when no `cpp` is on `PATH`.
 
 Exit codes: 0 success, 1 a refusal or a failed flash, 2 a usage error, 130
 interrupted.

@@ -83,6 +83,16 @@ def _no_subprocess(request, monkeypatch):
     monkeypatch.setattr(os, "system", _refuse_spawn("os.system"))
 
 
+@pytest.fixture(autouse=True)
+def _no_version_probe(request, monkeypatch):
+    """The python3 version probe spawns a process; fake it unless the test may spawn."""
+    if request.node.get_closest_marker("real_subprocess"):
+        return
+    from avocado_flash_tegra import prereqs
+
+    monkeypatch.setattr(prereqs, "python_version", lambda path: (3, 14))
+
+
 def layout_xml(sizes: dict) -> str:
     """A partition layout in the deployed external-flash.xml shape.
 
@@ -138,7 +148,11 @@ def deploy_tree(tmp_path):
         path = images_dir / name
         if key in DIR_KEYS:
             path.mkdir()
-            (path / "placeholder").write_text("x\n")
+            if key == "tegraflash_engine":
+                (path / "avocado_tegraflash").mkdir()
+                (path / "avocado_tegraflash" / "__main__.py").write_text("x = 1\n")
+            else:
+                (path / "placeholder").write_text("x\n")
             dirs[key] = path
         else:
             path.write_bytes(b"image-" + key.encode() + b"\n")

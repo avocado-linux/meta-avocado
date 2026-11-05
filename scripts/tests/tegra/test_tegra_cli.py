@@ -48,8 +48,10 @@ def stubs(tmp_path):
     calls.write_text("")
     log = f'echo "${{0##*/}}" >> "{calls}"\n'
     _stub(bindir / "lsusb", log + f'echo "{LISTING}"\n')
-    for name in ("jq", "fdtget", "fdtput", "cpp", "mkbootimg"):
+    for name in ("fdtget", "fdtput", "cpp", "mkbootimg"):
         _stub(bindir / name, log)
+    # Answers the version probe like a real python3; unlogged so call lists stay exact.
+    _stub(bindir / "python3", 'echo 3.14\n')
     # `sudo -v` only refreshes the credential cache; the stub has none to ask for.
     _stub(bindir / "sudo", log + '[ "$1" = "-v" ] && exit 0\nexec "$@"\n')
     for name in ("env", "sh"):
@@ -197,6 +199,22 @@ def test_dry_run_runs_only_lsusb(deploy_tree, stubs, tmp_path):
     assert "AVOCADO_PROVISION_PROFILE=tegraflash-nvme" in proc.stdout
 
 
+def test_missing_python3_and_cpp_are_one_refusal_and_jq_is_not_named(deploy_tree, stubs, tmp_path):
+    bindir, calls = stubs
+    for name in ("python3", "cpp", "jq"):
+        (bindir / name).unlink(missing_ok=True)
+
+    proc = run_launcher(stubs, tmp_path, nvme_args(deploy_tree, tmp_path, "--dry-run"))
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    refusals = [ln for ln in proc.stderr.splitlines() if ln.startswith("avocado-flash:")]
+    assert len(refusals) == 1
+    assert "python3" in proc.stderr and "cpp" in proc.stderr
+    assert "jq" not in proc.stderr
+    assert "pinned:" not in proc.stdout
+    assert "lsusb" not in tool_calls(calls)
+
+
 def test_nvme_task_option_is_refused_before_the_usb_listing(deploy_tree, stubs, tmp_path):
     _, calls = stubs
 
@@ -246,3 +264,23 @@ def test_unknown_medium_keeps_usage_and_choices(stubs, tmp_path):
         "(choose from 'sd', 'emmc', 'ums', 'fuse-srk')"
     ) in proc.stderr
     assert "nvme" not in proc.stderr
+
+
+@pytest.mark.parametrize(
+    "probe",
+    ["echo 3.8\n", "exit 1\n"],
+    ids=["old-python3", "unreadable-python3"],
+)
+@pytest.mark.parametrize("mode", ["--dry-run", "-y"])
+def test_launcher_refuses_an_old_or_unreadable_python3_before_the_usb_listing(
+    deploy_tree, stubs, tmp_path, probe, mode
+):
+    bindir, calls = stubs
+    _stub(bindir / "python3", probe)
+
+    proc = run_launcher(stubs, tmp_path, nvme_args(deploy_tree, tmp_path, mode))
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "python3" in proc.stderr and "3.10" in proc.stderr
+    assert "pinned:" not in proc.stdout
+    assert tool_calls(calls) == []
