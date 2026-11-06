@@ -7,6 +7,7 @@ those stubs plus links to the real env and sh.
 
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -126,7 +127,9 @@ def test_real_run_executes_script_with_five_variables(deploy_tree, stubs, tmp_pa
         "AVOCADO_PROVISION_KERNEL_IMAGE",
     ):
         assert f"{var}=" in text
-    assert "AVOCADO_PROVISION_PROFILE=\"tegraflash-nvme\"" in text
+    # `export -p` quotes with double quotes under bash and single quotes under
+    # dash, and /bin/sh is dash on the CI runner.
+    assert re.search(r"AVOCADO_PROVISION_PROFILE=[\"']tegraflash-nvme[\"']", text)
     assert "AVOCADO_AGENT_SOCK" not in text
     helpers = [ln for ln in text.splitlines() if ln.startswith("HELPER ")]
     work_bin = str(tmp_path / "work" / "bin")
