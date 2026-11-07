@@ -176,3 +176,11 @@ python do_create_v8_qemu_wrapper:append:intel-x86-64-v4() {
 # PYTHON_CPU_COUNT (Python 3.13+) overrides os.cpu_count() and
 # multiprocessing.cpu_count(); python3native supplies 3.14.
 export PYTHON_CPU_COUNT = "1"
+
+# x86 targets: H.264 and AAC through Chromium's bundled ffmpeg
+# (proprietary_codecs, ffmpeg_branding="Chrome"). use-vaapi is already in
+# meta-chromium's default PACKAGECONFIG, but VA-API hardware decode of H.264
+# only happens with these codecs present. The patent-licensed codecs are a
+# deliberate product choice, scoped to x86, where the Intel and AMD VA-API
+# drivers are shipped.
+PACKAGECONFIG:append:x86-64 = " proprietary-codecs"
