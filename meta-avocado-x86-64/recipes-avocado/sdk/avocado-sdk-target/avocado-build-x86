@@ -11,7 +11,16 @@ hook="avocado-build"
 target="${1:?usage: avocado-build-x86 <target> <runtime>}"
 shift
 
-RUNTIME_NAME="$1"
+RUNTIME_NAME="${1:-}"
+
+# The name becomes a path component under runtimes/ and output/runtimes/;
+# refuse anything that would be empty or step outside them.
+case "$RUNTIME_NAME" in
+  '' | . | .. | */*)
+    echo "ERROR: invalid runtime name '${RUNTIME_NAME}'" >&2
+    exit 1
+    ;;
+esac
 
 input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
 output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"

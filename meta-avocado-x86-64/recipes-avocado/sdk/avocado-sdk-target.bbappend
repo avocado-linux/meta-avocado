@@ -9,12 +9,17 @@ RDEPENDS:${PN}:append = " \
   nativesdk-util-linux-lsblk \
 "
 
-# The shared build hook body. The base recipe installs only the per-machine
-# avocado-build-<machine> file, which on x86 is a wrapper that execs this.
-SRC_URI += "file://avocado-build-x86"
+# The shared hook bodies. The base recipe installs only the per-machine
+# avocado-{build,provision}-<machine> files, which on x86 are wrappers that
+# exec these.
+SRC_URI += "file://avocado-build-x86 file://avocado-provision-x86"
 
 do_install:append() {
     install -m 0755 ${UNPACKDIR}/avocado-build-x86 ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/avocado-provision-x86 ${D}${SDKPATHNATIVE}${bindir}
 }
 
-FILES:${PN} += "${SDKPATHNATIVE}${bindir}/avocado-build-x86"
+FILES:${PN} += " \
+    ${SDKPATHNATIVE}${bindir}/avocado-build-x86 \
+    ${SDKPATHNATIVE}${bindir}/avocado-provision-x86 \
+"
