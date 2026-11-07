@@ -39,8 +39,10 @@ for script in "$here"/../intel-x86-64-v*/stone-provision-img.sh; do
   for fn in size_to_mib resolve_image_filename; do
     awk -v f="$fn" '$0 ~ "^"f"\\(\\) \\{" {on=1} on {print} on && /^}/ {exit}' "$script" >>"$w/fns.sh"
   done
-  # The sizing block: from the size test to its closing fi, at loop indent.
-  awk '/^    if .*"\$size" = "null"/ {on=1} on {print} on && /^    fi$/ {exit}' \
+  # The sizing block: from the size test to the fi at the same indent (any
+  # indent: the scripts were reformatted from four spaces to two by #546).
+  awk '!on && /^[[:space:]]*if .*"\$size" = "null"/ {on=1; match($0, /^[[:space:]]*/); ind=substr($0, 1, RLENGTH)}
+       on {print} on && $0 == ind "fi" {exit}' \
     "$script" >"$w/block.sh"
   grep -q '^size_to_mib()' "$w/fns.sh" && grep -q '^resolve_image_filename()' "$w/fns.sh" \
     && grep -q 'size_mib=' "$w/block.sh" \
