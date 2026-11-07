@@ -70,13 +70,16 @@ Yocto build deploys (the stub exists only so the Yocto-time
 `do_stone_validate` task passes — see
 [recipes-bsp/tegraflash/tegraflash-bsp.bb](../recipes-bsp/tegraflash/tegraflash-bsp.bb)).
 
-At provision time,
+At provision time, the provisioning engine (`avocado_tegraflash`, see
+[carrier.py](../stone/tegra/avocado_tegraflash/carrier.py)) overlays the
+carrier-bsp/ files onto the staged tegraflash-bsp/ working directory (so
+same-named files shadow MACHINE-baked defaults), reads `carrier.env`, and
+applies the `CARRIER_FV_<NAME>` / `CARRIER_ENV_<NAME>` overrides to
+`flashvars` and `.env.initrd-flash` before invoking `initrd-flash`.
 [stone-provision-tegraflash.sh](../stone/tegra/stone-provision-tegraflash.sh)
-overlays the carrier-bsp/ files onto the staged tegraflash-bsp/ working
-directory (so same-named files shadow MACHINE-baked defaults), sources
-`carrier.env`, and applies the `CARRIER_FV_<NAME>` / `CARRIER_ENV_<NAME>`
-overrides to `flashvars` and `.env.initrd-flash` before invoking
-`initrd-flash`.
+is only the shim that starts the engine. Values are written literally, so
+`&` and backslash sequences survive. A `carrier.env` should carry a
+`CARRIER_LABEL` line: the engine prints it in the provision log when present.
 
 ## Step-by-step: adding a new carrier
 
@@ -433,6 +436,6 @@ Regression test:
 - [bsp/icam-540/avocado.yaml](../../../bsp/icam-540/avocado.yaml) — full worked example
 - [bsp/icam-540/stone/carrier-bsp/carrier.env](../../../bsp/icam-540/stone/carrier-bsp/carrier.env) — carrier override values
 - [stone-jetson-orin-nx.json](../stone/stone-jetson-orin-nx.json) — SOM stone manifest with `tegraflash_carrier_bsp` slot
-- [stone-provision-tegraflash.sh](../stone/tegra/stone-provision-tegraflash.sh) — carrier overlay + flashvars/env patching at provision time
+- [carrier.py](../stone/tegra/avocado_tegraflash/carrier.py) — carrier overlay + flashvars/env patching at provision time, in the engine the [stone-provision-tegraflash.sh](../stone/tegra/stone-provision-tegraflash.sh) shim starts
 - [tegraflash-bsp.bb](../recipes-bsp/tegraflash/tegraflash-bsp.bb) — Yocto-time empty `carrier-bsp/` stub for `do_stone_validate`
 - avocado-cli `get_stone_include_paths_for_runtime` — composes runtime + per-extension paths, scoped to extension location for remote sources

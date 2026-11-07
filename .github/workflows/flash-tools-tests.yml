@@ -1,0 +1,149 @@
+name: Flash-Tools-Tests
+
+# Runs the test suites of the flash tooling on every pull request that touches
+# it: the host-side tools under scripts/ and the Tegra provisioning engine under
+# meta-avocado-nvidia/stone/.
+#
+# These scripts decide which disk a board boots from and which device an image
+# is written to, and nothing else in CI executes them. The engine is a port of a
+# legacy shell script and is proven equivalent by a differential parity test
+# against that script, so a regression here is silent unless the suite runs.
+#
+# The two suites run as separate pytest invocations on purpose: both trees carry
+# a test file with the same basename (scripts/tests/remote/test_profile.py and
+# meta-avocado-nvidia/stone/tegra/tests/test_profile.py), and one combined run
+# trips pytest's duplicate-module-name collision.
+#
+# The engine itself is standard library only, and targets Python 3.10 or newer.
+# pytest is the only Python dependency. The job pins 3.10 so the floor is the
+# version that gets exercised. The host tool tests pass once the help golden is
+# selected per argparse version.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "scripts/**"
+      - "meta-avocado-nvidia/stone/**"
+      # Files the recipe wiring and partition-UUID tests read.
+      - "meta-avocado-nvidia/recipes-bsp/tegraflash/tegraflash-engine.bb"
+      - "meta-avocado-nvidia/recipes-avocado/distro/avocado-stone.bbappend"
+      - "meta-avocado-nvidia/recipes-avocado/packages/avocado-img-bootfiles.bbappend"
+      - "meta-avocado-nvidia/recipes-bsp/tegra-binaries/tegra-storage-layout/**"
+      - "meta-avocado-nvidia/recipes-bsp/tegra-binaries/tegra-helper-scripts/**"
+      - ".github/workflows/flash-tools-tests.yml"
+
+# Least privilege: this job only checks out and runs tests.
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: flash-tools-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flash-tools-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # jq is the parity oracle's JSON tool; sgdisk (package gdisk) is used by
+      # the partition-UUID GPT test.
+      - name: Install host tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq gdisk
+          python -m pip install pytest
+          python --version
+          python -m pytest --version
+
+      # nvflashxmlparse.py belongs to meta-tegra and is not copied into this
+      # repository; the GPT test needs it, and fails (not skips) when CI is set
+      # and it is missing. The commit is on origin/wrynose of that repository.
+      - name: Fetch nvflashxmlparse.py
+        uses: actions/checkout@v4
+        with:
+          repository: avocado-linux/vendor-meta-tegra
+          ref: 727633deca9b72643112d1aebadafb736dad60c0
+          path: vendor-meta-tegra
+          sparse-checkout: recipes-bsp/tegra-binaries/tegra-helper-scripts
+
+      # scripts/tests/remote belongs to the ssh-emmc backend and has 4 failures
+      # on a clean runner that are unrelated to the Jetson flash path: two need
+      # uv on PATH, test_no_home_paths_leak matches the word "runner" in a README
+      # against the runner's /home/runner path, and test_reverify_replaced_file
+      # does not raise ImageChanged (cause not diagnosed). This job runs the two
+      # trees this tooling owns. Add tests/remote once those pass.
+      - name: Host tool tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest scripts/tests/boards scripts/tests/tegra -q
+
+      # -s keeps the parity test's `cases: N/M run` line on stdout, and the tee
+      # keeps it for the next step. pipefail makes a pytest failure fail this
+      # step despite the pipe.
+      - name: Tegra engine and parity tests
+        shell: bash
+        env:
+          NVFLASHXMLPARSE: ${{ github.workspace }}/vendor-meta-tegra/recipes-bsp/tegra-binaries/tegra-helper-scripts/nvflashxmlparse.py
+        run: |
+          set -euo pipefail
+          python -m pytest meta-avocado-nvidia/stone/tegra/tests -q -s 2>&1 \
+            | tee "$RUNNER_TEMP/engine-tests.log"
+
+      - name: Check the parity case count
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          log="$RUNNER_TEMP/engine-tests.log"
+
+          # The parity test prints `cases: N/M run`. Progress dots can precede
+          # it on the same line, so match the text rather than the line start.
+          mapfile -t lines < <(grep -oE 'cases: [0-9]+/[0-9]+ run' "$log" || true)
+
+          # A run that never printed the line proves nothing, and two lines
+          # mean the log is not what this step was written against.
+          if [ "${#lines[@]}" -ne 1 ]; then
+            echo "ERROR: expected exactly one 'cases: N/M run' line, found ${#lines[@]}." >&2
+            echo "       The parity test did not report; this run proves nothing." >&2
+            exit 1
+          fi
+
+          line="${lines[0]}"
+          echo "$line"
+
+          re='^cases: ([0-9]+)/([0-9]+) run$'
+          if [[ ! "$line" =~ $re ]]; then
+            echo "ERROR: could not parse '$line'." >&2
+            exit 1
+          fi
+          ran="${BASH_REMATCH[1]}"
+          planned="${BASH_REMATCH[2]}"
+
+          # The matrix has 127 cases today. A floor stops a discovery bug from
+          # reporting `cases: 0/0 run`, which satisfies N == M and reads
+          # exactly like a clean run. Raise it when the matrix grows.
+          if [ "$planned" -lt 100 ]; then
+            echo "ERROR: only $planned parity cases planned; expected at least 100." >&2
+            echo "       Case discovery is broken - this run proves nothing." >&2
+            exit 1
+          fi
+
+          if [ "$ran" -ne "$planned" ]; then
+            echo "ERROR: parity ran $ran of $planned cases." >&2
+            echo "       A shortfall means cases were skipped, not passed." >&2
+            exit 1
+          fi
+
+          echo "parity cases: ${ran}/${planned} run"
