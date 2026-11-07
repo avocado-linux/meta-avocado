@@ -145,6 +145,9 @@ jobs:
       - name: /var udev match and device per AVOCADO_VAR_PART_DEV form
         shell: bash
         run: sh meta-avocado-distro/recipes-core/base-files/tests/test-var-udev-match.sh
+      - name: x86 build hook applies the project kernel cmdline
+        shell: bash
+        run: bash meta-avocado-x86-64/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-build-x86-cmdline.sh
       - name: avocado-var-grow
         shell: bash
         run: bash meta-avocado/recipes-core/avocado-var-grow/tests/test-avocado-var-grow.sh

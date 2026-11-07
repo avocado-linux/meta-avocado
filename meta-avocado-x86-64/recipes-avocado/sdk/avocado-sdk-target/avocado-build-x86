@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Shared by every Intel x86-64 machine in this layer. The per-machine
+# avocado-build-<machine> scripts the SDK installs are wrappers that exec this
+# with their target name (avocado-cli invokes the hook by target name), the
+# avocado-build-qcom pattern.
+
+hook="avocado-build"
+target="${1:?usage: avocado-build-x86 <target> <runtime>}"
+shift
+
+RUNTIME_NAME="$1"
+
+input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME"
+
+mkdir -p "$output_dir"
+
+output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
+manifest="${AVOCADO_STONE_MANIFEST:-$AVOCADO_SDK_PREFIX/stone/stone-${target}.json}"
+
+# Extract image names from manifest
+rootfs_image=$(jq -r '.storage_devices.rootdisk.images.rootfs // empty' "$manifest")
+var_image=$(jq -r '.storage_devices.rootdisk.images.var // empty' "$manifest")
+initramfs_image=$(jq -r '.storage_devices.rootdisk.images.initramfs // empty' "$manifest")
+kernel_image=$(jq -r '.storage_devices.rootdisk.images.kernel // empty' "$manifest")
+bootloader_image=$(jq -r '.storage_devices.rootdisk.images.bootloader // empty' "$manifest")
+
+echo -e "\033[94m[INFO]\033[0m Extracted image names from manifest:
+  Rootfs:     ${rootfs_image}
+  Var:        ${var_image}
+  Initramfs:  ${initramfs_image}
+  Kernel:     ${kernel_image}
+  Bootloader: ${bootloader_image}"
+
+# The kernel command line from the project (kernel.cmdline / cmdline_extra in
+# avocado.yaml, exported by avocado-cli), as avocado-build-qcom does for its
+# UKI. x86 boots a systemd-boot entry, avocado.conf, whose `options` line the
+# runtime package ships into the runtime dir; `stone bundle` and provisioning
+# take it from there (the build copies the runtime dir into the stone dir after
+# this hook). The packaged entry is kept beside it as avocado.conf.orig and
+# every build starts from that, so a rebuild never appends twice and an unset
+# cmdline restores the shipped line. A file without the marker line is fresh
+# from the package (a reinstall), and becomes the new .orig.
+#
+#   AVOCADO_KERNEL_CMDLINE        replace the arguments outright
+#   AVOCADO_KERNEL_CMDLINE_EXTRA  append to them
+#
+# root=PARTLABEL=rootfs-a stays as shipped unless the project replaces the
+# whole line: avocadoctl's A/B update rewrites that argument to switch slots.
+entry="$input_dir/avocado.conf"
+marker="# kernel cmdline from the project (avocado-build-x86)"
+if [ -f "$entry" ]; then
+  grep -qxF "$marker" "$entry" || cp "$entry" "$entry.orig"
+  if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    options=$(sed -n 's/^options[[:space:]]*//p' "$entry.orig")
+    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}" ]; then
+      options="$AVOCADO_KERNEL_CMDLINE"
+      echo "Kernel cmdline replaced from project config"
+    fi
+    if [ -n "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+      options="$options $AVOCADO_KERNEL_CMDLINE_EXTRA"
+      echo "Kernel cmdline extended from project config: $AVOCADO_KERNEL_CMDLINE_EXTRA"
+    fi
+    awk -v o="$options" -v m="$marker" 'BEGIN { print m } /^options[[:space:]]/ { print "options " o; next } { print }' \
+      "$entry.orig" >"$entry"
+  else
+    cp "$entry.orig" "$entry"
+  fi
+elif [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+  echo "ERROR: kernel cmdline set, but no boot entry to apply it to: $entry" >&2
+  exit 1
+fi
+
+# stone validate/create used to run here. avocado-cli commit 35124cb moved that
+# work into the runtime build as `stone bundle`, which resolves the same inputs
+# and additionally records the bundle hash in the runtime manifest. This hook is
+# now the pre-bundle seam only: stage artifacts the manifest references that the
+# generic pipeline cannot build, and let stone bundle consume them.
+
+echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."
+exit 0
