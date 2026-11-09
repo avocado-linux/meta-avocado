@@ -56,6 +56,7 @@
             "files": [
               { "in": "systemd-bootx64.efi", "out": "EFI/BOOT/BOOTX64.EFI" },
               { "in": "bzImage", "out": "bzImage" },
+              { "in": "microcode.cpio", "out": "intel-ucode.cpio" },
               { "in": "avocado-image-initramfs-intel-x86-64-v3.cpio.zst", "out": "initramfs.cpio.zst" },
               { "in": "loader.conf", "out": "loader/loader.conf" },
               { "in": "avocado.conf", "out": "loader/entries/avocado.conf" }

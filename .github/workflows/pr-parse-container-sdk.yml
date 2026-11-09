@@ -167,6 +167,15 @@ jobs:
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh
+      - name: intel-x86-64 stone img sizing
+        shell: bash
+        run: bash meta-avocado-x86-64/stone/tests/test-stone-img-sizing.sh
+      - name: intel-x86-64 EFI slot entries
+        shell: bash
+        run: bash meta-avocado-x86-64/recipes-core/avocado-efi-slot-entries/tests/test-avocado-efi-slot-entries.sh
+      - name: intel-x86-64 qemuwrapper-native
+        shell: bash
+        run: bash meta-avocado-x86-64/recipes-devtools/qemu/tests/test-qemuwrapper-native.sh
       - name: qemux86-64 stone provision-img
         shell: bash
         run: bash meta-avocado-qemu/stone/qemux86-64/tests/test-stone-provision-img.sh

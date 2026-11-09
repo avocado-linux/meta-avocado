@@ -24,6 +24,12 @@ WIFI_REALTEK = " \
   linux-firmware-rtl8821 \
 "
 
+# Ethernet firmware - Realtek RTL8111/8125 (r8169), common on Celeron and
+# Atom boards
+ETH_FIRMWARE = " \
+  linux-firmware-rtl-nic \
+"
+
 # Bluetooth firmware - Intel
 BT_FIRMWARE = " \
   linux-firmware-ibt \
@@ -60,6 +66,7 @@ RDEPENDS:${PN} = " \
   ${WIFI_INTEL} \
   ${WIFI_ATHEROS} \
   ${WIFI_REALTEK} \
+  ${ETH_FIRMWARE} \
   ${BT_FIRMWARE} \
   ${GPU_FIRMWARE} \
   ${CPU_MICROCODE} \

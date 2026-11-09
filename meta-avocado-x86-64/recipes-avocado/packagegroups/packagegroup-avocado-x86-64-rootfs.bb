@@ -5,10 +5,14 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-# EFI boot management - required for A/B slot activation via efibootmgr
+# A/B slot activation: avocadoctl's efibootmgr slot action runs efibootmgr
+# from the rootfs and looks the target slot up by an entry label (boot-a,
+# boot-b) that avocado-efi-slot-entries creates at boot. Without it an OS
+# update cannot activate the new slot. The AMD machine already ships it.
 EFI_TOOLS = " \
   efibootmgr \
   efivar \
+  avocado-efi-slot-entries \
 "
 
 RDEPENDS:${PN} = " \

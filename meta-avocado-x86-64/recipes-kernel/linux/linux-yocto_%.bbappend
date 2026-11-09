@@ -19,6 +19,7 @@ SRC_URI:append:avocado-x86-64 = " \
     file://nvidia-gpu.cfg \
     file://x86-efi.cfg \
     file://intel-platform.cfg \
+    file://x86-containers.cfg \
 "
 
 # avocado-core.cfg, avocado-extra.cfg and tpm.cfg are this layer's own, found
