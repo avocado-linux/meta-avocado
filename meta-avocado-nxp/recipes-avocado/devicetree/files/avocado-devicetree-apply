@@ -19,6 +19,18 @@ overlays=""
 
 [ -d "$DROPDIR" ] || exit 0
 
+# Drop every double quote. Shell only: the rootfs BusyBox has no tr.
+unquote() {
+	s=$1
+	while :; do
+		case $s in
+			*\"*) s=${s%%\"*}${s#*\"} ;;
+			*) break ;;
+		esac
+	done
+	printf '%s' "$s"
+}
+
 for f in "$DROPDIR"/*.conf; do
 	# Shell glob expansion is already sorted, and unlike `ls | sort` it survives
 	# a fragment name containing whitespace. With no matches the pattern stays
@@ -28,8 +40,12 @@ for f in "$DROPDIR"/*.conf; do
 	o=""
 	while IFS='=' read -r k v; do
 		case "$k" in
-			DEVICETREE) d=$(printf '%s' "$v" | tr -d ' "') ;;
-			OVERLAYS)   o=$(printf '%s' "$v" | tr -d '"') ;;
+			DEVICETREE)
+				d=$(unquote "$v")
+				d=${d#"${d%%[![:space:]]*}"}
+				d=${d%"${d##*[![:space:]]}"}
+				;;
+			OVERLAYS) o=$(unquote "$v") ;;
 		esac
 	done < "$f"
 	[ -n "$d" ] && base="$d"
