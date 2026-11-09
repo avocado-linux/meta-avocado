@@ -5,3 +5,9 @@ SRC_URI:append = " \
   file://env-nowhere.cfg \
   file://fastboot.cfg \
 "
+
+# meta-rz-drpai V1.50 renamed its ether-setting patch to
+# 0001-add-ether-setting-RZV2N.patch, so meta-rzv2n's SRC_URI:remove of the
+# old name no longer matches. The patch targets Renesas's U-Boot, not
+# SolidRun's fork, and fails do_patch there.
+SRC_URI:remove:rzv2n-sr-som = "file://0001-add-ether-setting-RZV2N.patch"
