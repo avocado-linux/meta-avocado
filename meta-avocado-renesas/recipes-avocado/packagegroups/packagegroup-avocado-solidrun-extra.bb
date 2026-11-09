@@ -56,18 +56,13 @@ CAMERA_PACKAGES = "v4l-utils \
     yavta \
     v4l2-init-scripts"
 
-# DRP-AI3 inference accelerator (RZ/V2N).
-# From renesas-rz/rzv2n_drp-ai_driver's meta-rz-drpai layer (added in
-# distro/kas/vendor/renesas.yml). The kernel driver is built into the
-# linux-renesas image via recipes-kernel/linux/linux-renesas_6.1.bbappend
-# patches; these recipes provide the userspace pieces:
-#   - drpai     : UAPI header (linux/drpai.h) for /dev/drpai0
-#   - lib-tvm   : prebuilt libtvm_runtime.so.2.5.1 (Apache TVM runtime)
-# The full Mera2/DRP/ACL inference stack (libdrp_rt, libmera2_*, libacl_rt)
-# is not packaged here — it lives in renesas-rz/rzv_drp-ai_tvm (RUHMI) and
-# needs a separate recipe or per-reference bundling.
-DRPAI_PACKAGES = "drpai \
-    lib-tvm"
+# DRP-AI3 inference accelerator (RZ/V2N), from renesas-rz/rzv2n_drp-ai_driver
+# V1.50 (meta-rz-drpai, kas/vendor/renesas.yml):
+#   - kernel-module-drpai : out-of-tree /dev/drpai0 driver
+#   - lib-ruhmi           : prebuilt RUHMI runtime (DRP/Mera2/ACL/TVM libs),
+#                           which replaced lib-tvm in V1.50
+DRPAI_PACKAGES = "kernel-module-drpai \
+    lib-ruhmi"
 
 # SolidRun board firmware. The Renesas-style MACHINE_ESSENTIAL_EXTRA_RDEPENDS
 # in meta-rzv2n/conf/machine/rzv2n-sr-som.conf is a no-op in avocado-os's
