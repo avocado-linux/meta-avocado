@@ -27,3 +27,8 @@ SRC_URI:remove:rzv2n-sr-som = " \
     file://0001-add-drpai-property-to-devicetree-RZV2N.patch \
     file://0003-config-macro-eMMC_SD_SEL-to-support-eMMC-boot-RZV2N.patch \
 "
+
+# 6.1's conmakehash, pnmtologo and build_OID_registry write their input
+# path into the generated .c files (fixed in later kernels). They only
+# reach the debug-source package, which wrynose's fatal buildpaths QA flags.
+INSANE_SKIP:${PN}-src += "buildpaths"
