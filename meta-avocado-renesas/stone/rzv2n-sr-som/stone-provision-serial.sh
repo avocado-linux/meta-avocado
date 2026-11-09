@@ -13,6 +13,10 @@
 #                              Downloader mode: no prompt, and the flash
 #                              writer does not wait for the ROM's banner,
 #                              which printed before the port was opened.
+#   AVOCADO_RZ_FLASH_LATER   - "1": check the artifacts and stop. For a test
+#                              fixture whose console UART is also the SCIF
+#                              port (a Rubicon): its after-hook reruns this
+#                              script with the UART attached.
 
 set -e
 set -u
@@ -42,6 +46,11 @@ for f in "$BL2" "$FIP" "$FW"; do
     exit 1
   fi
 done
+
+if [ "${AVOCADO_RZ_FLASH_LATER:-0}" = "1" ]; then
+  echo "AVOCADO_RZ_FLASH_LATER=1: artifacts present; the flash runs later with the UART attached."
+  exit 0
+fi
 
 PORT="${AVOCADO_RZ_SERIAL_PORT:-/dev/ttyUSB0}"
 SPEED="${AVOCADO_RZ_SERIAL_SPEED:-921600}"
