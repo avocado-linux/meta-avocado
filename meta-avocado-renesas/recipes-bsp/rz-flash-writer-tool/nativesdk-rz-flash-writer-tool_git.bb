@@ -7,6 +7,7 @@ LIC_FILES_CHKSUM = "file://../LICENSE.md;md5=e4c8ad3b0ba7659157573c0d9d4bd496"
 
 SRC_URI = "git://github.com/SolidRun/rzg2_flash_writer.git;branch=rz_v2n;protocol=https \
     file://0001-flash_writer_tool-add-no-wait-prompt.patch;patchdir=.. \
+    file://0002-flash_writer_tool-wait-for-each-SPI-write-to-finish.patch;patchdir=.. \
 "
 SRCREV = "e9e0ae0a5b194a2d68dc5413d29b15f190f2a350"
 

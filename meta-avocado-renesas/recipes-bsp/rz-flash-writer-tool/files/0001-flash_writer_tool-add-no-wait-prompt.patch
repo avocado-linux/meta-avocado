@@ -1,7 +1,7 @@
 From 6e818ebd2d40a84e7c7424f11f1cc426d41251af Mon Sep 17 00:00:00 2001
 From: Justin Schneck <j.schneck@peridio.com>
 Date: Mon, 9 Nov 2026 17:29:21 -0500
-Subject: [PATCH] flash_writer_tool: add --no-wait-prompt
+Subject: [PATCH 1/2] flash_writer_tool: add --no-wait-prompt
 
 Lets a fixture that applies power before the tool opens the port (the
 prompt is then already gone: opening an FTDI port purges its RX FIFO)
