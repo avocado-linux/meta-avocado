@@ -8,6 +8,11 @@
 #   AVOCADO_STONE_MANIFEST   - manifest JSON path
 #   AVOCADO_STONE_DATA_DIR   - directory containing BL2/FIP/Flash_Writer.mot
 #   AVOCADO_USB_PASSTHROUGH  - "1" when /dev/ttyUSB* is reachable from the SDK
+#   AVOCADO_RZ_BOARD_READY   - "1" when automation (a Rubicon's provision
+#                              hook) already powered the board into Serial
+#                              Downloader mode: no prompt, and the flash
+#                              writer does not wait for the ROM's banner,
+#                              which printed before the port was opened.
 
 set -e
 set -u
@@ -59,13 +64,22 @@ Before continuing, confirm:
 
 Detected serial port: $PORT (override with AVOCADO_RZ_SERIAL_PORT)
 Transfer speed:       $SPEED baud (override with AVOCADO_RZ_SERIAL_SPEED)
-
-Press Enter to start flashing, or Ctrl-C to abort.
 ================================================================
 EOF
-read -r _
+
+wait_flag=()
+if [ "${AVOCADO_RZ_BOARD_READY:-0}" = "1" ]; then
+  echo "AVOCADO_RZ_BOARD_READY=1: the board is already in Serial Downloader mode."
+  wait_flag=(--no-wait-prompt)
+elif [ -t 0 ]; then
+  echo "Press Enter to start flashing, or Ctrl-C to abort."
+  read -r _
+else
+  echo "No terminal: power the board on in Serial Downloader mode within 30 s."
+fi
 
 rz-flash-writer-tool \
+  "${wait_flag[@]}" \
   --target spi \
   --fw "${DATA_DIR}/${FW}" \
   --bl2 "${DATA_DIR}/${BL2}" \
