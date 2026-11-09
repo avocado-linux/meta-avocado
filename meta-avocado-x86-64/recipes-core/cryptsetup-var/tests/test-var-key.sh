@@ -55,32 +55,52 @@ uuid="$fx/dmi/product_uuid"
 printf '150100474a3634328a1c2b3d4e5f60c1\n' >"$cid"
 if "$under_test" "$part" >"$work/k1" 2>"$work/e1"; then
   n=$(wc -c <"$work/k1")
-  [[ "$n" -eq 64 ]] && ok "the var disk's CID derives 64 raw key bytes" || bad "expected 64 bytes, got $n"
+  if [[ "$n" -eq 64 ]]; then
+    ok "the var disk's CID derives 64 raw key bytes"
+  else
+    bad "expected 64 bytes, got $n"
+  fi
 else
   bad "provider failed on a valid CID: $(cat "$work/e1")"
 fi
 
 # --- Case 2: deterministic ---
 "$under_test" "$part" >"$work/k1b" 2>/dev/null || true
-cmp -s "$work/k1" "$work/k1b" && ok "the same disk derives the same key every run" || bad "not deterministic"
+if cmp -s "$work/k1" "$work/k1b"; then
+  ok "the same disk derives the same key every run"
+else
+  bad "not deterministic"
+fi
 
 # --- Case 3: another chip, another key ---
 printf '150100474a3634328a1c2b3d4e5f60c2\n' >"$cid"
 "$under_test" "$part" >"$work/k2" 2>/dev/null || true
-cmp -s "$work/k1" "$work/k2" && bad "two CIDs derived the same key" || ok "a different CID derives a different key"
+if cmp -s "$work/k1" "$work/k2"; then
+  bad "two CIDs derived the same key"
+else
+  ok "a different CID derives a different key"
+fi
 
 # --- Case 4: the AMI placeholder UUID is ignored, not mixed in ---
 printf '150100474a3634328a1c2b3d4e5f60c1\n' >"$cid"
 printf '03000200-0400-0500-0006-000700080009' >"$uuid"
 "$under_test" "$part" >"$work/k3" 2>/dev/null || true
-cmp -s "$work/k1" "$work/k3" && ok "the AMI placeholder product_uuid is ignored" || bad "the placeholder UUID changed the key"
+if cmp -s "$work/k1" "$work/k3"; then
+  ok "the AMI placeholder product_uuid is ignored"
+else
+  bad "the placeholder UUID changed the key"
+fi
 
 # --- Case 5: placeholder UUID and no disk serial is a refusal ---
 rm -f "$cid"
 if "$under_test" "$part" >"$work/k4" 2>"$work/e4"; then
   bad "emitted a key from the AMI placeholder UUID alone (fleet-wide key)"
 else
-  grep -qi 'refus' "$work/e4" && ok "placeholder UUID alone is refused" || bad "refused without saying why: $(cat "$work/e4")"
+  if grep -qi 'refus' "$work/e4"; then
+    ok "placeholder UUID alone is refused"
+  else
+    bad "refused without saying why: $(cat "$work/e4")"
+  fi
 fi
 
 # --- Case 6: a real UUID alone still works (a disk without a readable serial) ---
