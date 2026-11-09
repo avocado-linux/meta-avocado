@@ -4,6 +4,8 @@ Date: Sun, 1 Mar 2026 16:26:46 +0200
 Subject: [PATCH] dts/renesas: add fixed gpu regulator
 
 Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+
+Upstream-Status: Inappropriate [SolidRun RZ/V2N SoM specific]
 ---
  .../dts/renesas/rzv2n-hummingboard-iiot-common.dtsi   | 11 +++++++++++
  1 file changed, 11 insertions(+)

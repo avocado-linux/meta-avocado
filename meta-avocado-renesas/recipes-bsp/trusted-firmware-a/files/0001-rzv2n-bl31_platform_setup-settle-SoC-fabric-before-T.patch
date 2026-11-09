@@ -30,6 +30,8 @@ typical fabric IP) but invisible at boot scale.
 
 Signed-off-by: Avocado Linux <info@avocadolinux.org>
 Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+
+Upstream-Status: Inappropriate [SolidRun RZ/V2N SoM specific]
 ---
  plat/renesas/rz/soc/v2n/bl31_plat_setup.c | 14 ++++++++++++++
  1 file changed, 14 insertions(+)
