@@ -1,0 +1,4 @@
+define KFEATURE_DESCRIPTION "Keep runtime debug options off in a debug-info kernel"
+define KFEATURE_COMPATIBILITY all
+
+kconf non-hardware debug-kernel-runtime-off.cfg

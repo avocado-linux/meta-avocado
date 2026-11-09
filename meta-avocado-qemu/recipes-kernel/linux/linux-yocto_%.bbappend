@@ -16,6 +16,11 @@ SRC_URI:append:avocado-qemuarm64 = " \
   file://ftpm.cfg \
 "
 
+# DEBUG_KERNEL is off on these machines, so the debug-info switch would also
+# turn on the runtime debug options the BSP requests. Keep them off.
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF:avocado-qemux86-64 = "1"
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF:avocado-qemuarm64 = "1"
+
 YOCTO_BUILD_DIR = "${TOPDIR}"
 
 inherit avocado-kernel-feed

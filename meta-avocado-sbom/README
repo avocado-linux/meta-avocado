@@ -409,24 +409,68 @@ because the kernel CNA assigns none. A consumer gating on severity has to decide
 what an unscored kernel finding means; the report states the absence rather than
 inventing a score.
 
-These settings arm it, all in kas/feature/cve-check.yml, and the task says so
-when one is missing rather than quietly filtering nothing:
+These settings arm it, and the task says so when one is missing rather than
+quietly filtering nothing:
 
-  KERNEL_EXTRA_FEATURES:append = " features/debug/debug-kernel.scc"
+  AVOCADO_KERNEL_DEBUGINFO = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
   AVOCADO_CVE_KERNEL_VULNS_DIR = "${DL_DIR}/kernel-vulns"
 
-The first is load-bearing: without kernel DWARF the debugsources hold 351
-binaries and zero sources, and the filter cuts nothing. Only the linux-yocto
-recipes read KERNEL_EXTRA_FEATURES. linux-raspberrypi ignores it, so its DWARF
-comes from a config fragment (avocado-cve-debug.cfg) that its bbappend in
-meta-avocado-raspberrypi adds when AVOCADO_CVE_KERNEL_VULNS_DIR is set. The
-SPDX lines are :pn-scoped because SPDX_INCLUDE_COMPILED_SOURCES sets
+The first four are in kas/feature/sbom.yml, so every build that stacks it
+builds a debug-info kernel, the feed builds included. A scan run on top of a
+feed build has to see the kernel the feed published: a kernel built for the
+scan alone would differ from it, its packages' RPM digests would match nothing
+in the feed, and they would get no verdict. kas/feature/cve-check.yml repeats
+the four, so a scan stacked without sbom.yml still filters, and adds the
+fifth.
+
+The switch is load-bearing: without kernel DWARF the debugsources hold 351
+binaries and zero sources, and the filter cuts nothing. It is read in two
+places. avocado-kernel-feed.bbclass appends features/debug/debug-kernel.scc to
+KERNEL_EXTRA_FEATURES, which only the linux-yocto recipes read; that feature
+sets CONFIG_DEBUG_KERNEL, CONFIG_DEBUG_INFO and
+CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT. linux-raspberrypi ignores
+KERNEL_EXTRA_FEATURES, so its bbappend in meta-avocado-raspberrypi adds a config
+fragment (avocado-cve-debug.cfg) on the same switch. The DWARF is split into
+kernel-dbg, so the packages a device installs stay stripped. The compiled-file
+list the filter reads comes from the recipe's SPDX document.
+
+Where CONFIG_DEBUG_KERNEL is already on without the switch, the switch adds
+debug info only. That is the Intel machines (from the in-tree
+x86_64_defconfig), the Jetson machines' linux-yocto kernel (genericarm64's
+security fragment sets CONFIG_EXPERT, which selects it), the Orange Pi's
+linux-yocto-dev (from the in-tree arm64 defconfig) and linux-raspberrypi. The
+runtime debug options their BSPs request already ship there.
+
+On the QEMU machines CONFIG_DEBUG_KERNEL is off without the switch, so turning
+it on also un-gates runtime debug options that kernel-cache fragments in the
+BSP request, or that default on under it. On qemux86-64 (linux-yocto 6.6.151)
+the switch turned these on:
+
+  KGDB, KGDB_KDB, KGDB_SERIAL_CONSOLE, KGDB_LOW_LEVEL_TRAP,
+  KGDB_HONOUR_BLOCKLIST, KDB_KEYBOARD, CONSOLE_POLL,
+  KDB_DEFAULT_ENABLE=0x1, KDB_CONTINUE_CATASTROPHIC=0,
+  SCHED_DEBUG, CGROUP_DEBUG, RCU_TRACE, DEBUG_MISC, X86_DEBUG_FPU
+
+meta-avocado-qemu's linux-yocto bbappend sets
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF = "1" for its machines, and with the
+switch on avocado-kernel-feed.bbclass then adds
+avocado/debug-kernel-runtime-off.scc (meta-avocado/files/avocado-kmeta) to
+KERNEL_FEATURES, which turns them back off. It is added from anonymous python
+so it lands after every other feature and wins over the fragments that request
+them. The two KDB values go with KGDB_KDB. A layer whose linux-yocto machine
+has CONFIG_DEBUG_KERNEL off without the switch should set
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF = "1" for it too; elsewhere the variable
+defaults to "0" and the off-list is not applied.
+
+The SPDX lines are :pn-scoped because SPDX_INCLUDE_COMPILED_SOURCES sets
 SPDX_INCLUDE_SOURCES in that recipe's datastore alone (spdx-common.bbclass:44).
 Tree-wide it measured 5.36 GB of SPDX and ~50-70 GB to parse; kernel-only it
 costs 63 MB. The last line points at a clone of the CNA data and pulls in
-avocado-cve-kernel-vulns-native to keep it current.
+avocado-cve-kernel-vulns-native to keep it current. It stays in cve-check.yml:
+the clone is only needed where the filter runs.
 
 Measured on a Pi 5 (avocado-raspberrypi5, linux-raspberrypi 6.12.25),
 Unpatched Patched All, 2026-10-28: the shipped kernel's Unpatched count fell
@@ -441,9 +485,9 @@ packaging.Version rejects it.
 
 Where the settings are unset, the task notes the absence and the report carries
 cve-check's own kernel results. That is also what a vendor kernel gets: neither
-KERNEL_EXTRA_FEATURES nor the fragment reaches linux-imx and friends, so they
-produce no DWARF, and the task warns and leaves their scan alone rather than
-filtering it on an empty list.
+the .scc nor the fragment reaches linux-imx and friends, so they produce no
+DWARF, and the task warns and leaves their scan alone rather than filtering it
+on an empty list.
 
 The improved results are written to ${CVE_CHECK_DIR}/kernel-improved/ and read
 as an overlay: a file there replaces the same-named file from CVE_CHECK_DIR.
