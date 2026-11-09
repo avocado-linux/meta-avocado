@@ -23,3 +23,9 @@ RDEPENDS:${PN} = " \
 # device_tree_overlays or boot_config, and runs it before `stone bundle`. It has
 # to be in this machine's feed for that install to find it.
 RDEPENDS:${PN} += "avocado-dtc-overlay-deliver"
+
+# NXP's GStreamer elements for the i.MX VPU (vpudec/vpuenc and friends) and
+# its parsers, so a BSP extension or project can install them by name. Only
+# on parts with the Hantro VPU (imxvpu: i.MX8M Mini/Plus/Quad); the recipe's
+# imx-vpuwrap dependency does not exist elsewhere.
+RDEPENDS:${PN}:append:imxvpu = " imx-gst1.0-plugin"
