@@ -57,7 +57,9 @@ else
   check "a cmdline with no boot entry fails the build" "failed" "failed"
 fi
 
-[ "$failures" -eq 0 ] && echo "all passed" || {
+if [ "$failures" -eq 0 ]; then
+  echo "all passed"
+else
   echo "$failures failed"
   exit 1
-}
+fi
