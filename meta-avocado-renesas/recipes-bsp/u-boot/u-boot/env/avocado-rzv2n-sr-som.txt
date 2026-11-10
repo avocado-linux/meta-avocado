@@ -83,4 +83,33 @@ avocado_boot_sd=\
   fi;\
   true;
 
-bootcmd=run avocado_bootcount avocado_boot_init avocado_boot_emmc avocado_boot_sd; fastboot usb 0
+# The boot chain follows the slot. Each boot partition carries the FIP (BL31 +
+# U-Boot) its OS was built with, at /bootchain/fip.bin; before booting a slot,
+# U-Boot compares it with the SPI NOR copy (offset 0x60000, where BL2 loads
+# it) and rewrites SPI and resets when they differ. An OTA that ships a new
+# FIP applies it on the first boot of the new slot, and a rollback puts the
+# old slot's FIP back. BL2 (SPI offset 0) is not updated over the air: a
+# failed BL2 write leaves the board for the SCIF download recovery (the
+# serial provision profile). A failed FIP write is the same single-copy risk.
+avocado_fip_offset=0x60000
+avocado_fip_max=0x180000
+avocado_bootchain=\
+  if load mmc 0:${bootpart} ${loadaddr} /bootchain/fip.bin; then\
+    setenv avocado_fip_size ${filesize};\
+    if test 0x${avocado_fip_size} -gt ${avocado_fip_max}; then\
+      echo "avocado: /bootchain/fip.bin is larger than the SPI FIP region, not applied";\
+    elif sf probe; then\
+      sf read ${kernel_addr_r} ${avocado_fip_offset} ${avocado_fip_size};\
+      if cmp.b ${loadaddr} ${kernel_addr_r} ${avocado_fip_size}; then\
+        true;\
+      else\
+        echo "avocado: updating the SPI boot chain (FIP) from slot ${avocado_boot_slot}";\
+        if sf update ${loadaddr} ${avocado_fip_offset} ${avocado_fip_size}; then\
+          reset;\
+        fi;\
+      fi;\
+    fi;\
+  fi;\
+  true;
+
+bootcmd=run avocado_bootcount avocado_boot_init avocado_bootchain avocado_boot_emmc avocado_boot_sd; fastboot usb 0

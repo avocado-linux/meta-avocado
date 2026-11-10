@@ -109,7 +109,8 @@
               { "in": "rzv2n-hummingboard-iiot-panel-dsi-WJ70N3TYJHMNG0.dtbo", "out": "rzv2n-hummingboard-iiot-panel-dsi-WJ70N3TYJHMNG0.dtbo" },
               { "in": "rzv2n-hummingboard-iiot-csi-camera-imx678.dtbo", "out": "rzv2n-hummingboard-iiot-csi-camera-imx678.dtbo" },
               { "in": "avocado-image-initramfs-rzv2n-sr-som.cpio.zst", "out": "avocado-image-initramfs-rzv2n-sr-som.cpio.zst" },
-              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" }
+              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" },
+              { "in": "fip-avocado-rzv2n-sr-som.bin", "out": "bootchain/fip.bin" }
             ]
           }
         },
