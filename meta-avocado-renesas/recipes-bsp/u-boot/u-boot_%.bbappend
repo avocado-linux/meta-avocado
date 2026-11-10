@@ -20,6 +20,7 @@ SRC_URI:append:rzv2n-sr-som = " \
   file://0002-usb-gadget-rcar-set-ep-desc-in-usbhsg_ep_enable.patch \
   file://0003-rzv2n-solidrun-permit-list-for-the-saved-environment.patch \
   file://env-compiled-in.cfg \
+  file://avocado-rzv2n-sr-som.env \
 "
 
 # env-compiled-in.cfg: CONFIG_ENV_SOURCE_FILE="avocado" resolves to
@@ -30,7 +31,11 @@ do_configure:prepend:rzv2n-sr-som() {
     if [ ! -d ${S}/board/solidrun/rzv2n ]; then
         bbfatal "board/solidrun/rzv2n is absent from ${S}: the compiled-in Avocado environment (env-compiled-in.cfg) has nowhere to go"
     fi
-    install -m 0644 ${UNPACKDIR}/${MACHINE}.txt ${S}/board/solidrun/rzv2n/avocado.env
+    # U-Boot's env2string keeps '#' and blank lines and glues them onto the
+    # neighbouring variable (one became a variable with an empty name, and the
+    # whole default environment failed to import with EINVAL): drop them.
+    sed -e '/^#/d' -e '/^[[:space:]]*$/d' ${UNPACKDIR}/avocado-rzv2n-sr-som.env \
+        >${S}/board/solidrun/rzv2n/avocado.env
 }
 
 # meta-rz-drpai V1.50 renamed its ether-setting patch to
