@@ -1,0 +1,29 @@
+From 28ab6f303da0c6cdf6f1d8051da37c99e380506a Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 9 Nov 2026 19:38:18 -0500
+Subject: [PATCH] usb: gadget: rcar: set ep->desc in usbhsg_ep_enable
+
+f_fastboot's rx_bytes_expected() reads ep->desc for the max packet size
+of the last, partial OUT transfer of a download. usbhsg never set it, so
+every fastboot download whose size is not a multiple of EP_BUFFER_SIZE
+ended in a NULL dereference (synchronous abort, reset).
+
+Upstream-Status: Pending
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ drivers/usb/gadget/rcar/mod_gadget.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/usb/gadget/rcar/mod_gadget.c b/drivers/usb/gadget/rcar/mod_gadget.c
+index 0e2f3089b0d..4789ee7ecce 100644
+--- a/drivers/usb/gadget/rcar/mod_gadget.c
++++ b/drivers/usb/gadget/rcar/mod_gadget.c
+@@ -596,6 +596,8 @@ static int usbhsg_ep_enable(struct usb_ep *ep,
+ 	 * nothing to do
+ 	 */
+ 	pr_dbg("++%s\n", __func__);
++	/* Function drivers read it, e.g. f_fastboot for the last OUT chunk */
++	ep->desc = desc;
+ 	if (uep->pipe) {
+ 		usbhs_pipe_clear(uep->pipe);
+ 		usbhs_pipe_sequence_data0(uep->pipe);

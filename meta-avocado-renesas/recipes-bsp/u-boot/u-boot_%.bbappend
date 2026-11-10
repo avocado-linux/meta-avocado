@@ -10,6 +10,7 @@ SRC_URI:append = " \
 # R-Car Gen3 / RZ/G2L addresses.
 SRC_URI:append:rzv2n-sr-som = " \
   file://0001-usb-gadget-rcar-support-the-RZ-V2H-P-and-RZ-V2N-USBH.patch \
+  file://0002-usb-gadget-rcar-set-ep-desc-in-usbhsg_ep_enable.patch \
 "
 
 # meta-rz-drpai V1.50 renamed its ether-setting patch to
