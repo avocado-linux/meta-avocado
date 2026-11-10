@@ -96,11 +96,40 @@ def _tos_destination(work_dir: Path) -> str:
     return name
 
 
+def _require_images(data: Path, manifest: Manifest) -> None:
+    """Refuse before staging when a required image is absent, not a file or empty.
+
+    Deviation required-image-refused: the oracle warns and carries on, so a
+    flash proceeds with a missing or zero-length rootfs. dtb and bpmp_dtb stay
+    optional and keep the warning in _copy_image.
+    """
+    required = (
+        manifest.rootfs,
+        manifest.var,
+        manifest.initramfs,
+        manifest.tegraflash_initramfs,
+        manifest.tegraflash_esp,
+        manifest.tegraflash_tos,
+    )
+    problems = []
+    for name in required:
+        if not name:
+            continue
+        src = join_name(data, name)
+        if not src.is_file():
+            problems.append(f"{src}: absent or not a regular file")
+        elif src.stat().st_size == 0:
+            problems.append(f"{src}: empty")
+    if problems:
+        raise EngineError("required image(s) unusable:\n" + "\n".join(problems))
+
+
 def copy_images(
     data_dir: str | Path, manifest: Manifest, work_dir: str | Path, log: Log = print
 ) -> None:
     data = Path(data_dir)
     work = Path(work_dir)
+    _require_images(data, manifest)
 
     def copy(src_name: str, dest_name: str) -> None:
         _copy_image(data, src_name, dest_name, work, log)

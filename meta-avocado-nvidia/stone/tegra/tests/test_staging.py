@@ -308,10 +308,9 @@ def test_copy_images_absolute_name_is_looked_up_inside_the_data_dir(dirs, tmp_pa
     data, work = dirs
     outside = write(tmp_path / "outside" / "secret.img", "secret")
     staging.reset_work_dir(work)
-    log = Log()
-    staging.copy_images(data, Manifest(rootfs=str(outside)), work, log=log)
+    with pytest.raises(EngineError, match=f"{data}{outside}"):
+        staging.copy_images(data, Manifest(rootfs=str(outside)), work)
     assert not (work / "secret.img").exists()
-    assert f"WARNING: File not found: {data}{outside}" in log.text()
 
 
 def test_copy_images_absolute_name_inside_the_data_dir_is_staged_from_there(dirs):
@@ -416,22 +415,54 @@ def test_copy_images_bpmp_dtb_under_own_name_only(dirs):
     assert sorted(p.name for p in work.iterdir()) == ["bpmp.dtb"]
 
 
-def test_copy_images_absent_file_warns_and_later_images_are_still_copied(dirs):
+@pytest.mark.deviation("required-image-refused")
+def test_copy_images_absent_required_image_is_refused_before_anything_is_copied(dirs):
     data, work = dirs
     write(data / "var.img", "v")
     m = Manifest(rootfs="missing.img", var="var.img")
     staging.reset_work_dir(work)
-    log = Log()
-    staging.copy_images(data, m, work, log=log)
-    assert f"WARNING: File not found: {data / 'missing.img'}" in log.text() and (work / "var.img").exists()
+    with pytest.raises(EngineError, match="missing.img"):
+        staging.copy_images(data, m, work)
+    assert list(work.iterdir()) == []
 
 
-def test_copy_images_absent_flash_initramfs_warns_and_creates_nothing(dirs):
+@pytest.mark.deviation("required-image-refused")
+def test_copy_images_absent_flash_initramfs_is_refused(dirs):
+    data, work = dirs
+    staging.reset_work_dir(work)
+    with pytest.raises(EngineError, match="gone.cpio"):
+        staging.copy_images(data, Manifest(tegraflash_initramfs="gone.cpio"), work)
+    assert not (work / "initrd-flash.img").exists()
+
+
+@pytest.mark.deviation("required-image-refused")
+def test_copy_images_empty_rootfs_is_refused_naming_the_file(dirs):
+    data, work = dirs
+    write(data / "root.img", b"")
+    staging.reset_work_dir(work)
+    with pytest.raises(EngineError, match="root.img.*empty"):
+        staging.copy_images(data, Manifest(rootfs="root.img"), work)
+
+
+@pytest.mark.deviation("required-image-refused")
+def test_copy_images_every_unusable_required_image_is_named_in_one_error(dirs):
+    data, work = dirs
+    write(data / "var.img", b"")
+    (data / "esp.img").mkdir()
+    m = Manifest(rootfs="missing.img", var="var.img", tegraflash_esp="esp.img", tegraflash_tos="tos.img")
+    staging.reset_work_dir(work)
+    with pytest.raises(EngineError) as exc:
+        staging.copy_images(data, m, work)
+    text = str(exc.value)
+    assert all(n in text for n in ("missing.img", "var.img", "esp.img", "tos.img"))
+
+
+def test_copy_images_absent_optional_dtb_still_only_warns(dirs):
     data, work = dirs
     staging.reset_work_dir(work)
     log = Log()
-    staging.copy_images(data, Manifest(tegraflash_initramfs="gone.cpio"), work, log=log)
-    assert "WARNING: File not found" in log.text() and not (work / "initrd-flash.img").exists()
+    staging.copy_images(data, Manifest(dtb="gone.dtb", bpmp_dtb="gone2.dtb"), work, log=log)
+    assert log.text().count("WARNING: File not found") == 3  # dtb twice, bpmp_dtb once
 
 
 def test_copy_images_empty_manifest_copies_nothing_and_does_not_warn(dirs):
@@ -442,13 +473,14 @@ def test_copy_images_empty_manifest_copies_nothing_and_does_not_warn(dirs):
     assert list(work.iterdir()) == [] and "WARNING" not in log.text()
 
 
-def test_copy_images_directory_named_as_image_warns_as_not_a_file(dirs):
+@pytest.mark.deviation("required-image-refused")
+def test_copy_images_directory_named_as_image_is_refused_as_not_a_file(dirs):
     data, work = dirs
     (data / "isdir").mkdir()
     staging.reset_work_dir(work)
-    log = Log()
-    staging.copy_images(data, Manifest(rootfs="isdir"), work, log=log)
-    assert "WARNING: File not found" in log.text() and not (work / "isdir").exists()
+    with pytest.raises(EngineError, match="isdir"):
+        staging.copy_images(data, Manifest(rootfs="isdir"), work)
+    assert not (work / "isdir").exists()
 
 
 def test_copy_images_shell_metacharacters_in_name_are_copied_verbatim(dirs):
@@ -600,14 +632,14 @@ def test_mutation_missing_bsp_that_does_not_raise_is_caught(dirs, tmp_path):
 
 def test_mutation_absent_image_that_stops_the_run_is_caught(dirs, tmp_path):
     data, work = dirs
-    write(data / "var.img")
+    write(data / "bpmp.dtb")
     mutant, saved = broken_staging(
         tmp_path, 'log(f"WARNING: File not found: {src}")', 'raise RuntimeError("stop")'
     )
     try:
         mutant.reset_work_dir(work)
         with pytest.raises(RuntimeError):
-            mutant.copy_images(data, Manifest(rootfs="missing.img", var="var.img"), work)
+            mutant.copy_images(data, Manifest(dtb="missing.dtb", bpmp_dtb="bpmp.dtb"), work)
     finally:
         restore(saved)
-    assert not (work / "var.img").exists()
+    assert not (work / "bpmp.dtb").exists()

@@ -27,6 +27,7 @@ DEVIATIONS = {
     "env-file-missing-status": "a BSP without .env.initrd-flash makes the engine exit 1 with an error naming the file; the oracle exits 2",
     "recovery-pids-widened": "the engine counts the Thor and newer product ids 7819, 7919, 7026, 7226 and 7326 as recovery devices, so a board with one of them and no APX text is found; the oracle's check_rcm lists only ten ids",
     "cmdline-control-chars-refused": "the engine refuses a control character or newline in AVOCADO_KERNEL_CMDLINE or AVOCADO_KERNEL_CMDLINE_EXTRA, naming the variable; the oracle passes them to the root-run boot image helper",
+    "required-image-refused": "the engine refuses, naming each file, when a manifest image it must flash (rootfs, var, initramfs, tegraflash_initramfs, tegraflash_esp, tegraflash_tos) is absent, not a regular file or empty; the oracle warns and flashes anyway",
 }
 
 # Wrapper text rule for deviation absolute-cpp-wrapper: the two wrappers must
