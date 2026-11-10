@@ -19,6 +19,7 @@ SRC_URI:append:avocado-x86-64 = " \
     file://nvidia-gpu.cfg \
     file://x86-efi.cfg \
     file://intel-platform.cfg \
+    file://intel-xe.cfg \
     file://x86-containers.cfg \
 "
 

@@ -85,7 +85,7 @@ KEY_SCRIPT="${SCRIPT_DIR}/var-key.sh"
 # (RAM-only, never swapped or remounted) - the right place for transient secrets.
 KEY_FILE=$(mktemp -p /run)
 trap 'rm -f "$KEY_FILE"' EXIT
-"$KEY_SCRIPT" >"$KEY_FILE"
+"$KEY_SCRIPT" "$VAR_DEV" >"$KEY_FILE"
 
 # Return 0 if the LUKS header already carries a systemd-tpm2 token. The initrd
 # has no grep, and gawk mishandles raw binary under some locales, so match the
