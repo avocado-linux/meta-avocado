@@ -37,6 +37,8 @@ class Config:
     erase_nvme: bool
     erase_emmc: bool
     erase_only: bool
+    # None: AVOCADO_PROVISION_FORCE unset; True: 1; False: 0.
+    force: bool | None = None
 
 
 def from_environ(environ: Mapping[str, str]) -> Config:
@@ -56,6 +58,11 @@ def from_environ(environ: Mapping[str, str]) -> Config:
     for name in _CMDLINE_VARS:
         if any(ord(c) < 0x20 or ord(c) == 0x7F for c in environ.get(name, "")):
             raise EngineError(f"{name} contains a control character or a newline")
+
+    force_raw = environ.get("AVOCADO_PROVISION_FORCE", "")
+    if force_raw not in ("", "0", "1"):
+        raise EngineError(f"AVOCADO_PROVISION_FORCE must be 1, 0 or unset, not {force_raw!r}")
+    force = None if force_raw == "" else force_raw == "1"
 
     def opt(name: str, default: str = "") -> str:
         return environ.get(name) or default
@@ -80,4 +87,5 @@ def from_environ(environ: Mapping[str, str]) -> Config:
         erase_nvme=environ.get("ERASE_NVME") == "1",
         erase_emmc=environ.get("ERASE_EMMC") == "1",
         erase_only=environ.get("ERASE_ONLY") == "1",
+        force=force,
     )
