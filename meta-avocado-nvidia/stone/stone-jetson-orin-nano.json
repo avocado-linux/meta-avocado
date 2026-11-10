@@ -112,7 +112,8 @@
         "tegraflash_carrier_bsp": "carrier-bsp"
       },
       "tegraflash": {
-        "sd_device": "mmcblk0"
+        "sd_device": "mmcblk0",
+        "rcm_ids": ["0955:7523", "0955:7623"]
       }
     }
   }

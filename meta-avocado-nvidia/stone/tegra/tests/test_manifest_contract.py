@@ -58,18 +58,30 @@ def test_extraction_finds_the_known_oracle_reads():
 # Keys the engine reads that the frozen oracle script never did.
 ENGINE_ONLY_KEYS = {("tegraflash", "rcm_ids")}
 
+# The Orin Nano template (TEMPLATE) deliberately defines rcm_ids: 7523 was seen on
+# the bench and 7623 is the 4GB module in NVIDIA's L4T recovery table; every other
+# optional key stays undefined.
+DEFINED_IN_TEMPLATE = {("tegraflash", "rcm_ids")}
+
 
 def oracle_reads():
     return {(m.group(1), m.group(2)) for m in _JQ_READ.finditer(ORACLE.read_text())}
 
 
+def key_set_differences(keys):
+    """Declared keys nobody allowed, and allowed keys nobody declared."""
+    declared = {(k.section, k.name) for k in keys}
+    allowed = oracle_reads() | ENGINE_ONLY_KEYS
+    return sorted(declared - allowed), sorted(allowed - declared)
+
+
 def test_keys_are_exactly_the_keys_the_oracle_reads():
-    assert {(k.section, k.name) for k in KEYS} == oracle_reads() | ENGINE_ONLY_KEYS
+    assert key_set_differences(KEYS) == ([], [])
 
 
 def test_an_undeclared_extra_key_still_fails_the_exact_set_check():
     mutated = KEYS + (Key("images", "invented_key", True, "test"),)
-    assert {(k.section, k.name) for k in mutated} != oracle_reads() | ENGINE_ONLY_KEYS
+    assert key_set_differences(mutated) == ([("images", "invented_key")], [])
 
 
 def test_every_declared_key_is_defined_or_optional():
@@ -80,7 +92,7 @@ def test_optional_keys_are_really_undefined_in_the_template():
     # A stale optional flag on a key the template now defines would mask a future break.
     rootdisk = template_doc()["storage_devices"]["rootdisk"]
     for key in KEYS:
-        if key.optional:
+        if key.optional and (key.section, key.name) not in DEFINED_IN_TEMPLATE:
             assert key.name not in rootdisk[key.section]
 
 
@@ -179,3 +191,17 @@ def test_json_scan_catches_a_module_that_parses_the_manifest_itself():
 def test_manifest_path_scan_catches_a_direct_open_of_the_manifest():
     (node, parent), = _manifest_path_uses(ast.parse("open(cfg.manifest)\n"))
     assert not (isinstance(parent, ast.Call) and getattr(parent.func, "id", "") == "read_manifest")
+
+
+def test_the_orin_nano_manifest_pins_both_recovery_ids():
+    assert read_manifest(TEMPLATE).rcm_ids == ("0955:7523", "0955:7623")
+
+
+def test_every_stone_manifest_reads_with_valid_nvidia_rcm_ids():
+    # A board gains rcm_ids when someone observes one on hardware, so this checks
+    # the contract (readable, NVIDIA vendor), not which boards carry ids today.
+    paths = sorted(TEMPLATE.parent.glob("stone-*.json"))
+    assert len(paths) >= 7
+    for path in paths:
+        ids = read_manifest(path).rcm_ids
+        assert all(re.fullmatch(r"0955:[0-9a-f]{4}", i) for i in ids), path.name
