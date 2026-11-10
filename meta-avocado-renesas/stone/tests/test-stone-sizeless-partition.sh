@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Host test for how the build-disk-image.sh scripts size a partition that has no
-# size in the manifest (var, which stone grows on the target): it is sized from
-# its own image, an explicit size still wins, and a sizeless partition with no
+# size in the manifest (var, which avocado-var-grow extends at boot): it is sized
+# from its own image, an explicit size still wins, and a sizeless partition with no
 # usable image is refused. Runs the real guard, lifted out of each script, so a
 # script that loses it fails here.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts

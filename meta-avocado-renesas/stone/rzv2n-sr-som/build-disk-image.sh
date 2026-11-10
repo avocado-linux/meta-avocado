@@ -70,8 +70,10 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
 
   if [ "$size" = "null" ] || [ -z "$size" ]; then
-    # A partition with no size (var, which stone grows to the disk on the
-    # target) is sized from its own image, rounded up.
+    # A partition with no size (var) is sized from its own image, rounded up.
+    # avocado-var-grow extends it to the disk at boot, which needs the
+    # manifest's `expand` mark and an AVOCADO_VAR_PART_DEV that is a
+    # /dev/disk/by-partlabel/ path.
     if [ -z "$image" ]; then
       echo "ERROR: partition '${name}' has no size and no image to size from" >&2
       exit 1
