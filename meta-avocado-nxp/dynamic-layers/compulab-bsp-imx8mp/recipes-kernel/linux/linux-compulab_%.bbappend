@@ -11,6 +11,7 @@ SRC_URI += " \
   file://avocado-usb-serial.cfg \
   file://caam.cfg \
   file://avocado-compulab.cfg \
+  file://avocado-t1-phy-imu.cfg \
   file://ucm-imx8m-plus-hdmi.dts \
 "
 
