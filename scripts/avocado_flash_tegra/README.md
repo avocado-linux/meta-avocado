@@ -3,6 +3,11 @@
 Backend for `avocado-flash nvme`. It flashes a Jetson Orin Nano's NVMe over
 USB while the board is in recovery mode. Standard library only.
 
+> **Deprecated.** This host wrapper is being wound down in favour of
+> `avocado provision`; see [the wind-down plan](../../docs/avocado-flash-wind-down.md).
+> New guards go into the engine (`meta-avocado-nvidia/stone/tegra/avocado_tegraflash/`),
+> not here.
+
 ## What it does
 
 `avocado-flash nvme` is a thin wrapper around the stone tegraflash
