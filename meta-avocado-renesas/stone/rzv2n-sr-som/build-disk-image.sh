@@ -57,10 +57,40 @@ size_to_mib() {
   esac
 }
 
+to_bytes() {
+  local size="$1" unit="$2"
+  case "$unit" in
+    bytes) echo "$size" ;;
+    kibibytes | KiB) echo $((size * 1024)) ;;
+    mebibytes | MiB) echo $((size * 1048576)) ;;
+    *)
+      echo "ERROR: unknown size unit: $unit" >&2
+      exit 1
+      ;;
+  esac
+}
+
 declare -a PART_NAMES PART_SIZES_MIB PART_TYPES PART_UUIDS PART_IMAGES PART_OFFSETS_MIB
+# Raw regions ("in-partition-table": "false", e.g. the U-Boot environment in
+# the gap before the first partition): written at their byte offsets, and at
+# offset_redundant too when given, never entered in the GPT.
+declare -a RAW_IMAGES RAW_OFFSETS
 CURSOR_MIB=1
 for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   name=$(jq -r ".storage_devices.rootdisk.partitions[$i].name // \"\"" "$MANIFEST")
+  in_table=$(jq -r ".storage_devices.rootdisk.partitions[$i].\"in-partition-table\" // \"true\"" "$MANIFEST")
+  if [ "$in_table" = "false" ]; then
+    image=$(jq -r ".storage_devices.rootdisk.partitions[$i].image // \"\"" "$MANIFEST")
+    [ -n "$image" ] || continue
+    for key in offset offset_redundant; do
+      off=$(jq -r ".storage_devices.rootdisk.partitions[$i].${key} // \"\"" "$MANIFEST")
+      [ -n "$off" ] || continue
+      unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].${key}_unit // \"mebibytes\"" "$MANIFEST")
+      RAW_IMAGES+=("$image")
+      RAW_OFFSETS+=("$(to_bytes "$off" "$unit")")
+    done
+    continue
+  fi
   size=$(jq -r ".storage_devices.rootdisk.partitions[$i].size" "$MANIFEST")
   size_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].size_unit" "$MANIFEST")
   ptype=$(jq -r ".storage_devices.rootdisk.partitions[$i].partition_type // \"8300\"" "$MANIFEST")
@@ -111,7 +141,7 @@ truncate -s "${TOTAL_MIB}M" "$IMAGE_FILE"
 sgdisk --zap-all "$IMAGE_FILE" >&2
 
 SGDISK_ARGS=()
-for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+for i in $(seq 0 $((${#PART_NAMES[@]} - 1))); do
   pnum=$((i + 1))
   start_sector=$((PART_OFFSETS_MIB[i] * 2048))
   size_sectors=$((PART_SIZES_MIB[i] * 2048))
@@ -127,7 +157,7 @@ done
 sgdisk "${SGDISK_ARGS[@]}" "$IMAGE_FILE" >&2
 
 # Build any FAT-typed images referenced by partitions.
-for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+for i in $(seq 0 $((${#PART_NAMES[@]} - 1))); do
   img_key="${PART_IMAGES[i]}"
   [ -z "$img_key" ] && continue
   build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\" | if type == \"object\" then .build_args.type // \"\" else \"\" end" "$MANIFEST")
@@ -173,7 +203,7 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
 done
 
 # Write each partition's image into the disk at its offset.
-for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
+for i in $(seq 0 $((${#PART_NAMES[@]} - 1))); do
   img_key="${PART_IMAGES[i]}"
   [ -z "$img_key" ] && continue
 
@@ -206,6 +236,22 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
 
   echo "  writing ${PART_NAMES[i]} from ${src} at ${PART_OFFSETS_MIB[i]} MiB" >&2
   dd if="$src" of="$IMAGE_FILE" bs=1M seek="${PART_OFFSETS_MIB[i]}" conv=notrunc status=none
+done
+
+first_part_bytes=$((PART_OFFSETS_MIB[0] * 1048576))
+for i in "${!RAW_IMAGES[@]}"; do
+  src="${DATA_DIR}/$(resolve_image_filename "${RAW_IMAGES[i]}")"
+  if [ ! -f "$src" ]; then
+    echo "ERROR: raw image not found: $src" >&2
+    exit 1
+  fi
+  end=$((RAW_OFFSETS[i] + $(stat -c '%s' "$src")))
+  if [ "${RAW_OFFSETS[i]}" -lt 34816 ] || [ "$end" -gt "$first_part_bytes" ]; then
+    echo "ERROR: raw image ${RAW_IMAGES[i]} at ${RAW_OFFSETS[i]} overlaps the GPT or the first partition" >&2
+    exit 1
+  fi
+  echo "  writing ${RAW_IMAGES[i]} from ${src} at byte ${RAW_OFFSETS[i]}" >&2
+  dd if="$src" of="$IMAGE_FILE" bs=512 seek=$((RAW_OFFSETS[i] / 512)) conv=notrunc status=none
 done
 
 echo "$IMAGE_FILE"

@@ -1,0 +1,86 @@
+# Saved environment for the uboot-env area (mkenvimage -r), written by stone
+# at provision time into the eMMC's user area before the first partition
+# (offsets: avocado-env-mmc.cfg). avocadoctl flips avocado_boot_slot with
+# fw_setenv; the env lives on the eMMC whatever disk the OS boots from.
+#
+# boot-a/boot-b/rootfs-a/rootfs-b are GPT partitions 1-4. Both boot partitions
+# carry the same extlinux/extlinux.conf, whose append says
+# root=PARTUUID=${avocado_root_partuuid} (U-Boot expands it), so the slot picks
+# the kernel partition and the root.
+avocado_boot_slot=a
+
+# Load addresses from U-Boot's default env (deployed as u-boot-initial-env):
+# a saved environment replaces the default one whole, so sysboot and the
+# extlinux loader find none of these unless they are here.
+# ponytail: copied, not generated; diff against u-boot-initial-env on a U-Boot
+# bump, or generate this file from it if it ever drifts.
+baudrate=115200
+bootdelay=2
+fdt_high=0xffffffffffffffff
+initrd_high=0xffffffffffffffff
+scriptaddr=0x4c100000
+pxefile_addr_r=0x4c200000
+kernel_addr_r=0x48000000
+kernel_comp_addr_r=0x50000000
+kernel_comp_size=0x08000000
+fdt_addr_r=0x4c000000
+fdtoverlay_addr_r=0x4c0f0000
+ramdisk_addr_r=0x4c800000
+loadaddr=0x58000000
+fdtfile=renesas/r9a09g056n48-hummingboard-iiot.dtb
+
+# Boot counting for a freshly activated slot. avocadoctl's activate sets
+# avocado_boot_tries=3 with the new slot and its commit clears it once the new
+# OS verifies; a slot that never gets that far is abandoned here after three
+# tries, before any userspace exists to roll it back.
+avocado_bootcount=\
+  if test -n "${avocado_boot_tries}"; then\
+    if test "${avocado_boot_tries}" -le 0; then\
+      echo "avocado: slot ${avocado_boot_slot} never committed, rolling back";\
+      if test "${avocado_boot_slot}" = "b"; then\
+        setenv avocado_boot_slot a;\
+      else\
+        setenv avocado_boot_slot b;\
+      fi;\
+      setenv avocado_boot_tries;\
+    else\
+      setexpr avocado_boot_tries ${avocado_boot_tries} - 1;\
+    fi;\
+    saveenv;\
+  fi;\
+  true;
+
+avocado_boot_init=\
+  if test "${avocado_boot_slot}" = "b"; then\
+    echo "Booting B";\
+    setenv bootpart 2;\
+    setenv rootpart 4;\
+  else\
+    if test "${avocado_boot_slot}" != "a"; then\
+      echo "avocado_boot_slot=${avocado_boot_slot} unset or invalid";\
+      setenv avocado_boot_slot a;\
+    fi;\
+    echo "Booting A";\
+    setenv bootpart 1;\
+    setenv rootpart 3;\
+  fi;
+
+# The eMMC (mmc 0) in the selected slot. sysboot only returns on failure.
+avocado_boot_emmc=\
+  setenv devnum 0;\
+  if part uuid mmc 0:${rootpart} avocado_root_partuuid; then\
+    sysboot mmc 0:${bootpart} any ${scriptaddr} /extlinux/extlinux.conf;\
+  fi;\
+  true;
+
+# The microSD (mmc 1): slot A only. A card is a provisioning or recovery
+# medium here; OTA slots live on the eMMC, beside the environment.
+avocado_boot_sd=\
+  setenv devnum 1;\
+  if part uuid mmc 1:3 avocado_root_partuuid; then\
+    echo "avocado: booting the microSD";\
+    sysboot mmc 1:1 any ${scriptaddr} /extlinux/extlinux.conf;\
+  fi;\
+  true;
+
+bootcmd=run avocado_bootcount avocado_boot_init avocado_boot_emmc avocado_boot_sd; fastboot usb 0
