@@ -42,7 +42,6 @@ if [ "$NUM_PARTITIONS" -eq 0 ]; then
   exit 1
 fi
 
-# All values normalised to sectors (1 sector = 512 bytes).
 resolve_image_filename() {
   local key="$1" img_type
   img_type=$(jq -r ".storage_devices.rootdisk.images.\"${key}\" | type" "$MANIFEST")
@@ -53,6 +52,7 @@ resolve_image_filename() {
   fi
 }
 
+# All values normalised to sectors (1 sector = 512 bytes).
 size_to_sectors() {
   local size="$1" unit="$2"
   case "$unit" in
