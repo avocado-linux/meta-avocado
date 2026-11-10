@@ -26,6 +26,14 @@ do_deploy:append() {
 # partition. (ovmf is the QEMU UEFI firmware; real UEFI hardware pulls its own.)
 do_compile[depends] += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uefi', 'systemd-boot:do_deploy systemd-bootconf:do_deploy ovmf:do_deploy', '', d)}"
 
+# The UEFI image script (stone-provision-img.sh) builds the disk natively: sgdisk
+# lays out the GPT, mkfs.fat formats the boot partition and mtools (mmd, mcopy)
+# fills it. They run on the build host, so the -native recipes must be staged;
+# without them do_stone_provision stops at the first missing tool (sgdisk, exit
+# 127). Gated on the uefi bootloader because the U-Boot machine assembles its
+# disk with fwup instead and needs none of these.
+DEPENDS += "${@bb.utils.contains('AVOCADO_BOOTLOADER', 'uefi', 'gptfdisk-native dosfstools-native mtools-native', '', d)}"
+
 # --- both qemu machines declare the 'direct' profile ------------------------
 # The base avocado-stone.bb only auto-stages scripts for stone-img/sd/usb
 # overrides, so wire stone-direct here.
