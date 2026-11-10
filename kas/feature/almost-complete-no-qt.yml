@@ -1,0 +1,40 @@
+header:
+  version: 16
+
+# almost-complete.yml without the qt group, for builds where the Qt sources
+# (code.qt.io) cannot be fetched. The includes are the same fragments as
+# almost-complete.yml minus the qt fragment, and the web-engine skip is kept.
+# This is not a replacement for almost-complete.yml, which stays the dev
+# default; use this one only when the Qt sources are unreachable.
+#
+# Keep the includes below identical to almost-complete.yml's, minus the qt
+# fragment. meta-avocado/tests/test_feature_umbrellas.py covers the
+# almost-complete.yml and complete.yml pair; this file has to be kept in step
+# by hand.
+  includes:
+  - repo: meta-avocado
+    file: kas/feature/system-base.yml
+  - repo: meta-avocado
+    file: kas/feature/networking.yml
+  - repo: meta-avocado
+    file: kas/feature/multimedia.yml
+  - repo: meta-avocado
+    file: kas/feature/python.yml
+  - repo: meta-avocado
+    file: kas/feature/graphics.yml
+  - repo: meta-avocado
+    file: kas/feature/python-ai.yml
+  - repo: meta-avocado
+    file: kas/feature/clang.yml
+  - repo: meta-avocado
+    file: kas/feature/java.yml
+  - repo: meta-avocado
+    file: kas/feature/containers.yml
+  - repo: meta-avocado
+    file: kas/feature/observability.yml
+  - repo: meta-avocado
+    file: kas/feature/robotics.yml
+
+local_conf_header:
+  feature/almost-complete-no-qt: |
+    AVOCADO_SKIP_WEB_ENGINES = "1"
