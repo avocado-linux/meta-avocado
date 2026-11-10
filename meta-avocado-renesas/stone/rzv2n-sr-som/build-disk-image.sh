@@ -34,6 +34,16 @@ if [ "$NUM_PARTITIONS" -eq 0 ]; then
   exit 1
 fi
 
+resolve_image_filename() {
+  local key="$1" img_type
+  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${key}\" | type" "$MANIFEST")
+  if [ "$img_type" = "string" ]; then
+    jq -r ".storage_devices.rootdisk.images.\"${key}\"" "$MANIFEST"
+  else
+    jq -r ".storage_devices.rootdisk.images.\"${key}\".out" "$MANIFEST"
+  fi
+}
+
 size_to_mib() {
   local size="$1" unit="$2"
   case "$unit" in
@@ -59,7 +69,23 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   offset=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset // \"\"" "$MANIFEST")
   offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
 
-  size_mib=$(size_to_mib "$size" "$size_unit")
+  if [ "$size" = "null" ] || [ -z "$size" ]; then
+    # A partition with no size (var, which stone grows to the disk on the
+    # target) is sized from its own image, rounded up.
+    if [ -z "$image" ]; then
+      echo "ERROR: partition '${name}' has no size and no image to size from" >&2
+      exit 1
+    fi
+    _src="${DATA_DIR}/$(resolve_image_filename "$image")"
+    if [ ! -f "$_src" ]; then
+      echo "ERROR: cannot size '${name}': image not found: ${_src}" >&2
+      exit 1
+    fi
+    _bytes=$(stat -c%s "$_src")
+    size_mib=$(((_bytes + 1048575) / 1048576))
+  else
+    size_mib=$(size_to_mib "$size" "$size_unit")
+  fi
   if [ -n "$offset" ]; then
     CURSOR_MIB=$(size_to_mib "$offset" "$offset_unit")
   fi
@@ -97,16 +123,6 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   fi
 done
 sgdisk "${SGDISK_ARGS[@]}" "$IMAGE_FILE" >&2
-
-resolve_image_filename() {
-  local key="$1" img_type
-  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${key}\" | type" "$MANIFEST")
-  if [ "$img_type" = "string" ]; then
-    jq -r ".storage_devices.rootdisk.images.\"${key}\"" "$MANIFEST"
-  else
-    jq -r ".storage_devices.rootdisk.images.\"${key}\".out" "$MANIFEST"
-  fi
-}
 
 # Build any FAT-typed images referenced by partitions.
 for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
