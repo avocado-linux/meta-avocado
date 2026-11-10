@@ -9,7 +9,7 @@ any of them via `kernel.version` in the lockfile.
 
 For the basics of adding a single-kernel target, see
 [adding-a-machine-target.md](adding-a-machine-target.md). The boilerplate
-required on every avocado kernel bbappend (kernel-devsrc rename,
+required on every avocado kernel bbappend (per-kernel package renames,
 `avocado-kernel-${KERNEL_VERSION}` virtual, packagegroup require) is
 documented there in Section 10 — that boilerplate is a prerequisite for
 multi-kernel and harmless in single-kernel feeds, so it's required on
@@ -238,8 +238,10 @@ local_conf_header:
 ```
 
 `AVOCADO_MULTIKERNEL_MC_RECIPES` lists every alt-mc recipe whose RPMs
-should land in the unified feed. For a kernel-only alt mc, list just the
-kernel recipe. For Jetson, both the kernel and the OOT shim are listed
+should land in the unified feed. For a kernel-only alt mc, list the
+kernel recipe and `kernel-devsrc` (out-of-tree module builds need the
+alt kernel's headers, and nothing else pulls the recipe into the alt mc).
+For Jetson, both the kernel and the OOT shim are listed
 because nvidia-kernel-oot's RPMs need to ship alongside the kernel's
 modules:
 

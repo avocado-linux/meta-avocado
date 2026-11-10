@@ -47,4 +47,4 @@ header:
 local_conf_header:
   feature/multi-kernel-raspberrypi: |
     BBMULTICONFIG += "raspberrypi-6_6"
-    AVOCADO_MULTIKERNEL_MC_RECIPES += "raspberrypi-6_6:linux-raspberrypi"
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "raspberrypi-6_6:linux-raspberrypi raspberrypi-6_6:kernel-devsrc"
