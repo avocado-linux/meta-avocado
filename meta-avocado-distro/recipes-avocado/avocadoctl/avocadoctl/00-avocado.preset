@@ -2,3 +2,12 @@ disable systemd-sysext.service
 disable systemd-sysext.socket
 disable systemd-confext.service
 disable systemd-confext.socket
+
+# Boot does not wait for the network. systemd enables wait-online with networkd
+# (90-systemd.preset, and networkd.service Also=), so any unit that pulls
+# network-online.target held boot up to 120 s, then failed the unit, on a
+# device with no link. Without it network-online.target is a plain
+# synchronization point. A product that needs a link before a service starts
+# enables systemd-networkd-wait-online.service (an extension preset, or
+# RequiredForOnline= on its links); wait-online-any.conf then applies.
+disable systemd-networkd-wait-online.service
