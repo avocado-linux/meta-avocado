@@ -13,6 +13,7 @@ DEPENDS += " jq-native"
 # that both profile scripts source.
 SRC_URI += " \
     file://build-disk-image.sh \
+    file://ums-disk.sh \
 "
 
 SRC_URI:append:stone-serial = " \
@@ -26,6 +27,7 @@ SRC_URI:append:stone-emmc = " \
 do_deploy:append() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${UNPACKDIR}/build-disk-image.sh ${DEPLOYDIR}/build-disk-image.sh
+  install -m 0644 ${UNPACKDIR}/ums-disk.sh ${DEPLOYDIR}/ums-disk.sh
 }
 
 do_deploy:append:stone-serial() {

@@ -41,7 +41,8 @@
       }
     },
     "files": [
-      "build-disk-image.sh"
+      "build-disk-image.sh",
+      "ums-disk.sh"
     ],
     "profiles": {
       "serial": {
