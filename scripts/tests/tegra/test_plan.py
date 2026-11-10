@@ -11,6 +11,7 @@ EXPECTED_KEYS = {
     "AVOCADO_STONE_BUILD_DIR",
     "AVOCADO_PROVISION_PROFILE",
     "AVOCADO_PROVISION_KERNEL_IMAGE",
+    "AVOCADO_PROVISION_FORCE",
     "PATH",
 }
 
@@ -66,6 +67,16 @@ def test_root_caller_gets_script_argv_and_env_dict():
     inv = make(is_root=True, have_sudo=False)
     assert inv.argv == ("/deploy/images/provision.sh",)
     assert set(inv.env) == EXPECTED_KEYS
+
+
+def test_provision_force_is_exported_for_root_and_once_in_the_sudo_argv():
+    root = make(is_root=True, have_sudo=False)
+    assert root.env["AVOCADO_PROVISION_FORCE"] == "1"
+    sudo = make()
+    assert sudo.env["AVOCADO_PROVISION_FORCE"] == "1"
+    assert sudo.argv.count("AVOCADO_PROVISION_FORCE=1") == 1
+    assert sudo.argv.index("AVOCADO_PROVISION_FORCE=1") < len(sudo.argv) - 1
+    assert sum(a.startswith("AVOCADO_PROVISION_FORCE=") for a in sudo.argv) == 1
 
 
 def test_root_caller_does_not_use_sudo_even_when_available():
