@@ -194,3 +194,6 @@ jobs:
       - name: QEMU SDK vm helper
         shell: bash
         run: bash meta-avocado-qemu/recipes-avocado/sdk/tests/test-vm.sh
+      - name: QEMU machine runner
+        shell: bash
+        run: bash meta-avocado-qemu/scripts/tests/test-run-qemu.sh
