@@ -35,3 +35,17 @@ Run the same command again with sudo, keeping the environment and PATH:
 - `partition-fit-refused`: the engine refuses, naming the image and the partition, when the rootfs or ESP image is larger than its partition in the layout the flash applies, where the legacy script flashes it anyway. The check runs after the recovery wait, in the oracle's call order; the `avocado-flash nvme` wrapper runs its own fit check before it pins a board, so only a direct engine run on an eMMC profile reaches recovery mode before an oversize image is refused.
 - `recovery-id-pinned`: the engine refuses a recovery device whose USB id is not in the manifest's `rcm_ids`, naming both ids, where the legacy script flashes whichever board it finds.
 - `device-confirmation`: the engine asks the operator to retype the recovery device before an erasing flash, per `AVOCADO_PROVISION_FORCE`, where the legacy script flashes without asking.
+
+## Recovery id and flash confirmation
+
+Two inputs control which device the engine writes and whether it asks first.
+
+`storage_devices.rootdisk.tegraflash.rcm_ids` in the stone manifest is a list of lowercase `vendor:product` USB ids. With ids declared, the engine refuses any recovery device not listed and names both ids. Without ids it warns that the board is not identity-checked and proceeds with exactly one recovery device. The list only narrows the match: a device is still recognised as a recovery device by its APX or RCM description or by `RECOVERY_PIDS` in `usb.py`, so an id outside both is never found. The Orin Nano manifest ships `0955:7523` (seen on the bench) and `0955:7623` (the 4GB module, from NVIDIA's L4T recovery table); other boards carry none until an id is observed on hardware. The host wrapper's `--rcm-id` is checked by the wrapper only, so the engine still refuses an id the manifest does not list.
+
+`AVOCADO_PROVISION_FORCE` has three states:
+
+- Unset: the engine prompts on a terminal; otherwise it prints that the confirmation was skipped and proceeds.
+- `0`: the engine requires a terminal and prompts, and refuses without one.
+- `1`: the engine skips the prompt.
+
+Any other value is refused. The prompt asks the operator to type the recovery device's `bus:device`.

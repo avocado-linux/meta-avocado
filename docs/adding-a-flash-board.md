@@ -14,7 +14,9 @@ A flash board is three pieces that have to agree:
 - An engine entry in that manifest, so stone copies the provisioning engine
   next to the script.
 - A registry entry in `scripts/avocado_flash_boards/tegra.py`, which the host
-  door uses to find the board's USB recovery id.
+  door uses to find the board's USB recovery id. This step is retiring: the
+  engine reads the id from the manifest (`tegraflash.rcm_ids`), and the
+  registry stays only until the wrapper is removed.
 
 Two doors write a board, and both run the same file. The host door,
 `avocado-flash nvme`, runs `stone-provision-tegraflash.sh` from the deploy
@@ -62,6 +64,17 @@ The engine reads these keys from `storage_devices.rootdisk` (the list is
 | `tegraflash.overlays` | Overlay list; optional, absence means none |
 | `tegraflash.dce_overlays` | DCE overlay list; optional |
 | `tegraflash.sd_device` | SD device name for the SD profile |
+| `tegraflash.rcm_ids` | List of lowercase `vendor:product` USB ids this board may show in recovery mode; the engine refuses a recovery device whose id is not listed. It narrows the match only: a device still has to be recognised as a recovery device first (see below). Optional: without it the engine warns that the board is not identity-checked and proceeds with exactly one device |
+
+Add the recovery ids you observed on hardware to `tegraflash.rcm_ids` in the
+manifest, for example `"rcm_ids": ["0955:7523", "0955:7623"]` (the two Orin Nano
+modules). Leave the list out until someone has seen the board in recovery mode.
+
+The list does not teach the engine a new id. The engine counts a device as a
+recovery device when its description says APX or RCM, or its product id is in
+`RECOVERY_PIDS` in `avocado_tegraflash/usb.py`. A declared id that is neither
+never matches, and the flash waits 60 seconds and fails with "Device did not
+enter RCM mode". For an id outside that list, add it to `RECOVERY_PIDS` too.
 
 `meta-avocado-nvidia/stone/tegra/tests/test_manifest_contract.py` compares
 this key list with the manifest template, so a key added in one place and not
@@ -88,7 +101,13 @@ that names the script and lacks this entry. The host door refuses a template
 whose value is not `tegraflash-engine` and an engine directory that lacks
 `avocado_tegraflash/__main__.py`, because the shim needs both.
 
-## 3. The registry entry
+## 3. The registry entry (retiring)
+
+The recovery id now lives in the manifest as `tegraflash.rcm_ids` (section 1),
+and the engine checks it there. The host-door registry is retiring: it is
+still kept in step with the manifests by
+`scripts/tests/boards/test_manifest_sync.py` until the wrapper is removed, and
+it is no longer the only place an id lives. Until then, add the entry too.
 
 Add a `Board` to the list in `scripts/avocado_flash_boards/tegra.py`:
 
