@@ -30,26 +30,37 @@ _ENV_INITRD_FLASH = (
 )
 _FLASHVARS = 'ODMDATA="0x9190000"\nOVERLAY_DTB_FILE="fixture.dtbo"\nDCE_OVERLAY=""\n'
 # APPUUID_b contains APPUUID, so each placeholder sits on its own line.
-_EXTERNAL_LAYOUT = (
+APP_SIZE = 8192
+ESP_SIZE = 4096
+ROOTFS_IMAGE_SIZE = 4096
+ESP_IMAGE_SIZE = 2048
+_LAYOUT = (
     "<partition_layout>\n"
     '  <partition name="APP">\n'
+    f"    <size>{APP_SIZE}</size>\n"
     "    <unique_guid>APPUUID</unique_guid>\n"
     "  </partition>\n"
     '  <partition name="APP_b">\n'
+    f"    <size>{APP_SIZE}</size>\n"
     "    <unique_guid>APPUUID_b</unique_guid>\n"
+    "  </partition>\n"
+    '  <partition name="esp">\n'
+    f"    <size>{ESP_SIZE}</size>\n"
     "  </partition>\n"
     "</partition_layout>\n"
 )
-_INTERNAL_EMMC_LAYOUT = (
-    "<partition_layout>\n"
-    '  <partition name="APP">\n'
-    "    <unique_guid>APPUUID</unique_guid>\n"
-    "  </partition>\n"
-    '  <partition name="APP_b">\n'
-    "    <unique_guid>APPUUID_b</unique_guid>\n"
-    "  </partition>\n"
-    "</partition_layout>\n"
-)
+_EXTERNAL_LAYOUT = _LAYOUT
+# A smaller APP than the external layout, so a test can tell which of the two the
+# fit check read: a rootfs between the two sizes fits one and not the other.
+EMMC_APP_SIZE = 6144
+_INTERNAL_EMMC_LAYOUT = _LAYOUT.replace(f"<size>{APP_SIZE}</size>", f"<size>{EMMC_APP_SIZE}</size>")
+_SIZED_IMAGES = {"rootfs": ROOTFS_IMAGE_SIZE, "tegraflash_esp": ESP_IMAGE_SIZE}
+
+
+def _sized_image(key: str, size: int) -> bytes:
+    head = f"fixture {key}\n".encode()
+    return head + b"\0" * (size - len(head))
+
 _DTBO_BYTES = b"\xd0\x0d\xfe\xed fixture dtbo"
 
 
@@ -188,6 +199,8 @@ def build_tree(
         elif key in DIR_KEYS:
             target.mkdir(parents=True, exist_ok=True)
             _touch(target / ".placeholder")
+        elif key in _SIZED_IMAGES:
+            _touch(target, _sized_image(key, _SIZED_IMAGES[key]))
         else:
             _touch(target, f"fixture {key}\n")
 

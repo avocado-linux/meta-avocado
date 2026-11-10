@@ -165,6 +165,8 @@ def build_env(case: Case, s: Setup) -> dict[str, str]:
         "AVOCADO_STONE_BUILD_DIR": str(s.tree.build_dir),
         "AVOCADO_STONE_DATA_DIR": str(s.tree.data_dir),
         "AVOCADO_PROVISION_PROFILE": case.profile,
+        # Never let a typed confirmation block a run that has no terminal.
+        "AVOCADO_PROVISION_FORCE": "1",
     }
     if s.tree.kernel_image is not None:
         env["AVOCADO_PROVISION_KERNEL_IMAGE"] = str(s.tree.kernel_image)

@@ -209,3 +209,22 @@ def test_each_recognised_drop_kind_does_not_raise(tmp_path, manifest):
 def test_bsp_name_with_bsp_dropped_raises(tmp_path):
     with pytest.raises(ValueError, match="flashvars"):
         _stage(tmp_path, MANIFESTS[0], drop=("tegraflash_bsp", "flashvars"))
+
+
+def _partition_sizes(layout_text):
+    return {
+        m.group(1): int(m.group(2))
+        for m in re.finditer(r'<partition name="([^"]+)">\s*<size>(\d+)</size>', layout_text)
+    }
+
+
+@pytest.mark.parametrize("manifest", MANIFESTS, ids=_ids(MANIFESTS))
+def test_layouts_carry_numeric_app_and_esp_sizes_that_fit_the_images(tmp_path, manifest):
+    tree = _stage(tmp_path, manifest)
+    entries = _string_entries(manifest)
+    bsp = tree.data_dir / entries["tegraflash_bsp"]
+    for layout_name in ("external-flash.xml.in", "internal-flash-emmc.xml"):
+        sizes = _partition_sizes((bsp / layout_name).read_text())
+        assert "APP" in sizes and "esp" in sizes, layout_name
+        assert (tree.data_dir / entries["rootfs"]).stat().st_size <= sizes["APP"]
+        assert (tree.data_dir / entries["tegraflash_esp"]).stat().st_size <= sizes["esp"]
