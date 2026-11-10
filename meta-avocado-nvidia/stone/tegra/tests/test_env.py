@@ -188,3 +188,21 @@ def test_from_environ_does_not_mutate_the_mapping():
 
 def test_config_type_is_exported():
     assert isinstance(cfg(), Config)
+
+
+CMDLINE_VARS = ("AVOCADO_KERNEL_CMDLINE", "AVOCADO_KERNEL_CMDLINE_EXTRA")
+
+
+@pytest.mark.deviation("cmdline-control-chars-refused")
+@pytest.mark.parametrize("name", CMDLINE_VARS)
+@pytest.mark.parametrize("bad", ["a\nb", "a\tb", "a\x00b", "a\x1fb", "a\x7fb", "a\r"])
+def test_cmdline_control_character_is_refused_naming_the_variable(name, bad):
+    with pytest.raises(EngineError, match=name):
+        cfg(**{name: bad})
+
+
+@pytest.mark.parametrize("name", CMDLINE_VARS)
+@pytest.mark.parametrize("ok", ["console=ttyTCU0,115200 quiet", "", "a  b é"])
+def test_cmdline_plain_or_empty_value_passes_unchanged(name, ok):
+    field = {"AVOCADO_KERNEL_CMDLINE": "kernel_cmdline", "AVOCADO_KERNEL_CMDLINE_EXTRA": "kernel_cmdline_extra"}[name]
+    assert getattr(cfg(**{name: ok}), field) == ok

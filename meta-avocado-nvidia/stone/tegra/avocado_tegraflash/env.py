@@ -13,6 +13,8 @@ _REQUIRED = (
     "AVOCADO_STONE_DATA_DIR",
 )
 
+_CMDLINE_VARS = ("AVOCADO_KERNEL_CMDLINE", "AVOCADO_KERNEL_CMDLINE_EXTRA")
+
 
 @dataclass(frozen=True)
 class Config:
@@ -47,6 +49,13 @@ def from_environ(environ: Mapping[str, str]) -> Config:
     for name in _REQUIRED:
         if not environ.get(name):
             raise EngineError(f"{name} is not set")
+
+    # Both values reach the root-run boot image helper, which replaces or
+    # appends the kernel command line, so a control character or newline
+    # would be read as more than arguments.
+    for name in _CMDLINE_VARS:
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in environ.get(name, "")):
+            raise EngineError(f"{name} contains a control character or a newline")
 
     def opt(name: str, default: str = "") -> str:
         return environ.get(name) or default

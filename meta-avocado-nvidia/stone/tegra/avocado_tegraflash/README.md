@@ -29,3 +29,4 @@ Run the same command again with sudo, keeping the environment and PATH:
 - `carrier-value-shell-safe`: the engine refuses a carrier key that is not a shell identifier and a carrier value containing a double quote, dollar sign, backtick, backslash or newline, naming the key and the file, where the legacy script writes them into files that bash sources as root.
 - `build-dir-locked`: the engine refuses to run while another provisioning run holds `<build dir>/tegraflash.lock`, where the legacy script has no lock and two runs restage one tree under each other.
 - `env-file-missing-status`: a BSP without `.env.initrd-flash` makes the engine exit 1 with an error naming the file, where the legacy script exits 2.
+- `cmdline-control-chars-refused`: the engine refuses a control character or newline in `AVOCADO_KERNEL_CMDLINE` or `AVOCADO_KERNEL_CMDLINE_EXTRA`, naming the variable, where the legacy script passes them to the root-run boot image helper.
