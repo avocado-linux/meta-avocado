@@ -40,6 +40,23 @@ GPU_FIRMWARE = " \
   linux-firmware-i915 \
 "
 
+# Intel iGPU media and compute: the VA-API driver (iHD, Gen9 and later) and
+# vainfo; oneVPL with its GPU runtime (Gen12 and later); Vulkan (ANV) with
+# vulkaninfo (the loader is listed itself: vulkaninfo and applications dlopen
+# it, so nothing depends on it); and the firmware the xe driver loads (Lunar
+# Lake and later).
+# libva alone has no Intel backend.
+GPU_MEDIA = " \
+  intel-media-driver \
+  libva-utils \
+  libvpl \
+  vpl-gpu-rt \
+  mesa-vulkan-drivers \
+  vulkan-loader \
+  vulkan-tools \
+  linux-firmware-xe \
+"
+
 # CPU microcode - Intel
 CPU_MICROCODE = " \
   intel-microcode \
@@ -69,6 +86,7 @@ RDEPENDS:${PN} = " \
   ${ETH_FIRMWARE} \
   ${BT_FIRMWARE} \
   ${GPU_FIRMWARE} \
+  ${GPU_MEDIA} \
   ${CPU_MICROCODE} \
   ${WIRELESS_TOOLS} \
   ${HARDWARE_TOOLS} \
