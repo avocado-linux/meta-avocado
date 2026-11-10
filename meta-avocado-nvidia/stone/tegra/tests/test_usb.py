@@ -21,8 +21,11 @@ class CaptureRunner:
         return self.status, self.out
 
 
-def test_recovery_pids_are_the_ten_oracle_ids():
-    assert RECOVERY_PIDS == ("7018", "7418", "7019", "7e19", "7023", "7223", "7323", "7423", "7523", "7623")
+def test_recovery_pids_are_the_union_of_engine_script_and_l4t_ids():
+    assert RECOVERY_PIDS == (
+        "7018", "7418", "7019", "7e19", "7023", "7223", "7323", "7423", "7523", "7623",
+        "7819", "7919", "7026", "7226", "7326",
+    )
 
 
 def test_list_nvidia_runs_exactly_lsusb_with_the_vendor_filter_and_env():

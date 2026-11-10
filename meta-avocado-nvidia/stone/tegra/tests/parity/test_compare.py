@@ -208,6 +208,7 @@ def test_deviation_registry_names():
         "layout-placeholder-unique",
         "build-dir-locked",
         "carrier-value-shell-safe",
+        "recovery-pids-widened",
         "cmdline-control-chars-refused",
     }
     assert all(isinstance(v, str) and v and "\n" not in v for v in deviations.DEVIATIONS.values())

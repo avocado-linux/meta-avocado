@@ -8,7 +8,11 @@ from . import EngineError
 from .runner import Runner
 
 NVIDIA_VENDOR = "0955"
-RECOVERY_PIDS = ("7018", "7418", "7019", "7e19", "7023", "7223", "7323", "7423", "7523", "7623")
+# Union of the legacy engine list, find-jetson-usb.sh at the kas pin and L4T's 7326.
+RECOVERY_PIDS = (
+    "7018", "7418", "7019", "7e19", "7023", "7223", "7323", "7423", "7523", "7623",
+    "7819", "7919", "7026", "7226", "7326",
+)
 
 # lsusb answers in well under a second; the bound only stops a hung bus query from hanging the engine.
 LSUSB_TIMEOUT = 5.0

@@ -65,7 +65,9 @@ def wait(runner, env, *, target="", serial="", sleeper=None, polls=60, logs=None
 def test_one_board_is_returned_without_boardctl_or_sleep():
     runner, sleeper, logs = ScriptRunner([ONE]), Sleeper(), []
     assert wait(runner, {}, target="x", sleeper=sleeper, logs=logs) == BOARD
-    assert (runner.runs, sleeper.calls, logs) == ([], [], ["Device already in RCM mode"])
+    assert (runner.runs, sleeper.calls) == ([], [])
+    assert logs[0] == "Device already in RCM mode"
+    assert len(logs) == 2 and "not identity-checked" in logs[1]
 
 
 def test_device_mode_board_alone_is_not_a_recovery_board():
@@ -109,7 +111,7 @@ def test_boardctl_success_waits_with_the_boardctl_message_then_returns(env):
     assert wait(runner, env, target="t", logs=logs) == BOARD
     assert logs[0] == "Device not in RCM mode, attempting recovery via boardctl (target=t)..."
     assert logs[1] == "Waiting for device to enter RCM mode..."
-    assert logs[-1] == "Device in RCM mode"
+    assert "Device in RCM mode" in logs
 
 
 def test_boardctl_failure_warns_and_falls_back_to_the_manual_prompt(env):
@@ -195,6 +197,61 @@ def test_recheck_refuses_a_different_single_board(other):
 def test_recheck_ignores_a_changed_description_of_the_same_board():
     listing = "Bus 001 Device 005: ID 0955:7523 NVIDIA Corp. RCM\n"
     assert recheck_single_board(ScriptRunner([listing]), {}, BOARD).device == "005"
+
+
+# ---- expected ids ----
+
+
+def test_expected_id_match_is_accepted_without_warning():
+    logs = []
+    assert wait_for_single_board(
+        ScriptRunner([ONE]), {}, boardctl_target="", boardctl_serial="", log=logs.append,
+        expected_ids=("0955:7523",),
+    ) == BOARD
+    assert not any("identity-checked" in m for m in logs)
+
+
+def test_wait_refuses_a_recovery_device_outside_the_expected_ids():
+    listing = "Bus 001 Device 005: ID 0955:7023 NVIDIA Corp. APX\n"
+    with pytest.raises(EngineError) as exc:
+        wait_for_single_board(
+            ScriptRunner([listing]), {}, boardctl_target="", boardctl_serial="",
+            log=lambda _m: None, expected_ids=("0955:7523",),
+        )
+    assert "0955:7023" in str(exc.value) and "0955:7523" in str(exc.value)
+
+
+def test_wait_still_refuses_two_boards_with_expected_ids():
+    with pytest.raises(EngineError, match="2 boards are in recovery mode"):
+        wait_for_single_board(
+            ScriptRunner([TWO]), {}, boardctl_target="", boardctl_serial="",
+            log=lambda _m: None, expected_ids=("0955:7523",),
+        )
+
+
+def test_wait_without_expected_ids_warns_after_the_board_appears():
+    logs = []
+    wait(ScriptRunner([NONE, ONE]), {}, logs=logs, sleeper=Sleeper())
+    assert any(m.startswith("WARNING: the board is not identity-checked") for m in logs)
+
+
+@pytest.mark.deviation("recovery-pids-widened")
+def test_a_7026_device_without_apx_text_counts_as_recovery():
+    listing = "Bus 001 Device 005: ID 0955:7026 NVIDIA Corp.\n"
+    assert wait(ScriptRunner([listing]), {}).pid == "7026"
+
+
+def test_recheck_accepts_a_listed_id_and_refuses_an_unlisted_one():
+    assert recheck_single_board(ScriptRunner([ONE]), {}, BOARD, expected_ids=("0955:7523",)) == BOARD
+    same_slot = "Bus 001 Device 005: ID 0955:7023 NVIDIA Corp. APX\n"
+    other = UsbDevice("001", "005", "0955", "7023", "NVIDIA Corp. APX")
+    with pytest.raises(EngineError, match="0955:7023.*0955:7523"):
+        recheck_single_board(ScriptRunner([same_slot]), {}, other, expected_ids=("0955:7523",))
+
+
+def test_recheck_two_boards_refused_with_expected_ids():
+    with pytest.raises(EngineError, match="Bus 003 Device 009"):
+        recheck_single_board(ScriptRunner([TWO]), {}, BOARD, expected_ids=("0955:7523",))
 
 
 # ---- a failed lsusb is not an empty bus ----
