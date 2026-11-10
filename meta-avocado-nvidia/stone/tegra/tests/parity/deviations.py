@@ -30,6 +30,7 @@ DEVIATIONS = {
     "required-image-refused": "the engine refuses, naming each file, when a manifest image it must flash (rootfs, var, initramfs, tegraflash_initramfs, tegraflash_esp, tegraflash_tos) is absent, not a regular file or empty; the oracle warns and flashes anyway",
     "partition-fit-refused": "the engine refuses, naming the image and the partition, when the rootfs or ESP image is larger than its partition in the layout the flash applies; the oracle flashes it anyway",
     "recovery-id-pinned": "the engine refuses a recovery device whose USB id is not in the manifest's rcm_ids, naming both ids; the oracle flashes whichever board it finds",
+    "device-confirmation": "the engine asks the operator to retype the recovery device before an erasing flash, per AVOCADO_PROVISION_FORCE; the oracle flashes without asking",
 }
 
 # Wrapper text rule for deviation absolute-cpp-wrapper: the two wrappers must

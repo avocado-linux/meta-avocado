@@ -18,6 +18,7 @@ from . import (
     bootimg,
     bootpriority,
     carrier,
+    confirm,
     cpp,
     flash,
     partuuid,
@@ -28,7 +29,7 @@ from . import (
 )
 from .env import from_environ
 from .fit import require_fit
-from .manifest import read_manifest
+from .manifest import read_manifest, require_image_keys
 from .profile import media_for_profile
 from .runner import SubprocessRunner
 
@@ -103,6 +104,7 @@ def _run(args, environ, runner, euid, sleep) -> int:
 
     # Oracle 58-103: manifest read.
     man = read_manifest(cfg.manifest)
+    require_image_keys(man)
 
     # Oracle 105-247 and 249-342: reset, BSP, tools, carrier, images, overlay check.
     with _build_dir_lock(cfg.build_dir):
@@ -171,6 +173,8 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
     settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)
 
     # Hardware-free, so it also runs under --prepare-only; refuses before any erase.
+    # After the eMMC layout swap above, and after the wait: the parity harness pins
+    # both, because the oracle fails a missing layout only after the wait.
     require_fit(work, man)
 
     # Oracle 599-627.
@@ -196,6 +200,11 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
         print(f"Work directory: {work}")
         print(f"Command: {' '.join(['./initrd-flash', *flags])}")
         return 0
+
+    # Deviation device-confirmation: after the prepare-only return, so it never
+    # prompts without a flash; before the recheck, so the operator confirms the
+    # board the flash will see.
+    confirm.confirm_device(board, media, force=cfg.force, isatty=confirm.stdin_is_tty, read=input)
 
     # Deviation one-board-only: the flash starts right after this check, on the
     # board the wait saw and no other.
