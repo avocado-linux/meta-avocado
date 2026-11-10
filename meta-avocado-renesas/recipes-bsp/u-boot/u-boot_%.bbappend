@@ -18,7 +18,20 @@ MKENVIMAGE_EXTRA_ARGS:bootvars-ubootenv = "-r"
 SRC_URI:append:rzv2n-sr-som = " \
   file://0001-usb-gadget-rcar-support-the-RZ-V2H-P-and-RZ-V2N-USBH.patch \
   file://0002-usb-gadget-rcar-set-ep-desc-in-usbhsg_ep_enable.patch \
+  file://0003-rzv2n-solidrun-permit-list-for-the-saved-environment.patch \
+  file://env-compiled-in.cfg \
 "
+
+# env-compiled-in.cfg: CONFIG_ENV_SOURCE_FILE="avocado" resolves to
+# board/$(SYS_VENDOR)/$(SYS_BOARD)/avocado.env = board/solidrun/rzv2n here. A
+# missing file builds an EMPTY default environment without an error, so fail
+# loudly if SolidRun moves the board directory.
+do_configure:prepend:rzv2n-sr-som() {
+    if [ ! -d ${S}/board/solidrun/rzv2n ]; then
+        bbfatal "board/solidrun/rzv2n is absent from ${S}: the compiled-in Avocado environment (env-compiled-in.cfg) has nowhere to go"
+    fi
+    install -m 0644 ${UNPACKDIR}/${MACHINE}.txt ${S}/board/solidrun/rzv2n/avocado.env
+}
 
 # meta-rz-drpai V1.50 renamed its ether-setting patch to
 # 0001-add-ether-setting-RZV2N.patch, so meta-rzv2n's SRC_URI:remove of the
