@@ -189,9 +189,10 @@ for i in $(seq 0 $((${#PART_NAMES[@]} - 1))); do
     fi
 
     src_file="${DATA_DIR}/${f_in}"
-    # kernel.cmdline_extra (exported by avocado as AVOCADO_KERNEL_CMDLINE_EXTRA)
-    # and the provision's AVOCADO_CMDLINE_EXTRA field go on every append line.
-    extra="${AVOCADO_KERNEL_CMDLINE_EXTRA:-}${AVOCADO_CMDLINE_EXTRA:+ ${AVOCADO_CMDLINE_EXTRA}}"
+    # kernel.cmdline_extra is baked in at build time (avocado-build hook), so
+    # it reaches OTA boot slots too; only the provision's AVOCADO_CMDLINE_EXTRA
+    # field is added here.
+    extra="${AVOCADO_CMDLINE_EXTRA:-}"
     if [ "$(basename "$f_out")" = "extlinux.conf" ] && [ -n "${extra// /}" ]; then
       EXTRA="$extra" awk '/^[[:space:]]*append[[:space:]]/ { $0 = $0 " " ENVIRON["EXTRA"] } { print }' \
         "$src_file" >"${BUILD_DIR}/extlinux.conf"

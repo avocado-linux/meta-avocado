@@ -11,6 +11,9 @@ inherit deploy
 do_compile[noexec] = "1"
 
 do_deploy() {
-    install -D -m 0644 ${UNPACKDIR}/extlinux.conf ${DEPLOYDIR}/extlinux.conf
+    # The SDK build hook regenerates extlinux.conf from the machine-named copy
+    # with the project's kernel cmdline, so it travels with the boot slot.
+    install -D -m 0644 ${UNPACKDIR}/extlinux.conf ${DEPLOYDIR}/extlinux.conf-${MACHINE}
+    ln -sf extlinux.conf-${MACHINE} ${DEPLOYDIR}/extlinux.conf
 }
 addtask deploy after do_compile before do_build
