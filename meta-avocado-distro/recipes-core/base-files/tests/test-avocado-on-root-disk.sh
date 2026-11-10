@@ -40,4 +40,26 @@ expect 0 mmcblk0p5 "root=PARTLABEL=rootfs-a rootwait" "root=PARTLABEL: no disk t
 expect 0 mmcblk1p5 "root=/dev/mmcblk1p3 rootwait" "root=/dev node: every var passes (unchanged behaviour)"
 expect 1 mmcblk1p5 "root=PARTUUID=00000000-0000-0000-0000-000000000000" "a root PARTUUID on neither disk: no var is claimed"
 
+# Kernels before 6.15 leave PARTUUID out of a partition's uevent: the helper
+# reads the partition table instead (blkid -p), here a stub keyed on the node.
+rm -rf "$w/sys"
+disk mmcblk0 x x
+disk mmcblk1 x x
+for f in "$w"/sys/block/*/*/uevent; do sed -i '/^PARTUUID=/d' "$f"; done
+cat >"$w/blkid" <<'BLKID'
+#!/bin/sh
+for a; do node=$a; done
+case "$node" in
+  */mmcblk0p3) echo 489ee3a6-ca13-4f67-913a-5eea91ff9b03 ;;
+  */mmcblk1p3) echo BAE4E9CC-4F05-475D-AFAE-BE1C6A262C66 ;;
+  *) echo 00000000-1111-2222-3333-444444444444 ;;
+esac
+BLKID
+chmod +x "$w/blkid"
+export AVOCADO_BLKID="$w/blkid"
+expect 0 mmcblk1p5 "$emmc_root" "no PARTUUID in uevent: eMMC root, the eMMC's var (from the partition table)"
+expect 1 mmcblk0p5 "$emmc_root" "no PARTUUID in uevent: eMMC root, the microSD's var is not"
+expect 0 mmcblk0p5 "$sd_root" "no PARTUUID in uevent: microSD root, the microSD's var"
+AVOCADO_BLKID=/nonexistent expect 1 mmcblk1p5 "$emmc_root" "no PARTUUID and no blkid: nothing is claimed (fails closed)"
+
 exit $fail

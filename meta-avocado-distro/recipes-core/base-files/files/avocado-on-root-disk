@@ -10,11 +10,16 @@
 # The bootloader says which root it booted with root=PARTUUID=<uuid>. Without
 # one (root=PARTLABEL=, a /dev node, a dm device) there is no disk to scope
 # to and every candidate passes: exactly the behaviour before this check.
-# Reads only sysfs, which the kernel fills when it scans the partition table,
-# so the answer does not depend on the order udev processes the partitions.
+# Reads sysfs, which the kernel fills when it scans the partition table, so
+# the answer does not depend on the order udev processes the partitions.
+# Kernels before 6.15 put no PARTUUID in a partition's uevent (RZ/V2N's 6.1
+# vendor kernel); there the partition table itself is read with blkid -p,
+# which is just as independent of udev's order.
 part=$1
 sys=${AVOCADO_SYSFS:-/sys}
 cmdline=${AVOCADO_CMDLINE:-/proc/cmdline}
+dev=${AVOCADO_DEV:-/dev}
+blkid=${AVOCADO_BLKID:-blkid}
 
 root=""
 read -r line <"$cmdline" || true
@@ -29,7 +34,11 @@ root=$(printf '%s' "$root" | tr 'ABCDEF' 'abcdef')
 disk=$(basename "$(readlink -f "$sys/class/block/$part/..")")
 for uevent in "$sys/block/$disk/$disk"*/uevent; do
   [ -f "$uevent" ] || continue
-  uuid=$(sed -n 's/^PARTUUID=//p' "$uevent" | tr 'ABCDEF' 'abcdef')
+  uuid=$(sed -n 's/^PARTUUID=//p' "$uevent")
+  if [ -z "$uuid" ] && ! grep -q '^PARTUUID=' "$uevent"; then
+    uuid=$("$blkid" -p -s PART_ENTRY_UUID -o value "$dev/$(basename "$(dirname "$uevent")")" 2>/dev/null)
+  fi
+  uuid=$(printf '%s' "$uuid" | tr 'ABCDEF' 'abcdef')
   [ "$uuid" = "$root" ] && exit 0
 done
 exit 1
