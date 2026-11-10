@@ -191,6 +191,9 @@ jobs:
       - name: qemuarm64 stone var sizing
         shell: bash
         run: bash meta-avocado-qemu/stone/qemuarm64/tests/test-var-unsized.sh
+      - name: stone sizeless var partition (renesas, alif, stm, rockchip)
+        shell: bash
+        run: bash meta-avocado-renesas/stone/tests/test-stone-sizeless-partition.sh
       - name: QEMU SDK vm helper
         shell: bash
         run: bash meta-avocado-qemu/recipes-avocado/sdk/tests/test-vm.sh
