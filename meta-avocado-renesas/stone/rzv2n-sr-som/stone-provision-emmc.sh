@@ -26,17 +26,20 @@ cat <<EOF
 ================================================================
 RZ/V2N SoM eMMC provisioning (Phase 2a: fastboot over USB-OTG)
 
-Before continuing, confirm:
-  1. The bootloader has been programmed to SPI NOR (Phase 1 'serial' profile).
-  2. DIP S5 is in SPI boot mode (MD0=OFF, MD1=ON).
-  3. The USB-OTG cable is connected from the SoM to this host.
-  4. The board is powered on; U-Boot has entered fastboot
-     (typical when no OS image is present in eMMC or SD).
-
-Press Enter to begin, or Ctrl-C to abort.
+Requires:
+  1. The bootloader programmed to SPI NOR (the 'serial' profile).
+  2. DIP S5 in SPI boot mode (MD0=OFF, MD1=ON).
+  3. The SoC's USB2.0 ch0 (J5003) connected to this host.
+  4. U-Boot running 'fastboot usb 0' (its fallback when neither eMMC nor
+     SD boots; or stop autoboot and type it).
+Disk image: $DISK_IMAGE
 ================================================================
 EOF
-read -r _
+
+if [ "${AVOCADO_RZ_BOARD_READY:-0}" != "1" ] && [ -t 0 ]; then
+  echo "Press Enter to begin, or Ctrl-C to abort."
+  read -r _
+fi
 
 echo "Waiting for fastboot device..."
 for _ in $(seq 1 30); do
@@ -50,37 +53,14 @@ fi
 
 echo "Fastboot device(s):"
 fastboot devices
+fastboot getvar product 2>&1 || true
 
-# Write the partition table first, then each populated partition.
-# `fastboot flash gpt` accepts a full disk image and only consumes the GPT
-# header/backup regions; subsequent per-partition flashes target the named
-# slots without re-touching the GPT.
-echo "=== Flashing GPT ==="
-fastboot flash gpt "$DISK_IMAGE"
-
-NUM_PARTITIONS=$(jq '.storage_devices.rootdisk.partitions | length' "$AVOCADO_STONE_MANIFEST")
-for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
-  name=$(jq -r ".storage_devices.rootdisk.partitions[$i].name" "$AVOCADO_STONE_MANIFEST")
-  img_key=$(jq -r ".storage_devices.rootdisk.partitions[$i].image // \"\"" "$AVOCADO_STONE_MANIFEST")
-  [ -z "$img_key" ] && continue
-
-  build_type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\" | if type == \"object\" then .build_args.type // \"\" else \"\" end" "$AVOCADO_STONE_MANIFEST")
-  if [ "$build_type" = "fat" ]; then
-    out=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$AVOCADO_STONE_MANIFEST")
-    src="${AVOCADO_STONE_BUILD_DIR}/${out}"
-  else
-    type=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\" | type" "$AVOCADO_STONE_MANIFEST")
-    if [ "$type" = "string" ]; then
-      f=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\"" "$AVOCADO_STONE_MANIFEST")
-    else
-      f=$(jq -r ".storage_devices.rootdisk.images.\"${img_key}\".out" "$AVOCADO_STONE_MANIFEST")
-    fi
-    src="${AVOCADO_STONE_DATA_DIR}/${f}"
-  fi
-
-  echo "=== Flashing ${name} from ${src} ==="
-  fastboot flash "$name" "$src"
-done
+# The whole disk image (GPT included) onto the eMMC user area. -S sends it
+# as sparse chunks no larger than U-Boot's 1 GiB download buffer; unused
+# space (the empty B slots) costs nothing on the wire.
+FASTBOOT_TARGET="${AVOCADO_RZ_FASTBOOT_DISK:-mmc0}"
+echo "=== Flashing ${DISK_IMAGE} to ${FASTBOOT_TARGET} ==="
+fastboot -S 512M flash "$FASTBOOT_TARGET" "$DISK_IMAGE"
 
 echo "=== Rebooting target ==="
 fastboot reboot
