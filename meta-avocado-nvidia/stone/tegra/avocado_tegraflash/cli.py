@@ -27,6 +27,7 @@ from . import (
     toolchain,
 )
 from .env import from_environ
+from .fit import require_fit
 from .manifest import read_manifest
 from .profile import media_for_profile
 from .runner import SubprocessRunner
@@ -167,6 +168,9 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
     # Oracle 512-597: boot device settings; an SD device from the environment wins.
     print(f"Boot media target: {media.value} (profile: {cfg.profile})")
     settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)
+
+    # Hardware-free, so it also runs under --prepare-only; refuses before any erase.
+    require_fit(work, man)
 
     # Oracle 599-627.
     bootpriority.set_first(runner, work, media, env=flash_env)

@@ -770,3 +770,37 @@ def test_taking_no_lock_mutation_is_caught(tmp_path, capsys):
         with mutant_main(tmp_path, "    with _build_dir_lock(cfg.build_dir):\n", "    with open(os.devnull):\n") as mutated:
             rc, _, _ = rig.go(mutated, capsys, argv=["--prepare-only"], euid=1000)
     assert rc == 0
+
+
+# --- partition fit (deviation partition-fit-refused) ---
+
+
+def _grow_rootfs(rig, size):
+    (found,) = Path(rig.environ["AVOCADO_STONE_DATA_DIR"]).rglob("avocado-image-rootfs-jetson-orin-nano.erofs-lz4")
+    found.write_bytes(b"\0" * size)
+
+
+@pytest.mark.deviation("partition-fit-refused")
+def test_oversize_rootfs_is_refused_naming_image_and_partition_before_any_flash(tmp_path, capsys):
+    rig = make_rig(tmp_path)
+    _grow_rootfs(rig, 8193)
+    rc, _, err = rig.go(main, capsys)
+    assert rc == 1
+    assert "avocado-image-rootfs-jetson-orin-nano.erofs-lz4" in err and "APP" in err and "8193" in err
+    assert rig.runner.named("initrd-flash") == []
+
+
+@pytest.mark.deviation("partition-fit-refused")
+def test_exact_fit_rootfs_still_flashes(tmp_path, capsys):
+    rig = make_rig(tmp_path)
+    _grow_rootfs(rig, 8192)
+    rc, _, _ = rig.go(main, capsys)
+    assert rc == 0 and len(rig.runner.named("initrd-flash")) == 1
+
+
+@pytest.mark.deviation("partition-fit-refused")
+def test_prepare_only_refuses_an_oversize_image(tmp_path, capsys):
+    rig = make_rig(tmp_path)
+    _grow_rootfs(rig, 8193)
+    rc, _, err = rig.go(main, capsys, argv=["--prepare-only"], euid=1000)
+    assert rc == 1 and "does not fit partition APP" in err
