@@ -157,8 +157,18 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
       done
     fi
 
+    src_file="${DATA_DIR}/${f_in}"
+    # kernel.cmdline_extra (exported by avocado as AVOCADO_KERNEL_CMDLINE_EXTRA)
+    # and the provision's AVOCADO_CMDLINE_EXTRA field go on every append line.
+    extra="${AVOCADO_KERNEL_CMDLINE_EXTRA:-}${AVOCADO_CMDLINE_EXTRA:+ ${AVOCADO_CMDLINE_EXTRA}}"
+    if [ "$(basename "$f_out")" = "extlinux.conf" ] && [ -n "${extra// /}" ]; then
+      EXTRA="$extra" awk '/^[[:space:]]*append[[:space:]]/ { $0 = $0 " " ENVIRON["EXTRA"] } { print }' \
+        "$src_file" >"${BUILD_DIR}/extlinux.conf"
+      src_file="${BUILD_DIR}/extlinux.conf"
+      echo "  extlinux.conf: appended '${extra# }' to the kernel command line" >&2
+    fi
     echo "  ${f_in} -> ${f_out}" >&2
-    mcopy -i "$fat_img" "${DATA_DIR}/${f_in}" "::${f_out}"
+    mcopy -i "$fat_img" "$src_file" "::${f_out}"
   done
 done
 
