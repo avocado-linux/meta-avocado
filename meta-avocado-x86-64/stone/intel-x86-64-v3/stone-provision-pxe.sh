@@ -1,142 +1,203 @@
 #!/usr/bin/env bash
 
-# PXE Boot Provisioning Script for Intel x86-64
+# PXE Provisioning Script for Intel x86-64
 #
-# Prepares PXE boot artifacts for network provisioning. The output directory
-# contains everything needed to boot a target system over the network and
-# install Avocado OS to its local disk.
+# Installs Avocado OS on a target over the network. Serves the target from
+# inside the provision container until its installer reports back:
+#
+#   UEFI PXE -> proxyDHCP + TFTP (dnsmasq) -> iPXE -> boot.ipxe (HTTP)
+#   -> installer kernel + initrd -> streams the disk image to the target disk
+#   -> GET /done -> this script stops serving and exits.
+#
+# Your DHCP server keeps handing out addresses: dnsmasq answers as a proxy
+# with only the boot information, and only to the target's MAC. The container
+# needs the host's network (container_args: --network=host, and NET_ADMIN +
+# NET_RAW or --privileged), so it works on a Linux host, not Docker Desktop.
 #
 # Environment variables provided by avocado/stone:
 # AVOCADO_STONE_MANIFEST  - path to manifest JSON file
 # AVOCADO_STONE_BUILD_DIR - build output directory
 # AVOCADO_STONE_DATA_DIR  - stone data directory
-# AVOCADO_PROVISION_OUT   - (optional) output directory for PXE artifacts
+#
+# Set with `avocado provision --env NAME=value`:
+# AVOCADO_PROVISION_PXE_MAC     - (required) the target's PXE NIC MAC
+# AVOCADO_PROVISION_DEVICE      - target disk, e.g. /dev/nvme0n1 (default:
+#                                 the installer picks the only internal disk)
+# AVOCADO_PROVISION_PXE_IFACE   - interface to serve on (default: the one
+#                                 holding the default route)
+# AVOCADO_PROVISION_PXE_ADDR    - address the target fetches from (default:
+#                                 the interface's IPv4 address)
+# AVOCADO_PROVISION_PXE_PORT    - HTTP port (default 8470)
+# AVOCADO_PROVISION_PXE_TIMEOUT - seconds to wait for the installer (default 1800)
+# AVOCADO_PROVISION_PXE_PAYLOAD - directory with snponly.efi, vmlinuz, initrd
+#                                 and an optional `cmdline` file (default:
+#                                 ${AVOCADO_STONE_DATA_DIR}/pxe)
 
-set -e
-set -u
-set -o pipefail
+set -euo pipefail
 
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 DATA_DIR="$AVOCADO_STONE_DATA_DIR"
 BUILD_DIR="$AVOCADO_STONE_BUILD_DIR"
-
-# Read image filenames from manifest
-ROOTFS_IMAGE=$(jq -r '.storage_devices.rootdisk.images.rootfs' "$MANIFEST")
-VAR_IMAGE=$(jq -r '.storage_devices.rootdisk.images.var' "$MANIFEST")
-INITRAMFS_IMAGE=$(jq -r '.storage_devices.rootdisk.images.initramfs' "$MANIFEST")
-KERNEL_IMAGE=$(jq -r '.storage_devices.rootdisk.images.kernel' "$MANIFEST")
-BOOTLOADER_IMAGE=$(jq -r '.storage_devices.rootdisk.images.bootloader' "$MANIFEST")
 PLATFORM=$(jq -r '.runtime.platform' "$MANIFEST")
 
-# Determine output directory
-PXE_OUT="${AVOCADO_PROVISION_OUT:-${BUILD_DIR}/pxe}"
-mkdir -p "$PXE_OUT"
+MAC="${AVOCADO_PROVISION_PXE_MAC:-}"
+DISK="${AVOCADO_PROVISION_DEVICE:-}"
+PORT="${AVOCADO_PROVISION_PXE_PORT:-8470}"
+TIMEOUT="${AVOCADO_PROVISION_PXE_TIMEOUT:-1800}"
+PAYLOAD="${AVOCADO_PROVISION_PXE_PAYLOAD:-${DATA_DIR}/pxe}"
 
-echo "=== Preparing PXE boot artifacts for ${PLATFORM} ==="
-echo "  Data directory: ${DATA_DIR}"
-echo "  Output directory: ${PXE_OUT}"
+if [ -z "$MAC" ]; then
+    echo "ERROR: set AVOCADO_PROVISION_PXE_MAC to the target's PXE NIC MAC"
+    echo "  (avocado provision ... --profile pxe --env AVOCADO_PROVISION_PXE_MAC=aa:bb:cc:dd:ee:ff)"
+    exit 1
+fi
+MAC=$(echo "$MAC" | tr 'A-F-' 'a-f:')
+
+IFACE="${AVOCADO_PROVISION_PXE_IFACE:-$(ip -4 route show default | awk '{print $5; exit}')}"
+ADDR="${AVOCADO_PROVISION_PXE_ADDR:-$(ip -4 -o addr show dev "$IFACE" | awk '{split($4, a, "/"); print a[1]; exit}')}"
+CIDR=$(ip -4 -o addr show dev "$IFACE" | awk '{print $4; exit}')
+if [ -z "$IFACE" ] || [ -z "$ADDR" ] || [ -z "$CIDR" ]; then
+    echo "ERROR: no IPv4 interface to serve on (is the container on the host network?)"
+    echo "  Set AVOCADO_PROVISION_PXE_IFACE and AVOCADO_PROVISION_PXE_ADDR."
+    exit 1
+fi
+SUBNET=$(python3 -c "import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network.network_address)" "$CIDR")
+
+for f in snponly.efi vmlinuz initrd; do
+    if [ ! -f "${PAYLOAD}/${f}" ]; then
+        echo "ERROR: PXE payload file missing: ${PAYLOAD}/${f}"
+        exit 1
+    fi
+done
+
+echo "=== PXE provisioning for ${PLATFORM} ==="
+echo "  Target MAC: ${MAC}"
+echo "  Serving on: ${IFACE} ${ADDR} (proxyDHCP for ${SUBNET}, HTTP :${PORT})"
+echo "  Target disk: ${DISK:-auto (the only internal disk)}"
 
 # =============================================================================
-# Copy boot artifacts for TFTP serving
+# The disk image the installer writes
 # =============================================================================
-echo ""
-echo "--- Boot artifacts (TFTP) ---"
-
-# Kernel
-if [ -f "${DATA_DIR}/${KERNEL_IMAGE}" ]; then
-  cp -v "${DATA_DIR}/${KERNEL_IMAGE}" "${PXE_OUT}/bzImage"
-else
-  echo "ERROR: Kernel not found: ${DATA_DIR}/${KERNEL_IMAGE}"
-  exit 1
+IMAGE_NAME="avocado-os-${PLATFORM}.img"
+IMAGE_FILE="${BUILD_DIR}/${IMAGE_NAME}"
+if [ ! -f "$IMAGE_FILE" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    bash "${SCRIPT_DIR}/stone-provision-img.sh"
+fi
+if [ ! -f "$IMAGE_FILE" ]; then
+    echo "ERROR: disk image not found: ${IMAGE_FILE}"
+    exit 1
 fi
 
-# Initramfs
-if [ -f "${DATA_DIR}/${INITRAMFS_IMAGE}" ]; then
-  cp -v "${DATA_DIR}/${INITRAMFS_IMAGE}" "${PXE_OUT}/initramfs.cpio.zst"
-else
-  echo "ERROR: Initramfs not found: ${DATA_DIR}/${INITRAMFS_IMAGE}"
-  exit 1
-fi
-
 # =============================================================================
-# Copy system images for HTTP/NFS serving (used by initramfs installer)
+# Serving tree: TFTP (iPXE) and HTTP (boot script, installer, image)
 # =============================================================================
-echo ""
-echo "--- System images (HTTP/NFS) ---"
+SERVE="${BUILD_DIR}/pxe"
+rm -rf "$SERVE"
+mkdir -p "${SERVE}/tftp" "${SERVE}/http"
+cp "${PAYLOAD}/snponly.efi" "${SERVE}/tftp/"
+for f in "${PAYLOAD}"/*; do
+    case "$(basename "$f")" in
+        snponly.efi | cmdline) ;;
+        *) ln -sf "$f" "${SERVE}/http/" ;;
+    esac
+done
+ln -sf "$IMAGE_FILE" "${SERVE}/http/disk.img"
 
-# EFI bootloader
-if [ -f "${DATA_DIR}/${BOOTLOADER_IMAGE}" ]; then
-  cp -v "${DATA_DIR}/${BOOTLOADER_IMAGE}" "${PXE_OUT}/"
+BASE="http://${ADDR}:${PORT}"
+EXTRA=""
+if [ -f "${PAYLOAD}/cmdline" ]; then
+    EXTRA=$(sed "s|@BASE@|${BASE}|g" "${PAYLOAD}/cmdline" | tr '\n' ' ')
 fi
-
-# Rootfs
-if [ -f "${DATA_DIR}/${ROOTFS_IMAGE}" ]; then
-  cp -v "${DATA_DIR}/${ROOTFS_IMAGE}" "${PXE_OUT}/"
-fi
-
-# Var
-if [ -f "${DATA_DIR}/${VAR_IMAGE}" ]; then
-  cp -v "${DATA_DIR}/${VAR_IMAGE}" "${PXE_OUT}/"
-fi
-
-# =============================================================================
-# Generate iPXE boot script
-# =============================================================================
-echo ""
-echo "--- Generating iPXE boot script ---"
-
-cat >"${PXE_OUT}/boot.ipxe" <<'IPXE'
+cat > "${SERVE}/tftp/boot.ipxe" <<IPXE
 #!ipxe
-# Avocado OS PXE Boot Script
-# Serve this file from your HTTP server and chainload from iPXE
-
-# Set the base URL to your HTTP server hosting these files
-# Adjust this to match your network setup
-set base-url http://${next-server}/avocado
-
-kernel ${base-url}/bzImage initrd=initramfs.cpio.zst avocado.install=1 avocado.install.url=${base-url} console=tty0 console=ttyS0,115200n8
-initrd ${base-url}/initramfs.cpio.zst
+echo Avocado OS PXE install from ${ADDR}
+kernel ${BASE}/vmlinuz initrd=initrd ${EXTRA} avocado.install.url=${BASE} ${DISK:+avocado.install.disk=${DISK}}
+initrd ${BASE}/initrd
 boot
 IPXE
 
-echo "  Created boot.ipxe"
+cat > "${SERVE}/dnsmasq.conf" <<DNSMASQ
+port=0
+interface=${IFACE}
+bind-interfaces
+dhcp-range=${SUBNET},proxy
+dhcp-host=${MAC},set:target
+dhcp-ignore=tag:!target
+dhcp-userclass=set:ipxe,iPXE
+pxe-service=tag:target,tag:!ipxe,X86-64_EFI,"iPXE",snponly.efi
+pxe-service=tag:target,tag:ipxe,X86-64_EFI,"Avocado install",boot.ipxe
+enable-tftp
+tftp-root=${SERVE}/tftp
+dhcp-leasefile=${SERVE}/dnsmasq.leases
+log-dhcp
+DNSMASQ
 
-# =============================================================================
-# Generate PXELINUX config (legacy BIOS PXE fallback)
-# =============================================================================
-mkdir -p "${PXE_OUT}/pxelinux.cfg"
+# The installer reports with GET /done?status=ok|fail&disk=...&msg=...
+cat > "${SERVE}/server.py" <<'PY'
+import http.server, os, sys, urllib.parse
+root, port, done = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 
-cat >"${PXE_OUT}/pxelinux.cfg/default" <<PXECFG
-DEFAULT avocado
-PROMPT 0
-TIMEOUT 50
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *a, **k):
+        super().__init__(*a, directory=root, **k)
 
-LABEL avocado
-    KERNEL bzImage
-    INITRD initramfs.cpio.zst
-    APPEND avocado.install=1 console=tty0 console=ttyS0,115200n8
-PXECFG
+    def do_GET(self):
+        url = urllib.parse.urlparse(self.path)
+        if url.path == "/done":
+            q = urllib.parse.parse_qs(url.query)
+            with open(done + ".tmp", "w") as f:
+                for k in ("status", "disk", "msg"):
+                    f.write("%s=%s\n" % (k, q.get(k, [""])[0]))
+            os.rename(done + ".tmp", done)
+            self.send_response(200)
+            self.end_headers()
+            return
+        super().do_GET()
 
-echo "  Created pxelinux.cfg/default"
+http.server.ThreadingHTTPServer(("", port), Handler).serve_forever()
+PY
 
-# =============================================================================
-# Summary
-# =============================================================================
+DONE="${SERVE}/done"
+PIDS=()
+cleanup() {
+    for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
+    wait 2>/dev/null || true
+}
+trap cleanup EXIT
+
+dnsmasq -k -C "${SERVE}/dnsmasq.conf" --log-facility=- &
+PIDS+=($!)
+python3 "${SERVE}/server.py" "${SERVE}/http" "$PORT" "$DONE" 2>"${SERVE}/http.log" &
+PIDS+=($!)
+sleep 1
+for p in "${PIDS[@]}"; do
+    if ! kill -0 "$p" 2>/dev/null; then
+        echo "ERROR: PXE server failed to start (port ${PORT} or 67/69 in use, or no NET_ADMIN?)"
+        exit 1
+    fi
+done
+
 echo ""
-echo "=== PXE boot artifacts prepared ==="
-echo ""
-echo "Directory contents:"
-ls -lh "$PXE_OUT"
-echo ""
-echo "To use these artifacts:"
-echo ""
-echo "  iPXE (UEFI):"
-echo "    1. Host all files via HTTP server"
-echo "    2. Chainload boot.ipxe from your DHCP/iPXE config"
-echo ""
-echo "  PXELINUX (Legacy BIOS):"
-echo "    1. Copy bzImage and initramfs.cpio.zst to TFTP root"
-echo "    2. Copy pxelinux.cfg/default to TFTP pxelinux.cfg/"
-echo ""
-echo "  The initramfs installer will download rootfs and var images"
-echo "  from the HTTP server to install Avocado OS to the target disk."
+echo "Serving. Power on or reboot the target now; it must PXE boot over IPv4 UEFI."
+echo "Waiting up to ${TIMEOUT} s for the installer to report back..."
+waited=0
+while [ ! -f "$DONE" ]; do
+    if [ "$waited" -ge "$TIMEOUT" ]; then
+        echo "ERROR: no report from the installer after ${TIMEOUT} s"
+        echo "  Last requests:"
+        tail -n 5 "${SERVE}/http.log" | sed 's/^/    /'
+        exit 1
+    fi
+    sleep 5
+    waited=$((waited + 5))
+done
+
+status=$(sed -n 's/^status=//p' "$DONE")
+disk=$(sed -n 's/^disk=//p' "$DONE")
+msg=$(sed -n 's/^msg=//p' "$DONE")
+echo "Installer reported: status=${status} disk=${disk} ${msg}"
+if [ "$status" != "ok" ]; then
+    exit 1
+fi
+echo "=== Avocado OS installed on ${disk}; the target reboots from it ==="

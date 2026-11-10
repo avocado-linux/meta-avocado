@@ -29,6 +29,10 @@ SRC_URI:append:stone-img = " \
     file://stone-provision-img.sh \
 "
 
+SRC_URI:append:stone-pxe = " \
+    file://stone-provision-pxe.sh \
+"
+
 SRC_URI:append:stone-sd = " \
     file://stone-provision-sd.sh \
 "
@@ -71,6 +75,11 @@ do_deploy:append:stone-sd() {
 do_deploy:append:stone-usb() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${UNPACKDIR}/stone-provision-usb.sh ${DEPLOYDIR}/stone-provision-usb.sh
+}
+
+do_deploy:append:stone-pxe() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${UNPACKDIR}/stone-provision-pxe.sh ${DEPLOYDIR}/stone-provision-pxe.sh
 }
 
 do_deploy:append:stone-img() {

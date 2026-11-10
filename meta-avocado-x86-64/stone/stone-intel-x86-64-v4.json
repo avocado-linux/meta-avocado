@@ -35,6 +35,9 @@
       "img": {
         "script": "stone-provision-img.sh"
       },
+      "pxe": {
+        "script": "stone-provision-pxe.sh"
+      },
       "usb": {
         "script": "stone-provision-usb.sh"
       }
