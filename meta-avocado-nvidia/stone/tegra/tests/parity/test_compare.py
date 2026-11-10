@@ -212,6 +212,7 @@ def test_deviation_registry_names():
         "cmdline-control-chars-refused",
         "required-image-refused",
         "partition-fit-refused",
+        "recovery-id-pinned",
     }
     assert all(isinstance(v, str) and v and "\n" not in v for v in deviations.DEVIATIONS.values())
 

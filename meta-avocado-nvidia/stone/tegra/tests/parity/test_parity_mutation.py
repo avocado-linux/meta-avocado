@@ -51,7 +51,7 @@ RECOVERY_MUTATIONS = [
     (
         "recheck-removed",
         "cli.py",
-        "    recovery.recheck_single_board(runner, flash_env, board)\n",
+        "    recovery.recheck_single_board(runner, flash_env, board, expected_ids=man.rcm_ids)\n",
         "    pass\n",
         "recheck",
     ),

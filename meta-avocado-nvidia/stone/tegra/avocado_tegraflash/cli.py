@@ -163,6 +163,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
             boardctl_target=cfg.boardctl_target,
             boardctl_serial=cfg.boardctl_serial,
             sleep=sleep,
+            expected_ids=man.rcm_ids,
         )
 
     # Oracle 512-597: boot device settings; an SD device from the environment wins.
@@ -198,7 +199,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
 
     # Deviation one-board-only: the flash starts right after this check, on the
     # board the wait saw and no other.
-    recovery.recheck_single_board(runner, flash_env, board)
+    recovery.recheck_single_board(runner, flash_env, board, expected_ids=man.rcm_ids)
 
     # Oracle 680-694.
     print("Running initrd-flash script from build directory")

@@ -99,11 +99,11 @@ class Rig:
         return rc, captured.out, captured.err
 
 
-def make_rig(tmp_path, *, profile="tegraflash", env=None, kernel=False, drop=(), runner=None, carrier=None):
+def make_rig(tmp_path, *, profile="tegraflash", env=None, kernel=False, drop=(), runner=None, carrier=None, manifest="stone-jetson-orin-nano.json"):
     stub_dir = tmp_path / "stubs"
     write_stubs(stub_dir, tmp_path / "stub.log", tmp_path / "scenario.json")
     tree = build_tree(
-        STONE_DIR / "stone-jetson-orin-nano.json", tmp_path / "tree", stub_dir, kernel=kernel, drop=drop, carrier=carrier
+        STONE_DIR / manifest, tmp_path / "tree", stub_dir, kernel=kernel, drop=drop, carrier=carrier
     )
     environ = {
         "AVOCADO_STONE_MANIFEST": str(tree.manifest),
@@ -259,7 +259,7 @@ def test_prepare_only_with_no_erase_flags_prints_the_bare_command(tmp_path, caps
 @pytest.mark.deviation("prepare-only")
 def test_prepare_only_calling_the_board_mutation_is_caught(tmp_path, capsys):
     rig = make_rig(tmp_path)
-    contact = "    board = recovery.wait_for_single_board(runner, flash_env, boardctl_target='', boardctl_serial='', sleep=sleep)\n"
+    contact = "    board = recovery.wait_for_single_board(runner, flash_env, boardctl_target='', boardctl_serial='', sleep=sleep, expected_ids=man.rcm_ids)\n"
     with mutant_main(tmp_path, "    if args.prepare_only:\n", contact + "    if False:\n") as mutated:
         assert prepare_only_touches_no_board(mutated, rig, capsys) is False
 
@@ -406,7 +406,7 @@ def test_second_board_after_the_wait_message_names_both(tmp_path, capsys):
 @pytest.mark.deviation("one-board-only")
 def test_skipping_the_recheck_mutation_is_caught(tmp_path, capsys):
     rig = make_rig(tmp_path, runner=FakeRunner(lsusb=[[APX], [APX, APX2]]))
-    with mutant_main(tmp_path, "    recovery.recheck_single_board(runner, flash_env, board)\n", "    pass\n") as mutated:
+    with mutant_main(tmp_path, "    recovery.recheck_single_board(runner, flash_env, board, expected_ids=man.rcm_ids)\n", "    pass\n") as mutated:
         assert second_board_stops_the_flash(mutated, rig, capsys) is False
 
 
@@ -431,9 +431,45 @@ def test_the_same_single_board_after_the_wait_still_flashes(tmp_path, capsys):
 @pytest.mark.deviation("one-board-only")
 def test_forgetting_the_waited_board_mutation_is_caught(tmp_path, capsys):
     rig = make_rig(tmp_path, runner=FakeRunner(lsusb=[[APX], [APX2]]))
-    accept_any = "    recovery.recheck_single_board(runner, flash_env, recovery._recovery_boards(runner, flash_env)[0])\n"
-    with mutant_main(tmp_path, "    recovery.recheck_single_board(runner, flash_env, board)\n", accept_any) as mutated:
+    accept_any = "    recovery.recheck_single_board(runner, flash_env, recovery._recovery_boards(runner, flash_env)[0], expected_ids=man.rcm_ids)\n"
+    with mutant_main(tmp_path, "    recovery.recheck_single_board(runner, flash_env, board, expected_ids=man.rcm_ids)\n", accept_any) as mutated:
         assert swapped_board_stops_the_flash(mutated, rig, capsys) is False
+
+
+OTHER_ID_APX = "Bus 001 Device 005: ID 0955:7023 NVIDIA Corp. APX"
+
+
+@pytest.mark.deviation("recovery-id-pinned")
+def test_a_recovery_device_outside_the_manifest_ids_is_refused_before_the_flash(tmp_path, capsys):
+    rig = make_rig(tmp_path, runner=FakeRunner(lsusb=[[OTHER_ID_APX]]))
+    rc, _, err = rig.go(main, capsys)
+    assert (rc, "0955:7023" in err, "0955:7523" in err, rig.runner.named("initrd-flash")) == (1, True, True, [])
+
+
+@pytest.mark.deviation("recovery-id-pinned")
+def test_the_recheck_is_given_the_manifest_ids(tmp_path, capsys, monkeypatch):
+    from avocado_tegraflash import recovery
+
+    seen = []
+    real = recovery.recheck_single_board
+
+    def spy(runner, env, expected, **kwargs):
+        seen.append(kwargs)
+        return real(runner, env, expected, **kwargs)
+
+    monkeypatch.setattr(recovery, "recheck_single_board", spy)
+    rig = make_rig(tmp_path)
+    rc, _, _ = rig.go(main, capsys)
+    assert (rc, seen) == (0, [{"expected_ids": ("0955:7523", "0955:7623")}])
+
+
+@pytest.mark.deviation("recovery-id-pinned")
+def test_a_manifest_without_ids_flashes_one_device_after_a_warning(tmp_path, capsys):
+    rig = make_rig(
+        tmp_path, runner=FakeRunner(lsusb=[[OTHER_ID_APX]]), manifest="stone-jetson-agx-orin.json"
+    )
+    rc, out, _ = rig.go(main, capsys)
+    assert (rc, "not identity-checked" in out, len(rig.runner.named("initrd-flash"))) == (0, True, 1)
 
 
 # --- an OS error from a stage ends in one ERROR line, not a traceback ---
