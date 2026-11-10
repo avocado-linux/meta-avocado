@@ -25,6 +25,9 @@ on:
     paths:
       - "scripts/**"
       - "meta-avocado-nvidia/stone/**"
+      - "meta-avocado-nvidia/stone/tegra/upstream-tracking.json"
+      # A pin bump must run the upstream-drift test.
+      - "kas/vendor/nvidia.yml"
       # Files the recipe wiring and partition-UUID tests read.
       - "meta-avocado-nvidia/recipes-bsp/tegraflash/tegraflash-engine.bb"
       - "meta-avocado-nvidia/recipes-avocado/distro/avocado-stone.bbappend"
@@ -68,14 +71,17 @@ jobs:
 
       # nvflashxmlparse.py belongs to meta-tegra and is not copied into this
       # repository; the GPT test needs it, and fails (not skips) when CI is set
-      # and it is missing. The commit is on origin/wrynose of that repository.
+      # and it is missing. The revision is the one kas/vendor/nvidia.yml pins for
+      # meta-tegra and must be kept equal to it. The engine's upstream-drift test
+      # reads upstream files by revision (git show <rev>:<path>) from this
+      # checkout, so the revision has to exist here.
       - name: Fetch nvflashxmlparse.py
         uses: actions/checkout@v4
         with:
           repository: avocado-linux/vendor-meta-tegra
-          ref: 727633deca9b72643112d1aebadafb736dad60c0
+          ref: feab7664000f313f655d20d2f39c04432214dc25
           path: vendor-meta-tegra
-          sparse-checkout: recipes-bsp/tegra-binaries/tegra-helper-scripts
+          sparse-checkout: recipes-bsp/tegra-binaries
 
       # scripts/tests/remote belongs to the ssh-emmc backend and has 4 failures
       # on a clean runner that are unrelated to the Jetson flash path: two need
@@ -96,6 +102,7 @@ jobs:
         shell: bash
         env:
           NVFLASHXMLPARSE: ${{ github.workspace }}/vendor-meta-tegra/recipes-bsp/tegra-binaries/tegra-helper-scripts/nvflashxmlparse.py
+          VENDOR_META_TEGRA: ${{ github.workspace }}/vendor-meta-tegra
         run: |
           set -euo pipefail
           python -m pytest meta-avocado-nvidia/stone/tegra/tests -q -s 2>&1 \
