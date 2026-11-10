@@ -1,6 +1,7 @@
 """The keys the engine reads from storage_devices.rootdisk, and their reader."""
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +42,12 @@ KEYS: tuple[Key, ...] = (
     ),
     Key("tegraflash", "dce_overlays", True, "Same as overlays, for the DCE device tree overlays."),
     Key("tegraflash", "sd_device", False, ""),
+    Key(
+        "tegraflash",
+        "rcm_ids",
+        True,
+        "USB vendor:product ids this board may show in recovery mode; a recovery device with another id is refused. Narrows only, and absence is an empty list.",
+    ),
 )
 
 
@@ -62,9 +69,11 @@ class Manifest:
     overlays: tuple[str, ...] = ()
     dce_overlays: tuple[str, ...] = ()
     sd_device: str = ""
+    rcm_ids: tuple[str, ...] = ()
 
 
-_LISTS = {"overlays", "dce_overlays"}
+_LISTS = {"overlays", "dce_overlays", "rcm_ids"}
+_USB_ID = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$")
 
 
 def _object(value: object, path: str) -> dict:
@@ -100,7 +109,39 @@ def read_manifest(path: str | Path) -> Manifest:
         if key.name in _LISTS:
             if not isinstance(value, list):
                 raise EngineError(f"manifest key {where} must be a list, found {type(value).__name__}")
-            values[key.name] = tuple(_text(item, f"{where}[]") for item in value)
+            items = tuple(_text(item, f"{where}[]") for item in value)
+            if key.name == "rcm_ids":
+                for item in items:
+                    if not _USB_ID.fullmatch(item):
+                        raise EngineError(
+                            f"manifest key {where} entries must be lowercase vendor:product hex ids like 0955:7523, found {item!r}"
+                        )
+            values[key.name] = items
         else:
             values[key.name] = _text(value, where)
     return Manifest(**values)
+
+
+REQUIRED_IMAGES = (
+    "rootfs",
+    "var",
+    "initramfs",
+    "tegraflash_initramfs",
+    "tegraflash_esp",
+    "tegraflash_tos",
+)
+
+
+def require_image_keys(manifest: Manifest) -> None:
+    """Refuse a manifest that names no file for an image the flash needs.
+
+    Deviation required-image-refused: an absent key reads as empty, and every
+    later image guard (presence, size, fit) skips an empty name, so the flash
+    would otherwise run without that image and without a word.
+    """
+    missing = [k for k in REQUIRED_IMAGES if not getattr(manifest, k)]
+    if missing:
+        raise EngineError(
+            "manifest names no file for: "
+            + ", ".join(f"storage_devices.rootdisk.images.{k}" for k in missing)
+        )

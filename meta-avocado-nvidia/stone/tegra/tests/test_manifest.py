@@ -89,17 +89,18 @@ def test_every_declared_key_round_trips(tmp_path):
     assert all(getattr(m, name) == f"{name}.img" for name in images)
 
 
-def test_keys_cover_the_fourteen_oracle_reads():
-    assert len(KEYS) == 14
+def test_keys_are_the_fourteen_oracle_reads_plus_one_engine_only_key():
+    assert len(KEYS) == 15
 
 
-def test_optional_keys_are_the_four_with_reasons():
+def test_optional_keys_are_the_five_with_reasons():
     optional = {(k.section, k.name) for k in KEYS if k.optional}
     assert optional == {
         ("images", "dtb"),
         ("images", "bpmp_dtb"),
         ("tegraflash", "overlays"),
         ("tegraflash", "dce_overlays"),
+        ("tegraflash", "rcm_ids"),
     }
 
 
@@ -223,3 +224,36 @@ def test_mutation_removing_a_type_check_lets_the_defective_manifest_through(tmp_
         read(path)
     except Exception as exc:
         assert type(exc).__name__ != "EngineError", "mutant still refused"
+
+
+def test_rcm_ids_default_to_empty_and_absent_key_is_accepted(tmp_path):
+    assert Manifest().rcm_ids == ()
+    assert read_manifest(write(tmp_path, rootdisk(tegraflash={"sd_device": "x"}))).rcm_ids == ()
+
+
+def test_rcm_ids_are_read_as_a_tuple(tmp_path):
+    doc = rootdisk(tegraflash={"rcm_ids": ["0955:7523", "0955:7c18"]})
+    assert read_manifest(write(tmp_path, doc)).rcm_ids == ("0955:7523", "0955:7c18")
+
+
+@pytest.mark.parametrize("bad", ["0955:75ZZ", "0955:7C18", "955:7523", "0955-7523", "0955:75233", "", " 0955:7523"])
+def test_a_malformed_rcm_id_is_refused_naming_the_key(tmp_path, bad):
+    with pytest.raises(EngineError, match=r"tegraflash\.rcm_ids"):
+        read_manifest(write(tmp_path, rootdisk(tegraflash={"rcm_ids": [bad]})))
+
+
+@pytest.mark.parametrize("value", ["0955:7523", {"a": 1}, 5, True])
+def test_a_non_list_rcm_ids_is_refused_naming_the_key(tmp_path, value):
+    with pytest.raises(EngineError, match=r"tegraflash\.rcm_ids.*list"):
+        read_manifest(write(tmp_path, rootdisk(tegraflash={"rcm_ids": value})))
+
+
+def test_require_image_keys_names_every_missing_key():
+    from avocado_tegraflash.manifest import REQUIRED_IMAGES, require_image_keys
+
+    with pytest.raises(EngineError) as exc:
+        require_image_keys(Manifest(rootfs="a.img", var="b.img"))
+    for key in REQUIRED_IMAGES[2:]:
+        assert f"images.{key}" in str(exc.value)
+    assert "images.rootfs" not in str(exc.value)
+    require_image_keys(Manifest(**{k: "x.img" for k in REQUIRED_IMAGES}))

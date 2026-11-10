@@ -55,9 +55,21 @@ def test_extraction_finds_the_known_oracle_reads():
     assert {("images", "rootfs"), ("images", "tegraflash_bsp"), ("tegraflash", "sd_device"), ("tegraflash", "overlays")} <= reads
 
 
+# Keys the engine reads that the frozen oracle script never did.
+ENGINE_ONLY_KEYS = {("tegraflash", "rcm_ids")}
+
+
+def oracle_reads():
+    return {(m.group(1), m.group(2)) for m in _JQ_READ.finditer(ORACLE.read_text())}
+
+
 def test_keys_are_exactly_the_keys_the_oracle_reads():
-    reads = {(m.group(1), m.group(2)) for m in _JQ_READ.finditer(ORACLE.read_text())}
-    assert {(k.section, k.name) for k in KEYS} == reads
+    assert {(k.section, k.name) for k in KEYS} == oracle_reads() | ENGINE_ONLY_KEYS
+
+
+def test_an_undeclared_extra_key_still_fails_the_exact_set_check():
+    mutated = KEYS + (Key("images", "invented_key", True, "test"),)
+    assert {(k.section, k.name) for k in mutated} != oracle_reads() | ENGINE_ONLY_KEYS
 
 
 def test_every_declared_key_is_defined_or_optional():
