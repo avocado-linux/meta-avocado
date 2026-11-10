@@ -8,10 +8,37 @@
 #
 # This bbappend copies the generated headers and creates necessary symlinks.
 
-# Note: We cannot set PV = "${KERNEL_VERSION}" because KERNEL_VERSION is
-# determined at runtime (during kernel build), not at parse time. This would
-# make the recipe non-deterministic and cause basehash errors.
+# One package per kernel. A multi-kernel feed carries a kernel-devsrc for each
+# kernel it builds, and kernelsrc.bbclass versions them all by the upstream
+# part of KERNEL_VERSION alone (6.8.12 for both L4T releases, 6.18.52 for the
+# stock and PREEMPT_RT kernels). Under one NAME, dnf just takes the newest, so
+# an out-of-tree module compiles against the wrong kernel's headers.
 #
+# Name each package after the full KERNEL_VERSION, like the kernel recipe's own
+# packages (avocado-kernel-feed.bbclass). avocado-cli excludes every other
+# kernel's `kernel-*<kver>` packages from an install, so a bare `kernel-devsrc`
+# request resolves to the selected kernel. RREPLACES keeps the bare names as
+# Provides, and obsoletes the old unversioned packages on upgrade.
+#
+# KERNEL_VERSION comes from the kernel's build dir, so it is unknown at parse
+# time. Pin its signature value, as kernel.bbclass does for
+# KERNEL_VERSION_PKG_NAME. do_install depends on virtual/kernel, so a new
+# kernel still rebuilds and repackages this recipe.
+KERNEL_DEVSRC_KVER = "${@d.getVar('KERNEL_VERSION') or 'unknown'}"
+KERNEL_DEVSRC_KVER[vardepvalue] = "kernel-version"
+
+PKG:${PN} = "${PN}-${KERNEL_DEVSRC_KVER}"
+PKG:${PN}-dev = "${PN}-dev-${KERNEL_DEVSRC_KVER}"
+PKG:${PN}-dbg = "${PN}-dbg-${KERNEL_DEVSRC_KVER}"
+RREPLACES:${PN} += "${PN}"
+RREPLACES:${PN}-dev += "${PN}-dev"
+RREPLACES:${PN}-dbg += "${PN}-dbg"
+
+python do_package:prepend() {
+    if not d.getVar('KERNEL_VERSION'):
+        bb.fatal("kernel-devsrc: KERNEL_VERSION is unset, cannot name the package after its kernel")
+}
+
 # For version tracking, we create a .kernel-version file inside the package.
 # Avocado can read this from /usr/src/kernel/.kernel-version to verify
 # the kernel-devsrc matches the target kernel version.

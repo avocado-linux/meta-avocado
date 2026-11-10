@@ -77,6 +77,8 @@ local_conf_header:
     AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:linux-noble-nvidia-tegra jetson-l4t:nvidia-kernel-oot"
     AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-rt:linux-yocto-rt jetson-rt:nvidia-kernel-oot"
     AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t-rt:linux-noble-nvidia-tegra-rt jetson-l4t-rt:nvidia-kernel-oot"
+    # Headers for out-of-tree module builds, one kernel-devsrc-${KERNEL_VERSION} per kernel.
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:kernel-devsrc jetson-rt:kernel-devsrc jetson-l4t-rt:kernel-devsrc"
     # Out-of-tree, so not in the alt mcs' graph for free: without these the RT
     # and L4T kernels are offered a module with the default kernel's vermagic.
     AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:avocado-shm jetson-rt:avocado-shm jetson-l4t-rt:avocado-shm"
