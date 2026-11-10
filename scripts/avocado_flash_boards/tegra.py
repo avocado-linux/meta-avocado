@@ -6,6 +6,8 @@ VENDOR = "0955"  # NVIDIA
 
 _ORIN_NANO_EVIDENCE = "lsusb on the bench Orin Nano showed 0955:7523 NVIDIA Corp. APX"
 
+# Source of truth is each manifest's tegraflash.rcm_ids; this table is kept in step by
+# scripts/tests/boards/test_manifest_sync.py until the wrapper is removed.
 BOARDS = [
     Board("avocado-icam-540", "tegra"),
     Board("avocado-jetson-agx-orin", "tegra"),

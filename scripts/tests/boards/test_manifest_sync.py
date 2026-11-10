@@ -68,3 +68,59 @@ def test_entry_without_manifest_is_detected(tmp_path):
     message = drift_message(manifests, registry)
     assert "['avocado-icam-540']" in message
     assert "no registry entry (add a board or remove the file): []" in message
+
+
+def manifest_rcm_ids(stone_dir: pathlib.Path) -> dict[str, list[str]]:
+    """Machine -> the manifest's storage_devices.rootdisk.tegraflash.rcm_ids."""
+    out = {}
+    for path in stone_dir.glob("*.json"):
+        if SCRIPT not in path.read_text():
+            continue
+        data = json.loads(path.read_text())
+        tf = data.get("storage_devices", {}).get("rootdisk", {}).get("tegraflash", {})
+        out["avocado-" + path.stem.removeprefix("stone-")] = list(tf.get("rcm_ids", []))
+    return out
+
+
+def registry_rcm_ids() -> dict[str, str | None]:
+    return {b.machine: b.rcm_id for b in all_boards() if b.family == "tegra"}
+
+
+def rcm_mismatches(manifest: dict[str, list[str]], registry: dict[str, str | None]) -> list[str]:
+    """Name each machine whose registry rcm_id is not one of the manifest's ids.
+
+    The registry holds one id per board while a manifest may list several SKUs, so
+    membership is the contract. A manifest with ids and a registry entry with none
+    (or the reverse) is also drift.
+    """
+    bad = []
+    for machine in sorted(set(manifest) | set(registry)):
+        ids = manifest.get(machine, [])
+        have = registry.get(machine)
+        if have is None and not ids:
+            continue
+        if have not in ids:
+            bad.append(f"{machine}: manifest {ids} vs registry {have!r}")
+    return bad
+
+
+def test_registry_rcm_ids_match_manifests():
+    manifest = manifest_rcm_ids(STONE_DIR)
+    assert manifest["avocado-jetson-orin-nano"] == ["0955:7523", "0955:7623"]
+    assert rcm_mismatches(manifest, registry_rcm_ids()) == []
+
+
+def test_rcm_id_drift_is_detected(tmp_path):
+    for p in STONE_DIR.glob("*.json"):
+        (tmp_path / p.name).write_text(p.read_text())
+    nano = tmp_path / "stone-jetson-orin-nano.json"
+    nano.write_text(nano.read_text().replace("0955:7523", "0955:7000"))
+    bad = rcm_mismatches(manifest_rcm_ids(tmp_path), registry_rcm_ids())
+    assert len(bad) == 1 and bad[0].startswith("avocado-jetson-orin-nano")
+
+
+def test_registry_id_without_manifest_id_is_detected():
+    registry = registry_rcm_ids()
+    registry["avocado-icam-540"] = "0955:7523"
+    bad = rcm_mismatches(manifest_rcm_ids(STONE_DIR), registry)
+    assert len(bad) == 1 and bad[0].startswith("avocado-icam-540")
