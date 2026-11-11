@@ -540,6 +540,33 @@ case "$boot_media" in
       -e 's/^EXTERNAL_ROOTFS_DRIVE=.*/EXTERNAL_ROOTFS_DRIVE=1/' \
       "$build_dir/.env.initrd-flash"
     flash_args="--erase-nvme"
+
+    # Which NVMe the image goes to. nvme0n1 is whichever controller's PCIe
+    # link came up first in the flashing kernel, so on a carrier with two
+    # NVMe slots the same flash lands on either disk and leaves the other
+    # one's old OS behind to win the next boot. A carrier pins the slot by
+    # PCIe address in its carrier.env (CARRIER_NVME_PCI); an operator can
+    # override it for one run (AVOCADO_PROVISION_NVME_PCI). Unset keeps
+    # nvme0n1 as before, which is fine with a single NVMe.
+    nvme_pci="${AVOCADO_PROVISION_NVME_PCI:-}"
+    if [ -z "$nvme_pci" ] && [ -f "$build_dir/carrier.env" ]; then
+      nvme_pci=$(sed -n -E 's/^CARRIER_NVME_PCI=["'"'"']?([^"'"'"']*)["'"'"']?[[:space:]]*$/\1/p' \
+        "$build_dir/carrier.env" | tail -1)
+    fi
+    if [ -n "$nvme_pci" ]; then
+      if [[ ! "$nvme_pci" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]]; then
+        echo "ERROR: NVMe flash target '$nvme_pci' is not a PCI address" >&2
+        echo "       (dddd:bb:dd.f, e.g. 0005:01:00.0). Check CARRIER_NVME_PCI" >&2
+        echo "       in carrier.env or AVOCADO_PROVISION_NVME_PCI." >&2
+        exit 1
+      fi
+      echo "NVMe flash target: PCIe $nvme_pci"
+      if grep -q '^ROOTFS_NVME_PCI=' "$build_dir/.env.initrd-flash"; then
+        sed -i -E "s/^ROOTFS_NVME_PCI=.*/ROOTFS_NVME_PCI=\"${nvme_pci}\"/" "$build_dir/.env.initrd-flash"
+      else
+        echo "ROOTFS_NVME_PCI=\"${nvme_pci}\"" >>"$build_dir/.env.initrd-flash"
+      fi
+    fi
     ;;
   emmc)
     sed -i \

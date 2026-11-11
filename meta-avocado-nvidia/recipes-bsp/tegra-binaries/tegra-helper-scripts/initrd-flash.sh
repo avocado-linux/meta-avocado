@@ -1246,11 +1246,55 @@ if [ -n "$usb_instance" ]; then
   instance_args="--usb-instance $usb_instance"
 fi
 
+# T264: pin the NVMe flash target by PCIe address (ROOTFS_NVME_PCI).
+#
+# NVIDIA's unified flash writes the external device by name (nvme0n1). With two
+# NVMe controllers the name follows whichever PCIe link came up first in the
+# flashing kernel, so the same flash lands on either disk. This waits for the
+# flashing initramfs's adbd, then runs nvme-pin-for-flash on the target, which
+# leaves the named controller as nvme0n1 and unbinds every other NVMe
+# controller. It runs beside flash_bsp_images.py: the boot partitions are
+# written to QSPI before the external device, which leaves minutes for it.
+pin_rootfs_nvme_t264() {
+  local pci="$1" adb_bin="" serial="" i=0
+  if [ -x "./unified_flash/tools/flashtools/flash/adb" ]; then
+    adb_bin="./unified_flash/tools/flashtools/flash/adb"
+  elif command -v adb >/dev/null 2>&1; then
+    adb_bin="$(command -v adb)"
+  fi
+  if [ -z "$adb_bin" ]; then
+    echo "nvme-pin: no adb binary"
+    return 1
+  fi
+  while [ "$i" -lt "${NVME_PIN_ADB_WAIT:-900}" ]; do
+    if [ -n "$usb_instance" ]; then
+      serial=$("$adb_bin" devices -l 2>/dev/null \
+        | awk -v want="usb:$usb_instance" '$2 == "device" { for (i = 3; i <= NF; i++) if ($i == want) { print $1; exit } }')
+    else
+      serial=$("$adb_bin" devices 2>/dev/null | awk '$2 == "device" { print $1; exit }')
+    fi
+    [ -n "$serial" ] && break
+    i=$((i + 2))
+    sleep 2
+  done
+  if [ -z "$serial" ]; then
+    echo "nvme-pin: the flashing initramfs never came up on adb"
+    return 1
+  fi
+  "$adb_bin" -s "$serial" push "$here/nvme-pin-for-flash" /tmp/nvme-pin-for-flash >/dev/null &&
+    "$adb_bin" -s "$serial" shell sh /tmp/nvme-pin-for-flash "$pci"
+}
+
 # Branch based on chip ID
 if [ "$CHIPID" = "0x23" ]; then
   # ===================================================================
   # T234 (Orin) flow - tegraflash.py with USB mass storage
   # ===================================================================
+  if [ -n "${ROOTFS_NVME_PCI:-}" ]; then
+    echo "ERR: ROOTFS_NVME_PCI (pinning the NVMe flash target by PCIe address) is" >&2
+    echo "     only implemented for T264 so far; this is a T234 board." >&2
+    exit 1
+  fi
   step_banner "Signing binaries"
   rm -rf bootloader_staging
   mkdir bootloader_staging
@@ -1411,11 +1455,29 @@ exit \$rc
 EOF
   chmod +x out/doflash.sh
 
+  nvme_pin_pid=""
+  if [ -n "${ROOTFS_NVME_PCI:-}" ] && [ "$EXTERNAL_ROOTFS_DRIVE" -eq 1 ] && [ "$qspi_only" -eq 0 ]; then
+    echo "Pinning the NVMe flash target to PCIe $ROOTFS_NVME_PCI" | tee -a "$logfile"
+    pin_rootfs_nvme_t264 "$ROOTFS_NVME_PCI" >nvme-pin.log 2>&1 &
+    nvme_pin_pid=$!
+  fi
+
   step_banner "Running unified flash"
   # uniflash_flags is a built-up argument list and must word-split.
   # shellcheck disable=SC2086
   ./out/doflash.sh $uniflash_flags 2>&1 | tee -a "$logfile"
   uniflash_rc="${PIPESTATUS[0]}"
+
+  # Fail closed: without the pin the external image went to whichever NVMe
+  # happened to be nvme0n1.
+  if [ -n "$nvme_pin_pid" ]; then
+    wait "$nvme_pin_pid"
+    tee -a "$logfile" <nvme-pin.log
+    if ! grep -q "^NVME-PINNED $ROOTFS_NVME_PCI nvme0n1" nvme-pin.log; then
+      echo "ERR: could not pin the NVMe flash target to $ROOTFS_NVME_PCI; the image may be on another disk" | tee -a "$logfile"
+      exit 1
+    fi
+  fi
 
   # Trigger device exit from the flashing initramfs.
   #
