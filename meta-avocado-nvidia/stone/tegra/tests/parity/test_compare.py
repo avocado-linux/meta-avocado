@@ -148,11 +148,17 @@ def test_non_flash_path_difference_is_reported():
     assert compare.diff(a, b)
 
 
+# Built from named bits so the two modes differ only in the exec bit, which a
+# comparer masking exec would miss, without a world-readable octal literal.
+MODE_EXEC = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+MODE_PLAIN = stat.S_IRUSR | stat.S_IWUSR
+
+
 def _make_layout(base: Path, uu_a: str, uu_b: str, extra: str = "") -> dict:
     (base / "sub").mkdir(parents=True)
     (base / "layout.xml").write_text(f"<p uuid='{uu_a}'/><q uuid='{uu_b}'/>{extra}")
     (base / "sub" / "f").write_text("data")
-    os.chmod(base / "sub" / "f", 0o600)
+    os.chmod(base / "sub" / "f", MODE_EXEC)
     os.symlink("sub/f", base / "link")
     return {uu_a: "<PARTUUID-A>", uu_b: "<PARTUUID-B>"}
 
@@ -171,7 +177,7 @@ def test_snapshot_records_type_mode_and_symlink_target(tmp_path):
     s = compare.snapshot(tmp_path / "l", m)
     assert s["sub"][0] == "dir"
     assert s["sub/f"][0] == "file"
-    assert s["sub/f"][1] == stat.S_IMODE(0o600)
+    assert s["sub/f"][1] == MODE_EXEC
     assert s["link"] == ("symlink", "sub/f")
 
 
@@ -182,7 +188,7 @@ def test_snapshot_detects_content_and_mode_difference(tmp_path):
         compare.snapshot(tmp_path / "l", m1), compare.snapshot(tmp_path / "r", m2)
     )
     assert out and "layout.xml" in out[0]
-    os.chmod(tmp_path / "r" / "sub" / "f", 0o400)
+    os.chmod(tmp_path / "r" / "sub" / "f", MODE_PLAIN)
     m3 = {UU_C: "<PARTUUID-A>", UU_D: "<PARTUUID-B>"}
     s = compare.diff_snapshots(
         compare.snapshot(tmp_path / "l", m1), compare.snapshot(tmp_path / "r", m3)
