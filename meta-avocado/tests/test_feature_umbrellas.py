@@ -46,6 +46,42 @@ class Umbrellas(unittest.TestCase):
         self.assertRegex(src, r"AVOCADO_SKIP_WEB_ENGINES")
         self.assertRegex(src, r"qtwebengine")
 
+    def test_almost_complete_no_qt_is_almost_complete_minus_qt(self):
+        """The no-qt file copies the include list by hand; this is what keeps the copy honest."""
+        almost = includes(FEATURE / "almost-complete.yml")
+        no_qt = includes(FEATURE / "almost-complete-no-qt.yml")
+        self.assertIn("kas/feature/qt.yml", almost)
+        self.assertEqual(no_qt, [f for f in almost if f != "kas/feature/qt.yml"])
+
+    def test_almost_complete_no_qt_keeps_the_web_engine_skip(self):
+        skip = re.compile(r'^\s*AVOCADO_SKIP_WEB_ENGINES\s*=\s*"1"\s*$', re.M)
+        self.assertRegex((FEATURE / "almost-complete-no-qt.yml").read_text(), skip)
+
+
+MACHINE = ROOT / "meta-avocado-arm64" / "conf" / "machine" / "avocado-arm64-uefi-v9.conf"
+
+
+class Armv8Userland(unittest.TestCase):
+    """kas/feature/armv8-userland.yml is what made Avocado OS boot on a vSoC with an Armv8.2-class CPU."""
+
+    def test_overlay_sets_the_baseline_aarch64_tune(self):
+        text = (FEATURE / "armv8-userland.yml").read_text()
+        self.assertRegex(text, re.compile(r'^\s*DEFAULTTUNE\s*=\s*"aarch64"\s*$', re.M))
+
+    def test_machine_assigns_its_tune_weakly_so_the_overlay_wins(self):
+        """A hard assignment in the machine file would beat the overlay's local.conf value silently."""
+        text = MACHINE.read_text()
+        assigned = re.findall(r"^\s*DEFAULTTUNE\s*(\?\??=|:=|\+=|=)", text, re.M)
+        self.assertTrue(assigned, "the machine no longer sets DEFAULTTUNE at all")
+        self.assertEqual(set(assigned), {"?="})
+
+    def test_overlay_is_not_part_of_any_umbrella(self):
+        """It is opt-in: no umbrella may pull the baseline tune in for every build."""
+        for umbrella in FEATURE.glob("*.yml"):
+            if umbrella.name == "armv8-userland.yml":
+                continue
+            self.assertNotIn("kas/feature/armv8-userland.yml", includes(umbrella), umbrella.name)
+
 
 if __name__ == "__main__":
     unittest.main()
