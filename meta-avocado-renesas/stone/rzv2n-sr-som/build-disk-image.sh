@@ -151,6 +151,9 @@ for i in $(seq 0 $((${#PART_NAMES[@]} - 1))); do
   if [ -n "${PART_NAMES[i]}" ]; then
     SGDISK_ARGS+=("-c" "${pnum}:${PART_NAMES[i]}")
   fi
+  # A partition the manifest doesn't pin gets a fresh GUID from sgdisk, so
+  # each provisioned disk has its own PARTUUIDs and the root=PARTUUID= U-Boot
+  # reads from the booted disk names that disk alone.
   if [ -n "${PART_UUIDS[i]}" ]; then
     SGDISK_ARGS+=("-u" "${pnum}:${PART_UUIDS[i]}")
   fi
