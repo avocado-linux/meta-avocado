@@ -405,7 +405,10 @@ if [ -n "$esp_image" ]; then
     #   UKI carries no id, and slot detection, bless and rollback all fail with
     #   "no entry in EFI/Linux carries AVOCADO_OS_BUILD_ID".
     rootfs_osrel="$AVOCADO_PREFIX/rootfs/usr/lib/os-release"
-    sidecar=$(ls "$input_dir"/avocado-image-rootfs-*.os-release 2>/dev/null | head -n 1)
+    sidecar=""
+    for f in "$input_dir"/avocado-image-rootfs-*.os-release; do
+      [ -f "$f" ] && { sidecar="$f"; break; }
+    done
     if [ -f "$rootfs_osrel" ]; then
       grep -vE '^(IMAGE_VERSION|IMAGE_ID|AVOCADO_OS_BUILD_ID)=' "$rootfs_osrel" >"$uki_dir/osrel"
       build_id=""
