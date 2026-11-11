@@ -4,6 +4,8 @@ Date: Sun, 1 Mar 2026 15:26:47 +0200
 Subject: [PATCH] dts/renesas: enable mali gpu
 
 Signed-off-by: Beniamin Sandu <b.sandu@peridio.com>
+
+Upstream-Status: Inappropriate [SolidRun RZ/V2N SoM specific]
 ---
  .../boot/dts/renesas/rzv2n-hummingboard-iiot-common.dtsi    | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)

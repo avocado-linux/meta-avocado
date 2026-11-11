@@ -34,3 +34,8 @@ SRC_URI:append:rzv2n-sr-som = " \
 # those DDR fixes baked into the source tree — applying the upstream patch
 # reverse-applies and breaks do_patch. Drop it on rzv2n-sr-som.
 SRC_URI:remove:rzv2n-sr-som = "file://0000-ddr_param_def_lpddr4-rzv2n_1.patch"
+
+# Wrynose meta-arm's firmware.bbclass installs into /firmware/${PN};
+# meta-rz-bsp's firmware-pack (and its own TF-A install appends) read
+# bl2.bin/fip.bin from /firmware. Keep the flat layout they expect.
+FIRMWARE_DIR = "${FIRMWARE_BASE_DIR}"

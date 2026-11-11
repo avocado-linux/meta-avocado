@@ -5,6 +5,30 @@
     "provision_default": "sd",
     "update_strategy": "gpt-ab"
   },
+  "update": {
+    "slot_detection": { "type": "uboot-env", "var": "avocado_boot_slot" },
+    "os_artifacts": {
+      "boot": { "image_key": "boot", "slot_partitions": ["boot-a", "boot-b"] },
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["rootfs-a", "rootfs-b"] }
+    },
+    "activate": [
+      {
+        "type": "uboot-env",
+        "set": {
+          "avocado_boot_slot": "{inactive_slot}",
+          "{inactive_slot}.avocado_platform": "{platform}",
+          "{inactive_slot}.avocado_architecture": "{architecture}",
+          "avocado_boot_tries": "3"
+        }
+      }
+    ],
+    "rollback": [
+      { "type": "uboot-env", "set": { "avocado_boot_slot": "{previous_slot}", "avocado_boot_tries": "" } }
+    ],
+    "commit": [
+      { "type": "uboot-env", "set": { "avocado_boot_tries": "" } }
+    ]
+  },
   "provision": {
     "envs": {
       "device_info": {
@@ -41,7 +65,8 @@
       }
     },
     "files": [
-      "build-disk-image.sh"
+      "build-disk-image.sh",
+      "ums-disk.sh"
     ],
     "profiles": {
       "serial": {
@@ -84,21 +109,24 @@
               { "in": "rzv2n-hummingboard-iiot-panel-dsi-WJ70N3TYJHMNG0.dtbo", "out": "rzv2n-hummingboard-iiot-panel-dsi-WJ70N3TYJHMNG0.dtbo" },
               { "in": "rzv2n-hummingboard-iiot-csi-camera-imx678.dtbo", "out": "rzv2n-hummingboard-iiot-csi-camera-imx678.dtbo" },
               { "in": "avocado-image-initramfs-rzv2n-sr-som.cpio.zst", "out": "avocado-image-initramfs-rzv2n-sr-som.cpio.zst" },
-              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" }
+              { "in": "extlinux.conf", "out": "extlinux/extlinux.conf" },
+              { "in": "fip-avocado-rzv2n-sr-som.bin", "out": "bootchain/fip.bin" }
             ]
           }
         },
         "rootfs": "avocado-image-rootfs-rzv2n-sr-som.erofs-lz4",
         "var": "avocado-image-var-rzv2n-sr-som.btrfs",
+        "uboot_env": "uboot.env",
         "initramfs": "avocado-image-initramfs-rzv2n-sr-som.cpio.zst",
         "kernel": "Image"
       },
       "partitions": [
-        { "name": "boot-a", "image": "boot", "partition_type": "EF00", "partition_uuid": "7569c01d-94e5-4fcb-ac9f-2ec8a43225c9", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
-        { "name": "boot-b", "partition_type": "EF00", "partition_uuid": "7ba34e50-0b05-4323-8283-9af74af17bc1", "size": 256, "size_unit": "mebibytes" },
-        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "bb6c0eca-50a4-4b9d-80d5-6f6ec33bdf66", "size": 128, "size_unit": "mebibytes" },
-        { "name": "rootfs-b", "partition_type": "8305", "partition_uuid": "02969f9b-d2c1-45f7-a90a-c36da86d576e", "size": 128, "size_unit": "mebibytes" },
-        { "name": "var", "image": "var", "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "expand": "true" }
+        { "name": "uboot-env", "image": "uboot_env", "offset": 512, "offset_unit": "kibibytes", "offset_redundant": 640, "offset_redundant_unit": "kibibytes", "size": 256, "size_unit": "kibibytes", "in-partition-table": "false" },
+        { "name": "boot-a", "image": "boot", "partition_type": "EF00", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
+        { "name": "boot-b", "partition_type": "EF00", "size": 256, "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "size": 128, "size_unit": "mebibytes" },
+        { "name": "rootfs-b", "partition_type": "8305", "size": 128, "size_unit": "mebibytes" },
+        { "name": "var", "image": "var", "partition_type": "8300", "expand": "true" }
       ]
     }
   }

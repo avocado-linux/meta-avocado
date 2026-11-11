@@ -1,0 +1,42 @@
+From 6e818ebd2d40a84e7c7424f11f1cc426d41251af Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 9 Nov 2026 17:29:21 -0500
+Subject: [PATCH 1/2] flash_writer_tool: add --no-wait-prompt
+
+Lets a fixture that applies power before the tool opens the port (the
+prompt is then already gone: opening an FTDI port purges its RX FIFO)
+drive the download.
+
+Upstream-Status: Pending
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ flash-tools/flash_writer_tool.py | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/flash-tools/flash_writer_tool.py b/flash-tools/flash_writer_tool.py
+index 3d4e32a..0b9fcf7 100644
+--- a/flash-tools/flash_writer_tool.py
++++ b/flash-tools/flash_writer_tool.py
+@@ -37,6 +37,10 @@ def parse_args():
+     parser.add_argument('--bl2', help='Path to BL2 image (.srec or .bin)')
+     parser.add_argument('--fip', help='Path to FIP image (.srec or .bin)')
+     parser.add_argument('--overlays', help='Path to FIT image with DT overlays (eMMC only)')
++    parser.add_argument('--no-wait-prompt', action='store_true',
++                        help='The board is already in SCIF download mode and has printed its '
++                             'prompt (e.g. power was applied by a test fixture before this '
++                             'tool opened the port): send the flash writer without waiting for it')
+ 
+     args = parser.parse_args()
+ 
+@@ -298,7 +302,10 @@ def main():
+     print("Please reset the board into SCIF download mode...")
+     # RZ/V2N outputs "-- Load Program to SRAM" when ready for download
+     # Older RZ/G2L boards output "please send !"
+-    wait_for_prompt(ser, "Load Program to SRAM", timeout=30)
++    if args.no_wait_prompt:
++        print("Not waiting for the download prompt (--no-wait-prompt).")
++    else:
++        wait_for_prompt(ser, "Load Program to SRAM", timeout=30)
+ 
+     start_time = time.time()
+     print(f"\nDownloading flash writer: {args.fw}")

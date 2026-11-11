@@ -1,0 +1,85 @@
+From 52e37e27f440917ee0a202ef3782e7b9233db1a3 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 9 Nov 2026 17:55:50 -0500
+Subject: [PATCH 2/2] flash_writer_tool: wait for each SPI write to finish
+
+It sent 'y' blindly and returned while the flash writer was still
+erasing/programming, so a caller that powers off afterwards cut the
+write short (BL2 then fails to find BL31 in a half-written FIP). Answer
+the erase prompt only when asked, and wait for the '>' prompt.
+
+Upstream-Status: Pending
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ flash-tools/flash_writer_tool.py | 44 ++++++++++++++++++++++++++------
+ 1 file changed, 36 insertions(+), 8 deletions(-)
+
+diff --git a/flash-tools/flash_writer_tool.py b/flash-tools/flash_writer_tool.py
+index 0b9fcf7..05ff117 100644
+--- a/flash-tools/flash_writer_tool.py
++++ b/flash-tools/flash_writer_tool.py
+@@ -105,6 +105,40 @@ def is_srec(file_path):
+     return file_path.lower().endswith('.srec')
+ 
+ 
++def wait_for_any(ser, markers, timeout):
++    """Read until the buffer ends with one of markers; return the marker."""
++    end_time = time.time() + timeout
++    buffer = ''
++    while time.time() < end_time:
++        data = ser.read(ser.in_waiting or 1)
++        if data:
++            decoded = data.decode(errors='ignore')
++            buffer += decoded
++            sys.stdout.write(decoded)
++            sys.stdout.flush()
++            tail = buffer.rstrip(' \r\n')
++            for m in markers:
++                if tail.endswith(m):
++                    return m
++        else:
++            time.sleep(0.1)
++    print(f"\nBuffer received: {repr(buffer)}")
++    raise Exception(f"Timeout waiting for one of {markers}")
++
++
++def finish_spi_write(ser, name):
++    """Confirm the erase if asked, then wait until the write has finished.
++
++    The flash writer asks (y/n) only when the area is not blank, then erases
++    and programs before printing its '>' prompt again. Returning before that
++    prompt lets the caller cut power mid-write.
++    """
++    if wait_for_any(ser, ["(y/n)", ">"], timeout=120) == "(y/n)":
++        ser.write(b"y")
++        wait_for_any(ser, [">"], timeout=300)
++    print(f"\n{name} written to SPI NOR flash.")
++
++
+ def spi_write_srec(ser, name, ram_addr, flash_addr, file_path):
+     """Write S-record file to SPI NOR flash using XLS2 command.
+ 
+@@ -126,10 +160,7 @@ def spi_write_srec(ser, name, ram_addr, flash_addr, file_path):
+     send_file(ser, file_path)
+     time.sleep(0.5)
+ 
+-    # Confirm erase if flash is not blank
+-    send_command(ser, "y")
+-    time.sleep(0.5)
+-    print(f"{name} written to SPI NOR flash.")
++    finish_spi_write(ser, name)
+ 
+ 
+ def spi_write_bin(ser, name, flash_addr, file_path):
+@@ -156,10 +187,7 @@ def spi_write_bin(ser, name, flash_addr, file_path):
+     send_file(ser, file_path)
+     time.sleep(0.5)
+ 
+-    # Confirm erase if flash is not blank
+-    send_command(ser, "y")
+-    time.sleep(0.5)
+-    print(f"{name} written to SPI NOR flash.")
++    finish_spi_write(ser, name)
+ 
+ 
+ def spi_write(ser, name, ram_addr, flash_addr, file_path):
