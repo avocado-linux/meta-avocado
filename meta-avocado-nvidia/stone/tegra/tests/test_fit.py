@@ -543,9 +543,25 @@ def test_an_oversized_decimal_size_is_refused_not_a_value_error(tmp_path, digits
     assert "not a number" in refusal(tmp_path, m)
 
 
+# the digit bound is 31: pins the boundary so widening or narrowing the pattern fails a test
+def test_a_31_digit_decimal_size_is_read(tmp_path):
+    m = stage(tmp_path, layout(app="9" * 31), rootfs=5)
+    assert run(tmp_path, m)[0].startswith("fit: rootfs 5 <= APP ")
+
+
+def test_a_32_digit_decimal_size_is_refused(tmp_path):
+    m = stage(tmp_path, layout(app="9" * 32), rootfs=5)
+    assert "not a number" in refusal(tmp_path, m)
+
+
 # the flash's sed rewrites every line, so every <filename> of a partition is checked, not only the first
 def test_a_second_filename_carrying_a_placeholder_is_refused(tmp_path):
     xml = layout(extra='<partition name="z"><filename>a</filename><filename>APPFILE</filename></partition>\n')
+    assert "APPFILE" in refusal(tmp_path, stage(tmp_path, xml))
+
+
+def test_a_first_filename_carrying_a_placeholder_is_refused_when_the_second_is_ordinary(tmp_path):
+    xml = layout(extra='<partition name="z"><filename>APPFILE</filename><filename>a</filename></partition>\n')
     assert "APPFILE" in refusal(tmp_path, stage(tmp_path, xml))
 
 

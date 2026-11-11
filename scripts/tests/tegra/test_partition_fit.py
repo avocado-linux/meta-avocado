@@ -201,6 +201,21 @@ def test_an_oversized_decimal_size_is_a_refusal_not_a_value_error(deploy_tree, t
     assert "not a number" in problems[0].what
 
 
+# the digit bound is 31: pins the boundary so widening or narrowing the pattern fails a test
+def test_a_31_digit_decimal_size_is_read(deploy_tree, template, make_layout):
+    _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": "9" * 31}))
+    _size_rootfs(deploy_tree, template, 5)
+    assert _check(deploy_tree, template) == []
+
+
+def test_a_32_digit_decimal_size_is_a_refusal(deploy_tree, template, make_layout):
+    _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": "9" * 32}))
+    _size_rootfs(deploy_tree, template, 5)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "not a number" in problems[0].what
+
+
 @pytest.mark.parametrize("raw,image", [("0x10", 16), ("0XfF", 255), ("16", 16), ("0", 0), ("5", 5), ("7", 7)])
 def test_a_plain_decimal_or_hex_size_is_read(deploy_tree, template, make_layout, raw, image):
     _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": raw}))
