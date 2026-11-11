@@ -7,7 +7,7 @@
 # same host (another board's, a card reader) could hold - and write a disk
 # image to it.
 
-# The gadget's USB id: CONFIG_USB_GADGET_VENDOR_NUM/PRODUCT_NUM in fastboot.cfg.
+# The gadget's USB id: CONFIG_USB_GADGET_VENDOR_NUM/PRODUCT_NUM in usb-gadget.cfg.
 AVOCADO_RZ_UMS_ID="${AVOCADO_RZ_UMS_ID:-18d1:0d02}"
 
 # Print the /dev node of each whole disk whose USB device is the UMS gadget.

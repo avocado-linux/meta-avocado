@@ -4,17 +4,18 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}/env:"
 SRC_URI:append = " \
   file://avocado.cfg \
   file://avocado-env-mmc.cfg \
-  file://fastboot.cfg \
+  file://usb-gadget.cfg \
 "
 
-# A/B boot (BOOTVARS = "ubootenv"): a redundant environment in the eMMC that
-# avocadoctl flips with fw_setenv, and env/${MACHINE}.txt (mkenvimage, via
-# meta-avocado-distro's u-boot-env.inc) carrying the boot flow that reads it.
-# Stone writes that image at provision time.
+# A/B boot (BOOTVARS = "ubootenv"): a redundant environment in the eMMC holding
+# the slot state, which avocadoctl flips with fw_setenv. env/${MACHINE}.txt
+# seeds it (mkenvimage, via meta-avocado-distro's u-boot-env.inc) and stone
+# writes that image at provision time. The boot flow that reads it is compiled
+# into U-Boot from avocado-rzv2n-sr-som.env (below), not taken from this file.
 MKENVIMAGE_EXTRA_ARGS:bootvars-ubootenv = "-r"
 
-# USB gadget (fastboot) on RZ/V2N: SolidRun's legacy USBHS port only knew
-# R-Car Gen3 / RZ/G2L addresses.
+# USB gadget (UMS provisioning, the fastboot fallback) on RZ/V2N: SolidRun's
+# legacy USBHS port only knew R-Car Gen3 / RZ/G2L addresses.
 SRC_URI:append:rzv2n-sr-som = " \
   file://0001-usb-gadget-rcar-support-the-RZ-V2H-P-and-RZ-V2N-USBH.patch \
   file://0002-usb-gadget-rcar-set-ep-desc-in-usbhsg_ep_enable.patch \
