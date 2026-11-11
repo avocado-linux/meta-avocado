@@ -58,14 +58,22 @@ wait_ums_disk() {
 # nothing reads it. oflag=direct + flushbufs: every block is on the device
 # before this returns, since the board is power-cycled right after.
 write_disk_image() {
-  local image=$1 target=$2 part img_bytes dev_bytes
+  local image=$1 target part img_bytes dev_bytes name
+  # Any path to the disk (/dev/disk/by-id/..., a symlink) names its kernel
+  # node, which /sys/block and the partition unmounts below go by.
+  target=$(readlink -f "$2")
+  name=$(basename "$target")
+  if [ ! -b "$target" ] || [ ! -e "/sys/block/$name" ]; then
+    echo "ERROR: $2 is not a whole disk" >&2
+    return 1
+  fi
   img_bytes=$(stat -c %s "$image")
-  dev_bytes=$(($(cat "/sys/block/$(basename "$target")/size") * 512))
+  dev_bytes=$(($(cat "/sys/block/$name/size") * 512))
   if [ "$img_bytes" -gt "$dev_bytes" ]; then
     echo "ERROR: $image ($img_bytes bytes) does not fit on $target ($dev_bytes bytes)" >&2
     return 1
   fi
-  for part in /sys/block/"$(basename "$target")"/"$(basename "$target")"*; do
+  for part in /sys/block/"$name"/"$name"*; do
     [ -e "$part" ] || continue
     umount "/dev/$(basename "$part")" 2>/dev/null || true
   done

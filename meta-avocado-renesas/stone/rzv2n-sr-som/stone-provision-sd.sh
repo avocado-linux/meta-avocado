@@ -108,7 +108,10 @@ RZ/V2N SoM SD provisioning
 
 WARNING: this will overwrite ALL data on $target.
 EOF
-if [ "${AVOCADO_RZ_BOARD_READY:-0}" != "1" ]; then
+# BOARD_READY skips the question only for the board's own UMS gadget, found by
+# its USB id; a disk picked on the host (AVOCADO_SD_DEVICE, the removable-disk
+# scan) could be any card or stick, so it is always confirmed.
+if [ "${AVOCADO_RZ_SD_VIA_UMS:-0}" != "1" ] || [ "${AVOCADO_RZ_BOARD_READY:-0}" != "1" ]; then
   read -r -p "Continue? [y/N] " confirm
   case "$confirm" in
     [yY] | [yY][eE][sS]) ;;
@@ -124,7 +127,7 @@ write_disk_image "$DISK_IMAGE" "$target"
 
 cat <<EOF
 
-SD card written. Eject, insert into the SoM, power-cycle.
-With Phase 1 done, U-Boot's distro_bootcmd will probe mmc0 (eMMC),
-then mmc1 (SD), and boot from /extlinux/extlinux.conf on boot-a.
+SD card written. Insert it into the SoM (or stop 'ums' if it was written
+in the board) and power-cycle. U-Boot boots the microSD's slot A when the
+eMMC carries no OS; with an OS on the eMMC, the eMMC boots.
 EOF
