@@ -52,11 +52,12 @@ wait_ums_disk() {
   return 1
 }
 
-# write_disk_image <image> <block device>: the whole image, GPT included.
-# conv=sparse skips the image's all-zero blocks (the empty B slots and the
-# unused space inside the filesystems), leaving whatever the disk held there:
-# nothing reads it. oflag=direct + flushbufs: every block is on the device
-# before this returns, since the board is power-cycled right after.
+# write_disk_image <image> <block device>: the whole image, GPT included,
+# every block of it. Skipping all-zero blocks (conv=sparse) would leave the
+# disk's old bytes wherever the image has zeros, inside files too: a reused
+# disk then reads back wrong data. Writing the zeros also empties the B slots.
+# oflag=direct + flushbufs: every block is on the device before this returns,
+# since the board is power-cycled right after.
 write_disk_image() {
   local image=$1 target part img_bytes dev_bytes name
   # Any path to the disk (/dev/disk/by-id/..., a symlink) names its kernel
@@ -78,7 +79,7 @@ write_disk_image() {
     umount "/dev/$(basename "$part")" 2>/dev/null || true
   done
   echo "Writing $(basename "$image") ($((img_bytes / 1048576)) MiB) to $target ($((dev_bytes / 1073741824)) GiB)..."
-  dd if="$image" of="$target" bs=1M conv=sparse,fsync oflag=direct status=progress
+  dd if="$image" of="$target" bs=1M conv=fsync oflag=direct status=progress
   sync
   blockdev --flushbufs "$target" 2>/dev/null || true
 }
