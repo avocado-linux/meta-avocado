@@ -529,10 +529,34 @@ def test_a_size_that_is_not_plain_decimal_or_hex_is_refused(tmp_path, raw):
     assert f"{raw!r}, not a number" in refusal(tmp_path, m)
 
 
-@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0X10", 16), ("0xFF", 255), ("0Xff", 255), ("16", 16), ("0", 0), ("  16  ", 16)])
+@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0X10", 16), ("0xFF", 255), ("0Xff", 255), ("16", 16), ("0", 0), ("  16  ", 16), ("5", 5), ("7", 7)])
 def test_plain_decimal_and_hex_sizes_are_accepted(tmp_path, raw, image):
     m = stage(tmp_path, layout(app=raw), rootfs=image)
     assert run(tmp_path, m)[0] == f"fit: rootfs {image} <= APP {image}"
+
+
+# int() raises ValueError past 4300 decimal digits; the size is refused like any other non-number instead
+@pytest.mark.parametrize("digits", [4301, 5000])
+def test_an_oversized_decimal_size_is_refused_not_a_value_error(tmp_path, digits):
+    raw = "9" * digits
+    m = stage(tmp_path, layout(app=raw), rootfs=5)
+    assert "not a number" in refusal(tmp_path, m)
+
+
+# the flash's sed rewrites every line, so every <filename> of a partition is checked, not only the first
+def test_a_second_filename_carrying_a_placeholder_is_refused(tmp_path):
+    xml = layout(extra='<partition name="z"><filename>a</filename><filename>APPFILE</filename></partition>\n')
+    assert "APPFILE" in refusal(tmp_path, stage(tmp_path, xml))
+
+
+def test_a_partition_with_two_ordinary_filenames_is_accepted(tmp_path):
+    xml = layout(extra='<partition name="z"><filename>a.bin</filename><filename>b.bin</filename></partition>\n')
+    assert len(run(tmp_path, stage(tmp_path, xml))) == 2
+
+
+def test_a_second_filename_in_the_esp_partition_must_be_the_staged_image_too(tmp_path):
+    xml = layout().replace("<filename>esp.img</filename>", "<filename>esp.img</filename><filename>other.img</filename>")
+    assert "other.img" in refusal(tmp_path, stage(tmp_path, xml))
 
 
 # the collision message names the file-name form of the pattern, not Python's escaping of it

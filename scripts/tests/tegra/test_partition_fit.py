@@ -188,9 +188,20 @@ def test_a_size_that_is_not_plain_decimal_or_hex_is_a_refusal(deploy_tree, templ
     problems = _check(deploy_tree, template)
     assert len(problems) == 1
     assert "APP" in problems[0].what and "cannot be verified" in problems[0].what
+    assert repr(raw) in problems[0].what
 
 
-@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0XfF", 255), ("16", 16), ("0", 0)])
+@pytest.mark.parametrize("digits", [4301, 5000])
+def test_an_oversized_decimal_size_is_a_refusal_not_a_value_error(deploy_tree, template, make_layout, digits):
+    # int() raises ValueError past 4300 digits; the wrapper refuses it like any other non-number.
+    _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": "9" * digits}))
+    _size_rootfs(deploy_tree, template, 5)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "not a number" in problems[0].what
+
+
+@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0XfF", 255), ("16", 16), ("0", 0), ("5", 5), ("7", 7)])
 def test_a_plain_decimal_or_hex_size_is_read(deploy_tree, template, make_layout, raw, image):
     _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": raw}))
     _size_rootfs(deploy_tree, template, image)

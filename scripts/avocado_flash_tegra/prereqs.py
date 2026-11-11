@@ -106,7 +106,8 @@ LAYOUT_NAMES = ("external-flash.xml.in", "external-flash.xml")
 # whose partition is visible in the real external-flash.xml are listed.
 FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
 MAX_LAYOUT_BYTES = 4 * 1024 * 1024
-_SIZE = re.compile(r"0[xX][0-9a-fA-F]+|[1-9][0-9]*|0")
+# Decimal is capped at 31 digits so int() never meets its 4300-digit limit; a longer size is no partition size anyway.
+_SIZE = re.compile(r"0[xX][0-9a-fA-F]+|[1-9][0-9]{0,30}|0")
 _PLAIN_ENCODINGS = ("utf-8", "us-ascii")
 _ENCODING_DECL = re.compile(
     r"""^\s*<\?xml[^>]*?\sencoding\s*=\s*["']([^"']*)["']""", re.IGNORECASE

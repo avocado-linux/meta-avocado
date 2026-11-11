@@ -24,7 +24,8 @@ FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
 # initrd-flash writes the rootfs image into both slots, so the smaller one limits it.
 ROOTFS_SLOTS = ("APP", "APP_b")
 MAX_LAYOUT_BYTES = 4 * 1024 * 1024
-_SIZE = re.compile(r"0[xX][0-9a-fA-F]+|[1-9][0-9]*|0")
+# Decimal is capped at 31 digits so int() never meets its 4300-digit limit; a longer size is no partition size anyway.
+_SIZE = re.compile(r"0[xX][0-9a-fA-F]+|[1-9][0-9]{0,30}|0")
 _PLAIN_ENCODINGS = ("utf-8", "us-ascii")
 _ENCODING_DECL = re.compile(
     r"""^\s*<\?xml[^>]*?\sencoding\s*=\s*["']([^"']*)["']""", re.IGNORECASE
@@ -63,8 +64,8 @@ def _plain_text(data: bytes) -> tuple[str | None, str | None]:
 class _Layout(NamedTuple):
     """What the checks read from a layout.
 
-    `sizes` is keyed by partition name (a repeated name is DUPLICATE); `parts` lists every partition element in order, named
-    or not, because the flash's sed rewrites every line whatever the name.
+    `sizes` is keyed by partition name (a repeated name is DUPLICATE); `parts` lists every <filename> of every partition
+    element in order, named or not, because the flash's sed rewrites every line whatever the name.
     """
 
     sizes: dict
@@ -103,7 +104,9 @@ def _parse_layout(path) -> _Layout:
     parts: list = []
     for part in root.iter("partition"):
         name = part.get("name")
-        parts.append((name, (part.findtext("filename") or "").strip()))
+        # one entry per <filename>, since the sed rewrites each line; a partition with none still gets one empty entry
+        for filename in part.findall("filename") or [None]:
+            parts.append((name, (filename.text or "").strip() if filename is not None else ""))
         if name is None:
             continue
         if name in sizes:

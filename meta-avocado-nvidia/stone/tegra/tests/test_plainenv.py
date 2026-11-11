@@ -417,27 +417,22 @@ def _timed(fn, tmp_path, line):
     return time.monotonic() - started, result
 
 
+# Doubling the input must not much more than double the time. A ratio holds on a loaded host where an
+# absolute bound would flake. A quadratic scan approaches a ratio of 4 from below, so the bound sits
+# under it; the sizes are the smallest at which a quadratic scan clears that bound by a wide margin.
 def test_a_very_long_line_of_prefixes_is_scanned_in_linear_time(tmp_path):
-    # Doubling the input must not much more than double the time. A ratio holds on a loaded
-    # host where an absolute bound would flake, and a quadratic scan misses it by a wide margin.
-    small, _ = _timed(refused, tmp_path, "then " * 150_000 + ". x")
-    large, msg = _timed(refused, tmp_path, "then " * 300_000 + ". x")
-    assert large < 4 * small + 0.5
+    small, _ = _timed(refused, tmp_path, "then " * 30_000 + ". x")
+    large, msg = _timed(refused, tmp_path, "then " * 60_000 + ". x")
+    assert large < 2.5 * small + 0.1
     assert ":2" in msg and "bash" in msg
 
 
-@pytest.mark.parametrize("tail", ["", ">", ">&"])
-def test_a_long_run_of_digits_is_scanned_in_linear_time(tmp_path, tail):
-    small, _ = _timed(read, tmp_path, "9" * 40_000 + tail)
-    large, _ = _timed(read, tmp_path, "9" * 80_000 + tail)
-    assert large < 3 * small + 0.3
-
-
-@pytest.mark.parametrize("tail", ["", ">", ">&"])
-def test_a_four_megabyte_line_of_digits_finishes(tmp_path, tail):
-    # Quadratic backtracking needs minutes here, so the bound is far above any loaded host's linear time.
-    elapsed, _ = _timed(read, tmp_path, "9" * 4_000_000 + tail)
-    assert elapsed < 20.0
+def test_a_long_run_of_digits_before_a_redirection_is_scanned_in_linear_time(tmp_path):
+    # `>` without the `&` is not a duplication, so a pattern that is not anchored rescans the run from
+    # every digit. (A bare digit run passed with the lookbehind removed, so it guards nothing.)
+    small, _ = _timed(read, tmp_path, "9" * 15_000 + ">")
+    large, _ = _timed(read, tmp_path, "9" * 30_000 + ">")
+    assert large < 2.5 * small + 0.1
 
 
 @pytest.mark.parametrize("line", ["2>&1 12>&- . f", "12>&- . f", "x=1 2>&1 12>&- source f"])
