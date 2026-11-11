@@ -172,7 +172,10 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
 
     # Oracle 512-597: boot device settings; an SD device from the environment wins.
     print(f"Boot media target: {media.value} (profile: {cfg.profile})")
-    settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)
+    device = settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)
+    # The staged env file is final here. The flash sources it with bash, so what it
+    # will use is read back instead of assumed; before the fit check, which reads it too.
+    device = settings.verify_staged_env(work, man, device)
 
     # Hardware-free, so it also runs under --prepare-only; refuses before any erase.
     # After the eMMC layout swap above, and after the wait: the parity harness pins
@@ -206,7 +209,9 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
     # Deviation device-confirmation: after the prepare-only return, so it never
     # prompts without a flash; before the recheck, so the operator confirms the
     # board the flash will see.
-    confirm.confirm_device(board, media, flags=flags, force=cfg.force, isatty=confirm.stdin_is_tty, read=input)
+    confirm.confirm_device(
+        board, media, flags=flags, device=device, force=cfg.force, isatty=confirm.stdin_is_tty, read=input
+    )
 
     # Deviation one-board-only: the flash starts right after this check, on the
     # board the wait saw and no other.

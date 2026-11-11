@@ -8,6 +8,10 @@ from pathlib import Path
 
 from . import EngineError
 
+# Fixed destinations copy_images stages an image under, whatever the manifest names it.
+ESP_IMAGE_NAME = "esp.img"
+FLASH_INITRAMFS_NAME = "initrd-flash.img"
+
 
 @dataclass(frozen=True)
 class Key:
@@ -151,3 +155,41 @@ def require_image_keys(manifest: Manifest) -> None:
             "manifest names no file for: "
             + ", ".join(f"storage_devices.rootdisk.images.{k}" for k in missing)
         )
+    require_distinct_staged_names(manifest)
+
+
+def staged_names(manifest: Manifest) -> dict[str, tuple[str, ...]]:
+    """The file names copy_images stages each named image under, per manifest key.
+
+    The TOS destination is read from the BSP env file at staging time, so only
+    its own basename is known here.
+    """
+    base = os.path.basename
+    names: dict[str, tuple[str, ...]] = {}
+    for key in ("rootfs", "var", "initramfs", "tegraflash_tos", "bpmp_dtb"):
+        if getattr(manifest, key):
+            names[key] = (base(getattr(manifest, key)),)
+    if manifest.tegraflash_initramfs:
+        names["tegraflash_initramfs"] = (FLASH_INITRAMFS_NAME,)
+    if manifest.tegraflash_esp:
+        names["tegraflash_esp"] = (base(manifest.tegraflash_esp), ESP_IMAGE_NAME)
+    if manifest.dtb:
+        names["dtb"] = (base(manifest.dtb), f"kernel_{base(manifest.dtb)}")
+    return names
+
+
+def require_distinct_staged_names(manifest: Manifest) -> None:
+    """Refuse two images that stage under one name.
+
+    Staging replaces the file, so the later copy silently replaces the earlier
+    and the flash writes the wrong image, one the size check never measured.
+    """
+    owner: dict[str, str] = {}
+    for key, names in staged_names(manifest).items():
+        for name in names:
+            other = owner.setdefault(name, key)
+            if other != key:
+                raise EngineError(
+                    f"images.{other} and images.{key} would both be staged as {name!r}; "
+                    "the later copy would replace the earlier one"
+                )

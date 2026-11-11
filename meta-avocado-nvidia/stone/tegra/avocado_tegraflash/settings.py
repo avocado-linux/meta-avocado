@@ -1,11 +1,14 @@
 """Boot-device settings for the staged BSP (oracle lines 529-585)."""
 
+import os
 import re
 from collections.abc import Callable
 from pathlib import Path
 
 from . import EngineError, Media
 from .files import copy_replacing_link, read_text_preserving, write_text_replacing_link
+from .manifest import Manifest
+from .plainenv import read_plain_env
 
 ENV_FILE = ".env.initrd-flash"
 EMMC_LAYOUT = "internal-flash-emmc.xml"
@@ -46,7 +49,8 @@ def apply_boot_device(
     *,
     sd_device: str,
     log: Callable[[str], None] = print,
-) -> None:
+) -> str:
+    """Write the boot device into the staged env file; return the device node chosen."""
     env_file = Path(work_dir) / ENV_FILE
     if media is Media.NVME:
         device, partition = "nvme0n1", "nvme0n1p1"
@@ -86,3 +90,29 @@ def apply_boot_device(
             raise EngineError(f"{EMMC_LAYOUT} not found in BSP")
         copy_replacing_link(layout, Path(work_dir) / EXTERNAL_LAYOUT)
         log(f"Using eMMC flash layout ({EMMC_LAYOUT} -> {EXTERNAL_LAYOUT})")
+    return device
+
+
+def verify_staged_env(work_dir: Path, manifest: Manifest, expected_device: str) -> str:
+    """Read the staged env file as the flash will and return the effective ROOTFS_DEVICE.
+
+    Runs once the file is final. The rewrite above matches only column-0 lines,
+    but bash takes the last assignment in any form, so the value the profile
+    chose is not proof of the value the flash uses.
+    """
+    env_file = Path(work_dir) / ENV_FILE
+    plain = read_plain_env(env_file)
+    device = plain.get("ROOTFS_DEVICE")
+    if device != expected_device:
+        raise EngineError(
+            f"ROOTFS_DEVICE in {env_file} is {device!r} but the profile chose {expected_device!r}; "
+            "the flash would erase a different device than the one it was asked to"
+        )
+    datafile = plain.get("DATAFILE")
+    var_name = os.path.basename(manifest.var)
+    if datafile is not None and datafile != var_name:
+        raise EngineError(
+            f"DATAFILE in {env_file} is {datafile!r} but the engine staged {var_name!r}; "
+            "the flash would write a different file into the data partition"
+        )
+    return device

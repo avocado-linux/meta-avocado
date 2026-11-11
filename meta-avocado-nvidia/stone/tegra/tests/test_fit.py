@@ -7,12 +7,14 @@ from avocado_tegraflash.fit import require_fit
 from avocado_tegraflash.manifest import Manifest
 
 
-def layout(app="8192", esp="4096", extra="", app_b=None, esp_file=None):
+def layout(app="8192", esp="4096", extra="", app_b=None, esp_file="esp.img", app_file=None, app_b_file=None):
     parts = ""
     if app is not None:
-        parts += f'<partition name="APP" type="data"><size>{app}</size></partition>\n'
+        fname = f"<filename>{app_file}</filename>" if app_file else ""
+        parts += f'<partition name="APP" type="data"><size>{app}</size>{fname}</partition>\n'
     if app_b is not None:
-        parts += f'<partition name="APP_b" type="data"><size>{app_b}</size></partition>\n'
+        fname = f"<filename>{app_b_file}</filename>" if app_b_file else ""
+        parts += f'<partition name="APP_b" type="data"><size>{app_b}</size>{fname}</partition>\n'
     if esp is not None:
         fname = f"<filename>{esp_file}</filename>" if esp_file else ""
         parts += f'<partition name="esp" type="data"><size>{esp}</size>{fname}</partition>\n'
@@ -203,3 +205,42 @@ def test_an_esp_filename_other_than_the_staged_one_is_refused(tmp_path):
 def test_an_esp_filename_matching_the_staged_one_passes(tmp_path):
     m = stage(tmp_path, layout(esp_file="esp.img"))
     assert len(run(tmp_path, m)) == 2
+
+
+def test_a_missing_esp_filename_is_refused(tmp_path):
+    m = stage(tmp_path, layout(esp_file=""))
+    msg = refusal(tmp_path, m)
+    assert "esp" in msg and "no <filename>" in msg
+
+
+@pytest.mark.parametrize("line", ['export ROOTFS_IMAGE="big.img"', '  ROOTFS_IMAGE="big.img"', 'X=1; ROOTFS_IMAGE="big.img"'])
+def test_a_non_plain_rootfs_image_assignment_is_refused_not_measured(tmp_path, line):
+    m = stage(tmp_path, layout(app="10"), env=f'ROOTFS_IMAGE="rootfs.img"\n{line}\n')
+    (tmp_path / "big.img").write_bytes(b"\0" * 5000)
+    msg = refusal(tmp_path, m)
+    assert "sources this file with bash" in msg and ".env.initrd-flash:2" in msg
+
+
+def test_the_first_of_two_rootfs_images_plays_no_part(tmp_path):
+    m = stage(tmp_path, layout(), env='ROOTFS_IMAGE="first.img"\nROOTFS_IMAGE="last.img"\n')
+    msg = refusal(tmp_path, m)
+    assert "last.img" in msg and "first.img" not in msg
+
+
+@pytest.mark.parametrize("which", ["app_file", "app_b_file"])
+def test_a_literal_app_filename_that_is_not_the_staged_rootfs_is_refused(tmp_path, which):
+    m = stage(tmp_path, layout(app_b="8192", **{which: "big.ext4"}))
+    msg = refusal(tmp_path, m)
+    assert "big.ext4" in msg and ("APP_b" if which == "app_b_file" else "partition APP ") in msg
+
+
+@pytest.mark.parametrize("app,app_b", [("APPFILE", "APPFILE_b"), ("rootfs.img", "rootfs.img"), (None, None)])
+def test_app_filenames_that_name_the_placeholder_or_the_staged_rootfs_pass(tmp_path, app, app_b):
+    m = stage(tmp_path, layout(app_b="8192", app_file=app, app_b_file=app_b))
+    assert len(run(tmp_path, m)) == 2
+
+
+def test_the_placeholders_are_not_interchangeable_between_slots(tmp_path):
+    m = stage(tmp_path, layout(app_b="8192", app_file="APPFILE_b", app_b_file="APPFILE"))
+    msg = refusal(tmp_path, m)
+    assert "APPFILE_b" in msg and "APPFILE'" in msg

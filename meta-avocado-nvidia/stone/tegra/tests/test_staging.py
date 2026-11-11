@@ -659,3 +659,40 @@ def test_the_required_image_check_uses_the_manifest_required_set():
     from avocado_tegraflash.manifest import REQUIRED_IMAGES
 
     assert staging.REQUIRED_IMAGES is REQUIRED_IMAGES
+
+
+# copy_images: every staged copy is required, including the second copy of one source
+
+SIX = ("rootfs", "var", "initramfs", "tegraflash_initramfs", "tegraflash_esp", "tegraflash_tos")
+
+
+def _six(data):
+    return images(data, **{key: f"{key}.img" for key in SIX})
+
+
+@pytest.mark.parametrize("key", SIX)
+def test_copy_images_refuses_a_required_source_that_vanished_after_the_check(dirs, monkeypatch, key):
+    data, work = dirs
+    m = _six(data)
+    monkeypatch.setattr(staging, "require_images", lambda *_a: None)
+    (data / f"{key}.img").unlink()
+    staging.reset_work_dir(work)
+    with pytest.raises(EngineError, match="disappeared"):
+        staging.copy_images(data, m, work, log=Log())
+
+
+@pytest.mark.parametrize("key", ["tegraflash_esp", "tegraflash_tos"])
+def test_copy_images_refuses_when_the_source_vanishes_between_its_two_copies(dirs, monkeypatch, key):
+    data, work = dirs
+    m = _six(data)
+    real = staging.copy_replacing_link
+
+    def copy_then_remove(src, dst):
+        real(src, dst)
+        if Path(src).name == f"{key}.img":
+            Path(src).unlink()
+
+    monkeypatch.setattr(staging, "copy_replacing_link", copy_then_remove)
+    staging.reset_work_dir(work)
+    with pytest.raises(EngineError, match="disappeared"):
+        staging.copy_images(data, m, work, log=Log())

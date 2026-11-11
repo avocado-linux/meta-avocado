@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import EngineError
 from .files import copy_replacing_link, join_name, merge_tree
+from .fit import ESP_IMAGE_NAME
 from .manifest import REQUIRED_IMAGES, Manifest
 
 DEFAULT_TOS_NAME = "tos-optee_t234.img"
@@ -136,9 +137,7 @@ def copy_images(
         copy(name, os.path.basename(name), True)
     copy(manifest.tegraflash_initramfs, "initrd-flash.img", True)
     copy(manifest.tegraflash_esp, os.path.basename(manifest.tegraflash_esp), True)
-    copy(manifest.tegraflash_esp, "esp.img", True)
-    # Guarded: the destination lookup refuses a BSP env file without a TOS name,
-    # which must not fire when the manifest names no TOS image.
+    copy(manifest.tegraflash_esp, ESP_IMAGE_NAME, True)
     if manifest.tegraflash_tos:
         copy(manifest.tegraflash_tos, os.path.basename(manifest.tegraflash_tos), True)
         copy(manifest.tegraflash_tos, _tos_destination(work), True)

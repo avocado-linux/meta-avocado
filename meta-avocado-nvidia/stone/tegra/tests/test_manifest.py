@@ -265,7 +265,7 @@ def test_require_image_keys_names_every_missing_key():
     for key in LITERAL_REQUIRED[2:]:
         assert f"images.{key}" in str(exc.value)
     assert "images.rootfs" not in str(exc.value)
-    require_image_keys(Manifest(**{k: "x.img" for k in LITERAL_REQUIRED}))
+    require_image_keys(Manifest(**{k: f"{k}.img" for k in LITERAL_REQUIRED}))
 
 
 @pytest.mark.parametrize("key", LITERAL_REQUIRED)
@@ -287,3 +287,50 @@ def test_an_image_value_with_no_file_name_is_refused_naming_the_key(tmp_path, ke
 
 def test_an_image_value_with_a_directory_part_and_a_file_name_is_accepted(tmp_path):
     assert read_manifest(write(tmp_path, rootdisk(images={"rootfs": "a/b/r.img"}))).rootfs == "a/b/r.img"
+
+
+def _named(**overrides):
+    from avocado_tegraflash.manifest import require_image_keys
+
+    values = {k: f"{k}.img" for k in LITERAL_REQUIRED}
+    values.update(overrides)
+    require_image_keys(Manifest(**values))
+
+
+def test_rootfs_and_esp_in_different_directories_with_the_same_name_are_refused_naming_both_keys():
+    with pytest.raises(EngineError) as exc:
+        _named(rootfs="r/esp.img", tegraflash_esp="e/esp.img")
+    msg = str(exc.value)
+    assert "rootfs" in msg and "tegraflash_esp" in msg and "esp.img" in msg
+
+
+def test_two_required_images_with_the_same_basename_are_refused():
+    with pytest.raises(EngineError, match=r"var.*initramfs|initramfs.*var"):
+        _named(var="a/data.img", initramfs="b/data.img")
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("rootfs", "esp.img"),
+        ("var", "x/initrd-flash.img"),
+        ("initramfs", "esp.img"),
+        ("dtb", "initrd-flash.img"),
+    ],
+)
+def test_an_image_whose_staged_name_is_another_images_fixed_destination_is_refused(key, value):
+    with pytest.raises(EngineError, match="stage"):
+        _named(**{key: value})
+
+
+def test_a_dtb_collides_with_its_own_kernel_prefixed_copy_of_another_image():
+    with pytest.raises(EngineError, match="kernel_a.dtb"):
+        _named(dtb="a.dtb", bpmp_dtb="kernel_a.dtb")
+
+
+def test_the_esp_image_may_itself_be_named_esp_img():
+    _named(tegraflash_esp="x/esp.img")
+
+
+def test_the_flash_initramfs_may_itself_be_named_initrd_flash_img():
+    _named(tegraflash_initramfs="initrd-flash.img")

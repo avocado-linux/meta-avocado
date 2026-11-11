@@ -163,3 +163,40 @@ def test_sd_profile_without_flags_does_not_name_nvme_or_emmc():
 def test_prompt_names_qspi_and_uefi_variables():
     prompt = _prompt(Media.SD, [])
     assert "QSPI" in prompt and "UEFI" in prompt
+
+
+def _prompt_for(media, flags=(), device=""):
+    prompts = []
+    confirm_device(
+        BOARD,
+        media,
+        flags=flags,
+        device=device,
+        force=None,
+        isatty=lambda: True,
+        read=lambda p: prompts.append(p) or "001:007",
+    )
+    return prompts[0]
+
+
+def test_prompt_names_the_device_node_next_to_the_medium():
+    assert _prompt_for(Media.NVME, device="nvme0n1").startswith("About to ERASE nvme (nvme0n1) on the board")
+
+
+def test_prompt_without_a_device_has_no_empty_parentheses():
+    assert "()" not in _prompt_for(Media.NVME)
+
+
+@pytest.mark.parametrize("device", ["", "x0"])
+@pytest.mark.parametrize(
+    "media,flag,name",
+    [(Media.NVME, "--erase-nvme", "nvme"), (Media.EMMC, "--erase-emmc", "emmc")],
+)
+def test_a_flag_naming_the_profile_medium_does_not_list_it_twice(media, flag, name, device):
+    first_line = _prompt_for(media, [flag], device).splitlines()[0]
+    assert first_line.count(name) == 1, first_line
+
+
+def test_flag_added_media_follow_the_profile_medium_once_each():
+    first_line = _prompt_for(Media.SD, ["--erase-nvme", "--erase-emmc", "--erase-nvme"], "mmcblk1").splitlines()[0]
+    assert "ERASE sd (mmcblk1), nvme, emmc on the board" in first_line

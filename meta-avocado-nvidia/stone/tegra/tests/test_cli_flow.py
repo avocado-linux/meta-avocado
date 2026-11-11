@@ -728,8 +728,9 @@ def test_prepare_only_refuses_a_malformed_sd_device_with_the_same_error_as_a_rea
 def test_prepare_only_skipping_the_boot_device_validation_mutation_is_caught(tmp_path, capsys):
     env = {"AVOCADO_PROVISION_SD_DEVICE": "mmcblk0;touch PWNED"}
     rig = make_rig(tmp_path, profile="tegraflash-sd", env=env)
-    old = "    settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)\n"
-    with mutant_main(tmp_path, old, "") as mutated:
+    old = "    device = settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)\n"
+    # The stand-in is the fixture env's own device, so only the skipped call differs.
+    with mutant_main(tmp_path, old, '    device = "nvme0n1"\n') as mutated:
         rc, _, _ = rig.go(mutated, capsys, argv=["--prepare-only"], euid=1000)
     assert rc == 0
 
@@ -1005,3 +1006,62 @@ def test_an_unusable_required_image_is_refused_before_the_old_work_directory_is_
     (data_dir / name).unlink()
     rc, _, err = rig.go(main, capsys)
     assert (rc, "required image(s) unusable" in err, (rig.work / "keep.me").exists()) == (1, True, True)
+
+
+# --- the staged env file, read as the flash reads it (plain-assignment rule) ---
+
+
+def _bsp_env(rig):
+    (found,) = [p for p in Path(rig.environ["AVOCADO_STONE_DATA_DIR"]).rglob(".env.initrd-flash")]
+    return found
+
+
+def _append_to_bsp_env(rig, text):
+    env = _bsp_env(rig)
+    env.write_text(env.read_text() + text)
+
+
+@pytest.mark.deviation("partition-fit-refused")
+@pytest.mark.parametrize("prepare", [False, True])
+@pytest.mark.parametrize("line", ['export ROOTFS_IMAGE="big.img"', '  ROOTFS_DEVICE="sda"', "DATAFILE+=x"])
+def test_a_non_plain_assignment_of_a_checked_key_is_refused_before_any_flash(tmp_path, capsys, line, prepare):
+    rig = make_rig(tmp_path)
+    _append_to_bsp_env(rig, line + "\n")
+    rc, _, err = rig.go(main, capsys, argv=["--prepare-only"] if prepare else [], euid=1000 if prepare else 0)
+    assert rc == 1 and "sources this file with bash" in err
+    assert rig.runner.named("initrd-flash") == []
+
+
+@pytest.mark.deviation("device-confirmation")
+def test_a_staged_rootfs_device_that_is_not_the_profiles_is_refused_before_the_flash(tmp_path, capsys, monkeypatch):
+    # A rewrite that no longer takes effect leaves the BSP's own value behind.
+    monkeypatch.setattr("avocado_tegraflash.settings._rewrite", lambda *_a, **_k: None)
+    rig = make_rig(tmp_path, profile="tegraflash-sd", env={"AVOCADO_PROVISION_SD_DEVICE": "mmcblk1"})
+    rc, _, err = rig.go(main, capsys)
+    assert rc == 1 and "ROOTFS_DEVICE" in err and "nvme0n1" in err and "mmcblk1" in err
+    assert rig.runner.named("initrd-flash") == []
+
+
+@pytest.mark.deviation("partition-fit-refused")
+def test_a_datafile_other_than_the_staged_var_image_is_refused(tmp_path, capsys):
+    rig = make_rig(tmp_path)
+    _append_to_bsp_env(rig, 'DATAFILE="other.img"\n')
+    rc, _, err = rig.go(main, capsys)
+    assert rc == 1 and "DATAFILE" in err and "other.img" in err
+    assert rig.runner.named("initrd-flash") == []
+
+
+@pytest.mark.deviation("device-confirmation")
+@pytest.mark.parametrize(
+    "profile,env,node",
+    [
+        ("tegraflash", {}, "nvme0n1"),
+        ("tegraflash-sd", {"AVOCADO_PROVISION_SD_DEVICE": "mmcblk1"}, "mmcblk1"),
+        ("tegraflash-emmc", {}, "mmcblk0"),
+    ],
+)
+def test_the_prompt_names_the_device_node_the_flash_will_use(tmp_path, capsys, monkeypatch, profile, env, node):
+    prompts = _terminal(monkeypatch, lambda p: re.search(r"\(USB (\S+)\)", p).group(1))
+    rig = make_rig(tmp_path, profile=profile, env={"AVOCADO_PROVISION_FORCE": "0", **env})
+    rc, _, _ = rig.go(main, capsys)
+    assert rc == 0 and f"({node})" in prompts[0].splitlines()[0]

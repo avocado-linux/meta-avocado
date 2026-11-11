@@ -46,6 +46,7 @@ _LAYOUT = (
     "  </partition>\n"
     '  <partition name="esp">\n'
     f"    <size>{ESP_SIZE}</size>\n"
+    "    <filename>esp.img</filename>\n"
     "  </partition>\n"
     "</partition_layout>\n"
 )

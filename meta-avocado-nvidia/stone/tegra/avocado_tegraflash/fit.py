@@ -14,11 +14,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import EngineError
-from .files import read_text_preserving
-from .manifest import Manifest
+from .manifest import ESP_IMAGE_NAME, Manifest
+from .plainenv import read_plain_env
 from .settings import ENV_FILE, EXTERNAL_LAYOUT
 
-ESP_IMAGE_NAME = "esp.img"
 # manifest image key -> partition name in the layout
 FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
 # initrd-flash writes the rootfs image into both slots, so the smaller one limits it.
@@ -59,17 +58,8 @@ def _plain_text(data: bytes) -> tuple[str | None, str | None]:
     return text, None
 
 
-def parse_partition_sizes(path) -> tuple[dict, str | None]:
-    """Map partition name to its size, an int or the raw text when not numeric.
-
-    A name listed more than once maps to DUPLICATE: its size is ambiguous.
-    """
-    sizes, _filenames, error = _parse_layout(path)
-    return sizes, error
-
-
 def _parse_layout(path) -> tuple[dict, dict, str | None]:
-    """Sizes as parse_partition_sizes returns them, plus each partition's <filename>."""
+    """Each partition's size (an int, the raw text when not numeric, or DUPLICATE) and <filename>."""
     try:
         with open(path, "rb") as fh:
             data = fh.read(MAX_LAYOUT_BYTES + 1)
@@ -108,20 +98,6 @@ def _parse_layout(path) -> tuple[dict, dict, str | None]:
     return sizes, filenames, None
 
 
-def _env_rootfs_image(env_file: Path) -> str | None:
-    """The last ROOTFS_IMAGE= value, quotes removed; None when the file has no such line.
-
-    initrd-flash fills APP and APP_b from this variable, and a carrier overlay
-    may rewrite it after the manifest was read.
-    """
-    values = [
-        line.split("=", 1)[1].strip().strip("\"'")
-        for line in read_text_preserving(env_file).splitlines()
-        if line.startswith("ROOTFS_IMAGE=")
-    ]
-    return values[-1] if values else None
-
-
 def _measure(work_dir: Path, name: str) -> int | str:
     """The size of a staged regular file, or the reason it cannot be measured."""
     try:
@@ -148,17 +124,28 @@ def require_fit(work_dir: str | Path, manifest: Manifest, log: Log = print) -> N
     problems: list[str] = []
     lines: list[str] = []
     rootfs_name = os.path.basename(manifest.rootfs)
-    env_rootfs = _env_rootfs_image(env_file)
+    env_rootfs = read_plain_env(env_file).get("ROOTFS_IMAGE")
     if env_rootfs is not None and env_rootfs != rootfs_name:
         problems.append(
             f"ROOTFS_IMAGE in {env_file} is {env_rootfs!r} but the engine staged and measured {rootfs_name!r}; "
             "the flash would write a different file into the partition"
         )
     esp_file = filenames.get("esp")
-    if esp_file and esp_file != ESP_IMAGE_NAME:
+    if esp_file is not None and esp_file != ESP_IMAGE_NAME:
         problems.append(
-            f"the esp partition in {layout} names {esp_file!r} but the engine staged and measured {ESP_IMAGE_NAME!r}"
+            f"the esp partition in {layout} "
+            + (f"names {esp_file!r}" if esp_file else "has no <filename>")
+            + f" but the engine staged and measured {ESP_IMAGE_NAME!r}"
         )
+    # initrd-flash substitutes the rootfs file only where the layout says APPFILE,
+    # so any other name writes a file the engine never measured into the slot.
+    for part, placeholder in (("APP", "APPFILE"), ("APP_b", "APPFILE_b")):
+        named = filenames.get(part)
+        if named and named not in (placeholder, rootfs_name):
+            problems.append(
+                f"partition {part} in {layout} names {named!r}, which is neither {placeholder!r} "
+                f"nor the staged rootfs {rootfs_name!r}; the flash would write a file the engine did not measure"
+            )
     images = {"rootfs": rootfs_name, "tegraflash_esp": ESP_IMAGE_NAME if manifest.tegraflash_esp else ""}
     for key, part in FIT_PAIRS:
         name = images[key]

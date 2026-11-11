@@ -21,6 +21,7 @@ def confirm_device(
     media: Media,
     *,
     flags: Sequence[str] = (),
+    device: str = "",
     force: bool | None,
     isatty: Callable[[], bool],
     read: Callable[[str], str],
@@ -41,9 +42,10 @@ def confirm_device(
     expected = f"{board.bus}:{board.device}"
     # The flags, not the profile alone, decide what the flash erases: ERASE_NVME
     # and ERASE_EMMC from the environment add media the operator did not pick.
-    erased = [media.value]
+    # The device node is the profile medium's only: the flag-added media are named without one.
+    erased = [f"{media.value} ({device})" if device else media.value]
     for flag, name in (("--erase-nvme", "nvme"), ("--erase-emmc", "emmc")):
-        if flag in flags and name not in erased:
+        if flag in flags and name != media.value and name not in erased:
             erased.append(name)
     prompt = (
         f"About to ERASE {', '.join(erased)} on the board {board.vid}:{board.pid} (USB {expected}).\n"
