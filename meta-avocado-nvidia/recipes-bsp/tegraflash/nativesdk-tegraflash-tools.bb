@@ -13,6 +13,8 @@ SRC_URI = "\
     file://initrd-flash.sh \
     file://make-sdcard.sh \
     file://tegra234-flash-helper.sh \
+    file://nvme-pin-for-flash.sh \
+    file://nvdd-pin-gate.sh \
 "
 
 S = "${UNPACKDIR}"
@@ -43,6 +45,9 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/initrd-flash.sh ${D}${TEGRAFLASH_BINDIR}/initrd-flash
     install -m 0755 ${UNPACKDIR}/make-sdcard.sh ${D}${TEGRAFLASH_BINDIR}/make-sdcard
     install -m 0755 ${UNPACKDIR}/tegra234-flash-helper.sh ${D}${TEGRAFLASH_BINDIR}/tegra234-flash-helper.sh
+    # Run on the target over adb by initrd-flash (ROOTFS_NVME_PCI).
+    install -m 0755 ${UNPACKDIR}/nvme-pin-for-flash.sh ${D}${TEGRAFLASH_BINDIR}/nvme-pin-for-flash
+    install -m 0755 ${UNPACKDIR}/nvdd-pin-gate.sh ${D}${TEGRAFLASH_BINDIR}/nvdd-pin-gate
     
     # Determine flash tools source directory from native staging
     # Use STAGING_DIR_NATIVE since nativesdk can't access native tools via STAGING_BINDIR_NATIVE
