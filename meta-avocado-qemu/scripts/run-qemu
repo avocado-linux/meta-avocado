@@ -236,7 +236,8 @@ find_firmware() {
 # also pads up to the next power-of-two MiB, which QEMU insists on. Never shrinks.
 plan_resize() {
   local bytes mib
-  bytes=$(stat -c %s "$IMAGE")
+  # -L: a symlinked image is measured at its target, not at the link's few bytes.
+  bytes=$(stat -L -c %s "$IMAGE")
   mib=$(((bytes + 1048575) / 1048576))
   [ "$mib" -ge 1024 ] || mib=1024
   if [ "$(disk_kind)" = sd ]; then
@@ -338,6 +339,25 @@ start_tpm() {
   wait=${RUN_QEMU_TPM_WAIT_SECONDS:-10}
 
   mkdir -p "$TPM_DIR" "$TPM_SOCK_DIR"
+  # The state dir and its pid file are shared by every --tpm run in this work
+  # dir. A second run must not delete the first run's pid file (the first run's
+  # exit would then leave its swtpm behind) and swtpm cannot share the state
+  # lock anyway, so a live swtpm on this state dir stops the run instead. The
+  # command line is compared, not just the pid, so a recycled pid in a stale
+  # file does not block.
+  if [ -f "$TPM_PIDFILE" ]; then
+    local held words
+    held=$(<"$TPM_PIDFILE")
+    case $held in
+      "" | *[!0-9]*) ;;
+      *)
+        if [ -r "/proc/$held/cmdline" ] && mapfile -d '' -t words <"/proc/$held/cmdline" \
+          && [[ "${words[*]}" == *"dir=$TPM_DIR"* ]]; then
+          die 1 "swtpm $held is already running on $TPM_DIR (another run-qemu --tpm, or one that was killed); stop it first"
+        fi
+        ;;
+    esac
+  fi
   rm -f "$TPM_SOCK" "$TPM_PIDFILE"
   TPM_STARTED=1
   echo "Starting swtpm (state: $TPM_DIR, log: $TPM_DIR/swtpm.log)"

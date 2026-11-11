@@ -753,6 +753,54 @@ rc=$?
   && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$longo" ]; } \
   && ok "a too-long socket path exits 1 naming it and its length, starting nothing" || bad "tpm overlong: rc=$rc out=[$out] log=[$(cat "$log")]"
 
+# 45. A live swtpm already on the state dir stops the run, and is left alone.
+d=$(workdir tpm-held)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+# A holder with no child process: `read -t` on a fifo it opens read-write waits without
+# forking, so killing the one pid leaves nothing holding the suite's stdout open.
+mkfifo "$w/hold-a.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "swtpm socket --tpmstate dir=$sd" "$w/hold-a.fifo" &
+holder=$!
+echo "$holder" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "already running" <<<"$out" && grep -qF "$holder" <<<"$out" && alive "$holder" \
+  && [ "$(<"$sd/swtpm.pid")" = "$holder" ] && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a live swtpm on the state dir stops the run and keeps its pid file" || bad "tpm held: rc=$rc holder=$holder out=[$out] log=[$(cat "$log")]"
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+
+# 46. A pid file naming a process that is not swtpm on this state dir is stale and replaced.
+d=$(workdir tpm-stale)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+mkfifo "$w/hold-b.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "unrelated process" "$w/hold-b.fifo" &
+other=$!
+echo "$other" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && alive "$other" && [ -n "$pid" ] && [ "$pid" != "$other" ] && ! alive "$pid"; } \
+  && ok "a pid file naming an unrelated process is replaced, not obeyed" || bad "tpm stale: rc=$rc other=$other pid=$pid out=[$out]"
+kill "$other" 2>/dev/null
+wait "$other" 2>/dev/null
+
+# 47. A symlinked image is sized by its target: a 2G image behind a link is not shrunk.
+d=$(workdir link-image)
+truncate -s 2G "$w/real-link-target.img"
+ln -s "$w/real-link-target.img" "$w/link.img"
+: >"$log"
+out=$(run "$d" qemux86-64 --image "$w/link.img" --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF 'resize: none' <<<"$out"; } \
+  && ok "a symlinked image is measured at its target, so no shrink is planned" || bad "link image: rc=$rc out=[$out]"
+
 # No stub swtpm may outlive the suite.
 stray=$(pgrep -af "$w/.*swtpm" || true)
 [ -z "$stray" ] && ok "no stub swtpm survives" || bad "stray swtpm: [$stray]"
