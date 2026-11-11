@@ -5,4 +5,5 @@ inherit packagegroup nospdx
 
 RDEPENDS:${PN} = " \
   nativesdk-rpi-usbboot \
+  nativesdk-swig \
 "
