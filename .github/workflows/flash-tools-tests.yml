@@ -25,7 +25,6 @@ on:
     paths:
       - "scripts/**"
       - "meta-avocado-nvidia/stone/**"
-      - "meta-avocado-nvidia/stone/tegra/upstream-tracking.json"
       # A pin bump must run the upstream-drift test.
       - "kas/vendor/nvidia.yml"
       # Files the recipe wiring and partition-UUID tests read.
@@ -71,15 +70,24 @@ jobs:
 
       # nvflashxmlparse.py belongs to meta-tegra and is not copied into this
       # repository; the GPT test needs it, and fails (not skips) when CI is set
-      # and it is missing. The revision is the one kas/vendor/nvidia.yml pins for
-      # meta-tegra and must be kept equal to it. The engine's upstream-drift test
-      # reads upstream files by revision (git show <rev>:<path>) from this
-      # checkout, so the revision has to exist here.
+      # and it is missing. The revision is read from kas/vendor/nvidia.yml so the
+      # pin has one source. The engine's upstream-drift test reads upstream files
+      # by revision (git show <rev>:<path>) from this checkout, so the revision
+      # has to exist here.
+      - name: Read the meta-tegra pin
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(awk '/^  meta-tegra:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}' kas/vendor/nvidia.yml)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "no meta-tegra pin found" >&2; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Fetch nvflashxmlparse.py
         uses: actions/checkout@v4
         with:
           repository: avocado-linux/vendor-meta-tegra
-          ref: feab7664000f313f655d20d2f39c04432214dc25
+          ref: ${{ steps.pin.outputs.sha }}
           path: vendor-meta-tegra
           sparse-checkout: recipes-bsp/tegra-binaries
 

@@ -21,10 +21,11 @@ RECORD_PATH = Path(__file__).resolve().parents[1] / "upstream-tracking.json"
 KAS_PIN_PATH = REPO_ROOT / "kas" / "vendor" / "nvidia.yml"
 USB_SCRIPT = "recipes-bsp/tegra-binaries/tegra-helper-scripts/find-jetson-usb.sh"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-PID_CASE_RE = re.compile(
-    r'case\s+"\$idProduct"\s+in\s*\n\s*([0-9a-fA-F]{4}(?:\|[0-9a-fA-F]{4})*)\)'
-)
+PID_CASE_RE = re.compile(r'case\s+"\$idProduct"\s+in\b(.*?)\besac\b', re.DOTALL)
+PID_ARM_RE = re.compile(r"^\s*([0-9a-fA-F]{4}(?:\|[0-9a-fA-F]{4})*)\)", re.MULTILINE)
 GIT_TIMEOUT = 30
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "flash-tools-tests.yml"
+PIN_AWK = "/^  meta-tegra:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}"
 
 
 class CouldNotEvaluate(Exception):
@@ -58,6 +59,8 @@ def check_record_complete(record: dict) -> list[str]:
         sha = entry.get("sha256") if isinstance(entry, dict) else None
         if not isinstance(sha, str) or not SHA256_RE.fullmatch(sha):
             errors.append(f"{path}: sha256 is not 64 lowercase hex: {sha!r}")
+        if isinstance(entry, dict) and "forked_as" not in entry:
+            errors.append(f"{path}: forked_as key is missing (use null for an unforked file)")
         file_rev = entry.get("revision", rev) if isinstance(entry, dict) else None
         if file_rev != rev:
             errors.append(f"{path}: revision {file_rev!r} differs from record revision {rev!r}")
@@ -94,10 +97,12 @@ def git_show(vendor: str, revision: str, path: str) -> bytes:
     return proc.stdout
 
 
-def check_hashes(record: dict, reader) -> list[str]:
+def check_hashes(record: dict, reader, revision: str) -> list[str]:
+    """Hash each tracked file at `revision`, the kas pin, so a changed upstream file
+    is reported with both hashes before anyone has edited the record."""
     errors = []
     for path, entry in record["files"].items():
-        data = reader(record["revision"], path)
+        data = reader(revision, path)
         actual = hashlib.sha256(data).hexdigest()
         if actual != entry["sha256"]:
             errors.append(f"{path}: recorded sha256 {entry['sha256']} but upstream is {actual}")
@@ -106,9 +111,10 @@ def check_hashes(record: dict, reader) -> list[str]:
 
 def extract_recovery_pids(script: str) -> list[str]:
     m = PID_CASE_RE.search(script)
-    if not m:
+    arms = PID_ARM_RE.findall(m.group(1)) if m else []
+    if not arms:
         raise CouldNotEvaluate("could not evaluate: no idProduct case line in find-jetson-usb.sh")
-    return [p.lower() for p in m.group(1).split("|")]
+    return [p.lower() for arm in arms for p in arm.split("|")]
 
 
 def check_pids(script: str, recovery_pids) -> list[str]:
@@ -134,7 +140,7 @@ SCRIPT = 'x\ncase "$idProduct" in\n    7019|7819|7E19)\n        ok\n        ;;\n
 
 
 def good_record():
-    return {"revision": GOOD_REV, "files": {"f": {"sha256": GOOD_SHA}}}
+    return {"revision": GOOD_REV, "files": {"f": {"sha256": GOOD_SHA, "forked_as": None}}}
 
 
 def test_complete_record_passes():
@@ -178,7 +184,7 @@ def test_revision_pin_mismatch_fails():
 
 
 def test_hash_mismatch_names_file_and_both_hashes():
-    errs = check_hashes(good_record(), lambda rev, path: b"changed")
+    errs = check_hashes(good_record(), lambda rev, path: b"changed", GOOD_REV)
     assert len(errs) == 1
     actual = hashlib.sha256(b"changed").hexdigest()
     assert "f:" in errs[0] and GOOD_SHA in errs[0] and actual in errs[0]
@@ -186,7 +192,50 @@ def test_hash_mismatch_names_file_and_both_hashes():
 
 def test_hash_match_passes():
     rec = {"revision": GOOD_REV, "files": {"f": {"sha256": hashlib.sha256(b"x").hexdigest()}}}
-    assert check_hashes(rec, lambda rev, path: b"x") == []
+    assert check_hashes(rec, lambda rev, path: b"x", GOOD_REV) == []
+
+
+def test_hashes_are_read_at_the_given_revision_not_the_recorded_one():
+    seen = []
+
+    def reader(rev, path):
+        seen.append(rev)
+        return b"x"
+
+    check_hashes(good_record(), reader, "d" * 40)
+    assert seen == ["d" * 40]
+
+
+def test_missing_forked_as_key_is_a_failure():
+    r = good_record()
+    del r["files"]["f"]["forked_as"]
+    assert check_record_complete(r) == ["f: forked_as key is missing (use null for an unforked file)"]
+
+
+def test_pids_in_every_case_arm_are_checked():
+    script = (
+        'case "$idProduct" in\n    7019|7819)\n        ok\n        ;;\n'
+        '    7E19|7C18)\n        ok\n        ;;\n    *)\n        no\n        ;;\nesac\n'
+        '7777)\n'
+    )
+    assert extract_recovery_pids(script) == ["7019", "7819", "7e19", "7c18"]
+    errs = check_pids(script, ("7019", "7819", "7e19"))
+    assert len(errs) == 1 and "7c18" in errs[0]
+
+
+def test_workflow_has_no_literal_ref_that_can_drift():
+    text = WORKFLOW_PATH.read_text()
+    assert not re.search(r"\b[0-9a-f]{40}\b", text)
+    assert "727633de" not in text
+    assert "ref: ${{ steps.pin.outputs.sha }}" in text
+    assert PIN_AWK in text
+
+
+def test_workflow_pin_extraction_yields_the_kas_pin():
+    out = subprocess.run(
+        ["awk", PIN_AWK, str(KAS_PIN_PATH)], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert out == parse_kas_pin(KAS_PIN_PATH.read_text())
 
 
 def test_removed_recovery_pid_fails():
@@ -261,7 +310,10 @@ def test_forked_as_paths_exist():
 
 def test_upstream_files_match_record():
     try:
-        errors = check_hashes(load_record(), vendor_reader())
+        pin = parse_kas_pin(KAS_PIN_PATH.read_text())
+        if pin is None:
+            raise CouldNotEvaluate("could not evaluate: no meta-tegra commit found in the kas pin")
+        errors = check_hashes(load_record(), vendor_reader(), pin)
     except CouldNotEvaluate as exc:
         pytest.fail(str(exc))
     assert errors == []
@@ -269,7 +321,10 @@ def test_upstream_files_match_record():
 
 def test_upstream_recovery_ids_covered():
     try:
-        script = vendor_reader()(load_record()["revision"], USB_SCRIPT).decode()
+        pin = parse_kas_pin(KAS_PIN_PATH.read_text())
+        if pin is None:
+            raise CouldNotEvaluate("could not evaluate: no meta-tegra commit found in the kas pin")
+        script = vendor_reader()(pin, USB_SCRIPT).decode()
         errors = check_pids(script, usb.RECOVERY_PIDS)
     except CouldNotEvaluate as exc:
         pytest.fail(str(exc))
