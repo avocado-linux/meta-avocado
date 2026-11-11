@@ -25,3 +25,13 @@ local_conf_header:
     # patch-file backported fixes (Patched) and the Ignored statements with
     # their justification.
     SPDX_INCLUDE_VEX = "current"
+
+    # Debug-info kernels, so the feed publishes the kernel a CVE scan sees: the
+    # kernel CVE filter needs its DWARF, and a scan built on its own kernel has
+    # different package digests and gets no verdict. Switch read in
+    # avocado-kernel-feed.bbclass and the linux-raspberrypi bbappend; the
+    # DWARF lands in kernel-dbg, not in what a device installs.
+    AVOCADO_KERNEL_DEBUGINFO = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
