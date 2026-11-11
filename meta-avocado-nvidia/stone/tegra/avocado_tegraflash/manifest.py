@@ -1,6 +1,7 @@
 """The keys the engine reads from storage_devices.rootdisk, and their reader."""
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,7 +119,12 @@ def read_manifest(path: str | Path) -> Manifest:
                         )
             values[key.name] = items
         else:
-            values[key.name] = _text(value, where)
+            text = _text(value, where)
+            # Every later guard derives the staged file name from the last path
+            # component; an empty, "." or ".." one would skip or misdirect them.
+            if key.section == "images" and text and os.path.basename(text) in ("", ".", ".."):
+                raise EngineError(f"manifest key {where} must end in a file name, found {text!r}")
+            values[key.name] = text
     return Manifest(**values)
 
 

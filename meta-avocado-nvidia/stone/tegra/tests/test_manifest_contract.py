@@ -59,8 +59,7 @@ def test_extraction_finds_the_known_oracle_reads():
 ENGINE_ONLY_KEYS = {("tegraflash", "rcm_ids")}
 
 # The Orin Nano template (TEMPLATE) deliberately defines rcm_ids: 7523 was seen on
-# the bench and 7623 is the 4GB module in NVIDIA's L4T recovery table; every other
-# optional key stays undefined.
+# the bench and it is the only id declared; every other optional key stays undefined.
 DEFINED_IN_TEMPLATE = {("tegraflash", "rcm_ids")}
 
 
@@ -193,8 +192,8 @@ def test_manifest_path_scan_catches_a_direct_open_of_the_manifest():
     assert not (isinstance(parent, ast.Call) and getattr(parent.func, "id", "") == "read_manifest")
 
 
-def test_the_orin_nano_manifest_pins_both_recovery_ids():
-    assert read_manifest(TEMPLATE).rcm_ids == ("0955:7523", "0955:7623")
+def test_the_orin_nano_manifest_pins_only_the_bench_observed_recovery_id():
+    assert read_manifest(TEMPLATE).rcm_ids == ("0955:7523",)
 
 
 def test_every_stone_manifest_reads_with_valid_nvidia_rcm_ids():

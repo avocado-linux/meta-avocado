@@ -135,3 +135,31 @@ def test_force_parsing(value, expected):
 def test_force_rejects_other_values(value):
     with pytest.raises(EngineError, match="AVOCADO_PROVISION_FORCE"):
         _force(value)
+
+
+def _prompt(media, flags):
+    prompts = []
+    confirm_device(
+        BOARD, media, flags=flags, force=None, isatty=lambda: True, read=lambda p: prompts.append(p) or "001:007"
+    )
+    return prompts[0]
+
+
+def test_sd_profile_with_erase_nvme_names_both_media():
+    prompt = _prompt(Media.SD, ["--erase-nvme"])
+    assert "sd" in prompt and "nvme" in prompt
+
+
+def test_erase_emmc_flag_names_emmc():
+    prompt = _prompt(Media.SD, ["--erase-emmc"])
+    assert "sd" in prompt and "emmc" in prompt
+
+
+def test_sd_profile_without_flags_does_not_name_nvme_or_emmc():
+    prompt = _prompt(Media.SD, [])
+    assert "nvme" not in prompt and "emmc" not in prompt
+
+
+def test_prompt_names_qspi_and_uefi_variables():
+    prompt = _prompt(Media.SD, [])
+    assert "QSPI" in prompt and "UEFI" in prompt

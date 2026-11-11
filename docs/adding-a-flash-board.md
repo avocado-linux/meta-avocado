@@ -67,8 +67,9 @@ The engine reads these keys from `storage_devices.rootdisk` (the list is
 | `tegraflash.rcm_ids` | List of lowercase `vendor:product` USB ids this board may show in recovery mode; the engine refuses a recovery device whose id is not listed. It narrows the match only: a device still has to be recognised as a recovery device first (see below). Optional: without it the engine warns that the board is not identity-checked and proceeds with exactly one device |
 
 Add the recovery ids you observed on hardware to `tegraflash.rcm_ids` in the
-manifest, for example `"rcm_ids": ["0955:7523", "0955:7623"]` (the two Orin Nano
-modules). Leave the list out until someone has seen the board in recovery mode.
+manifest, for example `"rcm_ids": ["0955:7523"]` (the id seen on the Orin Nano
+bench). List another SKU's id only after that module has been seen in recovery
+mode. Leave the list out until someone has seen the board in recovery mode.
 
 The list does not teach the engine a new id. The engine counts a device as a
 recovery device when its description says APX or RCM, or its product id is in

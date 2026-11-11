@@ -108,6 +108,8 @@ def _run(args, environ, runner, euid, sleep) -> int:
 
     # Oracle 105-247 and 249-342: reset, BSP, tools, carrier, images, overlay check.
     with _build_dir_lock(cfg.build_dir):
+        # Before the reset, so an unusable image leaves the previous staging intact.
+        staging.require_images(Path(cfg.data_dir), man)
         staging.reset_work_dir(work)
         print(f"Building tegraflash working directory: {work}")
         staging.copy_bsp(cfg.data_dir, man.tegraflash_bsp, work)
@@ -204,7 +206,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
     # Deviation device-confirmation: after the prepare-only return, so it never
     # prompts without a flash; before the recheck, so the operator confirms the
     # board the flash will see.
-    confirm.confirm_device(board, media, force=cfg.force, isatty=confirm.stdin_is_tty, read=input)
+    confirm.confirm_device(board, media, flags=flags, force=cfg.force, isatty=confirm.stdin_is_tty, read=input)
 
     # Deviation one-board-only: the flash starts right after this check, on the
     # board the wait saw and no other.

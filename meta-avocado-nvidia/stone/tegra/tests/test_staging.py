@@ -643,3 +643,19 @@ def test_mutation_absent_image_that_stops_the_run_is_caught(dirs, tmp_path):
     finally:
         restore(saved)
     assert not (work / "bpmp.dtb").exists()
+
+
+def test_a_required_source_removed_after_validation_raises_instead_of_warning(dirs, monkeypatch):
+    data, work = dirs
+    m = images(data, var="var.img")
+    staging.reset_work_dir(work)
+    monkeypatch.setattr(staging, "require_images", lambda *_a, **_k: None)
+    (data / "var.img").unlink()
+    with pytest.raises(EngineError, match="var"):
+        staging.copy_images(data, m, work)
+
+
+def test_the_required_image_check_uses_the_manifest_required_set():
+    from avocado_tegraflash.manifest import REQUIRED_IMAGES
+
+    assert staging.REQUIRED_IMAGES is REQUIRED_IMAGES

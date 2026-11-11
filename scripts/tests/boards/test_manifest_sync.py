@@ -87,26 +87,22 @@ def registry_rcm_ids() -> dict[str, str | None]:
 
 
 def rcm_mismatches(manifest: dict[str, list[str]], registry: dict[str, str | None]) -> list[str]:
-    """Name each machine whose registry rcm_id is not one of the manifest's ids.
+    """Name each machine whose registry rcm_id is not exactly the manifest's one id.
 
-    The registry holds one id per board while a manifest may list several SKUs, so
-    membership is the contract. A manifest with ids and a registry entry with none
-    (or the reverse) is also drift.
+    A manifest with ids and a registry entry with none (or the reverse) is also drift.
     """
     bad = []
     for machine in sorted(set(manifest) | set(registry)):
         ids = manifest.get(machine, [])
         have = registry.get(machine)
-        if have is None and not ids:
-            continue
-        if have not in ids:
+        if ids != ([] if have is None else [have]):
             bad.append(f"{machine}: manifest {ids} vs registry {have!r}")
     return bad
 
 
 def test_registry_rcm_ids_match_manifests():
     manifest = manifest_rcm_ids(STONE_DIR)
-    assert manifest["avocado-jetson-orin-nano"] == ["0955:7523", "0955:7623"]
+    assert manifest["avocado-jetson-orin-nano"] == ["0955:7523"]
     assert rcm_mismatches(manifest, registry_rcm_ids()) == []
 
 

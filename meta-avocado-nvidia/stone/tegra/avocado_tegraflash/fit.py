@@ -8,17 +8,21 @@ instead of passing unchecked.
 
 import os
 import re
+import stat
 import xml.etree.ElementTree as ET  # nosemgrep: python.lang.security.use-defused-xml.use-defused-xml
 from collections.abc import Callable
 from pathlib import Path
 
 from . import EngineError
+from .files import read_text_preserving
 from .manifest import Manifest
-from .settings import EXTERNAL_LAYOUT
+from .settings import ENV_FILE, EXTERNAL_LAYOUT
 
 ESP_IMAGE_NAME = "esp.img"
 # manifest image key -> partition name in the layout
 FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
+# initrd-flash writes the rootfs image into both slots, so the smaller one limits it.
+ROOTFS_SLOTS = ("APP", "APP_b")
 MAX_LAYOUT_BYTES = 4 * 1024 * 1024
 _PLAIN_ENCODINGS = ("utf-8", "us-ascii")
 _ENCODING_DECL = re.compile(
@@ -60,27 +64,34 @@ def parse_partition_sizes(path) -> tuple[dict, str | None]:
 
     A name listed more than once maps to DUPLICATE: its size is ambiguous.
     """
+    sizes, _filenames, error = _parse_layout(path)
+    return sizes, error
+
+
+def _parse_layout(path) -> tuple[dict, dict, str | None]:
+    """Sizes as parse_partition_sizes returns them, plus each partition's <filename>."""
     try:
         with open(path, "rb") as fh:
             data = fh.read(MAX_LAYOUT_BYTES + 1)
     except OSError as exc:
-        return {}, str(exc)
+        return {}, {}, str(exc)
     if len(data) > MAX_LAYOUT_BYTES:
-        return {}, f"the layout is larger than {MAX_LAYOUT_BYTES} bytes"
+        return {}, {}, f"the layout is larger than {MAX_LAYOUT_BYTES} bytes"
     text, reason = _plain_text(data)
     if text is None:
-        return {}, reason
+        return {}, {}, reason
     lowered = text.lower()
     if "<!doctype" in lowered or "<!entity" in lowered:
-        return {}, "will not parse a layout with a DOCTYPE or entity declaration"
+        return {}, {}, "will not parse a layout with a DOCTYPE or entity declaration"
     try:
         # The layout is untrusted; this parse only runs after the size cap, the
         # plain-text check and the DOCTYPE/ENTITY refusal above, so no entity
         # can be defined.
         root = ET.fromstring(data)  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
     except ET.ParseError as exc:
-        return {}, str(exc)
+        return {}, {}, str(exc)
     sizes: dict = {}
+    filenames: dict = {}
     for part in root.iter("partition"):
         name = part.get("name")
         if name is None:
@@ -88,12 +99,38 @@ def parse_partition_sizes(path) -> tuple[dict, str | None]:
         if name in sizes:
             sizes[name] = DUPLICATE
             continue
+        filenames[name] = (part.findtext("filename") or "").strip()
         raw = (part.findtext("size") or "").strip()
         try:
             sizes[name] = int(raw, 0)
         except ValueError:
             sizes[name] = raw
-    return sizes, None
+    return sizes, filenames, None
+
+
+def _env_rootfs_image(env_file: Path) -> str | None:
+    """The last ROOTFS_IMAGE= value, quotes removed; None when the file has no such line.
+
+    initrd-flash fills APP and APP_b from this variable, and a carrier overlay
+    may rewrite it after the manifest was read.
+    """
+    values = [
+        line.split("=", 1)[1].strip().strip("\"'")
+        for line in read_text_preserving(env_file).splitlines()
+        if line.startswith("ROOTFS_IMAGE=")
+    ]
+    return values[-1] if values else None
+
+
+def _measure(work_dir: Path, name: str) -> int | str:
+    """The size of a staged regular file, or the reason it cannot be measured."""
+    try:
+        st = os.stat(work_dir / name)
+    except OSError as exc:
+        return str(exc)
+    if not stat.S_ISREG(st.st_mode):
+        return f"{work_dir / name} is not a regular file"
+    return st.st_size
 
 
 def require_fit(work_dir: str | Path, manifest: Manifest, log: Log = print) -> None:
@@ -101,44 +138,61 @@ def require_fit(work_dir: str | Path, manifest: Manifest, log: Log = print) -> N
     layout = work_dir / EXTERNAL_LAYOUT
     if not layout.is_file():
         raise EngineError(f"the partition fit cannot be verified: {layout} is absent")
-    sizes, error = parse_partition_sizes(layout)
+    sizes, filenames, error = _parse_layout(layout)
     if error is not None:
         raise EngineError(f"the partition fit cannot be verified: {layout} is unreadable ({error})")
+    env_file = work_dir / ENV_FILE
+    if not env_file.is_file():
+        raise EngineError(f"the partition fit cannot be verified: {env_file} is absent")
 
-    images = {
-        "rootfs": os.path.basename(manifest.rootfs),
-        "tegraflash_esp": ESP_IMAGE_NAME if manifest.tegraflash_esp else "",
-    }
     problems: list[str] = []
     lines: list[str] = []
+    rootfs_name = os.path.basename(manifest.rootfs)
+    env_rootfs = _env_rootfs_image(env_file)
+    if env_rootfs is not None and env_rootfs != rootfs_name:
+        problems.append(
+            f"ROOTFS_IMAGE in {env_file} is {env_rootfs!r} but the engine staged and measured {rootfs_name!r}; "
+            "the flash would write a different file into the partition"
+        )
+    esp_file = filenames.get("esp")
+    if esp_file and esp_file != ESP_IMAGE_NAME:
+        problems.append(
+            f"the esp partition in {layout} names {esp_file!r} but the engine staged and measured {ESP_IMAGE_NAME!r}"
+        )
+    images = {"rootfs": rootfs_name, "tegraflash_esp": ESP_IMAGE_NAME if manifest.tegraflash_esp else ""}
     for key, part in FIT_PAIRS:
         name = images[key]
         if not name:
+            problems.append(f"manifest names no file for {key}, so its fit in partition {part} cannot be checked")
             continue
-        size = sizes.get(part)
-        if size is DUPLICATE:
-            problems.append(f"partition {part} is listed more than once in {layout}, so its size is ambiguous")
-            continue
+        slots = [p for p in (ROOTFS_SLOTS if key == "rootfs" else (part,)) if p in sizes]
         if part not in sizes:
             problems.append(f"partition {part} is absent from the layout {layout}, so {key} {name} cannot be checked")
             continue
-        if not isinstance(size, int):
-            problems.append(
-                f"the size of partition {part} in {layout} is {size!r}, not a number, "
-                f"so the fit of {key} {name} cannot be verified"
-            )
+        usable = []
+        for slot in slots:
+            size = sizes[slot]
+            if size is DUPLICATE:
+                problems.append(f"partition {slot} is listed more than once in {layout}, so its size is ambiguous")
+            elif not isinstance(size, int):
+                problems.append(
+                    f"the size of partition {slot} in {layout} is {size!r}, not a number, "
+                    f"so the fit of {key} {name} cannot be verified"
+                )
+            else:
+                usable.append((size, slot))
+        if len(usable) != len(slots):
             continue
-        try:
-            image_size = os.stat(work_dir / name).st_size
-        except OSError as exc:
-            problems.append(f"{key} image {name} cannot be measured: {exc}")
-            continue
-        if image_size > size:
+        size, slot = min(usable, key=lambda pair: pair[0])
+        image_size = _measure(work_dir, name)
+        if isinstance(image_size, str):
+            problems.append(f"{key} image {name} cannot be measured: {image_size}")
+        elif image_size > size:
             problems.append(
-                f"{key} image {name} ({image_size} bytes) does not fit partition {part} ({size} bytes)"
+                f"{key} image {name} ({image_size} bytes) does not fit partition {slot} ({size} bytes)"
             )
         else:
-            lines.append(f"fit: {key} {image_size} <= {part} {size}")
+            lines.append(f"fit: {key} {image_size} <= {slot} {size}")
     if problems:
         raise EngineError("\n".join(problems))
     for line in lines:

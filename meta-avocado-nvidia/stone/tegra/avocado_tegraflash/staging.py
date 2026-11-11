@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import EngineError
 from .files import copy_replacing_link, join_name, merge_tree
-from .manifest import Manifest
+from .manifest import REQUIRED_IMAGES, Manifest
 
 DEFAULT_TOS_NAME = "tos-optee_t234.img"
 _SDK_TOOLS = "sysroots/x86_64-avocadosdk-linux/usr/bin/tegraflash"
@@ -59,13 +59,19 @@ def copy_tools(
         log("Provisioning may fail without flash tools")
 
 
-def _copy_image(data_dir: Path, src_name: str, dest_name: str, work_dir: Path, log: Log) -> None:
+def _copy_image(
+    data_dir: Path, src_name: str, dest_name: str, work_dir: Path, log: Log, required: bool = False
+) -> None:
     if not src_name:
         return
     src = join_name(data_dir, src_name)
     if src.is_file():
         log(f"Copying {src_name} -> {dest_name}")
         copy_replacing_link(src, join_name(work_dir, dest_name))
+    elif required:
+        # The source was validated before staging; one that vanished since would
+        # otherwise flash without it and only log a warning.
+        raise EngineError(f"required image {src} disappeared before it was staged")
     else:
         log(f"WARNING: File not found: {src}")
 
@@ -96,23 +102,15 @@ def _tos_destination(work_dir: Path) -> str:
     return name
 
 
-def _require_images(data: Path, manifest: Manifest) -> None:
+def require_images(data: Path, manifest: Manifest) -> None:
     """Refuse before staging when a required image is absent, not a file or empty.
 
     Deviation required-image-refused: the oracle warns and carries on, so a
     flash proceeds with a missing or zero-length rootfs. dtb and bpmp_dtb stay
     optional and keep the warning in _copy_image.
     """
-    required = (
-        manifest.rootfs,
-        manifest.var,
-        manifest.initramfs,
-        manifest.tegraflash_initramfs,
-        manifest.tegraflash_esp,
-        manifest.tegraflash_tos,
-    )
     problems = []
-    for name in required:
+    for name in (getattr(manifest, key) for key in REQUIRED_IMAGES):
         if not name:
             continue
         src = join_name(data, name)
@@ -129,21 +127,21 @@ def copy_images(
 ) -> None:
     data = Path(data_dir)
     work = Path(work_dir)
-    _require_images(data, manifest)
+    require_images(data, manifest)
 
-    def copy(src_name: str, dest_name: str) -> None:
-        _copy_image(data, src_name, dest_name, work, log)
+    def copy(src_name: str, dest_name: str, required: bool = False) -> None:
+        _copy_image(data, src_name, dest_name, work, log, required)
 
     for name in (manifest.rootfs, manifest.var, manifest.initramfs):
-        copy(name, os.path.basename(name))
-    copy(manifest.tegraflash_initramfs, "initrd-flash.img")
-    copy(manifest.tegraflash_esp, os.path.basename(manifest.tegraflash_esp))
-    copy(manifest.tegraflash_esp, "esp.img")
+        copy(name, os.path.basename(name), True)
+    copy(manifest.tegraflash_initramfs, "initrd-flash.img", True)
+    copy(manifest.tegraflash_esp, os.path.basename(manifest.tegraflash_esp), True)
+    copy(manifest.tegraflash_esp, "esp.img", True)
     # Guarded: the destination lookup refuses a BSP env file without a TOS name,
     # which must not fire when the manifest names no TOS image.
     if manifest.tegraflash_tos:
-        copy(manifest.tegraflash_tos, os.path.basename(manifest.tegraflash_tos))
-        copy(manifest.tegraflash_tos, _tos_destination(work))
+        copy(manifest.tegraflash_tos, os.path.basename(manifest.tegraflash_tos), True)
+        copy(manifest.tegraflash_tos, _tos_destination(work), True)
     base = os.path.basename(manifest.dtb)
     copy(manifest.dtb, base)
     copy(manifest.dtb, f"kernel_{base}")

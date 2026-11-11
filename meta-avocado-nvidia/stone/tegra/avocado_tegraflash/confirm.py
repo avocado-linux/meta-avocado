@@ -1,7 +1,7 @@
 """Operator confirmation before an erasing flash (AVOCADO_PROVISION_FORCE policy)."""
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from . import EngineError, Media
 from .usb import UsbDevice
@@ -20,6 +20,7 @@ def confirm_device(
     board: UsbDevice,
     media: Media,
     *,
+    flags: Sequence[str] = (),
     force: bool | None,
     isatty: Callable[[], bool],
     read: Callable[[str], str],
@@ -38,8 +39,15 @@ def confirm_device(
         log("device confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal")
         return
     expected = f"{board.bus}:{board.device}"
+    # The flags, not the profile alone, decide what the flash erases: ERASE_NVME
+    # and ERASE_EMMC from the environment add media the operator did not pick.
+    erased = [media.value]
+    for flag, name in (("--erase-nvme", "nvme"), ("--erase-emmc", "emmc")):
+        if flag in flags and name not in erased:
+            erased.append(name)
     prompt = (
-        f"About to ERASE {media.value} on the board {board.vid}:{board.pid} (USB {expected}).\n"
+        f"About to ERASE {', '.join(erased)} on the board {board.vid}:{board.pid} (USB {expected}).\n"
+        "QSPI firmware and UEFI variables will also be rewritten.\n"
         f"All data on it will be lost. Type {expected} to continue: "
     )
     try:

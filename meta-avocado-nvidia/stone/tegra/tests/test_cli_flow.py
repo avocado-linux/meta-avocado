@@ -461,7 +461,7 @@ def test_the_recheck_is_given_the_manifest_ids(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(recovery, "recheck_single_board", spy)
     rig = make_rig(tmp_path)
     rc, _, _ = rig.go(main, capsys)
-    assert (rc, seen) == (0, [{"expected_ids": ("0955:7523", "0955:7623")}])
+    assert (rc, seen) == (0, [{"expected_ids": ("0955:7523",)}])
 
 
 @pytest.mark.deviation("recovery-id-pinned")
@@ -478,7 +478,7 @@ def test_the_wait_is_given_the_manifest_ids_and_does_not_warn_about_identity(tmp
     monkeypatch.setattr(recovery, "wait_for_single_board", spy)
     rig = make_rig(tmp_path)
     rc, out, _ = rig.go(main, capsys)
-    assert (rc, seen, "not identity-checked" in out) == (0, [("0955:7523", "0955:7623")], False)
+    assert (rc, seen, "not identity-checked" in out) == (0, [("0955:7523",)], False)
 
 
 @pytest.mark.deviation("recovery-id-pinned")
@@ -965,3 +965,43 @@ def test_a_manifest_without_a_required_image_key_is_refused_before_any_staging_o
     assert (rc, f"images.{key}" in err) == (1, True)
     assert {"lsusb", "initrd-flash"}.isdisjoint(rig.runner.tools())
     assert not rig.work.exists()
+
+
+@pytest.mark.deviation("device-confirmation")
+def test_the_prompt_names_every_medium_the_flags_erase(tmp_path, capsys, monkeypatch):
+    prompts = _terminal(monkeypatch, lambda p: re.search(r"\(USB (\S+)\)", p).group(1))
+    rig = make_rig(tmp_path, profile="tegraflash-sd", env={"AVOCADO_PROVISION_FORCE": "0", "ERASE_NVME": "1", "AVOCADO_PROVISION_SD_DEVICE": "mmcblk1"})
+    rc, _, _ = rig.go(main, capsys)
+    assert rc == 0 and "sd" in prompts[0] and "nvme" in prompts[0]
+
+
+@pytest.mark.deviation("device-confirmation")
+def test_force_unset_on_a_terminal_prompts_and_a_wrong_retype_refuses(tmp_path, capsys, monkeypatch):
+    prompts = _terminal(monkeypatch, "9:9")
+    rig = make_rig(tmp_path)
+    del rig.environ["AVOCADO_PROVISION_FORCE"]
+    rc, _, err = rig.go(main, capsys)
+    assert (rc, len(prompts), "device confirmation failed" in err, rig.runner.named("initrd-flash")) == (1, 1, True, [])
+
+
+@pytest.mark.deviation("device-confirmation")
+def test_force_unset_without_a_terminal_logs_the_skip_and_proceeds(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    rig = make_rig(tmp_path)
+    del rig.environ["AVOCADO_PROVISION_FORCE"]
+    rc, out, _ = rig.go(main, capsys)
+    assert (rc, "device confirmation skipped: no terminal" in out, len(rig.runner.named("initrd-flash"))) == (0, True, 1)
+
+
+@pytest.mark.deviation("required-image-refused")
+def test_an_unusable_required_image_is_refused_before_the_old_work_directory_is_deleted(tmp_path, capsys):
+    import json
+
+    rig = make_rig(tmp_path)
+    rig.work.mkdir(parents=True)
+    (rig.work / "keep.me").write_text("previous staging")
+    data_dir = Path(rig.environ["AVOCADO_STONE_DATA_DIR"])
+    name = json.loads(Path(rig.environ["AVOCADO_STONE_MANIFEST"]).read_text())["storage_devices"]["rootdisk"]["images"]["var"]
+    (data_dir / name).unlink()
+    rc, _, err = rig.go(main, capsys)
+    assert (rc, "required image(s) unusable" in err, (rig.work / "keep.me").exists()) == (1, True, True)

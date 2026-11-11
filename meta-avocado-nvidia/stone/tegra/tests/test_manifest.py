@@ -248,12 +248,42 @@ def test_a_non_list_rcm_ids_is_refused_naming_the_key(tmp_path, value):
         read_manifest(write(tmp_path, rootdisk(tegraflash={"rcm_ids": value})))
 
 
+LITERAL_REQUIRED = ("rootfs", "var", "initramfs", "tegraflash_initramfs", "tegraflash_esp", "tegraflash_tos")
+
+
+def test_the_required_image_set_is_exactly_these_six():
+    from avocado_tegraflash.manifest import REQUIRED_IMAGES
+
+    assert REQUIRED_IMAGES == LITERAL_REQUIRED
+
+
 def test_require_image_keys_names_every_missing_key():
-    from avocado_tegraflash.manifest import REQUIRED_IMAGES, require_image_keys
+    from avocado_tegraflash.manifest import require_image_keys
 
     with pytest.raises(EngineError) as exc:
         require_image_keys(Manifest(rootfs="a.img", var="b.img"))
-    for key in REQUIRED_IMAGES[2:]:
+    for key in LITERAL_REQUIRED[2:]:
         assert f"images.{key}" in str(exc.value)
     assert "images.rootfs" not in str(exc.value)
-    require_image_keys(Manifest(**{k: "x.img" for k in REQUIRED_IMAGES}))
+    require_image_keys(Manifest(**{k: "x.img" for k in LITERAL_REQUIRED}))
+
+
+@pytest.mark.parametrize("key", LITERAL_REQUIRED)
+def test_each_required_key_absent_is_refused_including_tegraflash_tos(key):
+    from avocado_tegraflash.manifest import require_image_keys
+
+    values = {k: "x.img" for k in LITERAL_REQUIRED}
+    del values[key]
+    with pytest.raises(EngineError, match=rf"images\.{key}"):
+        require_image_keys(Manifest(**values))
+
+
+@pytest.mark.parametrize("key", ["rootfs", "var", "tegraflash_esp", "dtb"])
+@pytest.mark.parametrize("value", ["x/", "x/.", "x/..", ".", "..", "/"])
+def test_an_image_value_with_no_file_name_is_refused_naming_the_key(tmp_path, key, value):
+    with pytest.raises(EngineError, match=rf"images\.{key}.*file name"):
+        read_manifest(write(tmp_path, rootdisk(images={key: value})))
+
+
+def test_an_image_value_with_a_directory_part_and_a_file_name_is_accepted(tmp_path):
+    assert read_manifest(write(tmp_path, rootdisk(images={"rootfs": "a/b/r.img"}))).rootfs == "a/b/r.img"

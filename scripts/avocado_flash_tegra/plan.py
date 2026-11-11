@@ -68,7 +68,7 @@ def build_invocation(
         "AVOCADO_STONE_BUILD_DIR": str(build_dir),
         "AVOCADO_PROVISION_PROFILE": profile,
         "AVOCADO_PROVISION_KERNEL_IMAGE": str(kernel_image),
-        # The wrapper already confirmed the device with the operator.
+        # The wrapper confirms the device with the operator unless run with -y/--assume-yes.
         "AVOCADO_PROVISION_FORCE": "1",
         "PATH": ":".join(path_parts),
     }
