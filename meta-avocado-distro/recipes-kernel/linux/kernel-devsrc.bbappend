@@ -9,9 +9,10 @@
 # This bbappend copies the generated headers and creates necessary symlinks.
 
 # One package per kernel. A multi-kernel feed carries a kernel-devsrc for each
-# kernel it builds, all as kernel-devsrc 1.0 (scarthgap's kernelsrc.bbclass
-# does not set PKGV). Under one NAME, dnf picks one of them arbitrarily, so an
-# out-of-tree module compiles against the wrong kernel's headers.
+# kernel it builds, all as kernel-devsrc 1.0 (scarthgap's kernel-devsrc.bb
+# does not inherit kernelsrc, so nothing sets PKGV). Under one NAME, dnf picks
+# one of them arbitrarily, so an out-of-tree module compiles against the wrong
+# kernel's headers.
 #
 # Name each package after the full KERNEL_VERSION, like the kernel recipe's own
 # packages (avocado-kernel-feed.bbclass). avocado-cli excludes every other
@@ -39,10 +40,11 @@ RPROVIDES:${PN} += "${PN}"
 RPROVIDES:${PN}-dev += "${PN}-dev"
 RPROVIDES:${PN}-dbg += "${PN}-dbg"
 
-# kernelsrc.bbclass's get_kernelversion_file returns None without a
-# kernel-abiversion, and inline python expands that to the string "None".
+# KERNEL_VERSION is set last by module-base.bbclass, from the kernel's
+# kernel-abiversion through oe.utils.read_file, which returns "" when the file
+# is missing.
 python do_package:prepend() {
-    if d.getVar('KERNEL_DEVSRC_KVER') in (None, '', 'None'):
+    if not d.getVar('KERNEL_DEVSRC_KVER'):
         bb.fatal("kernel-devsrc: KERNEL_VERSION is unset, cannot name the package after its kernel")
 }
 
