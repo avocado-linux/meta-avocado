@@ -22,7 +22,7 @@ record (`meta-avocado-nvidia/stone/tegra/tests/parity/deviations.py`).
 
 - `required-image-refused`: `staging.py` refuses a missing or empty required image before any erase. `tegraflash_tos` stays a mandatory image key.
 - `partition-fit-refused`: `fit.py` refuses an image larger than its partition before any erase.
-- `recovery-id-pinned`: `recovery.py`, driven by the manifest's `tegraflash.rcm_ids`, refuses a different Jetson in recovery and names both ids. The Orin Nano manifest declares only 7523; 7623 is dropped because only 7523 ships.
+- `recovery-id-pinned`: `recovery.py`, driven by the manifest's `tegraflash.rcm_ids`, refuses a different Jetson in recovery and names both ids. The Orin Nano manifest declares only 7523; 7623 (the 4GB module) is not pinned because no board with that id was ever run on hardware: pinning an unobserved sibling would refuse a valid board and would ship an id nobody has seen.
 - `cmdline-control-chars-refused`: `env.py` refuses a kernel command line carrying control characters.
 - `device-confirmation`: `confirm.py` asks the operator to retype the target before writing, and the prompt names every medium the erase flags destroy, including QSPI and UEFI variables; `AVOCADO_PROVISION_FORCE=1` skips it.
 - upstream-drift record: `meta-avocado-nvidia/stone/tegra/upstream-tracking.json`, checked by `meta-avocado-nvidia/stone/tegra/tests/test_upstream_drift.py`.
