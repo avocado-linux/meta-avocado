@@ -40,10 +40,11 @@ RPROVIDES:${PN} += "${PN}"
 RPROVIDES:${PN}-dev += "${PN}-dev"
 RPROVIDES:${PN}-dbg += "${PN}-dbg"
 
-# kernelsrc.bbclass's get_kernelversion_file returns None without a
-# kernel-abiversion, and inline python expands that to the string "None".
+# KERNEL_VERSION is set last by module-base.bbclass, from the kernel's
+# kernel-abiversion through oe.utils.read_file, which returns "" when the file
+# is missing.
 python do_package:prepend() {
-    if d.getVar('KERNEL_DEVSRC_KVER') in (None, '', 'None'):
+    if not d.getVar('KERNEL_DEVSRC_KVER'):
         bb.fatal("kernel-devsrc: KERNEL_VERSION is unset, cannot name the package after its kernel")
 }
 

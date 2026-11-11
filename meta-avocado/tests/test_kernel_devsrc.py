@@ -12,6 +12,7 @@ Run with:
 """
 
 import re
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -64,8 +65,30 @@ class KernelDevsrc(unittest.TestCase):
                 self.assertEqual(a[f"RREPLACES:{pkg}"], pkg)
 
     def test_unknown_kernel_version_is_fatal(self):
-        # get_kernelversion_file's None reaches the recipe as the string "None".
-        self.assertIn("'None'", BBAPPEND.read_text())
+        # module-base.bbclass reads KERNEL_VERSION with oe.utils.read_file,
+        # which returns "" when kernel-abiversion is missing. Run the guard
+        # itself: it must stop the build on "" and let a real version through.
+        body = re.search(r"^python do_package:prepend\(\) \{\n(.*?)^\}", BBAPPEND.read_text(), re.M | re.S)
+        self.assertIsNotNone(body, "the do_package:prepend guard is gone")
+        code = textwrap.dedent(body.group(1))
+
+        class Fatal(Exception):
+            pass
+
+        class Bb:
+            @staticmethod
+            def fatal(msg):
+                raise Fatal(msg)
+
+            note = warn = staticmethod(lambda msg: None)
+
+        def run(kver):
+            d = type("D", (), {"getVar": staticmethod(lambda name: {"KERNEL_DEVSRC_KVER": kver}.get(name))})
+            exec(code, {"d": d, "bb": Bb})
+
+        with self.assertRaises(Fatal):
+            run("")
+        run("6.18.52-yocto-standard")
 
 
 if __name__ == "__main__":
