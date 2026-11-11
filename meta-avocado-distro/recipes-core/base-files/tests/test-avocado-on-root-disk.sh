@@ -40,4 +40,31 @@ expect 0 mmcblk0p5 "root=PARTLABEL=rootfs-a rootwait" "root=PARTLABEL: no disk t
 expect 0 mmcblk1p5 "root=/dev/mmcblk1p3 rootwait" "root=/dev node: every var passes (unchanged behaviour)"
 expect 1 mmcblk1p5 "root=PARTUUID=00000000-0000-0000-0000-000000000000" "a root PARTUUID on neither disk: no var is claimed"
 
+# Kernels before 6.15 leave PARTUUID out of a partition's uevent: the helper
+# reads the GPT entry from the disk node instead. Real GPT disks (sgdisk) with
+# the same GUIDs as above stand in for /dev/mmcblk0 and /dev/mmcblk1.
+if command -v sgdisk >/dev/null 2>&1; then
+  rm -rf "$w/sys"
+  disk mmcblk0 x x
+  disk mmcblk1 x x
+  for f in "$w"/sys/block/*/*/uevent; do sed -i '/^PARTUUID=/d' "$f"; done
+  mkdir -p "$w/dev"
+  gpt() { # gpt <disk> <rootfs-a guid> <var guid>
+    truncate -s 64M "$w/dev/$1"
+    sgdisk -n 3:2048:+8M -u 3:"$2" -c 3:rootfs-a -n 5:0:+8M -u 5:"$3" -c 5:var "$w/dev/$1" >/dev/null
+  }
+  gpt mmcblk0 489ee3a6-ca13-4f67-913a-5eea91ff9b03 aaaaaaaa-0000-0000-0000-000000000000
+  gpt mmcblk1 BAE4E9CC-4F05-475D-AFAE-BE1C6A262C66 bbbbbbbb-0000-0000-0000-000000000000
+  export AVOCADO_DEV="$w/dev"
+  expect 0 mmcblk1p5 "$emmc_root" "no PARTUUID in uevent: eMMC root, the eMMC's var (from the GPT)"
+  expect 1 mmcblk0p5 "$emmc_root" "no PARTUUID in uevent: eMMC root, the microSD's var is not"
+  expect 0 mmcblk0p5 "$sd_root" "no PARTUUID in uevent: microSD root, the microSD's var"
+  expect 1 mmcblk1p5 "$sd_root" "no PARTUUID in uevent: microSD root, the eMMC's var is not"
+  : >"$w/dev/mmcblk1" # no GPT on the disk: nothing to match, nothing claimed
+  expect 1 mmcblk1p5 "$emmc_root" "no PARTUUID in uevent and no GPT: nothing is claimed (fails closed)"
+else
+  echo "FAIL - sgdisk not found: the no-PARTUUID (pre-6.15 kernel) cases did not run"
+  fail=1
+fi
+
 exit $fail
