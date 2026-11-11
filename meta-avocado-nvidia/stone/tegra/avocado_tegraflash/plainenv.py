@@ -39,7 +39,8 @@ _WRAPPERS = frozenset({"builtin", "command", "exec", "env"})
 _SEPARATORS = re.compile(r"&&|\|\||[;&|(){}`\n]")
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 _REDIRECTION = re.compile(r"[0-9]*(?:<<?<?|>>?)")
-_DUP_REDIRECTION = re.compile(r"[0-9]*[<>]&[0-9-]*")
+# The lookbehind keeps a long digit run from being rescanned from every digit in it.
+_DUP_REDIRECTION = re.compile(r"(?<![0-9])[0-9]*[<>]&[0-9-]*")
 
 
 class EnvValue(str):
@@ -93,6 +94,10 @@ def _command_word(words: list[str]) -> str:
         word = words[i]
         if word in _KEYWORDS or _ASSIGNMENT.match(word):
             i += 1
+            if word == "time":
+                # `time -p cmd`: the options belong to time, not to the command.
+                while i < n and words[i].startswith("-"):
+                    i += 1
         elif (redirect := _REDIRECTION.match(word)) is not None:
             # `> file` carries its target in the next word; `>file` carries it itself.
             i += 1 if redirect.end() < len(word) else 2

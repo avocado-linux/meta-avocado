@@ -411,27 +411,107 @@ def test_the_wider_command_word_reading_does_not_refuse_ordinary_lines(tmp_path,
     read(tmp_path, f"ROOTFS_IMAGE=a.img\n{line}\n")
 
 
-def test_a_very_long_line_of_prefixes_is_scanned_in_linear_time(tmp_path):
-    line = "then " * 600_000 + ". x"
-    assert len(line) > 3_000_000
+def _timed(fn, tmp_path, line):
     started = time.monotonic()
-    msg = refused(tmp_path, f"A=1\n{line}\n")
-    assert time.monotonic() - started < 2.0
+    result = fn(tmp_path, f"A=1\n{line}\n")
+    return time.monotonic() - started, result
+
+
+def test_a_very_long_line_of_prefixes_is_scanned_in_linear_time(tmp_path):
+    # Doubling the input must not much more than double the time. A ratio holds on a loaded
+    # host where an absolute bound would flake, and a quadratic scan misses it by a wide margin.
+    small, _ = _timed(refused, tmp_path, "then " * 150_000 + ". x")
+    large, msg = _timed(refused, tmp_path, "then " * 300_000 + ". x")
+    assert large < 4 * small + 0.5
     assert ":2" in msg and "bash" in msg
+
+
+@pytest.mark.parametrize("tail", ["", ">", ">&"])
+def test_a_long_run_of_digits_is_scanned_in_linear_time(tmp_path, tail):
+    small, _ = _timed(read, tmp_path, "9" * 40_000 + tail)
+    large, _ = _timed(read, tmp_path, "9" * 80_000 + tail)
+    assert large < 3 * small + 0.3
+
+
+@pytest.mark.parametrize("tail", ["", ">", ">&"])
+def test_a_four_megabyte_line_of_digits_finishes(tmp_path, tail):
+    # Quadratic backtracking needs minutes here, so the bound is far above any loaded host's linear time.
+    elapsed, _ = _timed(read, tmp_path, "9" * 4_000_000 + tail)
+    assert elapsed < 20.0
+
+
+@pytest.mark.parametrize("line", ["2>&1 12>&- . f", "12>&- . f", "x=1 2>&1 12>&- source f"])
+def test_duplicated_descriptor_redirections_are_stripped_and_the_command_after_them_is_seen(tmp_path, line):
+    assert ":2" in refused(tmp_path, f"A=1\n{line}\n")
+
+
+def test_a_duplicated_descriptor_redirection_after_an_ordinary_command_is_not_refused(tmp_path):
+    read(tmp_path, "ROOTFS_IMAGE=a.img\necho . 12>&-\n")
+
+
+# prefix forms that no other test pins, each one hiding a source command behind it
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "A+=1 . f",
+        "_X=1 . f",
+        "a_b=1 . f",
+        "<<< hi . f",
+        "<<EOF . f",
+        ">> f . x",
+        "2>> f . x",
+        "'command' . f",
+        '"env" source f',
+        "echo '#' ; source x",
+        'echo "#" && . x',
+        "time -p . f",
+        "time -p -p . f",
+        "x=1 time -p . f",
+        "! time -p source f",
+        "then . x",
+        "a & . x",
+        "a) . x",
+        "} . x",
+        "env -i . f",
+        "exec -c source x",
+    ],
+)
+def test_more_prefix_forms_in_front_of_a_source_command_are_looked_through(tmp_path, line):
+    assert ":2" in refused(tmp_path, f"A=1\n{line}\n")
+
+
+@pytest.mark.parametrize("line", ["time -p echo .", "<<< hi echo source", ">> f echo ."])
+def test_the_same_prefix_forms_in_front_of_an_ordinary_command_are_not_refused(tmp_path, line):
+    read(tmp_path, f"ROOTFS_IMAGE=a.img\n{line}\n")
+
+
+@pytest.mark.parametrize("blank", [" ", "\t", " \t", "\t "])
+def test_a_trailing_comment_is_found_after_a_space_or_a_tab(tmp_path, blank):
+    msg = refused(tmp_path, f"ROOTFS_IMAGE=a.img{blank}# note\n")
+    assert "trailing comment" in msg and ":1" in msg
 
 
 # an EnvValue is a str that carries its file and line, and has to keep them when it is copied
 
 
+VALUE_LINE = 7
+
+
 @pytest.fixture
 def value(tmp_path):
-    return read(tmp_path, "ROOTFS_DEVICE=nvme0n1\n")["ROOTFS_DEVICE"]
+    env = read(tmp_path, "A=1\n\n\nB=2\n\n\nROOTFS_DEVICE=nvme0n1\n")["ROOTFS_DEVICE"]
+    assert (env.path, env.line) == (tmp_path / ENV_NAME, VALUE_LINE)
+    return env
 
 
 def _same(duplicate, original):
     assert type(duplicate) is EnvValue
-    assert (str(duplicate), duplicate.path, duplicate.line) == (str(original), original.path, original.line)
-    assert duplicate.where == original.where
+    assert str(duplicate) == str(original)
+    assert duplicate.path == original.path
+    assert duplicate.line == original.line == VALUE_LINE
+    assert duplicate.where == original.where == f"{original.path}:{VALUE_LINE}"
 
 
 def test_an_env_value_survives_copy(value):

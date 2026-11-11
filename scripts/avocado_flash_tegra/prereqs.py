@@ -106,6 +106,7 @@ LAYOUT_NAMES = ("external-flash.xml.in", "external-flash.xml")
 # whose partition is visible in the real external-flash.xml are listed.
 FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
 MAX_LAYOUT_BYTES = 4 * 1024 * 1024
+_SIZE = re.compile(r"0[xX][0-9a-fA-F]+|[1-9][0-9]*|0")
 _PLAIN_ENCODINGS = ("utf-8", "us-ascii")
 _ENCODING_DECL = re.compile(
     r"""^\s*<\?xml[^>]*?\sencoding\s*=\s*["']([^"']*)["']""", re.IGNORECASE
@@ -173,10 +174,8 @@ def parse_partition_sizes(path) -> tuple[dict, str | None]:
             sizes[name] = DUPLICATE
             continue
         raw = (part.findtext("size") or "").strip()
-        try:
-            sizes[name] = int(raw, 0)
-        except ValueError:
-            sizes[name] = raw
+        # int(raw, 0) alone also takes `1_0`, `+5` and `0b11`; the engine's fit check reads only decimal and 0x hex.
+        sizes[name] = int(raw, 0) if _SIZE.fullmatch(raw) else raw
     return sizes, None
 
 

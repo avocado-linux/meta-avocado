@@ -297,7 +297,9 @@ def test_copy_images_tos_env_file_without_the_key_is_refused(dirs):
     write(work / ".env.initrd-flash", "OTHER=1\n #TOSIMGFILENAME=c.img\n")
     with pytest.raises(EngineError) as info:
         staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
-    assert ".env.initrd-flash" in str(info.value) and "TOSIMGFILENAME" in str(info.value)
+    msg = str(info.value)
+    # .presigning-vars can supply the value too, so the message must say it was looked at.
+    assert ".env.initrd-flash" in msg and "TOSIMGFILENAME" in msg and ".presigning-vars" in msg
 
 
 def test_copy_images_env_file_without_the_key_is_fine_when_no_tos_is_configured(dirs):

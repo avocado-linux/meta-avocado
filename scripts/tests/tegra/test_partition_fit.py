@@ -180,6 +180,23 @@ def test_non_numeric_size_is_a_refusal(deploy_tree, template, make_layout):
     assert problems[0].target == "tegraflash-bsp"
 
 
+@pytest.mark.parametrize("raw", ["1_0", "0x1_0", "010", "-5", "+5", "0b11", "0o7", "1e3", "0x", "0X"])
+def test_a_size_that_is_not_plain_decimal_or_hex_is_a_refusal(deploy_tree, template, make_layout, raw):
+    # int(raw, 0) alone reads these as numbers; the engine's fit check does not, and the two must agree.
+    _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": raw}))
+    _size_rootfs(deploy_tree, template, 5)
+    problems = _check(deploy_tree, template)
+    assert len(problems) == 1
+    assert "APP" in problems[0].what and "cannot be verified" in problems[0].what
+
+
+@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0XfF", 255), ("16", 16), ("0", 0)])
+def test_a_plain_decimal_or_hex_size_is_read(deploy_tree, template, make_layout, raw, image):
+    _set_layout(deploy_tree, make_layout({"esp": 67108864, "APP": raw}))
+    _size_rootfs(deploy_tree, template, image)
+    assert _check(deploy_tree, template) == []
+
+
 def test_absent_partition_is_a_problem(deploy_tree, template, make_layout):
     _set_layout(deploy_tree, make_layout({"esp": 67108864}))
     problems = _check(deploy_tree, template)

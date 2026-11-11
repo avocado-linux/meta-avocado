@@ -483,6 +483,28 @@ def test_an_oem_signed_layout_is_refused(tmp_path):
     assert "oem_sign" in msg
 
 
+# initrd-flash.sh:805 runs grep -q 'oem_sign="true"': case-sensitive, that exact attribute text, comments included
+
+
+def _with_esp_attr(attr):
+    return layout().replace('<partition name="esp"', f'<partition name="esp" {attr}')
+
+
+@pytest.mark.parametrize("attr", ['oem_sign="false"', 'OEM_SIGN="true"', 'oem_sign="yes"', 'oem_sign=""', 'oem_sign="TRUE"'])
+def test_an_oem_sign_attribute_that_the_flash_does_not_match_is_accepted(tmp_path, attr):
+    assert len(run(tmp_path, stage(tmp_path, _with_esp_attr(attr)))) == 2
+
+
+def test_oem_sign_true_is_refused_even_when_another_partition_says_false(tmp_path):
+    xml = _with_esp_attr('oem_sign="false"').replace('<partition name="APP"', '<partition name="APP" oem_sign="true"')
+    assert 'oem_sign="true"' in refusal(tmp_path, stage(tmp_path, xml))
+
+
+def test_oem_sign_true_in_a_comment_is_refused_like_the_flash_greps_it(tmp_path):
+    xml = layout(extra='<!-- oem_sign="true" -->')
+    assert 'oem_sign="true"' in refusal(tmp_path, stage(tmp_path, xml))
+
+
 # refusals cite the file and line that set the value, which is .presigning-vars when that file won
 
 
@@ -501,13 +523,13 @@ def test_a_rootfs_image_set_by_the_env_file_cites_the_env_file_and_line(tmp_path
 # a size is a decimal or 0x hex number; int(raw, 0) alone also takes 1_0, which nothing downstream reads as ten
 
 
-@pytest.mark.parametrize("raw", ["1_0", "0x1_0", "010", "-5", "+5", "0b11", "1e3", "٣"])
+@pytest.mark.parametrize("raw", ["1_0", "0x1_0", "010", "-5", "+5", "0b11", "1e3", "٣", "0x", "0X"])
 def test_a_size_that_is_not_plain_decimal_or_hex_is_refused(tmp_path, raw):
     m = stage(tmp_path, layout(app=raw), rootfs=5)
     assert f"{raw!r}, not a number" in refusal(tmp_path, m)
 
 
-@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0X10", 16), ("16", 16), ("0", 0), ("  16  ", 16)])
+@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0X10", 16), ("0xFF", 255), ("0Xff", 255), ("16", 16), ("0", 0), ("  16  ", 16)])
 def test_plain_decimal_and_hex_sizes_are_accepted(tmp_path, raw, image):
     m = stage(tmp_path, layout(app=raw), rootfs=image)
     assert run(tmp_path, m)[0] == f"fit: rootfs {image} <= APP {image}"
