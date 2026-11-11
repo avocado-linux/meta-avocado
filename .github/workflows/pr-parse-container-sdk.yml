@@ -154,6 +154,12 @@ jobs:
       - name: avocado-var-grow
         shell: bash
         run: bash meta-avocado/recipes-core/avocado-var-grow/tests/test-avocado-var-grow.sh
+      - name: i.MX eMMC boot partition switch
+        shell: bash
+        run: bash meta-avocado-nxp/recipes-bsp/avocado-imx-bootpart/tests/test-avocado-imx-bootpart.sh
+      - name: i.MX /var key provider (CAAM)
+        shell: bash
+        run: bash meta-avocado-nxp/recipes-core/cryptsetup-var/tests/test-var-hwkey.sh
       - name: NanoPi R5S disk image layout and U-Boot env offsets
         shell: bash
         run: sh meta-avocado-rockchip/stone/nanopi-r5s/tests/test-build-disk-image.sh

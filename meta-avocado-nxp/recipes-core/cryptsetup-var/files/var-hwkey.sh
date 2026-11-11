@@ -64,7 +64,7 @@ case "${1:-}" in
       echo "var-hwkey: blob is not valid base64" >&2
       exit 1
     fi
-    head -c 64 /dev/zero >"$work/zero"
+    dd if=/dev/zero of="$work/zero" bs=64 count=1 2>/dev/null
     # caam-crypt imports the black key from the blob (via caam-keygen import),
     # then runs AES-256-CBC over the input with it. Its stdout is chatter.
     caam-crypt enc AES-256-CBC -k "$work/blob.bb" -in "$work/zero" -out "$work/pass" -iv "$ZERO_IV" >/dev/null 2>&1 \
