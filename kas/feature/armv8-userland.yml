@@ -1,0 +1,21 @@
+# Build the userland for baseline aarch64 (Armv8-A) instead of the machine's tune.
+#
+#   bakar build meta-avocado/kas/machine/arm64-uefi-v9.yml:meta-avocado/kas/feature/armv8-userland.yml
+#
+# For CPU models that expose fewer features than the Armv9 tune assumes. On a
+# virtual platform whose Cortex-A720AE model reports an Armv8.2-class feature
+# set (ID_AA64ISAR1_EL1 reports RCpc level 1 and ID_AA64PFR1_EL1 reports no BTI,
+# MTE or SSBS), PID 1 dies with SIGILL at `stlur` (FEAT_LRCPC2, Armv8.4) in the
+# dynamic loader when the userland is built with armv9a-crypto.
+#
+# Opt-in because the machine's tune is right for real Armv9 hardware, and
+# dropping to Armv8-A there is a performance loss. DEFAULTTUNE is assigned weakly
+# in the machine file (avocado-arm64-uefi-v9.conf), so this local.conf value wins.
+# It changes the sstate hash of every target recipe, so expect a full package
+# rebuild, and the package architecture of the RPMs changes with the tune.
+header:
+  version: 16
+
+local_conf_header:
+  feature/armv8-userland: |
+    DEFAULTTUNE = "aarch64"
