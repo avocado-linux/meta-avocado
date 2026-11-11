@@ -24,6 +24,7 @@ FIT_PAIRS = (("rootfs", "APP"), ("tegraflash_esp", "esp"))
 # initrd-flash writes the rootfs image into both slots, so the smaller one limits it.
 ROOTFS_SLOTS = ("APP", "APP_b")
 MAX_LAYOUT_BYTES = 4 * 1024 * 1024
+_SIZE = re.compile(r"0[xX][0-9a-fA-F]+|[1-9][0-9]*|0")
 _PLAIN_ENCODINGS = ("utf-8", "us-ascii")
 _ENCODING_DECL = re.compile(
     r"""^\s*<\?xml[^>]*?\sencoding\s*=\s*["']([^"']*)["']""", re.IGNORECASE
@@ -109,10 +110,8 @@ def _parse_layout(path) -> _Layout:
             sizes[name] = DUPLICATE
             continue
         raw = (part.findtext("size") or "").strip()
-        try:
-            sizes[name] = int(raw, 0)
-        except ValueError:
-            sizes[name] = raw
+        # int(raw, 0) alone also takes `1_0`, `+5` and `0b11`, none of which the flash tools read as that number.
+        sizes[name] = int(raw, 0) if _SIZE.fullmatch(raw) else raw
     # initrd-flash.sh greps the text for this exact attribute, comments included.
     return _Layout(sizes, parts, 'oem_sign="true"' in text, None)
 
@@ -131,6 +130,8 @@ def _measure(work_dir: Path, name: str) -> int | str:
 # The partition that carries DATAFILE and the ones that carry DTB_FILE in every shipped layout
 # (recipes-bsp/tegra-binaries/tegra-storage-layout/*.xml): the flash substitutes the data image and
 # the kernel dtb by text, so the same text in any other partition is a file written where nobody meant it.
+# The sed that reads this layout is initrd-flash.sh's `s,DTB_FILE,kernel_$DTBFILE,`, which has no leading space
+# (the flash helper's `s, DTB_FILE,` reads its own flash.xml), so BPFDTB_FILE in a bpmp-fw-dtb partition is rewritten too.
 DATA_PARTITION = "DATAPART_EXPAND"
 _KERNEL_DTB_PARTITION = re.compile(r"(?:[AB]_)?kernel-dtb")
 
@@ -158,22 +159,29 @@ def _rename_collisions(
     with an unanchored sed whose pattern is `${ROOTFS_IMAGE%.*}.img`, so a `.`
     matches any character and any layout entry or staged image that matches it
     is rewritten into the rootfs name. A layout entry that is exactly the rootfs
-    name is rewritten into itself and passes.
+    name is rewritten into itself, which is fine in APP and APP_b; in any other
+    partition it receives the rootfs without a fit check, so it is refused.
     """
     pattern = _rename_pattern(rootfs_name)
-    sparse = pattern.pattern
+    sparse = f"{rootfs_name.rsplit('.', 1)[0]}.img"
+    dot = "`.` matches any character"
     found = []
     for part, named in parts:
-        if named and named != rootfs_name and pattern.search(named):
+        if named and named == rootfs_name and part not in ROOTFS_SLOTS:
             found.append(
-                f"{_label(part)} in {layout} names {named!r}, which matches {sparse!r}; the flash would "
+                f"{_label(part)} in {layout} names the staged rootfs {rootfs_name!r}; the flash would write the "
+                f"rootfs into it, and its fit was never checked against that partition"
+            )
+        elif named and named != rootfs_name and pattern.search(named):
+            found.append(
+                f"{_label(part)} in {layout} names {named!r}, which matches {sparse!r} ({dot}); the flash would "
                 f"rewrite it into the rootfs name {rootfs_name!r}"
             )
     for key, names in staged_names(manifest, tos_destination).items():
         for name in names if key != "rootfs" else ():
             if pattern.search(name):
                 found.append(
-                    f"images.{key} is staged as {name!r}, which matches {sparse!r}; the flash's rename "
+                    f"images.{key} is staged as {name!r}, which matches {sparse!r} ({dot}); the flash's rename "
                     f"of that pattern into the rootfs name {rootfs_name!r} would also rewrite it"
                 )
     return found

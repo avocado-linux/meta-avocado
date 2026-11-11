@@ -287,7 +287,7 @@ def test_a_staged_image_named_like_the_rewrite_pattern_is_refused(tmp_path):
 
 
 def test_the_staged_rootfs_named_like_its_own_rewrite_pattern_is_not_a_collision(tmp_path):
-    m = stage(tmp_path, layout(app_file="rootfs.img", extra=_extra_partition("UDA", "rootfs.img")))
+    m = stage(tmp_path, layout(app_b="8192", app_file="rootfs.img", app_b_file="rootfs.img"))
     assert len(run(tmp_path, m)) == 2
 
 
@@ -450,10 +450,23 @@ def test_dtb_file_in_a_kernel_dtb_partition_passes(tmp_path, name):
     assert len(run(tmp_path, m)) == 2
 
 
-@pytest.mark.parametrize("name", ["UDA", "A_kernel", "RECDTB-NAME", "A_kernel-dtb_x"])
+@pytest.mark.parametrize(
+    "name", ["UDA", "A_kernel", "RECDTB-NAME", "A_kernel-dtb_x", "recovery-dtb", "foo-dtb", "A_recovery-dtb", "C_kernel-dtb"]
+)
 def test_dtb_file_in_another_partition_is_refused(tmp_path, name):
     msg = refusal(tmp_path, stage(tmp_path, layout(extra=_extra_partition(name, "DTB_FILE"))))
     assert "DTB_FILE" in msg and name in msg
+
+
+# The layout this check reads is rewritten by initrd-flash.sh with `s,DTB_FILE,kernel_$DTBFILE,` (no leading
+# space); the leading-space sed (`s, DTB_FILE,`) belongs to the flash helper, which reads a different file. So a
+# BPFDTB_FILE or a space-prefixed DTB_FILE in this layout is rewritten too, and is refused outside the kernel slots.
+
+
+@pytest.mark.parametrize("filename", ["BPFDTB_FILE", " DTB_FILE", "x DTB_FILE", "pre_DTB_FILE_post"])
+def test_every_spelling_the_substitution_rewrites_is_refused_outside_the_kernel_slots(tmp_path, filename):
+    msg = refusal(tmp_path, stage(tmp_path, layout(extra=_extra_partition("A_bpmp-fw-dtb", filename))))
+    assert "DTB_FILE" in msg and "A_bpmp-fw-dtb" in msg
 
 
 def test_dtb_file_in_a_nameless_partition_is_refused(tmp_path):
@@ -483,3 +496,64 @@ def test_a_rootfs_image_set_by_presigning_vars_cites_that_file_and_line(tmp_path
 def test_a_rootfs_image_set_by_the_env_file_cites_the_env_file_and_line(tmp_path):
     m = stage(tmp_path, layout(), env='A=1\nROOTFS_IMAGE="big.img"\n')
     assert f"{tmp_path / '.env.initrd-flash'}:2" in refusal(tmp_path, m)
+
+
+# a size is a decimal or 0x hex number; int(raw, 0) alone also takes 1_0, which nothing downstream reads as ten
+
+
+@pytest.mark.parametrize("raw", ["1_0", "0x1_0", "010", "-5", "+5", "0b11", "1e3", "٣"])
+def test_a_size_that_is_not_plain_decimal_or_hex_is_refused(tmp_path, raw):
+    m = stage(tmp_path, layout(app=raw), rootfs=5)
+    assert f"{raw!r}, not a number" in refusal(tmp_path, m)
+
+
+@pytest.mark.parametrize("raw,image", [("0x10", 16), ("0X10", 16), ("16", 16), ("0", 0), ("  16  ", 16)])
+def test_plain_decimal_and_hex_sizes_are_accepted(tmp_path, raw, image):
+    m = stage(tmp_path, layout(app=raw), rootfs=image)
+    assert run(tmp_path, m)[0] == f"fit: rootfs {image} <= APP {image}"
+
+
+# the collision message names the file-name form of the pattern, not Python's escaping of it
+
+
+def test_the_collision_message_prints_the_stem_and_says_what_dot_matches(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "a+b.img")), name="a+b.ext4", env="BOOTDEV=x\n")
+    msg = refusal(tmp_path, m)
+    assert "matches 'a+b.img'" in msg and "`.` matches any character" in msg
+    assert "\\" not in msg
+
+
+def test_the_staged_image_collision_message_prints_the_stem_too(tmp_path):
+    m = stage(tmp_path, layout(), name="a+b.ext4", env="BOOTDEV=x\n")
+    m = Manifest(rootfs=m.rootfs, tegraflash_esp=m.tegraflash_esp, var="images/a+b.img")
+    msg = refusal(tmp_path, m)
+    assert "matches 'a+b.img'" in msg and "\\" not in msg
+
+
+# the staged names are searched like the layout ones: unanchored, so a name that merely contains the stem collides
+
+
+def test_a_staged_name_that_contains_the_stem_pattern_is_refused(tmp_path):
+    m = stage(tmp_path, layout(), name="rootfs.ext4")
+    m = Manifest(rootfs=m.rootfs, tegraflash_esp=m.tegraflash_esp, var="images/xrootfs.imgz")
+    msg = refusal(tmp_path, m)
+    assert "xrootfs.imgz" in msg and "var" in msg
+
+
+# a partition that is not a rootfs slot and carries the rootfs name is written the rootfs, and nothing measured it
+
+
+def test_a_non_slot_partition_named_exactly_like_the_rootfs_is_refused(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "rootfs.img")))
+    msg = refusal(tmp_path, m)
+    assert "UDA" in msg and "rootfs.img" in msg and "never checked" in msg
+
+
+def test_a_non_slot_partition_named_like_a_rootfs_that_the_pattern_misses_is_refused(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "rootfs.ext4")), name="rootfs.ext4")
+    assert "UDA" in refusal(tmp_path, m)
+
+
+def test_a_nameless_partition_named_exactly_like_the_rootfs_is_refused(tmp_path):
+    m = stage(tmp_path, layout(extra=_nameless("rootfs.img")))
+    assert "no name" in refusal(tmp_path, m)

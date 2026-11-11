@@ -4,10 +4,16 @@ The engine guards against mistakes and generated-file drift in files the flash
 tools trust anyway; it never executes them.
 """
 
+import copy
+import dataclasses
+import pickle
+import time
+
 import pytest
 
 from avocado_tegraflash import EngineError
-from avocado_tegraflash.plainenv import read_plain_env
+from avocado_tegraflash.plainenv import EnvValue, read_plain_env
+from avocado_tegraflash.settings import StagedEnv
 
 ENV_NAME = ".env.initrd-flash"
 PRESIGN_NAME = ".presigning-vars"
@@ -346,3 +352,101 @@ def test_a_value_carries_the_file_and_line_that_set_it(tmp_path):
 def test_a_value_set_only_in_the_env_file_cites_the_env_file(tmp_path):
     env = read(tmp_path, "A=1\nROOTFS_IMAGE=r.img\n", presign="B=2\n")
     assert env["ROOTFS_IMAGE"].where == f"{tmp_path / ENV_NAME}:2"
+
+
+# every command-word prefix bash accepts before the command, one by one
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "while . x",
+        "until . x",
+        "elif . x",
+        "! time . x",
+        "time ! . x",
+        "if . x",
+        "else . x",
+        "builtin command exec . x",
+        "env source x",
+        "command -p . x",
+    ],
+)
+def test_every_command_prefix_is_looked_through(tmp_path, line):
+    assert ":2" in refused(tmp_path, f"A=1\n{line}\n")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "X=1 . f",
+        "X=1 source f",
+        "X=1 Y=2 eval f",
+        ">/dev/null . f",
+        "</dev/null . f",
+        "2>/dev/null source f",
+        "> /dev/null . f",
+        "2>&1 . f",
+        "&>/dev/null . f",
+        "X=1 >/dev/null time . f",
+        "'source' f",
+        '"." f',
+        "s'ou'rce f",
+        "\\source f",
+        "true;. f",
+        "true;source f",
+        "x=`. f`",
+        "x=`true; source f`",
+    ],
+)
+def test_assignment_redirection_quoting_and_backtick_forms_of_sourcing_are_refused(tmp_path, line):
+    assert ":2" in refused(tmp_path, f"A=1\n{line}\n")
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["X=1 echo .", ">/dev/null echo source", "'echo' source", "true;.f", "echo `date`", "X=`date`", "exec >/dev/null"],
+)
+def test_the_wider_command_word_reading_does_not_refuse_ordinary_lines(tmp_path, line):
+    read(tmp_path, f"ROOTFS_IMAGE=a.img\n{line}\n")
+
+
+def test_a_very_long_line_of_prefixes_is_scanned_in_linear_time(tmp_path):
+    line = "then " * 600_000 + ". x"
+    assert len(line) > 3_000_000
+    started = time.monotonic()
+    msg = refused(tmp_path, f"A=1\n{line}\n")
+    assert time.monotonic() - started < 2.0
+    assert ":2" in msg and "bash" in msg
+
+
+# an EnvValue is a str that carries its file and line, and has to keep them when it is copied
+
+
+@pytest.fixture
+def value(tmp_path):
+    return read(tmp_path, "ROOTFS_DEVICE=nvme0n1\n")["ROOTFS_DEVICE"]
+
+
+def _same(duplicate, original):
+    assert type(duplicate) is EnvValue
+    assert (str(duplicate), duplicate.path, duplicate.line) == (str(original), original.path, original.line)
+    assert duplicate.where == original.where
+
+
+def test_an_env_value_survives_copy(value):
+    _same(copy.copy(value), value)
+
+
+def test_an_env_value_survives_deepcopy(value):
+    _same(copy.deepcopy(value), value)
+
+
+@pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
+def test_an_env_value_survives_a_pickle_round_trip(value, protocol):
+    _same(pickle.loads(pickle.dumps(value, protocol)), value)
+
+
+def test_an_env_value_keeps_its_origin_through_dataclasses_asdict(value):
+    out = dataclasses.asdict(StagedEnv(device=value, erases_mmc=True))
+    _same(out["device"], value)

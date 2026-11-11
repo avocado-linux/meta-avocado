@@ -31,10 +31,15 @@ _SHAPES = {
 }
 CHECKED_KEYS = tuple(_SHAPES)
 _BARE_WORD = {key: re.compile(rf"(?<![A-Za-z0-9_]){key}(?![A-Za-z0-9_])") for key in CHECKED_KEYS}
-_FOLLOW = ("eval", "source", ".")
-# Words that may precede a command in bash without being the command.
-_PREFIX = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "time", "builtin", "command", "exec"})
-_SEPARATORS = re.compile(r"&&|\|\||[;&|(){}\n]")
+_FOLLOW = frozenset({"eval", "source", "."})
+# Reserved words that may precede a command in bash without being the command.
+_KEYWORDS = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "time"})
+# Commands that run the next command word; `-` options between them are skipped.
+_WRAPPERS = frozenset({"builtin", "command", "exec", "env"})
+_SEPARATORS = re.compile(r"&&|\|\||[;&|(){}`\n]")
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+_REDIRECTION = re.compile(r"[0-9]*(?:<<?<?|>>?)")
+_DUP_REDIRECTION = re.compile(r"[0-9]*[<>]&[0-9-]*")
 
 
 class EnvValue(str):
@@ -48,6 +53,10 @@ class EnvValue(str):
         self.path = path
         self.line = line
         return self
+
+    def __getnewargs__(self) -> tuple[str, Path, int]:
+        # copy, deepcopy, pickle and dataclasses.asdict rebuild through __new__, which needs all three.
+        return (str(self), self.path, self.line)
 
     @property
     def where(self) -> str:
@@ -69,13 +78,37 @@ def _is_read(line: str, match: re.Match) -> bool:
     return line[start - 2 : start] == "${" and line[end : end + 1] == "}"
 
 
+def _unquoted(word: str) -> str:
+    """The word as bash sees it after quote removal: `'source'`, `"."` and `\\source` name the same command."""
+    return word.replace("'", "").replace('"', "").replace("\\", "")
+
+
+def _command_word(words: list[str]) -> str:
+    """The first word that is the command, after keywords, assignments, redirections and wrappers; '' if none.
+
+    One forward pass over an index: a line of millions of prefix words must not cost more than its length.
+    """
+    i, n = 0, len(words)
+    while i < n:
+        word = words[i]
+        if word in _KEYWORDS or _ASSIGNMENT.match(word):
+            i += 1
+        elif (redirect := _REDIRECTION.match(word)) is not None:
+            # `> file` carries its target in the next word; `>file` carries it itself.
+            i += 1 if redirect.end() < len(word) else 2
+        elif _unquoted(word) in _WRAPPERS:
+            i += 1
+            while i < n and words[i].startswith("-"):
+                i += 1
+        else:
+            return _unquoted(word)
+    return ""
+
+
 def _follows_code(line: str) -> bool:
     """True when any command word of the line is `.`, `source` or `eval`."""
-    for segment in _SEPARATORS.split(line):
-        words = segment.split()
-        while words and words[0] in _PREFIX:
-            words.pop(0)
-        if words and words[0] in _FOLLOW:
+    for segment in _SEPARATORS.split(_DUP_REDIRECTION.sub(" ", line)):
+        if _command_word(segment.split()) in _FOLLOW:
             return True
     return False
 
