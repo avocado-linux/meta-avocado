@@ -41,3 +41,5 @@ local_conf_header:
   feature/multi-kernel-jetson: |
     BBMULTICONFIG += "jetson-l4t"
     AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:linux-jammy-nvidia-tegra jetson-l4t:nvidia-kernel-oot"
+    # Headers for out-of-tree module builds, one kernel-devsrc-${KERNEL_VERSION} per kernel.
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "jetson-l4t:kernel-devsrc"
