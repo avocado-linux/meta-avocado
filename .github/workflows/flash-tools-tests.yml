@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha="$(awk '/^  meta-tegra:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}' kas/vendor/nvidia.yml)"
+          sha="$(awk '/^[^ ]/{f=0} /^  meta-tegra:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}' kas/vendor/nvidia.yml)"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "no meta-tegra pin found" >&2; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 

@@ -25,7 +25,7 @@ PID_CASE_RE = re.compile(r'case\s+"\$idProduct"\s+in\b(.*?)\besac\b', re.DOTALL)
 PID_ARM_RE = re.compile(r"^\s*([0-9a-fA-F]{4}(?:\|[0-9a-fA-F]{4})*)\)", re.MULTILINE)
 GIT_TIMEOUT = 30
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "flash-tools-tests.yml"
-PIN_AWK = "/^  meta-tegra:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}"
+PIN_AWK = "/^[^ ]/{f=0} /^  meta-tegra:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}"
 
 
 class CouldNotEvaluate(Exception):
@@ -236,6 +236,28 @@ def test_workflow_pin_extraction_yields_the_kas_pin():
         ["awk", PIN_AWK, str(KAS_PIN_PATH)], capture_output=True, text=True, check=True
     ).stdout.strip()
     assert out == parse_kas_pin(KAS_PIN_PATH.read_text())
+
+
+def run_pin_awk(tmp_path, text):
+    kas = tmp_path / "nvidia.yml"
+    kas.write_text(text)
+    return subprocess.run(["awk", PIN_AWK, str(kas)], capture_output=True, text=True, check=True)
+
+
+def test_workflow_pin_extraction_fails_closed_when_the_block_has_no_commit(tmp_path):
+    text = (
+        "repos:\n  meta-tegra:\n    url: https://example.invalid/x\n"
+        "overrides:\n    commit: " + "3" * 40 + "\n"
+    )
+    assert run_pin_awk(tmp_path, text).stdout.strip() == ""
+
+
+def test_workflow_pin_extraction_still_reads_the_commit_inside_the_block(tmp_path):
+    text = (
+        "repos:\n  meta-tegra:\n    url: https://example.invalid/x\n    commit: " + "2" * 40 + "\n"
+        "overrides:\n    commit: " + "3" * 40 + "\n"
+    )
+    assert run_pin_awk(tmp_path, text).stdout.strip() == "2" * 40
 
 
 def test_removed_recovery_pid_fails():
