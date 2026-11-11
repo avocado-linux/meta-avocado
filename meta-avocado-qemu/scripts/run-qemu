@@ -70,6 +70,10 @@ parse_args() {
           usage
           die 2 "--image needs a path"
         }
+        [ -n "$2" ] || {
+          usage
+          die 2 "--image needs a non-empty path"
+        }
         IMAGE=$2
         shift
         ;;
@@ -299,11 +303,13 @@ stop_tpm() {
       kill -TERM "$pid" 2>/dev/null || true
       for n in $(seq 1 50); do
         [ -r "/proc/$pid/stat" ] || break
-        s=$(<"/proc/$pid/stat")
+        # swtpm can vanish between the test above and this read, and under set -e
+        # a failure here would skip the cleanup below.
+        s=$(<"/proc/$pid/stat") || break
         s=${s##*) }
         # A zombie is already stopped: it only waits for a parent to reap it.
         [ "${s%% *}" = Z ] && break
-        [ "$n" -eq 50 ] && kill -KILL "$pid" 2>/dev/null
+        [ "$n" -eq 50 ] && { kill -KILL "$pid" 2>/dev/null || true; }
         sleep 0.1
       done
       ;;
@@ -378,31 +384,40 @@ start_tpm() {
 
 # Sets QEMU_ARGS to the machine's arguments, after the binary. No profile has a
 # display option: the console is the serial line on stdio.
+# QEMU splits an option on commas and reads ",," as a literal comma, so a path
+# carries its commas doubled or it can add options of its own.
+qpath() { printf '%s' "${1//,/,,}"; }
+
 build_qemu_args() {
   QEMU_ARGS=()
+  local image fw_code efivars tpm_sock
+  image=$(qpath "$IMAGE")
+  fw_code=$(qpath "${FW_CODE:-}")
+  efivars=$(qpath "${EFIVARS:-}")
+  tpm_sock=$(qpath "${TPM_SOCK:-}")
   [ ${#QEMU_PREFIX[@]} -eq 0 ] || QEMU_ARGS+=(-L "$QEMU_DATA_DIR")
   case $MACHINE in
     qemux86-64)
       QEMU_ARGS+=(-cpu max -m 1024
-        -drive "if=pflash,format=raw,unit=0,readonly=on,file=$FW_CODE"
-        -drive "if=pflash,format=raw,unit=1,file=$EFIVARS"
-        -drive "file=$IMAGE,if=virtio,format=raw")
+        -drive "if=pflash,format=raw,unit=0,readonly=on,file=$fw_code"
+        -drive "if=pflash,format=raw,unit=1,file=$efivars"
+        -drive "file=$image,if=virtio,format=raw")
       ;;
     qemuarm64)
       QEMU_ARGS+=(-M "virt,secure=on,highmem=off,acpi=off" -cpu cortex-a53 -m 1024
         -bios "$FLASH_BIN"
         -device sdhci-pci -device "sd-card,drive=mmc"
-        -drive "file=$IMAGE,if=none,format=raw,id=mmc")
+        -drive "file=$image,if=none,format=raw,id=mmc")
       ;;
     arm64-uefi-v9)
-      QEMU_ARGS+=(-M virt -cpu neoverse-n2 -m 2048 -smp 2
-        -drive "if=pflash,format=raw,unit=0,readonly=on,file=$FW_CODE"
-        -drive "if=pflash,format=raw,unit=1,file=$EFIVARS"
-        -drive "file=$IMAGE,if=virtio,format=raw")
+      QEMU_ARGS+=(-M "virt,acpi=on" -cpu neoverse-n2 -m 2048 -smp 2
+        -drive "if=pflash,format=raw,unit=0,readonly=on,file=$fw_code"
+        -drive "if=pflash,format=raw,unit=1,file=$efivars"
+        -drive "file=$image,if=virtio,format=raw")
       ;;
   esac
   if [ "$TPM" -eq 1 ]; then
-    QEMU_ARGS+=(-chardev "socket,id=chrtpm,path=$TPM_SOCK"
+    QEMU_ARGS+=(-chardev "socket,id=chrtpm,path=$tpm_sock"
       -tpmdev "emulator,id=tpm0,chardev=chrtpm"
       -device "tpm-tis,tpmdev=tpm0")
   fi
@@ -447,8 +462,11 @@ main() {
     "${resize[@]}"
   fi
   if [ -n "$FW_VARS" ] && [ ! -e "$EFIVARS" ]; then
-    cp "$FW_VARS" "$EFIVARS"
-    chmod u+w "$EFIVARS"
+    # Through a temp name: an interrupted copy must not leave a truncated store
+    # that every later run would then reuse because it exists.
+    cp "$FW_VARS" "$EFIVARS.tmp.$$"
+    chmod u+w "$EFIVARS.tmp.$$"
+    mv "$EFIVARS.tmp.$$" "$EFIVARS"
   fi
 
   [ "$TPM" -eq 0 ] || start_tpm

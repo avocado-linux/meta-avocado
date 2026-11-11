@@ -397,7 +397,7 @@ out=$(run "$d" arm64-uefi-v9 --dry-run)
 rc=$?
 c=$(cmdline "$out")
 store="${img%.img}-efivars.fd"
-{ [ $rc -eq 0 ] && grep -qF -- ' -M virt ' <<<"$c" && ! grep -qF -- 'acpi=off' <<<"$c" && ! grep -qF secure <<<"$c" \
+{ [ $rc -eq 0 ] && grep -qF -- ' -M virt,acpi=on ' <<<"$c" && ! grep -qF -- 'acpi=off' <<<"$c" && ! grep -qF secure <<<"$c" \
   && grep -qF -- ' -cpu neoverse-n2' <<<"$c" && grep -qF -- ' -m 2048' <<<"$c" && grep -qF -- ' -smp 2' <<<"$c" \
   && grep -qF -- "-drive if=pflash,format=raw,unit=0,readonly=on,file=$fwdefault/AAVMF_CODE.fd" <<<"$c" \
   && grep -qF -- "-drive if=pflash,format=raw,unit=1,file=$store" <<<"$c" \
@@ -473,8 +473,9 @@ store="${img%.img}-efivars.fd"
 : >"$log"
 out=$(run "$d" arm64-uefi-v9)
 rc=$?
-{ [ $rc -eq 0 ] && [ -f "$store" ] && cmp -s "$store" "$fwdefault/AAVMF_VARS.fd" && grep -qF "unit=1,file=$store" "$log"; } \
-  && ok "the first real run creates the store from the vars template" || bad "store first: rc=$rc out=[$out]"
+{ [ $rc -eq 0 ] && [ -f "$store" ] && cmp -s "$store" "$fwdefault/AAVMF_VARS.fd" && grep -qF "unit=1,file=$store" "$log" \
+  && ! compgen -G "$store.tmp.*" >/dev/null; } \
+  && ok "the first real run creates the store from the vars template and leaves no temp copy" || bad "store first: rc=$rc out=[$out]"
 echo guest-edit >>"$store"
 sum=$(cksum <"$store")
 : >"$log"
@@ -507,7 +508,7 @@ rc=$?
 # file=), then either binds the --ctrl socket (mode sock) or never does (nosock).
 # The runs use PATH = the stubs plus coreutils only, so no real swtpm or QEMU is
 # needed, and the stub QEMU either exits at once or sleeps.
-for c in mktemp sleep cp chmod rm mkdir rmdir truncate seq; do ln -s "$(command -v "$c")" "$tools/$c" 2>/dev/null; done
+for c in mktemp sleep cp mv chmod rm mkdir rmdir truncate seq; do ln -s "$(command -v "$c")" "$tools/$c" 2>/dev/null; done
 mkswtpm() {
   local d=$1 mode=$2
   mkdir -p "$d"
@@ -800,6 +801,25 @@ out=$(run "$d" qemux86-64 --image "$w/link.img" --dry-run)
 rc=$?
 { [ $rc -eq 0 ] && grep -qxF 'resize: none' <<<"$out"; } \
   && ok "a symlinked image is measured at its target, so no shrink is planned" || bad "link image: rc=$rc out=[$out]"
+
+# 48. An empty --image value is refused, not read as "no image given".
+d=$(workdir empty-image)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+out=$(run "$d" qemux86-64 --image "" --dry-run)
+rc=$?
+{ [ $rc -eq 2 ] && grep -qF -- '--image' <<<"$out"; } \
+  && ok "an empty --image exits 2 naming the option" || bad "empty image: rc=$rc out=[$out]"
+
+# 49. A comma in a path is doubled for QEMU, so it cannot add drive options.
+d=$(workdir comma-image)
+commaimg="$w/comma-image/x,snapshot=on.img"
+truncate -s 2G "$commaimg"
+out=$(run "$d" qemux86-64 --image "$commaimg" --dry-run)
+rc=$?
+c=$(cmdline "$out")
+{ [ $rc -eq 0 ] && grep -qF -- "-drive file=$w/comma-image/x,,snapshot=on.img,if=virtio,format=raw" <<<"$c" \
+  && ! grep -qF -- "x,snapshot=on" <<<"$c"; } \
+  && ok "a comma in the image path is doubled in the drive option" || bad "comma image: rc=$rc out=[$out]"
 
 # No stub swtpm may outlive the suite.
 stray=$(pgrep -af "$w/.*swtpm" || true)
