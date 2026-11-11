@@ -23,6 +23,7 @@ dev=${AVOCADO_DEV:-/dev}
 
 # Little-endian hex bytes ("0a 0b 0c") -> number.
 le() {
+  # shellcheck disable=SC2086 # split the hex bytes into positional parameters
   set -- $1
   out=""
   for b in "$@"; do out="$b$out"; done
@@ -34,12 +35,14 @@ le() {
 gpt_partuuid() {
   gdisk=$1 gpartn=$2
   lbs=$(cat "$sys/block/$gdisk/queue/logical_block_size" 2>/dev/null || echo 512)
+  # shellcheck disable=SC2046 # split od's hex bytes into positional parameters
   set -- $(dd if="$dev/$gdisk" bs=1 skip="$lbs" count=92 2>/dev/null | od -An -tx1 -v)
   [ $# -eq 92 ] && [ "$1$2$3$4$5$6$7$8" = "4546492050415254" ] || return 0 # "EFI PART"
   shift 72
   entries=$(le "$1 $2 $3 $4 $5 $6 $7 $8")
   shift 12
   esize=$(le "$1 $2 $3 $4")
+  # shellcheck disable=SC2046 # split od's hex bytes into positional parameters
   set -- $(dd if="$dev/$gdisk" bs=1 skip=$((entries * lbs + (gpartn - 1) * esize + 16)) count=16 2>/dev/null | od -An -tx1 -v)
   [ $# -eq 16 ] || return 0
   echo "$4$3$2$1-$6$5-$8$7-$9${10}-${11}${12}${13}${14}${15}${16}"
