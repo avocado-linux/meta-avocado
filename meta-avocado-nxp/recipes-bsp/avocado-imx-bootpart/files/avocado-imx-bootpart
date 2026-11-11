@@ -34,7 +34,7 @@ dev=$devdir/$disk
 # PARTITION_CONFIG: bit 6 = BOOT_ACK, bits 5:3 = boot partition (1 = boot0,
 # 2 = boot1, 7 = user area, 0 = none).
 partition_config() {
-  cfg=$(mmc extcsd read "$dev" | sed -n 's/.*PARTITION_CONFIG: 0x\([0-9A-Fa-f]*\).*/\1/p' | head -1)
+  cfg=$(mmc extcsd read "$dev" | sed -n 's/.*PARTITION_CONFIG: 0x\([0-9A-Fa-f]*\).*/\1/p' | head -n 1)
   [ -n "$cfg" ] || {
     echo "avocado-imx-bootpart: cannot read PARTITION_CONFIG from $dev" >&2
     exit 1
@@ -81,7 +81,7 @@ bootdev="$devdir/${disk}boot$((n - 1))"
 #                             (02 23 20 87 on a DART-MX95 imx-boot)
 # The tag is the discriminating field in both, so match on it and leave the
 # length free.
-sig=$(dd if="$bootdev" bs=4 count=1 2>/dev/null | head -c 4 | od -A n -t x1 | tr -d ' ')
+sig=$(dd if="$bootdev" bs=4 count=1 2>/dev/null | od -A n -t x1 | tr -d ' ')
 case "$sig" in
   d1????41) ;;
   ??????87) ;;

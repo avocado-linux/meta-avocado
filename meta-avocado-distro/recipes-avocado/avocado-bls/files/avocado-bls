@@ -33,7 +33,7 @@ die() {
 running_build_id() {
   for f in /etc/os-release /usr/lib/os-release; do
     [ -f "$f" ] || continue
-    id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -1)
+    id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$f" | tr -d '"' | head -n 1)
     [ -n "$id" ] && {
       echo "$id"
       return 0
