@@ -8,6 +8,12 @@ disable systemd-confext.socket
 # network-online.target held boot up to 120 s, then failed the unit, on a
 # device with no link. Without it network-online.target is a plain
 # synchronization point. A product that needs a link before a service starts
-# enables systemd-networkd-wait-online.service (an extension preset, or
-# RequiredForOnline= on its links); wait-online-any.conf then applies.
+# enables systemd-networkd-wait-online.service by shipping the wants link in
+# an extension overlay:
+#   overlay/etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service
+#     -> /usr/lib/systemd/system/systemd-networkd-wait-online.service
+# enable_services can't (the unit is in the base rootfs, not the extension's
+# sysroot), a preset can't (this file is matched first, and preset lookup stops
+# at the first match), and RequiredForOnline= only picks the links it waits for
+# once enabled. wait-online-any.conf then applies.
 disable systemd-networkd-wait-online.service
