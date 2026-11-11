@@ -20,18 +20,12 @@ S = "${UNPACKDIR}"
 # kernel-module-avocado-shm, and each multi-kernel machine also lists it in
 # AVOCADO_MULTIKERNEL_MC_RECIPES so every kernel gets a matching module.
 
-# Built by Yocto rather than through sdk.compile.<name>, and the reason is
-# vermagic. The SDK route (see extensions/ext-kmod-v4l2loopback for the shape)
-# builds against the kernel-devsrc package, and there is exactly one of those
-# in this feed -- the STOCK kernel, 6.18.37. The guests run the host's Image,
-# which is the RT kernel, 6.18.37-rt. A module carrying stock vermagic is
-# rejected on load. Building here instead means the module is produced once per
-# kernel by the multiconfig, so the RT variant exists and matches by
-# construction.
-#
-# The generic fix would be to publish kernel-devsrc per kernel version the way
-# kernel-module-* packages already are, which would make the SDK route work for
-# multi-kernel targets too.
+# Built by Yocto rather than through sdk.compile.<name>. The guests run the
+# host's Image, the RT kernel, and a module carrying another kernel's vermagic
+# is rejected on load. Building here produces the module once per kernel by the
+# multiconfig, so the RT variant exists and matches by construction. (The SDK
+# route, see extensions/ext-kmod-v4l2loopback, now works too: kernel-devsrc is
+# published per kernel version, kernel-devsrc-<KERNEL_VERSION>.)
 
 # Written for the Innodisk EXMP-Q911, then carried in meta-avocado-qcom for
 # q911, rubikpi3 and rb3gen2. In core since Jetson became the first non-qcom
