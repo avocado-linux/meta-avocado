@@ -262,28 +262,32 @@ def test_copy_images_tos_takes_the_last_tosimgfilename_with_quotes_stripped(dirs
     assert (work / "tos-optee_t264.img").read_bytes() == b"content-of-tos.img"
 
 
-def test_copy_images_tos_value_keeps_everything_after_first_equals(dirs):
+@pytest.mark.parametrize("value", ["a=b.img", '""', "", "$HOME"])
+def test_copy_images_tos_value_outside_the_bare_name_shape_is_refused(dirs, value):
     data, work = dirs
     staging.reset_work_dir(work)
-    write(work / ".env.initrd-flash", "TOSIMGFILENAME=a=b.img\n")
-    staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
-    assert (work / "a=b.img").exists()
+    write(work / ".env.initrd-flash", f"TOSIMGFILENAME={value}\n")
+    with pytest.raises(EngineError, match="TOSIMGFILENAME"):
+        staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
+    assert sorted(p.name for p in work.iterdir()) == [".env.initrd-flash"]
 
 
-def test_copy_images_tos_empty_value_keeps_the_default(dirs):
+@pytest.mark.parametrize("line", [" TOSIMGFILENAME=indented.img", "export TOSIMGFILENAME=exported.img"])
+def test_copy_images_tos_assignment_in_any_other_form_is_refused_not_ignored(dirs, line):
     data, work = dirs
     staging.reset_work_dir(work)
-    write(work / ".env.initrd-flash", 'TOSIMGFILENAME=""\n')
-    staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
-    assert (work / "tos-optee_t234.img").exists()
+    write(work / ".env.initrd-flash", f"{line}\n#TOSIMGFILENAME=c.img\nTOSIMGFILENAME=real.img\n")
+    with pytest.raises(EngineError, match="sources this file with bash"):
+        staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
 
 
-def test_copy_images_tos_ignores_indented_or_commented_assignment(dirs):
+def test_copy_images_tos_destination_can_come_from_presigning_vars(dirs):
     data, work = dirs
     staging.reset_work_dir(work)
-    write(work / ".env.initrd-flash", " TOSIMGFILENAME=indented.img\n#TOSIMGFILENAME=c.img\nTOSIMGFILENAME=real.img\n")
+    write(work / ".env.initrd-flash", "TOSIMGFILENAME=first.img\n")
+    write(work / ".presigning-vars", "TOSIMGFILENAME=signed.img\n")
     staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
-    assert (work / "real.img").exists() and not (work / "indented.img").exists()
+    assert (work / "signed.img").exists() and not (work / "first.img").exists()
 
 
 def test_copy_images_tos_env_file_without_the_key_is_refused(dirs):
@@ -333,6 +337,54 @@ def test_copy_images_tos_destination_must_be_a_bare_file_name(dirs, tmp_path, va
         staging.copy_images(data, images(data, tegraflash_tos="tos.img"), work)
     assert ".env.initrd-flash" in str(info.value) and value.replace('"', "") in str(info.value)
     assert not (tmp_path / "escaped-tos.img").exists() and not (tmp_path / "build" / "escaped-tos.img").exists()
+
+
+ALL_IMAGES = dict(
+    rootfs="sub/rootfs.ext4",
+    var="var.img",
+    initramfs="init.cpio",
+    tegraflash_initramfs="flash.cpio",
+    tegraflash_esp="e/e.img",
+    tegraflash_tos="tos.img",
+    dtb="a.dtb",
+    bpmp_dtb="bpmp.dtb",
+)
+
+
+@pytest.mark.deviation("required-image-refused")
+@pytest.mark.parametrize(
+    "value",
+    ["rootfs.ext4", "var.img", "init.cpio", "initrd-flash.img", "e.img", "esp.img", "a.dtb", "kernel_a.dtb", "bpmp.dtb"],
+)
+def test_copy_images_refuses_a_tos_destination_that_is_another_staged_name_before_copying(dirs, value):
+    data, work = dirs
+    staging.reset_work_dir(work)
+    write(work / ".env.initrd-flash", f"TOSIMGFILENAME={value}\n")
+    m = images(data, **ALL_IMAGES)
+    with pytest.raises(EngineError) as exc:
+        staging.copy_images(data, m, work)
+    assert value in str(exc.value) and "tegraflash_tos" in str(exc.value)
+    assert sorted(p.name for p in work.iterdir()) == [".env.initrd-flash"]
+
+
+def test_copy_images_accepts_a_tos_destination_equal_to_its_own_source_name(dirs):
+    data, work = dirs
+    staging.reset_work_dir(work)
+    write(work / ".env.initrd-flash", "TOSIMGFILENAME=tos.img\n")
+    staging.copy_images(data, images(data, **ALL_IMAGES), work)
+    assert (work / "tos.img").read_bytes() == b"content-of-tos.img"
+
+
+def test_copy_images_stages_every_image_under_the_names_the_manifest_policy_lists(dirs):
+    from avocado_tegraflash.manifest import staged_names
+
+    data, work = dirs
+    staging.reset_work_dir(work)
+    write(work / ".env.initrd-flash", "TOSIMGFILENAME=tos-optee_t234.img\n")
+    m = images(data, **ALL_IMAGES)
+    staging.copy_images(data, m, work)
+    expected = {name for names in staged_names(m, "tos-optee_t234.img").values() for name in names}
+    assert sorted(p.name for p in work.iterdir() if p.name != ".env.initrd-flash") == sorted(expected)
 
 
 def test_copy_bsp_absolute_name_is_not_read_from_outside_the_data_dir(dirs, tmp_path):
@@ -696,3 +748,59 @@ def test_copy_images_refuses_when_the_source_vanishes_between_its_two_copies(dir
     staging.reset_work_dir(work)
     with pytest.raises(EngineError, match="disappeared"):
         staging.copy_images(data, m, work, log=Log())
+
+
+# one table of destinations: renaming one in manifest.py moves the copy and the collision check together
+
+
+@pytest.mark.parametrize(
+    "constant,value,old_dest,new_dest",
+    [
+        ("FLASH_INITRAMFS_NAME", "flash-new.img", "initrd-flash.img", "flash-new.img"),
+        ("ESP_IMAGE_NAME", "esp-new.img", "esp.img", "esp-new.img"),
+        ("KERNEL_DTB_PREFIX", "k_", "kernel_a.dtb", "k_a.dtb"),
+    ],
+)
+def test_copy_images_destinations_follow_the_manifest_constants(dirs, monkeypatch, constant, value, old_dest, new_dest):
+    from avocado_tegraflash import manifest as manifest_module
+
+    data, work = dirs
+    staging.reset_work_dir(work)
+    write(work / ".env.initrd-flash", "TOSIMGFILENAME=tos-optee_t234.img\n")
+    monkeypatch.setattr(manifest_module, constant, value)
+    staging.copy_images(data, images(data, **ALL_IMAGES), work)
+    names = {p.name for p in work.iterdir()}
+    assert new_dest in names and old_dest not in names
+
+
+# require_images with require_keys: one refusal for every absent key and every unusable file
+
+
+@pytest.mark.deviation("required-image-refused")
+def test_require_images_with_keys_lists_absent_keys_and_unusable_files_in_one_refusal(dirs):
+    data, _ = dirs
+    write(data / "var.img", b"")
+    m = Manifest(rootfs="missing.img", var="var.img")
+    with pytest.raises(EngineError) as exc:
+        staging.require_images(data, m, require_keys=True)
+    text = str(exc.value)
+    assert "missing.img" in text and "var.img" in text
+    for key in ("initramfs", "tegraflash_initramfs", "tegraflash_esp", "tegraflash_tos"):
+        assert f"images.{key}" in text
+
+
+def test_require_images_without_keys_leaves_absent_keys_to_the_caller(dirs):
+    data, _ = dirs
+    staging.require_images(data, images(data, rootfs="r.img"))
+
+
+def test_require_images_with_keys_passes_a_complete_manifest(dirs):
+    data, _ = dirs
+    staging.require_images(data, images(data, **ALL_IMAGES), require_keys=True)
+
+
+def test_require_images_with_keys_refuses_two_images_staged_under_one_name(dirs):
+    data, _ = dirs
+    m = images(data, **{**ALL_IMAGES, "var": "other/rootfs.ext4"})
+    with pytest.raises(EngineError, match="rootfs.ext4"):
+        staging.require_images(data, m, require_keys=True)

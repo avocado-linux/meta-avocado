@@ -200,3 +200,36 @@ def test_a_flag_naming_the_profile_medium_does_not_list_it_twice(media, flag, na
 def test_flag_added_media_follow_the_profile_medium_once_each():
     first_line = _prompt_for(Media.SD, ["--erase-nvme", "--erase-emmc", "--erase-nvme"], "mmcblk1").splitlines()[0]
     assert "ERASE sd (mmcblk1), nvme, emmc on the board" in first_line
+
+
+def _prompt_erasing_mmc(media, flags=(), device=""):
+    prompts = []
+    confirm_device(
+        BOARD,
+        media,
+        flags=flags,
+        device=device,
+        erases_mmc=True,
+        force=None,
+        isatty=lambda: True,
+        read=lambda p: prompts.append(p) or "001:007",
+    )
+    return prompts[0].splitlines()[0]
+
+
+def test_an_env_the_flash_erases_emmc_for_names_emmc_though_no_flag_added_it():
+    assert "ERASE nvme (nvme0n1), emmc on the board" in _prompt_erasing_mmc(Media.NVME, device="nvme0n1")
+
+
+def test_emmc_implied_by_the_env_and_named_by_a_flag_is_listed_once():
+    first_line = _prompt_erasing_mmc(Media.NVME, ["--erase-emmc"], "nvme0n1")
+    assert first_line.count("emmc") == 1, first_line
+
+
+def test_emmc_implied_by_the_env_is_not_listed_twice_for_the_emmc_profile():
+    first_line = _prompt_erasing_mmc(Media.EMMC, device="mmcblk0")
+    assert first_line.count("emmc") == 1, first_line
+
+
+def test_without_the_implied_erase_the_prompt_does_not_name_emmc():
+    assert "emmc" not in _prompt_for(Media.NVME, device="nvme0n1").splitlines()[0]

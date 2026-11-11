@@ -29,7 +29,7 @@ from . import (
 )
 from .env import from_environ
 from .fit import require_fit
-from .manifest import read_manifest, require_image_keys
+from .manifest import read_manifest
 from .profile import media_for_profile
 from .runner import SubprocessRunner
 
@@ -104,12 +104,12 @@ def _run(args, environ, runner, euid, sleep) -> int:
 
     # Oracle 58-103: manifest read.
     man = read_manifest(cfg.manifest)
-    require_image_keys(man)
 
     # Oracle 105-247 and 249-342: reset, BSP, tools, carrier, images, overlay check.
     with _build_dir_lock(cfg.build_dir):
         # Before the reset, so an unusable image leaves the previous staging intact.
-        staging.require_images(Path(cfg.data_dir), man)
+        # One refusal lists every absent manifest key and every unusable file.
+        staging.require_images(Path(cfg.data_dir), man, require_keys=True)
         staging.reset_work_dir(work)
         print(f"Building tegraflash working directory: {work}")
         staging.copy_bsp(cfg.data_dir, man.tegraflash_bsp, work)
@@ -175,7 +175,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
     device = settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)
     # The staged env file is final here. The flash sources it with bash, so what it
     # will use is read back instead of assumed; before the fit check, which reads it too.
-    device = settings.verify_staged_env(work, man, device)
+    staged = settings.verify_staged_env(work, man, device)
 
     # Hardware-free, so it also runs under --prepare-only; refuses before any erase.
     # After the eMMC layout swap above, and after the wait: the parity harness pins
@@ -210,7 +210,14 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
     # prompts without a flash; before the recheck, so the operator confirms the
     # board the flash will see.
     confirm.confirm_device(
-        board, media, flags=flags, device=device, force=cfg.force, isatty=confirm.stdin_is_tty, read=input
+        board,
+        media,
+        flags=flags,
+        device=staged.device,
+        erases_mmc=staged.erases_mmc,
+        force=cfg.force,
+        isatty=confirm.stdin_is_tty,
+        read=input,
     )
 
     # Deviation one-board-only: the flash starts right after this check, on the

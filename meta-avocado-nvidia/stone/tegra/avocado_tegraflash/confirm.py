@@ -22,6 +22,7 @@ def confirm_device(
     *,
     flags: Sequence[str] = (),
     device: str = "",
+    erases_mmc: bool = False,
     force: bool | None,
     isatty: Callable[[], bool],
     read: Callable[[str], str],
@@ -44,9 +45,13 @@ def confirm_device(
     # and ERASE_EMMC from the environment add media the operator did not pick.
     # The device node is the profile medium's only: the flag-added media are named without one.
     erased = [f"{media.value} ({device})" if device else media.value]
-    for flag, name in (("--erase-nvme", "nvme"), ("--erase-emmc", "emmc")):
-        if flag in flags and name != media.value and name not in erased:
-            erased.append(name)
+    added = [
+        name for flag, name in (("--erase-nvme", "nvme"), ("--erase-emmc", "emmc")) if flag in flags and name != media.value
+    ]
+    # initrd-flash.sh also emits erase-mmc from the staged env, with no flag to show for it.
+    if erases_mmc and media.value != "emmc" and "emmc" not in added:
+        added.append("emmc")
+    erased += added
     prompt = (
         f"About to ERASE {', '.join(erased)} on the board {board.vid}:{board.pid} (USB {expected}).\n"
         "QSPI firmware and UEFI variables will also be rewritten.\n"

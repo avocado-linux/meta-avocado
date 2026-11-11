@@ -1,5 +1,7 @@
 """Partition fit check against the staged layout."""
 
+from pathlib import Path
+
 import pytest
 
 from avocado_tegraflash import EngineError
@@ -244,3 +246,94 @@ def test_the_placeholders_are_not_interchangeable_between_slots(tmp_path):
     m = stage(tmp_path, layout(app_b="8192", app_file="APPFILE_b", app_b_file="APPFILE"))
     msg = refusal(tmp_path, m)
     assert "APPFILE_b" in msg and "APPFILE'" in msg
+
+
+# initrd-flash.sh rewrites a copy of the layout with `sed s,${ROOTFS_IMAGE%.*}.img,$ROOTFS_IMAGE,` (unanchored,
+# `.` matches any character) and `s,APPFILE,$ROOTFS_IMAGE,` on every line, whatever partition holds the name.
+
+
+def _extra_partition(name, filename):
+    return f'<partition name="{name}" type="data"><size>10</size><filename>{filename}</filename></partition>\n'
+
+
+def test_a_layout_filename_the_flash_would_rewrite_to_the_rootfs_is_refused(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "root.img")), name="root.ext4")
+    msg = refusal(tmp_path, m)
+    assert "root.img" in msg and "UDA" in msg and "root.ext4" in msg
+
+
+def test_the_dot_of_the_rewritten_name_matches_any_character(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "rootXimg")), name="root.ext4")
+    assert "rootXimg" in refusal(tmp_path, m)
+
+
+def test_the_rewrite_pattern_is_unanchored(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "pre-root.img-post")), name="root.ext4")
+    assert "pre-root.img-post" in refusal(tmp_path, m)
+
+
+def test_a_staged_rootfs_that_contains_its_own_rewrite_pattern_is_not_a_collision(tmp_path):
+    # rootfs "r.img2" has the sparse name "r.img" as a substring, but the layout carries only the placeholder.
+    m = stage(tmp_path, layout(app_file="APPFILE"), name="r.img2")
+    assert len(run(tmp_path, m)) == 2
+
+
+def test_a_staged_image_named_like_the_rewrite_pattern_is_refused(tmp_path):
+    m = stage(tmp_path, layout(), name="root.ext4")
+    m = Manifest(rootfs=m.rootfs, tegraflash_esp=m.tegraflash_esp, var="images/root.img")
+    msg = refusal(tmp_path, m)
+    assert "root.img" in msg and "var" in msg
+
+
+def test_the_staged_rootfs_named_like_its_own_rewrite_pattern_is_not_a_collision(tmp_path):
+    m = stage(tmp_path, layout(app_file="rootfs.img", extra=_extra_partition("UDA", "rootfs.img")))
+    assert len(run(tmp_path, m)) == 2
+
+
+@pytest.mark.parametrize("filename", ["APPFILE", "xAPPFILEx", "APPFILE_b"])
+def test_appfile_in_a_partition_other_than_app_and_app_b_is_refused(tmp_path, filename):
+    m = stage(tmp_path, layout(app_b="8192", app_file="APPFILE", app_b_file="APPFILE_b", extra=_extra_partition("UDA", filename)))
+    msg = refusal(tmp_path, m)
+    assert "UDA" in msg and "APPFILE" in msg
+
+
+def test_the_placeholders_in_app_and_app_b_alone_are_not_refused(tmp_path):
+    m = stage(tmp_path, layout(app_b="8192", app_file="APPFILE", app_b_file="APPFILE_b"))
+    assert len(run(tmp_path, m)) == 2
+
+
+def test_a_partition_with_no_filename_is_not_refused(tmp_path):
+    m = stage(tmp_path, layout(extra='<partition name="UDA" type="data"><size>10</size></partition>\n'), name="root.ext4")
+    assert len(run(tmp_path, m)) == 2
+
+
+# the layouts the recipe ships, with the rootfs name the BSP recipe generates
+
+
+SHIPPED = Path(__file__).resolve().parents[3] / "recipes-bsp" / "tegra-binaries" / "tegra-storage-layout"
+SHIPPED_ROOTFS = "avocado-image-rootfs-avocado-jetson-orin-nano.erofs-lz4"
+
+
+@pytest.mark.parametrize("layout_name", ["external-flash.xml", "internal-flash-emmc.xml"])
+def test_the_shipped_layouts_pass_with_the_shipped_rootfs_name(tmp_path, layout_name):
+    # The flash helper fills APPSIZE and ESP_FILE before the layout is staged; the other placeholders stay text.
+    xml = (SHIPPED / layout_name).read_text().replace("APPSIZE", "8192").replace("ESP_FILE", "esp.img")
+    m = stage(tmp_path, xml, name=SHIPPED_ROOTFS, rootfs=1024, esp=1024)
+    assert len(run(tmp_path, m)) == 2
+
+
+# an absent APP_b is the intent, not an oversight: the limit is APP alone
+
+
+def test_an_absent_app_b_leaves_app_as_the_limit(tmp_path):
+    with_b, without_b = tmp_path / "with", tmp_path / "without"
+    with_b.mkdir()
+    without_b.mkdir()
+    logs_with = run(with_b, stage(with_b, layout(app="8192", app_b="8192")))
+    logs_without = run(without_b, stage(without_b, layout(app="8192")))
+    assert logs_without == logs_with == ["fit: rootfs 4096 <= APP 8192", "fit: tegraflash_esp 2048 <= esp 4096"]
+
+
+def test_an_absent_app_b_still_refuses_a_rootfs_larger_than_app(tmp_path):
+    m = stage(tmp_path, layout(app="1000"))
+    assert "does not fit partition APP (1000 bytes)" in refusal(tmp_path, m)

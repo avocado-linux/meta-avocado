@@ -7,8 +7,14 @@ from pathlib import Path
 
 from . import EngineError
 from .files import copy_replacing_link, join_name, merge_tree
-from .fit import ESP_IMAGE_NAME
-from .manifest import REQUIRED_IMAGES, Manifest
+from .manifest import (
+    REQUIRED_IMAGES,
+    Manifest,
+    missing_image_keys_problem,
+    require_distinct_staged_names,
+    staged_names,
+)
+from .plainenv import read_plain_env
 
 DEFAULT_TOS_NAME = "tos-optee_t234.img"
 _SDK_TOOLS = "sysroots/x86_64-avocadosdk-linux/usr/bin/tegraflash"
@@ -78,39 +84,35 @@ def _copy_image(
 
 
 def _tos_destination(work_dir: Path) -> str:
-    """The last TOSIMGFILENAME in the BSP's env file, double quotes removed.
+    """TOSIMGFILENAME as the flash sees it, read from the BSP's env files.
 
     Oracle line 299 aborts when the file exists but has no such line (grep
-    fails under set -e and pipefail); an empty value or an absent file falls
-    back to the tegra234 name.
+    fails under set -e and pipefail); an absent file falls back to the tegra234
+    name. Deviation tos-name-bare-filename: the oracle uses the value as a path,
+    so the reader refuses anything but a bare file name.
     """
-    name = DEFAULT_TOS_NAME
     env_file = work_dir / ".env.initrd-flash"
-    if env_file.is_file():
-        values = [
-            line.split("=", 1)[1].replace('"', "")
-            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines()
-            if line.startswith("TOSIMGFILENAME=")
-        ]
-        if not values:
-            raise EngineError(f"no TOSIMGFILENAME= line in {env_file}")
-        name = values[-1] or name
-        # Deviation tos-name-bare-filename: the oracle uses the value as a path.
-        if "/" in name or name in (".", ".."):
-            raise EngineError(
-                f"TOSIMGFILENAME in {env_file} must be a bare file name, found {name!r}"
-            )
+    if not env_file.is_file():
+        return DEFAULT_TOS_NAME
+    name = read_plain_env(env_file).get("TOSIMGFILENAME")
+    if name is None:
+        raise EngineError(f"no TOSIMGFILENAME= line in {env_file}")
     return name
 
 
-def require_images(data: Path, manifest: Manifest) -> None:
+def require_images(data: Path, manifest: Manifest, *, require_keys: bool = False) -> None:
     """Refuse before staging when a required image is absent, not a file or empty.
 
     Deviation required-image-refused: the oracle warns and carries on, so a
     flash proceeds with a missing or zero-length rootfs. dtb and bpmp_dtb stay
-    optional and keep the warning in _copy_image.
+    optional and keep the warning in _copy_image. With require_keys, a manifest
+    key that names no file is listed in the same refusal as the unusable files.
     """
     problems = []
+    if require_keys:
+        key_problem = missing_image_keys_problem(manifest)
+        if key_problem:
+            problems.append(key_problem)
     for name in (getattr(manifest, key) for key in REQUIRED_IMAGES):
         if not name:
             continue
@@ -121,6 +123,8 @@ def require_images(data: Path, manifest: Manifest) -> None:
             problems.append(f"{src}: empty")
     if problems:
         raise EngineError("required image(s) unusable:\n" + "\n".join(problems))
+    if require_keys:
+        require_distinct_staged_names(manifest)
 
 
 def copy_images(
@@ -129,22 +133,13 @@ def copy_images(
     data = Path(data_dir)
     work = Path(work_dir)
     require_images(data, manifest)
-
-    def copy(src_name: str, dest_name: str, required: bool = False) -> None:
-        _copy_image(data, src_name, dest_name, work, log, required)
-
-    for name in (manifest.rootfs, manifest.var, manifest.initramfs):
-        copy(name, os.path.basename(name), True)
-    copy(manifest.tegraflash_initramfs, "initrd-flash.img", True)
-    copy(manifest.tegraflash_esp, os.path.basename(manifest.tegraflash_esp), True)
-    copy(manifest.tegraflash_esp, ESP_IMAGE_NAME, True)
-    if manifest.tegraflash_tos:
-        copy(manifest.tegraflash_tos, os.path.basename(manifest.tegraflash_tos), True)
-        copy(manifest.tegraflash_tos, _tos_destination(work), True)
-    base = os.path.basename(manifest.dtb)
-    copy(manifest.dtb, base)
-    copy(manifest.dtb, f"kernel_{base}")
-    copy(manifest.bpmp_dtb, os.path.basename(manifest.bpmp_dtb))
+    # Before the first copy: a destination that equals another image's would
+    # replace it, and the fit check would then measure the wrong file.
+    tos_destination = _tos_destination(work) if manifest.tegraflash_tos else ""
+    require_distinct_staged_names(manifest, tos_destination)
+    for key, destinations in staged_names(manifest, tos_destination).items():
+        for destination in destinations:
+            _copy_image(data, getattr(manifest, key), destination, work, log, key in REQUIRED_IMAGES)
 
 
 def verify_overlays(manifest: Manifest, work_dir: str | Path, log: Log = print) -> None:

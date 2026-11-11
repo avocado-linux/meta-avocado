@@ -729,8 +729,8 @@ def test_prepare_only_skipping_the_boot_device_validation_mutation_is_caught(tmp
     env = {"AVOCADO_PROVISION_SD_DEVICE": "mmcblk0;touch PWNED"}
     rig = make_rig(tmp_path, profile="tegraflash-sd", env=env)
     old = "    device = settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)\n"
-    # The stand-in is the fixture env's own device, so only the skipped call differs.
-    with mutant_main(tmp_path, old, '    device = "nvme0n1"\n') as mutated:
+    # The stand-in applies the nvme profile instead, so only the SD validation is skipped.
+    with mutant_main(tmp_path, old, '    device = settings.apply_boot_device(work, settings.Media.NVME, sd_device="")\n') as mutated:
         rc, _, _ = rig.go(mutated, capsys, argv=["--prepare-only"], euid=1000)
     assert rc == 0
 
@@ -1048,6 +1048,32 @@ def test_a_datafile_other_than_the_staged_var_image_is_refused(tmp_path, capsys)
     _append_to_bsp_env(rig, 'DATAFILE="other.img"\n')
     rc, _, err = rig.go(main, capsys)
     assert rc == 1 and "DATAFILE" in err and "other.img" in err
+    assert rig.runner.named("initrd-flash") == []
+
+
+@pytest.mark.deviation("device-confirmation")
+@pytest.mark.parametrize(
+    "line,names_emmc",
+    [("", True), ("NO_INTERNAL_STORAGE=0\n", True), ("NO_INTERNAL_STORAGE=1\n", False)],
+)
+def test_the_prompt_names_emmc_when_the_staged_env_makes_the_flash_erase_it(
+    tmp_path, capsys, monkeypatch, line, names_emmc
+):
+    prompts = _terminal(monkeypatch, lambda p: re.search(r"\(USB (\S+)\)", p).group(1))
+    rig = make_rig(tmp_path, env={"AVOCADO_PROVISION_FORCE": "0"})
+    _append_to_bsp_env(rig, line)
+    rc, _, _ = rig.go(main, capsys)
+    assert rc == 0 and len(prompts) == 1
+    assert ("emmc" in prompts[0].splitlines()[0]) is names_emmc
+
+
+@pytest.mark.deviation("device-confirmation")
+def test_an_external_rootfs_drive_the_engine_did_not_write_is_refused_before_the_flash(tmp_path, capsys):
+    rig = make_rig(tmp_path)
+    # The rewrite fixes every column-0 line, so only a file sourced afterwards can undo it.
+    (_bsp_env(rig).parent / ".presigning-vars").write_text("EXTERNAL_ROOTFS_DRIVE=0\n")
+    rc, _, err = rig.go(main, capsys)
+    assert rc == 1 and "EXTERNAL_ROOTFS_DRIVE" in err
     assert rig.runner.named("initrd-flash") == []
 
 

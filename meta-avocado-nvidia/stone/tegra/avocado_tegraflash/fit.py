@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import EngineError
-from .manifest import ESP_IMAGE_NAME, Manifest
+from .manifest import ESP_IMAGE_NAME, Manifest, staged_names
 from .plainenv import read_plain_env
 from .settings import ENV_FILE, EXTERNAL_LAYOUT
 
@@ -109,6 +109,38 @@ def _measure(work_dir: Path, name: str) -> int | str:
     return st.st_size
 
 
+def _rename_collisions(layout: Path, filenames: dict, manifest: Manifest, rootfs_name: str) -> list[str]:
+    """Names the flash's own `<rootfs stem>.img` -> rootfs rename would also rewrite.
+
+    initrd-flash.sh turns a pre-signed sparse image name back into the raw one
+    with an unanchored sed whose pattern is `${ROOTFS_IMAGE%.*}.img`, so a `.`
+    matches any character and any layout entry or staged image that matches it
+    is rewritten into the rootfs name.
+    """
+    sparse = rootfs_name.rsplit(".", 1)[0] + ".img"
+    if sparse == rootfs_name:
+        return []
+    try:
+        pattern = re.compile(sparse)
+    except re.error as exc:
+        return [f"the rootfs name {rootfs_name!r} is not usable in the flash's rename pattern {sparse!r}: {exc}"]
+    found = []
+    for part, named in filenames.items():
+        if named and pattern.search(named):
+            found.append(
+                f"partition {part} in {layout} names {named!r}, which matches {sparse!r}; the flash would "
+                f"rewrite it into the rootfs name {rootfs_name!r}"
+            )
+    for key, names in staged_names(manifest).items():
+        for name in names if key != "rootfs" else ():
+            if pattern.search(name):
+                found.append(
+                    f"images.{key} is staged as {name!r}, which matches {sparse!r}; the flash's rename "
+                    f"of that pattern into the rootfs name {rootfs_name!r} would also rewrite it"
+                )
+    return found
+
+
 def require_fit(work_dir: str | Path, manifest: Manifest, log: Log = print) -> None:
     work_dir = Path(work_dir)
     layout = work_dir / EXTERNAL_LAYOUT
@@ -146,6 +178,15 @@ def require_fit(work_dir: str | Path, manifest: Manifest, log: Log = print) -> N
                 f"partition {part} in {layout} names {named!r}, which is neither {placeholder!r} "
                 f"nor the staged rootfs {rootfs_name!r}; the flash would write a file the engine did not measure"
             )
+    # The flash runs the same sed over every line of its layout copy, so the
+    # placeholder is rewritten in any partition that carries it, not just the two slots.
+    for part, named in filenames.items():
+        if part not in ROOTFS_SLOTS and "APPFILE" in named:
+            problems.append(
+                f"partition {part} in {layout} names {named!r}, which contains APPFILE; the flash would "
+                f"replace that text with the rootfs name {rootfs_name!r} and write the rootfs into {part}"
+            )
+    problems.extend(_rename_collisions(layout, filenames, manifest, rootfs_name))
     images = {"rootfs": rootfs_name, "tegraflash_esp": ESP_IMAGE_NAME if manifest.tegraflash_esp else ""}
     for key, part in FIT_PAIRS:
         name = images[key]

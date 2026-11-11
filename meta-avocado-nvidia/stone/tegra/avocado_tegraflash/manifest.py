@@ -11,6 +11,7 @@ from . import EngineError
 # Fixed destinations copy_images stages an image under, whatever the manifest names it.
 ESP_IMAGE_NAME = "esp.img"
 FLASH_INITRAMFS_NAME = "initrd-flash.img"
+KERNEL_DTB_PREFIX = "kernel_"
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,14 @@ REQUIRED_IMAGES = (
 )
 
 
+def missing_image_keys_problem(manifest: Manifest) -> str | None:
+    """The refusal line for required images the manifest names no file for, or None."""
+    missing = [k for k in REQUIRED_IMAGES if not getattr(manifest, k)]
+    if not missing:
+        return None
+    return "manifest names no file for: " + ", ".join(f"storage_devices.rootdisk.images.{k}" for k in missing)
+
+
 def require_image_keys(manifest: Manifest) -> None:
     """Refuse a manifest that names no file for an image the flash needs.
 
@@ -149,43 +158,47 @@ def require_image_keys(manifest: Manifest) -> None:
     later image guard (presence, size, fit) skips an empty name, so the flash
     would otherwise run without that image and without a word.
     """
-    missing = [k for k in REQUIRED_IMAGES if not getattr(manifest, k)]
-    if missing:
-        raise EngineError(
-            "manifest names no file for: "
-            + ", ".join(f"storage_devices.rootdisk.images.{k}" for k in missing)
-        )
+    problem = missing_image_keys_problem(manifest)
+    if problem:
+        raise EngineError(problem)
     require_distinct_staged_names(manifest)
 
 
-def staged_names(manifest: Manifest) -> dict[str, tuple[str, ...]]:
+def staged_names(manifest: Manifest, tos_destination: str = "") -> dict[str, tuple[str, ...]]:
     """The file names copy_images stages each named image under, per manifest key.
 
-    The TOS destination is read from the BSP env file at staging time, so only
-    its own basename is known here.
+    The one table both the copy and the collision check read, in copy order.
+    The TOS destination comes from the BSP env file at staging time, so it is
+    known only once the caller has read it; without it only the TOS source's
+    own basename is listed.
     """
     base = os.path.basename
     names: dict[str, tuple[str, ...]] = {}
-    for key in ("rootfs", "var", "initramfs", "tegraflash_tos", "bpmp_dtb"):
+    for key in ("rootfs", "var", "initramfs"):
         if getattr(manifest, key):
             names[key] = (base(getattr(manifest, key)),)
     if manifest.tegraflash_initramfs:
         names["tegraflash_initramfs"] = (FLASH_INITRAMFS_NAME,)
     if manifest.tegraflash_esp:
         names["tegraflash_esp"] = (base(manifest.tegraflash_esp), ESP_IMAGE_NAME)
+    if manifest.tegraflash_tos:
+        tos = (base(manifest.tegraflash_tos), tos_destination) if tos_destination else (base(manifest.tegraflash_tos),)
+        names["tegraflash_tos"] = tuple(dict.fromkeys(tos))
     if manifest.dtb:
-        names["dtb"] = (base(manifest.dtb), f"kernel_{base(manifest.dtb)}")
+        names["dtb"] = (base(manifest.dtb), f"{KERNEL_DTB_PREFIX}{base(manifest.dtb)}")
+    if manifest.bpmp_dtb:
+        names["bpmp_dtb"] = (base(manifest.bpmp_dtb),)
     return names
 
 
-def require_distinct_staged_names(manifest: Manifest) -> None:
+def require_distinct_staged_names(manifest: Manifest, tos_destination: str = "") -> None:
     """Refuse two images that stage under one name.
 
     Staging replaces the file, so the later copy silently replaces the earlier
     and the flash writes the wrong image, one the size check never measured.
     """
     owner: dict[str, str] = {}
-    for key, names in staged_names(manifest).items():
+    for key, names in staged_names(manifest, tos_destination).items():
         for name in names:
             other = owner.setdefault(name, key)
             if other != key:

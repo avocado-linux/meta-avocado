@@ -111,7 +111,9 @@ def test_boardctl_success_waits_with_the_boardctl_message_then_returns(env):
     assert wait(runner, env, target="t", logs=logs) == BOARD
     assert logs[0] == "Device not in RCM mode, attempting recovery via boardctl (target=t)..."
     assert logs[1] == "Waiting for device to enter RCM mode..."
-    assert "Device in RCM mode" in logs
+    # The identity warning follows the board's arrival, so the order is pinned by index, not by the last line.
+    assert logs[2] == "Device in RCM mode" and logs[3].startswith("WARNING: the board is not identity-checked")
+    assert len(logs) == 4
 
 
 def test_boardctl_failure_warns_and_falls_back_to_the_manual_prompt(env):

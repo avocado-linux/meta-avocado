@@ -3,6 +3,7 @@
 import os
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import EngineError, Media
@@ -13,6 +14,8 @@ from .plainenv import read_plain_env
 ENV_FILE = ".env.initrd-flash"
 EMMC_LAYOUT = "internal-flash-emmc.xml"
 EXTERNAL_LAYOUT = "external-flash.xml.in"
+# apply_boot_device writes it unquoted for every medium: the rootfs is on an external drive.
+EXTERNAL_ROOTFS_DRIVE = "1"
 
 # [0-9] and fullmatch, not \d and $: a unicode digit or a trailing newline
 # must not pass, since the value lands in a file the flash tool sources.
@@ -80,7 +83,7 @@ def apply_boot_device(
         {
             "BOOTDEV": f'"{partition}"',
             "ROOTFS_DEVICE": f'"{device}"',
-            "EXTERNAL_ROOTFS_DRIVE": "1",
+            "EXTERNAL_ROOTFS_DRIVE": EXTERNAL_ROOTFS_DRIVE,
         },
     )
 
@@ -93,12 +96,22 @@ def apply_boot_device(
     return device
 
 
-def verify_staged_env(work_dir: Path, manifest: Manifest, expected_device: str) -> str:
-    """Read the staged env file as the flash will and return the effective ROOTFS_DEVICE.
+@dataclass(frozen=True)
+class StagedEnv:
+    """What the flash will use, as read back from the staged env files."""
 
-    Runs once the file is final. The rewrite above matches only column-0 lines,
-    but bash takes the last assignment in any form, so the value the profile
-    chose is not proof of the value the flash uses.
+    device: str
+    # initrd-flash.sh emits erase-mmc for this env whatever the flags say.
+    erases_mmc: bool
+
+
+def verify_staged_env(work_dir: Path, manifest: Manifest, expected_device: str) -> StagedEnv:
+    """Read the staged env files as the flash will and return what it will use.
+
+    Runs once the files are final. The rewrite above matches only column-0
+    lines, but bash takes the last assignment in any form and sources
+    .presigning-vars after the env file, so the values the profile chose are
+    not proof of the values the flash uses.
     """
     env_file = Path(work_dir) / ENV_FILE
     plain = read_plain_env(env_file)
@@ -108,6 +121,12 @@ def verify_staged_env(work_dir: Path, manifest: Manifest, expected_device: str) 
             f"ROOTFS_DEVICE in {env_file} is {device!r} but the profile chose {expected_device!r}; "
             "the flash would erase a different device than the one it was asked to"
         )
+    external = plain.get("EXTERNAL_ROOTFS_DRIVE")
+    if external != EXTERNAL_ROOTFS_DRIVE:
+        raise EngineError(
+            f"EXTERNAL_ROOTFS_DRIVE in {env_file} is {external!r} but the engine wrote "
+            f"{EXTERNAL_ROOTFS_DRIVE!r}; the flash would take a different root drive path than the profile chose"
+        )
     datafile = plain.get("DATAFILE")
     var_name = os.path.basename(manifest.var)
     if datafile is not None and datafile != var_name:
@@ -115,4 +134,5 @@ def verify_staged_env(work_dir: Path, manifest: Manifest, expected_device: str) 
             f"DATAFILE in {env_file} is {datafile!r} but the engine staged {var_name!r}; "
             "the flash would write a different file into the data partition"
         )
-    return device
+    # `[ "$NO_INTERNAL_STORAGE" -eq 1 ]` is false for an unset variable, so only an explicit 1 spares the eMMC.
+    return StagedEnv(device=device, erases_mmc=plain.get("NO_INTERNAL_STORAGE") != "1")
