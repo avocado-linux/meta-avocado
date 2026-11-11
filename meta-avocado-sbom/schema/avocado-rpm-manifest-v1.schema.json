@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avocadolinux.org/schema/avocado-rpm-manifest-v1.schema.json",
+  "title": "Avocado RPM manifest, version 1",
+  "description": "The RPMs a build produced, each with the digest of its header, written next to the CVE report. A correlation service joins it to the report on the package name and to a repository on the header digest. The shape is frozen, the contents are not: nothing here constrains which packages appear. Unknown keys are permitted - additions do not bump the major. See meta-avocado-sbom/README.",
+  "type": "object",
+  "required": ["version", "generated", "packages"],
+  "properties": {
+    "version": {
+      "description": "A consumer must reject a major it does not implement rather than read the parts it recognises.",
+      "type": "string",
+      "const": "1"
+    },
+    "generated": {
+      "description": "UTC, second resolution, Z-suffixed.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "machine": {
+      "description": "MACHINE the manifest describes.",
+      "type": "string"
+    },
+    "distro_version": {
+      "description": "DISTRO_VERSION of the build, the same string the CVE report of the same build carries.",
+      "type": "string"
+    },
+    "packages": {
+      "description": "One entry per RPM the build produced, sorted by name, arch, version and release. A second multiconfig's kernel is a second version of the same name. Never empty.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "epoch", "version", "release", "arch", "sha256header", "file"],
+        "properties": {
+          "name": {
+            "description": "Binary package name, the key of the CVE report's packages map.",
+            "type": "string",
+            "minLength": 1
+          },
+          "epoch": {
+            "description": "RPM epoch, null when the package has none. Zero is an epoch and is not the same as absent.",
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "release": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256header": {
+            "description": "sha256 of the main header section, the value rpm records as SHA256HEADER. Not a digest of the whole file, which also covers the payload.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "file": {
+            "description": "Path of the RPM relative to the build's rpm deploy directory, <arch>/<name>-<version>-<release>.<arch>.rpm.",
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "anyOf": [
+                {"pattern": "^/"},
+                {"pattern": "(^|/)\\.\\.(/|$)"}
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
