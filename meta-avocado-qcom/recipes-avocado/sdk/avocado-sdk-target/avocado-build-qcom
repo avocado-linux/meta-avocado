@@ -399,26 +399,27 @@ if [ -n "$esp_image" ]; then
     #                  learns the path from the LoaderBootCountPath EFI
     #                  variable, and there are none.
     #   avocado-cli no longer stamps AVOCADO_OS_BUILD_ID into the shared sysroot
-    #   os-release; it writes a per-runtime sidecar,
-    #   <rootfs image>.os-release, next to the image. Read the id from there
-    #   (else the AVOCADO_OS_BUILD_ID the rootfs step exports): without it the
-    #   UKI carries no id, and slot detection, bless and rollback all fail with
-    #   "no entry in EFI/Linux carries AVOCADO_OS_BUILD_ID".
+    #   os-release; it keeps the image's own os-release beside the image and
+    #   exports its path as AVOCADO_ROOTFS_OS_RELEASE, the same file stone
+    #   bundles from and the OTA tail checks against AVOCADO_OS_BUILD_ID. Read
+    #   the id from that exact file, not by globbing the runtime dir: the
+    #   sidecar is named per filesystem format and an earlier format's file is
+    #   never removed, so a glob can return a stale id. Older CLIs export only
+    #   AVOCADO_OS_BUILD_ID. Without an id, slot detection, bless and rollback
+    #   all fail with "no entry in EFI/Linux carries AVOCADO_OS_BUILD_ID".
     rootfs_osrel="$AVOCADO_PREFIX/rootfs/usr/lib/os-release"
-    sidecar=""
-    for f in "$input_dir"/avocado-image-rootfs-*.os-release; do
-      [ -f "$f" ] && { sidecar="$f"; break; }
-    done
     if [ -f "$rootfs_osrel" ]; then
       grep -vE '^(IMAGE_VERSION|IMAGE_ID|AVOCADO_OS_BUILD_ID)=' "$rootfs_osrel" >"$uki_dir/osrel"
       build_id=""
-      [ -n "$sidecar" ] && build_id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$sidecar" | head -n 1)
+      if [ -n "${AVOCADO_ROOTFS_OS_RELEASE:-}" ] && [ -f "$AVOCADO_ROOTFS_OS_RELEASE" ]; then
+        build_id=$(sed -n 's/^AVOCADO_OS_BUILD_ID=//p' "$AVOCADO_ROOTFS_OS_RELEASE" | head -n 1)
+      fi
       [ -n "$build_id" ] || build_id="${AVOCADO_OS_BUILD_ID:-}"
       if [ -n "$build_id" ]; then
         echo "AVOCADO_OS_BUILD_ID=$build_id" >>"$uki_dir/osrel"
         echo "UKI .osrel carries AVOCADO_OS_BUILD_ID=$build_id"
       else
-        echo "WARNING: no AVOCADO_OS_BUILD_ID (no sidecar in $input_dir, no env); slot detection will fail" >&2
+        echo "WARNING: no AVOCADO_OS_BUILD_ID (none in ${AVOCADO_ROOTFS_OS_RELEASE:-AVOCADO_ROOTFS_OS_RELEASE unset}, none in env); slot detection will fail" >&2
       fi
       # The build time leads, so a later build sorts ahead of an earlier one
       # whatever its VERSION_ID: a release build's <release>.<build-id> and
