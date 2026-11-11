@@ -57,8 +57,15 @@ class KernelDevsrc(unittest.TestCase):
                 # Ends in the version, so avocado-cli's end-anchored
                 # `kernel-*<kver>` exclude matches it.
                 self.assertTrue(a[f"PKG:{pkg}"].endswith("-${KERNEL_DEVSRC_KVER}"))
-                # The bare name stays resolvable and the old package is obsoleted.
+                # The bare name stays resolvable: without RPROVIDES, BitBake
+                # rewrites a bare RDEPENDS to the default kernel's package.
+                self.assertEqual(a[f"RPROVIDES:{pkg}"], pkg)
+                # The old unversioned package is obsoleted on upgrade.
                 self.assertEqual(a[f"RREPLACES:{pkg}"], pkg)
+
+    def test_unknown_kernel_version_is_fatal(self):
+        # get_kernelversion_file's None reaches the recipe as the string "None".
+        self.assertIn("'None'", BBAPPEND.read_text())
 
 
 if __name__ == "__main__":

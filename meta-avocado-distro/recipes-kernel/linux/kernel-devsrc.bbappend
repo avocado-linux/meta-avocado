@@ -16,14 +16,17 @@
 # Name each package after the full KERNEL_VERSION, like the kernel recipe's own
 # packages (avocado-kernel-feed.bbclass). avocado-cli excludes every other
 # kernel's `kernel-*<kver>` packages from an install, so a bare `kernel-devsrc`
-# request resolves to the selected kernel. RREPLACES keeps the bare names as
-# Provides, and obsoletes the old unversioned packages on upgrade.
+# request resolves to the selected kernel. RPROVIDES keeps a bare RDEPENDS
+# (packagegroup-avocado-extra's) on the bare name: BitBake's dependency rename
+# rewrites it to the renamed package unless that package RPROVIDES it
+# (oe.packagedata.get_package_mapping), which would pin it to the default
+# kernel. RREPLACES obsoletes the old unversioned packages on upgrade.
 #
 # KERNEL_VERSION comes from the kernel's build dir, so it is unknown at parse
 # time. Pin its signature value, as kernel.bbclass does for
 # KERNEL_VERSION_PKG_NAME. do_install depends on virtual/kernel, so a new
 # kernel still rebuilds and repackages this recipe.
-KERNEL_DEVSRC_KVER = "${@d.getVar('KERNEL_VERSION') or 'unknown'}"
+KERNEL_DEVSRC_KVER = "${KERNEL_VERSION}"
 KERNEL_DEVSRC_KVER[vardepvalue] = "kernel-version"
 
 PKG:${PN} = "${PN}-${KERNEL_DEVSRC_KVER}"
@@ -32,9 +35,14 @@ PKG:${PN}-dbg = "${PN}-dbg-${KERNEL_DEVSRC_KVER}"
 RREPLACES:${PN} += "${PN}"
 RREPLACES:${PN}-dev += "${PN}-dev"
 RREPLACES:${PN}-dbg += "${PN}-dbg"
+RPROVIDES:${PN} += "${PN}"
+RPROVIDES:${PN}-dev += "${PN}-dev"
+RPROVIDES:${PN}-dbg += "${PN}-dbg"
 
+# kernelsrc.bbclass's get_kernelversion_file returns None without a
+# kernel-abiversion, and inline python expands that to the string "None".
 python do_package:prepend() {
-    if not d.getVar('KERNEL_VERSION'):
+    if d.getVar('KERNEL_DEVSRC_KVER') in (None, '', 'None'):
         bb.fatal("kernel-devsrc: KERNEL_VERSION is unset, cannot name the package after its kernel")
 }
 
