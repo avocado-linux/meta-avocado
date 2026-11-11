@@ -36,6 +36,12 @@ do_configure:prepend:rzv2n-sr-som() {
     # whole default environment failed to import with EINVAL): drop them.
     sed -e '/^#/d' -e '/^[[:space:]]*$/d' ${UNPACKDIR}/avocado-rzv2n-sr-som.env \
         >${S}/board/solidrun/rzv2n/avocado.env
+    # U-Boot's hush treats a single quote as a quote even inside double
+    # quotes: one in a message swallowed the rest of the command, and bootcmd
+    # stopped at boot with "syntax error". Nothing here needs one.
+    if grep -n "'" ${S}/board/solidrun/rzv2n/avocado.env; then
+        bbfatal "avocado-rzv2n-sr-som.env: a single quote in a command line breaks U-Boot's hush parser"
+    fi
 }
 
 # meta-rz-drpai V1.50 renamed its ether-setting patch to
