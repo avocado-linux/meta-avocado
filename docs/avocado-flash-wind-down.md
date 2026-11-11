@@ -20,17 +20,19 @@ gap so the wrapper can go.
 Each line is the engine module and the deviation name used in the parity
 record (`meta-avocado-nvidia/stone/tegra/tests/parity/deviations.py`).
 
-- `required-image-refused`: `staging.py` refuses a missing or empty required image before any erase.
+- `required-image-refused`: `staging.py` refuses a missing or empty required image before any erase. `tegraflash_tos` stays a mandatory image key.
 - `partition-fit-refused`: `fit.py` refuses an image larger than its partition before any erase.
-- `recovery-id-pinned`: `recovery.py`, driven by the manifest's `tegraflash.rcm_ids`, refuses a different Jetson in recovery and names both ids.
+- `recovery-id-pinned`: `recovery.py`, driven by the manifest's `tegraflash.rcm_ids`, refuses a different Jetson in recovery and names both ids. The Orin Nano manifest declares only 7523; 7623 is dropped because only 7523 ships.
 - `cmdline-control-chars-refused`: `env.py` refuses a kernel command line carrying control characters.
-- `device-confirmation`: `confirm.py` asks the operator to retype the target before writing; `AVOCADO_PROVISION_FORCE=1` skips it.
+- `device-confirmation`: `confirm.py` asks the operator to retype the target before writing, and the prompt names every medium the erase flags destroy, including QSPI and UEFI variables; `AVOCADO_PROVISION_FORCE=1` skips it.
 - upstream-drift record: `meta-avocado-nvidia/stone/tegra/upstream-tracking.json`, checked by `meta-avocado-nvidia/stone/tegra/tests/test_upstream_drift.py`.
 
 ## 3. Wrapper-only today: these BLOCK removal
 
-Three guards live only in the wrapper. Each needs a decision before removal.
-The options are listed; this document does not pick one.
+Six guards live only in the wrapper: the three in 3.1 to 3.3, the unpinned
+confirmed board in 3.4, and the two below in 3.5 and 3.6. Each needs a
+decision before removal. The options are listed; this document does not pick
+one.
 
 ### 3.1 PATH hardening
 
@@ -89,12 +91,54 @@ Decision, one of:
 - Move to avocado-cli: `avocado provision` confirms and passes the identity through.
 - Drop: accept that a swap during staging is the operator's responsibility.
 
+### 3.5 Refusing a machine with no recorded recovery id
+
+Today: `scripts/avocado_flash_tegra/rcm.py`, `expected_rcm_id()`, raises
+`FlashError` when the machine has no registry entry or no recorded
+recovery-mode USB id, and tells the operator to pass `--rcm-id`. The engine
+does not refuse: `avocado_tegraflash/recovery.py`, `wait_for_single_board()`,
+only logs "the board is not identity-checked" and proceeds with the one device
+in recovery when `expected_ids` is empty. Six of the seven stone manifests
+declare no `rcm_ids`, so for those machines the engine has no identity check
+at all.
+
+Removing the wrapper therefore drops a refusal. With
+`AVOCADO_PROVISION_FORCE=1`, or a run with no terminal, the engine skips the
+confirmation too, so a flash for a module with no declared id proceeds
+unconfirmed against whichever lone NVIDIA device is in recovery, for example
+an Orin Nano. Whether `initrd-flash` would then erase that board or fail when
+it boots the wrong RCM payload is unproven; do not rely on it failing.
+
+Decision, one of:
+
+- Move into the engine: refuse when no ids are declared and `AVOCADO_PROVISION_FORCE=1` (or a non-tty run) would skip the confirmation.
+- Move into the engine: declare `rcm_ids` for every manifest, so the warning branch is unreachable.
+- Drop: accept the warning as the only protection.
+
+### 3.6 Work directory ownership and mode refusals
+
+Today: `scripts/avocado_flash_tegra/workdir.py` refuses, because the helper
+staged there runs as root:
+
+- `require_private_dir` (line 62): a work directory that is not a real directory (a symlink or other file), is not owned by the current user, or is writable by group or others.
+- `require_safe_ancestors` (line 81): any existing ancestor, symlinks resolved, that is not owned by root or the current user, or is writable by group or others without the sticky bit.
+- `create_workdir` (line 110): a default (tool-chosen) work directory that already exists, and an explicit one that fails `require_private_dir`.
+
+The engine has no equivalent of these checks, so another user who can pre-create
+or write the directory could choose what root executes.
+
+Decision, one of:
+
+- Move into the engine: apply the same checks to the engine's work directory before staging.
+- Move to avocado-cli: `avocado provision` creates the work directory privately and passes it in.
+- Drop: accept that the work directory is trusted.
+
 ## 4. Removal list
 
 Every path below was checked to exist in this tree.
 
 - [ ] `scripts/avocado_flash_tegra/`
-- [ ] `scripts/avocado_flash_boards/` (this also removes the `avocado-flash boards` subcommand; confirm nothing else needs it)
+- [ ] `scripts/avocado_flash_boards/`, together with the `boards` dispatch in `scripts/avocado-flash` (`dispatch_boards` and its branch in `main`, which import `avocado_flash_boards.cli`) and the `boards` lines in its help text; otherwise `avocado-flash boards` imports a deleted package. If the board listing is still wanted, it must move instead of being deleted.
 - [ ] `scripts/tests/boards`
 - [ ] `scripts/tests/tegra`
 - [ ] the `nvme` dispatch in `scripts/avocado-flash`: `dispatch_nvme` and its two `nvme` branches in `main`, plus the `nvme` lines in the help text
@@ -110,7 +154,7 @@ Do not remove the wrapper until both hold:
    - an oversize image is refused before any erase
    - an empty or missing image is refused
    - a different Jetson in recovery is refused, naming both ids
-   - a board with no recorded id warns and proceeds
+   - a board with no recorded id warns and proceeds (this changes if 3.5 moves the refusal into the engine)
    - a wrong retype aborts
    - `AVOCADO_PROVISION_FORCE=1` skips the confirmation
    - NVMe boot
@@ -132,6 +176,6 @@ which is a separate design.
 
 Removal is a follow-up change. Nothing here deletes the wrapper, so until that
 change lands both doors keep working and a regression in the engine can be
-cross-checked against the wrapper. Settle the three decisions in section 3,
+cross-checked against the wrapper. Settle the six decisions in section 3,
 run the gate in section 5, then remove in one change so it reverts as one
 commit.
