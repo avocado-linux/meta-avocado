@@ -210,7 +210,11 @@ CARRIER_FV_CHECK_BOARDSKU="0001"
 | `DTBFILE` | Kernel DTB filename to flash |
 | `EMMC_BCTS` | Primary SDRAM init dts (despite the name) |
 | `ODMDATA` | UPHY lane / GBE config string |
-| `ROOTFS_DEVICE`, `BOOTDEV`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE`, `ROOTFS_IMAGE`, `LNXFILE`, `FLASH_HELPER`, `DATAFILE` | Per-profile boot/storage retargeting |
+| `BOOTDEV`, `LNXFILE`, `FLASH_HELPER` | Per-profile boot retargeting; the engine does not check these |
+| `ROOTFS_IMAGE`, `DATAFILE` | Not retargetable under `avocado provision`: the engine refuses a `ROOTFS_IMAGE` other than the staged rootfs name and a `DATAFILE` other than the basename of the manifest `var` image |
+| `ROOTFS_DEVICE`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE` | Set by the engine's boot-device step from the profile; the engine reads them back and refuses any value that differs, so do not set them in `carrier.env` |
+
+The engine reads `.env.initrd-flash` and `.presigning-vars` without executing them. A line that mentions `ROOTFS_IMAGE`, `ROOTFS_DEVICE`, `DATAFILE`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE` or `TOSIMGFILENAME` must stay a plain column-0 assignment (`KEY=value`) or a `$KEY` / `${KEY}` read; `export`, indentation, chains, `eval` and `source` forms are refused.
 
 The list isn't exhaustive — anything in either file can be patched
 with `CARRIER_FV_*` / `CARRIER_ENV_*`. Unknown keys log a warning and
