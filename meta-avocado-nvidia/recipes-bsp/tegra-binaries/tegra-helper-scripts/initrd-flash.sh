@@ -1253,8 +1253,11 @@ fi
 # flashing kernel, so the same flash lands on either disk. This waits for the
 # flashing initramfs's adbd, then runs nvme-pin-for-flash on the target, which
 # leaves the named controller as nvme0n1 and unbinds every other NVMe
-# controller. It runs beside flash_bsp_images.py: the boot partitions are
-# written to QSPI before the external device, which leaves minutes for it.
+# controller. It runs beside flash_bsp_images.py, which writes every device in
+# parallel, so the flash's nvdd is swapped for nvdd-pin-gate: each write waits
+# for the marker this sets on the target (nvme-pinned) and runs the real nvdd,
+# pushed here as /tmp/nvdd.real. A failed pin sets nvme-pin-failed, and the
+# gate then refuses every write.
 pin_rootfs_nvme_t264() {
   local pci="$1" adb_bin="" serial="" i=0
   if [ -x "./unified_flash/tools/flashtools/flash/adb" ]; then
@@ -1281,8 +1284,22 @@ pin_rootfs_nvme_t264() {
     echo "nvme-pin: the flashing initramfs never came up on adb"
     return 1
   fi
-  "$adb_bin" -s "$serial" push "$here/nvme-pin-for-flash" /tmp/nvme-pin-for-flash >/dev/null &&
-    "$adb_bin" -s "$serial" shell sh /tmp/nvme-pin-for-flash "$pci"
+  if ! "$adb_bin" -s "$serial" push "$here/nvme-pin-for-flash" /tmp/nvme-pin-for-flash >/dev/null ||
+    ! "$adb_bin" -s "$serial" push out/tools/flashtools/flash/nvdd.real /tmp/nvdd.real >/dev/null; then
+    "$adb_bin" -s "$serial" shell touch /tmp/nvme-pin-failed
+    echo "nvme-pin: could not push the pin tools to the target"
+    return 1
+  fi
+  "$adb_bin" -s "$serial" shell "chmod 0755 /tmp/nvdd.real &&
+    if sh /tmp/nvme-pin-for-flash $pci; then touch /tmp/nvme-pinned; else touch /tmp/nvme-pin-failed; fi"
+}
+
+stop_nvme_pin() {
+  [ -n "${nvme_pin_pid:-}" ] || return 0
+  pkill -P "$nvme_pin_pid" 2>/dev/null
+  kill "$nvme_pin_pid" 2>/dev/null
+  wait "$nvme_pin_pid" 2>/dev/null
+  nvme_pin_pid=""
 }
 
 # Branch based on chip ID
@@ -1458,8 +1475,13 @@ EOF
   nvme_pin_pid=""
   if [ -n "${ROOTFS_NVME_PCI:-}" ] && [ "$EXTERNAL_ROOTFS_DRIVE" -eq 1 ] && [ "$qspi_only" -eq 0 ]; then
     echo "Pinning the NVMe flash target to PCIe $ROOTFS_NVME_PCI" | tee -a "$logfile"
+    # Every nvdd call waits for the pin (see pin_rootfs_nvme_t264).
+    mv out/tools/flashtools/flash/nvdd out/tools/flashtools/flash/nvdd.real
+    install -m 0755 "$here/nvdd-pin-gate" out/tools/flashtools/flash/nvdd
     pin_rootfs_nvme_t264 "$ROOTFS_NVME_PCI" >nvme-pin.log 2>&1 &
     nvme_pin_pid=$!
+    # An interrupted flash must not leave the pin polling adb.
+    trap 'stop_nvme_pin' EXIT
   fi
 
   step_banner "Running unified flash"
@@ -1469,9 +1491,17 @@ EOF
   uniflash_rc="${PIPESTATUS[0]}"
 
   # Fail closed: without the pin the external image went to whichever NVMe
-  # happened to be nvme0n1.
+  # happened to be nvme0n1. A failed flash is reported as such: the pin may
+  # still be waiting for an adbd that never came up.
+  if [ -n "$nvme_pin_pid" ] && [ "$uniflash_rc" -ne 0 ]; then
+    stop_nvme_pin
+    tee -a "$logfile" <nvme-pin.log
+    echo "ERR: unified flash failed (exit $uniflash_rc)" | tee -a "$logfile"
+    exit "$uniflash_rc"
+  fi
   if [ -n "$nvme_pin_pid" ]; then
     wait "$nvme_pin_pid"
+    nvme_pin_pid=""
     tee -a "$logfile" <nvme-pin.log
     if ! grep -q "^NVME-PINNED $ROOTFS_NVME_PCI nvme0n1" nvme-pin.log; then
       echo "ERR: could not pin the NVMe flash target to $ROOTFS_NVME_PCI; the image may be on another disk" | tee -a "$logfile"
