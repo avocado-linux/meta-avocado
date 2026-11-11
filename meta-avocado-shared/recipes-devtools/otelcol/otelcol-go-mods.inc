@@ -5,154 +5,78 @@
 # running the update-modules task.
 
 SRC_URI += "\
-    gomod://cloud.google.com/go/auth;version=v0.20.0;sha256sum=06371584193bbb88a8f2c2931d85efaf45666cc52643be5b8aada6b053672f3a \
-    gomod://cloud.google.com/go/auth/oauth2adapt;version=v0.2.8;sha256sum=4cd64264bafc4dd05f645452d6e1485adf92309130bd82b4c595db10cd534963 \
-    gomod://cloud.google.com/go/compute;version=v1.72.0;sha256sum=43e9a9f15399ce2608b9bfe7d270b3b25164548ca801234ef9399aeaa78f2f82 \
-    gomod://cloud.google.com/go/compute/metadata;version=v0.10.0;sha256sum=5814f9cc62d49d73e213091485cf977037ec4c219d1d831422c24f2f40735346 \
-    gomod://github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp;version=v1.38.0;sha256sum=5db9855231f35340eabaaa8361bb3cd9db35dec582a22309105487e8329d7d07 \
+    gomod://cloud.google.com/go/compute/metadata;version=v0.9.0;sha256sum=f97e35d1c96239b8574054a77e312c95d2c82a89c21daf46ffeaea6d5fc59eca \
+    gomod://github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp;version=v1.35.0;sha256sum=55c71ad8e35445c18d0c30e03de13896393446a63d06b8c6b3aa59c961208424 \
     gomod://github.com/Masterminds/semver/v3;version=v3.5.0;sha256sum=2cda916821eedb0e1d7ac45d80b6cb78320b035f0f77272ff18d082b7cd90713 \
-    gomod://github.com/Showmax/go-fqdn;version=v1.0.0;sha256sum=f77e441b7748cbfb0190f080b3b5f04f73e1d423a0d4749f69fccc5cb6468296 \
     gomod://github.com/alecthomas/participle/v2;version=v2.1.4;sha256sum=774ff8ab732f96050b785d219c18e4d38e45cad570a14f76605b869ed28302ac \
     gomod://github.com/antchfx/xmlquery;version=v1.5.1;sha256sum=5b28c57acb61959e52f34fa10708832a910f32e7e833d99ab2d17c3ca9b3c3ca \
     gomod://github.com/antchfx/xpath;version=v1.3.8;sha256sum=c87b6d214ddcb4300c72266758c835c1d1554e43dd4acdd02c1e0e3dc60e89c8 \
-    gomod://github.com/armon/go-metrics;version=v0.4.1;sha256sum=f1b9155b8635eea48fb8929934b1268bf624cec2d51fcef8b62fa4aa91e05cc9 \
-    gomod://github.com/aws/aws-sdk-go-v2;version=v1.47.1;sha256sum=77426f349a7b386aa8d2d9751238bf4db8956c9cc468bad629485597c7a6ac9f \
-    gomod://github.com/aws/aws-sdk-go-v2/config;version=v1.33.6;sha256sum=a041703e32ded40b0aa192c49066f234a3f4ce9d5042f9f292d86ebecd7ac778 \
-    gomod://github.com/aws/aws-sdk-go-v2/credentials;version=v1.20.6;sha256sum=d147c2c128ece81781dc57f67e6e6509bd4bf09ff0b9fd49fc877a7e9bb5ad35 \
-    gomod://github.com/aws/aws-sdk-go-v2/feature/ec2/imds;version=v1.20.1;sha256sum=635809672f2e52f384f0d1aa94deb29b500c1da3fbc387812fc6761b0098819a \
-    gomod://github.com/aws/aws-sdk-go-v2/internal/configsources;version=v1.5.4;sha256sum=b74f96b17d0f4be1b1a5ef1ad0deefdb51968ef7d487baeea6ba6c53b78daaea \
-    gomod://github.com/aws/aws-sdk-go-v2/internal/endpoints/v2;version=v2.8.4;sha256sum=5dcec15cd217c314ca83fc5358a0982789816c958a6f5ae8443071b2aaa96f8f \
-    gomod://github.com/aws/aws-sdk-go-v2/internal/v4a;version=v1.5.4;sha256sum=f0fe667942c87da9ce5667daec522e0aa1235e3066f197c73e8a5a3fd680f9fd \
-    gomod://github.com/aws/aws-sdk-go-v2/service/ec2;version=v1.336.1;sha256sum=4e5de5d0ef7a2fcc77641cb053d143dd6ce6cedc8567c9c9d6e214a1c4f267ba \
-    gomod://github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding;version=v1.13.19;sha256sum=cd55f71c785b8d9b08ae8eeb8d9803e38a4c6f4905c1cf9ff54a30f1cd5c858d \
-    gomod://github.com/aws/aws-sdk-go-v2/service/internal/presigned-url;version=v1.14.4;sha256sum=67d0d6a5471084647012d14d0382cc91b8c3b3ae1243dec97df0bd23d64fff02 \
-    gomod://github.com/aws/aws-sdk-go-v2/service/signin;version=v1.10.1;sha256sum=00427f8464deb9852645066841fa7e321439d207bc0c0ff8ea5cac7caeb889df \
-    gomod://github.com/aws/aws-sdk-go-v2/service/sso;version=v1.38.1;sha256sum=7364ffb1cf0d9f12ad754af4df2c5ee3be17dd39f186fb52fa577a03307efc5b \
-    gomod://github.com/aws/aws-sdk-go-v2/service/ssooidc;version=v1.43.1;sha256sum=6b96b3689d4bca34270477688ebf7ac34fef6678e1c077c1118ee01a1a3dd7ad \
-    gomod://github.com/aws/aws-sdk-go-v2/service/sts;version=v1.51.1;sha256sum=13e69189e77cf3199add4f35bbc447eabebb0981705c4c1858db462df5e9cd16 \
-    gomod://github.com/aws/smithy-go;version=v1.28.1;sha256sum=88b0cddd5c35c76652b846b3a8ad2cbe52db0738af592e791976f1ac590750de \
     gomod://github.com/beorn7/perks;version=v1.0.1;sha256sum=25bd9e2d94aca770e6dbc1f53725f84f6af4432f631d35dd2c46f96ef0512f1a \
     gomod://github.com/brunoscheufler/aws-ecs-metadata-go;version=v0.0.0-20221221133751-67e37ae746cd;sha256sum=295dc295e2ed2c96fabc7885360554bafe3fed08980767fc998ed4df60d80d89 \
     gomod://github.com/cenkalti/backoff/v4;version=v4.3.0;sha256sum=ef220b1ebf3bff4c46bbad5b2e123030e812b722b9e9dc88bc35956f9c622c2a \
     gomod://github.com/cenkalti/backoff/v5;version=v5.0.3;sha256sum=58e4d9014277bc1c5c7ab64539137923964cc3920303a4f771d02a532939bedb \
     gomod://github.com/cenkalti/backoff/v7;version=v7.0.1;sha256sum=a99dafad70e1f2b5fba60e8dbd6e8da97b20b0aa41316c94a187bf6d5a6a1126 \
     gomod://github.com/cespare/xxhash/v2;version=v2.3.0;sha256sum=145a26cdc7c49db566017b807c4989ee7f7ddeb569423e9cb99f995fac3621d3 \
-    gomod://github.com/containerd/errdefs;version=v1.0.0;sha256sum=b4ef42c38d00f2c81cf3e69646549b7f5dc8fb72de9402d7b391963dc0ac9162 \
-    gomod://github.com/containerd/errdefs/pkg;version=v0.3.0;sha256sum=593bf56f1991517e493510815d8fc6d344b8550fbfb3de56812f015096aab24f \
     gomod://github.com/davecgh/go-spew;version=v1.1.2-0.20180830191138-d8f796af33cc;sha256sum=b4d0923b169b194f0016ec46f3df1ab0c68e27999743e43fe2de59ecb2484128 \
-    gomod://github.com/digitalocean/go-metadata;version=v0.0.0-20250129100319-e3650a3df44b;sha256sum=d68eea58174594d6ae4544b78b73776f6f3b422d9e71e3721ff397772ea37f06 \
-    gomod://github.com/distribution/reference;version=v0.6.0;sha256sum=08232852a7a908263599777daab50e4306bd877e2467df036206367496122bcc \
-    gomod://github.com/docker/go-connections;version=v0.8.1;sha256sum=5e442ebd8f4006f2bc0ef192dd4813da487f94d34a2aa662c5b9b964742e2565 \
-    gomod://github.com/docker/go-units;version=v0.5.0;sha256sum=039d53ebe64af1aefa0be94ce42c621a17a3052c58ad15e5b3f357529beeaff6 \
     gomod://github.com/elastic/go-grok;version=v0.3.1;sha256sum=3c0e133ed52015be264fda53140cc912f730365a9384377d2e8e1149127a05e4 \
     gomod://github.com/elastic/lunes;version=v0.2.2;sha256sum=e50115ee6b95ef4a0f8f2f40fa85366a189fb434cba1ebe1eec6f332ecc0cfdc \
-    gomod://github.com/emicklei/go-restful/v3;version=v3.13.0;sha256sum=06bd60484b324de0b8e4366d4ed326db2e1dc730459b46e19a5306a108439c77 \
     gomod://github.com/expr-lang/expr;version=v1.17.8;sha256sum=82210321f9078349af5dbf774e2a2d9f4aabe79db23a3124034722cdc632cd80 \
-    gomod://github.com/fatih/color;version=v1.19.0;sha256sum=694b4265dc678e2a65b196371d5a6ec4eed3739f12a16021dcd2f0c1355d0ec6 \
     gomod://github.com/felixge/httpsnoop;version=v1.1.0;sha256sum=e3405a361843f8e69f64e41b523512925cd50fd5ea108b7912534922c31b00e7 \
     gomod://github.com/foxboron/go-tpm-keyfiles;version=v0.0.0-20251226215517-609e4778396f;sha256sum=3d32aee07868e9860cfef5095b7a8d16ca03625b727647491bdd4303d851fa0e \
     gomod://github.com/fsnotify/fsnotify;version=v1.10.1;sha256sum=b2c6a334e0d518da2e046066bdd9da34cb26bad6df9f17701802d3de522ab016 \
     gomod://github.com/fxamacker/cbor/v2;version=v2.9.2;sha256sum=778e7b1e56acefbf9f9b6fd435e55a1dcc6d59bbd5513b9a60eac08886617d06 \
     gomod://github.com/go-logr/logr;version=v1.4.4;sha256sum=3ab107c1d280ce798eaa744efd595982fa709d4023f3f38d24189827483c1710 \
     gomod://github.com/go-logr/stdr;version=v1.2.2;sha256sum=9dd6893bf700198485ae699640b49bc1efbc6c73b37cb5792a0476e1fd8f7fef \
-    gomod://github.com/go-openapi/jsonpointer;version=v1.0.0;sha256sum=403cc887595921a24880a173862ea95b7c46f0747725d7b75c31165e0647e157 \
-    gomod://github.com/go-openapi/jsonreference;version=v1.0.0;sha256sum=381714f9c672c76e573155e6e6fb38ab1ccceafba6163d672a52d4460a999f5b \
-    gomod://github.com/go-openapi/swag;version=v0.28.0;sha256sum=3d8ca6e12ec2e0ca5e14be6f2688cfb3005878b799d42fbe3828e293d375dd5b \
-    gomod://github.com/go-openapi/swag/cmdutils;version=v0.28.0;sha256sum=ec8d7c8093e697ab5aa09eb1c7644bc02f9bb48d2cd00278a1c851001c6f82c4 \
-    gomod://github.com/go-openapi/swag/conv;version=v0.28.0;sha256sum=0869a899afe4cdc64843f06a45cc9fe4feddb47be187e223730ffe4b57de854b \
-    gomod://github.com/go-openapi/swag/fileutils;version=v0.28.0;sha256sum=282c501d0d2f2539c5ea0ae18fcd0b3b544d958b91b483404426717610ffcacb \
-    gomod://github.com/go-openapi/swag/jsonutils;version=v0.28.0;sha256sum=9ec1021cfa869bcf862ec8a36b166c46ebbb47f736e2bb8fa2a6685b83170e34 \
-    gomod://github.com/go-openapi/swag/loading;version=v0.28.0;sha256sum=63c459ca5289190b2a231c05aff1d22710bab0f50c33a49fe5f0c6cb218612a0 \
-    gomod://github.com/go-openapi/swag/mangling;version=v0.28.0;sha256sum=2d16f070918e2fd8714aaf356dfb9984e84daf7643689a8e25cc58d5ded54b70 \
-    gomod://github.com/go-openapi/swag/netutils;version=v0.28.0;sha256sum=d7363cce443a04264c352c76d34d89d0993e7e299319b25c00854d7ab865672a \
-    gomod://github.com/go-openapi/swag/pools;version=v0.28.0;sha256sum=623705ee11fe884b4a998ca0e8305c4da03ada2f43c3b4c41e1f84486e627049 \
-    gomod://github.com/go-openapi/swag/stringutils;version=v0.28.0;sha256sum=e15348c48de427f551dc69583eb088a72510c257cf976f6ab382601ec602ab6c \
-    gomod://github.com/go-openapi/swag/typeutils;version=v0.28.0;sha256sum=9256dec49a60a1efca39e0486107c7d86d15f7c52c962cfb9a04a720023e3e0d \
-    gomod://github.com/go-openapi/swag/yamlutils;version=v0.28.0;sha256sum=66bffa6d57cfc00135695b8d873f08d11c6017f472aa00b777dd168b3ecec2c3 \
-    gomod://github.com/go-resty/resty/v2;version=v2.17.2;sha256sum=424588a1577747a23273e5ef9f75fdb9178b8d2a42fa37f2e0ed90bb2b957cd8 \
     gomod://github.com/go-viper/mapstructure/v2;version=v2.5.0;sha256sum=326f8e00f648af4ae8e6e18c606325e4206a92d6ed42f486dc2f4da8e1897547 \
     gomod://github.com/gobwas/glob;version=v0.2.3;sha256sum=0cfe486cd63d45ed4cb5863ff1cbd14b15e4b9380dcbf80ff26991b4049f4fdf \
     gomod://github.com/goccy/go-json;version=v0.10.6;sha256sum=2296e77cc44facf3596ddd7a5866578a8450b59ad1583cbb70bfbfa77fe0dadc \
-    gomod://github.com/gogo/protobuf;version=v1.3.2;sha256sum=dd2b73f163c8183941626360196c8f844addd95423d341a0412e1b22d0104ff7 \
     gomod://github.com/golang/groupcache;version=v0.0.0-20241129210726-2c02b8208cf8;sha256sum=163367355442a630b12b0b452892cd98e99fcfdf7e40b68d358be73479cc1c23 \
     gomod://github.com/golang/snappy;version=v1.0.0;sha256sum=d712fef567e361d17e879f80ea53ebfdf529185a6bc74a2aa1996133ddd0a930 \
-    gomod://github.com/google/gnostic-models;version=v0.7.1;sha256sum=91ea6e1d4f6f41437d37d6e01bbeb5cdab3fa8b96f6868a94ca88c9ee5c60c71 \
     gomod://github.com/google/go-tpm;version=v0.9.8;sha256sum=3b26b46c32cfc9adfc6859da0ce1aef87170fd26f1e87d1d4c4c3cfc2a7cab49 \
-    gomod://github.com/google/s2a-go;version=v0.1.9;sha256sum=bf8f4b159d3fc201477822ed2514e4f05f58c764b78ffed73ec0accce5fb7f07 \
     gomod://github.com/google/uuid;version=v1.6.0;sha256sum=d0f02f377217f42702e259684e06441edbf5140dddcc34ba9bea56038b38a6ed \
-    gomod://github.com/googleapis/enterprise-certificate-proxy;version=v0.3.17;sha256sum=9f7a3faf31b200d1db27b6799b255600ae7159b8d0dee84ea2510058810f919e \
-    gomod://github.com/googleapis/gax-go/v2;version=v2.26.2;sha256sum=97c16d0f59fa00739d6ec77c6e21337f25c93162fc3e232b50173476579c8d0d \
     gomod://github.com/grpc-ecosystem/grpc-gateway/v2;version=v2.29.0;sha256sum=92aa0dbc15037aeddca97ff7f8e4c61bdc3841a34a0df9bc27af30265e598f2d \
-    gomod://github.com/hashicorp/consul/api;version=v1.34.4;sha256sum=b99e56e2c3a19a19ae62955130afaeb21086041ccb2fff0f27d4c85c89ae77f6 \
-    gomod://github.com/hashicorp/errwrap;version=v1.1.0;sha256sum=209ae99bc039443e28e4d6bb66517d1756d9468b7578d31f1b63a28103d8e18c \
-    gomod://github.com/hashicorp/go-cleanhttp;version=v0.5.2;sha256sum=e9f3dcfcb33172ba499b4f8e888169252d7f1e072082182124a6e2053523f7df \
-    gomod://github.com/hashicorp/go-hclog;version=v1.6.3;sha256sum=ebab3136e5327ad17606485f633c2d033c61eadb843b2f3629b6d65d6fbb1400 \
-    gomod://github.com/hashicorp/go-immutable-radix;version=v1.3.1;sha256sum=47f3d79b57082d5db3f966547ad4de2a00544dfb362790fbf2cef1a161b4de3f \
-    gomod://github.com/hashicorp/go-metrics;version=v0.6.0;sha256sum=6152c13d1922bf06994b0476c062369acd900c389b7bef3ecb5462224d8593e7 \
-    gomod://github.com/hashicorp/go-multierror;version=v1.1.1;sha256sum=972cd841ee51fdeac69c5a301e57f8ea27aebf15fddd7f621d5c240f28c3000c \
-    gomod://github.com/hashicorp/go-rootcerts;version=v1.0.2;sha256sum=864a48e642e87a273fb5ef60bb3575bd74a7090510f93143163fa6700be31948 \
     gomod://github.com/hashicorp/go-version;version=v1.9.0;sha256sum=b6c05489bf11a28c81cf38119782284c859d6c2d193b811d3f0117592eb31fcb \
     gomod://github.com/hashicorp/golang-lru;version=v1.0.2;sha256sum=175d78ffe7391f3f6369cf58ddb87fc51016ba61f2de25bf4ea3962a0b4a0fac \
     gomod://github.com/hashicorp/golang-lru/v2;version=v2.0.7;sha256sum=2eb92ff13970bccd460efae14255bfc03bb51474da0137e477a60f95561acc30 \
-    gomod://github.com/hashicorp/serf;version=v0.10.4;sha256sum=f009201887ef8d3cb7df13b99bc92ba85bab1621fd649878817d56dc01aef526 \
-    gomod://github.com/hetznercloud/hcloud-go/v2;version=v2.49.0;sha256sum=caa0e3987c530102e8525a8a0fbdf7f8813d73d58fa86ef89584d5541696ea86 \
     gomod://github.com/iancoleman/strcase;version=v0.3.0;sha256sum=fe8d071a2f64f2fdf24a0b080a7fd277488bc4840503d7475045070fe50c3f58 \
     gomod://github.com/json-iterator/go;version=v1.1.12;sha256sum=d001ea57081afd0e378467c8f4a9b6a51259996bb8bb763f78107eaf12f99501 \
     gomod://github.com/klauspost/compress;version=v1.20.3;sha256sum=1eb710a814c44bf21332a512a19f496fb5c489ca8eb72244bb9c49f80900848f \
-    gomod://github.com/klauspost/cpuid/v2;version=v2.3.0;sha256sum=e6766f75ecfadf12fd045e4bdd9383f2a5bd3f9bd4c88a6db72861c84cf41486 \
     gomod://github.com/knadh/koanf/maps;version=v0.1.3;sha256sum=011eaef67d0befb7a1b30a64d1d8e015111aa8760fdaca4cd36cb6d8dea1407f \
     gomod://github.com/knadh/koanf/providers/confmap;version=v1.0.1;sha256sum=68f32b7a4a6485572860e89c5a325ff94ed4681f97bcd6912769da78ad53e087 \
     gomod://github.com/knadh/koanf/v2;version=v2.3.8;sha256sum=d4ec8d015db66d6d690b470c11b1bec1f3452ca656462aea7679fbfa7c7b9a91 \
     gomod://github.com/leodido/go-syslog/v4;version=v4.6.0;sha256sum=77a56554c4138f34f2c29da6ccf358d69d668c0fd27947ac5f3c65733318d53f \
     gomod://github.com/leodido/ragel-machinery;version=v0.0.0-20190525184631-5f46317e436b;sha256sum=3e809aec9786faf870f674db3da0ebf4da691ab430a31595d6cdd6c1ed6cc2c1 \
     gomod://github.com/lightstep/go-expohisto;version=v1.0.0;sha256sum=a37e64b0d5fd6fac768103bea08143987df09fde40b1677b43f000b19890bf01 \
-    gomod://github.com/linode/go-metadata;version=v0.3.1;sha256sum=bf88f928cac5a2c17df3467858f248f057ddbd680f26ec45ed80e832b9b996e0 \
-    gomod://github.com/mattn/go-colorable;version=v0.1.15;sha256sum=221144f51cc5eeda0a72bd7b5832181b94240c1d760bde0b3428895e63e63339 \
-    gomod://github.com/mattn/go-isatty;version=v0.0.22;sha256sum=aee31e550fcdffd1fc4b8e7e7fa8bb59aa4311f9c0b51893f8c6837f8c3f7f37 \
     gomod://github.com/mitchellh/copystructure;version=v1.2.0;sha256sum=4a1ce1f3c66bf99883e55da50fe1b3122299b79ad1d11c5407abbd74ace12550 \
     gomod://github.com/mitchellh/reflectwalk;version=v1.0.2;sha256sum=c96eed6b50f00b1acdc79224e8e55f66ef3e98e3f7c6373afa3e3b8c6ef440d1 \
-    gomod://github.com/moby/docker-image-spec;version=v1.3.1;sha256sum=e3fe212be410465c0cae032baa7e2c7282b9bb878f081f00549333edc260c306 \
-    gomod://github.com/moby/moby/api;version=v1.56.0;sha256sum=c37d978e3626ae7f767a7fd008d4de06236750db160130c85422986964c3a72e \
-    gomod://github.com/moby/moby/client;version=v0.6.0;sha256sum=2becd1818d706245e52364d830e04dae2d27d8199695ef84ed55bc7215a6fc95 \
     gomod://github.com/modern-go/concurrent;version=v0.0.0-20180306012644-bacd9c7ef1dd;sha256sum=91ef49599bec459869d94ff3dec128871ab66bd2dfa61041f1e1169f9b4a8073 \
     gomod://github.com/modern-go/reflect2;version=v1.0.3-0.20250322232337-35a7c28c31ee;sha256sum=49f3fb0f76b1b98b52b5e6e8eab2a48454eab33904b937625941c28138a7fea4 \
     gomod://github.com/munnerz/goautoneg;version=v0.0.0-20191010083416-a7dc8b61c822;sha256sum=3d7ce17916779890be02ea6b3dd6345c3c30c1df502ad9d8b5b9b310e636afd9 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/extension/bearertokenauthextension;version=v0.163.0;sha256sum=23d1632e6fbb1c9b699576a134f3f2395bff57c72bdd64c5480cbd671ed62ee4 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/extension/internal/credentialsfile;version=v0.163.0;sha256sum=2f7de1d1c3b85e86b2af0daf1dce3392c1227c6fb46183e02b4f449754eed207 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage;version=v0.163.0;sha256sum=330ad948747d0a9ec0d86a10b2c23eebb570fc1003c0d1d069e234de1b41bd6c \
-    gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/ecsutil;version=v0.163.0;sha256sum=62699db2be6d299afecb279e7bd93af99642e02db6d9bed991dfe25bee5d359c \
-    gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/common;version=v0.163.0;sha256sum=93ebe7d8c7827dd687f3e2a8140838960ebf6fdb8501fbc396f8cf71029260b6 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal;version=v0.163.0;sha256sum=9a81b3595f62a4fe71f1b4b9ab9fac0c3f9db11c0918adf4c2b21feaaf5bc28f \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/filter;version=v0.163.0;sha256sum=27f3c71d8d20e269c112c83c75bbfdbe46deb596cc9c7a1be822699ed87a051c \
-    gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/k8sconfig;version=v0.163.0;sha256sum=0b208dbf67bdd10dd01b827398e5a25da3a40c93e174fab0d0b9ebec87e8a47d \
-    gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/metadataproviders;version=v0.163.0;sha256sum=434fc655308d3dabb539e4f0a9396f115a605c6126e24a79d05d300e5fd0ed7a \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/internal/pdatautil;version=v0.163.0;sha256sum=120e399005691f36e8fb1e6e65818e2181c8aa2f29b61734ffc95eb54cc470e4 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/pkg/expohisto;version=v0.163.0;sha256sum=2b946152ec139c9ade0ba8f0a8d2118acc4900b35d7740e49f31035d8c63e054 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl;version=v0.163.0;sha256sum=254658c95dcc871154703ea776626df06038ebaea148b0e1fba18a64a05508ac \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/xprofile;version=v0.163.0;sha256sum=9cda51da95a5cf95f38f585072c9c23d4bb1a3be18cc1a33cf5b7088c13b4f67 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/xottl;version=v0.163.0;sha256sum=3f2e6fb28985dc26174c850881a9554e996c9919cd2e3bf690da052a371ef722 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza;version=v0.163.0;sha256sum=865221d7e39e5303563d35a5a0f863ec1aec1b6cc172604cf7d7965630a8ca9a \
-    gomod://github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor;version=v0.163.0;sha256sum=21f143c5c00a339ff8deed8c1171697baba9b4734c696cb59d5db959f777205d \
+    gomod://github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor;version=v0.163.0;sha256sum=87df7799aebbe59f00b544114123882d99fcaf805f35c282b8c1b7b3da48322f \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor;version=v0.163.0;sha256sum=0b5c5249446236033596f42828891d5052af5a5511d8c910d65161727c5e761e \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor;version=v0.163.0;sha256sum=beced93ec0031c5b9635c9b80af62b414c1f2a03dff32bd4d03a40f68be15d32 \
     gomod://github.com/open-telemetry/opentelemetry-collector-contrib/receiver/journaldreceiver;version=v0.163.0;sha256sum=036e15b71a01b091ee20a3228d7efc7a00376001c796edec38d3476c167e1eac \
-    gomod://github.com/opencontainers/go-digest;version=v1.0.0;sha256sum=615efb31ff6cd71035b8aa38c3659d8b4da46f3cd92ac807cb50449adfe37c86 \
-    gomod://github.com/opencontainers/image-spec;version=v1.1.1;sha256sum=3a32eeb459719172947c20be78b5b7293c6ea84f4039184e846f6b676bc19574 \
-    gomod://github.com/openshift/api;version=v0.0.0-20251015095338-264e80a2b6e7;sha256sum=d6db4f91212e556566ad6a35692ab02481f3a5bea5813c7cd9479a90b9df1201 \
-    gomod://github.com/openshift/client-go;version=v0.0.0-20251015124057-db0dee36e235;sha256sum=9171d3883ca9b9c3c9c7891f850281a99efadb13842c72238cdb154f85a8983a \
     gomod://github.com/pierrec/lz4/v4;version=v4.1.33;sha256sum=b848476e729bbdf587a80940fa84b45680a63052e6c021201baa38ee61275686 \
-    gomod://github.com/pmezard/go-difflib;version=v1.0.1-0.20181226105442-5d4384ee4fb2;sha256sum=24ff45e356f638a53bd0c89fff961fbeaecfdb0dc5e482ceed0a2230e0e5f3b7 \
     gomod://github.com/prometheus/client_golang;version=v1.24.1;sha256sum=90b627e392d9936cf410ed23066d6198fecc11130bbab2e17dda627da3a86fc3 \
     gomod://github.com/prometheus/client_model;version=v0.6.3;sha256sum=92f5d9a39b75bdc3f6733563934438148a3c3661420a8f742fea8cbf40d39abe \
     gomod://github.com/prometheus/common;version=v0.72.1;sha256sum=4bc895838ac3416153ab67a1459400ca32dfaf8d19220c1bda6133481bcecefd \
     gomod://github.com/prometheus/otlptranslator;version=v1.0.0;sha256sum=b4a3a9d8b0dfd8d7a54937d6916beb08108e57afdd8f0e21544a0d163181ffb4 \
-    gomod://github.com/prometheus/procfs;version=v0.22.0;sha256sum=e13d43da4a9773cecdfa8b86e745bbd8efda07b005402c673a1e882b6dbb6804 \
+    gomod://github.com/prometheus/procfs;version=v0.21.1;sha256sum=b417ab3081ad334ce4c6b367b2d5e74dea49e2eb3b5431c1dd5a65e1256736f9 \
     gomod://github.com/rs/cors;version=v1.11.1;sha256sum=0555d9d0c18079e1d472d83044bf9fb2517626f1027d3d9d527c7a4294978500 \
-    gomod://github.com/scaleway/scaleway-sdk-go;version=v1.38.0;sha256sum=8a4ac91b088f34da841c9d0089be81bf8548ec047ee38ad3bfb0083840577bba \
     gomod://github.com/shirou/gopsutil/v4;version=v4.26.9;sha256sum=2206a841e6e5ca18b4b88d10f90a05c0714528cdec5bdd0801b9c02ed76e0ab6 \
     gomod://github.com/spf13/cobra;version=v1.10.2;sha256sum=a00aae6fcd631e0fde52c98604452ff70e1b73c3b8a560d68db15aff5e26872d \
     gomod://github.com/spf13/pflag;version=v1.0.10;sha256sum=a246b8c9d3daa87d6c634cdfee1bdf7fa53d5817eeef4fa0c6da43edd12de4ca \
-    gomod://github.com/stretchr/objx;version=v0.5.3;sha256sum=cdc804051b06efceea75ee9b0b6349d2f92f17cd46c6193c4a8dfb0f51465a44 \
     gomod://github.com/stretchr/testify;version=v1.12.1;sha256sum=6874ed1c4b0b7e9feb27989b16c179b36590020633436ae260cefc5f5565589f \
     gomod://github.com/tklauser/go-sysconf;version=v0.4.0;sha256sum=61e89253bc4d7091170601be12633dc02e94a3bc30470b081a2449944fa18784 \
     gomod://github.com/tklauser/numcpus;version=v0.12.0;sha256sum=56c22a112976df3a4d8db776b41288658070650ae6382ec86d0a32fc07af0276 \
@@ -228,15 +152,8 @@ SRC_URI += "\
     gomod://go.opentelemetry.io/contrib/bridges/otelzap;version=v0.20.0;sha256sum=6377cbef8fa41aad8e600a58fc84d2621d82187d664c0a1142a32739fcddefbb \
     gomod://go.opentelemetry.io/contrib/detectors/aws/ecs;version=v1.45.0;sha256sum=74231544c03a9a36d4d752f3b6e56d5df18f76f78d4dcaef23c004a70873e0e2 \
     gomod://go.opentelemetry.io/contrib/detectors/aws/eks;version=v1.45.0;sha256sum=605966e3707d57dd43ab24b0c76880342972e80fa1f3e013ecab99571e37a9aa \
-    gomod://go.opentelemetry.io/contrib/detectors/aws/elasticbeanstalk;version=v0.19.0;sha256sum=c3f1bfd097a28e5d7c6b16eb6d13ab32cb2cbe0f6d26a3dcb3e45cae3f5c4f91 \
-    gomod://go.opentelemetry.io/contrib/detectors/azure/azureappservice;version=v0.19.0;sha256sum=eb635ca88de85e8ef542b5c64cc3f0827f6cd6db6c83d550ab956aa4a6cb8744 \
-    gomod://go.opentelemetry.io/contrib/detectors/azure/azurecontainerapps;version=v0.19.0;sha256sum=e074e27137c5107886806e0b80aec076d4bc862dad76b8f330ddbb643a82333b \
-    gomod://go.opentelemetry.io/contrib/detectors/azure/azurefunctions;version=v0.19.0;sha256sum=136d6e4624ad4d23b30950451ca86a054a907e4b9990fb5f2061a5a3a0702654 \
     gomod://go.opentelemetry.io/contrib/detectors/azure/azurevm;version=v0.17.0;sha256sum=af1f13b6594225c6493c0fc1b5c0112953bf42ed8ecc30d98c6a82ba4f71d10e \
     gomod://go.opentelemetry.io/contrib/detectors/gcp;version=v1.45.0;sha256sum=73a93ddfe872b4494c23f6c991e44b949c3b4d898026641199ade1ea844a73bb \
-    gomod://go.opentelemetry.io/contrib/detectors/hetzner;version=v0.19.0;sha256sum=893310ebf54d0cc991e5ff170b71fa4e56f4884df85e0cba5e6207a4ad7ed668 \
-    gomod://go.opentelemetry.io/contrib/detectors/ibmcloud/vpc;version=v0.19.0;sha256sum=a4a79975b0232a7d569d38ac693f11acff1a2c71c8d465ca7fe380aed6dfc324 \
-    gomod://go.opentelemetry.io/contrib/detectors/vultr;version=v0.19.0;sha256sum=4805d58f853bc3ca4a3a3888782a367ea6eddadf0aefbdacdc9f72711ac4eb06 \
     gomod://go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp;version=v0.70.0;sha256sum=5afae012c182ed95c9068c4b4de772677fbfecb9fbe41605046f907abba8bc92 \
     gomod://go.opentelemetry.io/contrib/otelconf;version=v0.25.0;sha256sum=8b8ae2bebc7ddd6d25ca233a725ed32bc0d36d24928fcbb6a81dc4b8e978c40f \
     gomod://go.opentelemetry.io/contrib/propagators/autoprop;version=v0.70.0;sha256sum=a37fceda02a8b9aebf3d4e3e41a258a2be02f13c7d3040155d30f940e193e6f0 \
@@ -271,25 +188,19 @@ SRC_URI += "\
     gomod://golang.org/x/exp;version=v0.0.0-20260727155853-b88d891fe743;sha256sum=3318e6fa865d56af019347fdbdc986c8e65d740bea6b19abc4865bc4d171c2c6 \
     gomod://golang.org/x/net;version=v0.61.0;sha256sum=f6843a98d608298e48a6ca287292c9a6fae066284050ce174d5ffb781c9b3dcf \
     gomod://golang.org/x/oauth2;version=v0.37.0;sha256sum=82b0472ff31d57867bfb95e28c2906acd54764949a215b6a01bda40f4ae4c3bd \
-    gomod://golang.org/x/sync;version=v0.24.0;sha256sum=ca3fcf3ea8259e75891f7947e1a816a5b89402c542d45d8bbbd9e061b0c58019 \
     gomod://golang.org/x/sys;version=v0.49.0;sha256sum=e73a06591ca0d7016ce3ccb45c36a8ed7128468aecc1a357f94d815c760c6b31 \
     gomod://golang.org/x/term;version=v0.47.0;sha256sum=d990d5ab94dfa41ba980645b721bba7490064337a01bb03e6cacace70e8df0bf \
     gomod://golang.org/x/text;version=v0.43.0;sha256sum=b75131f628f6e2e4892fd638d33127e952a5027775e0162b94ba069cb4e13863 \
     gomod://golang.org/x/time;version=v0.15.0;sha256sum=8cfb20e915fa5d6c3fd264304233f8d71a3385e48a37819239c532ad9da27f84 \
     gomod://gonum.org/v1/gonum;version=v0.17.0;sha256sum=dadeb3d260548de27375f7188bdfd5a175110120fd8ee8085a63b0dff2cae501 \
-    gomod://google.golang.org/api;version=v0.288.0;sha256sum=344a481ee69da5a535b80cd36daa33571f52a00cfb583f85c64cb4f33eea1666 \
-    gomod://google.golang.org/genproto;version=v0.0.0-20260715232425-e75dac1f907d;sha256sum=2bb3944dd73d398fb40cf3e7cbc3ccfaec83e9e37ec2e4fa5e516989ee74d0a0 \
     gomod://google.golang.org/genproto/googleapis/api;version=v0.0.0-20260803160001-6ac0973c030d;sha256sum=81fb4ff242fb2e9ec4328eed36190bf5ba96307ff85a057e2327fbd171b47650 \
     gomod://google.golang.org/genproto/googleapis/rpc;version=v0.0.0-20260803160001-6ac0973c030d;sha256sum=a17ff826d2b2e39c2179f99cea77e36137af38f193a718c6445570d326784111 \
     gomod://google.golang.org/grpc;version=v1.84.0;sha256sum=a14bebefbac1ec115d9e1f8042006c185d65adf43a91644f3e58df0688831b95 \
     gomod://google.golang.org/protobuf;version=v1.36.12;sha256sum=68f8a3174aff42950fd9bd02c11b45c6986eb8060508d124d1c3dd6bf86b9be6 \
-    gomod://gopkg.in/evanphx/json-patch.v4;version=v4.13.0;sha256sum=de94747c5023a2c83909845c76acc6b4bfe28b44994207394b5e057f3085625a \
     gomod://gopkg.in/inf.v0;version=v0.9.1;sha256sum=08abac18c95cc43b725d4925f63309398d618beab68b4669659b61255e5374a0 \
-    gomod://gopkg.in/yaml.v2;version=v2.4.0;sha256sum=ede49e27c4cca6cdd2ec719aed8ea4d363710cceb3d411e7a786fbdec0d391fd \
     gomod://gopkg.in/yaml.v3;version=v3.0.1;sha256sum=aab8fbc4e6300ea08e6afe1caea18a21c90c79f489f52c53e2f20431f1a9a015 \
-    gomod://k8s.io/api;version=v0.37.1;sha256sum=a599830bb9480afbbbf0b8cdc0954d68a8f8271f9d8e31e9dc5c2a1fdb88406a \
-    gomod://k8s.io/apimachinery;version=v0.37.1;sha256sum=35ac0650a8182926b34823991f08d98b869a06720bdbe09cea79b3d6db0156e5 \
-    gomod://k8s.io/client-go;version=v0.37.1;sha256sum=6058950813d4923d7c56c5ea1551e45c6521a204d0fb2270a5efd67c82b8c3ce \
+    gomod://k8s.io/apimachinery;version=v0.35.4;sha256sum=7c9c6b4bbc22bda8f9758513fe1be85b5b0d1167d506cd7a327048d90b854395 \
+    gomod://k8s.io/client-go;version=v0.35.4;sha256sum=e9b8853e9f3709a4f65138195bfdd44ad250069debbf72d755e4a2ac0946ecb4 \
     gomod://k8s.io/klog/v2;version=v2.140.0;sha256sum=46fab8686139b04c42f1b44e84c5a162667fbf22628216d5061d95206625a886 \
     gomod://k8s.io/kube-openapi;version=v0.0.0-20260721132016-d427ff9ee9ad;sha256sum=d49441d035de2e04140f634bc3e4055d0ac59a05cd095cbb0717c3e36e16ed4c \
     gomod://k8s.io/utils;version=v0.0.0-20260707023825-cf1189d6abe3;sha256sum=b4dd9cd9ed581fd60f44473214be210ccd7aa680067f6b2218a18047ef2b9262 \

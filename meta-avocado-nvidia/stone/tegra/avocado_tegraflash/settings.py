@@ -21,6 +21,13 @@ EXTERNAL_ROOTFS_DRIVE = "1"
 # must not pass, since the value lands in a file the flash tool sources.
 _SD_DEVICE = re.compile(r"mmcblk[0-9]+")
 
+PIN_KEY = "ROOTFS_NVME_PCI"
+CARRIER_ENV = "carrier.env"
+# The oracle's sed expression: the last matching line wins, quotes are optional
+# and need not pair, and trailing whitespace outside quotes stays in the value.
+_CARRIER_PIN = re.compile(r"""CARRIER_NVME_PCI=["']?([^"']*)["']?[ \t\n\v\f\r]*""")
+_PCI_ADDRESS = re.compile(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]")
+
 
 def _rewrite(env_file: Path, values: dict[str, str]) -> None:
     """Replace whole ``KEY=`` lines like ``sed -i 's/^KEY=.*/.../'``; add none.
@@ -46,11 +53,58 @@ def _rewrite(env_file: Path, values: dict[str, str]) -> None:
     )
 
 
+def _carrier_pin(carrier_env: Path) -> str:
+    """The last `CARRIER_NVME_PCI=` value in carrier.env, or "" when there is none."""
+    if not carrier_env.is_file():
+        return ""
+    pin = ""
+    for line in read_text_preserving(carrier_env).split("\n"):
+        match = _CARRIER_PIN.fullmatch(line)
+        if match:
+            pin = match.group(1)
+    return pin
+
+
+def _pin_nvme(env_file: Path, carrier_env: Path, override: str, log: Callable[[str], None]) -> None:
+    """Pin the NVMe flash target by PCIe address (oracle: the nvme branch of the media case).
+
+    nvme0n1 is whichever controller's link came up first in the flashing
+    kernel, so a carrier with two NVMe slots needs the slot named. The
+    operator's override beats the carrier's value; neither set changes nothing.
+    """
+    pci = override or _carrier_pin(carrier_env)
+    if not pci:
+        return
+    if not _PCI_ADDRESS.fullmatch(pci):
+        raise EngineError(
+            f"NVMe flash target '{pci}' is not a PCI address\n"
+            "       (dddd:bb:dd.f, e.g. 0005:01:00.0). Check CARRIER_NVME_PCI\n"
+            "       in carrier.env or AVOCADO_PROVISION_NVME_PCI."
+        )
+    log(f"NVMe flash target: PCIe {pci}")
+    lines = read_text_preserving(env_file).split("\n")
+    line_out = f'{PIN_KEY}="{pci}"'
+    hit = False
+    for i, line in enumerate(lines):
+        if line.startswith(PIN_KEY + "="):
+            lines[i] = line_out
+            hit = True
+    if not hit:
+        # Deviation env-append-newline: the oracle's echo >> glues the line onto an unterminated last line.
+        if lines[-1] != "":
+            lines.append("")
+        lines.insert(len(lines) - 1, line_out)
+    write_text_replacing_link(
+        env_file, "\n".join(lines), encoding="utf-8", errors="surrogateescape", newline=""
+    )
+
+
 def apply_boot_device(
     work_dir: Path,
     media: Media,
     *,
     sd_device: str,
+    nvme_pci: str = "",
     log: Callable[[str], None] = print,
 ) -> str:
     """Write the boot device into the staged env file; return the device node chosen."""
@@ -86,6 +140,9 @@ def apply_boot_device(
             "EXTERNAL_ROOTFS_DRIVE": EXTERNAL_ROOTFS_DRIVE,
         },
     )
+
+    if media is Media.NVME:
+        _pin_nvme(env_file, Path(work_dir) / CARRIER_ENV, nvme_pci, log)
 
     if media is Media.EMMC:
         layout = Path(work_dir) / EMMC_LAYOUT

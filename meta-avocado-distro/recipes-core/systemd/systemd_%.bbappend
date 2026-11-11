@@ -25,6 +25,20 @@ do_install:append () {
         bbfatal "wait-online-any.conf points ExecStart at ${systemd_unitdir}/systemd-networkd-wait-online, which this build does not install"
     fi
 
+    # Boot does not wait for the network by default. Packages are enabled at
+    # image build with `systemctl --root enable`, which ignores presets and
+    # follows Also=, so networkd's "Also=systemd-networkd-wait-online.service"
+    # enabled it on every image (the disable in 00-avocado.preset only covers
+    # preset runs). Drop that line; a product that needs a link before its
+    # services enables wait-online itself.
+    if [ -e ${D}${systemd_system_unitdir}/systemd-networkd.service ]; then
+        sed -i '/^Also=systemd-networkd-wait-online\.service$/d' \
+            ${D}${systemd_system_unitdir}/systemd-networkd.service
+        if grep -q '^Also=.*systemd-networkd-wait-online' ${D}${systemd_system_unitdir}/systemd-networkd.service; then
+            bbfatal "systemd-networkd.service still names systemd-networkd-wait-online; update the Also= removal"
+        fi
+    fi
+
     # Order networkd after the extension merge, so a .network file an extension
     # ships is on disk before networkd reads its configuration.
     install -d ${D}${sysconfdir}/systemd/system/systemd-networkd.service.d

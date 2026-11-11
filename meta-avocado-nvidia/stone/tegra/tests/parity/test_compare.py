@@ -219,6 +219,7 @@ def test_deviation_registry_names():
         "required-image-refused",
         "partition-fit-refused",
         "recovery-id-pinned",
+        "env-append-newline",
         "device-confirmation",
     }
     assert all(isinstance(v, str) and v and "\n" not in v for v in deviations.DEVIATIONS.values())

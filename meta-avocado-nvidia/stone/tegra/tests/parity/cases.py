@@ -36,6 +36,8 @@ STONE_DIR = Path(__file__).resolve().parents[3]
 
 APX = "Bus 001 Device 005: ID 0955:7523 NVIDIA Corp. APX"
 EMMC_PROFILES = ("tegraflash-mmc", "tegraflash-emmc")
+NVME_PROFILES = ("tegraflash", "tegraflash-nvme")
+PIN = "0005:01:00.0"
 CARRIER = {"CARRIER_LABEL": "Parity Carrier", "CARRIER_FV_BOARDID": "9999", "CARRIER_ENV_EXTRA": "carrier-value"}
 
 
@@ -145,6 +147,27 @@ def all_cases(stone_dir: Path | None = None) -> list[Case]:
                 deviation="env-file-missing-status",
             ),
         ]
+        nvme = next((p for p in profiles if p in NVME_PROFILES), None)
+        if nvme:
+            out += [
+                _case(manifest, nvme, "nvme-pin-env", env={"AVOCADO_PROVISION_NVME_PCI": PIN}),
+                _case(manifest, nvme, "nvme-pin-malformed", env={"AVOCADO_PROVISION_NVME_PCI": "nvme1n1"}),
+            ]
+            if _has_carrier_image(manifest):
+                out += [
+                    _case(manifest, nvme, "nvme-pin-carrier", tree={"carrier": {**CARRIER, "CARRIER_NVME_PCI": f'"{PIN}"'}}),
+                    _case(
+                        manifest,
+                        nvme,
+                        "nvme-pin-override",
+                        env={"AVOCADO_PROVISION_NVME_PCI": PIN},
+                        tree={"carrier": {**CARRIER, "CARRIER_NVME_PCI": "'0003:01:00.0'"}},
+                    ),
+                ]
+        emmc = next((p for p in profiles if p in EMMC_PROFILES), None)
+        if emmc:
+            # Only the nvme branch reads the knob, so a malformed value must change nothing here.
+            out.append(_case(manifest, emmc, "nvme-pin-ignored", env={"AVOCADO_PROVISION_NVME_PCI": "nvme1n1"}))
         if _has_carrier_image(manifest):
             out += [
                 _case(

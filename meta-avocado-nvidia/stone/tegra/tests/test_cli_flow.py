@@ -728,7 +728,11 @@ def test_prepare_only_refuses_a_malformed_sd_device_with_the_same_error_as_a_rea
 def test_prepare_only_skipping_the_boot_device_validation_mutation_is_caught(tmp_path, capsys):
     env = {"AVOCADO_PROVISION_SD_DEVICE": "mmcblk0;touch PWNED"}
     rig = make_rig(tmp_path, profile="tegraflash-sd", env=env)
-    old = "    device = settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)\n"
+    old = (
+        "    device = settings.apply_boot_device(\n"
+        "        work, media, sd_device=cfg.sd_device or man.sd_device, nvme_pci=cfg.nvme_pci\n"
+        "    )\n"
+    )
     # The stand-in applies the nvme profile instead, so only the SD validation is skipped.
     with mutant_main(tmp_path, old, '    device = settings.apply_boot_device(work, settings.Media.NVME, sd_device="")\n') as mutated:
         rc, _, _ = rig.go(mutated, capsys, argv=["--prepare-only"], euid=1000)

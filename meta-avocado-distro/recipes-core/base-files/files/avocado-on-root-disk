@@ -10,11 +10,43 @@
 # The bootloader says which root it booted with root=PARTUUID=<uuid>. Without
 # one (root=PARTLABEL=, a /dev node, a dm device) there is no disk to scope
 # to and every candidate passes: exactly the behaviour before this check.
-# Reads only sysfs, which the kernel fills when it scans the partition table,
-# so the answer does not depend on the order udev processes the partitions.
+# Reads sysfs, which the kernel fills when it scans the partition table, so
+# the answer does not depend on the order udev processes the partitions.
+# Kernels before 6.15 put no PARTUUID in a partition's uevent (RZ/V2N's 6.1
+# vendor kernel); there the GPT entry itself is read from the disk (dd + od,
+# no blkid: a busybox root has none that reads the partition table), which
+# is just as independent of udev's order.
 part=$1
 sys=${AVOCADO_SYSFS:-/sys}
 cmdline=${AVOCADO_CMDLINE:-/proc/cmdline}
+dev=${AVOCADO_DEV:-/dev}
+
+# Little-endian hex bytes ("0a 0b 0c") -> number.
+le() {
+  # shellcheck disable=SC2086 # split the hex bytes into positional parameters
+  set -- $1
+  out=""
+  for b in "$@"; do out="$b$out"; done
+  echo $((0x${out:-0}))
+}
+
+# gpt_partuuid <disk> <partition number>: the partition's unique GUID from
+# the disk's primary GPT, lower case; nothing if the disk has no GPT.
+gpt_partuuid() {
+  gdisk=$1 gpartn=$2
+  lbs=$(cat "$sys/block/$gdisk/queue/logical_block_size" 2>/dev/null || echo 512)
+  # shellcheck disable=SC2046 # split od's hex bytes into positional parameters
+  set -- $(dd if="$dev/$gdisk" bs=1 skip="$lbs" count=92 2>/dev/null | od -An -tx1 -v)
+  [ $# -eq 92 ] && [ "$1$2$3$4$5$6$7$8" = "4546492050415254" ] || return 0 # "EFI PART"
+  shift 72
+  entries=$(le "$1 $2 $3 $4 $5 $6 $7 $8")
+  shift 12
+  esize=$(le "$1 $2 $3 $4")
+  # shellcheck disable=SC2046 # split od's hex bytes into positional parameters
+  set -- $(dd if="$dev/$gdisk" bs=1 skip=$((entries * lbs + (gpartn - 1) * esize + 16)) count=16 2>/dev/null | od -An -tx1 -v)
+  [ $# -eq 16 ] || return 0
+  echo "$4$3$2$1-$6$5-$8$7-$9${10}-${11}${12}${13}${14}${15}${16}"
+}
 
 root=""
 read -r line <"$cmdline" || true
@@ -29,7 +61,12 @@ root=$(printf '%s' "$root" | tr 'ABCDEF' 'abcdef')
 disk=$(basename "$(readlink -f "$sys/class/block/$part/..")")
 for uevent in "$sys/block/$disk/$disk"*/uevent; do
   [ -f "$uevent" ] || continue
-  uuid=$(sed -n 's/^PARTUUID=//p' "$uevent" | tr 'ABCDEF' 'abcdef')
+  uuid=$(sed -n 's/^PARTUUID=//p' "$uevent")
+  if [ -z "$uuid" ] && ! grep -q '^PARTUUID=' "$uevent"; then
+    partn=$(sed -n 's/^PARTN=//p' "$uevent")
+    [ -n "$partn" ] && uuid=$(gpt_partuuid "$disk" "$partn")
+  fi
+  uuid=$(printf '%s' "$uuid" | tr 'ABCDEF' 'abcdef')
   [ "$uuid" = "$root" ] && exit 0
 done
 exit 1

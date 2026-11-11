@@ -32,8 +32,9 @@ S
 # dd reads our fake boot partition files; od is the real one.
 cat >"$work/bin/dd" <<S
 #!/bin/sh
-for a in "\$@"; do case "\$a" in if=*) f=\${a#if=} ;; esac; done
-cat "$work/\$(basename "\$f")"
+bs=512 count=
+for a in "\$@"; do case "\$a" in if=*) f=\${a#if=} ;; bs=*) bs=\${a#bs=} ;; count=*) count=\${a#count=} ;; esac; done
+if [ -n "\$count" ]; then head -c "\$((bs * count))" "$work/\$(basename "\$f")"; else cat "$work/\$(basename "\$f")"; fi
 S
 chmod +x "$work/bin/"*
 printf '\xd1\x00\x20\x41rest' >"$work/mmcblk9boot0"

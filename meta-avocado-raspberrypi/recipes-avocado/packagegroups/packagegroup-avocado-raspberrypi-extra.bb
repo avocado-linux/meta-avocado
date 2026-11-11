@@ -26,4 +26,7 @@ RDEPENDS:${PN} = " \
   python3-google-crc32c \
   python3-pyarrow \
   python3-scipy \
+  usb-modeswitch \
+  usb-modeswitch-data \
+  wdt-rpi \
 "

@@ -15,8 +15,14 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/tegra-helper-scripts:"
 # through -native into the runtime deploy. (S = ${UNPACKDIR}, per upstream.)
 SRC_URI += " \
     file://tegra234-flash-helper.sh \
+    file://nvme-pin-for-flash.sh \
+    file://nvdd-pin-gate.sh \
 "
 
 do_install:append() {
     install -m 0755 ${S}/tegra234-flash-helper.sh ${D}${bindir}/tegra-flash/tegra234-flash-helper.sh
+    # Run on the target over adb by initrd-flash (ROOTFS_NVME_PCI); it must sit
+    # beside initrd-flash in the runtime copy, which comes from this -native.
+    install -m 0755 ${S}/nvme-pin-for-flash.sh ${D}${bindir}/tegra-flash/nvme-pin-for-flash
+    install -m 0755 ${S}/nvdd-pin-gate.sh ${D}${bindir}/tegra-flash/nvdd-pin-gate
 }

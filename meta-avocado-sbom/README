@@ -131,6 +131,8 @@ Variables
                                manifests name one recipe, a CVE id is listed
                                once, with the status of the first manifest
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
+  AVOCADO_RPM_MANIFEST_FILE    output path of the RPM manifest, see "The RPM
+                               manifest" below
 
 Report format
 -------------
@@ -214,3 +216,106 @@ runtime package. Two different things land there:
   pkgdata_unreadable    pkgdata entries that would not parse
   package_collisions    package names claimed by more than one recipe or
                         version; the first pkgdata directory won
+
+The RPM manifest
+----------------
+
+  bitbake avocado-cve-report
+
+also writes ${DEPLOY_DIR}/avocado-cve/avocado-rpm-manifest-${MACHINE}.json:
+every RPM the build produced, each with the digest of its header. A service
+that keeps a verdict per build needs it, because two builds of one
+name-version-release are different files with different headers, and neither
+Pulp nor the report records which build a file came from. It joins the report
+on the package name and a repository on the header digest. The format is the
+one scarthgap writes, so one consumer reads both.
+
+  {
+    "version": "1",
+    "generated": "2026-10-22T19:38:57Z",
+    "machine": "avocado-raspberrypi5",
+    "distro_version": "2026.0+801.ge5a9500e",
+    "packages": [
+      { "name": "avocadoctl", "epoch": null, "version": "0.14.0",
+        "release": "r0.0", "arch": "cortexa76",
+        "sha256header": "<64 lowercase hex>",
+        "file": "cortexa76/avocadoctl-0.14.0-r0.0.cortexa76.rpm" }
+    ]
+  }
+
+Packages are sorted by name, arch, version and release. epoch is an integer, or
+null when the package has none; zero is an epoch. sha256header is the sha256 of
+the RPM's main header section - rpm's SHA256HEADER, and the byte range Pulp
+reports as rpm_header_start to rpm_header_end - not a digest of the whole file,
+which also covers the payload. file is relative to ${DEPLOY_DIR_RPM}. version
+has a "+" where the upstream version has a "-", because rpm refuses a hyphen
+there.
+
+It lists everything ${PKGDATA_DIR} names, the -dbg, -dev and -src packages
+included, not only what an image installs: a service rescanning the whole feed,
+and customer runtimes that pull packages the reference image does not have,
+need all of it. This holds at both report scopes. Pkgdata says which version
+and release of each package this build made, and ${DEPLOY_DIR_RPM} keeps every
+release ever built, so each file is named from pkgdata's PKGV-PKGR rather than
+globbed, and takes its arch from the directory it sits in. A package with its
+own PKGV (lvm2's libdevmapper) is named by that one. The header found there
+must then name the same package.
+
+It reads the same machine pkgdata as the report, because the two are consumed
+as a pair and a manifest naming a package the report lacks is rejected
+downstream. So on a machine that builds a second kernel in another multiconfig
+(AVOCADO_MULTIKERNEL_MC_RECIPES), only the default multiconfig's RPMs are
+listed: the report does not read tmp-<mc> pkgdata, and the task notes this in
+the build log. SDK pkgdata is not listed either.
+
+A package pkgdata names that holds no files (PKGSIZE 0) and has no RPM is not
+listed and is not a failure: package_rpm writes no RPM for an empty package
+unless ALLOW_EMPTY, while pkgdata still names it - avocado-core-dbg reads this
+way. An empty package that does have an RPM, a packagegroup, is listed. A
+package whose size pkgdata does not state is not excused this way.
+
+Any other package with no RPM depends on whether the scanned image ships it:
+
+  the image ships it           the build fails
+  the image does not ship it   left out, with a build warning that names it
+
+At image scope pkgdata also names packages the image does not install, some
+built only as build-time dependencies, which may have no RPM. Those are on no
+device, so leaving them out costs nothing, and every name that is listed is
+still in the report's "packages". A package the image does install must be
+listed, so a missing RPM for it is a failure: it means pkgdata names a version
+whose RPM was never written, as when another target's build refreshes a
+dependency's pkgdata at a new PKGR. "Ships" is read from the image's
+installed-package manifest in ${DEPLOY_DIR_IMAGE}, the one write_image_manifest
+writes beside the image; if it cannot be read, the task warns and treats every
+package as shipped.
+
+At world scope there is no image to ask, and the feed publishes everything the
+world build packaged, so every package with no RPM fails the build, as on
+scarthgap.
+
+Anything else wrong with a package fails the build, with every such package
+named: a version with no release, an arch that is ambiguous, a file whose
+header names something else or will not read as an RPM, or one whose signature
+header records a different SHA256HEADER than its main header hashes to. The
+previous build's file is removed first, so a failure leaves no list at all.
+
+The task runs after do_cve_report. At image scope that means after the image:
+do_cve_report waits for the image's do_sbom_cve_check, which follows the
+rootfs, and do_rootfs waits for the do_package_write_rpm of everything it
+installs. At world scope nothing in that chain waits for packaging, because the
+world SBOM is built from recipe-level SPDX, so run it after the world build has
+finished; a package still being packaged then fails the task rather than being
+left out.
+
+The same limit as the report's counters applies: pkgdata and ${DEPLOY_DIR_RPM}
+accumulate and nothing prunes either, so a recipe that no longer builds but was
+built once into this TMPDIR is still listed.
+
+The reader is avocado_sbom/rpms.py. It reads the lead and the two headers and
+never the payload, and needs neither rpm nor rpm-native. The contract is
+schema/avocado-rpm-manifest-v1.schema.json: unknown keys are permitted, and
+additions do not bump the major. The tests build their RPMs byte by byte, so
+they need no build either:
+
+  python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'

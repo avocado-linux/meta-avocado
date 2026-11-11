@@ -172,7 +172,9 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
 
     # Oracle 512-597: boot device settings; an SD device from the environment wins.
     print(f"Boot media target: {media.value} (profile: {cfg.profile})")
-    device = settings.apply_boot_device(work, media, sd_device=cfg.sd_device or man.sd_device)
+    device = settings.apply_boot_device(
+        work, media, sd_device=cfg.sd_device or man.sd_device, nvme_pci=cfg.nvme_pci
+    )
     # The staged env file is final here. The flash sources it with bash, so what it
     # will use is read back instead of assumed; before the fit check, which reads it too.
     staged = settings.verify_staged_env(work, man, device)

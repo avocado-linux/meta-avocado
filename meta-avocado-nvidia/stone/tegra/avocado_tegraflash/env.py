@@ -39,6 +39,8 @@ class Config:
     erase_only: bool
     # None: AVOCADO_PROVISION_FORCE unset; True: 1; False: 0.
     force: bool | None = None
+    # AVOCADO_PROVISION_NVME_PCI; empty when unset. Validated where it is used.
+    nvme_pci: str = ""
 
 
 def from_environ(environ: Mapping[str, str]) -> Config:
@@ -88,4 +90,5 @@ def from_environ(environ: Mapping[str, str]) -> Config:
         erase_emmc=environ.get("ERASE_EMMC") == "1",
         erase_only=environ.get("ERASE_ONLY") == "1",
         force=force,
+        nvme_pci=opt("AVOCADO_PROVISION_NVME_PCI"),
     )

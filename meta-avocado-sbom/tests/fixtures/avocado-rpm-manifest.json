@@ -1,0 +1,35 @@
+{
+  "version": "1",
+  "generated": "2026-10-13T20:00:00Z",
+  "machine": "avocado-raspberrypi5",
+  "distro_version": "2026.0+1.g00000000",
+  "packages": [
+    {
+      "name": "avocado-security-capabilities",
+      "epoch": null,
+      "version": "1.0",
+      "release": "r0.0",
+      "arch": "avocado_raspberrypi5",
+      "sha256header": "6880983984f1fc4291eb1007604ee3b95a0cb404a993afec6bf2e31caa55fdb1",
+      "file": "avocado_raspberrypi5/avocado-security-capabilities-1.0-r0.0.avocado_raspberrypi5.rpm"
+    },
+    {
+      "name": "avocado-users",
+      "epoch": null,
+      "version": "1.0",
+      "release": "r0.5",
+      "arch": "noarch",
+      "sha256header": "3cf2276b76c1a333ac2bfbb548d9018f2f401363c002ad54b53c304c03b3a2fb",
+      "file": "noarch/avocado-users-1.0-r0.5.noarch.rpm"
+    },
+    {
+      "name": "avocadoctl",
+      "epoch": null,
+      "version": "0.12.0",
+      "release": "r0.1",
+      "arch": "cortexa76",
+      "sha256header": "4e7773eebb4142d1643b7dfa285ca2a650baea85d6e0dd2fc36625091d8e3c77",
+      "file": "cortexa76/avocadoctl-0.12.0-r0.1.cortexa76.rpm"
+    }
+  ]
+}

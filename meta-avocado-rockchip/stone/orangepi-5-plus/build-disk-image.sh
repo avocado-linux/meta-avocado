@@ -42,6 +42,16 @@ if [ "$NUM_PARTITIONS" -eq 0 ]; then
   exit 1
 fi
 
+resolve_image_filename() {
+  local key="$1" img_type
+  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${key}\" | type" "$MANIFEST")
+  if [ "$img_type" = "string" ]; then
+    jq -r ".storage_devices.rootdisk.images.\"${key}\"" "$MANIFEST"
+  else
+    jq -r ".storage_devices.rootdisk.images.\"${key}\".out" "$MANIFEST"
+  fi
+}
+
 # All values normalised to sectors (1 sector = 512 bytes).
 size_to_sectors() {
   local size="$1" unit="$2"
@@ -76,7 +86,25 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   offset_unit=$(jq -r ".storage_devices.rootdisk.partitions[$i].offset_unit // \"mebibytes\"" "$MANIFEST")
   in_table=$(jq -r ".storage_devices.rootdisk.partitions[$i].\"in-partition-table\" // \"true\"" "$MANIFEST")
 
-  size_sec=$(size_to_sectors "$size" "$size_unit")
+  if [ "$size" = "null" ] || [ -z "$size" ]; then
+    # A partition with no size (var) is sized from its own image, rounded up.
+    # avocado-var-grow extends it to the disk at boot, which needs the
+    # manifest's `expand` mark and an AVOCADO_VAR_PART_DEV that is a
+    # /dev/disk/by-partlabel/ path.
+    if [ -z "$image" ]; then
+      echo "ERROR: partition '${name}' has no size and no image to size from" >&2
+      exit 1
+    fi
+    _src="${DATA_DIR}/$(resolve_image_filename "$image")"
+    if [ ! -f "$_src" ]; then
+      echo "ERROR: cannot size '${name}': image not found: ${_src}" >&2
+      exit 1
+    fi
+    _bytes=$(stat -c%s "$_src")
+    size_sec=$((((_bytes + 4194303) / 4194304) * 8192))
+  else
+    size_sec=$(size_to_sectors "$size" "$size_unit")
+  fi
   if [ -n "$offset" ]; then
     CURSOR_SEC=$(size_to_sectors "$offset" "$offset_unit")
   fi
@@ -123,16 +151,6 @@ done
 if [ ${#SGDISK_ARGS[@]} -gt 0 ]; then
   sgdisk "${SGDISK_ARGS[@]}" "$IMAGE_FILE" >&2
 fi
-
-resolve_image_filename() {
-  local key="$1" img_type
-  img_type=$(jq -r ".storage_devices.rootdisk.images.\"${key}\" | type" "$MANIFEST")
-  if [ "$img_type" = "string" ]; then
-    jq -r ".storage_devices.rootdisk.images.\"${key}\"" "$MANIFEST"
-  else
-    jq -r ".storage_devices.rootdisk.images.\"${key}\".out" "$MANIFEST"
-  fi
-}
 
 # Build any FAT-typed images referenced by partitions.
 for i in $(seq 0 $((NUM_PARTITIONS - 1))); do

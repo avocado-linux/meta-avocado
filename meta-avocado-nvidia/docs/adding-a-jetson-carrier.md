@@ -151,6 +151,12 @@ This is the heart of the carrier override. Two generic knob shapes:
 
 - `CARRIER_FV_<NAME>=value` — patches `<NAME>=value` in `flashvars`.
 - `CARRIER_ENV_<NAME>=value` — patches `<NAME>=value` in `.env.initrd-flash`.
+- `CARRIER_NVME_PCI=dddd:bb:dd.f` — pins the NVMe the `nvme` provision
+  profile flashes, by PCIe address (for example `0005:01:00.0`). Without it
+  the flash writes `nvme0n1`, whichever controller came up first, which on a
+  carrier with two NVMe slots can be either disk. The engine hands it to
+  `initrd-flash` as `ROOTFS_NVME_PCI`. `AVOCADO_PROVISION_NVME_PCI`
+  overrides it for one run; a malformed value stops the provision.
 
 Files referenced by name must exist in the merged BSP — either in the
 MACHINE-baked `tegraflash-bsp/` (for variants meta-tegra already ships,
