@@ -1,6 +1,8 @@
 import os
 import stat
 
+import pytest
+
 from avocado_tegraflash.toolchain import ADB_TIMEOUT, flash_environment, warm_adb
 
 
@@ -202,3 +204,25 @@ def test_warm_adb_discards_stderr_and_bounds_each_call(tmp_path):
 
     warm_adb(Spy(), env={"PATH": str(adb.parent)}, data_dir=tmp_path, home=tmp_path / "h")
     assert seen == [(True, ADB_TIMEOUT)] * 2
+
+
+CHECKED = ("ROOTFS_IMAGE", "ROOTFS_DEVICE", "DATAFILE", "EXTERNAL_ROOTFS_DRIVE", "NO_INTERNAL_STORAGE", "TOSIMGFILENAME")
+
+
+@pytest.mark.parametrize("key", CHECKED)
+def test_an_exported_checked_key_does_not_reach_the_flash(key):
+    base = {"PATH": "/usr/bin", "HOME": "/h", key: "from-the-shell"}
+    env = flash_environment(base, wrapper_dir="/w", work_dir="/b", pythonwarnings=None)
+    assert key not in env and env["HOME"] == "/h"
+    assert base[key] == "from-the-shell"
+
+
+def test_extra_may_still_set_a_checked_key():
+    env = flash_environment({"DATAFILE": "x"}, wrapper_dir="/w", work_dir="/b", pythonwarnings=None, extra={"DATAFILE": "y"})
+    assert env["DATAFILE"] == "y"
+
+
+def test_the_stripped_keys_are_the_ones_the_env_reader_checks():
+    from avocado_tegraflash.plainenv import CHECKED_KEYS
+
+    assert set(CHECKED) == set(CHECKED_KEYS)

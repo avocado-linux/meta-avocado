@@ -14,7 +14,8 @@ from .manifest import (
     require_distinct_staged_names,
     staged_names,
 )
-from .plainenv import read_plain_env
+from .plainenv import PRESIGNING_FILE, read_plain_env
+from .settings import ENV_FILE
 
 DEFAULT_TOS_NAME = "tos-optee_t234.img"
 _SDK_TOOLS = "sysroots/x86_64-avocadosdk-linux/usr/bin/tegraflash"
@@ -91,12 +92,12 @@ def _tos_destination(work_dir: Path) -> str:
     name. Deviation tos-name-bare-filename: the oracle uses the value as a path,
     so the reader refuses anything but a bare file name.
     """
-    env_file = work_dir / ".env.initrd-flash"
+    env_file = work_dir / ENV_FILE
     if not env_file.is_file():
         return DEFAULT_TOS_NAME
     name = read_plain_env(env_file).get("TOSIMGFILENAME")
     if name is None:
-        raise EngineError(f"no TOSIMGFILENAME= line in {env_file}")
+        raise EngineError(f"no TOSIMGFILENAME= line in {env_file} or {PRESIGNING_FILE}")
     return name
 
 

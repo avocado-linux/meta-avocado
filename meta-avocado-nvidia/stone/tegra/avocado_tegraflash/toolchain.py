@@ -5,6 +5,7 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
+from .plainenv import CHECKED_KEYS
 from .runner import Runner
 
 DEFAULT_PYTHONWARNINGS = "ignore::SyntaxWarning"
@@ -63,7 +64,9 @@ def flash_environment(
     pythonwarnings: str | None,
     extra: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    env = dict(base)
+    # The flash sources the staged env files, which the engine read and checked. An exported
+    # variable of the same name would stand in for a key the files leave out, unchecked.
+    env = {key: value for key, value in base.items() if key not in CHECKED_KEYS}
     env["PATH"] = f"{wrapper_dir}:{work_dir}:{base.get('PATH', '')}"
     env["PYTHONWARNINGS"] = pythonwarnings or DEFAULT_PYTHONWARNINGS
     if extra:

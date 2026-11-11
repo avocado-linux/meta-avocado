@@ -10,6 +10,7 @@ file name.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import stat
 from collections.abc import Iterable, Mapping
@@ -88,7 +89,14 @@ def _carrier_env(carrier: str | Mapping[str, str]) -> str:
 
 
 def _stage_bsp(
-    bsp: Path, tegraflash: Mapping, stub_dir: Path, omit, used: set, tos_name: str | None, shadow_target: Path | None
+    bsp: Path,
+    tegraflash: Mapping,
+    stub_dir: Path,
+    omit,
+    used: set,
+    tos_name: str | None,
+    shadow_target: Path | None,
+    datafile: str | None,
 ) -> None:
     bsp.mkdir(parents=True, exist_ok=True)
     layout = _EXTERNAL_LAYOUT
@@ -98,8 +106,10 @@ def _stage_bsp(
     if "appuuid_b" in omit:
         layout = layout.replace("    <unique_guid>APPUUID_b</unique_guid>\n", "")
         used.add("appuuid_b")
+    # The engine refuses a staged env that leaves DATAFILE out, so it names the manifest's var image.
+    env = _ENV_INITRD_FLASH + (f'DATAFILE="{datafile}"\n' if datafile else "")
     files: dict[str, str | bytes] = {
-        ".env.initrd-flash": _ENV_INITRD_FLASH,
+        ".env.initrd-flash": env,
         "flashvars": _FLASHVARS,
         "external-flash.xml.in": layout,
         "internal-flash-emmc.xml": _INTERNAL_EMMC_LAYOUT,
@@ -110,8 +120,8 @@ def _stage_bsp(
         files.setdefault(name, _DTBO_BYTES)
     if tos_name is not None:
         old = 'TOSIMGFILENAME="tos-optee_t234.img"'
-        assert _ENV_INITRD_FLASH.count(old) == 1
-        files[".env.initrd-flash"] = _ENV_INITRD_FLASH.replace(old, f'TOSIMGFILENAME="{tos_name}"')
+        assert env.count(old) == 1
+        files[".env.initrd-flash"] = env.replace(old, f'TOSIMGFILENAME="{tos_name}"')
     for name, content in files.items():
         if name in omit:
             used.add(name)
@@ -187,7 +197,9 @@ def build_tree(
             continue
         target = data_dir / name.lstrip("/")
         if key == "tegraflash_bsp":
-            _stage_bsp(target, tegraflash, stub_dir, omit, used, tos_name, sentinel if shadow_link else None)
+            var_image = rootdisk["images"].get("var")
+            datafile = os.path.basename(var_image) if isinstance(var_image, str) else None
+            _stage_bsp(target, tegraflash, stub_dir, omit, used, tos_name, sentinel if shadow_link else None, datafile)
         elif key == "tegraflash_carrier_bsp":
             target.mkdir(parents=True, exist_ok=True)
             _touch(target / ".placeholder")

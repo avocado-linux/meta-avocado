@@ -274,3 +274,75 @@ def test_trailing_blanks_after_a_value_are_not_part_of_it(tmp_path):
 @pytest.mark.parametrize("quote", ["", '"', "'"])
 def test_an_allowed_value_is_read_bare_or_in_one_matching_pair_of_quotes(tmp_path, key, value, quote):
     assert read(tmp_path, f"{key}={quote}{value}{quote}\n") == {key: value}
+
+
+# code that is run from a position other than the first word of the line
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "[ -e x ] && . ./x",
+        "true; . ./x",
+        "test -f x && source x",
+        "builtin source x",
+        "command . ./x",
+        "if a; then . ./x; fi",
+        "a || eval foo",
+        "a | source x",
+        "do . ./x",
+        "{ . ./x; }",
+        "( . ./x )",
+        "! . ./x",
+    ],
+)
+def test_code_run_from_a_later_command_position_is_refused(tmp_path, line):
+    msg = refused(tmp_path, f"A=1\n{line}\n")
+    assert ":2" in msg and "bash" in msg
+
+
+@pytest.mark.parametrize("line", ["# . ./x", "  # source x", "A=1", 'B="a.b"', "echo source", "X=$ROOTFS_IMAGE"])
+def test_ordinary_lines_and_comments_are_not_mistaken_for_sourcing(tmp_path, line):
+    read(tmp_path, f"ROOTFS_IMAGE=a.img\n{line}\n")
+
+
+def test_a_trailing_comment_on_a_checked_key_is_refused_and_named(tmp_path):
+    msg = refused(tmp_path, "ROOTFS_IMAGE=foo # note\n")
+    assert "trailing comment" in msg and "unmatched quote" not in msg and ":1" in msg
+
+
+def test_a_trailing_comment_after_a_quoted_value_is_named_not_called_an_unmatched_quote(tmp_path):
+    msg = refused(tmp_path, 'ROOTFS_IMAGE="foo" # note\n')
+    assert "trailing comment" in msg and "unmatched quote" not in msg
+
+
+def test_a_hash_inside_a_word_is_not_a_comment_but_fails_the_shape(tmp_path):
+    msg = refused(tmp_path, "ROOTFS_IMAGE=a#b\n")
+    assert "trailing comment" not in msg and "ROOTFS_IMAGE" in msg
+
+
+def test_a_crlf_line_ending_is_named(tmp_path):
+    msg = refused(tmp_path, 'ROOTFS_IMAGE="a.img"\r\n')
+    assert "carriage return" in msg and "unmatched quote" not in msg and ":1" in msg
+
+
+def test_a_leading_blank_in_a_value_is_refused(tmp_path):
+    assert "ROOTFS_DEVICE" in refused(tmp_path, "ROOTFS_DEVICE= nvme0n1\n")
+
+
+def test_a_comment_line_that_mentions_a_key_is_still_skipped(tmp_path):
+    assert read(tmp_path, "# ROOTFS_IMAGE=x # note\nROOTFS_IMAGE=a.img\n") == {"ROOTFS_IMAGE": "a.img"}
+
+
+# every value says which file and line it came from
+
+
+def test_a_value_carries_the_file_and_line_that_set_it(tmp_path):
+    env = read(tmp_path, "A=1\nROOTFS_DEVICE=nvme0n1\n", presign="B=2\n\nROOTFS_DEVICE=sda\nDATAFILE=v.img\n")
+    assert (env["ROOTFS_DEVICE"].path, env["ROOTFS_DEVICE"].line) == (tmp_path / PRESIGN_NAME, 3)
+    assert env["DATAFILE"].where == f"{tmp_path / PRESIGN_NAME}:4"
+
+
+def test_a_value_set_only_in_the_env_file_cites_the_env_file(tmp_path):
+    env = read(tmp_path, "A=1\nROOTFS_IMAGE=r.img\n", presign="B=2\n")
+    assert env["ROOTFS_IMAGE"].where == f"{tmp_path / ENV_NAME}:2"

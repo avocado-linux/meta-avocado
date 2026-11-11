@@ -9,7 +9,8 @@ from avocado_tegraflash.settings import apply_boot_device, verify_staged_env
 ENV_NAME = ".env.initrd-flash"
 MANIFEST = Manifest(var="images/var.img")
 # What apply_boot_device leaves for the nvme profile plus the key it never writes.
-NVME_ENV = 'ROOTFS_DEVICE="nvme0n1"\nEXTERNAL_ROOTFS_DRIVE=1\nNO_INTERNAL_STORAGE=1\n'
+NVME_ENV = 'ROOTFS_DEVICE="nvme0n1"\nEXTERNAL_ROOTFS_DRIVE=1\nNO_INTERNAL_STORAGE=1\nDATAFILE="var.img"\n'
+WITHOUT_DATAFILE = NVME_ENV.replace('DATAFILE="var.img"\n', "")
 
 
 def work_with(tmp_path, text):
@@ -61,8 +62,40 @@ def test_a_datafile_naming_the_staged_var_image_passes(tmp_path):
     verify_staged_env(work, MANIFEST, "nvme0n1")
 
 
-def test_an_env_file_without_datafile_passes(tmp_path):
-    verify_staged_env(work_with(tmp_path, NVME_ENV), MANIFEST, "nvme0n1")
+def test_an_env_file_without_datafile_is_refused_because_the_flash_then_deletes_the_data_entry(tmp_path):
+    with pytest.raises(EngineError) as exc:
+        verify_staged_env(work_with(tmp_path, WITHOUT_DATAFILE), MANIFEST, "nvme0n1")
+    assert "DATAFILE" in str(exc.value) and "not set" in str(exc.value)
+
+
+def test_a_datafile_set_only_by_presigning_vars_satisfies_the_check(tmp_path):
+    work = work_with(tmp_path, WITHOUT_DATAFILE)
+    (work / ".presigning-vars").write_text('DATAFILE="var.img"\n')
+    verify_staged_env(work, MANIFEST, "nvme0n1")
+
+
+def test_a_wrong_datafile_from_presigning_vars_cites_that_file_and_line(tmp_path):
+    work = work_with(tmp_path, NVME_ENV + 'DATAFILE="var.img"\n')
+    (work / ".presigning-vars").write_text('A=1\nDATAFILE="other.img"\n')
+    with pytest.raises(EngineError) as exc:
+        verify_staged_env(work, MANIFEST, "nvme0n1")
+    assert f"{work / '.presigning-vars'}:2" in str(exc.value)
+
+
+def test_a_wrong_rootfs_device_cites_its_own_file_and_line(tmp_path):
+    work = work_with(tmp_path, NVME_ENV + 'DATAFILE="var.img"\n')
+    (work / ".presigning-vars").write_text("\n\nROOTFS_DEVICE=sda\n")
+    with pytest.raises(EngineError) as exc:
+        verify_staged_env(work, MANIFEST, "nvme0n1")
+    assert f"{work / '.presigning-vars'}:3" in str(exc.value)
+
+
+def test_a_wrong_external_rootfs_drive_cites_its_own_file_and_line(tmp_path):
+    work = work_with(tmp_path, NVME_ENV + 'DATAFILE="var.img"\n')
+    (work / ".presigning-vars").write_text("EXTERNAL_ROOTFS_DRIVE=0\n")
+    with pytest.raises(EngineError) as exc:
+        verify_staged_env(work, MANIFEST, "nvme0n1")
+    assert f"{work / '.presigning-vars'}:1" in str(exc.value)
 
 
 def test_an_empty_datafile_is_refused_because_the_flash_then_deletes_the_data_partition_entry(tmp_path):
@@ -104,7 +137,7 @@ def test_the_shipped_no_internal_storage_does_not_erase_emmc(tmp_path):
 
 @pytest.mark.parametrize("line", ["", "NO_INTERNAL_STORAGE=0\n"])
 def test_an_env_that_is_not_marked_without_internal_storage_erases_emmc(tmp_path, line):
-    env = 'ROOTFS_DEVICE="nvme0n1"\nEXTERNAL_ROOTFS_DRIVE=1\n' + line
+    env = 'ROOTFS_DEVICE="nvme0n1"\nEXTERNAL_ROOTFS_DRIVE=1\nDATAFILE="var.img"\n' + line
     assert verify_staged_env(work_with(tmp_path, env), MANIFEST, "nvme0n1").erases_mmc is True
 
 

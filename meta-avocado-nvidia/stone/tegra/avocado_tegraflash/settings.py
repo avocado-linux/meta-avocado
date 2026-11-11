@@ -9,7 +9,7 @@ from pathlib import Path
 from . import EngineError, Media
 from .files import copy_replacing_link, read_text_preserving, write_text_replacing_link
 from .manifest import Manifest
-from .plainenv import read_plain_env
+from .plainenv import PRESIGNING_FILE, read_plain_env
 
 ENV_FILE = ".env.initrd-flash"
 EMMC_LAYOUT = "internal-flash-emmc.xml"
@@ -117,21 +117,28 @@ def verify_staged_env(work_dir: Path, manifest: Manifest, expected_device: str) 
     plain = read_plain_env(env_file)
     device = plain.get("ROOTFS_DEVICE")
     if device != expected_device:
+        where = device.where if device is not None else str(env_file)
         raise EngineError(
-            f"ROOTFS_DEVICE in {env_file} is {device!r} but the profile chose {expected_device!r}; "
-            "the flash would erase a different device than the one it was asked to"
+            f"ROOTFS_DEVICE at {where} is {None if device is None else str(device)!r} but the profile chose "
+            f"{expected_device!r}; the flash would erase a different device than the one it was asked to"
         )
     external = plain.get("EXTERNAL_ROOTFS_DRIVE")
     if external != EXTERNAL_ROOTFS_DRIVE:
+        where = external.where if external is not None else str(env_file)
         raise EngineError(
-            f"EXTERNAL_ROOTFS_DRIVE in {env_file} is {external!r} but the engine wrote "
-            f"{EXTERNAL_ROOTFS_DRIVE!r}; the flash would take a different root drive path than the profile chose"
+            f"EXTERNAL_ROOTFS_DRIVE at {where} is {None if external is None else str(external)!r} but the engine "
+            f"wrote {EXTERNAL_ROOTFS_DRIVE!r}; the flash would take a different root drive path than the profile chose"
         )
     datafile = plain.get("DATAFILE")
     var_name = os.path.basename(manifest.var)
-    if datafile is not None and datafile != var_name:
+    if datafile is None:
         raise EngineError(
-            f"DATAFILE in {env_file} is {datafile!r} but the engine staged {var_name!r}; "
+            f"DATAFILE is not set in {env_file} or {PRESIGNING_FILE}; the flash would delete the data partition "
+            f"entry from the layout instead of writing {var_name!r} into it"
+        )
+    if datafile != var_name:
+        raise EngineError(
+            f"DATAFILE at {datafile.where} is {str(datafile)!r} but the engine staged {var_name!r}; "
             "the flash would write a different file into the data partition"
         )
     # `[ "$NO_INTERNAL_STORAGE" -eq 1 ]` is false for an unset variable, so only an explicit 1 spares the eMMC.

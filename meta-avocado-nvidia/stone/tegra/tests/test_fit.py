@@ -1,5 +1,6 @@
 """Partition fit check against the staged layout."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -337,3 +338,148 @@ def test_an_absent_app_b_leaves_app_as_the_limit(tmp_path):
 def test_an_absent_app_b_still_refuses_a_rootfs_larger_than_app(tmp_path):
     m = stage(tmp_path, layout(app="1000"))
     assert "does not fit partition APP (1000 bytes)" in refusal(tmp_path, m)
+
+
+# the rename pattern is read by GNU sed as a basic regex: only `.` is special in the names the env reader accepts
+
+
+@pytest.mark.parametrize(
+    "rootfs,colliding",
+    [
+        ("img+dev.raw", "img+dev.img"),
+        ("r(1).raw", "r(1).img"),
+        ("rootfs.img", "rootfs_img"),
+        ("a.b.ext4", "a.b.img"),
+    ],
+)
+def test_the_rewrite_pattern_is_the_sed_basic_regex_of_the_stem(tmp_path, rootfs, colliding):
+    # no ROOTFS_IMAGE line: the env reader would refuse parentheses, and the staged name is used as is
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", colliding)), name=rootfs, env="BOOTDEV=x\n")
+    msg = refusal(tmp_path, m)
+    assert colliding in msg and "UDA" in msg
+
+
+def test_only_the_last_extension_is_dropped_from_the_stem(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "a.img")), name="a.b.ext4")
+    assert len(run(tmp_path, m)) == 2
+
+
+def test_regex_metacharacters_in_the_rootfs_name_are_literal_and_cannot_backtrack(tmp_path):
+    name = "a+" * 8 + "x.ext4"
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "a" * 60)), name=name, env=f'ROOTFS_IMAGE="{name}"\n')
+    started = time.monotonic()
+    assert len(run(tmp_path, m)) == 2
+    assert time.monotonic() - started < 1.0
+
+
+def test_a_plus_in_the_rootfs_name_does_not_match_repeated_characters(tmp_path):
+    # in a BRE `a+x` is the three characters a, +, x, so "aax.img" is not rewritten
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "aax.img")), name="a+x.ext4", env='ROOTFS_IMAGE="a+x.ext4"\n')
+    assert len(run(tmp_path, m)) == 2
+
+
+def test_a_layout_filename_equal_to_the_rootfs_name_is_the_only_exemption(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("UDA", "rootfs.img.bak")))
+    assert "rootfs.img.bak" in refusal(tmp_path, m)
+
+
+def test_the_tos_destination_is_part_of_the_collision_check(tmp_path):
+    m = stage(tmp_path, layout(), name="root.ext4", env='ROOTFS_IMAGE="root.ext4"\nTOSIMGFILENAME="root.img"\n')
+    m = Manifest(rootfs=m.rootfs, tegraflash_esp=m.tegraflash_esp, tegraflash_tos="tos/other.bin")
+    msg = refusal(tmp_path, m)
+    assert "tegraflash_tos" in msg and "root.img" in msg
+
+
+# the sed runs over every line of the layout, so a partition with no name, or a name listed twice, is scanned too
+
+
+def _nameless(filename):
+    return f'<partition type="data"><size>10</size><filename>{filename}</filename></partition>\n'
+
+
+def test_a_nameless_partition_carrying_appfile_is_refused(tmp_path):
+    m = stage(tmp_path, layout(extra=_nameless("APPFILE")))
+    msg = refusal(tmp_path, m)
+    assert "no name" in msg and "APPFILE" in msg
+
+
+def test_a_nameless_partition_matching_the_rename_pattern_is_refused(tmp_path):
+    m = stage(tmp_path, layout(extra=_nameless("root.img")), name="root.ext4")
+    assert "root.img" in refusal(tmp_path, m)
+
+
+def test_a_repeated_partition_name_does_not_hide_its_second_filename(tmp_path):
+    extra = _extra_partition("UDA", "ok.bin") + _extra_partition("UDA", "APPFILE")
+    msg = refusal(tmp_path, stage(tmp_path, layout(extra=extra)))
+    assert "UDA" in msg and "APPFILE" in msg
+
+
+def test_a_second_app_partition_with_a_foreign_filename_is_refused_for_its_filename(tmp_path):
+    extra = _extra_partition("APP", "big.ext4")
+    assert "big.ext4" in refusal(tmp_path, stage(tmp_path, layout(extra=extra)))
+
+
+def test_a_second_esp_partition_with_a_foreign_filename_is_refused(tmp_path):
+    extra = _extra_partition("esp", "other.img")
+    assert "other.img" in refusal(tmp_path, stage(tmp_path, layout(extra=extra)))
+
+
+# DATAFILE belongs to the data partition and DTB_FILE to the kernel dtb partitions
+
+
+def test_datafile_in_the_data_partition_passes(tmp_path):
+    m = stage(tmp_path, layout(extra=_extra_partition("DATAPART_EXPAND", "DATAFILE")))
+    assert len(run(tmp_path, m)) == 2
+
+
+@pytest.mark.parametrize("name", ["UDA", "esp", "A_kernel-dtb"])
+def test_datafile_in_another_partition_is_refused(tmp_path, name):
+    extra = _extra_partition("DATAPART_EXPAND", "DATAFILE") + _extra_partition(name + "_x", "DATAFILE")
+    msg = refusal(tmp_path, stage(tmp_path, layout(extra=extra)))
+    assert "DATAFILE" in msg and name + "_x" in msg
+
+
+def test_datafile_in_a_nameless_partition_is_refused(tmp_path):
+    msg = refusal(tmp_path, stage(tmp_path, layout(extra=_nameless("DATAFILE"))))
+    assert "no name" in msg and "DATAFILE" in msg
+
+
+@pytest.mark.parametrize("name", ["A_kernel-dtb", "B_kernel-dtb", "kernel-dtb"])
+def test_dtb_file_in_a_kernel_dtb_partition_passes(tmp_path, name):
+    m = stage(tmp_path, layout(extra=_extra_partition(name, "DTB_FILE")))
+    assert len(run(tmp_path, m)) == 2
+
+
+@pytest.mark.parametrize("name", ["UDA", "A_kernel", "RECDTB-NAME", "A_kernel-dtb_x"])
+def test_dtb_file_in_another_partition_is_refused(tmp_path, name):
+    msg = refusal(tmp_path, stage(tmp_path, layout(extra=_extra_partition(name, "DTB_FILE"))))
+    assert "DTB_FILE" in msg and name in msg
+
+
+def test_dtb_file_in_a_nameless_partition_is_refused(tmp_path):
+    msg = refusal(tmp_path, stage(tmp_path, layout(extra=_nameless("DTB_FILE"))))
+    assert "no name" in msg and "DTB_FILE" in msg
+
+
+# a signed layout is rebuilt by the flash from a copy the engine never read
+
+
+def test_an_oem_signed_layout_is_refused(tmp_path):
+    xml = layout().replace('<partition name="esp"', '<partition name="esp" oem_sign="true"')
+    msg = refusal(tmp_path, stage(tmp_path, xml))
+    assert "oem_sign" in msg
+
+
+# refusals cite the file and line that set the value, which is .presigning-vars when that file won
+
+
+def test_a_rootfs_image_set_by_presigning_vars_cites_that_file_and_line(tmp_path):
+    m = stage(tmp_path, layout())
+    (tmp_path / ".presigning-vars").write_text("A=1\nROOTFS_IMAGE=big.img\n")
+    msg = refusal(tmp_path, m)
+    assert f"{tmp_path / '.presigning-vars'}:2" in msg and "big.img" in msg
+
+
+def test_a_rootfs_image_set_by_the_env_file_cites_the_env_file_and_line(tmp_path):
+    m = stage(tmp_path, layout(), env='A=1\nROOTFS_IMAGE="big.img"\n')
+    assert f"{tmp_path / '.env.initrd-flash'}:2" in refusal(tmp_path, m)
