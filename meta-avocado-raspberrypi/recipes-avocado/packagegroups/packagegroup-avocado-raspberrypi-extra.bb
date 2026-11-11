@@ -28,4 +28,5 @@ RDEPENDS:${PN} = " \
   python3-scipy \
   usb-modeswitch \
   usb-modeswitch-data \
+  wdt-rpi \
 "
