@@ -212,7 +212,8 @@ CARRIER_FV_CHECK_BOARDSKU="0001"
 | `ODMDATA` | UPHY lane / GBE config string |
 | `BOOTDEV`, `LNXFILE`, `FLASH_HELPER` | Per-profile boot retargeting; the engine does not check these |
 | `ROOTFS_IMAGE`, `DATAFILE` | Not retargetable under `avocado provision`: the engine refuses a `ROOTFS_IMAGE` other than the staged rootfs name and a `DATAFILE` other than the basename of the manifest `var` image |
-| `ROOTFS_DEVICE`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE` | Set by the engine's boot-device step from the profile; the engine reads them back and refuses any value that differs, so do not set them in `carrier.env` |
+| `ROOTFS_DEVICE`, `EXTERNAL_ROOTFS_DRIVE` | Set by the engine's boot-device step from the profile; the engine reads them back and refuses any value that differs, so do not set them in `carrier.env` |
+| `NO_INTERNAL_STORAGE` | Not written by the engine. The BSP recipe or a carrier may set it; the engine only reads it, and it must be `0` or `1`. `1` keeps the flash off the internal eMMC. Unset or `0` makes the flash erase the eMMC, and the confirmation prompt then names `emmc` |
 
 The engine reads `.env.initrd-flash` and `.presigning-vars` without executing them. A line that mentions `ROOTFS_IMAGE`, `ROOTFS_DEVICE`, `DATAFILE`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE` or `TOSIMGFILENAME` must stay a plain column-0 assignment (`KEY=value`) or a `$KEY` / `${KEY}` read; `export`, indentation, chains, `eval` and `source` forms are refused.
 
