@@ -56,7 +56,8 @@ class EnvValue(str):
         return self
 
     def __getnewargs__(self) -> tuple[str, Path, int]:
-        # copy, deepcopy, pickle and dataclasses.asdict rebuild through __new__, which needs all three.
+        # copy, deepcopy and pickle call __new__ with these, so they must be supplied; the instance
+        # dict (path, line) is restored afterwards, so the values passed here are not observable.
         return (str(self), self.path, self.line)
 
     @property
