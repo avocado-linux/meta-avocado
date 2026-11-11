@@ -55,8 +55,8 @@ write_disk_image "$DISK_IMAGE" "$TARGET"
 cat <<EOF
 
 ================================================================
-eMMC provisioning complete. Stop 'ums' (Ctrl-C on the console) or
-power-cycle: U-Boot's distro_bootcmd probes mmc0 (eMMC) first and
-boots /extlinux/extlinux.conf from boot-a.
+eMMC provisioning complete. Stop 'ums' (Ctrl-C on the console) and
+power-cycle. U-Boot boots the eMMC's slot A: a newly written disk
+always starts from slot A.
 ================================================================
 EOF

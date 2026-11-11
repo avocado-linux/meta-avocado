@@ -105,7 +105,9 @@ Next steps:
   1. Power off the SoM.
   2. Set DIP S5 to SPI boot mode (MD0=OFF, MD1=ON).
   3. Power on. BL2 will load from SPI, FIP will follow, U-Boot will run.
-  4. With no OS image present, U-Boot enters fastboot. Run
-     'avocado provision emmc' (or 'avocado provision sd') to install the OS.
+  4. With no OS on the eMMC or microSD, U-Boot stops in fastboot. Press
+     Ctrl-C on the console, run 'ums 0 mmc 0' (eMMC) or 'ums 0 mmc 1'
+     (microSD), then 'avocado provision emmc' (or 'sd' with
+     AVOCADO_RZ_SD_VIA_UMS=1) to install the OS over USB.
 ================================================================
 EOF

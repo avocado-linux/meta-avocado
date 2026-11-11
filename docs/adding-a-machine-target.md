@@ -413,7 +413,7 @@ Profiles outside that set (e.g. `serial`, `emmc`) need to be wired up in
 | `img` | `stone-provision-img.sh` | Creates a raw disk image |
 | `sd` | `stone-provision-sd.sh` | Builds GPT image + writes to host-attached SD |
 | `usb` | `stone-provision-usb.sh` | Creates image + writes to USB device |
-| `emmc` | `stone-provision-emmc.sh` | Flashes onboard eMMC via U-Boot fastboot |
+| `emmc` | `stone-provision-emmc.sh` | Writes the onboard eMMC through the bootloader (rzv2n: U-Boot USB mass storage) |
 | `serial` | `stone-provision-serial.sh` | Bootloader bootstrap via UART/USB-DFU |
 
 For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
@@ -769,5 +769,5 @@ To add a new machine called `acme-widget`:
 | `qemux86-64` | `meta-avocado-qemu` | U-Boot | img | QEMU testing |
 | `imx93-evk` | `meta-avocado-nxp` | U-Boot | img, sd | NXP i.MX93 |
 | `imx93-frdm` | `meta-avocado-nxp` | U-Boot | img, sd, uuu-emmc | NXP FRDM-IMX93, FAT boot + GPT-AB |
-| `rzv2n-sr-som` | `meta-avocado-renesas` | U-Boot (TF-A FIP) | sd, emmc, serial | SolidRun RZ/V2N SoM, FAT boot + GPT-AB, USB-OTG fastboot |
+| `rzv2n-sr-som` | `meta-avocado-renesas` | U-Boot (TF-A FIP) | sd, emmc, serial | SolidRun RZ/V2N SoM, FAT boot + GPT-AB on eMMC or microSD, U-Boot USB mass storage |
 | `stm32mp25-dk` | `meta-avocado-stm` | U-Boot (TF-A FIP + OP-TEE) | sd, emmc, serial | ST STM32MP257F-DK, FAT boot + GPT-AB, USB-DFU bootstrap |
