@@ -8,6 +8,8 @@
 # work directory, so from any other directory the machine's override must name
 # it (RUN_QEMU_UBOOT_ROM for qemux86-64, RUN_QEMU_FLASH_BIN for qemuarm64).
 # --dry-run prints what the runner resolved and starts nothing.
+# A signal sent to the runner is forwarded to QEMU; a QEMU that ignores the
+# forwarded signal is killed after 5 seconds.
 set -euo pipefail
 
 PROG=run-qemu
@@ -48,6 +50,8 @@ usage() {
     echo "  (default: build/tmp/deploy/stone/u-boot.rom, then .../stone/_build/u-boot.rom)"
     echo "  RUN_QEMU_TPM_SOCK_DIR=DIR  directory for the swtpm control socket with --tpm"
     echo "  RUN_QEMU_TPM_WAIT_SECONDS=N  seconds to wait for that socket (default 10)"
+    echo "a signal sent to the runner is forwarded to QEMU; a QEMU that ignores the"
+    echo "  forwarded signal is killed after 5 seconds"
   } >&2
 }
 
@@ -307,22 +311,58 @@ swtpm_owns_pid() {
   cmdline_has_words "$1" "dir=$TPM_DIR" "type=unixio,path=$TPM_SOCK"
 }
 
-# Forwards a trapped signal to QEMU, waits for it, then exits 128+<number> so the
-# EXIT trap stops swtpm only after QEMU is gone. Never signals an unset pid.
+# Forwards a trapped signal to QEMU, waits up to 5 seconds for it, kills it if it
+# is still running, then exits 128+<number> so the EXIT trap stops swtpm only
+# after QEMU is gone. QEMU is addressed as job %1, the only background job: the
+# job table has no stale pid, and before QEMU starts or after it was reaped the
+# kill fails and nothing is signalled. A job that has ended is not "running" to
+# jobs -r, which is how the wait sees it end (kill -0 %1 succeeds on a dead job).
 # shellcheck disable=SC2329 # invoked through the INT, TERM, HUP and QUIT traps in main
 forward_signal() {
-  if [[ $QEMU_PID =~ ^[0-9]+$ ]] && [ "$QEMU_PID" -gt 1 ] && kill -0 "$QEMU_PID" 2>/dev/null; then
-    kill "-$1" "$QEMU_PID" 2>/dev/null || true
-    wait "$QEMU_PID" 2>/dev/null || true
+  local n
+  if kill "-$1" %1 2>/dev/null; then
+    for ((n = 0; n < 50; n++)); do
+      [ -n "$(jobs -rp)" ] || break
+      sleep 0.1
+    done
+    if [ -n "$(jobs -rp)" ]; then
+      kill -KILL %1 2>/dev/null || true
+    fi
+    wait %1 2>/dev/null || true
   fi
-  QEMU_PID=""
   exit $((128 + $2))
 }
 
+# Sets TPM_PID from the pid file once it holds a number, and never replaces a pid
+# already recorded. A file that is missing, unreadable or not a number leaves it
+# alone.
+record_tpm_pid() {
+  local p=""
+  [ -z "$TPM_PID" ] || return 0
+  { p=$(<"$TPM_PIDFILE"); } 2>/dev/null || p=""
+  case $p in
+    "" | *[!0-9]*) ;;
+    *) TPM_PID=$p ;;
+  esac
+}
+
 # Stops the swtpm this run started, by the pid recorded at its start, and removes
-# what the run made. Safe to call twice and when nothing started.
+# what the run made. Safe to call twice and when nothing started. Signals are
+# ignored from the first line: this runs from the EXIT trap, and a signal that
+# reached forward_signal now would exit without running the EXIT trap again,
+# leaving swtpm and the temp directories behind.
 # shellcheck disable=SC2329 # invoked through the EXIT trap in main
 stop_tpm() {
+  trap '' INT TERM HUP QUIT
+  # No pid recorded: a signal can end the run before start_tpm read the pid file,
+  # or the swtpm launcher can return before the daemon writes it. Adopt the file's
+  # pid only when it is this run's swtpm, as the pid file is shared with other runs.
+  if [ "$TPM_STARTED" -eq 1 ] && [ -z "$TPM_PID" ]; then
+    record_tpm_pid
+    if [ -n "$TPM_PID" ] && ! { [ "$TPM_PID" -gt 1 ] && swtpm_owns_pid "$TPM_PID"; }; then
+      TPM_PID=""
+    fi
+  fi
   local pid=$TPM_PID s n cur=""
   # A gone or recycled pid is not ours to signal; the files below still go. Only
   # a real pid is signalled: 0 and 1 would reach a whole group or init.
@@ -390,6 +430,10 @@ start_tpm() {
   # lock anyway, so a live swtpm on this state dir stops the run instead. The
   # command line is compared, not just the pid, so a recycled pid in a stale
   # file does not block.
+  # devtool-debt: a running swtpm is found through its pid file only. Ceiling: one
+  # started without a pid file (the removed launcher's) is not detected and the
+  # new start fails on the state lock. Upgrade trigger: a report of 'swtpm failed
+  # to start' with a live swtpm on the state directory.
   if [ -f "$TPM_PIDFILE" ]; then
     local held=""
     # A file that vanishes or cannot be read after the test above means no pid.
@@ -413,10 +457,17 @@ start_tpm() {
     --pid file="$TPM_PIDFILE" \
     --tpm2 \
     --daemon || die 1 "swtpm failed to start; QEMU was not started"
-  # Cleanup signals this pid, never one re-read from the pid file other runs share.
-  { TPM_PID=$(<"$TPM_PIDFILE"); } 2>/dev/null || TPM_PID=""
+  # Cleanup signals the pid recorded here, never one re-read from the pid file
+  # other runs share. The launcher can return before the daemon has written the
+  # file, so the wait below keeps reading until it holds a number.
+  record_tpm_pid
 
+  # devtool-debt: socket wait tests existence only. Ceiling: a swtpm that dies
+  # right after binding passes the wait. Upgrade trigger: a report of QEMU
+  # failing with a chardev connect error, or a second swtpm start path that needs
+  # the check.
   for ((n = 0; n < wait; n++)); do
+    record_tpm_pid
     [ -S "$TPM_SOCK" ] && return 0
     sleep 1
   done

@@ -586,6 +586,7 @@ cat >"$sigqhs/qemu-system-x86_64" <<'STUB'
 trap 'echo "qemu-got TERM" >>"$STUB_LOG"; exit 0' TERM
 trap 'echo "qemu-got HUP" >>"$STUB_LOG"; exit 0' HUP
 trap 'echo "qemu-got INT" >>"$STUB_LOG"; exit 0' INT
+trap 'echo "qemu-got QUIT" >>"$STUB_LOG"; exit 0' QUIT
 echo "qemu-launch $*" >>"$STUB_LOG"
 echo "qemu-pid $$" >>"$STUB_LOG"
 IFS= read -r line
@@ -967,17 +968,28 @@ done
 # 51c. The socket length limit counts bytes, not characters: a directory of
 #      multibyte characters whose path is under the limit in characters but over
 #      it in bytes is refused, naming the byte length and the override.
-d=$(workdir tpm-multibyte)
-truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
-mb="$w/$(printf 'é%.0s' $(seq 1 45))"
-mbbytes=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=C wc -c)
-mbchars=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=en_US.UTF-8 wc -m)
-: >"$log"
-out=$(LC_ALL=en_US.UTF-8 RUN_QEMU_TPM_SOCK_DIR=$mb trun "$d" qemux86-64 --tpm)
-rc=$?
-{ [ "$mbchars" -le 100 ] && [ "$mbbytes" -gt 100 ] && [ $rc -eq 1 ] && grep -qF "TPM socket path is $mbbytes bytes" <<<"$out" \
-  && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$mb" ]; } \
-  && ok "the socket path limit counts bytes, not characters" || bad "tpm multibyte: rc=$rc chars=$mbchars bytes=$mbbytes out=[$out]"
+#      Needs a UTF-8 locale on the host: en_US.UTF-8 when installed, else C.UTF-8,
+#      else any other; with none the case is skipped.
+utf8loc=""
+for pat in '^en_US\.utf-?8$' '^C\.utf-?8$' '\.utf-?8$'; do
+  utf8loc=$(locale -a 2>/dev/null | grep -i -m1 -E "$pat") && break
+  utf8loc=""
+done
+if [ -z "$utf8loc" ]; then
+  ok "multibyte socket path: skipped, no UTF-8 locale is installed"
+else
+  d=$(workdir tpm-multibyte)
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  mb="$w/$(printf 'é%.0s' $(seq 1 45))"
+  mbbytes=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=C wc -c)
+  mbchars=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=$utf8loc wc -m)
+  : >"$log"
+  out=$(LC_ALL=$utf8loc RUN_QEMU_TPM_SOCK_DIR=$mb trun "$d" qemux86-64 --tpm)
+  rc=$?
+  { [ "$mbchars" -le 100 ] && [ "$mbbytes" -gt 100 ] && [ $rc -eq 1 ] && grep -qF "TPM socket path is $mbbytes bytes" <<<"$out" \
+    && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$mb" ]; } \
+    && ok "the socket path limit counts bytes, not characters ($utf8loc)" || bad "tpm multibyte: rc=$rc locale=$utf8loc chars=$mbchars bytes=$mbbytes out=[$out]"
+fi
 
 # 51d. The too-long message points at RUN_QEMU_TPM_SOCK_DIR as the way out.
 d=$(workdir tpm-overlong-hint)
@@ -1026,22 +1038,27 @@ if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
 # --- signals sent to the runner's pid alone, not its group -----------------------
 # Cases 35, 42 and 53 signal the whole group, so QEMU gets the signal directly.
 # These signal only the runner, which must pass it on to a QEMU that keeps stdin.
+# python3 resets INT and QUIT first: a background job starts with both ignored,
+# and bash cannot trap a signal that was ignored when it started.
 PYSTART='import os, signal, sys
 signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGQUIT, signal.SIG_DFL)
 os.setsid()
 os.execvp(sys.argv[1], sys.argv[1:])'
 
 # sigrun <name> <signal> <stdin file> -> starts the runner on the signalling QEMU
 # stub, sends <signal> to the runner's pid once QEMU has read its stdin, and sets
 # SIG_RC ("hung" when the runner outlives 6s), SIG_DIR, SIG_PID (swtpm), SIG_QPID
-# (QEMU) and SIG_QALIVE/SIG_TALIVE (1 when still running after the runner left).
+# (QEMU), SIG_QALIVE/SIG_TALIVE (1 when still running after the runner left) and
+# SIG_MS (milliseconds from the signal to the runner's exit, to the 0.1s poll).
+# SIGHS names another stub directory, SIGPOLLS the number of 0.1s polls to wait.
 # Stragglers are killed by recorded pid and by the group this helper created.
 sigrun() {
-  local name=$1 sig=$2 in=$3 rp own=0 r _
+  local name=$1 sig=$2 in=$3 rp own=0 r _ t0
   SIG_DIR=$(workdir "sig-$name")
   truncate -s 2G "$(deploy "$SIG_DIR")/avocado-os-avocado-qemux86-64.img"
   : >"$log"
-  (cd "$SIG_DIR" && exec python3 -c "$PYSTART" env PATH="$sigqhs:$tools" \
+  (cd "$SIG_DIR" && exec python3 -c "$PYSTART" env PATH="${SIGHS-$sigqhs}:$tools" \
     RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/sig-$name.out" 2>&1 <"$in") &
   rp=$!
   for _ in $(seq 1 100); do
@@ -1051,15 +1068,18 @@ sigrun() {
   SIG_PID=$(sed -n 's/^swtpm-pid //p' "$log")
   SIG_QPID=$(sed -n 's/^qemu-pid //p' "$log")
   SIG_RC=none
+  SIG_MS=0
   SIG_QALIVE=1
   SIG_TALIVE=1
   [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && own=1
   if [ "$own" -eq 1 ] && [ -n "$SIG_QPID" ]; then
+    t0=$(date +%s%N)
     kill "-$sig" "$rp"
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 "${SIGPOLLS-60}"); do
       alive "$rp" || break
       sleep 0.1
     done
+    SIG_MS=$((($(date +%s%N) - t0) / 1000000))
     alive "$rp" && SIG_RC=hung
     alive "$SIG_QPID" || SIG_QALIVE=0
     { [ -z "$SIG_PID" ] || ! alive "$SIG_PID"; } && SIG_TALIVE=0
@@ -1073,15 +1093,17 @@ sigrun() {
   return 0
 }
 
-# 54. TERM, HUP and INT sent to the runner alone are forwarded to QEMU, the runner
-#     exits 128+signal once QEMU is gone, and swtpm is stopped after it.
-for spec in "TERM 143" "HUP 129" "INT 130"; do
+# 54. TERM, HUP, INT and QUIT sent to the runner alone are forwarded to QEMU, the
+#     runner exits 128+signal once QEMU is gone, and swtpm is stopped after it.
+#     The stub QEMU exits on the signal, so none of these may reach the 5 second
+#     bound on a QEMU that ignores it (case 70): each ends within 3 seconds.
+for spec in "TERM 143" "HUP 129" "INT 130" "QUIT 131"; do
   read -r sig want <<<"$spec"
   sigrun "$sig" "$sig" /dev/null
   { [ "$SIG_RC" = "$want" ] && grep -qx "qemu-got $sig" "$log" && [ "$SIG_QALIVE" -eq 0 ] && [ -n "$SIG_PID" ] \
-    && [ "$SIG_TALIVE" -eq 0 ] && [ ! -e "$SIG_DIR/build/tmp/tpm-state/swtpm.pid" ]; } \
-    && ok "a $sig sent to the runner alone reaches QEMU, exits $want and stops swtpm" \
-    || bad "runner $sig: rc=$SIG_RC want=$want qalive=$SIG_QALIVE talive=$SIG_TALIVE out=[$(cat "$w/sig-$sig.out")] log=[$(cat "$log")]"
+    && [ "$SIG_TALIVE" -eq 0 ] && [ ! -e "$SIG_DIR/build/tmp/tpm-state/swtpm.pid" ] && [ "$SIG_MS" -lt 3000 ]; } \
+    && ok "a $sig sent to the runner alone reaches QEMU, exits $want and stops swtpm (${SIG_MS} ms)" \
+    || bad "runner $sig: rc=$SIG_RC want=$want ms=$SIG_MS qalive=$SIG_QALIVE talive=$SIG_TALIVE out=[$(cat "$w/sig-$sig.out")] log=[$(cat "$log")]"
 done
 
 # 55. QEMU keeps the runner's stdin: -nographic needs the terminal, and a
@@ -1172,8 +1194,11 @@ pid=$(sed -n 's/^swtpm-pid //p' "$log")
   && ok "KILL is not sent once the pid no longer belongs to this swtpm" || bad "tpm reexec: rc=$rc pid=$pid out=[$out]"
 if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
 
-# 60. A pid file of 0 is never signalled: it would reach the runner's own group.
-#     The runner runs in its own session; a canary in this suite's group must live.
+# 60. A pid file of 0 leaves every process group untouched: a kill of pid 0 would
+#     reach the runner's own group. A canary in this suite's group must live. This
+#     is a canary, not a guard test: swtpm_owns_pid 0 is already false because
+#     /proc/0 does not exist, so the runner's `-gt 1` check is belt and braces and
+#     removing it does not fail this case.
 d=$(workdir tpm-pid0)
 truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
 sleep 60 &
@@ -1292,6 +1317,220 @@ pid=$(sed -n 's/^swtpm-pid //p' "$log")
   && [ -n "$pid" ] && ! alive "$pid"; } \
   && ok "a stale socket from an earlier run does not satisfy the wait" || bad "tpm stale sock: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
 if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# --- signals during cleanup, a late pid file, a QEMU that ignores the signal -------
+# A swtpm stub whose launcher differs from mkswtpm's, which writes the pid file
+# from the launcher before it exits (and so hides these cases). Both modes fork a
+# daemon child that binds the control socket and logs "swtpm-pid <its pid>":
+#   late  the launcher returns at once; the daemon writes the pid file 0.5s later
+#         and binds the socket after that.
+#   slow  the launcher writes the pid file, then lingers 1.5s before it returns.
+#   slowforeign  as slow, but the pid file names $FOREIGN_PID, as when another run
+#         has rewritten it; the log still names the daemon.
+mkswtpm_launch() {
+  local d=$1 mode=$2
+  mkdir -p "$d"
+  {
+    echo "#!$(command -v python3)"
+    echo "MODE = '$mode'"
+    cat <<'EOF'
+import os, socket, sys, time
+args = sys.argv[1:]
+ctrl = pidfile = None
+for i, a in enumerate(args):
+    if a.startswith("type=unixio,path="):
+        ctrl = a.split("path=", 1)[1]
+    if a.startswith("file=") and args[i - 1] == "--pid":
+        pidfile = a[5:]
+def publish(pid, filepid):
+    with open(pidfile, "w") as f:
+        f.write("%d\n" % filepid)
+    with open(os.environ["STUB_LOG"], "a") as f:
+        f.write("swtpm-pid %d\n" % pid)
+with open(os.environ["STUB_LOG"], "a") as f:
+    f.write("swtpm " + " ".join(args) + "\n")
+pid = os.fork()
+if pid:
+    if MODE == "slow":
+        publish(pid, pid)
+    if MODE == "slowforeign":
+        publish(pid, int(os.environ["FOREIGN_PID"]))
+    if MODE in ("slow", "slowforeign"):
+        time.sleep(1.5)
+    sys.exit(0)
+os.setsid()
+null = os.open(os.devnull, os.O_RDWR)
+for fd in (0, 1, 2):
+    os.dup2(null, fd)
+if MODE == "late":
+    time.sleep(0.5)
+    publish(os.getpid(), os.getpid())
+s = socket.socket(socket.AF_UNIX)
+s.bind(ctrl)
+s.listen(1)
+time.sleep(60)
+EOF
+  } >"$d/swtpm"
+  chmod +x "$d/swtpm"
+}
+latehs=$w/latestubs
+slowhs=$w/slowstubs
+ignqhs=$w/ignqstubs
+mkdir -p "$latehs" "$slowhs" "$ignqhs"
+mkstubs "$latehs"
+mkswtpm_launch "$latehs" late
+mkstubs "$slowhs"
+mkswtpm_launch "$slowhs" slow
+slowforeignhs=$w/slowforeignstubs
+mkdir -p "$slowforeignhs"
+mkstubs "$slowforeignhs"
+mkswtpm_launch "$slowforeignhs" slowforeign
+# A QEMU that ignores TERM, as a hung guest would: it logs its pid and what it read
+# from stdin, then runs until killed. The ignored signal is inherited by its sleeps.
+mkstubs "$ignqhs"
+mkswtpm "$ignqhs" sock
+cat >"$ignqhs/qemu-system-x86_64" <<'STUB'
+#!/bin/sh
+trap '' TERM
+echo "qemu-launch $*" >>"$STUB_LOG"
+echo "qemu-pid $$" >>"$STUB_LOG"
+IFS= read -r line
+echo "qemu-stdin $line" >>"$STUB_LOG"
+while :; do sleep 0.2; done
+STUB
+chmod +x "$ignqhs/qemu-system-x86_64"
+
+# plain_start <name> <stub dir> <1 for a work dir with build/tmp, 0 for none> ->
+# starts the runner with --tpm in its own session, with nothing on stdin, and sets
+# PLAIN_RP, PLAIN_WORK and PLAIN_TMP (the TMPDIR, so a leftover temp dir shows).
+# Without build/tmp the state dir is a temp dir too, and the image and boot
+# firmware come from --image and RUN_QEMU_UBOOT_ROM.
+plain_start() {
+  local name=$1 hs=$2 build=$3 args=(qemux86-64 --tpm) envs=()
+  PLAIN_TMP=$w/$name-tmp
+  mkdir -p "$PLAIN_TMP"
+  if [ "$build" -eq 1 ]; then
+    PLAIN_WORK=$(workdir "$name")
+    truncate -s 2G "$(deploy "$PLAIN_WORK")/avocado-os-avocado-qemux86-64.img"
+  else
+    PLAIN_WORK=$w/$name-work
+    mkdir -p "$PLAIN_WORK"
+    truncate -s 2G "$PLAIN_WORK/img"
+    : >"$PLAIN_WORK/fw"
+    args+=(--image "$PLAIN_WORK/img")
+    envs+=(RUN_QEMU_UBOOT_ROM="$PLAIN_WORK/fw")
+  fi
+  : >"$log"
+  (cd "$PLAIN_WORK" && exec python3 -c "$PYSTART" env PATH="$hs:$tools" "${envs[@]}" \
+    RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$PLAIN_TMP" bash "$script" "${args[@]}" >"$w/$name.out" 2>&1 </dev/null) &
+  PLAIN_RP=$!
+}
+# log_wait <pattern> <polls> -> true once a log line matches, polling every 0.1s.
+log_wait() {
+  local _
+  for _ in $(seq 1 "$2"); do
+    grep -q "$1" "$log" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+# plain_wait <polls> -> sets PLAIN_RC to the runner's status, or "hung" when it
+# outlives <polls> 0.1s polls, and then kills the runner's own group.
+plain_wait() {
+  local _ hung=0
+  for _ in $(seq 1 "$1"); do
+    alive "$PLAIN_RP" || break
+    sleep 0.1
+  done
+  if alive "$PLAIN_RP"; then
+    hung=1
+    if [ "$(ps -o pgid= -p "$PLAIN_RP" | tr -d ' ')" = "$PLAIN_RP" ]; then
+      kill -KILL -- "-$PLAIN_RP" 2>/dev/null
+    else
+      kill -KILL "$PLAIN_RP" 2>/dev/null
+    fi
+  fi
+  wait "$PLAIN_RP"
+  PLAIN_RC=$?
+  [ "$hung" -eq 0 ] || PLAIN_RC=hung
+}
+# reap <pid> -> KILL a pid this suite started, if it is still alive.
+reap() {
+  if [ -n "$1" ] && alive "$1"; then kill -KILL "$1" 2>/dev/null; fi
+  return 0
+}
+
+# 67. A TERM that arrives while stop_tpm waits out a swtpm that ignores TERM must
+#     not cut the cleanup short: the swtpm is still KILLed after its 5 second window
+#     and the pid file, the temp socket dir and the temp state dir all go. The stub
+#     QEMU exits at once, so the whole run is the cleanup; the TERM is sent to the
+#     runner alone 1.5 seconds into it, and the status stays QEMU's 0 (not 143).
+plain_start cleanup-term "$ignhs" 0
+if log_wait '^qemu-launch' 100 && log_wait '^swtpm-pid' 10; then
+  sleep 1.5
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 150
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+left=$(ls -A "$PLAIN_TMP")
+{ [ "$PLAIN_RC" = 0 ] && [ -n "$pid" ] && ! alive "$pid" && [ -z "$left" ]; } \
+  && ok "a TERM during the swtpm stop does not cut cleanup short" \
+  || bad "cleanup term: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) left=[$left] out=[$(cat "$w/cleanup-term.out")]"
+reap "$pid"
+
+# 68. A swtpm whose launcher returns before the daemon has written the pid file
+#     (the daemon writes it 0.5s later, then binds the socket) is still stopped by
+#     cleanup, and its pid file removed.
+plain_start late-pid "$latehs" 1
+plain_wait 100
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 0 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ] \
+  && grep -q '^qemu-launch' "$log"; } \
+  && ok "a swtpm that writes its pid file after the launcher returned is stopped" \
+  || bad "late pid: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) out=[$(cat "$w/late-pid.out")] log=[$(cat "$log")]"
+reap "$pid"
+
+# 69. A TERM that arrives while the swtpm launcher is still running (it writes the
+#     pid file, then lingers 1.5s) runs its trap before the runner records any pid:
+#     the runner exits 143 without starting QEMU, and cleanup still finds the swtpm
+#     through the pid file, stops it and removes that file.
+plain_start term-in-launch "$slowhs" 1
+if log_wait '^swtpm-pid' 100; then
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 100
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 143 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ] \
+  && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a TERM while the swtpm launcher runs still stops swtpm and removes its pid file" \
+  || bad "term in launcher: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) pidfile=$([ -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ] && echo present || echo absent) out=[$(cat "$w/term-in-launch.out")] log=[$(cat "$log")]"
+reap "$pid"
+
+# 69b. The same TERM, with a pid file that names an unrelated process (as when
+#      another run has rewritten it): cleanup adopts a pid from the file only when
+#      it is this run's swtpm, so that process is not signalled. The stub's own
+#      daemon is left running by design here, and the test stops it.
+hold "$w/hold-g.fifo" "$w/hold-g.fifo" unrelated
+FOREIGN_PID=$HELD plain_start term-foreign-pid "$slowforeignhs" 1
+if log_wait '^swtpm-pid' 100; then
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 100
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 143 ] && alive "$HELD" && [ "$(<"$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid")" = "$HELD" ]; } \
+  && ok "a pid file naming another process is not adopted or signalled by cleanup" \
+  || bad "term foreign pid: rc=$PLAIN_RC held=$HELD out=[$(cat "$w/term-foreign-pid.out")]"
+reap "$pid"
+kill "$HELD" 2>/dev/null
+wait "$HELD" 2>/dev/null
+
+# 70. A QEMU that ignores TERM is killed after 5 seconds: a TERM sent to the runner
+#     alone ends with 143 after about that long, QEMU gone and swtpm stopped.
+SIGHS=$ignqhs SIGPOLLS=120 sigrun ignq TERM /dev/null
+{ [ "$SIG_RC" = 143 ] && [ "$SIG_QALIVE" -eq 0 ] && [ -n "$SIG_PID" ] && [ "$SIG_TALIVE" -eq 0 ] \
+  && [ ! -e "$SIG_DIR/build/tmp/tpm-state/swtpm.pid" ] && [ "$SIG_MS" -ge 4500 ] && [ "$SIG_MS" -lt 8000 ]; } \
+  && ok "a QEMU that ignores TERM is killed after 5 seconds, the runner exits 143 (${SIG_MS} ms)" \
+  || bad "ignoring qemu: rc=$SIG_RC ms=$SIG_MS qalive=$SIG_QALIVE talive=$SIG_TALIVE out=[$(cat "$w/sig-ignq.out")] log=[$(cat "$log")]"
 
 # No stub swtpm may outlive the suite.
 stray=$(pgrep -af "$w/.*swtpm" || true)
