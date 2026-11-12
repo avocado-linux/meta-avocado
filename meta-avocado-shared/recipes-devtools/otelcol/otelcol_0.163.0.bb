@@ -12,6 +12,10 @@ require ${BPN}-licenses.inc
 # with ocb v0.163.0 (go install go.opentelemetry.io/collector/cmd/builder@v0.163.0).
 # Regenerate them and the -go-mods.inc and -licenses.inc files together when the
 # manifest changes or the collector version moves.
+# update_modules only lists modules the target it ran for imports: run from a
+# non-x86 build, it drops klauspost/cpuid/v2 (imported by zeebo/xxh3 on amd64
+# only) and its x86-64 licence entry. Keep both, or x86-64 builds fail in
+# do_compile trying to download the module.
 SRC_URI = " \
     file://manifest.yaml;subdir=${GO_SRCURI_DESTSUFFIX} \
     file://components.go;subdir=${GO_SRCURI_DESTSUFFIX} \
