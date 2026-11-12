@@ -23,6 +23,8 @@ TPM_PIDFILE=""
 TPM_TMP=0
 TPM_SOCK_TMP=0
 TPM_STARTED=0
+TPM_PID=""
+QEMU_PID=""
 TPM_SOCK_MAX=100
 
 die() {
@@ -251,24 +253,60 @@ plan_tpm() {
   fi
 }
 
-# True when <pid> is a live process whose command line carries this run's swtpm
-# state dir, so a recycled pid or an unrelated process never matches.
-swtpm_owns_pid() {
-  local words
-  [ -r "/proc/$1/cmdline" ] && mapfile -d '' -t words <"/proc/$1/cmdline" \
-    && [[ "${words[*]}" == *"dir=$TPM_DIR"* ]]
+# True when <pid> is a live process whose command line carries every given word
+# exactly: a recycled pid, an unrelated process or a swtpm on a state dir whose
+# name only starts like ours never matches. Words are whole arguments, never
+# substrings.
+cmdline_has_words() {
+  local pid=$1 need w found words=()
+  shift
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  mapfile -d '' -t words 2>/dev/null <"/proc/$pid/cmdline" || return 1
+  for need in "$@"; do
+    found=0
+    for w in "${words[@]}"; do
+      if [ "$w" = "$need" ]; then
+        found=1
+        break
+      fi
+    done
+    [ "$found" -eq 1 ] || return 1
+  done
 }
 
-# Stops the swtpm this run started, by its pid file only, and removes what the
-# run made. Safe to call twice and when nothing started.
-# shellcheck disable=SC2329 # invoked through the EXIT, INT and TERM traps in main
-stop_tpm() {
-  local pid="" s n
-  if [ "$TPM_STARTED" -eq 1 ] && [ -f "$TPM_PIDFILE" ]; then
-    pid=$(<"$TPM_PIDFILE")
+# True when <pid> is a swtpm on this run's state dir, whoever started it. Any
+# such swtpm holds the state lock, so it blocks a start.
+swtpm_on_state_dir() {
+  cmdline_has_words "$1" "dir=$TPM_DIR"
+}
+
+# True when <pid> is this run's own swtpm: on its state dir and on its own
+# control socket, so another run on the same state dir never matches.
+# shellcheck disable=SC2329 # reached only through stop_tpm, which the EXIT trap runs
+swtpm_owns_pid() {
+  cmdline_has_words "$1" "dir=$TPM_DIR" "type=unixio,path=$TPM_SOCK"
+}
+
+# Forwards a trapped signal to QEMU, waits for it, then exits 128+<number> so the
+# EXIT trap stops swtpm only after QEMU is gone. Never signals an unset pid.
+# shellcheck disable=SC2329 # invoked through the INT, TERM, HUP and QUIT traps in main
+forward_signal() {
+  if [[ $QEMU_PID =~ ^[0-9]+$ ]] && [ "$QEMU_PID" -gt 1 ] && kill -0 "$QEMU_PID" 2>/dev/null; then
+    kill "-$1" "$QEMU_PID" 2>/dev/null || true
+    wait "$QEMU_PID" 2>/dev/null || true
   fi
-  # A gone or recycled pid is not ours to signal; the files below still go.
-  if [ "$pid" != 0 ] && [[ $pid =~ ^[0-9]+$ ]] && swtpm_owns_pid "$pid"; then
+  QEMU_PID=""
+  exit $((128 + $2))
+}
+
+# Stops the swtpm this run started, by the pid recorded at its start, and removes
+# what the run made. Safe to call twice and when nothing started.
+# shellcheck disable=SC2329 # invoked through the EXIT trap in main
+stop_tpm() {
+  local pid=$TPM_PID s n cur=""
+  # A gone or recycled pid is not ours to signal; the files below still go. Only
+  # a real pid is signalled: 0 and 1 would reach a whole group or init.
+  if [ "$TPM_STARTED" -eq 1 ] && [[ $pid =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] && swtpm_owns_pid "$pid"; then
     kill -TERM "$pid" 2>/dev/null || true
     for n in $(seq 1 50); do
       [ -r "/proc/$pid/stat" ] || break
@@ -278,13 +316,23 @@ stop_tpm() {
       s=${s##*) }
       # A zombie is already stopped: it only waits for a parent to reap it.
       [ "${s%% *}" = Z ] && break
-      [ "$n" -eq 50 ] && { kill -KILL "$pid" 2>/dev/null || true; }
+      # The pid may have been recycled since the TERM; KILL only what is still ours.
+      if [ "$n" -eq 50 ] && swtpm_owns_pid "$pid"; then
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
       sleep 0.1
     done
   fi
   if [ "$TPM_STARTED" -eq 1 ]; then
-    rm -f "$TPM_PIDFILE" "$TPM_SOCK"
+    # The pid file is shared by every run on this state dir: remove it only while
+    # it still names our swtpm. A vanished or unreadable file means no pid.
+    { cur=$(<"$TPM_PIDFILE"); } 2>/dev/null || cur=""
+    if [ -n "$TPM_PID" ] && [ "$cur" = "$TPM_PID" ]; then
+      rm -f "$TPM_PIDFILE"
+    fi
+    rm -f "$TPM_SOCK"
     TPM_STARTED=0
+    TPM_PID=""
   fi
   if [ "$TPM_SOCK_TMP" -eq 1 ]; then
     # The temp dir only ever holds the socket, so rmdir is enough.
@@ -321,12 +369,13 @@ start_tpm() {
   # command line is compared, not just the pid, so a recycled pid in a stale
   # file does not block.
   if [ -f "$TPM_PIDFILE" ]; then
-    local held
-    held=$(<"$TPM_PIDFILE")
+    local held=""
+    # A file that vanishes or cannot be read after the test above means no pid.
+    { held=$(<"$TPM_PIDFILE"); } 2>/dev/null || held=""
     case $held in
       "" | *[!0-9]*) ;;
       *)
-        if swtpm_owns_pid "$held"; then
+        if swtpm_on_state_dir "$held"; then
           die 1 "swtpm $held is already running on $TPM_DIR (another run-qemu --tpm, or one that was killed); stop it first"
         fi
         ;;
@@ -342,6 +391,8 @@ start_tpm() {
     --pid file="$TPM_PIDFILE" \
     --tpm2 \
     --daemon || die 1 "swtpm failed to start; QEMU was not started"
+  # Cleanup signals this pid, never one re-read from the pid file other runs share.
+  { TPM_PID=$(<"$TPM_PIDFILE"); } 2>/dev/null || TPM_PID=""
 
   for ((n = 0; n < wait; n++)); do
     [ -S "$TPM_SOCK" ] && return 0
@@ -383,8 +434,10 @@ build_qemu_args() {
 main() {
   parse_args "$@"
   trap stop_tpm EXIT
-  trap 'stop_tpm; exit 130' INT
-  trap 'stop_tpm; exit 143' TERM
+  trap 'forward_signal INT 2' INT
+  trap 'forward_signal TERM 15' TERM
+  trap 'forward_signal HUP 1' HUP
+  trap 'forward_signal QUIT 3' QUIT
   resolve_image
   resolve_qemu
   find_boot_firmware
@@ -411,16 +464,28 @@ main() {
     exit 0
   fi
 
+  # swtpm first: a missing swtpm, a held state dir or a socket timeout must not
+  # leave a grown image behind a run that never started QEMU. The EXIT trap stops
+  # swtpm if the resize then fails.
+  [ "$TPM" -eq 0 ] || start_tpm
+
   if [ ${#resize[@]} -gt 0 ]; then
     "${resize[@]}"
   fi
 
-  [ "$TPM" -eq 0 ] || start_tpm
-
-  # A child, not exec, so the exit status passes through this script and the
-  # traps can stop swtpm after it.
+  # A background child that is waited for, not exec and not a foreground child:
+  # the exit status passes through this script, and bash runs a trapped signal
+  # at once instead of after QEMU exits. <&0 keeps the terminal for -nographic,
+  # which a background command would otherwise lose to /dev/null. The subshell
+  # resets INT and QUIT, which an asynchronous command starts out ignoring.
   local rc=0
-  "${cmd[@]}" || rc=$?
+  (
+    trap - INT QUIT
+    exec "${cmd[@]}"
+  ) <&0 &
+  QEMU_PID=$!
+  wait "$QEMU_PID" || rc=$?
+  QEMU_PID=""
   exit "$rc"
 }
 
