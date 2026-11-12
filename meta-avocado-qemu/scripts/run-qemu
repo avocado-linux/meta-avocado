@@ -16,6 +16,14 @@ TPM=0
 IMAGE=""
 DRY_RUN=0
 RESIZE_MIB=0
+TPM_DIR=""
+TPM_SOCK=""
+TPM_SOCK_DIR=""
+TPM_PIDFILE=""
+TPM_TMP=0
+TPM_SOCK_TMP=0
+TPM_STARTED=0
+TPM_SOCK_MAX=100
 
 die() {
   local rc=$1
@@ -32,6 +40,8 @@ usage() {
     echo "  (default: build/tmp/deploy/stone/flash.bin, then .../stone/_build/flash.bin)"
     echo "  RUN_QEMU_UBOOT_ROM=PATH  U-Boot image for qemux86-64"
     echo "  (default: build/tmp/deploy/stone/u-boot.rom, then .../stone/_build/u-boot.rom)"
+    echo "  RUN_QEMU_TPM_SOCK_DIR=DIR  directory for the swtpm control socket with --tpm"
+    echo "  RUN_QEMU_TPM_WAIT_SECONDS=N  seconds to wait for that socket (default 10)"
   } >&2
 }
 
@@ -208,6 +218,131 @@ find_boot_firmware() {
 # carries its commas doubled or it can add options of its own.
 qpath() { printf '%s' "${1//,/,,}"; }
 
+# Sets TPM_DIR, TPM_SOCK and TPM_PIDFILE. The state lives under build/tmp when
+# the work directory has one, else in a temp dir removed on exit. The control
+# socket is kept apart from it, in RUN_QEMU_TPM_SOCK_DIR or a private temp dir
+# removed on exit, because an AF_UNIX path holds about 107 bytes and a kas work
+# directory alone can exceed that. A dry run creates nothing, so it names a
+# placeholder instead of making a temp dir.
+plan_tpm() {
+  if [ -d "$PWD/build/tmp" ]; then
+    TPM_DIR="$PWD/build/tmp/tpm-state"
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    TPM_DIR="${TMPDIR:-/tmp}/run-qemu-tpm.XXXXXX"
+  else
+    TPM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/run-qemu-tpm.XXXXXX") || die 1 "cannot create a TPM state directory"
+    TPM_TMP=1
+  fi
+  TPM_PIDFILE="$TPM_DIR/swtpm.pid"
+
+  if [ -n "${RUN_QEMU_TPM_SOCK_DIR:-}" ]; then
+    TPM_SOCK_DIR=$RUN_QEMU_TPM_SOCK_DIR
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    TPM_SOCK_DIR="${TMPDIR:-/tmp}/run-qemu-tpmsock.XXXXXX"
+  else
+    TPM_SOCK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/run-qemu-tpmsock.XXXXXX") || die 1 "cannot create a TPM socket directory"
+    TPM_SOCK_TMP=1
+    chmod 700 "$TPM_SOCK_DIR"
+  fi
+  TPM_SOCK="$TPM_SOCK_DIR/swtpm-sock"
+  if [ "${#TPM_SOCK}" -gt "$TPM_SOCK_MAX" ]; then
+    die 1 "TPM socket path is ${#TPM_SOCK} bytes, over the $TPM_SOCK_MAX byte limit for a unix socket: $TPM_SOCK"
+  fi
+}
+
+# Stops the swtpm this run started, by its pid file only, and removes what the
+# run made. Safe to call twice and when nothing started.
+# shellcheck disable=SC2329 # invoked through the EXIT, INT and TERM traps in main
+stop_tpm() {
+  local pid="" s n
+  if [ "$TPM_STARTED" -eq 1 ] && [ -f "$TPM_PIDFILE" ]; then
+    pid=$(<"$TPM_PIDFILE")
+  fi
+  case $pid in
+    "" | *[!0-9]*) ;;
+    *)
+      kill -TERM "$pid" 2>/dev/null || true
+      for n in $(seq 1 50); do
+        [ -r "/proc/$pid/stat" ] || break
+        # swtpm can vanish between the test above and this read, and under set -e
+        # a failure here would skip the cleanup below.
+        s=$(<"/proc/$pid/stat") || break
+        s=${s##*) }
+        # A zombie is already stopped: it only waits for a parent to reap it.
+        [ "${s%% *}" = Z ] && break
+        [ "$n" -eq 50 ] && { kill -KILL "$pid" 2>/dev/null || true; }
+        sleep 0.1
+      done
+      ;;
+  esac
+  if [ "$TPM_STARTED" -eq 1 ]; then
+    rm -f "$TPM_PIDFILE" "$TPM_SOCK"
+    TPM_STARTED=0
+  fi
+  if [ "$TPM_SOCK_TMP" -eq 1 ]; then
+    # The temp dir only ever holds the socket, so rmdir is enough.
+    rm -f "$TPM_SOCK"
+    rmdir "$TPM_SOCK_DIR" 2>/dev/null || true
+    TPM_SOCK_TMP=0
+  fi
+  if [ "$TPM_TMP" -eq 1 ]; then
+    rm -rf "$TPM_DIR"
+    TPM_TMP=0
+  fi
+}
+
+# Starts swtpm as a daemon and waits for its control socket. TPM_STARTED is set
+# before the launch so a failed start still stops whatever came up.
+start_tpm() {
+  local native bin wait n prefix=()
+  native="$PWD/build/tmp/sysroots-components/x86_64/swtpm-native/usr/bin/swtpm"
+  if [ -e "$native" ]; then
+    native_prefix "swtpm at $native"
+    prefix=("${NATIVE_PREFIX[@]}")
+    bin=$native
+  elif ! bin=$(command -v swtpm); then
+    die 1 "no swtpm at $native and none on PATH (PATH=$PATH)"
+  fi
+  wait=${RUN_QEMU_TPM_WAIT_SECONDS:-10}
+
+  mkdir -p "$TPM_DIR" "$TPM_SOCK_DIR"
+  # The state dir and its pid file are shared by every --tpm run in this work
+  # dir. A second run must not delete the first run's pid file (the first run's
+  # exit would then leave its swtpm behind) and swtpm cannot share the state
+  # lock anyway, so a live swtpm on this state dir stops the run instead. The
+  # command line is compared, not just the pid, so a recycled pid in a stale
+  # file does not block.
+  if [ -f "$TPM_PIDFILE" ]; then
+    local held words
+    held=$(<"$TPM_PIDFILE")
+    case $held in
+      "" | *[!0-9]*) ;;
+      *)
+        if [ -r "/proc/$held/cmdline" ] && mapfile -d '' -t words <"/proc/$held/cmdline" \
+          && [[ "${words[*]}" == *"dir=$TPM_DIR"* ]]; then
+          die 1 "swtpm $held is already running on $TPM_DIR (another run-qemu --tpm, or one that was killed); stop it first"
+        fi
+        ;;
+    esac
+  fi
+  rm -f "$TPM_SOCK" "$TPM_PIDFILE"
+  TPM_STARTED=1
+  echo "Starting swtpm (state: $TPM_DIR, log: $TPM_DIR/swtpm.log)"
+  "${prefix[@]}" "$bin" socket \
+    --tpmstate dir="$TPM_DIR" \
+    --ctrl type=unixio,path="$TPM_SOCK" \
+    --log file="$TPM_DIR/swtpm.log",level=5 \
+    --pid file="$TPM_PIDFILE" \
+    --tpm2 \
+    --daemon || die 1 "swtpm failed to start; QEMU was not started"
+
+  for ((n = 0; n < wait; n++)); do
+    [ -S "$TPM_SOCK" ] && return 0
+    sleep 1
+  done
+  [ -S "$TPM_SOCK" ] || die 1 "swtpm socket $TPM_SOCK did not appear after ${wait}s; QEMU was not started"
+}
+
 # Sets QEMU_ARGS to the machine's arguments, after the binary. No profile has a
 # display option: the console is the serial line on stdio.
 build_qemu_args() {
@@ -230,15 +365,24 @@ build_qemu_args() {
         -drive "file=$image,if=none,format=raw,id=mmc")
       ;;
   esac
+  if [ "$TPM" -eq 1 ]; then
+    QEMU_ARGS+=(-chardev "socket,id=chrtpm,path=$(qpath "$TPM_SOCK")"
+    -tpmdev "emulator,id=tpm0,chardev=chrtpm"
+    -device "tpm-tis,tpmdev=tpm0")
+  fi
   QEMU_ARGS+=(-nographic)
 }
 
 main() {
   parse_args "$@"
+  trap stop_tpm EXIT
+  trap 'stop_tpm; exit 130' INT
+  trap 'stop_tpm; exit 143' TERM
   resolve_image
   resolve_qemu
   find_boot_firmware
   plan_resize
+  [ "$TPM" -eq 0 ] || plan_tpm
   build_qemu_args
   local cmd=("${QEMU_PREFIX[@]}" "$QEMU_BIN" "${QEMU_ARGS[@]}")
 
@@ -255,6 +399,7 @@ main() {
     else
       echo "resize: none"
     fi
+    [ "$TPM" -eq 0 ] || echo "tpm: socket $TPM_SOCK"
     echo "command: ${cmd[*]}"
     exit 0
   fi
@@ -263,7 +408,10 @@ main() {
     "${resize[@]}"
   fi
 
-  # A child, not exec, so the exit status passes through this script.
+  [ "$TPM" -eq 0 ] || start_tpm
+
+  # A child, not exec, so the exit status passes through this script and the
+  # traps can stop swtpm after it.
   local rc=0
   "${cmd[@]}" || rc=$?
   exit "$rc"

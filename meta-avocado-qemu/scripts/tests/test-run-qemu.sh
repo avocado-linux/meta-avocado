@@ -440,5 +440,312 @@ for m in qemux86-64 qemuarm64; do
     || bad "$m real: rc=$rc n=$n out=[$out] log=[$(cat "$log")]"
 done
 
+# --- --tpm: swtpm lifecycle -------------------------------------------------
+# swtpm is a python3 stub that daemonizes like the real one (--daemon, --pid
+# file=), then either binds the --ctrl socket (mode sock) or never does (nosock).
+# The runs use PATH = the stubs plus coreutils only, so no real swtpm or QEMU is
+# needed, and the stub QEMU either exits at once or sleeps.
+for c in mktemp sleep cp mv chmod rm mkdir rmdir truncate seq; do ln -s "$(command -v "$c")" "$tools/$c" 2>/dev/null; done
+mkswtpm() {
+  local d=$1 mode=$2
+  mkdir -p "$d"
+  {
+    echo "#!$(command -v python3)"
+    echo "MODE = '$mode'"
+    cat <<'EOF'
+import os, socket, sys, time
+args = sys.argv[1:]
+ctrl = pidfile = None
+for i, a in enumerate(args):
+    if a.startswith("type=unixio,path="):
+        ctrl = a.split("path=", 1)[1]
+    if a.startswith("file=") and args[i - 1] == "--pid":
+        pidfile = a[5:]
+with open(os.environ["STUB_LOG"], "a") as f:
+    f.write("swtpm " + " ".join(args) + "\n")
+if "--daemon" in args:
+    pid = os.fork()
+    if pid:
+        with open(pidfile, "w") as f:
+            f.write("%d\n" % pid)
+        with open(os.environ["STUB_LOG"], "a") as f:
+            f.write("swtpm-pid %d\n" % pid)
+        sys.exit(0)
+    os.setsid()
+    null = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(null, fd)
+if MODE == "sock":
+    s = socket.socket(socket.AF_UNIX)
+    s.bind(ctrl)
+    s.listen(1)
+time.sleep(60)
+EOF
+  } >"$d/swtpm"
+  chmod +x "$d/swtpm"
+}
+tpmhs=$w/tpmstubs
+nosockhs=$w/nosockstubs
+sleephs=$w/sleepstubs
+failhs=$w/tpmfailstubs
+noswtpmhs=$w/noswtpmstubs
+mkdir -p "$tpmhs" "$nosockhs" "$sleephs" "$failhs" "$noswtpmhs"
+mkstubs "$tpmhs"
+mkswtpm "$tpmhs" sock
+mkstubs "$nosockhs"
+mkswtpm "$nosockhs" nosock
+mkstubs "$sleephs"
+mkswtpm "$sleephs" sock
+# shellcheck disable=SC2016 # $* belongs to the generated stub
+printf '#!/bin/sh\necho "qemu-launch $*" >>"$STUB_LOG"\nsleep 30\n' >"$sleephs/qemu-system-x86_64"
+mkstubs "$failhs"
+mkswtpm "$failhs" sock
+printf '#!/bin/sh\nexit 7\n' >"$failhs/qemu-system-x86_64"
+mkstubs "$noswtpmhs"
+
+# alive <pid> -> true for a running process; a zombie is already dead.
+alive() {
+  local s
+  [ -r "/proc/$1/stat" ] || return 1
+  s=$(<"/proc/$1/stat")
+  s=${s##*) }
+  [ "${s%% *}" != Z ]
+}
+# trun <dir> <args...> -> like run, but PATH is $TPMSTUBS plus the coreutils.
+trun() {
+  local d=$1
+  shift
+  (cd "$d" && env PATH="${TPMSTUBS-$tpmhs}:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+    RUN_QEMU_TPM_WAIT_SECONDS="${TPMWAIT-3}" TMPDIR="${TPMTMP-$w}" bash "$script" "$@" </dev/null 2>&1)
+}
+tpm_args_in() { grep -qF -- "-chardev socket,id=chrtpm,path=$2 -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-tis,tpmdev=tpm0" <<<"$1"; }
+
+# 33. --dry-run with --tpm prints the TPM arguments and starts and creates nothing.
+d=$(workdir tpm-dry)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm --dry-run)
+rc=$?
+sock=$(sed -n 's/^tpm: socket //p' <<<"$out")
+{ [ $rc -eq 0 ] && [ -n "$sock" ] && [ "${#sock}" -lt 100 ] && [[ $sock == "$w"/run-qemu-tpmsock.*/swtpm-sock ]] \
+  && tpm_args_in "$(cmdline "$out")" "$sock" && [ ! -s "$log" ] && [ ! -e "$d/build/tmp/tpm-state" ] \
+  && [ -z "$(ls -d "$w"/run-qemu-tpmsock.* 2>/dev/null)" ]; } \
+  && ok "--tpm --dry-run prints the TPM arguments and starts and creates nothing" || bad "tpm dry: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 34. A normal run starts swtpm before QEMU, wires it in, and leaves no swtpm behind.
+d=$(workdir tpm-run)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+sd="$d/build/tmp/tpm-state"
+tl=$(grep '^swtpm socket' "$log")
+sock=$(sed -n 's/.*--ctrl type=unixio,path=\([^ ]*\).*/\1/p' <<<"$tl")
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+st=$(grep -n '^swtpm socket' "$log" | head -1 | cut -d: -f1)
+ql=$(grep -n '^qemu-launch' "$log" | head -1 | cut -d: -f1)
+{ [ $rc -eq 0 ] && [ -n "$sock" ] && [ "${#sock}" -lt 100 ] && [ -n "$pid" ] && ! alive "$pid" && [ -n "$st" ] && [ -n "$ql" ] && [ "$st" -lt "$ql" ] \
+  && grep -qF -- "--tpmstate dir=$sd" <<<"$tl" && [[ $sock == "$w"/run-qemu-tpmsock.*/swtpm-sock ]] \
+  && grep -qF -- '--tpm2' <<<"$tl" && grep -qF -- '--daemon' <<<"$tl" && grep -qF -- "--pid file=$sd/swtpm.pid" <<<"$tl" \
+  && tpm_args_in "$(grep '^qemu-launch' "$log")" "$sock" && [ ! -e "$sock" ] && [ ! -e "$(dirname "$sock")" ] && [ ! -e "$sd/swtpm.pid" ]; } \
+  && ok "a normal --tpm run starts swtpm first, wires it in and stops it" || bad "tpm run: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+
+# 35. A group TERM while QEMU runs still stops swtpm.
+d=$(workdir tpm-term)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+(cd "$d" && exec setsid env PATH="$sleephs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/term.out" 2>&1 </dev/null) &
+rp=$!
+for _ in $(seq 1 100); do
+  grep -q '^qemu-launch' "$log" && break
+  sleep 0.1
+done
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+rc=none
+if [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && grep -q '^qemu-launch' "$log"; then
+  kill -TERM -- "-$rp"
+  wait "$rp"
+  rc=$?
+fi
+{ [ "$rc" = 143 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "a TERM while QEMU runs stops swtpm" || bad "tpm term: rc=$rc pid=$pid out=[$(cat "$w/term.out")] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 36. A socket that never appears exits 1 naming it, never starts QEMU, and stops swtpm.
+d=$(workdir tpm-nosock)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$nosockhs TPMWAIT=1 trun "$d" qemux86-64 --tpm)
+rc=$?
+sock=$(sed -n 's/.*--ctrl type=unixio,path=\([^ ]*\).*/\1/p' "$log")
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 1 ] && [ -n "$sock" ] && grep -qF "$sock" <<<"$out" && [ ! -e "$(dirname "$sock")" ] && grep -qi 'qemu was not started' <<<"$out" && ! grep -q '^qemu-launch' "$log" \
+  && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a missing TPM socket exits 1 naming it, without starting QEMU" || bad "tpm nosock: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 37. With no build directory the state dir is a temp dir, removed on exit.
+mkdir -p "$w/tmpd" "$w/bare-tpm"
+truncate -s 1100M "$w/bare-tpm/disk.img"
+: >"$w/bare-tpm/u-boot.rom"
+: >"$log"
+out=$(RUN_QEMU_UBOOT_ROM=$w/bare-tpm/u-boot.rom TPMTMP=$w/tmpd trun "$w/bare-tpm" qemux86-64 --tpm --image "$w/bare-tpm/disk.img")
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && grep -qF -- "path=$w/tmpd/" "$log" && [ -z "$(ls -A "$w/tmpd")" ] && [ -n "$pid" ] && ! alive "$pid" \
+  && [ ! -e "$w/bare-tpm/build" ]; } \
+  && ok "without a build dir the TPM state is a temp dir removed on exit" || bad "tpm tmp: rc=$rc out=[$out] left=[$(ls -A "$w/tmpd")] log=[$(cat "$log")]"
+
+# 38. The QEMU exit status passes through and swtpm is still stopped.
+d=$(workdir tpm-fail)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$failhs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 7 ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "the QEMU exit status passes through and swtpm is stopped" || bad "tpm fail: rc=$rc pid=$pid out=[$out]"
+
+# 39. A native swtpm runs through the uninative loader in preference to the host's.
+d=$(workdir tpm-native)
+mksysroot "$d"
+sr="$d/build/tmp/sysroots-components/x86_64"
+mkswtpm "$sr/swtpm-native/usr/bin" sock
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$noswtpmhs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && grep -q "^loader --library-path .* $sr/swtpm-native/usr/bin/swtpm socket " "$log" && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a native swtpm runs under the uninative loader" || bad "tpm native: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+
+# 40. No swtpm native or on PATH exits 1 naming where it looked, before QEMU starts.
+d=$(workdir tpm-noswtpm)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$noswtpmhs trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$d/build/tmp/sysroots-components/x86_64/swtpm-native/usr/bin/swtpm" <<<"$out" \
+  && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "no swtpm anywhere exits 1 naming where it looked" || bad "tpm none: rc=$rc out=[$out]"
+
+# 41. A deliberately long work directory still works: the socket is short and
+# lives outside it, because an AF_UNIX path holds only about 107 bytes.
+longd="$w/tpm-long/$(printf 'long-directory-name-%.0s' 1 2 3 4 5 6)/work"
+mkdir -p "$longd/build/tmp/deploy/stone/_build"
+echo rom >"$longd/build/tmp/deploy/stone/u-boot.rom"
+truncate -s 2G "$longd/build/tmp/deploy/stone/_build/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$longd" qemux86-64 --tpm)
+rc=$?
+sock=$(sed -n 's/.*--ctrl type=unixio,path=\([^ ]*\).*/\1/p' "$log")
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ ${#longd} -gt 120 ] && [ $rc -eq 0 ] && [ -n "$sock" ] && [ ${#sock} -lt 100 ] && [[ $sock != "$longd"* ]] \
+  && tpm_args_in "$(grep '^qemu-launch' "$log")" "$sock" && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a long work directory still gets a short TPM socket outside it" || bad "tpm long: rc=$rc len=${#longd} sock=[$sock] out=[$out]"
+
+# 42. The temp socket dir is removed after a TERM while QEMU runs.
+d=$(workdir tpm-term2)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/termtmp"
+: >"$log"
+(cd "$d" && exec setsid env PATH="$sleephs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w/termtmp" bash "$script" qemux86-64 --tpm >"$w/term2.out" 2>&1 </dev/null) &
+rp=$!
+for _ in $(seq 1 100); do
+  grep -q '^qemu-launch' "$log" && break
+  sleep 0.1
+done
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+existed=$(ls -A "$w/termtmp")
+rc=none
+if [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && grep -q '^qemu-launch' "$log"; then
+  kill -TERM -- "-$rp"
+  wait "$rp"
+  rc=$?
+fi
+{ [ "$rc" = 143 ] && [ -n "$existed" ] && [ -z "$(ls -A "$w/termtmp")" ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "the temp TPM socket dir is removed after a TERM" || bad "tpm term2: rc=$rc existed=[$existed] left=[$(ls -A "$w/termtmp")] out=[$(cat "$w/term2.out")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 43. RUN_QEMU_TPM_SOCK_DIR names where the socket goes; the dir itself stays.
+d=$(workdir tpm-override)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/ovr" "$w/ovrtmp"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/ovr TPMTMP=$w/ovrtmp trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && grep -qF -- "--ctrl type=unixio,path=$w/ovr/swtpm-sock" "$log" && tpm_args_in "$(grep '^qemu-launch' "$log")" "$w/ovr/swtpm-sock" \
+  && [ -d "$w/ovr" ] && [ ! -e "$w/ovr/swtpm-sock" ] && [ -z "$(ls -A "$w/ovrtmp")" ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "RUN_QEMU_TPM_SOCK_DIR places the socket and is left in place" || bad "tpm override: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 44. An override that makes the socket path over 100 bytes exits 1 naming it, before swtpm.
+d=$(workdir tpm-overlong)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+longo="$w/$(printf 'o%.0s' $(seq 1 95))"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$longo trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$longo/swtpm-sock" <<<"$out" && grep -qE "$((${#longo} + 11))" <<<"$out" \
+  && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$longo" ]; } \
+  && ok "a too-long socket path exits 1 naming it and its length, starting nothing" || bad "tpm overlong: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 45. A live swtpm already on the state dir stops the run, and is left alone.
+d=$(workdir tpm-held)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+# A holder with no child process: `read -t` on a fifo it opens read-write waits without
+# forking, so killing the one pid leaves nothing holding the suite's stdout open.
+mkfifo "$w/hold-a.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "swtpm socket --tpmstate dir=$sd" "$w/hold-a.fifo" &
+holder=$!
+echo "$holder" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "already running" <<<"$out" && grep -qF "$holder" <<<"$out" && alive "$holder" \
+  && [ "$(<"$sd/swtpm.pid")" = "$holder" ] && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a live swtpm on the state dir stops the run and keeps its pid file" || bad "tpm held: rc=$rc holder=$holder out=[$out] log=[$(cat "$log")]"
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+
+# 46. A pid file naming a process that is not swtpm on this state dir is stale and replaced.
+d=$(workdir tpm-stale)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+mkfifo "$w/hold-b.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "unrelated process" "$w/hold-b.fifo" &
+other=$!
+echo "$other" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && alive "$other" && [ -n "$pid" ] && [ "$pid" != "$other" ] && ! alive "$pid"; } \
+  && ok "a pid file naming an unrelated process is replaced, not obeyed" || bad "tpm stale: rc=$rc other=$other pid=$pid out=[$out]"
+kill "$other" 2>/dev/null
+wait "$other" 2>/dev/null
+
+# 47. A comma in the socket directory is doubled in the chardev path, so it cannot add chardev options.
+d=$(workdir tpm-comma)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/c,d"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/c,d trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+ql=$(grep '^qemu-launch' "$log")
+{ [ $rc -eq 0 ] && grep -qF -- "path=$w/c,,d/swtpm-sock -tpmdev" <<<"$ql" && ! grep -qF -- "path=$w/c,d/swtpm-sock" <<<"$ql" \
+  && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a comma in the socket directory is doubled in the chardev path" || bad "tpm comma: rc=$rc out=[$out] ql=[$ql]"
+
+# No stub swtpm may outlive the suite.
+stray=$(pgrep -af "$w/.*swtpm" || true)
+[ -z "$stray" ] && ok "no stub swtpm survives" || bad "stray swtpm: [$stray]"
+
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]
