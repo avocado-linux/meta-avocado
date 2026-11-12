@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "kinds": ["dt_overlay", "kernel_args"]
+}
