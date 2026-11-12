@@ -81,6 +81,9 @@ exit 0
 S
   cat >"$w/bin/jq" <<S
 #!/bin/bash
+# Drain stdin like real jq: the script pipes the manifest in, and under pipefail
+# a stub that exits unread makes cat die of SIGPIPE (rc 141) intermittently.
+cat >/dev/null
 echo os.aos
 S
   cat >"$w/bin/bc" <<S

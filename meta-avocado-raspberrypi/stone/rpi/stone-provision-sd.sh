@@ -257,7 +257,10 @@ avocado_safe_disk_confirm "$sd_block_device" || exit 1
 echo "Proceeding with firmware write..."
 
 # Unmount any mounted partitions on the target device
-if mount | grep -q "${sd_block_device}"; then
+# Capture first: under pipefail a grep -q that exits on its first match makes a
+# long-running `mount` die of SIGPIPE, and the pipeline then reads as "not mounted".
+mounted_now=$(mount)
+if grep -q "${sd_block_device}" <<<"$mounted_now"; then
   echo "Unmounting any mounted partitions on ${sd_block_device}..."
   if ! avocado_safe_disk_write umount "${sd_block_device}"* 2>/dev/null; then
     echo "Error: Failed to unmount partitions on ${sd_block_device}"
