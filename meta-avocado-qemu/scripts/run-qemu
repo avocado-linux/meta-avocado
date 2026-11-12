@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Boot a provisioned Avocado image under QEMU for one of the supported machines.
+#
+# Usage: run-qemu <machine> [--tpm] [--image PATH] [--dry-run]
+#
+# Run it from the machine's kas work directory (the one holding build/tmp), or
+# pass --image to boot a copied image from anywhere. --dry-run prints what the
+# runner resolved and starts nothing.
+set -euo pipefail
+
+PROG=run-qemu
+SUPPORTED_MACHINES=(qemux86-64 qemuarm64)
+
+MACHINE=""
+TPM=0
+IMAGE=""
+DRY_RUN=0
+RESIZE_MIB=0
+
+die() {
+  local rc=$1
+  shift
+  printf '%s: %s\n' "$PROG" "$*" >&2
+  exit "$rc"
+}
+
+usage() {
+  {
+    echo "usage: $PROG <machine> [--tpm] [--image PATH] [--dry-run]"
+    echo "supported machines: ${SUPPORTED_MACHINES[*]}"
+  } >&2
+}
+
+is_supported() {
+  local m
+  for m in "${SUPPORTED_MACHINES[@]}"; do
+    [ "$m" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# Image names the stone scripts use, in the order the runner prefers them:
+# named after the platform, after the machine, then the bare root disk.
+image_candidates() {
+  local m=$1
+  echo "avocado-os-avocado-$m.img"
+  echo "avocado-os-$m.img"
+  echo "avocado-$m-rootdisk.img"
+}
+
+parse_args() {
+  local positional=()
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --tpm) TPM=1 ;;
+      --dry-run) DRY_RUN=1 ;;
+      --image)
+        [ $# -ge 2 ] || {
+          usage
+          die 2 "--image needs a path"
+        }
+        [ -n "$2" ] || {
+          usage
+          die 2 "--image needs a non-empty path"
+        }
+        IMAGE=$2
+        shift
+        ;;
+      -*)
+        usage
+        die 2 "unknown option '$1'"
+        ;;
+      *) positional+=("$1") ;;
+    esac
+    shift
+  done
+
+  MACHINE=${positional[0]:-}
+  if [ ${#positional[@]} -gt 1 ] || ! is_supported "$MACHINE"; then
+    usage
+    die 2 "unsupported machine '$MACHINE' (supported: ${SUPPORTED_MACHINES[*]})"
+  fi
+  if [ "$TPM" -eq 1 ] && [ "$MACHINE" != qemux86-64 ]; then
+    die 2 "--tpm is only supported for qemux86-64"
+  fi
+}
+
+# Sets IMAGE from --image or from the work directory's stone deploy output.
+resolve_image() {
+  if [ -n "$IMAGE" ]; then
+    [ -f "$IMAGE" ] || die 1 "image not found: $IMAGE"
+    return
+  fi
+
+  local tmpdir deploy name
+  tmpdir="$PWD/build/tmp"
+  [ -d "$tmpdir" ] || die 1 "no build output at $tmpdir; run from the machine's kas work directory or pass --image"
+  deploy="$tmpdir/deploy/stone/_build"
+  while read -r name; do
+    if [ -f "$deploy/$name" ]; then
+      IMAGE="$deploy/$name"
+      return
+    fi
+  done < <(image_candidates "$MACHINE")
+  die 1 "no image for $MACHINE in $deploy; tried: $(image_candidates "$MACHINE" | paste -sd' ')"
+}
+
+# Sets RESIZE_MIB to the size the image must grow to, or 0 for none. Both
+# machines boot an SD card, so an image under 1024 MiB grows to 1024 MiB and
+# any other size pads up to the next power-of-two MiB, which QEMU insists on.
+# Never shrinks.
+plan_resize() {
+  local bytes mib p=1024
+  # -L: a symlinked image is measured at its target, not at the link's few bytes.
+  bytes=$(stat -L -c %s "$IMAGE")
+  mib=$(((bytes + 1048575) / 1048576))
+  while [ "$p" -lt "$mib" ]; do p=$((p * 2)); done
+  mib=$p
+  if [ $((mib * 1048576)) -le "$bytes" ]; then
+    mib=0
+  fi
+  RESIZE_MIB=$mib
+}
+
+main() {
+  parse_args "$@"
+  resolve_image
+  plan_resize
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "image: $IMAGE"
+    if [ "$RESIZE_MIB" -gt 0 ]; then
+      echo "resize: ${RESIZE_MIB}M"
+    else
+      echo "resize: none"
+    fi
+    exit 0
+  fi
+
+  die 1 "launching QEMU is not implemented yet; use --dry-run"
+}
+
+main "$@"
