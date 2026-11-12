@@ -19,6 +19,17 @@ _RCM_ID = re.compile(r"[0-9a-f]{4}:[0-9a-f]{4}")
 _CMDLINE_VARS = ("AVOCADO_KERNEL_CMDLINE", "AVOCADO_KERNEL_CMDLINE_EXTRA")
 
 
+def dry_run_requested(environ: Mapping[str, str]) -> bool:
+    """AVOCADO_PROVISION_DRY_RUN: exactly 1 means --prepare-only; unset or empty is a normal run.
+
+    Any other value is refused, so a "0" or "true" cannot be read as either answer.
+    """
+    raw = environ.get("AVOCADO_PROVISION_DRY_RUN", "")
+    if raw not in ("", "1"):
+        raise EngineError(f"AVOCADO_PROVISION_DRY_RUN must be 1 or unset, not {raw!r}")
+    return raw == "1"
+
+
 @dataclass(frozen=True)
 class Config:
     manifest: str
@@ -78,6 +89,15 @@ def from_environ(environ: Mapping[str, str]) -> Config:
         raise EngineError(
             f"AVOCADO_PROVISION_RCM_ID must be a lowercase vendor:product pair such as 0955:7523, not {rcm_id!r}"
         )
+
+    # The Jetson engine flashes the complete image only; staging for another task would flash the wrong thing.
+    task = environ.get("AVOCADO_PROVISION_FWUP_TASK", "")
+    if task not in ("", "complete"):
+        raise EngineError(
+            f"AVOCADO_PROVISION_FWUP_TASK must be complete or unset, not {task!r}: this engine supports only a complete flash"
+        )
+
+    dry_run_requested(environ)
 
     def opt(name: str, default: str = "") -> str:
         return environ.get(name) or default

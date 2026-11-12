@@ -28,7 +28,7 @@ from . import (
     staging,
     toolchain,
 )
-from .env import from_environ
+from .env import dry_run_requested, from_environ
 from .fit import require_fit
 from .manifest import read_manifest
 from .profile import media_for_profile
@@ -115,11 +115,14 @@ def _require_identified_board(force_raw):
 
 
 def _run(args, environ, runner, euid, sleep) -> int:
-    # Deviation root-check-first: before the environment is read or anything is created.
+    base = dict(os.environ if environ is None else environ)
+    # AVOCADO_PROVISION_DRY_RUN=1 is --prepare-only; the later steps read args.prepare_only.
+    if dry_run_requested(base):
+        args.prepare_only = True
+    # Deviation root-check-first: before anything is created.
     if not args.prepare_only and (os.geteuid() if euid is None else euid) != 0:
         raise EngineError(_ROOT_REQUIRED)
 
-    base = dict(os.environ if environ is None else environ)
     base["PATH"] = _absolute_path(base.get("PATH", ""))
     cfg = from_environ(base)
     # Only the exact value 1 lifts it, so a stray "yes" cannot silently take the unpinned path.
