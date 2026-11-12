@@ -122,7 +122,8 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   # in the manifest is for stone metadata, not sgdisk).
   start_sector=$((PART_OFFSETS_KIB[i] * 2))
   size_sectors=$((PART_SIZES_KIB[i] * 2))
-  SGDISK_ARGS+=("-n" "${pnum}:${start_sector}:+$((size_sectors - 1))")
+  # sgdisk "+N" is a length in sectors, not an end offset
+  SGDISK_ARGS+=("-n" "${pnum}:${start_sector}:+${size_sectors}")
   SGDISK_ARGS+=("-t" "${pnum}:${PART_TYPES[i]}")
   if [ -n "${PART_NAMES[i]}" ]; then
     SGDISK_ARGS+=("-c" "${pnum}:${PART_NAMES[i]}")

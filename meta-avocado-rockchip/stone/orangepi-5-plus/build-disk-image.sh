@@ -137,7 +137,8 @@ for i in $(seq 0 $((NUM_PARTITIONS - 1))); do
   pnum=$((pnum + 1))
   start=${P_OFFSET_SEC[i]}
   size=${P_SIZE_SEC[i]}
-  SGDISK_ARGS+=("-n" "${pnum}:${start}:+$((size - 1))")
+  # sgdisk "+N" is a length in sectors, not an end offset
+  SGDISK_ARGS+=("-n" "${pnum}:${start}:+${size}")
   SGDISK_ARGS+=("-t" "${pnum}:${P_TYPE[i]}")
   if [ -n "${P_NAME[i]}" ]; then
     SGDISK_ARGS+=("-c" "${pnum}:${P_NAME[i]}")
