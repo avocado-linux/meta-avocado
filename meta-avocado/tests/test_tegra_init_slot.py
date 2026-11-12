@@ -31,6 +31,8 @@ def _slot_block():
     return m.group(0)
 
 
+@unittest.skipUnless(all(shutil.which(t) for t in INITRAMFS_TOOLS),
+                     "needs util-linux hexdump; CI runs this in the host-tests job")
 class TegraInitSlot(unittest.TestCase):
     def slot(self, attributes, value):
         with tempfile.TemporaryDirectory() as d:
