@@ -1284,8 +1284,8 @@ pin_rootfs_nvme_t264() {
     echo "nvme-pin: the flashing initramfs never came up on adb"
     return 1
   fi
-  if ! "$adb_bin" -s "$serial" push "$here/nvme-pin-for-flash" /tmp/nvme-pin-for-flash >/dev/null ||
-    ! "$adb_bin" -s "$serial" push out/tools/flashtools/flash/nvdd.real /tmp/nvdd.real >/dev/null; then
+  if ! "$adb_bin" -s "$serial" push "$here/nvme-pin-for-flash" /tmp/nvme-pin-for-flash >/dev/null \
+    || ! "$adb_bin" -s "$serial" push out/tools/flashtools/flash/nvdd.real /tmp/nvdd.real >/dev/null; then
     "$adb_bin" -s "$serial" shell touch /tmp/nvme-pin-failed
     echo "nvme-pin: could not push the pin tools to the target"
     return 1

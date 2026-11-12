@@ -70,13 +70,16 @@ Yocto build deploys (the stub exists only so the Yocto-time
 `do_stone_validate` task passes — see
 [recipes-bsp/tegraflash/tegraflash-bsp.bb](../recipes-bsp/tegraflash/tegraflash-bsp.bb)).
 
-At provision time,
+At provision time, the provisioning engine (`avocado_tegraflash`, see
+[carrier.py](../stone/tegra/avocado_tegraflash/carrier.py)) overlays the
+carrier-bsp/ files onto the staged tegraflash-bsp/ working directory (so
+same-named files shadow MACHINE-baked defaults), reads `carrier.env`, and
+applies the `CARRIER_FV_<NAME>` / `CARRIER_ENV_<NAME>` overrides to
+`flashvars` and `.env.initrd-flash` before invoking `initrd-flash`.
 [stone-provision-tegraflash.sh](../stone/tegra/stone-provision-tegraflash.sh)
-overlays the carrier-bsp/ files onto the staged tegraflash-bsp/ working
-directory (so same-named files shadow MACHINE-baked defaults), sources
-`carrier.env`, and applies the `CARRIER_FV_<NAME>` / `CARRIER_ENV_<NAME>`
-overrides to `flashvars` and `.env.initrd-flash` before invoking
-`initrd-flash`.
+is only the shim that starts the engine. Values are written literally, so
+`&` and backslash sequences survive. A `carrier.env` should carry a
+`CARRIER_LABEL` line: the engine prints it in the provision log when present.
 
 ## Step-by-step: adding a new carrier
 
@@ -148,6 +151,12 @@ This is the heart of the carrier override. Two generic knob shapes:
 
 - `CARRIER_FV_<NAME>=value` — patches `<NAME>=value` in `flashvars`.
 - `CARRIER_ENV_<NAME>=value` — patches `<NAME>=value` in `.env.initrd-flash`.
+- `CARRIER_NVME_PCI=dddd:bb:dd.f` — pins the NVMe the `nvme` provision
+  profile flashes, by PCIe address (for example `0005:01:00.0`). Without it
+  the flash writes `nvme0n1`, whichever controller came up first, which on a
+  carrier with two NVMe slots can be either disk. The engine hands it to
+  `initrd-flash` as `ROOTFS_NVME_PCI`. `AVOCADO_PROVISION_NVME_PCI`
+  overrides it for one run; a malformed value stops the provision.
 
 Files referenced by name must exist in the merged BSP — either in the
 MACHINE-baked `tegraflash-bsp/` (for variants meta-tegra already ships,
@@ -207,7 +216,12 @@ CARRIER_FV_CHECK_BOARDSKU="0001"
 | `DTBFILE` | Kernel DTB filename to flash |
 | `EMMC_BCTS` | Primary SDRAM init dts (despite the name) |
 | `ODMDATA` | UPHY lane / GBE config string |
-| `ROOTFS_DEVICE`, `BOOTDEV`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE`, `ROOTFS_IMAGE`, `LNXFILE`, `FLASH_HELPER`, `DATAFILE` | Per-profile boot/storage retargeting |
+| `BOOTDEV`, `LNXFILE`, `FLASH_HELPER` | Per-profile boot retargeting; the engine does not check these |
+| `ROOTFS_IMAGE`, `DATAFILE` | Not retargetable under `avocado provision`: the engine refuses a `ROOTFS_IMAGE` other than the staged rootfs name and a `DATAFILE` other than the basename of the manifest `var` image |
+| `ROOTFS_DEVICE`, `EXTERNAL_ROOTFS_DRIVE` | Set by the engine's boot-device step from the profile; the engine reads them back and refuses any value that differs, so do not set them in `carrier.env` |
+| `NO_INTERNAL_STORAGE` | Not written by the engine. The BSP recipe or a carrier may set it; the engine only reads it, and it must be `0` or `1`. `1` keeps the flash off the internal eMMC. Unset or `0` makes the flash erase the eMMC, and the confirmation prompt then names `emmc` |
+
+The engine reads `.env.initrd-flash` and `.presigning-vars` without executing them. A line that mentions `ROOTFS_IMAGE`, `ROOTFS_DEVICE`, `DATAFILE`, `EXTERNAL_ROOTFS_DRIVE`, `NO_INTERNAL_STORAGE` or `TOSIMGFILENAME` must stay a plain column-0 assignment (`KEY=value`) or a `$KEY` / `${KEY}` read; `export`, indentation, chains, `eval` and `source` forms are refused.
 
 The list isn't exhaustive — anything in either file can be patched
 with `CARRIER_FV_*` / `CARRIER_ENV_*`. Unknown keys log a warning and
@@ -433,6 +447,6 @@ Regression test:
 - [bsp/icam-540/avocado.yaml](../../../bsp/icam-540/avocado.yaml) — full worked example
 - [bsp/icam-540/stone/carrier-bsp/carrier.env](../../../bsp/icam-540/stone/carrier-bsp/carrier.env) — carrier override values
 - [stone-jetson-orin-nx.json](../stone/stone-jetson-orin-nx.json) — SOM stone manifest with `tegraflash_carrier_bsp` slot
-- [stone-provision-tegraflash.sh](../stone/tegra/stone-provision-tegraflash.sh) — carrier overlay + flashvars/env patching at provision time
+- [carrier.py](../stone/tegra/avocado_tegraflash/carrier.py) — carrier overlay + flashvars/env patching at provision time, in the engine the [stone-provision-tegraflash.sh](../stone/tegra/stone-provision-tegraflash.sh) shim starts
 - [tegraflash-bsp.bb](../recipes-bsp/tegraflash/tegraflash-bsp.bb) — Yocto-time empty `carrier-bsp/` stub for `do_stone_validate`
 - avocado-cli `get_stone_include_paths_for_runtime` — composes runtime + per-extension paths, scoped to extension location for remote sources

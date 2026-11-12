@@ -27,7 +27,10 @@ expect() {
   printf '%s\n' "$3" >"$w/cmdline"
   AVOCADO_SYSFS="$w/sys" AVOCADO_CMDLINE="$w/cmdline" sh "$helper" "$2"
   got=$?
-  if [ "$got" = "$1" ]; then echo "ok - $4"; else echo "FAIL - $4 (exit $got, want $1)"; fail=1; fi
+  if [ "$got" = "$1" ]; then echo "ok - $4"; else
+    echo "FAIL - $4 (exit $got, want $1)"
+    fail=1
+  fi
 }
 
 emmc_root="root=PARTUUID=BAE4E9CC-4F05-475D-AFAE-BE1C6A262C66 rootwait ro"

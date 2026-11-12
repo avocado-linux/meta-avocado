@@ -1,0 +1,38 @@
+{
+  "upstream": "vendor-meta-tegra",
+  "revision": "feab7664000f313f655d20d2f39c04432214dc25",
+  "files": {
+    "recipes-bsp/tegra-binaries/tegra-helper-scripts/initrd-flash.sh": {
+      "sha256": "5a33eb38489d43eaf62ee421d794b3564f01d3da5ae27a7a6c670b4e9f6bb948",
+      "forked_as": "meta-avocado-nvidia/recipes-bsp/tegra-binaries/tegra-helper-scripts/initrd-flash.sh"
+    },
+    "recipes-bsp/tegra-binaries/tegra-helper-scripts/tegra-flash-helper.sh": {
+      "note": "Upstream folded tegra234-flash-helper.sh back into this script (commit 41d77a626). Orin flashes through the avocado fork; tegra264 uses this file unforked (tegraflash-bsp.bb FLASH_HELPER_SCRIPT).",
+      "sha256": "e769087d14dae1c0479de5ce8bcfe96b34fd763178e984eedf0ebbd9516f3939",
+      "forked_as": "meta-avocado-nvidia/recipes-bsp/tegra-binaries/tegra-helper-scripts/tegra234-flash-helper.sh"
+    },
+    "recipes-bsp/tegra-binaries/tegra-helper-scripts/find-jetson-usb.sh": {
+      "sha256": "2393e0acb1704fa9198e8976f91cc65bff845f84eb048567fbd20adc79cd6fe3",
+      "forked_as": null
+    },
+    "recipes-bsp/tegra-binaries/tegra-helper-scripts/make-sdcard.sh": {
+      "sha256": "88a256622c676751b2e9de8d92f390c127c10a8e2c41ed26b9da9d9919d1d762",
+      "forked_as": "meta-avocado-nvidia/recipes-bsp/tegra-binaries/tegra-helper-scripts/make-sdcard.sh"
+    },
+    "recipes-bsp/tegra-binaries/tegra-storage-layout_39.2.1.bb": {
+      "note": "Hashes the recipe that packages the layouts, not the layout template.",
+      "sha256": "53a276cf570c016e511d3d625ae3ffabd5b511e87083b56e40cb83b5937ed283",
+      "forked_as": null
+    },
+    "recipes-bsp/tegra-binaries/tegra-storage-layout-base_39.2.1.bb": {
+      "note": "Hashes the recipe that installs the external layout template (PARTITION_FILE_EXTERNAL); the template itself comes from the L4T tarball and is covered by the tegra-binaries .inc hash.",
+      "sha256": "f0a0044a50572d81533833cdce944888d43377fd0de6134866a58895d09c3554",
+      "forked_as": "meta-avocado-nvidia/recipes-bsp/tegra-binaries/tegra-storage-layout/external-flash.xml"
+    },
+    "recipes-bsp/tegra-binaries/tegra-binaries-39.2.1.inc": {
+      "note": "Hashes the recipe include that names the L4T tarball (source of the layout template); a tarball bump changes this file.",
+      "sha256": "f5b3ca0ba7626860ddd05581474bfbf3c00742ffdcc911a3d0f6cec2aaa9800e",
+      "forked_as": null
+    }
+  }
+}

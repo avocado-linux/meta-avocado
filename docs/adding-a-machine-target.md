@@ -419,6 +419,10 @@ Profiles outside that set (e.g. `serial`, `emmc`) need to be wired up in
 For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
 `serial` (bootstrap bootloader) → `emmc`/`sd` (install OS image).
 
+For a Jetson board the `tegraflash` profiles run one shared engine, and the
+board also needs a registry entry for `avocado-flash nvme`; see
+[adding a flash board](adding-a-flash-board.md).
+
 ### Environment variables available to scripts
 
 | Variable | Description |
@@ -518,6 +522,10 @@ do_deploy:append:stone-serial() {
 `stone-<profile>` is a `MACHINEOVERRIDES` element synthesized by `avocado.inc`
 from the machine's `STONE_PROVISIONING` value, so the `:append:stone-<profile>`
 overrides only fire when the corresponding profile is enabled.
+
+Jetson targets do not wire their own script this way: the manifest names the
+shared `stone-provision-tegraflash.sh` and the engine directory. See
+[adding a flash board](adding-a-flash-board.md).
 
 ---
 
