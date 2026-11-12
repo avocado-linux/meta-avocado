@@ -96,7 +96,7 @@ def test_override_matching_the_board_flashes(tmp_path, capsys):
 
 @pytest.mark.parametrize(
     "bad",
-    ["0955:7C18", "0x0955:0x7523", " 0955:7523", "0955:7523 ", "0955-7523", "955:7523", "0955:75234", "", "0955:7523,0955:7c18", "0955:7523\n"],
+    ["0955:7C18", "0x0955:0x7523", " 0955:7523", "0955:7523 ", "0955-7523", "955:7523", "0955:75234", "0955:7523,0955:7c18", "0955:7523\n"],
 )
 def test_a_malformed_override_is_refused_before_anything_is_staged(tmp_path, capsys, bad):
     rig = make_rig(tmp_path, env={VAR: bad})
@@ -114,3 +114,18 @@ def test_force_one_with_manifest_ids_still_waits(tmp_path, capsys):
     rig = make_rig(tmp_path, env={FORCE: "1"})
     rc, _, _ = rig.go(main, capsys)
     assert (rc, "lsusb" in rig.runner.tools()) == (0, True)
+
+
+def test_an_empty_override_is_no_override_and_the_manifest_ids_still_apply(tmp_path, capsys):
+    # Empty counts as unset, as for FORCE, FWUP_TASK and DRY_RUN: a manifest id that
+    # the board does not match must still refuse, so the manifest list was used.
+    line = "Bus 001 Device 005: ID 0955:7c18 NVIDIA Corp. APX"
+    rig = make_rig(tmp_path, env={VAR: ""}, runner=FakeRunner(lsusb=[[line]]))
+    rc, _, err = rig.go(main, capsys)
+    assert (rc, "must be a lowercase" in err, "0955:7523" in err, rig.runner.named("initrd-flash")) == (1, False, True, [])
+
+
+def test_an_empty_override_does_not_supply_an_id_a_manifest_lacks(tmp_path, capsys):
+    rig = _no_ids(make_rig(tmp_path, env={FORCE: "1", VAR: ""}))
+    rc, _, err = rig.go(main, capsys)
+    assert (_refused_early(rig, rc, err), "must be a lowercase" in err) == (True, False)

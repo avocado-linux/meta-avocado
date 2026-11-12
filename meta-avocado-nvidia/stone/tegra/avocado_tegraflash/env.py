@@ -84,8 +84,8 @@ def from_environ(environ: Mapping[str, str]) -> Config:
 
     # An override that does not parse must stop the run: it names the one board that may be
     # flashed, so a typo that quietly matched nothing would read as no restriction.
-    rcm_id = environ.get("AVOCADO_PROVISION_RCM_ID")
-    if rcm_id is not None and not _RCM_ID.fullmatch(rcm_id):
+    rcm_id = environ.get("AVOCADO_PROVISION_RCM_ID", "")
+    if rcm_id and not _RCM_ID.fullmatch(rcm_id):
         raise EngineError(
             f"AVOCADO_PROVISION_RCM_ID must be a lowercase vendor:product pair such as 0955:7523, not {rcm_id!r}"
         )

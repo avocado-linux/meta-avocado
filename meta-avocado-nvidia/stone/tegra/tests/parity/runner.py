@@ -179,10 +179,21 @@ def build_env(case: Case, s: Setup) -> dict[str, str]:
     else:
         # The engine refuses an unpinned kernel; these cases exercise the prebuilt boot image.
         env["AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL"] = "1"
-    # Manifests without rcm_ids are refused unless an id is given; the stub board is 0955:7523.
-    env.setdefault("AVOCADO_PROVISION_RCM_ID", "0955:7523")
+    # A manifest without rcm_ids is refused unless an id is given (the stub board is 0955:7523);
+    # one that declares its own is left to supply them, so the parity run reads them too.
+    if not _declares_rcm_ids(s.tree.manifest):
+        env.setdefault("AVOCADO_PROVISION_RCM_ID", "0955:7523")
     env.update(case.env_dict)
     return env
+
+
+def _declares_rcm_ids(manifest) -> bool:
+    def walk(node) -> bool:
+        if isinstance(node, dict):
+            return bool(node.get("rcm_ids")) or any(walk(v) for v in node.values())
+        return False
+
+    return walk(json.loads(Path(manifest).read_text()))
 
 
 def read_calls(log_path) -> list:

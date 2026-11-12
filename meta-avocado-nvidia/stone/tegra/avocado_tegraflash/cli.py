@@ -164,6 +164,8 @@ def _run(args, environ, runner, euid, sleep) -> int:
         # Before the reset, so an unusable image leaves the previous staging intact.
         # One refusal lists every absent manifest key and every unusable file.
         staging.require_images(Path(cfg.data_dir), man, require_keys=True)
+        if cfg.kernel_image:
+            bootimg.require_tools(_boot_tools_dir(cfg, man, work))
         staging.reset_work_dir(work)
         print(f"Building tegraflash working directory: {work}")
         staging.copy_bsp(cfg.data_dir, man.tegraflash_bsp, work)
@@ -180,6 +182,10 @@ def _run(args, environ, runner, euid, sleep) -> int:
             target = cpp.resolve_cpp(path=path_env, sdk_arch=cfg.sdk_arch, cc=cfg.cc)
             cpp.write_wrapper(wrapper_dir, target)
             return _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep)
+
+
+def _boot_tools_dir(cfg, man, work):
+    return join_name(cfg.data_dir, man.tegraflash_tools) if man.tegraflash_tools else work
 
 
 def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) -> int:
@@ -206,7 +212,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
             initramfs_name=man.initramfs,
             env=flash_env,
             version=cfg.kernel_version,
-            tools_dir=join_name(cfg.data_dir, man.tegraflash_tools) if man.tegraflash_tools else work,
+            tools_dir=_boot_tools_dir(cfg, man, work),
         )
     else:
         bootimg.refuse_cmdline_without_kernel(cfg.kernel_cmdline, cfg.kernel_cmdline_extra)

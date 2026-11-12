@@ -21,6 +21,19 @@ _PREBUILT_WARNING = (
 )
 
 
+def require_tools(tools_dir: str | Path) -> tuple[str, str]:
+    """Return the helper and mkbootimg paths in tools_dir, refusing if either is missing or not executable."""
+    tools = Path(tools_dir)
+    helper = str(tools / "avocado-tegra-bootimg")
+    mkbootimg = str(tools / "mkbootimg")
+    for path in (helper, mkbootimg):
+        if not (os.path.isfile(path) and os.access(path, os.X_OK)):
+            raise EngineError(
+                f"{os.path.basename(path)} is missing or not executable in the tools directory {tools}"
+            )
+    return helper, mkbootimg
+
+
 def repack(
     runner: Runner,
     *,
@@ -40,14 +53,7 @@ def repack(
         raise EngineError(f"initramfs cpio not staged at {initramfs}")
     # Absolute paths into the directory the manifest names: PATH is never consulted,
     # so a same-named program earlier on it cannot stand in for the staged helper.
-    tools = Path(tools_dir)
-    helper = str(tools / "avocado-tegra-bootimg")
-    mkbootimg = str(tools / "mkbootimg")
-    for path in (helper, mkbootimg):
-        if not (os.path.isfile(path) and os.access(path, os.X_OK)):
-            raise EngineError(
-                f"{os.path.basename(path)} is missing or not executable in the tools directory {tools}"
-            )
+    helper, mkbootimg = require_tools(tools_dir)
     log(f"Packing boot.img from kernel {version or '?'} (Image={kernel_image})")
     boot = f"{work}/boot.img"
     # The helper reads its base image from the path it then writes, so a staged

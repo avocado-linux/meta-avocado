@@ -136,3 +136,29 @@ def test_the_force_decision_table_end_to_end(tmp_path, capsys, monkeypatch, forc
     assert (rc == 0, len(rig.runner.named("initrd-flash"))) == ((True, 1) if flashes else (False, 0))
     if not flashes:
         assert FORCE in err
+
+
+@pytest.mark.deviation("mkbootimg-missing-refused")
+def test_a_tools_dir_without_mkbootimg_is_refused_before_the_work_dir_is_reset(tmp_path, capsys):
+    rig = make_rig(tmp_path, kernel=True)
+    doc = json.loads(Path(rig.environ["AVOCADO_STONE_MANIFEST"]).read_text())
+    tools = Path(rig.environ["AVOCADO_STONE_DATA_DIR"]) / _find_key(doc, "tegraflash_tools")
+    (tools / "mkbootimg").unlink()
+    rig.work.mkdir(parents=True)
+    sentinel = rig.work / "previous-staging"
+    sentinel.write_text("keep")
+    rc, _, err = rig.go(main, capsys)
+    # The adb warm-up precedes the manifest read, so it may have run; nothing after it may.
+    ran = set(rig.runner.tools()) - {"adb"}
+    assert (rc != 0, "mkbootimg" in err, sentinel.read_text() if sentinel.exists() else None, ran) == (True, True, "keep", set())
+
+
+def _find_key(node, key):
+    if isinstance(node, dict):
+        if key in node:
+            return node[key]
+        for child in node.values():
+            found = _find_key(child, key)
+            if found is not None:
+                return found
+    return None
