@@ -41,7 +41,8 @@
       }
     },
     "files": [
-      "build-disk-image.sh"
+      "build-disk-image.sh",
+      "avocado-safe-disk.sh"
     ],
     "profiles": {
       "serial": {
@@ -57,7 +58,8 @@
       "sd": {
         "script": "stone-provision-sd.sh",
         "envs": ["device_info", "cmdline"],
-        "requires": ["usb"]
+        "requires": ["usb"],
+        "config": { "dry_run": true }
       }
     }
   },
