@@ -17,7 +17,7 @@ w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 pass=0
 fail=0
-total=20
+total=21
 ok() {
   echo "  ok   - $1"
   pass=$((pass + 1))
@@ -96,6 +96,9 @@ exit 0
 S
   cat >"$w/bin/jq" <<S
 #!/bin/bash
+# Drain stdin when fed by a pipe (cat | jq) so cat never takes SIGPIPE under
+# pipefail; a call that names the manifest reads no stdin and must not eat the prompt's.
+case "\$*" in *manifest.json*) ;; *) cat >/dev/null ;; esac
 case "\$*" in
   *rootdisk.out*) echo os.aos ;;
   *devpath*) echo /dev/mmcblk0 ;;
@@ -247,6 +250,17 @@ out=$(run "" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -eq 0 ] && grep -q "^umount $w/dev/sdb" "$w/log" && wrote_to "$w/dev/sdb"; } \
   && ok "a mounted partition is unmounted by the script and the write proceeds" || bad "unmount: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+setup
+usb sdb
+{
+  echo "$w/dev/sdb1 /media/stick vfat rw 0 0"
+  awk 'BEGIN { for (i = 0; i < 150000; i++) print "tmpfs /run/fill/" i " tmpfs rw 0 0" }'
+} >"$w/st/mounts"
+out=$(run "" AVOCADO_PROVISION_FORCE=1)
+rc=$?
+{ [ $rc -eq 0 ] && grep -q "^umount $w/dev/sdb" "$w/log" && wrote_to "$w/dev/sdb"; } \
+  && ok "a mounted partition listed first in a multi-MB mount table is still unmounted (no SIGPIPE false negative)" || bad "big mount table: rc=$rc out=[$(echo "$out" | tail -5)] log=$(cat "$w/log")"
 
 setup
 usb sdb

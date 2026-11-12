@@ -469,7 +469,10 @@ echo "Proceeding with firmware write..."
 
 # Release any mounted partitions before the first write, then refuse what is still
 # mounted or in use, here or on the host: clearing uboot-env writes the disk too.
-if mount | grep -q "${rpi_block_device}"; then
+# Capture first: under pipefail, grep -q exiting at its first match SIGPIPEs a
+# large `mount` and the pipeline would read as "not mounted".
+mounted_now=$(mount)
+if grep -q "${rpi_block_device}" <<<"$mounted_now"; then
   echo "Unmounting any mounted partitions on ${rpi_block_device}..."
   if ! avocado_safe_disk_write umount "${rpi_block_device}"* 2>/dev/null; then
     echo "Error: Failed to unmount partitions on ${rpi_block_device}"
