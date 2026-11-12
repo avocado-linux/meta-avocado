@@ -93,6 +93,13 @@ def _absolute_path(path: str) -> str:
     return ":".join(kept)
 
 
+_UNPINNED_KERNEL = (
+    "AVOCADO_PROVISION_KERNEL_IMAGE is not set: the prebuilt boot.img names no rootfs PARTUUID.\n"
+    "Pin the kernel with AVOCADO_PROVISION_KERNEL_IMAGE, or set "
+    "AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1 to accept the prebuilt boot image."
+)
+
+
 def _run(args, environ, runner, euid, sleep) -> int:
     # Deviation root-check-first: before the environment is read or anything is created.
     if not args.prepare_only and (os.geteuid() if euid is None else euid) != 0:
@@ -101,6 +108,9 @@ def _run(args, environ, runner, euid, sleep) -> int:
     base = dict(os.environ if environ is None else environ)
     base["PATH"] = _absolute_path(base.get("PATH", ""))
     cfg = from_environ(base)
+    # Only the exact value 1 lifts it, so a stray "yes" cannot silently take the unpinned path.
+    if not cfg.kernel_image and base.get("AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL") != "1":
+        raise EngineError(_UNPINNED_KERNEL)
     # Deviation unknown-profile-refused: the oracle (514-527) falls back to nvme.
     media = media_for_profile(cfg.profile)
     path_env = base.get("PATH", "")
