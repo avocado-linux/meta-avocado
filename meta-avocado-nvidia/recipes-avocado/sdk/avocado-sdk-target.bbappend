@@ -45,3 +45,14 @@ do_install:append() {
         bbfatal "tegraflash-bsp not in ${DEPLOY_DIR_IMAGE}; the SDK stone dir would ship without the BSP and every consumer of a BSP artifact would fail at CLI build time with a not-found that points at the SDK rather than at this recipe"
     fi
 }
+
+# Shared boot.img packer for the A_kernel/B_kernel partitions, called by the
+# Jetson build hooks (OTA payload) and stone-provision-tegraflash.sh (flash),
+# and the build-time wrapper the hooks call to pick the pinned kernel.
+SRC_URI += "file://avocado-tegra-bootimg file://avocado-tegra-build-bootimg"
+FILES:${PN} += "${SDKPATHNATIVE}${bindir}/avocado-tegra-bootimg ${SDKPATHNATIVE}${bindir}/avocado-tegra-build-bootimg"
+do_install:append() {
+    install -d ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${WORKDIR}/avocado-tegra-bootimg ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${WORKDIR}/avocado-tegra-build-bootimg ${D}${SDKPATHNATIVE}${bindir}
+}

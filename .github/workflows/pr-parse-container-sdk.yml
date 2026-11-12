@@ -125,3 +125,8 @@ jobs:
       - name: stone sizeless var partition (renesas, alif, stm, rockchip)
         shell: bash
         run: bash meta-avocado-renesas/stone/tests/test-stone-sizeless-partition.sh
+      - name: Tegra boot.img packer and build-time kernel selection
+        shell: bash
+        run: |
+          bash meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-tegra-bootimg.sh
+          bash meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-tegra-build-bootimg.sh
