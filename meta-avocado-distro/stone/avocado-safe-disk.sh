@@ -26,6 +26,10 @@
 #   AVOCADO_SAFE_DISK_MOUNTS    mount table (default /proc/self/mounts)
 #   AVOCADO_SAFE_DISK_SWAPS     swap table (default /proc/swaps)
 #   AVOCADO_SAFE_DISK_DEVDIR    where device nodes live (default /dev)
+#   AVOCADO_PROVISION_HOST_MOUNTS  file holding the host's mount table, exported
+#                               by avocado-cli; read as a second mount table
+#   AVOCADO_SAFE_DISK_CONTAINER_MARKERS  files whose presence means "in a
+#                               container" (default /.dockerenv /run/.containerenv)
 #   AVOCADO_SAFE_DISK_EUID      effective uid avocado_safe_disk_run acts on
 #                               (default: id -u); a test override
 #
@@ -184,14 +188,30 @@ avocado_safe_disk_not_root() {
   fi
 }
 
-# Refuse a device, or any partition of it, that is mounted or in use as swap. A
-# filesystem still mounted while its disk is rewritten is corrupted. Reads the
-# mount tables directly, so this sees only this mount namespace: a host mount
-# is invisible from inside the SDK container.
+# Refuse a device, or any partition of it, that is mounted or in use as swap,
+# including through a dm, LVM or md volume stacked on it. A filesystem still
+# mounted while its disk is rewritten is corrupted. Inside the SDK container
+# /proc/self/mounts shows only the container's namespace, so a host mount is
+# invisible there; avocado-cli exports the host's table as the file named by
+# AVOCADO_PROVISION_HOST_MOUNTS, read here as a second mount table. A named file
+# that cannot be read refuses. In a container with it unset the check warns that
+# host mounts were not checked and continues; on a host nothing is warned.
 avocado_safe_disk_unmounted() {
-  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} target table src real name
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} target table src real name chain marker
+  local tables=("${AVOCADO_SAFE_DISK_MOUNTS:-/proc/self/mounts}" "${AVOCADO_SAFE_DISK_SWAPS:-/proc/swaps}")
   target=$(basename -- "$(readlink -f -- "$dev")")
-  for table in "${AVOCADO_SAFE_DISK_MOUNTS:-/proc/self/mounts}" "${AVOCADO_SAFE_DISK_SWAPS:-/proc/swaps}"; do
+  if [ -n "${AVOCADO_PROVISION_HOST_MOUNTS:-}" ]; then
+    tables+=("$AVOCADO_PROVISION_HOST_MOUNTS")
+  else
+    for marker in ${AVOCADO_SAFE_DISK_CONTAINER_MARKERS:-/.dockerenv /run/.containerenv}; do
+      if [ -e "$marker" ]; then
+        # devtool-debt: a missing host mount table only warns. Ceiling: avocado-cli exporting no table. Upgrade trigger: the exporting avocado-cli release becomes the minimum; a missing table then refuses.
+        echo "WARNING: running in a container and AVOCADO_PROVISION_HOST_MOUNTS is unset; host mounts of ${dev} were not checked" >&2
+        break
+      fi
+    done
+  fi
+  for table in "${tables[@]}"; do
     [ -r "$table" ] || {
       _asd_err "refusing ${dev}: cannot read ${table}, so its mount state is unknown"
       return 1
@@ -204,7 +224,11 @@ avocado_safe_disk_unmounted() {
       real=$(readlink -f -- "$src") || continue
       name=$(basename -- "$real")
       [ -e "$(_asd_sysblock)/$name" ] || continue
-      if [ "$(_asd_parent_disk "$name")" = "$target" ]; then
+      chain=$(_asd_chain "$name") || {
+        _asd_err "refusing ${dev}: cannot trace the devices under ${src}"
+        return 1
+      }
+      if printf '%s\n' "$chain" | grep -qxF -- "$target"; then
         _asd_err "refusing ${dev}: ${src} is mounted or in use (${table##*/}); unmount it first"
         return 1
       fi

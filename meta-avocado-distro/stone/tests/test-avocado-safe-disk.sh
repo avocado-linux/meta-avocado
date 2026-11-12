@@ -84,7 +84,7 @@ S
 call() {
   PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys/class/block" \
     AVOCADO_SAFE_DISK_MOUNTS="${T_MOUNTS:-$w/st/mounts}" AVOCADO_SAFE_DISK_SWAPS="${T_SWAPS:-$w/st/swaps}" \
-    AVOCADO_SAFE_DISK_DEVDIR="$w/dev" bash -c ". '$lib'; $1" 2>&1
+    AVOCADO_SAFE_DISK_DEVDIR="$w/dev" AVOCADO_SAFE_DISK_CONTAINER_MARKERS="${T_MARKERS:-$w/st/no-marker}" bash -c ". '$lib'; $1" 2>&1
 }
 idpath() { echo "$2" >"$w/st/idpath-$1"; }
 
@@ -263,6 +263,52 @@ rc=$?
 { [ $rc -ne 0 ] && echo "$out" | grep -q "cannot read"; } \
   && ok "an unreadable swap table fails closed" || bad "no swaps: rc=$rc out=[$out]"
 
+# --- host mount table -------------------------------------------------------
+
+setup
+echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/host-mounts"
+out=$(call "AVOCADO_PROVISION_HOST_MOUNTS=$w/st/host-mounts avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "host-mounts"; } \
+  && ok "a partition mounted only in the host table is refused" || bad "host-only mount: rc=$rc out=[$out]"
+
+out=$(call "AVOCADO_PROVISION_HOST_MOUNTS=$w/st/absent avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "$w/st/absent"; } \
+  && ok "an unreadable host table is refused, naming the file" || bad "host unreadable: rc=$rc out=[$out]"
+
+echo "overlay / overlay rw 0 0" >"$w/st/host-mounts"
+out=$(call "AVOCADO_PROVISION_HOST_MOUNTS=$w/st/host-mounts avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -eq 0 ] && ! echo "$out" | grep -qi "warning"; } \
+  && ok "a clean host table passes without a warning" || bad "host clean: rc=$rc out=[$out]"
+
+: >"$w/st/marker"
+out=$(T_MARKERS="$w/st/marker" call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "host mounts" && echo "$out" | grep -qi "not checked"; } \
+  && ok "in a container with no host table it warns and continues" || bad "container warn: rc=$rc out=[$out]"
+
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -eq 0 ] && [ -z "$out" ]; } \
+  && ok "on a host with no host table it neither warns nor refuses" || bad "host silent: rc=$rc out=[$out]"
+
+out=$(T_MARKERS="$w/st/marker" call "AVOCADO_PROVISION_HOST_MOUNTS=$w/st/host-mounts avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -eq 0 ] && ! echo "$out" | grep -qi "warning"; } \
+  && ok "in a container with a host table there is no warning" || bad "container with table: rc=$rc out=[$out]"
+
+mkdir -p "$w/sys/devices/virtual/block/dm-0/slaves"
+ln -s "../../../../$USBPATH/sdb/sdb1" "$w/sys/devices/virtual/block/dm-0/slaves/sdb1"
+ln -s ../../devices/virtual/block/dm-0 "$w/sys/class/block/dm-0"
+: >"$w/dev/dm-0"
+ln -s ../dm-0 "$w/dev/mapper/crypt"
+echo "$w/dev/mapper/crypt /mnt/secret ext4 rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+[ $rc -ne 0 ] && ok "a dm volume stacked on a partition of the target is refused" || bad "stacked dm: rc=$rc out=[$out]"
+
 # --- confirmation -----------------------------------------------------------
 
 setup
@@ -378,5 +424,5 @@ out=$(runcall x "avocado_safe_disk_run fwup" AVOCADO_SAFE_DISK_EUID=0 LD_LIBRARY
   && ok "as uid 0 the environment passes through untouched" || bad "root env: out=[$out]"
 
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/41 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 41 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/48 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 48 ]
