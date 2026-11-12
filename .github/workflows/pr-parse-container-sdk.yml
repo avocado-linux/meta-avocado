@@ -187,6 +187,11 @@ jobs:
       - name: stone sd/usb wrong-disk guards (shared library)
         shell: bash
         run: bash meta-avocado-distro/stone/tests/test-avocado-safe-disk.sh
+      - name: i.MX and Raspberry Pi stone sd provisioning guards
+        shell: bash
+        run: |
+          bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-sd-safe-disk.sh
+          bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-sd-safe-disk.sh meta-avocado-raspberrypi/stone/rpi/stone-provision-sd.sh
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh

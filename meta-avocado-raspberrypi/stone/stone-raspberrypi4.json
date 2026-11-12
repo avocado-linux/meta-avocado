@@ -84,6 +84,7 @@
         "required": false
       }
     },
+    "files": ["avocado-safe-disk.sh"],
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",

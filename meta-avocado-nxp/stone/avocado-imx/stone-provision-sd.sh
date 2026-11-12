@@ -69,6 +69,11 @@ echo ""
 echo "This tool will write the Avocado system image to an SD card."
 echo ""
 
+# Wrong-disk guards shared with the other sd and usb profiles. Shipped beside
+# this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
 # =============================================================================
 # Device selection helper
 # =============================================================================
@@ -111,11 +116,6 @@ sd_block_device=""
 if [[ -n "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
   echo "Non-interactive mode: AVOCADO_PROVISION_DEVICE=${AVOCADO_PROVISION_DEVICE}"
   echo ""
-
-  if [[ ! -b "$AVOCADO_PROVISION_DEVICE" ]]; then
-    echo "Error: ${AVOCADO_PROVISION_DEVICE} is not a valid block device"
-    exit 1
-  fi
 
   if [[ -n "$root_dev" && "$AVOCADO_PROVISION_DEVICE" == "$root_dev" ]]; then
     echo "Error: ${AVOCADO_PROVISION_DEVICE} is the boot volume -- refusing to overwrite"
@@ -211,6 +211,11 @@ else
   fi
 fi
 
+# Whole disk on a USB or MMC bus that does not hold the running root. Runs for
+# both branches above, on the device actually chosen.
+avocado_safe_disk_check_device "$sd_block_device" || exit 1
+sd_block_device="$AVOCADO_SAFE_DISK_DEV"
+
 # =============================================================================
 # Confirm and write
 # =============================================================================
@@ -230,16 +235,14 @@ echo "  Size:   ${device_size_gib_decimal} GiB"
 echo "  Info:   $device_info"
 echo ""
 
-if [[ -z "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
-  echo "WARNING: This will completely overwrite ${sd_block_device}!"
-  echo "All existing data on this SD card will be lost."
-  echo ""
-  read -p "Are you sure you want to continue? (y/N): " -r
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Operation cancelled by user"
-    exit 1
-  fi
+# Typed retype of the device path. A device named up front through
+# AVOCADO_PROVISION_DEVICE is an unattended run and is not asked; so is
+# AVOCADO_PROVISION_FORCE=1.
+explicit_device=0
+if [[ -n "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
+  explicit_device=1
 fi
+avocado_safe_disk_confirm "$sd_block_device" "$explicit_device" || exit 1
 
 echo "Proceeding with firmware write..."
 
@@ -251,6 +254,9 @@ if mount | grep -q "${sd_block_device}"; then
     exit 1
   fi
 fi
+
+# Whatever is still mounted now was not unmounted above; never write under it.
+avocado_safe_disk_unmounted "$sd_block_device" || exit 1
 
 # Brief wait to ensure device is ready
 sleep 2

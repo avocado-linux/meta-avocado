@@ -97,6 +97,7 @@
         "description": "Stable identifier registered with Peridio."
       }
     },
+    "files": ["avocado-safe-disk.sh"],
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",

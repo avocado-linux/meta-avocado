@@ -28,6 +28,7 @@
         "AVOCADO_DEVICE_ID": "${AVOCADO_DEVICE_ID}"
       }
     },
+    "files": ["avocado-safe-disk.sh"],
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
