@@ -22,6 +22,10 @@
     "rollback": [
       {
         "type": "command",
+        "command": ["nvbootctrl", "verify"]
+      },
+      {
+        "type": "command",
         "command": ["nvbootctrl", "set-active-boot-slot", "{previous_slot}"]
       }
     ]
