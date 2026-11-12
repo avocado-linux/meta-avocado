@@ -36,8 +36,10 @@ meta-avocado/meta-avocado-qemu/scripts/run-qemu <machine>
 Supported machines: `qemux86-64` and `qemuarm64`.
 
 - `--tpm` adds a software TPM (swtpm); it works for `qemux86-64` only.
-- `--image PATH` boots a copied image from any directory instead of the one
-  under `build/tmp/deploy/stone/_build/`.
+- `--image PATH` boots a copied image instead of the one under
+  `build/tmp/deploy/stone/_build/`. It replaces the image lookup only: outside
+  a work directory, set `RUN_QEMU_UBOOT_ROM` (`qemux86-64`) or
+  `RUN_QEMU_FLASH_BIN` (`qemuarm64`) to the boot firmware.
 - `--dry-run` prints what the runner resolved and starts nothing.
 
 ## Local package feed

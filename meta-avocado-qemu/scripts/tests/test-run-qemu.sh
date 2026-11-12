@@ -6,9 +6,13 @@
 # no real QEMU starts. Run it by hand after any change to the runner.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
-here=$(cd "$(dirname "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 script=${1:-$here/../run-qemu}
-w=$(mktemp -d)
+# The scratch root is under /tmp whatever the caller's TMPDIR is, so a long
+# TMPDIR cannot push a socket path past the 100 byte limit in the cases that
+# do not mean to test it.
+w=$(mktemp -d -p /tmp)
+export TMPDIR=$w
 trap 'rm -rf "$w"' EXIT
 pass=0
 fail=0
@@ -109,6 +113,16 @@ out=$(run "$d" qemux86-64 --frobnicate)
 rc=$?
 { [ $rc -eq 2 ] && grep -qF "run-qemu: unknown option '--frobnicate'" <<<"$out"; } \
   && ok "an unknown option exits 2 naming it" || bad "option: rc=$rc out=[$out]"
+
+# 4b. A second positional argument exits 2 as an unexpected argument, even when
+#     it is a supported machine name, and prints the usage.
+for extra in qemux86-64 extra; do
+  out=$(run "$d" qemux86-64 "$extra" --dry-run)
+  rc=$?
+  { [ $rc -eq 2 ] && grep -qF "run-qemu: unexpected argument '$extra'" <<<"$out" && grep -qF 'usage: run-qemu' <<<"$out" \
+    && ! grep -qF 'unsupported machine' <<<"$out" && ! grep -q '^image:' <<<"$out"; } \
+    && ok "a second positional '$extra' exits 2 as an unexpected argument" || bad "extra arg $extra: rc=$rc out=[$out]"
+done
 
 # 5. --tpm with qemuarm64 exits 2 naming qemux86-64.
 d=$(workdir tpm-other)
@@ -220,6 +234,29 @@ out=$(run "$d" qemuarm64 --image "" --dry-run)
 rc=$?
 { [ $rc -eq 2 ] && ! grep -q '^image:' <<<"$out"; } \
   && ok "--image with an empty path exits 2" || bad "image empty: rc=$rc out=[$out]"
+
+# 17b. --image replaces the image lookup only: from a directory with no build
+#      output the boot firmware is still needed. Without the machine's override
+#      the run exits 1 naming that override; with it, the run resolves.
+e="$w/empty-cwd"
+mkdir -p "$e"
+for mv in qemux86-64:RUN_QEMU_UBOOT_ROM:u-boot.rom qemuarm64:RUN_QEMU_FLASH_BIN:flash.bin; do
+  m=${mv%%:*}
+  var=${mv#*:}
+  var=${var%%:*}
+  fw=${mv##*:}
+  out=$(run "$e" "$m" --image "$c/disk.img" --dry-run)
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "$var" <<<"$out" && grep -qF "no $fw" <<<"$out" && ! grep -q '^command:' <<<"$out"; } \
+    && ok "$m: --image with no firmware override outside a work directory exits 1 naming $var" || bad "image no fw $m: rc=$rc out=[$out]"
+  : >"$c/$fw"
+  RUNENV=("$var=$c/$fw")
+  out=$(run "$e" "$m" --image "$c/disk.img" --dry-run)
+  rc=$?
+  RUNENV=()
+  { [ $rc -eq 0 ] && grep -qxF "image: $c/disk.img" <<<"$out" && grep -qF -- "-bios $c/$fw" <<<"$out"; } \
+    && ok "$m: --image with $var resolves outside a work directory" || bad "image fw $m: rc=$rc out=[$out]"
+done
 
 # size_of <file> -> the file size in bytes.
 size_of() { stat -c %s "$1"; }
@@ -569,7 +606,7 @@ alive() {
 trun() {
   local d=$1
   shift
-  (cd "$d" && env PATH="${TPMSTUBS-$tpmhs}:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+  (cd "$d" && env PATH="${TPMSTUBS-$tpmhs}:$tools" \
     RUN_QEMU_TPM_WAIT_SECONDS="${TPMWAIT-3}" TMPDIR="${TPMTMP-$w}" bash "$script" "$@" </dev/null 2>&1)
 }
 tpm_args_in() { grep -qF -- "-chardev socket,id=chrtpm,path=$2 -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-tis,tpmdev=tpm0" <<<"$1"; }
@@ -608,7 +645,7 @@ ql=$(grep -n '^qemu-launch' "$log" | head -1 | cut -d: -f1)
 d=$(workdir tpm-term)
 truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
 : >"$log"
-(cd "$d" && exec setsid env PATH="$sleephs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+(cd "$d" && exec setsid env PATH="$sleephs:$tools" \
   RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/term.out" 2>&1 </dev/null) &
 rp=$!
 for _ in $(seq 1 100); do
@@ -704,7 +741,7 @@ d=$(workdir tpm-term2)
 truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
 mkdir -p "$w/termtmp"
 : >"$log"
-(cd "$d" && exec setsid env PATH="$sleephs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+(cd "$d" && exec setsid env PATH="$sleephs:$tools" \
   RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w/termtmp" bash "$script" qemux86-64 --tpm >"$w/term2.out" 2>&1 </dev/null) &
 rp=$!
 for _ in $(seq 1 100); do
@@ -784,18 +821,40 @@ pid=$(sed -n 's/^swtpm-pid //p' "$log")
 kill "$other" 2>/dev/null
 wait "$other" 2>/dev/null
 
-# 47. A comma in the socket directory is doubled in the chardev path, so it cannot add chardev options.
+# 47. swtpm splits an option string on commas with no escape, so a comma in the
+#     socket directory can never work: the run exits 1 naming the socket path and
+#     starts nothing, dry run included.
 d=$(workdir tpm-comma)
 truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
 mkdir -p "$w/c,d"
-: >"$log"
-out=$(RUN_QEMU_TPM_SOCK_DIR=$w/c,d trun "$d" qemux86-64 --tpm)
-rc=$?
-pid=$(sed -n 's/^swtpm-pid //p' "$log")
-ql=$(grep '^qemu-launch' "$log")
-{ [ $rc -eq 0 ] && grep -qF -- "path=$w/c,,d/swtpm-sock -tpmdev" <<<"$ql" && ! grep -qF -- "path=$w/c,d/swtpm-sock" <<<"$ql" \
-  && [ -n "$pid" ] && ! alive "$pid"; } \
-  && ok "a comma in the socket directory is doubled in the chardev path" || bad "tpm comma: rc=$rc out=[$out] ql=[$ql]"
+for mode in real dry; do
+  : >"$log"
+  if [ $mode = dry ]; then
+    out=$(RUN_QEMU_TPM_SOCK_DIR=$w/c,d trun "$d" qemux86-64 --tpm --dry-run)
+  else
+    out=$(RUN_QEMU_TPM_SOCK_DIR=$w/c,d trun "$d" qemux86-64 --tpm)
+  fi
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "TPM socket path" <<<"$out" && grep -qF "$w/c,d/swtpm-sock" <<<"$out" && grep -qF "swtpm cannot take a comma" <<<"$out" \
+    && ! grep -q '^command:' <<<"$out" && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+    && ok "$mode: a comma in the socket directory exits 1 naming it, starting nothing" || bad "tpm comma $mode: rc=$rc out=[$out] log=[$(cat "$log")]"
+done
+
+# 47b. A comma in the TPM state directory (a TMPDIR with a comma, no build/tmp)
+#      is refused the same way, naming the state directory.
+mkdir -p "$w/t,mp" "$w/comma-tpm"
+truncate -s 1100M "$w/comma-tpm/disk.img"
+: >"$w/comma-tpm/u-boot.rom"
+for mode in real dry; do
+  : >"$log"
+  args=(qemux86-64 --tpm --image "$w/comma-tpm/disk.img")
+  [ $mode = dry ] && args+=(--dry-run)
+  out=$(RUN_QEMU_UBOOT_ROM=$w/comma-tpm/u-boot.rom RUN_QEMU_TPM_SOCK_DIR=$w/ovr TPMTMP=$w/t,mp trun "$w/comma-tpm" "${args[@]}")
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "TPM state directory" <<<"$out" && grep -qF "swtpm cannot take a comma" <<<"$out" \
+    && ! grep -q '^command:' <<<"$out" && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ -z "$(ls -A "$w/t,mp")" ]; } \
+    && ok "$mode: a comma in the TPM state directory exits 1 naming it, starting nothing" || bad "tpm state comma $mode: rc=$rc out=[$out] log=[$(cat "$log")]"
+done
 
 # 48. -bios is not a key-value option, so a comma in the firmware path stays single
 #     while the -drive file= path of an image under a comma directory is doubled.
@@ -881,6 +940,53 @@ for v in 10s x; do
     && ok "TPM wait '$v' exits 1 and starts nothing" || bad "tpm wait $v: rc=$rc out=[$out] log=[$(cat "$log")]"
 done
 
+# 51b. A wait with leading zeros is a decimal number: 08 is 8 and 010 is 10, not
+#      a bash arithmetic error or an octal 8. The observable is the count of
+#      `sleep 1` calls the runner makes before giving up, read from a stub sleep
+#      that logs and returns at once, so the case costs no wall-clock time.
+fastsleephs=$w/fastsleepstubs
+mkdir -p "$fastsleephs"
+mkstubs "$fastsleephs"
+mkswtpm "$fastsleephs" nosock
+# shellcheck disable=SC2016 # $1 and $* belong to the generated stub
+printf '#!/bin/sh\n[ "$1" = 1 ] || exec %s "$@"\necho "sleep $1" >>"$STUB_LOG"\n' "$(command -v sleep)" >"$fastsleephs/sleep"
+chmod +x "$fastsleephs/sleep"
+for v in 08:8 010:10 0:0; do
+  d=$(workdir "tpm-wait-zeros-${v%%:*}")
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  : >"$log"
+  out=$(TPMSTUBS=$fastsleephs TPMWAIT=${v%%:*} trun "$d" qemux86-64 --tpm)
+  rc=$?
+  pid=$(sed -n 's/^swtpm-pid //p' "$log")
+  { [ $rc -eq 1 ] && [ "$(grep -c '^sleep 1$' "$log")" -eq "${v##*:}" ] && grep -qF "did not appear after ${v##*:}s" <<<"$out" \
+    && ! grep -q 'value too great' <<<"$out"; } \
+    && ok "TPM wait '${v%%:*}' means ${v##*:} seconds" || bad "tpm wait zeros ${v%%:*}: rc=$rc sleeps=$(grep -c '^sleep 1$' "$log") out=[$out]"
+  if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
+done
+
+# 51c. The socket length limit counts bytes, not characters: a directory of
+#      multibyte characters whose path is under the limit in characters but over
+#      it in bytes is refused, naming the byte length and the override.
+d=$(workdir tpm-multibyte)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mb="$w/$(printf 'é%.0s' $(seq 1 45))"
+mbbytes=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=C wc -c)
+mbchars=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=en_US.UTF-8 wc -m)
+: >"$log"
+out=$(LC_ALL=en_US.UTF-8 RUN_QEMU_TPM_SOCK_DIR=$mb trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ "$mbchars" -le 100 ] && [ "$mbbytes" -gt 100 ] && [ $rc -eq 1 ] && grep -qF "TPM socket path is $mbbytes bytes" <<<"$out" \
+  && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$mb" ]; } \
+  && ok "the socket path limit counts bytes, not characters" || bad "tpm multibyte: rc=$rc chars=$mbchars bytes=$mbbytes out=[$out]"
+
+# 51d. The too-long message points at RUN_QEMU_TPM_SOCK_DIR as the way out.
+d=$(workdir tpm-overlong-hint)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$longo trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "RUN_QEMU_TPM_SOCK_DIR" <<<"$out"; } \
+  && ok "a too-long socket path message names RUN_QEMU_TPM_SOCK_DIR" || bad "tpm overlong hint: rc=$rc out=[$out]"
+
 # 52. A failed mkdir of the TPM directories stops the run before QEMU starts.
 d=$(workdir tpm-mkdir)
 truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
@@ -899,7 +1005,7 @@ truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
 (cd "$d" && exec python3 -c 'import os, signal, sys
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 os.setsid()
-os.execvp(sys.argv[1], sys.argv[1:])' env PATH="$sleephs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+os.execvp(sys.argv[1], sys.argv[1:])' env PATH="$sleephs:$tools" \
   RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/int.out" 2>&1 </dev/null) &
 rp=$!
 for _ in $(seq 1 100); do
@@ -935,7 +1041,7 @@ sigrun() {
   SIG_DIR=$(workdir "sig-$name")
   truncate -s 2G "$(deploy "$SIG_DIR")/avocado-os-avocado-qemux86-64.img"
   : >"$log"
-  (cd "$SIG_DIR" && exec python3 -c "$PYSTART" env PATH="$sigqhs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+  (cd "$SIG_DIR" && exec python3 -c "$PYSTART" env PATH="$sigqhs:$tools" \
     RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/sig-$name.out" 2>&1 <"$in") &
   rp=$!
   for _ in $(seq 1 100); do
@@ -1073,7 +1179,7 @@ truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
 sleep 60 &
 canary=$!
 : >"$log"
-out=$(cd "$d" && FOREIGN_PID=0 env PATH="$foreignhs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+out=$(cd "$d" && FOREIGN_PID=0 env PATH="$foreignhs:$tools" \
   RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" "$(command -v setsid)" --wait bash "$script" qemux86-64 --tpm </dev/null 2>&1)
 rc=$?
 { [ $rc -eq 0 ] && alive "$canary"; } \
@@ -1154,6 +1260,38 @@ ql=$(grep -n '^qemu-launch' "$log" | head -1 | cut -d: -f1)
 { [ $rc -eq 0 ] && [ "$(size_of "$img")" -eq $((1024 * 1048576)) ] && [ -n "$st" ] && [ -n "$ri" ] && [ -n "$ql" ] \
   && [ "$st" -lt "$ri" ] && [ "$ri" -lt "$ql" ]; } \
   && ok "a TPM run starts swtpm, then resizes, then starts QEMU" || bad "tpm resize order: rc=$rc st=$st ri=$ri ql=$ql out=[$out] log=[$(cat "$log")]"
+
+# 65. With a native swtpm AND a swtpm on PATH, the native one starts: the run
+#     goes through the uninative loader, which the host's swtpm would not.
+d=$(workdir tpm-both)
+mksysroot "$d"
+sr="$d/build/tmp/sysroots-components/x86_64"
+mkswtpm "$sr/swtpm-native/usr/bin" sock
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ -x "$tpmhs/swtpm" ] && [ $rc -eq 0 ] && grep -q "^loader --library-path .* $sr/swtpm-native/usr/bin/swtpm socket " "$log" \
+  && [ "$(grep -c '^swtpm socket' "$log")" -eq 1 ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "the native swtpm is preferred over a swtpm on PATH" || bad "tpm both: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+
+# 66. A socket file left behind by an earlier run does not satisfy the wait: the
+#     runner removes it before swtpm starts, and a swtpm that never binds one
+#     still times out. python3 binds then closes a unix socket, which leaves a
+#     real socket file ([ -S ] is true for it).
+d=$(workdir tpm-stale-sock)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/stale-sock"
+python3 -I -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.close()' "$w/stale-sock/swtpm-sock"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/stale-sock TPMSTUBS=$nosockhs TPMWAIT=1 trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 1 ] && grep -qF "$w/stale-sock/swtpm-sock did not appear" <<<"$out" && ! grep -q '^qemu-launch' "$log" \
+  && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a stale socket from an earlier run does not satisfy the wait" || bad "tpm stale sock: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
 
 # No stub swtpm may outlive the suite.
 stray=$(pgrep -af "$w/.*swtpm" || true)

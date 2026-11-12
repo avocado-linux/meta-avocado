@@ -3,9 +3,11 @@
 #
 # Usage: run-qemu <machine> [--tpm] [--image PATH] [--dry-run]
 #
-# Run it from the machine's kas work directory (the one holding build/tmp), or
-# pass --image to boot a copied image from anywhere. --dry-run prints what the
-# runner resolved and starts nothing.
+# Run it from the machine's kas work directory (the one holding build/tmp).
+# --image replaces the image lookup only: boot firmware is still found under the
+# work directory, so from any other directory the machine's override must name
+# it (RUN_QEMU_UBOOT_ROM for qemux86-64, RUN_QEMU_FLASH_BIN for qemuarm64).
+# --dry-run prints what the runner resolved and starts nothing.
 set -euo pipefail
 
 PROG=run-qemu
@@ -38,6 +40,8 @@ usage() {
   {
     echo "usage: $PROG <machine> [--tpm] [--image PATH] [--dry-run]"
     echo "supported machines: ${SUPPORTED_MACHINES[*]}"
+    echo "--image PATH replaces the image lookup only; outside a work directory the"
+    echo "  machine's firmware variable below must name the boot firmware"
     echo "environment: RUN_QEMU_FLASH_BIN=PATH  TF-A flash image for qemuarm64"
     echo "  (default: build/tmp/deploy/stone/flash.bin, then .../stone/_build/flash.bin)"
     echo "  RUN_QEMU_UBOOT_ROM=PATH  U-Boot image for qemux86-64"
@@ -92,7 +96,11 @@ parse_args() {
   done
 
   MACHINE=${positional[0]:-}
-  if [ ${#positional[@]} -gt 1 ] || ! is_supported "$MACHINE"; then
+  if [ ${#positional[@]} -gt 1 ]; then
+    usage
+    die 2 "unexpected argument '${positional[1]}'"
+  fi
+  if ! is_supported "$MACHINE"; then
     usage
     die 2 "unsupported machine '$MACHINE' (supported: ${SUPPORTED_MACHINES[*]})"
   fi
@@ -159,8 +167,8 @@ native_prefix() {
 }
 
 # Sets QEMU_BIN, QEMU_IMG, QEMU_DATA_DIR and QEMU_PREFIX (the command words that
-# launch a tool). QEMU_DATA_DIR is the data dir of the QEMU being run; the host's
-# is /usr/share/qemu unless RUN_QEMU_HOST_QEMU_DATA_DIR says otherwise.
+# launch a tool). QEMU_DATA_DIR is the data dir of BitBake's native QEMU and is
+# read only when that QEMU runs.
 # BitBake's native QEMU is an ELF bound to the uninative glibc, so it runs
 # through that loader with every native sysroot lib dir on its library path.
 # Without a native build the host's QEMU from PATH is used as is.
@@ -170,7 +178,6 @@ resolve_qemu() {
   comps="$PWD/build/tmp/sysroots-components/x86_64"
   native="$comps/qemu-system-native/usr/bin"
   QEMU_PREFIX=()
-  QEMU_DATA_DIR=${RUN_QEMU_HOST_QEMU_DATA_DIR:-/usr/share/qemu}
   if [ -e "$native/$bin" ]; then
     native_prefix "QEMU at $native/$bin"
     QEMU_PREFIX=("${NATIVE_PREFIX[@]}")
@@ -248,8 +255,21 @@ plan_tpm() {
     chmod 700 "$TPM_SOCK_DIR"
   fi
   TPM_SOCK="$TPM_SOCK_DIR/swtpm-sock"
-  if [ "${#TPM_SOCK}" -gt "$TPM_SOCK_MAX" ]; then
-    die 1 "TPM socket path is ${#TPM_SOCK} bytes, over the $TPM_SOCK_MAX byte limit for a unix socket: $TPM_SOCK"
+  # swtpm splits its option strings on commas and has no escape for one.
+  case $TPM_DIR in
+    *,*) die 1 "TPM state directory '$TPM_DIR' holds a comma; swtpm cannot take a comma in it (set TMPDIR, or run from a work directory, without one)" ;;
+  esac
+  case $TPM_SOCK in
+    *,*) die 1 "TPM socket path '$TPM_SOCK' holds a comma; swtpm cannot take a comma in it (set RUN_QEMU_TPM_SOCK_DIR to a directory without one)" ;;
+  esac
+  # A unix socket path is limited in bytes, so count bytes whatever the locale.
+  local sock_bytes
+  sock_bytes=$(
+    LC_ALL=C
+    echo "${#TPM_SOCK}"
+  )
+  if [ "$sock_bytes" -gt "$TPM_SOCK_MAX" ]; then
+    die 1 "TPM socket path is $sock_bytes bytes, over the $TPM_SOCK_MAX byte limit for a unix socket: $TPM_SOCK (set RUN_QEMU_TPM_SOCK_DIR to a shorter directory)"
   fi
 }
 
@@ -360,6 +380,8 @@ start_tpm() {
   fi
   wait=${RUN_QEMU_TPM_WAIT_SECONDS:-10}
   [[ $wait =~ ^[0-9]+$ ]] || die 1 "RUN_QEMU_TPM_WAIT_SECONDS must be a whole number of seconds, got '$wait'"
+  # Base 10: a leading zero must not read as octal (08 is an error, 010 is 8).
+  wait=$((10#$wait))
 
   mkdir -p "$TPM_DIR" "$TPM_SOCK_DIR"
   # The state dir and its pid file are shared by every --tpm run in this work
