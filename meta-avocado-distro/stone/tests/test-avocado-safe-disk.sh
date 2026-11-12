@@ -423,6 +423,146 @@ out=$(runcall x "avocado_safe_disk_run fwup" AVOCADO_SAFE_DISK_EUID=0 LD_LIBRARY
 { echo "$out" | grep -q "ld=/sdk/lib" && [ ! -e "$w/st/sudo-argv" ]; } \
   && ok "as uid 0 the environment passes through untouched" || bad "root env: out=[$out]"
 
+# --- run modes: write choke point, mode validation, dry run ----------------
+
+# The recording fwup stub writes its argv to st/tool-ran, so "nothing ran" is a
+# missing file rather than an absence of output.
+modes_setup() {
+  runner_setup
+  cat >"$w/tools/fwup" <<S
+#!/bin/bash
+echo "\$*" >"$w/st/tool-ran"
+echo "TOOL argv=\$*"
+S
+  chmod +x "$w/tools/fwup"
+  rm -f "$w/st/tool-ran"
+}
+
+modes_setup
+out=$(runcall x "avocado_safe_disk_write fwup -a 1" AVOCADO_SAFE_DISK_EUID=0)
+rc=$?
+{ [ $rc -eq 0 ] && [ "$(cat "$w/st/tool-ran" 2>/dev/null)" = "-a 1" ]; } \
+  && ok "outside a dry run the write choke point runs the command" || bad "write real: rc=$rc out=[$out]"
+
+modes_setup
+out=$(runcall x "avocado_safe_disk_write fwup -a 1" AVOCADO_SAFE_DISK_EUID=0 AVOCADO_PROVISION_DRY_RUN=1)
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -qx "dry-run: fwup -a 1" && [ ! -e "$w/st/tool-ran" ] && ! echo "$out" | grep -q TOOL; } \
+  && ok "in a dry run the write is printed as 'dry-run: <cmd>' and never run" || bad "write dry: rc=$rc out=[$out]"
+
+modes_setup
+out=$(runcall x "avocado_safe_disk_write fwup -a 1" AVOCADO_SAFE_DISK_EUID=1000 AVOCADO_PROVISION_DRY_RUN=1)
+{ ! echo "$out" | grep -q SUDO_CALLED && [ ! -e "$w/st/sudo-argv" ]; } \
+  && ok "a dry run never reaches sudo" || bad "write dry sudo: out=[$out]"
+
+modes_setup
+out=$(runcall x "avocado_safe_disk_write fwup -a 1" AVOCADO_SAFE_DISK_EUID=0 AVOCADO_PROVISION_DRY_RUN=true)
+rc=$?
+{ [ $rc -ne 0 ] && [ ! -e "$w/st/tool-ran" ]; } \
+  && ok "the write refuses under an unvalidated DRY_RUN value rather than running" || bad "write true: rc=$rc out=[$out]"
+
+modes() { # env args in $@ after the call, profile flags in $1
+  runcall x "avocado_safe_disk_modes $1" "${@:2}"
+}
+for v in "" 1; do
+  out=$(modes "sd 1 1" AVOCADO_PROVISION_DRY_RUN="$v")
+  rc=$?
+  [ $rc -eq 0 ] && ok "DRY_RUN='$v' is accepted" || bad "dry '$v': rc=$rc out=[$out]"
+done
+out=$(modes "sd 1 1")
+rc=$?
+[ $rc -eq 0 ] && ok "DRY_RUN unset is accepted" || bad "dry unset: rc=$rc out=[$out]"
+for v in 0 true yes; do
+  out=$(modes "sd 1 1" AVOCADO_PROVISION_DRY_RUN="$v")
+  rc=$?
+  { [ $rc -ne 0 ] && echo "$out" | grep -q "AVOCADO_PROVISION_DRY_RUN" && echo "$out" | grep -q "$v"; } \
+    && ok "DRY_RUN=$v is refused, naming the variable and value" || bad "dry $v: rc=$rc out=[$out]"
+done
+for v in "" 0 1; do
+  out=$(modes "sd 1 1" AVOCADO_PROVISION_FORCE="$v")
+  rc=$?
+  [ $rc -eq 0 ] && ok "FORCE='$v' is accepted" || bad "force '$v': rc=$rc out=[$out]"
+done
+out=$(modes "sd 1 1")
+rc=$?
+[ $rc -eq 0 ] && ok "FORCE unset is accepted" || bad "force unset: rc=$rc out=[$out]"
+for v in yes true 2; do
+  out=$(modes "sd 1 1" AVOCADO_PROVISION_FORCE="$v" AVOCADO_PROVISION_DRY_RUN=1)
+  rc=$?
+  { [ $rc -ne 0 ] && echo "$out" | grep -q "AVOCADO_PROVISION_FORCE" && echo "$out" | grep -q "$v"; } \
+    && ok "FORCE=$v is refused, even in a dry run" || bad "force $v: rc=$rc out=[$out]"
+done
+for v in "" complete upgrade; do
+  out=$(modes "sd 1 1" AVOCADO_PROVISION_FWUP_TASK="$v")
+  rc=$?
+  [ $rc -eq 0 ] && ok "FWUP_TASK='$v' is accepted" || bad "task '$v': rc=$rc out=[$out]"
+done
+out=$(modes "sd 1 1" AVOCADO_PROVISION_FWUP_TASK=full)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "full"; } \
+  && ok "FWUP_TASK=full is refused, naming it" || bad "task full: rc=$rc out=[$out]"
+
+out=$(modes "uuu 0 1" AVOCADO_PROVISION_DRY_RUN=1)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "uuu" && echo "$out" | grep -qi "dry run"; } \
+  && ok "a profile without dry-run support refuses a dry run, naming itself" || bad "dry_run_ok=0: rc=$rc out=[$out]"
+out=$(modes "uuu 0 1")
+rc=$?
+[ $rc -eq 0 ] && ok "a profile without dry-run support runs normally" || bad "dry_run_ok=0 real: rc=$rc out=[$out]"
+
+out=$(modes "dd 1 0" AVOCADO_PROVISION_FWUP_TASK=upgrade)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "upgrade" && echo "$out" | grep -q "dd"; } \
+  && ok "a profile that cannot honour a task refuses upgrade, naming it" || bad "task_ok=0: rc=$rc out=[$out]"
+out=$(modes "dd 1 0" AVOCADO_PROVISION_FWUP_TASK=complete)
+rc=$?
+[ $rc -eq 0 ] && ok "a profile that cannot honour a task accepts complete" || bad "task_ok=0 complete: rc=$rc out=[$out]"
+
+out=$(runcall x "avocado_safe_disk_finish $w/dev/sdb" AVOCADO_PROVISION_DRY_RUN=1)
+[ "$out" = "dry run: nothing was written to $w/dev/sdb." ] \
+  && ok "finish says nothing was written in a dry run" || bad "finish dry: out=[$out]"
+out=$(runcall x "avocado_safe_disk_finish $w/dev/sdb")
+[ -z "$out" ] && ok "finish is silent outside a dry run" || bad "finish real: out=[$out]"
+
+# Dry run: a mount in this namespace is reported, a host-table mount refuses.
+setup
+idpath sdb "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0"
+echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/mounts"
+out=$(call "AVOCADO_PROVISION_DRY_RUN=1 avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "$w/dev/sdb1" && echo "$out" | grep -qi "would"; } \
+  && ok "in a dry run a local mount is reported and the run continues" || bad "dry local mount: rc=$rc out=[$out]"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+[ $rc -ne 0 ] && ok "outside a dry run the same local mount still refuses" || bad "real local mount: rc=$rc out=[$out]"
+echo "overlay / overlay rw 0 0" >"$w/st/mounts"
+echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/host-mounts"
+out=$(call "AVOCADO_PROVISION_DRY_RUN=1 AVOCADO_PROVISION_HOST_MOUNTS=$w/st/host-mounts avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+[ $rc -ne 0 ] && ok "in a dry run a mount seen only in the host table still refuses" || bad "dry host mount: rc=$rc out=[$out]"
+
+# Dry run asks no retype: FORCE=0 and a pipe, run through every guard, exits 0.
+rm -f "$w/st/host-mounts"
+mkdir -p "$w/sys/devices/$USBPATH/sdb/device"
+printf 'ACME    ' >"$w/sys/devices/$USBPATH/sdb/device/vendor"
+printf 'Card Reader     ' >"$w/sys/devices/$USBPATH/sdb/device/model"
+pipeline="export AVOCADO_PROVISION_DRY_RUN=1 AVOCADO_PROVISION_FORCE=0 AVOCADO_SAFE_DISK_EUID=0
+  avocado_safe_disk_modes sd 1 1 && avocado_safe_disk_check_device $w/dev/sdb &&
+  avocado_safe_disk_unmounted && avocado_safe_disk_confirm \$AVOCADO_SAFE_DISK_DEV 0 &&
+  avocado_safe_disk_write fwup -a /img -d \$AVOCADO_SAFE_DISK_DEV && avocado_safe_disk_finish \$AVOCADO_SAFE_DISK_DEV"
+out=$(printf 'y\n' | PATH="$w/tools:$w/bin:$PATH" call "$pipeline")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "Model: ACME Card Reader" && ! echo "$out" | grep -qi "type the device" \
+  && echo "$out" | grep -qx "dry-run: fwup -a /img -d $w/dev/sdb" && [ ! -e "$w/st/tool-ran" ] \
+  && [ "$(echo "$out" | tail -n1)" = "dry run: nothing was written to $w/dev/sdb." ]; } \
+  && ok "a dry run with FORCE=0 and a pipe runs every guard, asks no retype and exits 0" || bad "dry full: rc=$rc out=[$out]"
+
+out=$(printf 'y\n' | PATH="$w/tools:$w/bin:$PATH" call "${pipeline/FORCE=0/FORCE=yes}")
+rc=$?
+{ [ $rc -ne 0 ] && ! echo "$out" | grep -q "Model:" && ! echo "$out" | grep -q "^dry-run"; } \
+  && ok "an unknown FORCE value refuses before any guard output" || bad "dry unknown force: rc=$rc out=[$out]"
+
+N=80
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/48 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 48 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]

@@ -22,6 +22,10 @@
 #
 # Environment:
 #   AVOCADO_PROVISION_FORCE=1   skip the retype confirmation (checks still run)
+#   AVOCADO_PROVISION_DRY_RUN=1 run every guard, print each target-changing
+#                               command instead of running it (1 only; 0 and
+#                               anything else but unset or empty refuse)
+#   AVOCADO_PROVISION_FWUP_TASK complete (default) or upgrade; validated here
 #   AVOCADO_PROVISION_SYSBLOCK  sysfs block directory (default /sys/class/block)
 #   AVOCADO_SAFE_DISK_MOUNTS    mount table (default /proc/self/mounts)
 #   AVOCADO_SAFE_DISK_SWAPS     swap table (default /proc/swaps)
@@ -197,7 +201,7 @@ avocado_safe_disk_not_root() {
 # that cannot be read refuses. In a container with it unset the check warns that
 # host mounts were not checked and continues; on a host nothing is warned.
 avocado_safe_disk_unmounted() {
-  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} target table src real name chain marker
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} target table src real name chain marker host=${AVOCADO_PROVISION_HOST_MOUNTS:-}
   local tables=("${AVOCADO_SAFE_DISK_MOUNTS:-/proc/self/mounts}" "${AVOCADO_SAFE_DISK_SWAPS:-/proc/swaps}")
   target=$(basename -- "$(readlink -f -- "$dev")")
   if [ -n "${AVOCADO_PROVISION_HOST_MOUNTS:-}" ]; then
@@ -216,6 +220,7 @@ avocado_safe_disk_unmounted() {
       _asd_err "refusing ${dev}: cannot read ${table}, so its mount state is unknown"
       return 1
     }
+    # shellcheck disable=SC2094 # $table is only read; the dry-run note goes to stderr
     while read -r src _; do
       case "$src" in
         "${AVOCADO_SAFE_DISK_DEVDIR:-/dev}"/*) ;;
@@ -229,6 +234,13 @@ avocado_safe_disk_unmounted() {
         return 1
       }
       if printf '%s\n' "$chain" | grep -qxF -- "$target"; then
+        # A dry run does not unmount, so a mount in this namespace is reported
+        # as one the real run would release; the host table is not ours to
+        # release, so it refuses either way.
+        if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ] && [ "$table" != "$host" ]; then
+          echo "dry run: ${src} is mounted or in use (${table##*/}); a real run would unmount it first" >&2
+          continue
+        fi
         _asd_err "refusing ${dev}: ${src} is mounted or in use (${table##*/}); unmount it first"
         return 1
       fi
@@ -274,6 +286,10 @@ avocado_safe_disk_confirm() {
   echo ""
   avocado_safe_disk_identity "$dev"
   echo ""
+  if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+    echo "dry run: not asking for confirmation."
+    return 0
+  fi
   echo "WARNING: this overwrites everything on ${dev}."
   if [ "${AVOCADO_PROVISION_FORCE:-0}" = "1" ]; then
     echo "AVOCADO_PROVISION_FORCE=1: not asking for confirmation."
@@ -325,4 +341,77 @@ avocado_safe_disk_run() {
   else
     sudo "$path" "$@"
   fi
+}
+
+# Run one command that changes the target (the image write, zeroing, unmount,
+# swapoff). The only place a dry run is honoured: with
+# AVOCADO_PROVISION_DRY_RUN=1 the command is printed and nothing runs. Callers
+# validate the variable first (avocado_safe_disk_modes); any value but 1, empty
+# or unset refuses here too, so an unvalidated value never runs or skips a write
+# by accident.
+#
+#   rest  the command and its arguments; the tool is resolved as in _run
+avocado_safe_disk_write() {
+  if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+    echo "dry-run: $*"
+    return 0
+  fi
+  case "${AVOCADO_PROVISION_DRY_RUN:-}" in
+    "") ;;
+    *)
+      _asd_err "AVOCADO_PROVISION_DRY_RUN=${AVOCADO_PROVISION_DRY_RUN} is not valid; refusing to write"
+      return 1
+      ;;
+  esac
+  avocado_safe_disk_run "$@"
+}
+
+# Validate the run-mode variables before any guard runs.
+#
+#   $1  profile name, used in refusals
+#   $2  1 when the profile supports a dry run (its manifest declares it)
+#   $3  1 when the profile can honour a task other than complete
+avocado_safe_disk_modes() {
+  local profile=${1:-?} dry_ok=${2:-0} task_ok=${3:-0}
+  case "${AVOCADO_PROVISION_FORCE:-}" in
+    "" | 0 | 1) ;;
+    *)
+      _asd_err "AVOCADO_PROVISION_FORCE=${AVOCADO_PROVISION_FORCE} is not valid; use 1 or 0"
+      return 1
+      ;;
+  esac
+  case "${AVOCADO_PROVISION_DRY_RUN:-}" in
+    "") ;;
+    1)
+      [ "$dry_ok" = "1" ] || {
+        _asd_err "profile ${profile} does not support a dry run"
+        return 1
+      }
+      ;;
+    *)
+      _asd_err "AVOCADO_PROVISION_DRY_RUN=${AVOCADO_PROVISION_DRY_RUN} is not valid; use 1, or leave it unset"
+      return 1
+      ;;
+  esac
+  case "${AVOCADO_PROVISION_FWUP_TASK:-}" in
+    "" | complete) ;;
+    upgrade)
+      [ "$task_ok" = "1" ] || {
+        _asd_err "profile ${profile} cannot honour AVOCADO_PROVISION_FWUP_TASK=upgrade; only complete"
+        return 1
+      }
+      ;;
+    *)
+      _asd_err "AVOCADO_PROVISION_FWUP_TASK=${AVOCADO_PROVISION_FWUP_TASK} is not valid; use complete or upgrade"
+      return 1
+      ;;
+  esac
+}
+
+# Last line of a dry run. Silent otherwise.
+#
+#   $1  the target that was not written
+avocado_safe_disk_finish() {
+  [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ] || return 0
+  echo "dry run: nothing was written to ${1:-$AVOCADO_SAFE_DISK_DEV}."
 }
