@@ -38,23 +38,28 @@
     "profiles": {
       "tegraflash": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-nvme": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-mmc": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-emmc": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-sd": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "noop": {
         "script": "stone-provision-noop.sh"
