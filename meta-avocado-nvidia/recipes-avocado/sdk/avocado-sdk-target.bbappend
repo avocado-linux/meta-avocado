@@ -12,7 +12,16 @@ RDEPENDS:${PN}:append = " \
   nativesdk-python3-pyyaml \
   nativesdk-boardctl \
   nativesdk-dtc \
+  nativesdk-avocado-dtc-overlay \
 "
+
+# nativesdk-avocado-dtc-overlay compiles the device-tree overlays a project
+# declares with a `src`; the delivery hook (avocado-dtc-overlay-deliver, Orin
+# only) merges them. The wrapper only compiles, so it is not gated by SoC.
+# DEPENDS as well as RDEPENDS: RDEPENDS alone records the requirement without
+# building the provider, so it never reaches the SDK feed and `avocado install`
+# fails with "No match for argument: nativesdk-avocado-dtc-overlay".
+DEPENDS:append = " nativesdk-avocado-dtc-overlay"
 
 # Shared boot.img packer for the A_kernel/B_kernel partitions, called by the
 # Jetson build hooks (OTA payload) and stone-provision-tegraflash.sh (flash).

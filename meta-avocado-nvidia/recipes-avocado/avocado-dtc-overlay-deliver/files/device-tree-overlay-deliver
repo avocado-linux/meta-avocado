@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+
+# NVIDIA (Tegra) device-tree overlay delivery hook.
+#
+# The avocado CLI stages compiled .dtbo files plus an overlays.manifest.json and
+# then runs this hook (the single fixed-path hook at
+# usr/libexec/avocado/device-tree-overlay-deliver) before `stone bundle`. Only
+# one BSP's implementation of this path is ever installed in a given machine
+# build, so this file owns delivery for Tegra.
+#
+# Delivery on Tegra is a MERGED DTB, not a list of .dtbo files. Tegra has
+# nowhere to put loose overlays: the flashed partition set has no DTBO
+# partition, and the ESP carries only EFI/BOOT/bootaa64.efi. The overlay lists
+# that do exist in flashvars (OVERLAY_DTB_FILE, BOOTCONTROL_OVERLAYS,
+# PLUGIN_MANAGER_OVERLAYS) are consumed by the classic flash.sh path via
+# tegra-flash-helper.sh; initrd-flash.sh - the path Avocado uses - never reads
+# them, because it consumes binaries already signed at Yocto build time.
+#
+# So this hook merges each staged overlay into the base DTB with fdtoverlay and
+# publishes the result as storage_devices.rootdisk.images.dtb. The provisioning
+# script reads that key (stone-provision-tegraflash.sh:73) and copies it to
+# <basename>.dtb and kernel_<basename>.dtb (:306-311), which is the file the
+# flash writes to the kernel-dtb partition. An OS update does not carry it:
+# update.os_artifacts names rootfs and boot only, so an overlay change reaches
+# a device by reflashing.
+#
+# Two deliberate choices worth keeping:
+#
+#   * rootdisk is hardcoded, matching the consumer's own hardcoded jq path. A
+#     discovered destination would be worse, not better: delivery to any other
+#     device is invisible to the consumer and would fail silently.
+#   * An fdtoverlay failure is fatal. Publishing the unmerged base DTB would
+#     produce a board that boots perfectly with none of the requested overlays
+#     applied, which is the hardest kind of failure to notice.
+#
+# tegraflash.overlays is also populated, but only as provenance: the
+# provisioning script's read of it (:320-330) merely checks each named file
+# exists and warns otherwise. It never applies anything.
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+# The device key the provisioning script reads. Keep in sync with
+# stone-provision-tegraflash.sh:73; the test suite has a drift guard on this.
+TARGET_DEVICE = "rootdisk"
+
+
+def die(msg):
+    sys.exit(f"[ERROR] device-tree-overlay-deliver (tegra): {msg}")
+
+
+def env(name):
+    value = os.environ.get(name)
+    if not value:
+        die(f"missing required environment variable {name}")
+    return value
+
+
+def read_dtbfile(bsp_dir):
+    """Return the DTB basename this machine actually boots.
+
+    A BSP ships one base DTB per module SKU - five on the Orin Nano developer
+    kit (p3767-0000/0001/0003/0004/0005) - so the tree cannot be identified by
+    being the only one present. initrd-flash.sh resolves the flash XML's
+    DTB_FILE to kernel_$DTBFILE, sourcing DTBFILE from .env.initrd-flash, which
+    is the only thing in the BSP that names the SKU this machine boots
+    (tegraflash-bsp.bb writes it from KERNEL_DEVICETREE). Use the same
+    selector, so the merged tree is by construction the tree that gets
+    flashed."""
+    env_path = os.path.join(bsp_dir, ".env.initrd-flash")
+    if not os.path.isfile(env_path):
+        die(
+            f"{env_path} not found: it names the DTB this machine boots "
+            "(DTBFILE), and a BSP ships one base DTB per module SKU, so there "
+            "is no safe way to pick one without it"
+        )
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = line.partition("=")
+            if not sep:
+                continue
+            # `export DTBFILE=...` and a trailing `# comment` are both valid
+            # shell and both appear in hand-edited env files. Neither is in the
+            # BSP's current output, but this is the single selector the whole
+            # merge hinges on: an unrecognised form matches nothing and falls
+            # through to the die() below, which reports a MISSING selector when
+            # the truth is an unparsed one - and sends the reader looking for a
+            # BSP that failed to write the value rather than a format change.
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export ") :].strip()
+            if key != "DTBFILE":
+                continue
+            value = value.strip()
+            if value[:1] in ("'", '"'):
+                quote = value[0]
+                end = value.find(quote, 1)
+                if end != -1:
+                    return value[1:end]
+                # Unterminated quote - fall through to the bare-word path
+                # rather than silently returning the rest of the line.
+                value = value[1:]
+            else:
+                value = value.split("#", 1)[0].strip()
+            if value:
+                return value
+            die(f"DTBFILE in {env_path} is set but empty; cannot pick a base DTB")
+    die(f"no DTBFILE entry in {env_path}; cannot tell which base DTB to merge into")
+
+
+def find_base_dtb(stone, data_dir):
+    """Locate the BSP's base kernel DTB.
+
+    tegraflash-bsp.bb installs each kernel DTB into the BSP directory under its
+    own name. The flash writes the kernel_<name>.dtb alias to the kernel-dtb
+    partition, and both the provisioning script and the signer derive that
+    alias from the un-prefixed file, so the un-prefixed file is the tree to
+    merge into."""
+    device = stone.get("storage_devices", {}).get(TARGET_DEVICE)
+    if device is None:
+        die(
+            f"no '{TARGET_DEVICE}' storage device in the stone manifest; "
+            "stone-provision-tegraflash.sh reads that key by name, so delivery "
+            "to any other device would never be seen"
+        )
+
+    bsp_rel = device.get("images", {}).get("tegraflash_bsp")
+    if not bsp_rel:
+        die(f"{TARGET_DEVICE} declares no tegraflash_bsp image; cannot find the base DTB")
+
+    bsp_dir = os.path.join(data_dir, bsp_rel)
+    if not os.path.isdir(bsp_dir):
+        die(f"tegraflash_bsp directory not found: {bsp_dir}")
+
+    # Un-prefixed, deliberately. The BSP may ship both <name>.dtb and a
+    # kernel_<name>.dtb alias, but they are not interchangeable here:
+    # tegra-flash-helper.sh does `rm -f kernel_<name>.dtb` and recreates it
+    # from the un-prefixed <name>.dtb (or its .signed form) at signing time.
+    # Publishing the merged tree as kernel_<name>.dtb therefore hands it to a
+    # file that is deleted before it is read, and the board boots the stock tree
+    # with no overlay applied and nothing reported. Merging into the un-prefixed
+    # base means the signer regenerates the alias FROM the merged tree.
+    base_name = read_dtbfile(bsp_dir)
+    if not os.path.isfile(os.path.join(bsp_dir, base_name)):
+        die(
+            f"{base_name} not found in {bsp_dir}: DTBFILE names it as the tree "
+            "this machine boots, but the BSP does not ship it"
+        )
+    return bsp_dir, base_name
+
+
+def main():
+    staging = env("AVOCADO_DTBO_STAGING")
+    manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
+    fragment_path = env("AVOCADO_DELIVERY_FRAGMENT")
+    stone_path = env("AVOCADO_STONE_MANIFEST")
+
+    # The CLI passes the four variables above and none that names a data dir.
+    # The hook also inherits the runtime build script's exports, AVOCADO_PREFIX
+    # and RUNTIME_NAME among them.
+    #
+    # The BSP tree is not beside the stone manifest: nothing stages
+    # tegraflash-bsp/ into the SDK's stone dir. avocado-img-bootfiles installs
+    # it into the runtime's own dnf root, $AVOCADO_PREFIX/runtimes/$RUNTIME_NAME.
+    # That is the input dir the CLI hands `stone bundle`, and the directory
+    # avocado-tegra-build-bootimg reads tegraflash-bsp/boot.img from, so the
+    # tree merged here is the BSP tree the bundle ships (unless a project's
+    # stone_include_paths carries a tegraflash-bsp/ of its own, which stone
+    # would resolve first).
+    #
+    # The override exists so the test suite can point at a fixture tree.
+    data_dir = os.environ.get("AVOCADO_STONE_DATA_DIR") or os.path.join(
+        env("AVOCADO_PREFIX"), "runtimes", env("RUNTIME_NAME")
+    )
+
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    if manifest.get("version") != 1:
+        die("overlays.manifest.json: unsupported version")
+    overlays = manifest.get("overlays", [])
+    if not overlays:
+        die("hook invoked with no overlays to deliver")
+
+    # Validate up front rather than at each use. Every other failure in this
+    # hook exits through die() with a "[ERROR] device-tree-overlay-deliver"
+    # prefix; indexing ov["file"] and ov["name"] later would raise a bare
+    # KeyError traceback instead - the one class of bad input that escapes the
+    # otherwise-uniform fail-clean handling, and the least readable place to
+    # land given the hook runs inside a build container.
+    for index, ov in enumerate(overlays):
+        if not isinstance(ov, dict):
+            die(f"overlays[{index}] is not an object: {ov!r}")
+        for key in ("name", "file"):
+            if not ov.get(key):
+                die(
+                    f"overlays[{index}] has no '{key}': the CLI writes both for "
+                    f"every declared overlay, so this manifest is malformed. Entry: {ov!r}"
+                )
+
+    with open(stone_path) as f:
+        stone = json.load(f)
+    bsp_dir, base_name = find_base_dtb(stone, data_dir)
+    platform = stone.get("runtime", {}).get("platform", "tegra")
+
+    # Merge into a copy staged alongside the .dtbo files, so the BSP's own DTB
+    # is never mutated in place. Keep the base filename: the provisioning script
+    # derives kernel_<basename>.dtb from it, and the flash layout expects the
+    # name the BSP shipped.
+    merged = os.path.join(staging, base_name)
+
+    # images.dtb is resolved by name against stone's input dirs, first match
+    # wins, and the merged DTB has to keep the base name because the flash
+    # layout refers to the BSP's filename.
+    #
+    # Precedence is owned by the CLI, not by this check: it prepends the
+    # staging dir to the -i list, so the merged tree wins over every other
+    # input dir by construction. That ordering is the actual guarantee, and it
+    # is asserted in the CLI's own tests. This hook cannot enforce it - the -i
+    # list is assembled after the hook returns, and the hook is never told what
+    # is on it.
+    #
+    # The check below is therefore a second line covering the runtime input
+    # dir, the one -i entry the hook can see, not the whole input set. It is
+    # kept because it costs nothing and the failure it catches is invisible: a
+    # shadowed lookup ships an unmerged tree, and the board boots cleanly with
+    # no overlay applied and nothing reported. The Raspberry Pi hook refuses by
+    # name for the same class of shadowing.
+    shadow = os.path.join(data_dir, base_name)
+    if os.path.exists(shadow):
+        die(
+            f"{shadow} would shadow the merged DTB: stone resolves images.dtb "
+            "by name against its input dirs and would pick that copy over the "
+            "merged one in staging, shipping a tree with no overlays applied. "
+            "Remove it or rename the deployed DTB"
+        )
+
+    shutil.copy2(os.path.join(bsp_dir, base_name), merged)
+
+    # fdtoverlay applies in argument order, and order is load-bearing: a later
+    # overlay may target a node an earlier one created.
+    dtbo_paths = [os.path.join(staging, ov["file"]) for ov in overlays]
+    for path in dtbo_paths:
+        if not os.path.isfile(path):
+            die(f"staged overlay missing: {path}")
+
+    cmd = ["fdtoverlay", "-i", merged, "-o", merged, *dtbo_paths]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        die(
+            "fdtoverlay failed to merge the overlays into "
+            f"{base_name}: {result.stderr.strip() or result.stdout.strip()}. "
+            "Refusing to publish an unmerged DTB, which would boot cleanly with "
+            "no overlay applied"
+        )
+
+    fragment = {
+        "storage_devices": {
+            TARGET_DEVICE: {
+                "images": {"dtb": base_name},
+                # Provenance only. stone-provision-tegraflash.sh:320-330 checks
+                # each of these files exists and warns if not; it applies
+                # nothing. Recording them makes the flash log show what the
+                # merged DTB was built from.
+                "tegraflash": {"overlays": [ov["file"] for ov in overlays]},
+            }
+        }
+    }
+    with open(fragment_path, "w") as f:
+        json.dump(fragment, f, indent=2)
+
+    # Record delivery so the CLI's post-hook check passes.
+    for ov in overlays:
+        ov["claimed_by"] = platform
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    names = ", ".join(ov["name"] for ov in overlays)
+    print(
+        f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) "
+        f"merged into {base_name} for {platform}: {names}"
+    )
+
+
+if __name__ == "__main__":
+    main()
