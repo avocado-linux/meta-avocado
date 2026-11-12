@@ -29,7 +29,7 @@ echo "Build dir: $AVOCADO_STONE_BUILD_DIR"
 # --- Step 1: Build the raw disk image from the fwup archive ---
 archive_name=$(jq -r .storage_devices.rootdisk.out "$AVOCADO_STONE_MANIFEST")
 archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
-archive_image="${archive_file%%.*}.img"
+archive_image="${archive_file%.*}.img"
 
 if [ ! -f "$archive_image" ]; then
   echo "Building disk image from archive..."

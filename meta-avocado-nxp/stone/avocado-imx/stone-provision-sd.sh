@@ -27,7 +27,7 @@ if [[ ! -f "$archive_file" ]]; then
   exit 1
 fi
 
-archive_image="${archive_file%%.*}.img"
+archive_image="${archive_file%.*}.img"
 
 # When USB passthrough is unavailable (Docker Desktop on macOS/Windows),
 # produce a disk image for host-side burning instead of flashing directly.
