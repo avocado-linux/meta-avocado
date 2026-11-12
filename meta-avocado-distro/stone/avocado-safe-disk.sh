@@ -193,6 +193,20 @@ avocado_safe_disk_not_root() {
   fi
 }
 
+# True for a path under the device dir that names a device-mapper volume: a
+# mapper/ entry, a dm-N node, or a <vg>/<lv> pair (not a udev or kernel class
+# directory such as disk/, pts/ or shm/).
+_asd_is_dm_path() {
+  local rel=${1#"${AVOCADO_SAFE_DISK_DEVDIR:-/dev}"/}
+  case "$rel" in
+    mapper/* | dm-[0-9]*) return 0 ;;
+    disk/* | pts/* | shm/* | mqueue/* | hugepages/* | block/* | char/* | bus/* | input/* | snd/* | dri/* | net/* | cpu/* | vfio/* | usb/*) return 1 ;;
+    */*/*) return 1 ;;
+    */*) return 0 ;;
+  esac
+  return 1
+}
+
 # Refuse a device, or any partition of it, that is mounted or in use as swap,
 # including through a dm, LVM or md volume stacked on it. A filesystem still
 # mounted while its disk is rewritten is corrupted. Inside the SDK container
@@ -227,9 +241,20 @@ avocado_safe_disk_unmounted() {
         "${AVOCADO_SAFE_DISK_DEVDIR:-/dev}"/*) ;;
         *) continue ;;
       esac
-      real=$(readlink -f -- "$src") || continue
-      name=$(basename -- "$real")
-      [ -e "$(_asd_sysblock)/$name" ] || continue
+      real=$(readlink -f -- "$src") || real=""
+      name=""
+      [ -n "$real" ] && name=$(basename -- "$real")
+      if [ -z "$name" ] || [ ! -e "$(_asd_sysblock)/$name" ]; then
+        # The host table can name devices this container has no node for. A
+        # device-mapper volume there could sit on the target, and nothing here
+        # can prove it does not, so it refuses; anything else is only warned.
+        if [ "$table" = "$host" ] && _asd_is_dm_path "$src"; then
+          _asd_err "refusing ${dev}: the host mount table names the device-mapper volume ${src}, which this container cannot resolve, so it cannot be proven unrelated to the target; expose /dev/mapper in the container, or unmount it on the host"
+          return 1
+        fi
+        [ "$table" = "$host" ] && echo "warning: host mount ${src} cannot be resolved in this container; not checked against ${dev}" >&2
+        continue
+      fi
       chain=$(_asd_chain "$name") || {
         _asd_err "refusing ${dev}: cannot trace the devices under ${src}"
         return 1

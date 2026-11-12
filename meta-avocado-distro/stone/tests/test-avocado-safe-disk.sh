@@ -309,6 +309,51 @@ out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
 rc=$?
 [ $rc -ne 0 ] && ok "a dm volume stacked on a partition of the target is refused" || bad "stacked dm: rc=$rc out=[$out]"
 
+# Host-table sources the container cannot resolve. A dm volume could sit on the
+# target, so it refuses; other unresolvable /dev sources warn; non-/dev is silent.
+hostchk() { # host-table line
+  echo "overlay / overlay rw 0 0" >"$w/st/mounts"
+  echo "$1" >"$w/st/host-mounts"
+  call "AVOCADO_PROVISION_HOST_MOUNTS=$w/st/host-mounts avocado_safe_disk_unmounted $w/dev/sdb"
+}
+rm -f "$w/dev/mapper/crypt"
+out=$(hostchk "$w/dev/mapper/luks-x /home ext4 rw 0 0")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "luks-x" && echo "$out" | grep -q "device-mapper" && echo "$out" | grep -q "cannot be proven"; } \
+  && ok "a host-table dm source with no node in the container refuses, naming it" || bad "unresolvable mapper: rc=$rc out=[$out]"
+out=$(AVOCADO_PROVISION_DRY_RUN=1 hostchk "$w/dev/mapper/luks-x /home ext4 rw 0 0")
+rc=$?
+[ $rc -ne 0 ] && ok "the unresolvable dm source refuses in a dry run too" || bad "unresolvable mapper dry: rc=$rc out=[$out]"
+ln -s ../dm-0 "$w/dev/mapper/luks-x"
+out=$(hostchk "$w/dev/mapper/luks-x /home ext4 rw 0 0")
+rc=$?
+[ $rc -ne 0 ] && ok "a host-table dm source that resolves to a volume on the target refuses" || bad "resolvable mapper: rc=$rc out=[$out]"
+mkdir -p "$w/sys/devices/virtual/block/dm-1/slaves"
+ln -s "../../../../$ATAPATH/sda/sda1" "$w/sys/devices/virtual/block/dm-1/slaves/sda1"
+ln -s ../../devices/virtual/block/dm-1 "$w/sys/class/block/dm-1"
+: >"$w/dev/dm-1"
+ln -s ../dm-1 "$w/dev/mapper/other"
+out=$(hostchk "$w/dev/mapper/other /data ext4 rw 0 0")
+rc=$?
+[ $rc -eq 0 ] && ok "a resolvable host-table dm source unrelated to the target passes" || bad "unrelated mapper: rc=$rc out=[$out]"
+out=$(hostchk "$w/dev/vg0/root / ext4 rw 0 0")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "vg0/root"; } \
+  && ok "an unresolvable /dev/<vg>/<lv> host source refuses" || bad "unresolvable vg/lv: rc=$rc out=[$out]"
+out=$(hostchk "$w/dev/dm-3 /srv ext4 rw 0 0")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "dm-3"; } \
+  && ok "an unresolvable /dev/dm-N host source refuses" || bad "unresolvable dm-3: rc=$rc out=[$out]"
+out=$(hostchk "$w/dev/disk/by-label/BOOT /boot vfat rw 0 0")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "^warning:.*by-label/BOOT"; } \
+  && ok "an unresolvable by-label host source warns, naming it, and passes" || bad "unresolvable by-label: rc=$rc out=[$out]"
+out=$(hostchk "$(printf '%s\n%s\n%s' "tmpfs /run tmpfs rw 0 0" "proc /proc proc rw 0 0" "nas:/export /mnt nfs rw 0 0")")
+rc=$?
+{ [ $rc -eq 0 ] && [ -z "$out" ]; } \
+  && ok "non-/dev host sources pass silently" || bad "non-dev sources: rc=$rc out=[$out]"
+rm -f "$w/st/host-mounts" "$w/dev/mapper/luks-x" "$w/dev/mapper/other"
+
 # --- confirmation -----------------------------------------------------------
 
 setup
@@ -708,7 +753,7 @@ idpath mmcblk0 "pci-0000:00:17.0-ata-2"
 out=$(call "avocado_safe_disk_bus_candidates")
 [ -z "$out" ] && ok "bus_candidates prints nothing when no disk is on a USB or MMC bus" || bad "candidates none: [$out]"
 
-N=117
+N=125
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]
