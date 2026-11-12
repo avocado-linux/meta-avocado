@@ -376,6 +376,62 @@ else
   fi
 fi
 
+# Pi 5: the firmware looks each dtoverlay= name up in overlays/overlay_map.dtb
+# and loads the BCM2712 replacement in its place, so dtoverlay=disable-bt needs
+# disable-bt-pi5.dtbo on the boot FAT or nothing is applied. dtc builds the map,
+# so the hook's parser is checked against an independent encoder.
+stone_pi5="$(jq -c '.storage_devices.rootdisk.images.boot.build_args.files += [{"in": "overlay_map.dtb", "out": "overlays/overlay_map.dtb"}, {"in": "vc4-kms-v3d-pi5.dtbo", "out": "overlays/vc4-kms-v3d-pi5.dtbo"}, "bcm2712-rpi-5-b.dtb"]' "$work/stone.json")"
+pi5_manifest='{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "vc4-kms-v3d", "file": "vc4-kms-v3d.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "custom", "file": "custom.dtbo", "params": {}, "stock": false, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}'
+if command -v dtc >/dev/null 2>&1; then
+  mkdir -p "$work/prefix/rootfs/boot"
+  dtc -q -I dts -O dtb -o "$work/prefix/rootfs/boot/overlay_map.dtb" - <<'EOF'
+/dts-v1/;
+/ {
+    disable-bt {
+        bcm2835;
+        bcm2711;
+        bcm2712 = "disable-bt-pi5";
+    };
+    disable-bt-pi5 {
+        bcm2712;
+    };
+    vc4-kms-v3d {
+        bcm2835;
+        bcm2711 = "vc4-kms-v3d-pi4";
+        bcm2712 = "vc4-kms-v3d-pi5";
+    };
+};
+EOF
+
+  # disable-bt-pi5 is appended beside disable-bt; vc4-kms-v3d-pi5 is not,
+  # because the boot FAT already ships it; the custom overlay is untouched.
+  if AVOCADO_PREFIX="$work/prefix" run_case pi5 "$pi5_manifest" "$stone_pi5"; then
+    d="$work/case-pi5"
+    if [[ "$(jq -c "[${fa}[].out]" "$d/fragment.json")" == '["overlays/disable-bt.dtbo","overlays/vc4-kms-v3d.dtbo","overlays/custom.dtbo","overlays/disable-bt-pi5.dtbo","avocado-overlays.txt"]' ]] \
+      && jq -e "${fa}[] | select(.in == \"disable-bt-pi5.dtbo\" and .out == \"overlays/disable-bt-pi5.dtbo\")" "$d/fragment.json" >/dev/null \
+      && [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=disable-bt\ndtoverlay=vc4-kms-v3d\ndtoverlay=custom' ]]; then
+      ok "a stock overlay the BCM2712 map replaces is delivered with its replacement"
+    else
+      bad "BCM2712 replacement delivery wrong: fa=$(jq -c "$fa" "$d/fragment.json") txt=$(cat "$d/avocado-overlays.txt")"
+    fi
+  else
+    bad "hook rejected stock overlays on a BCM2712 boot FAT: $(cat "$work/case-pi5/err")"
+  fi
+else
+  echo "  SKIP - dtc not installed; BCM2712 overlay-map delivery not checked"
+fi
+
+# Without the map the hook cannot know which file the firmware will load, so it
+# stops rather than claim an overlay the board might never apply.
+if AVOCADO_PREFIX="$work/no-such-prefix" run_case pi5-nomap "$pi5_manifest" "$stone_pi5"; then
+  bad "hook delivered to a BCM2712 boot FAT without reading the overlay map"
+elif grep -qF 'overlay_map.dtb' "$work/case-pi5-nomap/err" \
+  && [[ ! -e "$work/case-pi5-nomap/fragment.json" && ! -e "$work/case-pi5-nomap/avocado-overlays.txt" ]]; then
+  ok "a BCM2712 boot FAT with no readable overlay map is a hard error, with nothing written"
+else
+  bad "missing overlay map failed without naming it or left output behind: $(cat "$work/case-pi5-nomap/err")"
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]
