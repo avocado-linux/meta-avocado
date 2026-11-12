@@ -9,17 +9,20 @@ set -euo pipefail
 # AVOCADO_DEVICE_CERT - device certificate content (base64 encoded pem)
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
-# AVOCADO_PROVISION_FORCE - 1, 0 or unset; see confirm_device below
+# AVOCADO_PROVISION_FORCE - 1, 0 or unset; see avocado_safe_disk_confirm
+# AVOCADO_PROVISION_DRY_RUN - 1 runs every check and prints the uuu command
+#                             instead of running it
+# AVOCADO_PROVISION_FWUP_TASK - only complete; upgrade is refused (uuu rewrites
+#                             the whole eMMC and has no upgrade path)
 
-# Checked first so a bad value stops the run before any image work.
-force="${AVOCADO_PROVISION_FORCE:-}"
-case "$force" in
-  1 | 0 | "") ;;
-  *)
-    echo "ERROR: AVOCADO_PROVISION_FORCE must be 1, 0 or unset, not '${force}'"
-    exit 1
-    ;;
-esac
+# Confirmation table and run-mode validation shared with the other profiles.
+# Shipped beside this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
+# Checked first so a bad value, or a task this profile cannot do, stops the run
+# before any image work and before waiting for a device.
+avocado_safe_disk_modes uuu-emmc 1 0 || exit 1
 
 echo "=== iMX eMMC Provisioning via uuu ==="
 echo "Manifest: $AVOCADO_STONE_MANIFEST"
@@ -31,7 +34,9 @@ archive_name=$(jq -r .storage_devices.rootdisk.out "$AVOCADO_STONE_MANIFEST")
 archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
 archive_image="${archive_file%.*}.img"
 
-if [ ! -f "$archive_image" ]; then
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  echo "dry-run: would build ${archive_image} from ${archive_file} unless it exists"
+elif [ ! -f "$archive_image" ]; then
   echo "Building disk image from archive..."
   fwup \
     -a \
@@ -63,9 +68,13 @@ ${archive_image}	0x400000	0x20000	0x200	256
 ${archive_image}	0x440000	0x20000	0x200	256
 EOF
 
-fw_setenv -c "$fw_env_img_config" devnum "$emmc_uboot_dev"
-fw_setenv -c "$fw_env_img_config" mmcblk "$emmc_mmcblk"
-echo "U-Boot env patched: devnum=${emmc_uboot_dev}, mmcblk=${emmc_mmcblk}"
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  echo "dry-run: would set U-Boot env devnum=${emmc_uboot_dev} mmcblk=${emmc_mmcblk} in ${archive_image}"
+else
+  fw_setenv -c "$fw_env_img_config" devnum "$emmc_uboot_dev"
+  fw_setenv -c "$fw_env_img_config" mmcblk "$emmc_mmcblk"
+  echo "U-Boot env patched: devnum=${emmc_uboot_dev}, mmcblk=${emmc_mmcblk}"
+fi
 
 # --- Step 4: Locate imx-boot image for the SDPS handoff ---
 # iMX8M: prefer the emmc_fastboot variant (mkimage_imx8 -dev emmc_fastboot),
@@ -167,40 +176,12 @@ fi
 read -r usb_path usb_chip usb_proto usb_id <<<"$uuu_devices"
 
 # --- Step 5b: Confirm the target ---
-# AVOCADO_PROVISION_FORCE has three states, shared with the Jetson flasher:
-#   1     skip the prompt
-#   0     always require a terminal to confirm on; refuse without one
-#   unset prompt on a terminal; with none, proceed and say the prompt was skipped
-confirm_device() {
-  case "$force" in
-    1)
-      echo "Device confirmation skipped: AVOCADO_PROVISION_FORCE=1"
-      return 0
-      ;;
-  esac
-  if [ ! -t 0 ]; then
-    if [ "$force" = 0 ]; then
-      echo "ERROR: AVOCADO_PROVISION_FORCE=0 requires confirmation but there is no terminal to confirm on"
-      exit 1
-    fi
-    echo "Device confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal"
-    return 0
-  fi
-  echo "About to ERASE the eMMC (U-Boot mmc dev ${emmc_uboot_dev}) on the board ${usb_id} (${usb_chip}, USB ${usb_path})."
-  printf 'All data on it will be lost. Type %s to continue: ' "$usb_path"
-  if ! read -r typed; then
-    echo ""
-    echo "ERROR: device confirmation failed: stdin closed before an answer was given"
-    exit 1
-  fi
-  if [ "$typed" != "$usb_path" ]; then
-    echo "ERROR: device confirmation failed: typed '${typed}', expected '${usb_path}'"
-    exit 1
-  fi
-}
-
+# The retype target is the uuu USB path, the only name that selects the board
+# (uuu -m); lsusb bus/device numbers are never accepted. FORCE only skips the
+# retype: two boards were refused above whatever FORCE says.
 echo "Target device: USB ${usb_path} ${usb_id} (${usb_chip}, ${usb_proto})"
-confirm_device
+echo "About to ERASE the eMMC (U-Boot mmc dev ${emmc_uboot_dev}) on this board."
+avocado_safe_disk_confirm "$usb_path" || exit 1
 
 # --- Step 6: Generate custom uuu script and flash ---
 # uuu resolves file paths relative to the .uuu script location,
@@ -267,6 +248,13 @@ echo "  Script: $uuu_script"
 echo ""
 cat "$uuu_script"
 echo ""
+
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  # Same command line a real run uses, printed and never executed.
+  avocado_safe_disk_write uuu -v -m "$usb_path" "$uuu_script"
+  avocado_safe_disk_finish "$usb_path"
+  exit 0
+fi
 
 uuu -v -m "$usb_path" "$uuu_script"
 
