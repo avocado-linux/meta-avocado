@@ -81,9 +81,19 @@ do_deploy() {
     else
         bbwarn "No tegraflash tools found in native sysroot at $FLASH_SRC"
     fi
+
+    # The tegraflash engine repacks boot.img by running avocado-tegra-bootimg
+    # and mkbootimg out of this directory. mkbootimg already arrives with the
+    # tegra-flash copy above (tegra-flashtools installs it into
+    # ${bindir}/tegra-flash); the helper ships only with the SDK target, so
+    # stage the same source file here.
+    install -m 0755 ${UNPACKDIR}/avocado-tegra-bootimg ${DEPLOYDIR}/tegraflash-tools/avocado-tegra-bootimg
 }
 
-SRC_URI += "file://strip-udevadm.py"
+# avocado-tegra-bootimg lives with the SDK target recipe's files.
+FILESEXTRAPATHS:prepend := "${THISDIR}/../../recipes-avocado/sdk/avocado-sdk-target:"
+
+SRC_URI += "file://strip-udevadm.py file://avocado-tegra-bootimg"
 
 addtask deploy before do_build after do_compile
 
