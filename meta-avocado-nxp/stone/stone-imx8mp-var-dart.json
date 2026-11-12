@@ -55,7 +55,10 @@
       "sd": {
         "script": "stone-provision-sd.sh",
         "envs": ["device_info"],
-        "requires": ["usb"]
+        "requires": ["usb"],
+        "config": {
+          "dry_run": true
+        }
       },
       "uuu-emmc": {
         "script": "stone-provision-uuu-emmc.sh",
@@ -63,7 +66,8 @@
         "requires": ["usb"],
         "config": {
           "emmc_uboot_dev": 2,
-          "emmc_mmcblk": 2
+          "emmc_mmcblk": 2,
+          "dry_run": true
         }
       }
     }
