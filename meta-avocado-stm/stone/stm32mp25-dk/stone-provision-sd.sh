@@ -14,6 +14,12 @@ set -u
 set -o pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+# Wrong-disk guards shared with the other sd and usb profiles. Shipped beside
+# this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "${SCRIPT_DIR}/avocado-safe-disk.sh"
+
 DISK_IMAGE=$("${SCRIPT_DIR}/build-disk-image.sh")
 
 # Docker Desktop / Windows / macOS path: produce the disk image and stop.
@@ -81,6 +87,11 @@ else
   esac
 fi
 
+# Whole disk on a USB or MMC bus that does not hold the running root. The
+# kernel removable flag the listing above uses is not trusted for this.
+avocado_safe_disk_check_device "$target" || exit 1
+target="$AVOCADO_SAFE_DISK_DEV"
+
 if command -v blockdev >/dev/null 2>&1; then
   size_bytes=$(blockdev --getsize64 "$target" 2>/dev/null || echo 0)
 else
@@ -97,20 +108,20 @@ STM32MP25-DK SD provisioning
 
 WARNING: this will overwrite ALL data on $target.
 EOF
-read -r -p "Continue? [y/N] " confirm
-case "$confirm" in
-  [yY] | [yY][eE][sS]) ;;
-  *)
-    echo "Aborted."
-    exit 1
-    ;;
-esac
+
+# Typed retype of the device path, skipped by AVOCADO_PROVISION_FORCE=1. Naming
+# the card through AVOCADO_SD_DEVICE does not skip it: this script has always
+# asked in that case, and the override alone is not an unattended-run signal.
+avocado_safe_disk_confirm "$target" 0 || exit 1
 
 target_base=$(basename "$target")
 for partdir in /sys/block/"$target_base"/"$target_base"*; do
   [ -e "$partdir" ] || continue
   umount "/dev/$(basename "$partdir")" 2>/dev/null || true
 done
+
+# Whatever is still mounted now was not unmounted above; never write under it.
+avocado_safe_disk_unmounted "$target" || exit 1
 
 echo "Writing $(basename "$DISK_IMAGE") to $target..."
 dd if="$DISK_IMAGE" of="$target" bs=4M oflag=direct status=progress
