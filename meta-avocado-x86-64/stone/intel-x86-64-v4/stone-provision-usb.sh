@@ -32,6 +32,10 @@ done
 # shellcheck source=/dev/null # sibling file, absent from a standalone lint
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
 
+# The write is a raw dd, so there is neither a dry run nor an fwup task to
+# honour; refuse both before any image is built or disk is listed.
+avocado_safe_disk_modes usb 0 0 || exit 1
+
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 # Never read below, but the assignment is load-bearing under `set -u`: it aborts
 # the script here if stone did not export AVOCADO_STONE_DATA_DIR, rather than
@@ -224,9 +228,8 @@ echo ""
 echo "Image to write: ${IMAGE_NAME} (${IMAGE_SIZE})"
 echo ""
 
-# Retype of the device path, skipped by AVOCADO_PROVISION_FORCE=1. This script
-# takes no device up front, so every other run is attended.
-avocado_safe_disk_confirm "$target_device" 0 || exit 1
+# Retype of the device path; only AVOCADO_PROVISION_FORCE=1 skips it.
+avocado_safe_disk_confirm "$target_device" || exit 1
 
 # =============================================================================
 # Step 5: Unmount any existing partitions
