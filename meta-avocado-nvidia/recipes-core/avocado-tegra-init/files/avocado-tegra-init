@@ -33,12 +33,15 @@ rootdev=""
 # the PARTLABEL fallback below need it, so it can no longer be computed inside
 # whichever branch happens to run.
 if [ "$foundslotsfx" != "yes" ]; then
-  # This variable file contains a type (should be 6) followed by the value (should be 0 or 1)
-  # awk splits on runs of whitespace and ignores the leading blank hexdump
-  # emits, which is what the nested echo used to be doing.
-  bcdata=$(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null || true)
-  if [ "$(echo "$bcdata" | awk '{print $1}')" = "6" ]; then
-    slotnum=$(echo "$bcdata" | awk '{print $2}')
+  # The 8-byte file is <attributes:4><value:4> little-endian. Attributes are
+  # 6 (BS+RT) on T23x and 7 (NV+BS+RT) where the firmware sets NON_VOLATILE;
+  # accept either. The initramfs ships no awk, so split with cut: the unquoted
+  # echo collapses hexdump's leading and repeated spaces first.
+  # shellcheck disable=SC2046,SC2005
+  bcdata=$(echo $(hexdump -n 8 -e '2/4 " %u"' /sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9 2>/dev/null) || true)
+  bctype=$(echo "$bcdata" | cut -d' ' -f1)
+  if [ "$bctype" = "6" ] || [ "$bctype" = "7" ]; then
+    slotnum=$(echo "$bcdata" | cut -d' ' -f2)
     [ "$slotnum" != "1" ] || slotsfx="_b"
   fi
 fi
