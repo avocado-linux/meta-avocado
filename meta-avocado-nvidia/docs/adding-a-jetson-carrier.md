@@ -167,8 +167,6 @@ CARRIER_ENV_DTBFILE="tegra234-p3768-0000+p3767-0001-nv.dtb"
 
 # BPMP DTB / firmware — Advantech variants. Shipped in this overlay.
 CARRIER_FV_BPFDTB_FILE="tegra234-bpmp-3767-0001-3509-a02.dtb"
-# The flash helper rewrites the TExxxM part by chip SKU: D3/D4
-# (Orin NX 16GB and 8GB) get TE980M, D5/D6 (Orin Nano) TE950M.
 CARRIER_FV_BPF_FILE="bpmp_t234-TE980M-A1_prod.bin"
 
 # Pinmux + pad-voltage dtsi — HDMI variants. Already in the
