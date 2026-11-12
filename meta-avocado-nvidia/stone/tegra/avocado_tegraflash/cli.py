@@ -44,6 +44,9 @@ _ROOT_REQUIRED = (
     '  sudo -E env PATH="$PATH" <the command you just ran>'
 )
 
+# The host wrapper's fallback (scripts/avocado_flash_tegra/plan.py) when no PATH entry is absolute.
+SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="avocado_tegraflash", add_help=False)
@@ -73,12 +76,30 @@ def _build_dir_lock(build_dir: str):
         yield
 
 
+def _absolute_path(path: str) -> str:
+    """PATH with its empty and relative components removed.
+
+    Either kind resolves against the working directory, which root does not
+    control here: cpp, lsusb or the flash tool could come from it.
+    """
+    parts = path.split(":") if path else []
+    kept = [p for p in parts if p.startswith("/")]
+    dropped = [p for p in parts if not p.startswith("/")]
+    if dropped:
+        print(f"WARNING: dropped relative or empty PATH entries: {', '.join(map(repr, dropped))}")
+    if not kept:
+        print(f"WARNING: PATH has no absolute entry, using {SYSTEM_PATH}")
+        return SYSTEM_PATH
+    return ":".join(kept)
+
+
 def _run(args, environ, runner, euid, sleep) -> int:
     # Deviation root-check-first: before the environment is read or anything is created.
     if not args.prepare_only and (os.geteuid() if euid is None else euid) != 0:
         raise EngineError(_ROOT_REQUIRED)
 
     base = dict(os.environ if environ is None else environ)
+    base["PATH"] = _absolute_path(base.get("PATH", ""))
     cfg = from_environ(base)
     # Deviation unknown-profile-refused: the oracle (514-527) falls back to nvme.
     media = media_for_profile(cfg.profile)
