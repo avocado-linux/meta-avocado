@@ -29,6 +29,7 @@ from . import (
     toolchain,
 )
 from .env import dry_run_requested, from_environ
+from .files import join_name
 from .fit import require_fit
 from .manifest import read_manifest
 from .profile import media_for_profile
@@ -205,6 +206,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
             initramfs_name=man.initramfs,
             env=flash_env,
             version=cfg.kernel_version,
+            tools_dir=join_name(cfg.data_dir, man.tegraflash_tools) if man.tegraflash_tools else work,
         )
     else:
         bootimg.refuse_cmdline_without_kernel(cfg.kernel_cmdline, cfg.kernel_cmdline_extra)

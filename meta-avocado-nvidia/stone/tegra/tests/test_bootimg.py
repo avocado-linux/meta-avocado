@@ -27,19 +27,32 @@ def staged(tmp_path):
     (work / "initrd.cpio").write_bytes(b"cpio")
     kernel = tmp_path / "Image"
     kernel.write_bytes(b"kernel")
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    mkbootimg = bindir / "mkbootimg"
-    mkbootimg.write_text("#!/bin/sh\n")
-    mkbootimg.chmod(0o755)
-    env = {"PATH": f"{tmp_path / 'nope'}:{bindir}", "AVOCADO_KERNEL_CMDLINE_EXTRA": PINS_ENV}
-    return work, kernel, env, mkbootimg
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("mkbootimg", "avocado-tegra-bootimg"):
+        helper = tools / name
+        helper.write_text("#!/bin/sh\n")
+        helper.chmod(0o755)
+    # Decoys on PATH that must never be picked over the staged tools directory.
+    decoys = tmp_path / "decoys"
+    decoys.mkdir()
+    for name in ("mkbootimg", "avocado-tegra-bootimg"):
+        decoy = decoys / name
+        decoy.write_text("#!/bin/sh\n")
+        decoy.chmod(0o755)
+    env = {"PATH": f"{decoys}:/usr/bin", "AVOCADO_KERNEL_CMDLINE_EXTRA": PINS_ENV}
+    return work, kernel, env, tools / "mkbootimg"
 
 
 def do_repack(runner, staged, **over):
-    work, kernel, env, _ = staged
+    work, kernel, env, mkbootimg = staged
     args = dict(
-        work_dir=work, kernel_image=str(kernel), initramfs_name="initrd.cpio", env=env, version="6.12.1"
+        work_dir=work,
+        kernel_image=str(kernel),
+        initramfs_name="initrd.cpio",
+        env=env,
+        version="6.12.1",
+        tools_dir=mkbootimg.parent,
     )
     args.update(over)
     logged = []
@@ -52,7 +65,7 @@ def test_repack_runs_the_helper_with_the_oracle_argument_order(staged):
     do_repack(runner, staged)
     work, kernel, _, mkbootimg = staged
     assert runner.calls[0][0] == [
-        "avocado-tegra-bootimg",
+        str(mkbootimg.parent / "avocado-tegra-bootimg"),
         str(mkbootimg),
         f"{work}/boot.img",
         str(kernel),
@@ -144,21 +157,47 @@ def test_repack_names_the_initramfs_by_its_basename(staged):
 
 
 @pytest.mark.deviation("mkbootimg-missing-refused")
-def test_repack_refuses_when_mkbootimg_is_not_on_the_env_path(staged):
-    # Oracle line 438: `command -v mkbootimg` expands to nothing and the helper
-    # starts with an empty argument.
+def test_repack_uses_the_tools_directory_helpers_not_the_path_decoys(staged):
     runner = FakeRunner()
-    work, kernel, env, _ = staged
+    do_repack(runner, staged)
+    tools = staged[3].parent
+    decoys = staged[0].parent / "decoys"
+    argv = runner.calls[0][0]
+    assert (argv[0], argv[1], str(decoys) in " ".join(argv)) == (
+        str(tools / "avocado-tegra-bootimg"),
+        str(tools / "mkbootimg"),
+        False,
+    )
+
+
+@pytest.mark.deviation("mkbootimg-missing-refused")
+@pytest.mark.parametrize("name", ["mkbootimg", "avocado-tegra-bootimg"])
+def test_repack_refuses_a_helper_only_on_path_naming_tool_and_directory(staged, name):
+    runner = FakeRunner()
+    tools = staged[3].parent
+    (tools / name).unlink()
+    with pytest.raises(EngineError) as info:
+        do_repack(runner, staged)
+    assert (name in str(info.value), str(tools) in str(info.value), runner.calls) == (True, True, [])
+
+
+@pytest.mark.parametrize("name", ["mkbootimg", "avocado-tegra-bootimg"])
+def test_repack_refuses_a_helper_that_is_not_executable(staged, name):
+    runner = FakeRunner()
+    tools = staged[3].parent
+    (tools / name).chmod(0o644)
+    with pytest.raises(EngineError) as info:
+        do_repack(runner, staged)
+    assert (name in str(info.value), str(tools) in str(info.value), runner.calls) == (True, True, [])
+
+
+def test_repack_ignores_the_process_path_too(staged, monkeypatch):
+    runner = FakeRunner()
+    (staged[3].parent / "mkbootimg").unlink()
+    monkeypatch.setenv("PATH", str(staged[0].parent / "decoys"))
     with pytest.raises(EngineError, match="mkbootimg"):
-        do_repack(runner, staged, env={**env, "PATH": "/nonexistent-dir"})
+        do_repack(runner, staged)
     assert runner.calls == []
-
-
-def test_repack_resolves_mkbootimg_only_on_the_env_path_not_the_process_path(staged, monkeypatch):
-    bindir = staged[0].parent / "bin"
-    monkeypatch.setenv("PATH", str(bindir))
-    with pytest.raises(EngineError, match="mkbootimg"):
-        do_repack(FakeRunner(), staged, env={"PATH": "/nonexistent-dir"})
 
 
 def test_repack_fails_on_a_nonzero_helper_exit_without_claiming_success(staged):
@@ -172,6 +211,7 @@ def test_repack_fails_on_a_nonzero_helper_exit_without_claiming_success(staged):
             initramfs_name="initrd.cpio",
             env=env,
             version="1",
+            tools_dir=staged[3].parent,
             log=logged.append,
         )
     assert "boot.img repacked at provision time" not in logged
@@ -240,7 +280,7 @@ def test_falsifier_missing_kernel_check_removed_lets_repack_run_the_helper(stage
     mod = mutant("bootimg.py", "if not Path(kernel_image).is_file():", "if False:")
     runner = FakeRunner()
     mod.repack(runner, work_dir=staged[0], kernel_image=str(staged[0] / "gone"),
-               initramfs_name="initrd.cpio", env=staged[2], version="1", log=lambda _t: None)
+               initramfs_name="initrd.cpio", env=staged[2], version="1", tools_dir=staged[3].parent, log=lambda _t: None)
     assert len(runner.calls) == 1
 
 
@@ -248,5 +288,5 @@ def test_falsifier_nonzero_exit_ignored_reports_success(staged, mutant):
     mod = mutant("bootimg.py", "if status != 0:", "if False:")
     logged = []
     mod.repack(FakeRunner(status=3), work_dir=staged[0], kernel_image=str(staged[1]),
-               initramfs_name="initrd.cpio", env=staged[2], version="1", log=logged.append)
+               initramfs_name="initrd.cpio", env=staged[2], version="1", tools_dir=staged[3].parent, log=logged.append)
     assert "boot.img repacked at provision time" in logged

@@ -1,7 +1,6 @@
 """Repack boot.img from the staged kernel (oracle: stone-provision-tegraflash.sh)."""
 
 import os
-import shutil
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -30,6 +29,7 @@ def repack(
     initramfs_name: str,
     env: Mapping[str, str],
     version: str,
+    tools_dir: str | Path,
     log: Log = print,
 ) -> None:
     if not Path(kernel_image).is_file():
@@ -38,16 +38,23 @@ def repack(
     initramfs = work / os.path.basename(initramfs_name)
     if not initramfs.is_file():
         raise EngineError(f"initramfs cpio not staged at {initramfs}")
-    mkbootimg = shutil.which("mkbootimg", path=env.get("PATH", ""))
-    if mkbootimg is None:
-        raise EngineError("mkbootimg not found on PATH")
+    # Absolute paths into the directory the manifest names: PATH is never consulted,
+    # so a same-named program earlier on it cannot stand in for the staged helper.
+    tools = Path(tools_dir)
+    helper = str(tools / "avocado-tegra-bootimg")
+    mkbootimg = str(tools / "mkbootimg")
+    for path in (helper, mkbootimg):
+        if not (os.path.isfile(path) and os.access(path, os.X_OK)):
+            raise EngineError(
+                f"{os.path.basename(path)} is missing or not executable in the tools directory {tools}"
+            )
     log(f"Packing boot.img from kernel {version or '?'} (Image={kernel_image})")
     boot = f"{work}/boot.img"
     # The helper reads its base image from the path it then writes, so a staged
     # link becomes a copy first and the data directory's own image is not modified.
     materialize_link(boot)
     status = runner.run(
-        ["avocado-tegra-bootimg", mkbootimg, boot, kernel_image, str(initramfs), boot],
+        [helper, mkbootimg, boot, kernel_image, str(initramfs), boot],
         env=env,
     )
     if status != 0:
