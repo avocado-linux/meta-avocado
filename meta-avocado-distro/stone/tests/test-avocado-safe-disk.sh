@@ -691,7 +691,24 @@ else
   [ $? -eq 7 ] && ok "run_with_tty returns the command's exit status" || bad "pty rc: $?"
 fi
 
-N=115
+# --- bus candidates ---------------------------------------------------------
+
+setup
+idpath sdb "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0"
+idpath sda "pci-0000:00:17.0-ata-1"
+echo 1 >"$w/sys/devices/$ATAPATH/sda/removable"
+out=$(call "avocado_safe_disk_bus_candidates")
+rc=$?
+[ "$out" = "$(printf '%s\n%s' "$w/dev/mmcblk0" "$w/dev/sdb")" ] \
+  && ok "bus_candidates lists whole USB and MMC disks only: no partitions, no SATA, removable flag ignored" || bad "candidates: rc=$rc out=[$out]"
+
+setup
+idpath sdb "pci-0000:00:17.0-ata-1"
+idpath mmcblk0 "pci-0000:00:17.0-ata-2"
+out=$(call "avocado_safe_disk_bus_candidates")
+[ -z "$out" ] && ok "bus_candidates prints nothing when no disk is on a USB or MMC bus" || bad "candidates none: [$out]"
+
+N=117
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]

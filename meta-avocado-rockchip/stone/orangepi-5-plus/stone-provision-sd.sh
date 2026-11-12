@@ -57,20 +57,6 @@ fi
 
 sysblock=${AVOCADO_PROVISION_SYSBLOCK:-/sys/class/block}
 
-# Whole disks on a USB or MMC bus, decided by the library's bus check. The
-# kernel removable flag is not consulted: it is wrong both ways.
-list_bus_candidates() {
-  local entry name node
-  for entry in "$sysblock"/*; do
-    [ -e "$entry" ] || continue
-    name=$(basename -- "$entry")
-    node="${AVOCADO_SAFE_DISK_DEVDIR:-/dev}/${name}"
-    avocado_safe_disk_whole_disk "$node" 2>/dev/null || continue
-    avocado_safe_disk_bus "$node" 2>/dev/null || continue
-    echo "$node"
-  done
-}
-
 named=$(avocado_safe_disk_sd_device) || exit 1
 if [ -n "$named" ]; then
   target="$named"
@@ -82,7 +68,7 @@ else
     echo "Set AVOCADO_PROVISION_DEVICE=/dev/sdX for an unattended run." >&2
     exit 1
   fi
-  mapfile -t candidates < <(list_bus_candidates)
+  mapfile -t candidates < <(avocado_safe_disk_bus_candidates)
   case ${#candidates[@]} in
     0)
       echo "ERROR: no disk on a USB or MMC bus detected. Insert the microSD via a USB reader and re-run." >&2

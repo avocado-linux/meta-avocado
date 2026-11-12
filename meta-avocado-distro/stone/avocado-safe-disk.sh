@@ -463,3 +463,19 @@ avocado_safe_disk_sd_device() {
   fi
   echo "${a:-$b}"
 }
+
+# Print the whole disks on a USB or MMC bus, one node per line, for a script
+# choosing a lone target. The kernel removable flag is not consulted: it is
+# wrong both ways (see avocado_safe_disk_bus). Nothing is printed for a host
+# with no such disk; the caller decides what zero, one or many means.
+avocado_safe_disk_bus_candidates() {
+  local entry name node
+  for entry in "$(_asd_sysblock)"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename -- "$entry")
+    node="${AVOCADO_SAFE_DISK_DEVDIR:-/dev}/${name}"
+    avocado_safe_disk_whole_disk "$node" 2>/dev/null || continue
+    avocado_safe_disk_bus "$node" 2>/dev/null || continue
+    echo "$node"
+  done
+}

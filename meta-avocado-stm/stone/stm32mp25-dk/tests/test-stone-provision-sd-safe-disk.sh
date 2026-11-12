@@ -223,6 +223,23 @@ rc=$?
 
 setup
 usb sdb
+echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/mounts"
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_DRY_RUN=1)
+rc=$?
+{ [ $rc -eq 0 ] && ! wrote && ! grep -q "^umount" "$w/log" && echo "$out" | grep -q "dry-run: umount" \
+  && echo "$out" | grep -q "a real run would unmount it first"; } \
+  && ok "dry run: a mounted partition is reported, not unmounted" || bad "dry run mounted: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+setup
+usb sdb
+echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/hostmounts"
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_DRY_RUN=1 AVOCADO_PROVISION_HOST_MOUNTS="$w/st/hostmounts")
+rc=$?
+{ [ $rc -ne 0 ] && ! wrote && ! grep -q "^umount" "$w/log" && echo "$out" | grep -q "mounted or in use (hostmounts)"; } \
+  && ok "dry run: a partition mounted on the host is refused, not unmounted" || bad "dry run host mount: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+setup
+usb sdb
 out=$(run "$w/dev/sdb\n" AVOCADO_PROVISION_DRY_RUN=2)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "not valid"; } \
@@ -264,5 +281,5 @@ else
 fi
 
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/18 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 18 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/20 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 20 ]
