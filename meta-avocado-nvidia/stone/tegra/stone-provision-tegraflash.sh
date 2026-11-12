@@ -435,74 +435,29 @@ if [ -n "${AVOCADO_PROVISION_KERNEL_IMAGE:-}" ]; then
   # written to A_kernel and B_kernel, so one command line has to serve
   # whichever slot nvbootctrl later selects; avocado-tegra-init picks between
   # them using the slot it already resolves from BootChainOsCurrent.
-  #
   app_partuuid=$(tr 'a-f' 'A-F' </proc/sys/kernel/random/uuid)
   app_b_partuuid=$(tr 'a-f' 'A-F' </proc/sys/kernel/random/uuid)
-  boot_cmdline="avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
-
-  # Carry the machine's KERNEL_ARGS forward. mkbootimg writes an empty command
-  # line otherwise, and the machine config's arguments then reach the kernel by
-  # no path at all - `nvme_core.default_ps_max_latency_us=0` and `pcie_aspm=off`
-  # are set for this hardware and were not being applied to a provisioned board.
+  # The pins are appended through AVOCADO_KERNEL_CMDLINE_EXTRA, so
+  # avocado-tegra-bootimg keeps the machine's KERNEL_ARGS (read from the
+  # prebuilt boot.img header) and the project's kernel.cmdline / cmdline_extra
+  # and only adds these two arguments, last. The packer is the one the build
+  # hooks use for the OTA boot.img, so a flash and an update carry the same
+  # line apart from the pins. It fails closed on an empty base line (no
+  # console=: the board flashes and the console stays dead) and on a line
+  # over the 511 bytes a v0-v2 header holds: mkbootimg would move the overflow,
+  # the PARTUUIDs, into extra_cmdline and silently un-name the rootfs.
   #
   # Console ORDERING is not handled here on purpose. /dev/console follows the
   # last `console=` on the line, and meta-tegra's tegra234 lists end with
   # `console=tty0` while also setting `video=efifb:off`, which is what made a
   # working board look hung (#398). That is fixed in the machine configs, where
-  # meta-avocado already owns KERNEL_ARGS, so it applies to the prebuilt
-  # boot.img too rather than only to images this function repacks.
-  #
-  # The prebuilt image is read as an Android boot header, where v0-v2 keep a
-  # 512-byte command line at offset 64. Check the magic and the version rather
-  # than assuming: a v3+ header moved the field, and reading offset 64 there
-  # returns a fragment of some other field that is non-empty and looks fine.
-  prebuilt_cmdline=""
-  if [ -f "$build_dir/boot.img" ]; then
-    boot_magic=$(dd if="$build_dir/boot.img" bs=8 count=1 2>/dev/null)
-    boot_hdr_version=$(od -An -tu4 -j40 -N4 "$build_dir/boot.img" 2>/dev/null | tr -d ' ')
-    if [ "$boot_magic" = "ANDROID!" ] && [ -n "$boot_hdr_version" ] && [ "$boot_hdr_version" -le 2 ]; then
-      prebuilt_cmdline=$(dd if="$build_dir/boot.img" bs=1 skip=64 count=512 2>/dev/null | tr -d '\0')
-    else
-      echo "WARNING: $build_dir/boot.img is not an Android boot header v0-v2"
-      echo "         (magic='$boot_magic' header_version='$boot_hdr_version')."
-      echo "         Not carrying KERNEL_ARGS forward; the repacked image will"
-      echo "         name only the rootfs PARTUUIDs."
-    fi
-  fi
-
-  # The project's kernel line (kernel.cmdline / cmdline_extra, exported by
-  # avocado-cli as AVOCADO_KERNEL_CMDLINE / _EXTRA): kernel.cmdline replaces
-  # the BSP's line, cmdline_extra is appended to it. Checked before the extras
-  # go on, so cmdline_extra alone never stands in for a missing base line (no
-  # console= or root=: the board flashes and the console stays dead).
-  base_cmdline="${AVOCADO_KERNEL_CMDLINE:-$prebuilt_cmdline}"
-  if [ -z "$base_cmdline" ] && [ -n "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
-    echo "ERROR: kernel.cmdline_extra is set, but there is no base command line to"
-    echo "       append it to (the prebuilt boot.img carries none, and kernel.cmdline is unset)."
-    exit 1
-  fi
-  [ -z "${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ] || base_cmdline="$base_cmdline $AVOCADO_KERNEL_CMDLINE_EXTRA"
-  [ -z "$base_cmdline" ] || boot_cmdline="$base_cmdline $boot_cmdline"
-
-  # mkbootimg does not reject an over-long command line for a v0-v2 header, it
-  # SPLITS it: the first 511 bytes stay in cmdline and the rest goes to the
-  # extra_cmdline field. The PARTUUID arguments are appended last and would be
-  # the part that moves, so an overflow would silently un-name the rootfs. Refuse
-  # instead, while the operator is watching a provision run.
-  if [ "${#boot_cmdline}" -gt 511 ]; then
-    echo "ERROR: kernel command line is ${#boot_cmdline} bytes, over the 511"
-    echo "       an Android v0-v2 boot header holds before mkbootimg splits it."
-    echo "       cmdline: $boot_cmdline"
-    exit 1
-  fi
+  # meta-avocado already owns KERNEL_ARGS.
+  AVOCADO_KERNEL_CMDLINE_EXTRA="${AVOCADO_KERNEL_CMDLINE_EXTRA:+$AVOCADO_KERNEL_CMDLINE_EXTRA }avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"
+  export AVOCADO_KERNEL_CMDLINE_EXTRA
 
   echo "Packing boot.img from kernel ${AVOCADO_PROVISION_KERNEL_VERSION:-?} (Image=$AVOCADO_PROVISION_KERNEL_IMAGE)"
-  echo "  cmdline: $boot_cmdline"
-  mkbootimg \
-    --kernel "$AVOCADO_PROVISION_KERNEL_IMAGE" \
-    --ramdisk "$initramfs_in_build" \
-    --cmdline "$boot_cmdline" \
-    --output "$build_dir/boot.img"
+  avocado-tegra-bootimg "$(command -v mkbootimg)" "$build_dir/boot.img" \
+    "$AVOCADO_PROVISION_KERNEL_IMAGE" "$initramfs_in_build" "$build_dir/boot.img" || exit 1
   echo "boot.img repacked at provision time"
 else
   if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
@@ -511,9 +466,12 @@ else
     exit 1
   fi
   echo "AVOCADO_PROVISION_KERNEL_IMAGE not set — using prebuilt boot.img from BSP"
-  echo "WARNING: the prebuilt boot.img names no rootfs PARTUUID, so the initrd"
-  echo "         locates APP by label. On a board that also carries another"
-  echo "         provisioned disk, the label does not say which one."
+  echo "WARNING: the prebuilt boot.img names no rootfs PARTUUID. With a boot signal"
+  echo "         (BootCurrent) the initrd takes APP on the disk UEFI booted from."
+  echo "         With none, the first APP to appear boots, so an SD card that"
+  echo "         enumerates before the NVMe wins. Two or more APP disks are caught"
+  echo "         only if all are present at that moment; then a root= naming"
+  echo "         exactly one of them settles it, and otherwise the initrd stops."
 fi
 
 # Check if any NVIDIA device is in RCM mode (vendor 0955).
