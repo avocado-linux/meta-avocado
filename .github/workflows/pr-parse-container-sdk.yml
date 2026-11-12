@@ -145,6 +145,9 @@ jobs:
           bash meta-avocado-nvidia/stone/tegra/tests/test-nvme-flash-target.sh
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvme-pin-for-flash.sh
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvdd-pin-gate.sh
+      - name: P3767 nvpmodel conf picked from the device-tree compatible
+        shell: bash
+        run: bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvpmodel-select.sh
       - name: /var udev match and device per AVOCADO_VAR_PART_DEV form
         shell: bash
         run: sh meta-avocado-distro/recipes-core/base-files/tests/test-var-udev-match.sh
