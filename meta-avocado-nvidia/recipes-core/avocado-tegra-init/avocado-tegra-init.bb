@@ -38,6 +38,18 @@ do_install() {
     # disk only. Inert when optee-ftpm-init is not in the image.
     ln -sf /dev/null ${D}${sysconfdir}/systemd/system/optee-ftpm-setup.service
 
+    # systemd-tpm2-setup-early.service runs in the initrd as well. Same gate
+    # and bound as systemd-jetson-masks gives both TPM units in the rootfs;
+    # optee-ftpm-setup.sh, which this script runs, writes the marker.
+    install -d ${D}${systemd_system_unitdir}/systemd-tpm2-setup-early.service.d
+    cat > ${D}${systemd_system_unitdir}/systemd-tpm2-setup-early.service.d/50-avocado-tegra-init-ftpm.conf <<EOF
+[Unit]
+ConditionPathExists=/run/optee-ftpm/supplicant.env
+
+[Service]
+TimeoutSec=30s
+EOF
+
     # systemd 258+ uses initrd-preset/ instead of system-preset/ when
     # /etc/initrd-release exists (i.e. in initramfs images).  The bbclass
     # only generates system-preset/98-*.preset, so we must provide an
@@ -54,4 +66,5 @@ FILES:${PN} += "${sbindir}/avocado-tegra-init \
                 ${systemd_system_unitdir}/avocado-tegra-init.service \
                 ${sysconfdir}/systemd/system/cryptsetup-var.service \
                 ${sysconfdir}/systemd/system/optee-ftpm-setup.service \
-                ${systemd_unitdir}/initrd-preset/98-avocado-tegra-init.preset"
+                ${systemd_unitdir}/initrd-preset/98-avocado-tegra-init.preset \
+                ${systemd_system_unitdir}/systemd-tpm2-setup-early.service.d"

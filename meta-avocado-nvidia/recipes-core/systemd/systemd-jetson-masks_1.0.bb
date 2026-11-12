@@ -38,6 +38,27 @@ do_install() {
     cat > ${D}${nonarch_libdir}/systemd/system-preset/89-avocado-jetson.preset <<EOF
 disable getty@.service
 EOF
+
+    # Every Jetson builds the OP-TEE fTPM and tpm_ftpm_tee binds at coldplug,
+    # but only a runtime that installs optee-ftpm-init gives it a supplicant
+    # and an NV store. Without them it is in dictionary-attack lockout every
+    # boot: systemd's SRK setup fails, and as Type=oneshot with no timeout it
+    # can hold sysinit.target. optee-ftpm-setup.sh writes supplicant.env once
+    # the store is up and before it loads the driver; /run crosses the switch
+    # to the real root. A file from the optee-ftpm-init package would not do:
+    # the documented opt-in installs it in the initramfs only.
+    for u in systemd-tpm2-setup-early systemd-tpm2-setup; do
+        install -d ${D}${systemd_system_unitdir}/$u.service.d
+        cat > ${D}${systemd_system_unitdir}/$u.service.d/50-avocado-jetson-ftpm.conf <<EOF
+[Unit]
+ConditionPathExists=/run/optee-ftpm/supplicant.env
+
+[Service]
+TimeoutSec=30s
+EOF
+    done
 }
 
-FILES:${PN} = "${nonarch_libdir}/systemd/system-preset/89-avocado-jetson.preset"
+FILES:${PN} = "${nonarch_libdir}/systemd/system-preset/89-avocado-jetson.preset \
+               ${systemd_system_unitdir}/systemd-tpm2-setup-early.service.d \
+               ${systemd_system_unitdir}/systemd-tpm2-setup.service.d"
