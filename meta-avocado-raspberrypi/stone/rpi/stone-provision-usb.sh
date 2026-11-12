@@ -7,6 +7,17 @@ set -u
 # Propagate errors in pipelines
 set -o pipefail
 
+# Wrong-disk guards and the one place that escalates to root, shipped beside
+# this script through the manifest's provision.files.
+# shellcheck source=/dev/null
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
+# Validate the run-mode variables before rpiboot starts. The disk only exists
+# once rpiboot has exposed it, so a dry run cannot show the guards' verdict on a
+# real target without first changing the board: this profile refuses it.
+avocado_safe_disk_modes usb 0 1 || exit 1
+fwup_task=$(avocado_safe_disk_fwup_task) || exit 1
+
 # Environment variables provided by avocado:
 # AVOCADO_STONE_MANIFEST - path to manifest JSON file
 # AVOCADO_STONE_BUILD_DIR - build output directory
@@ -14,6 +25,8 @@ set -o pipefail
 # AVOCADO_DEVICE_CERT - device certificate content (base64 encoded pem)
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
+# AVOCADO_PROVISION_FORCE - 1 to skip the retype confirmation (guards still run)
+# AVOCADO_PROVISION_FWUP_TASK - complete (default) or upgrade
 # AVOCADO_PROVISION_VERIFY - 1 to read back and compare every write (fwup
 #   --verify-writes); off by default, see the fwup call below
 
@@ -69,7 +82,7 @@ if [[ "${AVOCADO_FLASH_EEPROM:-0}" == "1" ]]; then
       echo "Timed out after $TIMEOUT seconds waiting for rpi boot device"
       exit 1
     fi
-    for d in /sys/bus/usb/devices/*; do
+    for d in "${SYSFS:-/sys}"/bus/usb/devices/*; do
       [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
       device_vid=$(<"$d/idVendor")
       device_pid=$(<"$d/idProduct")
@@ -147,7 +160,7 @@ while :; do
     echo -n "."
     last_boot_dot_time=$now
   fi
-  for d in /sys/bus/usb/devices/*; do
+  for d in "${SYSFS:-/sys}"/bus/usb/devices/*; do
     [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
     device_vid=$(<"$d/idVendor")
     device_pid=$(<"$d/idProduct")
@@ -181,7 +194,7 @@ done
 # Record existing block devices before enabling mass storage mode
 echo "Recording existing block devices..."
 existing_devices=()
-for block_dev in /sys/block/sd*; do
+for block_dev in "${SYSFS:-/sys}"/block/sd*; do
   [[ -d "$block_dev" ]] || continue
   existing_devices+=("$(basename "$block_dev")")
 done
@@ -278,7 +291,7 @@ while [[ -z "$rpi_block_device" ]]; do
   fi
 
   # Use fwup -D to detect available devices
-  available_devices=$(fwup -D 2>/dev/null | grep "^/dev/sd" || true)
+  available_devices=$(fwup -D 2>/dev/null | grep "^${AVOCADO_SAFE_DISK_DEVDIR:-/dev}/sd" || true)
 
   if [[ -n "$available_devices" ]]; then
     echo "" # New line after progress dots
@@ -320,14 +333,14 @@ while [[ -z "$rpi_block_device" ]]; do
     echo "Timed out after $STORAGE_TIMEOUT seconds waiting for RPi mass storage device"
     echo "Diagnostic information:"
     echo "USB devices currently detected:"
-    for d in /sys/bus/usb/devices/*; do
+    for d in "${SYSFS:-/sys}"/bus/usb/devices/*; do
       [[ -f "$d/idVendor" && -f "$d/idProduct" ]] || continue
       vid=$(<"$d/idVendor")
       pid=$(<"$d/idProduct")
       echo "  USB device $(basename "$d"): $vid:$pid"
     done
     echo "Block devices currently present:"
-    for block_dev in /sys/block/sd*; do
+    for block_dev in "${SYSFS:-/sys}"/block/sd*; do
       [[ -d "$block_dev" ]] || continue
       device_name=$(basename "$block_dev")
       if [[ -f "$block_dev/device/vendor" && -f "$block_dev/device/model" ]]; then
@@ -344,6 +357,11 @@ while [[ -z "$rpi_block_device" ]]; do
   sleep 1
 done
 
+# The same stat test the guards use, so a test can stand in for a block node.
+is_block_node() {
+  [[ "$(stat -Lc %F -- "$1" 2>/dev/null)" == "block special file" ]]
+}
+
 # Wait for the block device to be fully accessible
 echo "Waiting for block device to be ready for access..."
 DEVICE_READY_TIMEOUT=15
@@ -352,7 +370,7 @@ device_ready=false
 
 while [[ "$device_ready" == "false" ]]; do
   # Check if device exists as a block device
-  if [[ -b "$rpi_block_device" ]]; then
+  if is_block_node "$rpi_block_device"; then
     # Try a simple read test first
     if timeout 2 dd if="$rpi_block_device" of=/dev/null bs=512 count=1 2>/dev/null; then
       device_ready=true
@@ -374,7 +392,7 @@ while [[ "$device_ready" == "false" ]]; do
   now=$(date +%s)
   if ((now - device_ready_start_time >= DEVICE_READY_TIMEOUT)); then
     echo "" # New line after progress dots
-    echo "Device status: block device exists: $([[ -b "$rpi_block_device" ]] && echo "yes" || echo "no")"
+    echo "Device status: block device exists: $(is_block_node "$rpi_block_device" && echo "yes" || echo "no")"
     echo "Device status: readable: $([[ -r "$rpi_block_device" ]] && echo "yes" || echo "no")"
     echo "Proceeding anyway - device may be ready despite timeout"
     break
@@ -399,7 +417,7 @@ echo "  Device: $rpi_block_device"
 echo "  Size: ${device_size_gib_decimal} GiB (${rpi_device_size_bytes} bytes)"
 
 # Get device vendor/model info if available
-block_dev="/sys/block/$(basename "$rpi_block_device")"
+block_dev="${SYSFS:-/sys}/block/$(basename "$rpi_block_device")"
 if [[ -d "$block_dev" ]]; then
   vendor_file="$block_dev/device/vendor"
   model_file="$block_dev/device/model"
@@ -410,11 +428,6 @@ if [[ -d "$block_dev" ]]; then
     echo "  Model: $model"
   fi
 fi
-
-echo ""
-echo "WARNING: This will completely overwrite the device $rpi_block_device!"
-echo "All existing data on this ${device_size_gib_decimal} GiB device will be lost."
-echo ""
 
 # The USB device (idVendor:idProduct) a block device sits on, from sysfs
 # (SYSFS overrides the root for tests/test-usb-id-of-block.sh).
@@ -431,28 +444,41 @@ usb_id_of_block() {
   return 1
 }
 
-# Unattended (no terminal on stdin, e.g. a CI job, or
-# AVOCADO_NONINTERACTIVE set): nobody can answer the prompt, and the only
-# safe target is the disk rpiboot's mass-storage gadget (0a5c:0104) just
-# exposed. Write it without asking if that is provably what was found;
-# refuse anything else.
-if [[ -n "${AVOCADO_NONINTERACTIVE:-}" || ! -t 0 ]]; then
+# The guards judge the disk rpiboot just exposed. Nothing is shown for
+# confirmation, cleared or written until it is a whole USB or MMC disk that does
+# not hold the running root. Mounts are checked after the unmount below.
+avocado_safe_disk_check_device "$rpi_block_device" || exit 1
+rpi_block_device=$AVOCADO_SAFE_DISK_DEV
+
+# Unattended (FORCE, AVOCADO_NONINTERACTIVE, or no terminal on stdin): nobody
+# watches the identity, so the only acceptable target is the disk rpiboot's
+# mass-storage gadget (0a5c:0104) just exposed. Refuse anything else.
+if [[ "${AVOCADO_PROVISION_FORCE:-0}" == "1" || -n "${AVOCADO_NONINTERACTIVE:-}" || ! -t 0 ]]; then
   found_id=$(usb_id_of_block "$rpi_block_device" || true)
   if [[ "$found_id" != "0a5c:0104" ]]; then
     echo "Error: unattended provision refuses to write $rpi_block_device: it is on USB device '${found_id:-unknown}', not the rpiboot mass-storage gadget 0a5c:0104"
     exit 1
   fi
-  echo "Unattended: $rpi_block_device is the rpiboot mass-storage gadget (0a5c:0104); writing it."
-else
-  read -p "Are you sure you want to continue? (y/N): " -r 2>&1
+  echo "Unattended: $rpi_block_device is the rpiboot mass-storage gadget (0a5c:0104)."
+fi
 
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Operation cancelled by user"
+# The device was found, not named, so the operator retypes its path; only
+# AVOCADO_PROVISION_FORCE=1 skips that.
+avocado_safe_disk_confirm "$rpi_block_device" 0 || exit 1
+echo "Proceeding with firmware write..."
+
+# Release any mounted partitions before the first write, then refuse what is still
+# mounted or in use, here or on the host: clearing uboot-env writes the disk too.
+if mount | grep -q "${rpi_block_device}"; then
+  echo "Unmounting any mounted partitions on ${rpi_block_device}..."
+  if ! avocado_safe_disk_write umount "${rpi_block_device}"* 2>/dev/null; then
+    echo "Error: Failed to unmount partitions on ${rpi_block_device}"
     exit 1
   fi
-
-  echo "User confirmed. Proceeding with firmware write..."
 fi
+
+# Whatever is still mounted or in use now, here or on the host, refuses.
+avocado_safe_disk_unmounted "$rpi_block_device" || exit 1
 
 # Extract uboot-env partition info from manifest to clear it
 echo "Clearing uboot-env partition..."
@@ -497,21 +523,12 @@ echo "Clearing uboot-env at offset ${uboot_offset_bytes} bytes, size ${uboot_siz
 # Use skip blocks approach for BusyBox dd compatibility
 uboot_offset_blocks=$((uboot_offset_bytes / 512))
 uboot_size_blocks=$(((uboot_size_bytes + 511) / 512)) # Round up
-if ! dd if=/dev/zero of="${rpi_block_device}" bs=512 seek=${uboot_offset_blocks} count=${uboot_size_blocks} 2>/dev/null; then
+if ! avocado_safe_disk_write dd if=/dev/zero of="${rpi_block_device}" bs=512 seek=${uboot_offset_blocks} count=${uboot_size_blocks} 2>/dev/null; then
   echo "Error: Failed to clear uboot-env partition"
   exit 1
 fi
 
 echo "Writing system image to rpi..."
-
-# Ensure device is not mounted and accessible
-if mount | grep -q "${rpi_block_device}"; then
-  echo "Unmounting any mounted partitions on ${rpi_block_device}..."
-  if ! umount "${rpi_block_device}"* 2>/dev/null; then
-    echo "Error: Failed to unmount partitions on ${rpi_block_device}"
-    exit 1
-  fi
-fi
 
 # Brief wait to ensure device is ready
 sleep 2
@@ -530,11 +547,12 @@ fi
 # read-back mostly guards against a bad medium, so it is opt-in here.
 verify_flag=--no-verify-writes
 [[ "${AVOCADO_PROVISION_VERIFY:-0}" == "1" ]] && verify_flag=--verify-writes
-if ! fwup -a -u "$verify_flag" -i "${archive_file}" -d "${rpi_block_device}" -t complete 2>&1; then
+if ! avocado_safe_disk_write fwup -a -u "$verify_flag" -i "${archive_file}" -d "${rpi_block_device}" -t "$fwup_task" 2>&1; then
   echo "Error: fwup failed to write system image"
   exit 1
 fi
 
+avocado_safe_disk_finish "$rpi_block_device"
 echo "System image successfully written to rpi!"
 echo "Please disconnect the USB cable and power cycle the device in normal boot mode."
 echo "Remove any boot mode jumpers or reset boot switches and ensure the device boots from eMMC."
