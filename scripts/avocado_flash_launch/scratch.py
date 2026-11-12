@@ -27,7 +27,7 @@ from pathlib import Path
 
 from .envmap import LauncherError
 
-__all__ = ["MARKER", "Scratch", "plan_scratch", "create_scratch", "remove_scratch", "capture"]
+__all__ = ["MARKER", "Scratch", "plan_scratch", "create_scratch", "remove_scratch", "capture", "required_bytes", "require_space"]
 
 MARKER = ".avocado-flash-launcher"
 # Bound at import so a test that fakes the uid for the sudo path does not change
@@ -142,6 +142,46 @@ def create_scratch(path, uid, stat_fn=os.lstat) -> Scratch:
         undo()
         raise
     return Scratch(path, token)
+
+
+def required_bytes(source) -> int:
+    """Total size of the inputs the scratch will link (``_build`` excluded) plus one tenth.
+
+    Same rule as the old wrapper's workdir.required_bytes (sum of input sizes,
+    10% added, rounded up). Symlinks are followed, as the scratch links resolve
+    to their targets.
+    """
+    total = 0
+    for entry in Path(source).iterdir():
+        if entry.name == "_build":
+            continue
+        resolved = entry.resolve()
+        if resolved.is_dir():
+            for root, _dirs, files in os.walk(resolved):
+                for name in files:
+                    try:
+                        total += os.stat(os.path.join(root, name)).st_size
+                    except OSError:
+                        pass  # a dangling link occupies nothing
+        else:
+            try:
+                total += resolved.stat().st_size
+            except OSError:
+                pass
+    return total + -(-total // 10)
+
+
+def require_space(path, needed, disk_usage=shutil.disk_usage) -> None:
+    """Refuse when the filesystem that will hold ``path`` has less than ``needed`` free."""
+    probe = Path(path)
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    available = disk_usage(probe).free
+    if available < needed:
+        raise LauncherError(
+            f"not enough free space for the scratch directory {path}: "
+            f"needs {needed} bytes, has {available} bytes available on {probe}"
+        )
 
 
 def _warn(path, why):

@@ -33,7 +33,7 @@ from .inputs import (
     stone_dir_for,
     var_size_bytes,
 )
-from .scratch import capture, create_scratch, plan_scratch, remove_scratch
+from .scratch import capture, create_scratch, plan_scratch, remove_scratch, require_space, required_bytes
 from .tools import check_tegra_tools, find_stone, make_sysroot_lookup
 
 __all__ = ["RunContext", "run_stone", "safe_path", "SIGINT_EXIT"]
@@ -98,18 +98,52 @@ def _python3_version(which, capture_fn):
         return None
 
 
+def _absolute_only(path_list: str) -> str:
+    """Drop empty and relative components: both mean the current directory."""
+    return ":".join(p for p in path_list.split(":") if p.startswith("/"))
+
+
 def _fixed_env(env: dict[str, str], additions: dict[str, str]) -> dict[str, str]:
     """The explicit environment for a root run: launcher-owned variables, PATH, library path.
 
     Nothing else of the caller's leaks in, and the USB-reset agent socket is never added.
+    LD_LIBRARY_PATH is only what the launcher added for the build's sysroot (the
+    caller's own value is never forwarded to root), reduced to absolute components.
     """
     fixed = {k: v for k, v in env.items() if k in OWNED_VARS}
     fixed["PATH"] = safe_path(additions.get("PATH", env.get("PATH", "")))
-    ld = additions.get("LD_LIBRARY_PATH", env.get("LD_LIBRARY_PATH"))
+    ld = _absolute_only(additions.get("LD_LIBRARY_PATH", ""))
     if ld:
         fixed["LD_LIBRARY_PATH"] = ld
     fixed.pop(AGENT_SOCK_VAR, None)
     return fixed
+
+
+def _user_env(env: dict[str, str], additions: dict[str, str]) -> dict[str, str]:
+    """The environment for a run as the invoking user: the caller's own plus the additions.
+
+    The caller's LD_LIBRARY_PATH may pass (the user runs it as themselves) but
+    empty and relative components are dropped, so the scratch directory the
+    child runs in is never a library search directory.
+    """
+    merged = {**env, **additions}
+    ld = _absolute_only(":".join(p for p in (additions.get("LD_LIBRARY_PATH"), env.get("LD_LIBRARY_PATH")) if p))
+    if ld:
+        merged["LD_LIBRARY_PATH"] = ld
+    else:
+        merged.pop("LD_LIBRARY_PATH", None)
+    return merged
+
+
+def _resolve_sudo(which, caller_path: str):
+    """sudo as an absolute path found on the absolute PATH components only, else None.
+
+    A relative result would resolve against whichever directory the caller's
+    process happens to be in: the scratch for the flash, the launcher's cwd for
+    the cleanup.
+    """
+    found = which("sudo", path=safe_path(caller_path))
+    return found if found and os.path.isabs(found) else None
 
 
 def _wait_child(popen, argv, env, cwd):
@@ -156,6 +190,7 @@ def run_stone(
     sysroot_lookup=None,
     python_version=None,
     token_hex=secrets.token_hex,
+    disk_usage=shutil.disk_usage,
     out=_err,
 ) -> int:
     uid = os.geteuid() if uid is None else uid
@@ -176,9 +211,9 @@ def run_stone(
             )
 
     lookup = sysroot_lookup or make_sysroot_lookup(ctx.deploy)
-    stone, additions = find_stone(
-        lookup, which, base_path=environ.get("PATH", ""), base_ld=environ.get("LD_LIBRARY_PATH", "")
-    )
+    # base_ld="": the additions carry only the sysroot library dirs; the caller's
+    # own LD_LIBRARY_PATH is merged (user run) or dropped (root run) below.
+    stone, additions = find_stone(lookup, which, base_path=environ.get("PATH", ""), base_ld="")
     stone = Path(os.path.abspath(stone))
     if jetson:
         version = python_version if python_version is not None else _python3_version(which, capture_fn)
@@ -189,7 +224,7 @@ def run_stone(
     real_tegra = jetson and not opts.dry_run
     sudo = None
     if real_tegra and uid != 0:
-        sudo = which("sudo")
+        sudo = _resolve_sudo(which, environ.get("PATH", ""))
         if not sudo:
             raise LauncherError(
                 "the flash needs root: run as root or install sudo (the recovery-mode "
@@ -200,6 +235,10 @@ def run_stone(
         raise LauncherError(f"cannot run {stone} through sudo env: the path contains '='")
 
     scratch_path = plan_scratch(ctx.workdir, ctx.deploy, uid, token_hex)
+    if real_tegra:
+        # Refuse up front, as the old wrapper did: running out of space mid-staging
+        # happens after the escalation, with a half-written scratch left behind.
+        require_space(scratch_path, required_bytes(stone_dir or ctx.images_dir), disk_usage)
     scratch = create_scratch(scratch_path, uid)
     for message in warnings:
         out(message)
@@ -219,7 +258,7 @@ def run_stone(
         else:
             argv = stone_argv
     else:
-        run_env = {**env, **additions}
+        run_env = _user_env(env, additions)
         argv = stone_argv
 
     try:

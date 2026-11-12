@@ -6,7 +6,9 @@ argv and runs the command as the same user; nothing here uses real sudo or USB.
 
 import hashlib
 import os
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -76,7 +78,7 @@ class Env:
             "lsusb": "/bin/true",
         }
         known.update(overrides)
-        return lambda name: known.get(name)
+        return lambda name, path=None: known.get(name)
 
     def ctx(self, workdir=True):
         return RunContext(
@@ -451,3 +453,123 @@ def test_ordinary_variables_still_reach_user_runs(env, name):
 def test_no_seam_warning_when_none_inherited(env):
     env.run(LaunchOpts(medium="sd"))
     assert not any("AVOCADO_SAFE_DISK" in m or "SYSBLOCK" in m for m in env.messages)
+
+
+# --- LD_LIBRARY_PATH reaches the root run only from the launcher ---------
+
+
+def _sysroot(tmp: Path, stone_src: Path) -> Path:
+    root = tmp / "sysroot"
+    (root / "usr/bin").mkdir(parents=True)
+    (root / "usr/lib").mkdir(parents=True)
+    _script(root / "usr/bin/stone", stone_src.read_text().split("\n", 1)[1])
+    return root
+
+
+def _ld_line(env):
+    return next((l for l in read(env, "stone.env").splitlines() if l.startswith("LD_LIBRARY_PATH=")), None)
+
+
+def test_root_run_never_forwards_the_callers_ld_library_path(env):
+    env.extra_environ = {"LD_LIBRARY_PATH": "/opt/x:"}
+    env.run(LaunchOpts(medium="nvme"))
+    assert _ld_line(env) is None
+
+
+def test_root_run_passes_only_absolute_sysroot_library_dirs(env, tmp_path):
+    env.extra_environ = {"LD_LIBRARY_PATH": "/opt/x:"}
+    root = _sysroot(tmp_path, env.bin / "stone")
+    which = env.which_map(stone=None)
+    env.run(LaunchOpts(medium="nvme"), which=which, sysroot_lookup=lambda tool: root)
+    assert _ld_line(env) == f"LD_LIBRARY_PATH={root}/usr/lib"
+
+
+def test_user_run_keeps_the_callers_ld_library_path_without_empty_or_relative(env):
+    env.extra_environ = {"LD_LIBRARY_PATH": "rel:/opt/x:"}
+    env.run(LaunchOpts(medium="sd"))
+    assert _ld_line(env) == "LD_LIBRARY_PATH=/opt/x"
+
+
+def test_user_run_with_only_empty_components_sets_no_ld_library_path(env):
+    env.extra_environ = {"LD_LIBRARY_PATH": ":rel"}
+    env.run(LaunchOpts(medium="sd"))
+    assert _ld_line(env) is None
+
+
+# --- sudo is resolved once, to an absolute path ----------------------------
+
+
+def test_relative_sudo_from_which_is_refused_before_anything(env):
+    which = env.which_map(sudo="./sudo")
+    with pytest.raises(LauncherError, match="needs root"):
+        env.run(LaunchOpts(medium="nvme"), which=which, uid=1000)
+    assert not env.workdir.exists()
+
+
+def test_sudo_is_searched_only_in_absolute_path_components(env, tmp_path, monkeypatch):
+    trap = tmp_path / "cwd"
+    trap.mkdir()
+    _script(trap / "sudo", f'echo used > {env.rec}/trap.used\nexec "$@"\n')
+    monkeypatch.chdir(trap)
+    known = env.which_map()
+    seen = {}
+
+    def which(name, path=None):
+        if name == "sudo":
+            seen["path"] = path
+            return shutil.which("sudo", path=path)
+        return known(name)
+
+    env.extra_environ = {"PATH": f".::{env.bin}:/usr/bin"}
+    assert env.run(LaunchOpts(medium="nvme"), which=which) == 0
+    assert seen["path"] == f"{env.bin}:/usr/bin"
+    assert not (env.rec / "trap.used").exists()
+
+
+def test_same_absolute_sudo_serves_the_flash_and_the_cleanup(env):
+    calls = []
+
+    def popen(argv, **kw):
+        calls.append(("flash", argv[0]))
+        return subprocess.Popen(argv, **kw)
+
+    def capture_fn(argv):
+        calls.append(("rm", argv[0]))
+        return 0, ""
+
+    assert env.run(LaunchOpts(medium="nvme"), popen=popen, capture_fn=capture_fn) == 0
+    assert calls == [("flash", str(env.bin / "sudo")), ("rm", str(env.bin / "sudo"))]
+
+
+# --- free-space pre-check before escalation -----------------------------------
+
+
+class _Usage:
+    def __init__(self, free):
+        self.free = free
+        self.probed = []
+
+    def __call__(self, path):
+        self.probed.append(Path(path))
+        return self
+
+
+def test_real_tegraflash_refuses_when_scratch_filesystem_is_too_small(env):
+    du = _Usage(free=1)
+    with pytest.raises(LauncherError, match=r"not enough free space.*needs \d+ bytes.*has 1 "):
+        env.run(LaunchOpts(medium="nvme"), disk_usage=du)
+    assert not env.workdir.exists()
+    assert not (env.rec / "sudo.argv").exists()
+    assert du.probed and du.probed[0].exists()
+
+
+def test_free_space_need_is_inputs_plus_one_tenth(env):
+    # the stone dir holds stone-test.json (2 bytes): need 2 + ceil(2 / 10) = 3
+    assert env.run(LaunchOpts(medium="nvme"), disk_usage=_Usage(free=3)) == 0
+    with pytest.raises(LauncherError, match="not enough free space"):
+        env.run(LaunchOpts(medium="nvme"), disk_usage=_Usage(free=2))
+
+
+def test_dry_run_and_user_runs_skip_the_space_check(env):
+    assert env.run(LaunchOpts(medium="nvme", dry_run=True), disk_usage=_Usage(free=0)) == 0
+    assert env.run(LaunchOpts(medium="sd"), disk_usage=_Usage(free=0)) == 0
