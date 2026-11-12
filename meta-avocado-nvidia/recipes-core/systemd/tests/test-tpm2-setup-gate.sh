@@ -24,8 +24,11 @@ bad() {
 gate=$(sed -n 's/^ConditionPathExists=//p' "$masks" "$init" | sort -u)
 case $gate in
   /run/*)
-    [ "$(printf '%s\n' "$gate" | wc -l)" -eq 1 ] \
-      && ok "both recipes gate on $gate" || bad "the recipes gate on different files: $gate"
+    if [ "$(printf '%s\n' "$gate" | wc -l)" -eq 1 ]; then
+      ok "both recipes gate on $gate"
+    else
+      bad "the recipes gate on different files: $gate"
+    fi
     ;;
   *)
     bad "no /run gate in either recipe"
@@ -37,15 +40,23 @@ esac
 w=$(grep -nF "$gate" "$setup" | grep -vE '^[0-9]+:[[:space:]]*#' \
   | grep -E '>[[:space:]]*/run/' | head -n 1 | cut -d: -f1)
 m=$(grep -nE '^[[:space:]]*modprobe tpm_ftpm_tee' "$setup" | head -n 1 | cut -d: -f1)
-[ -n "$w" ] && ok "optee-ftpm-setup.sh writes the gate file (line $w)" \
-  || bad "optee-ftpm-setup.sh never writes $gate"
-[ -n "$w" ] && [ -n "$m" ] && [ "$w" -lt "$m" ] \
-  && ok "the gate file is written before tpm_ftpm_tee loads" \
-  || bad "the gate file is not written before modprobe tpm_ftpm_tee (write=$w modprobe=$m)"
+if [ -n "$w" ]; then
+  ok "optee-ftpm-setup.sh writes the gate file (line $w)"
+else
+  bad "optee-ftpm-setup.sh never writes $gate"
+fi
+if [ -n "$w" ] && [ -n "$m" ] && [ "$w" -lt "$m" ]; then
+  ok "the gate file is written before tpm_ftpm_tee loads"
+else
+  bad "the gate file is not written before modprobe tpm_ftpm_tee (write=$w modprobe=$m)"
+fi
 
 for f in "$masks" "$init"; do
-  grep -qE '^TimeoutSec=[0-9]+s$' "$f" && ok "$(basename "$f") bounds the unit" \
-    || bad "$(basename "$f") sets no TimeoutSec"
+  if grep -qE '^TimeoutSec=[0-9]+s$' "$f"; then
+    ok "$(basename "$f") bounds the unit"
+  else
+    bad "$(basename "$f") sets no TimeoutSec"
+  fi
 done
 
 echo "checks: $((pass + fail)) run, $fail failed"
