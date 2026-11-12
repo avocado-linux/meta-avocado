@@ -125,7 +125,10 @@ EOF
 avocado_safe_disk_confirm "$target" || exit 1
 
 target_base=$(basename "$target")
-for partdir in /sys/block/"$target_base"/"$target_base"*; do
+# Partitions sit under the disk's sysfs directory; the same root the safe-disk
+# library reads, so a test's fake tree and the real one enumerate alike.
+disk_sysdir=$(readlink -f -- "${AVOCADO_PROVISION_SYSBLOCK:-/sys/class/block}/$target_base" 2>/dev/null || true)
+for partdir in "$disk_sysdir"/"$target_base"*; do
   [ -e "$partdir" ] || continue
   avocado_safe_disk_write umount "/dev/$(basename "$partdir")" 2>/dev/null || true
 done
