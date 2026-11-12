@@ -41,8 +41,15 @@ class NvidiaKernelOotDev(unittest.TestCase):
 
     def test_conftest_headers_are_staged(self):
         text = BBAPPEND.read_text()
-        self.assertIn("out/nvidia-conftest/nvidia/conftest.h", text)
-        self.assertIn("${D}${includedir}/${BPN}/nvidia/conftest", text)
+        # conftest.h includes the per-category headers beside it: both the
+        # top-level header and the directory must be installed, not just made.
+        self.assertIn("install -d ${D}${includedir}/${BPN}/nvidia/conftest\n", text)
+        self.assertIn(
+            "${S}/out/nvidia-conftest/nvidia/conftest.h ${D}${includedir}/${BPN}/nvidia/conftest.h\n", text
+        )
+        self.assertIn(
+            "${S}/out/nvidia-conftest/nvidia/conftest/*.h ${D}${includedir}/${BPN}/nvidia/conftest/\n", text
+        )
 
 
 if __name__ == "__main__":
