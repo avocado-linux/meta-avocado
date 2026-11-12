@@ -65,6 +65,14 @@
           "emmc_uboot_dev": 0,
           "emmc_mmcblk": 0
         }
+      },
+      "ums": {
+        "script": "stone-provision-ums.sh",
+        "envs": ["device_info"],
+        "requires": ["usb"],
+        "config": {
+          "dry_run": true
+        }
       }
     }
   },

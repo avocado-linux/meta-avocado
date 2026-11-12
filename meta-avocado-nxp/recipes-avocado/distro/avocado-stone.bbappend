@@ -37,6 +37,10 @@ SRC_URI:append:stone-uuu-emmc = " \
     file://stone-provision-uuu-emmc.sh \
 "
 
+SRC_URI:append:stone-ums = " \
+    file://stone-provision-ums.sh \
+"
+
 do_deploy:append() {
   install -d ${DEPLOYDIR}
   install -m 0644 ${UNPACKDIR}/rootdisk.conf ${DEPLOYDIR}/rootdisk.conf
@@ -52,6 +56,11 @@ do_deploy:append() {
 do_deploy:append:stone-uuu-emmc() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${UNPACKDIR}/stone-provision-uuu-emmc.sh ${DEPLOYDIR}/stone-provision-uuu-emmc.sh
+}
+
+do_deploy:append:stone-ums() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${UNPACKDIR}/stone-provision-ums.sh ${DEPLOYDIR}/stone-provision-ums.sh
 }
 
 # With AHAB on, the boot partition carries a signed OS container instead of a
