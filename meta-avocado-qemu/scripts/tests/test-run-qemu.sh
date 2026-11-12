@@ -743,6 +743,126 @@ ql=$(grep '^qemu-launch' "$log")
   && [ -n "$pid" ] && ! alive "$pid"; } \
   && ok "a comma in the socket directory is doubled in the chardev path" || bad "tpm comma: rc=$rc out=[$out] ql=[$ql]"
 
+# 48. -bios is not a key-value option, so a comma in the firmware path stays single
+#     while the -drive file= path of an image under a comma directory is doubled.
+mkdir -p "$w/f,w"
+: >"$w/f,w/u-boot.rom"
+: >"$w/f,w/flash.bin"
+for spec in "qemux86-64 RUN_QEMU_UBOOT_ROM u-boot.rom" "qemuarm64 RUN_QEMU_FLASH_BIN flash.bin"; do
+  read -r m var fw <<<"$spec"
+  d=$(workdir "fw-comma-$m")
+  truncate -s 1M "$w/a,b/disk.img"
+  RUNENV=("$var=$w/f,w/$fw")
+  out=$(run "$d" "$m" --image "$w/a,b/disk.img" --dry-run)
+  rc=$?
+  RUNENV=()
+  c=$(cmdline "$out")
+  { [ $rc -eq 0 ] && [[ $c == *" -bios $w/f,w/$fw "* ]] && [[ $c != *" -bios $w/f,,w"* ]] \
+    && [[ $c == *"-drive file=$w/a,,b/disk.img,"* ]]; } \
+    && ok "$m: the -bios path keeps a single comma and the -drive path doubles it" || bad "bios comma $m: rc=$rc out=[$out]"
+done
+
+# 49. One unreadable directory in the native sysroot must not end the run: the
+#     readable lib dirs are still used.
+d=$(workdir native-unreadable)
+mksysroot "$d"
+truncate -s 1M "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$d/build/tmp/sysroots-components/x86_64/locked-native"
+chmod 000 "$d/build/tmp/sysroots-components/x86_64/locked-native"
+if [ "$(id -u)" -eq 0 ]; then
+  ok "unreadable native sysroot directory: skipped, root can read mode 000"
+else
+  out=$(run "$d" qemux86-64 --dry-run)
+  rc=$?
+  { [ $rc -eq 0 ] && grep -qF "$d/build/tmp/sysroots-components/x86_64/glib-native/usr/lib" <<<"$out" && grep -q '^command: ' <<<"$out"; } \
+    && ok "an unreadable native sysroot directory does not stop the run" || bad "native unreadable: rc=$rc out=[$out]"
+fi
+chmod 755 "$d/build/tmp/sysroots-components/x86_64/locked-native"
+
+# 50. The pid file names a live process that is not this run's swtpm: cleanup must
+#     not signal it. A stub swtpm binds the socket and writes that pid, then exits.
+foreignhs=$w/foreignstubs
+mkdir -p "$foreignhs"
+mkstubs "$foreignhs"
+{
+  echo "#!$(command -v python3)"
+  cat <<'EOF'
+import os, socket, sys
+args = sys.argv[1:]
+ctrl = pidfile = None
+for i, a in enumerate(args):
+    if a.startswith("type=unixio,path="):
+        ctrl = a.split("path=", 1)[1]
+    if a.startswith("file=") and args[i - 1] == "--pid":
+        pidfile = a[5:]
+s = socket.socket(socket.AF_UNIX)
+s.bind(ctrl)
+with open(pidfile, "w") as f:
+    f.write(os.environ["FOREIGN_PID"] + "\n")
+EOF
+} >"$foreignhs/swtpm"
+chmod +x "$foreignhs/swtpm"
+d=$(workdir tpm-foreign)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkfifo "$w/hold-c.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "unrelated process" "$w/hold-c.fifo" &
+other=$!
+: >"$log"
+out=$(FOREIGN_PID=$other TPMSTUBS=$foreignhs trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 0 ] && alive "$other" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "cleanup does not signal a pid file naming a process that is not this swtpm" || bad "tpm foreign: rc=$rc other=$other out=[$out]"
+kill "$other" 2>/dev/null
+wait "$other" 2>/dev/null
+
+# 51. A TPM wait that is not a whole number exits 1 before swtpm or QEMU starts.
+for v in 10s x; do
+  d=$(workdir "tpm-wait-$v")
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  : >"$log"
+  out=$(TPMWAIT=$v trun "$d" qemux86-64 --tpm)
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "RUN_QEMU_TPM_WAIT_SECONDS must be a whole number of seconds, got '$v'" <<<"$out" \
+    && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+    && ok "TPM wait '$v' exits 1 and starts nothing" || bad "tpm wait $v: rc=$rc out=[$out] log=[$(cat "$log")]"
+done
+
+# 52. A failed mkdir of the TPM directories stops the run before QEMU starts.
+d=$(workdir tpm-mkdir)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$w/notadir"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/notadir/sock trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -q 'mkdir' <<<"$out" && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a failed mkdir exits 1 naming mkdir, without starting QEMU" || bad "tpm mkdir: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 53. A group INT while QEMU runs exits 130 and still stops swtpm. python3 resets
+#     SIGINT first: a background job starts with it ignored, and bash cannot trap that.
+d=$(workdir tpm-int)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+(cd "$d" && exec python3 -c 'import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.setsid()
+os.execvp(sys.argv[1], sys.argv[1:])' env PATH="$sleephs:$tools" RUN_QEMU_HOST_QEMU_DATA_DIR="$w/hostdata" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/int.out" 2>&1 </dev/null) &
+rp=$!
+for _ in $(seq 1 100); do
+  grep -q '^qemu-launch' "$log" && break
+  sleep 0.1
+done
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+rc=none
+if [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && grep -q '^qemu-launch' "$log"; then
+  kill -INT -- "-$rp"
+  wait "$rp"
+  rc=$?
+fi
+{ [ "$rc" = 130 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "an INT while QEMU runs exits 130 and stops swtpm" || bad "tpm int: rc=$rc pid=$pid out=[$(cat "$w/int.out")] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
 # No stub swtpm may outlive the suite.
 stray=$(pgrep -af "$w/.*swtpm" || true)
 [ -z "$stray" ] && ok "no stub swtpm survives" || bad "stray swtpm: [$stray]"

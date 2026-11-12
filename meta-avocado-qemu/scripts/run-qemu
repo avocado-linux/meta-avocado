@@ -151,7 +151,8 @@ native_prefix() {
   comps="$PWD/build/tmp/sysroots-components/x86_64"
   uninative="$PWD/build/tmp/sysroots-uninative/x86_64-linux/lib"
   [ -x "$uninative/ld-linux-x86-64.so.2" ] || die 1 "native $1 needs the uninative loader, but $uninative/ld-linux-x86-64.so.2 is missing"
-  libs=$(find "$comps" -maxdepth 3 -name lib -type d 2>/dev/null | sort | paste -sd: -)
+  # find exits non-zero on one unreadable directory; the readable lib dirs still count.
+  libs=$({ find "$comps" -maxdepth 3 -name lib -type d 2>/dev/null || true; } | sort | paste -sd: -)
   NATIVE_PREFIX=("$uninative/ld-linux-x86-64.so.2" --library-path "$uninative${libs:+:$libs}")
 }
 
@@ -250,6 +251,14 @@ plan_tpm() {
   fi
 }
 
+# True when <pid> is a live process whose command line carries this run's swtpm
+# state dir, so a recycled pid or an unrelated process never matches.
+swtpm_owns_pid() {
+  local words
+  [ -r "/proc/$1/cmdline" ] && mapfile -d '' -t words <"/proc/$1/cmdline" \
+    && [[ "${words[*]}" == *"dir=$TPM_DIR"* ]]
+}
+
 # Stops the swtpm this run started, by its pid file only, and removes what the
 # run made. Safe to call twice and when nothing started.
 # shellcheck disable=SC2329 # invoked through the EXIT, INT and TERM traps in main
@@ -258,23 +267,21 @@ stop_tpm() {
   if [ "$TPM_STARTED" -eq 1 ] && [ -f "$TPM_PIDFILE" ]; then
     pid=$(<"$TPM_PIDFILE")
   fi
-  case $pid in
-    "" | *[!0-9]*) ;;
-    *)
-      kill -TERM "$pid" 2>/dev/null || true
-      for n in $(seq 1 50); do
-        [ -r "/proc/$pid/stat" ] || break
-        # swtpm can vanish between the test above and this read, and under set -e
-        # a failure here would skip the cleanup below.
-        s=$(<"/proc/$pid/stat") || break
-        s=${s##*) }
-        # A zombie is already stopped: it only waits for a parent to reap it.
-        [ "${s%% *}" = Z ] && break
-        [ "$n" -eq 50 ] && { kill -KILL "$pid" 2>/dev/null || true; }
-        sleep 0.1
-      done
-      ;;
-  esac
+  # A gone or recycled pid is not ours to signal; the files below still go.
+  if [ "$pid" != 0 ] && [[ $pid =~ ^[0-9]+$ ]] && swtpm_owns_pid "$pid"; then
+    kill -TERM "$pid" 2>/dev/null || true
+    for n in $(seq 1 50); do
+      [ -r "/proc/$pid/stat" ] || break
+      # swtpm can vanish between the test above and this read, and under set -e
+      # a failure here would skip the cleanup below.
+      s=$(<"/proc/$pid/stat") || break
+      s=${s##*) }
+      # A zombie is already stopped: it only waits for a parent to reap it.
+      [ "${s%% *}" = Z ] && break
+      [ "$n" -eq 50 ] && { kill -KILL "$pid" 2>/dev/null || true; }
+      sleep 0.1
+    done
+  fi
   if [ "$TPM_STARTED" -eq 1 ]; then
     rm -f "$TPM_PIDFILE" "$TPM_SOCK"
     TPM_STARTED=0
@@ -304,6 +311,7 @@ start_tpm() {
     die 1 "no swtpm at $native and none on PATH (PATH=$PATH)"
   fi
   wait=${RUN_QEMU_TPM_WAIT_SECONDS:-10}
+  [[ $wait =~ ^[0-9]+$ ]] || die 1 "RUN_QEMU_TPM_WAIT_SECONDS must be a whole number of seconds, got '$wait'"
 
   mkdir -p "$TPM_DIR" "$TPM_SOCK_DIR"
   # The state dir and its pid file are shared by every --tpm run in this work
@@ -313,13 +321,12 @@ start_tpm() {
   # command line is compared, not just the pid, so a recycled pid in a stale
   # file does not block.
   if [ -f "$TPM_PIDFILE" ]; then
-    local held words
+    local held
     held=$(<"$TPM_PIDFILE")
     case $held in
       "" | *[!0-9]*) ;;
       *)
-        if [ -r "/proc/$held/cmdline" ] && mapfile -d '' -t words <"/proc/$held/cmdline" \
-          && [[ "${words[*]}" == *"dir=$TPM_DIR"* ]]; then
+        if swtpm_owns_pid "$held"; then
           die 1 "swtpm $held is already running on $TPM_DIR (another run-qemu --tpm, or one that was killed); stop it first"
         fi
         ;;
@@ -347,20 +354,20 @@ start_tpm() {
 # display option: the console is the serial line on stdio.
 build_qemu_args() {
   QEMU_ARGS=()
-  local image fw
+  local image
   image=$(qpath "$IMAGE")
-  fw=$(qpath "$BOOT_FW")
   [ ${#QEMU_PREFIX[@]} -eq 0 ] || QEMU_ARGS+=(-L "$QEMU_DATA_DIR")
+  # -bios takes a plain path, not a key-value list, so its commas stay single.
   case $MACHINE in
     qemux86-64)
-      QEMU_ARGS+=(-bios "$fw"
+      QEMU_ARGS+=(-bios "$BOOT_FW"
         -device sdhci-pci -device "sd-card,drive=mmc"
         -drive "file=$image,if=none,format=raw,id=mmc"
         -m 256 -cpu max)
       ;;
     qemuarm64)
       QEMU_ARGS+=(-M "virt,secure=on,highmem=off,acpi=off" -cpu cortex-a53 -m 1024
-        -bios "$fw"
+        -bios "$BOOT_FW"
         -device sdhci-pci -device "sd-card,drive=mmc"
         -drive "file=$image,if=none,format=raw,id=mmc")
       ;;
