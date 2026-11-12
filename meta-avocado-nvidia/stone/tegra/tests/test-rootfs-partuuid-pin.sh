@@ -182,10 +182,10 @@ fi
 # The command line and the layout must name the same values. The pattern is the
 # literal source line, so the variables must not expand.
 # shellcheck disable=SC2016
-if grep -q 'boot_cmdline="avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"' "$PROVISION"; then
+if grep -qF 'AVOCADO_KERNEL_CMDLINE_EXTRA }avocado.root_partuuid=$app_partuuid avocado.root_partuuid_b=$app_b_partuuid"' "$PROVISION"; then
   pass "the boot.img command line names the same variables the layout is filled from"
 else
-  fail "boot_cmdline no longer carries \$app_partuuid/\$app_b_partuuid"
+  fail "the cmdline extras no longer carry \$app_partuuid/\$app_b_partuuid"
 fi
 
 echo

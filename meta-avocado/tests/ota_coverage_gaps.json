@@ -15,7 +15,6 @@
     "rootfs": "no update section: the board can only be reflashed"
   },
   "stone-icam-540": {
-    "boot": "A_kernel/B_kernel are not in os_artifacts: the kernel and initramfs change only on a reflash (wrynose carries them since #448)",
     "bootloader": "QSPI boot firmware and UEFI are not updated: needs the UEFI capsule path",
     "kernel_dtb": "A_kernel-dtb/B_kernel-dtb are not in os_artifacts: the device tree changes only on a reflash"
   },
@@ -38,17 +37,14 @@
     "imx_boot": "imx-boot is written only at provision; wrynose imx8mp-evk and imx95-var-dart update it through emmc-boot:0/1"
   },
   "stone-jetson-agx-orin": {
-    "boot": "A_kernel/B_kernel are not in os_artifacts: the kernel and initramfs change only on a reflash (wrynose carries them since #448)",
     "bootloader": "QSPI boot firmware and UEFI are not updated: needs the UEFI capsule path",
     "kernel_dtb": "A_kernel-dtb/B_kernel-dtb are not in os_artifacts: the device tree changes only on a reflash"
   },
   "stone-jetson-orin-nano": {
-    "boot": "A_kernel/B_kernel are not in os_artifacts: the kernel and initramfs change only on a reflash (wrynose carries them since #448)",
     "bootloader": "QSPI boot firmware and UEFI are not updated: needs the UEFI capsule path",
     "kernel_dtb": "A_kernel-dtb/B_kernel-dtb are not in os_artifacts: the device tree changes only on a reflash"
   },
   "stone-jetson-orin-nx": {
-    "boot": "A_kernel/B_kernel are not in os_artifacts: the kernel and initramfs change only on a reflash (wrynose carries them since #448)",
     "bootloader": "QSPI boot firmware and UEFI are not updated: needs the UEFI capsule path",
     "kernel_dtb": "A_kernel-dtb/B_kernel-dtb are not in os_artifacts: the device tree changes only on a reflash"
   },

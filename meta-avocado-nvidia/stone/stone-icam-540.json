@@ -11,7 +11,8 @@
       "command": ["nvbootctrl", "get-current-slot"]
     },
     "os_artifacts": {
-      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] }
+      "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] },
+      "boot": { "image_key": "boot", "slot_partitions": ["A_kernel", "B_kernel"] }
     },
     "activate": [
       {
@@ -20,6 +21,10 @@
       }
     ],
     "rollback": [
+      {
+        "type": "command",
+        "command": ["nvbootctrl", "verify"]
+      },
       {
         "type": "command",
         "command": ["nvbootctrl", "set-active-boot-slot", "{previous_slot}"]
@@ -73,6 +78,11 @@
         "rootfs": "avocado-image-rootfs-icam-540.erofs-lz4",
         "var": "avocado-image-var-icam-540.btrfs",
         "initramfs": "avocado-image-initramfs-icam-540.cpio.gz",
+        "boot": {
+          "out": "boot.img",
+          "size": 128,
+          "size_unit": "mebibytes"
+        },
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-icam-540.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-icam-540.esp",
         "tegraflash_tos": "tos-avocado-icam-540.img",

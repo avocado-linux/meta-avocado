@@ -37,3 +37,8 @@ jobs:
       - name: run tegra provisioning tests
         shell: bash
         run: meta-avocado-nvidia/stone/tegra/tests/run-tegra-tests.sh
+      # The parse container has no hexdump, so this test skips there; run it
+      # here, where it can't skip.
+      - name: initrd slot detection with the initramfs's tools
+        shell: bash
+        run: command -v hexdump && python3 -m unittest -v meta-avocado/tests/test_tegra_init_slot.py
