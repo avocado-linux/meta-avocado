@@ -59,9 +59,10 @@
         "description": "Stable identifier registered with Peridio."
       }
     },
+    "files": ["build-disk-image.sh", "avocado-safe-disk.sh"],
     "profiles": {
       "img":  { "script": "stone-provision-img.sh" },
-      "sd":   { "script": "stone-provision-sd.sh",   "envs": ["device_info"], "requires": ["usb"] },
+      "sd":   { "script": "stone-provision-sd.sh",   "envs": ["device_info"], "requires": ["usb"], "config": { "dry_run": true } },
       "emmc": { "script": "stone-provision-emmc.sh", "envs": ["device_info"], "requires": ["usb"] }
     }
   },
