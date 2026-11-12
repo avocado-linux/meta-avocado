@@ -27,13 +27,21 @@ def _sysroot(tmp_path: Path, tools=("stone", "fwup")) -> Path:
     return root
 
 
-def test_sysroot_stone_wins_over_host_stone(tmp_path):
+def test_sysroot_stone_wins_over_host_stone(tmp_path, monkeypatch):
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
     root = _sysroot(tmp_path)
     which = lambda name: "/usr/bin/stone" if name == "stone" else None
     stone, env = find_stone(lambda tool: root, which, base_path="/usr/bin:/bin")
     assert stone == root / "usr/bin/stone"
     assert env["PATH"] == f"{root}/usr/bin:/usr/bin:/bin"
     assert env["LD_LIBRARY_PATH"] == f"{root}/usr/lib"
+
+
+def test_sysroot_stone_keeps_callers_library_path_after_sysroot_dirs(tmp_path, monkeypatch):
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/py/lib")
+    root = _sysroot(tmp_path)
+    _, env = find_stone(lambda tool: root, lambda name: None, base_path="/usr/bin")
+    assert env["LD_LIBRARY_PATH"] == f"{root}/usr/lib:/opt/py/lib"
 
 
 def test_host_stone_used_only_when_sysroot_has_none():
