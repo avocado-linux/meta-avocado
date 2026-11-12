@@ -35,7 +35,7 @@ VIRTUAL-RUNTIME_dev_manager ?= "udev"
 # (which only the alt mc 5.15 builds) and unqualified `kernel`/`kernel-image`
 # providers. `tegra-firmware`, the one usable item it contributes, comes via
 # packagegroup-avocado-tegra-rootfs (whose RDEPENDS pulls
-# `tegra-firmware-${SOC_FAMILY}`).
+# the `tegra-firmware` umbrella).
 #
 # NOTE: Intentionally NO unqualified `packagegroup-avocado-rootfs-modules`
 # RDEPENDS here. In a multi-kernel feed, several kernels each Provide that

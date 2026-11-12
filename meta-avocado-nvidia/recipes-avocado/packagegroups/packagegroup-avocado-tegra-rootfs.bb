@@ -13,8 +13,9 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-# The firmware set of this machine's SoC (tegra234: Orin, tegra264: Thor). A
-# Thor rootfs with the Orin set has no GPU or display firmware: nvidia.ko's
-# RmInitAdapter fails on nvidia/<version>/gsp_ga10x.bin, and EGL, CUDA and
-# Argus with it.
-RDEPENDS:${PN} = "tegra-firmware-${SOC_FAMILY}"
+# The firmware set meta-tegra defines for this machine's SoC (its FWDEPS: the
+# SoC's own package plus the vic, shared and xusb ones). Name the umbrella,
+# not a subpackage: tegra-firmware-tegra234 gave Thor (tegra264) no GPU
+# firmware, and the SoC package alone misses what upstream splits out of it
+# (tegra-firmware-shared carries the NVJPG firmware).
+RDEPENDS:${PN} = "tegra-firmware"
