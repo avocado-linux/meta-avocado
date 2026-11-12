@@ -28,6 +28,10 @@ usage() {
   {
     echo "usage: $PROG <machine> [--tpm] [--image PATH] [--dry-run]"
     echo "supported machines: ${SUPPORTED_MACHINES[*]}"
+    echo "environment: RUN_QEMU_FLASH_BIN=PATH  TF-A flash image for qemuarm64"
+    echo "  (default: build/tmp/deploy/stone/flash.bin, then .../stone/_build/flash.bin)"
+    echo "  RUN_QEMU_UBOOT_ROM=PATH  U-Boot image for qemux86-64"
+    echo "  (default: build/tmp/deploy/stone/u-boot.rom, then .../stone/_build/u-boot.rom)"
   } >&2
 }
 
@@ -122,22 +126,147 @@ plan_resize() {
   RESIZE_MIB=$mib
 }
 
+# QEMU system binary for the machine.
+qemu_binary() {
+  case $MACHINE in
+    qemux86-64) echo qemu-system-x86_64 ;;
+    *) echo qemu-system-aarch64 ;;
+  esac
+}
+
+# Sets NATIVE_PREFIX to the command words that run a BitBake native binary: the
+# uninative glibc loader with every native sysroot lib dir on its library path.
+native_prefix() {
+  local comps uninative libs
+  comps="$PWD/build/tmp/sysroots-components/x86_64"
+  uninative="$PWD/build/tmp/sysroots-uninative/x86_64-linux/lib"
+  [ -x "$uninative/ld-linux-x86-64.so.2" ] || die 1 "native $1 needs the uninative loader, but $uninative/ld-linux-x86-64.so.2 is missing"
+  libs=$(find "$comps" -maxdepth 3 -name lib -type d 2>/dev/null | sort | paste -sd: -)
+  NATIVE_PREFIX=("$uninative/ld-linux-x86-64.so.2" --library-path "$uninative${libs:+:$libs}")
+}
+
+# Sets QEMU_BIN, QEMU_IMG, QEMU_DATA_DIR and QEMU_PREFIX (the command words that
+# launch a tool). QEMU_DATA_DIR is the data dir of the QEMU being run; the host's
+# is /usr/share/qemu unless RUN_QEMU_HOST_QEMU_DATA_DIR says otherwise.
+# BitBake's native QEMU is an ELF bound to the uninative glibc, so it runs
+# through that loader with every native sysroot lib dir on its library path.
+# Without a native build the host's QEMU from PATH is used as is.
+resolve_qemu() {
+  local bin comps native
+  bin=$(qemu_binary)
+  comps="$PWD/build/tmp/sysroots-components/x86_64"
+  native="$comps/qemu-system-native/usr/bin"
+  QEMU_PREFIX=()
+  QEMU_DATA_DIR=${RUN_QEMU_HOST_QEMU_DATA_DIR:-/usr/share/qemu}
+  if [ -e "$native/$bin" ]; then
+    native_prefix "QEMU at $native/$bin"
+    QEMU_PREFIX=("${NATIVE_PREFIX[@]}")
+    QEMU_BIN="$native/$bin"
+    QEMU_IMG="$native/qemu-img"
+    QEMU_DATA_DIR="$comps/qemu-system-native/usr/share/qemu"
+  elif QEMU_BIN=$(command -v "$bin") && QEMU_IMG=$(command -v qemu-img); then
+    :
+  else
+    die 1 "no $bin at $native/$bin and none on PATH ($bin, qemu-img; PATH=$PATH)"
+  fi
+}
+
+# Sets BOOT_FW, the boot firmware image the machine starts QEMU with -bios:
+# flash.bin (TF-A) for qemuarm64, u-boot.rom for qemux86-64. The machine's
+# override variable wins; else build/tmp/deploy/stone, then the older
+# build/tmp/deploy/stone/_build, relative to $PWD. A missing image fails here,
+# not inside QEMU.
+find_boot_firmware() {
+  local name var override c searched=()
+  case $MACHINE in
+    qemuarm64)
+      name=flash.bin
+      var=RUN_QEMU_FLASH_BIN
+      ;;
+    *)
+      name=u-boot.rom
+      var=RUN_QEMU_UBOOT_ROM
+      ;;
+  esac
+  override=${!var:-}
+  if [ -n "$override" ]; then
+    [ -f "$override" ] || die 1 "$var names a file that does not exist: $override"
+    BOOT_FW=$override
+    return 0
+  fi
+  for c in "$PWD/build/tmp/deploy/stone/$name" "$PWD/build/tmp/deploy/stone/_build/$name"; do
+    if [ -f "$c" ]; then
+      BOOT_FW=$c
+      return 0
+    fi
+    searched+=("$c")
+  done
+  die 1 "no $name for $MACHINE; searched: ${searched[0]}; ${searched[1]} (or set $var)"
+}
+
+# QEMU splits an option on commas and reads ",," as a literal comma, so a path
+# carries its commas doubled or it can add options of its own.
+qpath() { printf '%s' "${1//,/,,}"; }
+
+# Sets QEMU_ARGS to the machine's arguments, after the binary. No profile has a
+# display option: the console is the serial line on stdio.
+build_qemu_args() {
+  QEMU_ARGS=()
+  local image fw
+  image=$(qpath "$IMAGE")
+  fw=$(qpath "$BOOT_FW")
+  [ ${#QEMU_PREFIX[@]} -eq 0 ] || QEMU_ARGS+=(-L "$QEMU_DATA_DIR")
+  case $MACHINE in
+    qemux86-64)
+      QEMU_ARGS+=(-bios "$fw"
+        -device sdhci-pci -device "sd-card,drive=mmc"
+        -drive "file=$image,if=none,format=raw,id=mmc"
+        -m 256 -cpu max)
+      ;;
+    qemuarm64)
+      QEMU_ARGS+=(-M "virt,secure=on,highmem=off,acpi=off" -cpu cortex-a53 -m 1024
+        -bios "$fw"
+        -device sdhci-pci -device "sd-card,drive=mmc"
+        -drive "file=$image,if=none,format=raw,id=mmc")
+      ;;
+  esac
+  QEMU_ARGS+=(-nographic)
+}
+
 main() {
   parse_args "$@"
   resolve_image
+  resolve_qemu
+  find_boot_firmware
   plan_resize
+  build_qemu_args
+  local cmd=("${QEMU_PREFIX[@]}" "$QEMU_BIN" "${QEMU_ARGS[@]}")
+
+  local resize=()
+  if [ "$RESIZE_MIB" -gt 0 ]; then
+    resize=("${QEMU_PREFIX[@]}" "$QEMU_IMG" resize -f raw "$IMAGE" "${RESIZE_MIB}M")
+  fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "image: $IMAGE"
-    if [ "$RESIZE_MIB" -gt 0 ]; then
-      echo "resize: ${RESIZE_MIB}M"
+    echo "qemu: $(qemu_binary)"
+    if [ ${#resize[@]} -gt 0 ]; then
+      echo "resize: ${resize[*]}"
     else
       echo "resize: none"
     fi
+    echo "command: ${cmd[*]}"
     exit 0
   fi
 
-  die 1 "launching QEMU is not implemented yet; use --dry-run"
+  if [ ${#resize[@]} -gt 0 ]; then
+    "${resize[@]}"
+  fi
+
+  # A child, not exec, so the exit status passes through this script.
+  local rc=0
+  "${cmd[@]}" || rc=$?
+  exit "$rc"
 }
 
 main "$@"
