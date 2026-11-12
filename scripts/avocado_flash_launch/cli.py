@@ -9,7 +9,9 @@ run.run_stone, the single entry for a `stone provision` run. It starts no
 write tool itself.
 
 One function per medium route, so a later task wires a medium by replacing its
-route and nothing else. nvme and ums are not wired yet and say so.
+route and nothing else. nvme is first-argument only and parses its own small
+option set (main_nvme); ums wraps the ums session (the board's USB mass storage
+export) around the ums profile, with the console driver passed in as `host`.
 """
 
 from __future__ import annotations
@@ -22,7 +24,8 @@ from pathlib import Path
 
 from .envmap import LauncherError, LaunchOpts, build_run_env, map_profile
 from .inputs import _template_name, stone_dir_for
-from .run import RunContext, run_stone
+from .run import SIGINT_EXIT, RunContext, run_stone
+from .ums import ums_session
 
 __all__ = ["Resolved", "main", "route_sd", "route_emmc", "route_ums", "route_nvme"]
 
@@ -45,14 +48,14 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("-y", "--assume-yes", action="store_true")
     ap.add_argument("--workdir", type=Path)
     # Accepted so a shared command line parses; fuse-srk and ums read them in avocado-flash.
-    ap.add_argument("-p", "--port")
+    ap.add_argument("-p", "--port", default="/dev/ttyACM0")
     ap.add_argument("-k", "--keys", type=Path)
     ap.add_argument("--key-type")
     ap.add_argument("--spsdk-bin", type=Path)
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--interrupt", action="store_true")
-    ap.add_argument("--ums-dev")
-    ap.add_argument("--usb-controller", type=int)
+    ap.add_argument("--ums-dev", default="mmc 1")
+    ap.add_argument("--usb-controller", type=int, default=0)
     ap.add_argument("medium", choices=["sd", "emmc", "ums"])
     ap.add_argument("device", nargs="?")
     return ap
@@ -82,18 +85,21 @@ def _opts(args, medium: str) -> LaunchOpts:
     )
 
 
-def _provision(resolved: Resolved, opts: LaunchOpts, args) -> int:
-    # The bmaptool refusal precedes every other piece of work, manifest reading included.
-    build_run_env(opts, {}, map_profile(opts.medium, opts.boot_media))
-    ctx = RunContext(
+def _context(resolved: Resolved, args) -> RunContext:
+    return RunContext(
         deploy=resolved.deploy,
         machine=resolved.machine,
         images_dir=resolved.images_dir,
         manifest=_load_manifest(resolved),
-        stale_ok=args.stale_ok,
+        stale_ok=getattr(args, "stale_ok", False),
         workdir=args.workdir,
     )
-    return run_stone(opts, ctx)
+
+
+def _provision(resolved: Resolved, opts: LaunchOpts, args) -> int:
+    # The bmaptool refusal precedes every other piece of work, manifest reading included.
+    build_run_env(opts, {}, map_profile(opts.medium, opts.boot_media))
+    return run_stone(opts, _context(resolved, args))
 
 
 def route_sd(resolved: Resolved, args) -> int:
@@ -106,28 +112,97 @@ def route_emmc(resolved: Resolved, args) -> int:
     return _provision(resolved, _opts(args, "emmc"), args)
 
 
-def route_ums(resolved: Resolved, args) -> int:
-    raise LauncherError("the ums medium is not yet wired into the launcher (AVOCADO_FLASH_LAUNCHER=1)")
+def route_ums(resolved: Resolved, args, host=None) -> int:
+    if args.device:
+        raise LauncherError("the ums medium takes no device argument")
+    if host is None:
+        raise LauncherError("the ums medium needs the board console driver; none was supplied")
+    opts = _opts(args, "ums")
+    # Refusals that need no board come before the export is started.
+    build_run_env(opts, {}, map_profile("ums"))
+    ctx = _context(resolved, args)
+    with ums_session(host, args.port, args.usb_controller, args.ums_dev) as disk:
+        opts.exported_device = disk
+        return run_stone(opts, ctx)
 
 
-def route_nvme(resolved: Resolved, args=None) -> int:
-    raise LauncherError("the nvme medium is not yet wired into the launcher (AVOCADO_FLASH_LAUNCHER=1)")
+_ROUTES = {"sd": route_sd, "emmc": route_emmc}
+
+_MID_WRITE = "the board may be mid-write and must be put in recovery mode again"
 
 
-_ROUTES = {"sd": route_sd, "emmc": route_emmc, "ums": route_ums}
+def _nvme_parser() -> argparse.ArgumentParser:
+    class Parser(argparse.ArgumentParser):
+        def error(self, message):
+            raise LauncherError(f"nvme: {message}")
+
+    ap = Parser(prog="avocado-flash nvme", description="Flash a Jetson in USB recovery mode.", allow_abbrev=False)
+    ap.add_argument("-m", "--machine")
+    ap.add_argument("-d", "--deploy", type=Path)
+    ap.add_argument("-n", "--dry-run", action="store_true")
+    ap.add_argument("-y", "--assume-yes", action="store_true")
+    ap.add_argument("--workdir", type=Path)
+    ap.add_argument("--rcm-id")
+    ap.add_argument("--boot-media", choices=["nvme", "sd", "emmc"], default="nvme")
+    ap.add_argument("--kernel-cmdline-extra")
+    return ap
 
 
-def main_nvme() -> int:
+def route_nvme(resolved: Resolved, args) -> int:
+    opts = LaunchOpts(
+        medium="nvme",
+        assume_yes=args.assume_yes,
+        dry_run=args.dry_run,
+        boot_media=args.boot_media,
+        kernel_cmdline_extra=args.kernel_cmdline_extra,
+        rcm_id=args.rcm_id,
+    )
+    kept: list[str] = []
+
+    def out(message):
+        print(message, file=sys.stderr)
+        if "kept:" in message:
+            kept.append(message.rsplit("kept:", 1)[1].strip())
+
+    rc = run_stone(opts, _context(resolved, args), out=out)
+    if rc == 0:
+        if opts.dry_run:
+            print("dry run: stone prepared the inputs only; the board was not contacted")
+        else:
+            print("Flash finished. Remove the FC_REC recovery jumper and power-cycle the board.")
+            print("work directory: removed")
+    elif kept:
+        # 127 (stone never started) writes nothing, but the operator still needs the path.
+        what = "interrupted" if rc == SIGINT_EXIT else f"the flash exited {rc}"
+        print(f"{what}; {_MID_WRITE}.", file=sys.stderr)
+        print(f"work directory: {kept[-1]}", file=sys.stderr)
+    return rc
+
+
+def main_nvme(argv: list[str], resolve_deploy_dir, resolve_machine) -> int:
+    """`avocado-flash nvme [options]`; argv is everything after the word nvme.
+
+    The options are parsed here, before deploy resolution, so a foreign option or a
+    device argument is refused before any process starts. avocado-flash's own
+    resolvers are passed in so "several build trees" and "several machines" behave
+    as for every other medium.
+    """
     try:
-        return route_nvme(None)
+        args = _nvme_parser().parse_args(argv)
+        deploy = resolve_deploy_dir(args.deploy)
+        machine = resolve_machine(deploy, args.machine)
+        resolved = Resolved(deploy=deploy, machine=machine, images_dir=Path(deploy) / "images" / machine)
+        return route_nvme(resolved, args)
     except LauncherError as exc:
         print(f"avocado-flash: {exc}", file=sys.stderr)
         return 1
 
 
-def main(argv: list[str], resolved: Resolved) -> int:
+def main(argv: list[str], resolved: Resolved, host=None) -> int:
     try:
         args = _parser().parse_args(argv)
+        if args.medium == "ums":
+            return route_ums(resolved, args, host)
         return _ROUTES[args.medium](resolved, args)
     except LauncherError as exc:
         print(f"avocado-flash: {exc}", file=sys.stderr)

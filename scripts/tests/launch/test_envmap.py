@@ -128,3 +128,27 @@ def test_ums_device_refused():
 def test_owned_variables_listed():
     assert "AVOCADO_PROVISION_FORCE" in envmap.OWNED_VARS
     assert len(envmap.OWNED_VARS) == 8
+
+
+def test_exported_device_sets_device_for_ums():
+    env, _ = build_run_env(opts(medium="ums", exported_device="/dev/sdb"), {}, "ums")
+    assert env["AVOCADO_PROVISION_DEVICE"] == "/dev/sdb"
+
+
+def test_exported_device_with_user_device_for_ums_still_refused():
+    with pytest.raises(LauncherError, match="ums"):
+        build_run_env(opts(medium="ums", device="/dev/sdc", exported_device="/dev/sdb"), {}, "ums")
+
+
+@pytest.mark.parametrize("medium,profile", [("sd", "sd"), ("emmc", "uuu-emmc"), ("nvme", "tegraflash-nvme")])
+def test_exported_device_refused_for_other_media(medium, profile):
+    with pytest.raises(LauncherError, match="exported"):
+        build_run_env(opts(medium=medium, exported_device="/dev/sdb"), {}, profile)
+
+
+def test_inherited_device_replaced_and_warned_for_ums():
+    env, warns = build_run_env(
+        opts(medium="ums", exported_device="/dev/sdb"), {"AVOCADO_PROVISION_DEVICE": "/dev/sda"}, "ums"
+    )
+    assert env["AVOCADO_PROVISION_DEVICE"] == "/dev/sdb"
+    assert any("AVOCADO_PROVISION_DEVICE" in w and "/dev/sda" in w for w in warns)

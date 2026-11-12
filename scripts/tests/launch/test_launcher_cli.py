@@ -179,13 +179,6 @@ def test_bmaptool_is_refused_with_no_process_started(tree):
     assert tree.started() == []
 
 
-def test_unwired_media_fail_loudly_not_silently(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "ums")
-    assert rc != 0
-    assert "not yet wired" in out
-    assert tree.started() == []
-
-
 def test_two_deploy_trees_still_refused(tmp_path):
     # Resolution stays in avocado-flash: ensure it still refuses with the opt-in on.
     for n in ("build-a", "build-b"):
@@ -207,14 +200,3 @@ def test_opt_in_unset_or_other_keeps_the_old_path(tree, value):
     assert rc != 0
     assert tree.started() == []
     assert "stone" not in out
-
-
-def test_nvme_under_opt_in_fails_loudly_and_starts_nothing(tree):
-    env = {"PATH": f"{tree.bin}:/usr/bin:/bin", "HOME": str(tree.tmp), "AVOCADO_FLASH_LAUNCHER": "1"}
-    proc = subprocess.run(
-        [sys.executable, str(SCRIPT), "nvme", "--dry-run"], env=env,
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
-    )
-    assert proc.returncode != 0
-    assert "not yet wired" in proc.stderr
-    assert tree.started() == []

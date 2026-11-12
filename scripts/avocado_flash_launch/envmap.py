@@ -52,6 +52,9 @@ class LaunchOpts:
     boot_media: str = "nvme"
     kernel_cmdline_extra: str | None = None
     rcm_id: str | None = None
+    # Set by the ums route from its session; never from the command line, so a
+    # user-supplied device for ums (opts.device) stays refused.
+    exported_device: str | None = None
 
 
 def map_profile(medium: str, boot_media: str = "nvme") -> str:
@@ -76,6 +79,9 @@ def build_run_env(
     if opts.medium == "ums" and opts.device:
         raise LauncherError("the ums medium takes no device argument")
 
+    if opts.exported_device and opts.medium != "ums":
+        raise LauncherError("an exported device only applies to the ums medium")
+
     jetson = profile.startswith("tegraflash-")
     nvme = opts.medium == "nvme"
     mapped: dict[str, str] = {
@@ -88,6 +94,8 @@ def build_run_env(
         mapped["AVOCADO_PROVISION_FWUP_TASK"] = opts.task
     if opts.device:
         mapped["AVOCADO_PROVISION_DEVICE"] = opts.device
+    if opts.exported_device:
+        mapped["AVOCADO_PROVISION_DEVICE"] = opts.exported_device
     if nvme and opts.kernel_cmdline_extra:
         mapped["AVOCADO_KERNEL_CMDLINE_EXTRA"] = opts.kernel_cmdline_extra
     if nvme and opts.rcm_id:

@@ -30,6 +30,7 @@ import struct
 import subprocess
 import sys
 import time
+import types
 from datetime import datetime
 from pathlib import Path
 
@@ -1088,15 +1089,24 @@ def _launcher_cli():
 def dispatch_launcher(argv: list[str], deploy: Path, machine: str) -> int:
     """Run sd/emmc/ums through the launcher; resolution above stays in this script."""
     cli = _launcher_cli()
+    host = types.SimpleNamespace(
+        UBoot=UBoot,
+        interrupt_to_uboot=interrupt_to_uboot,
+        ums_expose=ums_expose,
+        ums_release=ums_release,
+        block_devices=block_devices,
+        usb_gadget_present=usb_gadget_present,
+    )
     return cli.main(
         argv,
         cli.Resolved(deploy=deploy, machine=machine, images_dir=deploy / "images" / machine),
+        host=host,
     )
 
 
-def dispatch_launcher_nvme() -> int:
-    """nvme is first-argument only; the launcher has no route for it yet."""
-    return _launcher_cli().main_nvme()
+def dispatch_launcher_nvme(argv: list[str]) -> int:
+    """nvme is first-argument only and parses its own options, so it never reaches build_parser()."""
+    return _launcher_cli().main_nvme(argv, resolve_deploy_dir, resolve_machine)
 
 
 def main() -> int:
@@ -1107,7 +1117,7 @@ def main() -> int:
         return dispatch_ssh_emmc(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "nvme":
         if launcher_enabled():
-            return dispatch_launcher_nvme()
+            return dispatch_launcher_nvme(sys.argv[2:])
         return dispatch_nvme(sys.argv[2:])
     if "nvme" in sys.argv[1:]:
         raise Fatal("nvme must be the first argument: avocado-flash nvme [options]")
