@@ -13,4 +13,9 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup nospdx
 PACKAGES = "${PN}"
 
-RDEPENDS:${PN} = "tegra-firmware-tegra234"
+# The firmware set meta-tegra defines for this machine's SoC (its FWDEPS: the
+# SoC's own package plus the vic, shared and xusb ones). Name the umbrella,
+# not a subpackage: tegra-firmware-tegra234 gave Thor (tegra264) no GPU
+# firmware, and the SoC package alone misses what upstream splits out of it
+# (tegra-firmware-shared carries the NVJPG firmware).
+RDEPENDS:${PN} = "tegra-firmware"
