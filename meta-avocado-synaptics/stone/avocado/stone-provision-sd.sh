@@ -14,7 +14,7 @@ archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
 # sibling stone-provision-img.sh passes this path to `fwup -d`. Kept so the two
 # scripts stay line-for-line comparable.
 # shellcheck disable=SC2034
-archive_image="${archive_file%%.*}.img"
+archive_image="${archive_file%.*}.img"
 
 fwup \
   -a \

@@ -221,6 +221,14 @@ def test_deviation_registry_names():
         "recovery-id-pinned",
         "env-append-newline",
         "device-confirmation",
+        "path-filter",
+        "unpinned-kernel-refused",
+        "unidentified-board-refused",
+        "rcm-id-override",
+        "dry-run-env-prepare-only",
+        "fwup-task-refused",
+        "boot-tools-from-tools-dir",
+        "force-policy-table",
     }
     assert all(isinstance(v, str) and v and "\n" not in v for v in deviations.DEVIATIONS.values())
 

@@ -6,6 +6,7 @@ comments below say where each stage comes from.
 
 import argparse
 import contextlib
+import dataclasses
 import fcntl
 import os
 import sys
@@ -27,7 +28,8 @@ from . import (
     staging,
     toolchain,
 )
-from .env import from_environ
+from .env import dry_run_requested, from_environ
+from .files import join_name
 from .fit import require_fit
 from .manifest import read_manifest
 from .profile import media_for_profile
@@ -43,6 +45,9 @@ _ROOT_REQUIRED = (
     "Run the same command again with sudo, keeping the environment and PATH:\n"
     '  sudo -E env PATH="$PATH" <the command you just ran>'
 )
+
+# The host wrapper's fallback (scripts/avocado_flash_tegra/plan.py) when no PATH entry is absolute.
+SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -73,13 +78,57 @@ def _build_dir_lock(build_dir: str):
         yield
 
 
+def _absolute_path(path: str) -> str:
+    """PATH with its empty and relative components removed.
+
+    Either kind resolves against the working directory, which root does not
+    control here: cpp, lsusb or the flash tool could come from it.
+    """
+    parts = path.split(":") if path else []
+    kept = [p for p in parts if p.startswith("/")]
+    dropped = [p for p in parts if not p.startswith("/")]
+    if dropped:
+        print(f"WARNING: dropped relative or empty PATH entries: {', '.join(map(repr, dropped))}")
+    if not kept:
+        print(f"WARNING: PATH has no absolute entry, using {SYSTEM_PATH}")
+        return SYSTEM_PATH
+    return ":".join(kept)
+
+
+_UNPINNED_KERNEL = (
+    "AVOCADO_PROVISION_KERNEL_IMAGE is not set: the prebuilt boot.img names no rootfs PARTUUID.\n"
+    "Pin the kernel with AVOCADO_PROVISION_KERNEL_IMAGE, or set "
+    "AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1 to accept the prebuilt boot image."
+)
+
+
+def _require_identified_board(force_raw):
+    """With no board id declared anywhere, an unattended run would flash whatever it finds."""
+    decision = confirm.decide_confirmation(force_raw, confirm.stdin_is_tty())
+    if decision == "skip":
+        raise EngineError(
+            "no USB id is declared for the board: the manifest has no rcm_ids and "
+            "AVOCADO_PROVISION_RCM_ID is not set, so an unattended run would flash any board in recovery mode.\n"
+            "Set AVOCADO_PROVISION_RCM_ID to the board's vendor:product id (lsusb), e.g. 0955:7523."
+        )
+    if decision == "retype":
+        print("WARNING: no USB id is declared for the board (set AVOCADO_PROVISION_RCM_ID); only your retyped confirmation identifies it")
+
+
 def _run(args, environ, runner, euid, sleep) -> int:
-    # Deviation root-check-first: before the environment is read or anything is created.
+    base = dict(os.environ if environ is None else environ)
+    # AVOCADO_PROVISION_DRY_RUN=1 is --prepare-only; the later steps read args.prepare_only.
+    if dry_run_requested(base):
+        args.prepare_only = True
+    # Deviation root-check-first: before anything is created.
     if not args.prepare_only and (os.geteuid() if euid is None else euid) != 0:
         raise EngineError(_ROOT_REQUIRED)
 
-    base = dict(os.environ if environ is None else environ)
+    base["PATH"] = _absolute_path(base.get("PATH", ""))
     cfg = from_environ(base)
+    # Only the exact value 1 lifts it, so a stray "yes" cannot silently take the unpinned path.
+    if not cfg.kernel_image and base.get("AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL") != "1":
+        raise EngineError(_UNPINNED_KERNEL)
     # Deviation unknown-profile-refused: the oracle (514-527) falls back to nvme.
     media = media_for_profile(cfg.profile)
     path_env = base.get("PATH", "")
@@ -104,12 +153,19 @@ def _run(args, environ, runner, euid, sleep) -> int:
 
     # Oracle 58-103: manifest read.
     man = read_manifest(cfg.manifest)
+    # The override replaces the manifest list, so one id never widens the other.
+    if cfg.rcm_id:
+        man = dataclasses.replace(man, rcm_ids=(cfg.rcm_id,))
+    if not man.rcm_ids:
+        _require_identified_board(base.get("AVOCADO_PROVISION_FORCE"))
 
     # Oracle 105-247 and 249-342: reset, BSP, tools, carrier, images, overlay check.
     with _build_dir_lock(cfg.build_dir):
         # Before the reset, so an unusable image leaves the previous staging intact.
         # One refusal lists every absent manifest key and every unusable file.
         staging.require_images(Path(cfg.data_dir), man, require_keys=True)
+        if cfg.kernel_image:
+            bootimg.require_tools(_boot_tools_dir(cfg, man, work))
         staging.reset_work_dir(work)
         print(f"Building tegraflash working directory: {work}")
         staging.copy_bsp(cfg.data_dir, man.tegraflash_bsp, work)
@@ -126,6 +182,10 @@ def _run(args, environ, runner, euid, sleep) -> int:
             target = cpp.resolve_cpp(path=path_env, sdk_arch=cfg.sdk_arch, cc=cfg.cc)
             cpp.write_wrapper(wrapper_dir, target)
             return _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep)
+
+
+def _boot_tools_dir(cfg, man, work):
+    return join_name(cfg.data_dir, man.tegraflash_tools) if man.tegraflash_tools else work
 
 
 def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) -> int:
@@ -152,6 +212,7 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
             initramfs_name=man.initramfs,
             env=flash_env,
             version=cfg.kernel_version,
+            tools_dir=_boot_tools_dir(cfg, man, work),
         )
     else:
         bootimg.refuse_cmdline_without_kernel(cfg.kernel_cmdline, cfg.kernel_cmdline_extra)

@@ -15,6 +15,14 @@ set -o pipefail
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
 
+# Wrong-disk guards shared with the other sd and usb profiles. Shipped beside
+# this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
+# Run-mode variables are validated before any guard or write.
+avocado_safe_disk_modes sd 1 1 || exit 1
+
 archive_name=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r .storage_devices.rootdisk.out)
 if [[ -z "$archive_name" || "$archive_name" == "null" ]]; then
   echo "Error: Could not extract archive name from manifest"
@@ -27,7 +35,7 @@ if [[ ! -f "$archive_file" ]]; then
   exit 1
 fi
 
-archive_image="${archive_file%%.*}.img"
+archive_image="${archive_file%.*}.img"
 
 # When USB passthrough is unavailable (Docker Desktop on macOS/Windows),
 # produce a disk image for host-side burning instead of flashing directly.
@@ -113,11 +121,6 @@ if [[ -n "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
   echo "Non-interactive mode: AVOCADO_PROVISION_DEVICE=${AVOCADO_PROVISION_DEVICE}"
   echo ""
 
-  if [[ ! -b "$AVOCADO_PROVISION_DEVICE" ]]; then
-    echo "Error: ${AVOCADO_PROVISION_DEVICE} is not a valid block device"
-    exit 1
-  fi
-
   if [[ -n "$root_dev" && "$AVOCADO_PROVISION_DEVICE" == "$root_dev" ]]; then
     echo "Error: ${AVOCADO_PROVISION_DEVICE} is the boot volume -- refusing to overwrite"
     exit 1
@@ -129,6 +132,14 @@ else
   # =============================================================================
   # Interactive mode: list available devices, let user select
   # =============================================================================
+
+  # Choosing the target is an answer, and only a terminal answers.
+  # AVOCADO_PROVISION_FORCE does not stand in for it.
+  if [[ ! -t 0 ]]; then
+    echo "ERROR: no device named and no terminal: cannot choose a target without a terminal." >&2
+    echo "Set AVOCADO_PROVISION_DEVICE=/dev/sdX for an unattended run." >&2
+    exit 1
+  fi
 
   echo "Detecting available storage devices..."
   echo ""
@@ -214,6 +225,11 @@ else
   fi
 fi
 
+# Whole disk on a USB or MMC bus that does not hold the running root. Runs for
+# both branches above, on the device actually chosen.
+avocado_safe_disk_check_device "$sd_block_device" || exit 1
+sd_block_device="$AVOCADO_SAFE_DISK_DEV"
+
 # =============================================================================
 # Confirm and write
 # =============================================================================
@@ -234,43 +250,47 @@ echo "  Size:   ${device_size_gib_decimal} GiB"
 echo "  Info:   $device_info"
 echo ""
 
-# In non-interactive mode skip the final confirmation
-if [[ -z "${AVOCADO_PROVISION_DEVICE:-}" ]]; then
-  echo "WARNING: This will completely overwrite ${sd_block_device}!"
-  echo "All existing data on this SD card will be lost."
-  echo ""
-  read -p "Are you sure you want to continue? (y/N): " -r
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Operation cancelled by user"
-    exit 1
-  fi
-fi
+# Typed retype of the device path. Naming the device up front does not skip it;
+# only AVOCADO_PROVISION_FORCE=1 does, and a dry run asks nothing.
+avocado_safe_disk_confirm "$sd_block_device" || exit 1
 
 echo "Proceeding with firmware write..."
 
 # Unmount any mounted partitions on the target device
-if mount | grep -q "${sd_block_device}"; then
+# Capture first: under pipefail a grep -q that exits on its first match makes a
+# long-running `mount` die of SIGPIPE, and the pipeline then reads as "not mounted".
+mounted_now=$(mount)
+if grep -q "${sd_block_device}" <<<"$mounted_now"; then
   echo "Unmounting any mounted partitions on ${sd_block_device}..."
-  if ! umount "${sd_block_device}"* 2>/dev/null; then
+  if ! avocado_safe_disk_write umount "${sd_block_device}"* 2>/dev/null; then
     echo "Error: Failed to unmount partitions on ${sd_block_device}"
     exit 1
   fi
 fi
 
+# Whatever is still mounted now was not unmounted above; never write under it.
+avocado_safe_disk_unmounted "$sd_block_device" || exit 1
+
 # Brief wait to ensure device is ready
 sleep 2
 
 # Verify device is accessible before fwup
-if ! dd if="${sd_block_device}" of=/dev/null bs=512 count=1 2>/dev/null; then
+if ! avocado_safe_disk_run dd if="${sd_block_device}" of=/dev/null bs=512 count=1 2>/dev/null; then
   echo "Error: Device ${sd_block_device} is not accessible for read/write operations"
   exit 1
 fi
 
 echo "Writing system image to SD card..."
 
-if ! fwup -a -u -i "${archive_file}" -d "${sd_block_device}" -t complete 2>&1; then
+fwup_task=$(avocado_safe_disk_fwup_task) || exit 1
+if ! avocado_safe_disk_write fwup -a -u -i "${archive_file}" -d "${sd_block_device}" -t "${fwup_task}" 2>&1; then
   echo "Error: fwup failed to write system image"
   exit 1
+fi
+
+if [[ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]]; then
+  avocado_safe_disk_finish "$sd_block_device"
+  exit 0
 fi
 
 echo "System image successfully written to SD card!"

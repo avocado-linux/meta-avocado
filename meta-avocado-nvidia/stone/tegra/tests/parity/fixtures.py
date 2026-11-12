@@ -212,6 +212,10 @@ def build_tree(
         elif key in DIR_KEYS:
             target.mkdir(parents=True, exist_ok=True)
             _touch(target / ".placeholder")
+            if key == "tegraflash_tools":
+                for helper in ("mkbootimg", "avocado-tegra-bootimg"):
+                    if (stub_dir / helper).is_file() and helper not in omit:
+                        shutil.copy2(stub_dir / helper, target / helper)
         elif key in _SIZED_IMAGES:
             _touch(target, _sized_image(key, _SIZED_IMAGES[key]))
         else:

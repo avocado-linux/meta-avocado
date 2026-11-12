@@ -13,10 +13,12 @@ A flash board is three pieces that have to agree:
   `stone-provision-tegraflash.sh` in its profiles.
 - An engine entry in that manifest, so stone copies the provisioning engine
   next to the script.
-- A registry entry in `scripts/avocado_flash_boards/tegra.py`, which the host
-  door uses to find the board's USB recovery id. This step is retiring: the
-  engine reads the id from the manifest (`tegraflash.rcm_ids`), and the
-  registry stays only until the wrapper is removed.
+- The recovery id and its evidence in the same manifest
+  (`tegraflash.rcm_ids` and `tegraflash.rcm_evidence`). No Python board table is
+  involved: the engine and the launcher's `boards` verb read the manifest. The
+  old registry in `scripts/avocado_flash_boards/` still exists but is retired by
+  this change's default flip of the launcher (`AVOCADO_FLASH_LAUNCHER`); do not
+  add a board to it.
 
 Two doors write a board, and both run the same file. The host door,
 `avocado-flash nvme`, runs `stone-provision-tegraflash.sh` from the deploy
@@ -64,12 +66,24 @@ The engine reads these keys from `storage_devices.rootdisk` (the list is
 | `tegraflash.overlays` | Overlay list; optional, absence means none |
 | `tegraflash.dce_overlays` | DCE overlay list; optional |
 | `tegraflash.sd_device` | SD device name for the SD profile |
-| `tegraflash.rcm_ids` | List of lowercase `vendor:product` USB ids this board may show in recovery mode; the engine refuses a recovery device whose id is not listed. It narrows the match only: a device still has to be recognised as a recovery device first (see below). Optional: without it the engine warns that the board is not identity-checked and proceeds with exactly one device |
+| `tegraflash.rcm_ids` | List of lowercase `vendor:product` USB ids this board may show in recovery mode; the engine refuses a recovery device whose id is not listed. It narrows the match only: a device still has to be recognised as a recovery device first (see below). Optional, but without it the engine refuses an unattended run and only warns when an operator retypes the confirmation (see `AVOCADO_PROVISION_RCM_ID`) |
+| `tegraflash.rcm_evidence` | Object mapping each declared id to what was seen on hardware, for example the `lsusb` line. Required for every id in `rcm_ids`, and an entry for an undeclared id is an error |
 
 Add the recovery ids you observed on hardware to `tegraflash.rcm_ids` in the
-manifest, for example `"rcm_ids": ["0955:7523"]` (the id seen on the Orin Nano
-bench). List another SKU's id only after that module has been seen in recovery
-mode. Leave the list out until someone has seen the board in recovery mode.
+manifest, and the evidence beside them, for example:
+
+```json
+"rcm_ids": ["0955:7523"],
+"rcm_evidence": {
+  "0955:7523": "lsusb on the bench Orin Nano showed 0955:7523 NVIDIA Corp. APX"
+}
+```
+
+List another SKU's id only after that module has been seen in recovery mode.
+Leave both out until someone has seen the board in recovery mode; guessing an id
+would pin a different device. The launcher's `boards` verb
+(`python3 scripts/avocado-flash boards`) validates the shape: a lowercase
+`0955:xxxx` pair, non-empty evidence, no evidence for an undeclared id.
 
 The list does not teach the engine a new id. The engine counts a device as a
 recovery device when its description says APX or RCM, or its product id is in
@@ -102,62 +116,49 @@ that names the script and lacks this entry. The host door refuses a template
 whose value is not `tegraflash-engine` and an engine directory that lacks
 `avocado_tegraflash/__main__.py`, because the shim needs both.
 
-## 3. The registry entry (retiring)
+## 3. The recovery id (manifest only)
 
-The recovery id now lives in the manifest as `tegraflash.rcm_ids` (section 1),
-and the engine checks it there. The host-door registry is retiring: it is
-still kept in step with the manifests by
-`scripts/tests/boards/test_manifest_sync.py` until the wrapper is removed, and
-it is no longer the only place an id lives. Until then, add the entry too.
-
-Add a `Board` to the list in `scripts/avocado_flash_boards/tegra.py`:
-
-```python
-Board("avocado-<name>", "tegra", "0955:xxxx", "evidence text"),
-```
-
-The fields, from `scripts/avocado_flash_boards/__init__.py`:
-
-| Field | Meaning |
-|-------|---------|
-| `machine` | The machine name, `avocado-` plus the manifest's `<name>` |
-| `family` | `tegra` |
-| `rcm_id` | The USB `vendor:product` the board shows in recovery mode, or omitted |
-| `rcm_evidence` | Where the id came from |
-
-The evidence rule: record a recovery id only when someone saw it on hardware,
-and put what was seen in the evidence text, for example the `lsusb` line
-observed. The registry is validated the first time a command reads it, and it
-refuses:
-
-- a family that has no module in `scripts/avocado_flash_boards/` exporting
-  `VENDOR` (the USB vendor of its recovery ids) and `BOARDS`;
-- an id that is not a lowercase `vendor:product` hex pair;
-- an id whose vendor is not the family's `VENDOR` (`0955` for `tegra`);
-- an id with empty evidence;
-- a duplicate machine.
-
-One bad entry stops `avocado-flash nvme` and `avocado-flash boards` (every
-command that reads the registry) with a one-line refusal naming the entry, not
-just one flash.
-
-A recovery id recorded here must also be recognised by the engine, so its
-product id has to be listed in `RECOVERY_PIDS` in
-`meta-avocado-nvidia/stone/tegra/avocado_tegraflash/usb.py`;
-`scripts/tests/boards/test_registry.py` fails, naming the board and the missing
-product id, when it is not.
+There is no registry step. The recovery id and its evidence live only in the
+manifest (`tegraflash.rcm_ids`, `tegraflash.rcm_evidence`, section 1).
+`scripts/tests/launch/test_boards_manifests.py` and the engine's manifest tests
+validate them, and a recovery id recorded there must also be recognised by the
+engine, so its product id has to be listed in `RECOVERY_PIDS` in
+`meta-avocado-nvidia/stone/tegra/avocado_tegraflash/usb.py`.
 
 When nobody has seen the board in recovery mode, omit the id and the evidence.
-`avocado-flash boards` then lists the board as `none recorded`, and the host
-door refuses it unless the caller passes `--rcm-id <vendor:product>`. Guessing
-an id would let the flash pin a different device, so an unknown id stays
-unknown.
+`python3 scripts/avocado-flash boards` then lists the board as `none recorded`,
+and an unattended run is refused unless the caller sets
+`AVOCADO_PROVISION_RCM_ID=<vendor:product>`.
 
-`scripts/tests/boards/test_manifest_sync.py` fails when a Jetson manifest has
-no registry entry, or a registry entry has no manifest, and its message names
-the `stone-<name>.json` files and the orphaned machines. It holds no count, so
-adding the manifest and the entry together passes it. The other board-count
-places are listed in section 5.
+## 3a. Adding a non-Jetson board
+
+A board that writes an SD card, eMMC or a USB mass storage export is added the
+same way: a stone profile plus a manifest entry. There is no Python table to
+edit.
+
+1. Write `stone-provision-<medium>.sh`, source the library
+   `meta-avocado-distro/stone/avocado-safe-disk.sh` from the script's own
+   directory, and call its guards (`avocado_safe_disk_modes`,
+   `avocado_safe_disk_check_device`, `avocado_safe_disk_confirm`,
+   `avocado_safe_disk_run` and the rest). The i.MX93 ums profile,
+   `meta-avocado-nxp/stone/avocado-imx/stone-provision-ums.sh`, is a short
+   example.
+2. Name the profile in the manifest's `provision.profiles`, and list the
+   library in the manifest's `provision.files` (`"files": ["avocado-safe-disk.sh"]`),
+   or stone does not copy it next to the script.
+3. Declare `"config": { "dry_run": true }` on the profile only if the script
+   honours `AVOCADO_PROVISION_DRY_RUN=1`, which it does by running every guard
+   through the library and letting it print each target-changing command
+   instead of running it. A declaration on a script that ignores the variable
+   would let a "dry run" write the disk.
+4. Keep the confirmation behaviour in the library. The confirmation table is
+   `meta-avocado-distro/stone/tests/confirm-vectors.tsv`; the library's test
+   (`meta-avocado-distro/stone/tests/test-avocado-safe-disk.sh`) and the
+   engine (`avocado_tegraflash/confirm.py`) both read it, so a new rule is
+   one row and not two edits. Today: `AVOCADO_PROVISION_FORCE=1` skips the
+   retype; `0` retypes on a terminal and refuses without one; unset or empty
+   retypes on a terminal and proceeds without one; any other value refuses; a
+   dry run proceeds without a retype.
 
 ## 4. The parity matrix
 
@@ -185,11 +186,11 @@ and the tests below fail until each one is edited:
 | `meta-avocado-nvidia/stone/tegra/tests/test_manifest_entries.py` | `EXPECTED_MANIFESTS` |
 | `meta-avocado-nvidia/stone/tegra/tests/parity/test_cases.py` | `len(stems) == 7` in `test_every_manifest_naming_the_script_is_covered`, and the profile-case total (`32`) in `test_profile_cases_total_32_from_manifest_data` |
 | `meta-avocado-nvidia/stone/tegra/tests/parity/test_fixtures.py` | `len(MANIFESTS) == 7` in `test_scan_finds_all_seven_manifests` |
-| `scripts/tests/boards/test_registry.py` | the machine list in `test_registry_has_the_seven_jetson_machines` |
-| `scripts/tests/boards/test_boards_command.py` | `len(lines) == 7` in `test_boards_lists_seven_lines_with_orin_nano_id` |
+| `scripts/tests/boards/test_registry.py` | the machine list in `test_registry_has_the_seven_jetson_machines` (registry tests go away with the registry) |
+| `scripts/tests/boards/test_boards_command.py` | `len(lines) == 7` in `test_boards_lists_seven_lines_with_orin_nano_id` (same) |
 
-`scripts/tests/boards/test_manifest_sync.py` needs no edit: it compares the
-manifests with the registry and names any difference.
+The launcher tests under `scripts/tests/launch/` need no edit for a new
+manifest: they read the manifests and validate the recovery ids.
 
 Run the two test trees in separate invocations. `test_profile.py` exists in
 both, and one pytest run over both trees stops on the duplicate module name.
@@ -199,7 +200,7 @@ python -m pytest scripts/tests -q
 python -m pytest meta-avocado-nvidia/stone/tegra/tests -q
 ```
 
-List the registry. The board must appear with its recovery id or
+List the boards. The board must appear with its recovery id or
 `none recorded`:
 
 ```bash
@@ -214,7 +215,8 @@ avocado-jetson-orin-nano tegra 0955:7523
 ```
 
 Then run the engine up to the point where it would flash, with no board
-attached. This prepares the work directory and stops:
+attached. This prepares the work directory and stops
+(`AVOCADO_PROVISION_DRY_RUN=1` does the same):
 
 ```bash
 AVOCADO_STONE_MANIFEST=<deploy>/stone-<machine>.json \
@@ -248,6 +250,9 @@ This section is the release note for the move to the shared engine.
 | Carrier values are written literally; a value with `&` or a backslash and a digit used to be corrupted (`carrier-values-literal`). A `carrier.env` with no `CARRIER_LABEL` line no longer aborts the script silently | Carrier authors | Nothing for correct files; add a `CARRIER_LABEL` line so the provision log names the carrier |
 | A missing `mkbootimg`, or a failing boot image helper, raises an error naming the cause; the legacy script exited silently | Anyone debugging a failed flash | Read the error text; install the named tool |
 | The boardctl target and serial are single arguments (`boardctl-single-arguments`) | A boardctl target or serial containing whitespace, which used to be split | Nothing; the value now arrives whole |
+| A named device no longer skips the retype; only `AVOCADO_PROVISION_FORCE=1` does. With no terminal and no signal the run proceeds with a notice, and `AVOCADO_PROVISION_FORCE=0` with no terminal refuses | Anyone who passed an explicit device to skip the prompt, and unattended runs | Set `AVOCADO_PROVISION_FORCE=1` where skipping is intended |
+| The engine refuses a run with no pinned kernel, and an unattended run for a board with no declared recovery id | Downstream manifests and lab scripts | Pin the kernel, or set `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`; declare `rcm_ids` or set `AVOCADO_PROVISION_RCM_ID` |
+| `AVOCADO_FLASH_LAUNCHER=1` routes `avocado-flash` through the stone-profile launcher (opt-in; the default flip is planned by this change) | Anyone driving `avocado-flash` | Nothing yet |
 | `avocado-flash nvme` requires python3 3.10 or newer, `cpp`, `fdtget`, `fdtput` and `lsusb` on the host, and no longer needs `jq`. It requires the engine directory in the deploy tree | Everyone using the host door | Install the tools; rebuild an older image tree with the `avocado-stone` target (it is refused with that message) |
 | An image tree built before this change keeps the old 694-line script, and none of the new refusals apply to it | Anyone running an old tree | Nothing; reverting the series restores the old behaviour everywhere |
 

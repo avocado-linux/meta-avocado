@@ -81,6 +81,8 @@ command_not_found_handle() {
 
 _DRIVER = """\
 import os, subprocess, sys
+
+HELPERS = ("mkbootimg", "avocado-tegra-bootimg")
 sys.path.insert(0, sys.argv[1])
 from avocado_tegraflash.cli import main
 
@@ -89,7 +91,11 @@ _init = subprocess.Popen.__init__
 
 def _hooked(self, args, *a, **k):
     first = str(args if isinstance(args, str) else (list(args) or [""])[0])
-    if first.startswith("/") and os.path.dirname(first) not in os.environ["PATH"].split(":"):
+    # Deviation mkbootimg-missing-refused: the engine starts the two boot image
+    # helpers by absolute path from the manifest's tools directory, not from PATH.
+    staged = os.path.join(os.environ["AVOCADO_STONE_DATA_DIR"], "tegraflash-tools")
+    helper = os.path.dirname(first) == staged and os.path.basename(first) in HELPERS
+    if first.startswith("/") and not helper and os.path.dirname(first) not in os.environ["PATH"].split(":"):
         with open(os.environ["PARITY_UNSTUBBED_LOG"], "a") as fh:
             fh.write(first + "\\n")
     try:
@@ -170,8 +176,24 @@ def build_env(case: Case, s: Setup) -> dict[str, str]:
     }
     if s.tree.kernel_image is not None:
         env["AVOCADO_PROVISION_KERNEL_IMAGE"] = str(s.tree.kernel_image)
+    else:
+        # The engine refuses an unpinned kernel; these cases exercise the prebuilt boot image.
+        env["AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL"] = "1"
+    # A manifest without rcm_ids is refused unless an id is given (the stub board is 0955:7523);
+    # one that declares its own is left to supply them, so the parity run reads them too.
+    if not _declares_rcm_ids(s.tree.manifest):
+        env.setdefault("AVOCADO_PROVISION_RCM_ID", "0955:7523")
     env.update(case.env_dict)
     return env
+
+
+def _declares_rcm_ids(manifest) -> bool:
+    def walk(node) -> bool:
+        if isinstance(node, dict):
+            return bool(node.get("rcm_ids")) or any(walk(v) for v in node.values())
+        return False
+
+    return walk(json.loads(Path(manifest).read_text()))
 
 
 def read_calls(log_path) -> list:
@@ -179,7 +201,14 @@ def read_calls(log_path) -> list:
         text = Path(log_path).read_text()
     except FileNotFoundError:
         return []
-    return [json.loads(line) for line in text.splitlines() if line.strip()]
+    records = [json.loads(line) for line in text.splitlines() if line.strip()]
+    # Deviation mkbootimg-missing-refused: only the directory of the mkbootimg
+    # path handed to the repack helper differs; its file name is still compared.
+    for rec in records:
+        argv = rec.get("argv")
+        if rec.get("tool") == "avocado-tegra-bootimg" and argv and os.path.basename(argv[0]) == "mkbootimg":
+            argv[0] = "<HELPER_DIR>/mkbootimg"
+    return records
 
 
 def snapshot_of(work_dir, calls) -> dict:

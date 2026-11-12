@@ -82,7 +82,8 @@
       }
     },
     "files": [
-      "build-disk-image.sh"
+      "build-disk-image.sh",
+      "avocado-safe-disk.sh"
     ],
     "profiles": {
       "img": {
@@ -95,7 +96,10 @@
         ],
         "requires": [
           "usb"
-        ]
+        ],
+        "config": {
+          "dry_run": true
+        }
       },
       "emmc": {
         "script": "stone-provision-emmc.sh",
@@ -113,7 +117,10 @@
         ],
         "requires": [
           "usb"
-        ]
+        ],
+        "config": {
+          "dry_run": true
+        }
       }
     }
   },

@@ -97,6 +97,7 @@
         "description": "Stable identifier registered with Peridio."
       }
     },
+    "files": ["avocado-safe-disk.sh"],
     "profiles": {
       "img": {
         "script": "stone-provision-img.sh",
@@ -111,7 +112,10 @@
         ],
         "requires": [
           "usb"
-        ]
+        ],
+        "config": {
+          "dry_run": true
+        }
       },
       "uuu-emmc": {
         "script": "stone-provision-uuu-emmc.sh",
@@ -123,7 +127,8 @@
         ],
         "config": {
           "emmc_uboot_dev": 0,
-          "emmc_mmcblk": 0
+          "emmc_mmcblk": 0,
+          "dry_run": true
         }
       }
     }

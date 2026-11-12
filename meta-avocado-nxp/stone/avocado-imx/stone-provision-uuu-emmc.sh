@@ -9,6 +9,20 @@ set -euo pipefail
 # AVOCADO_DEVICE_CERT - device certificate content (base64 encoded pem)
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
+# AVOCADO_PROVISION_FORCE - 1, 0 or unset; see avocado_safe_disk_confirm
+# AVOCADO_PROVISION_DRY_RUN - 1 runs every check and prints the uuu command
+#                             instead of running it
+# AVOCADO_PROVISION_FWUP_TASK - only complete; upgrade is refused (uuu rewrites
+#                             the whole eMMC and has no upgrade path)
+
+# Confirmation table and run-mode validation shared with the other profiles.
+# Shipped beside this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
+# Checked first so a bad value, or a task this profile cannot do, stops the run
+# before any image work and before waiting for a device.
+avocado_safe_disk_modes uuu-emmc 1 0 || exit 1
 
 echo "=== iMX eMMC Provisioning via uuu ==="
 echo "Manifest: $AVOCADO_STONE_MANIFEST"
@@ -18,9 +32,11 @@ echo "Build dir: $AVOCADO_STONE_BUILD_DIR"
 # --- Step 1: Build the raw disk image from the fwup archive ---
 archive_name=$(jq -r .storage_devices.rootdisk.out "$AVOCADO_STONE_MANIFEST")
 archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
-archive_image="${archive_file%%.*}.img"
+archive_image="${archive_file%.*}.img"
 
-if [ ! -f "$archive_image" ]; then
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  echo "dry-run: would build ${archive_image} from ${archive_file} unless it exists"
+elif [ ! -f "$archive_image" ]; then
   echo "Building disk image from archive..."
   fwup \
     -a \
@@ -52,9 +68,13 @@ ${archive_image}	0x400000	0x20000	0x200	256
 ${archive_image}	0x440000	0x20000	0x200	256
 EOF
 
-fw_setenv -c "$fw_env_img_config" devnum "$emmc_uboot_dev"
-fw_setenv -c "$fw_env_img_config" mmcblk "$emmc_mmcblk"
-echo "U-Boot env patched: devnum=${emmc_uboot_dev}, mmcblk=${emmc_mmcblk}"
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  echo "dry-run: would set U-Boot env devnum=${emmc_uboot_dev} mmcblk=${emmc_mmcblk} in ${archive_image}"
+else
+  fw_setenv -c "$fw_env_img_config" devnum "$emmc_uboot_dev"
+  fw_setenv -c "$fw_env_img_config" mmcblk "$emmc_mmcblk"
+  echo "U-Boot env patched: devnum=${emmc_uboot_dev}, mmcblk=${emmc_mmcblk}"
+fi
 
 # --- Step 4: Locate imx-boot image for the SDPS handoff ---
 # iMX8M: prefer the emmc_fastboot variant (mkimage_imx8 -dev emmc_fastboot),
@@ -77,11 +97,31 @@ if [ ! -f "$imx_boot_path" ]; then
 fi
 echo "Using imx-boot: $imx_boot_path"
 
-# --- Step 5: Wait for device in serial download mode ---
+# --- Step 5: Wait for exactly one device in serial download mode, and pin it ---
 # NXP i.MX devices in serial download mode use USB vendor IDs:
 #   1fc9 (NXP) or 15a2 (Freescale legacy)
+#
+# Matching a vendor ID only answers "is any NXP device in serial download
+# mode", and uuu without -m takes whichever known device enumerated first. With
+# a second i.MX board on the bench that is the wrong board, so the target is
+# pinned: exactly one device, passed to uuu by its own path.
+nxp_lsusb_lines() {
+  lsusb 2>/dev/null | grep -Ei ' ID (1fc9|15a2):[0-9a-f]{4}' || true
+}
+
 check_sdp() {
-  lsusb -d 1fc9: >/dev/null 2>&1 || lsusb -d 15a2: >/dev/null 2>&1
+  [ -n "$(nxp_lsusb_lines)" ]
+}
+
+# uuu -m takes the path column of `uuu -lsusb` (bus:port chain, e.g. 1:2 or
+# 3:1-4), which is not the device number lsusb prints, so it is read from uuu.
+# Output per device: "<path> <chip> <protocol> <vid:pid>".
+uuu_known_devices() {
+  uuu -lsusb 2>/dev/null \
+    | awk '$1 ~ /^[0-9]+:[0-9]+([.-][0-9]+)*$/ {
+      vid = $4; pid = $5; sub(/^0x/, "", vid); sub(/^0x/, "", pid)
+      print $1, $2, $3, vid ":" pid
+    }' || true
 }
 
 if check_sdp; then
@@ -99,10 +139,49 @@ else
     sleep 1
   done
   if ! check_sdp; then
-    echo "ERROR: Device not detected in serial download mode (waited 60s)"
+    echo "ERROR: No NXP device detected in serial download mode (waited 60s)"
+    echo "       Set the board's boot-mode switches to serial download, power-cycle it,"
+    echo "       and connect its USB download port to this host."
     exit 1
   fi
 fi
+
+sdp_lines=$(nxp_lsusb_lines)
+sdp_count=$(printf '%s\n' "$sdp_lines" | grep -c . || true)
+uuu_devices=$(uuu_known_devices)
+uuu_count=$(printf '%s\n' "$uuu_devices" | grep -c . || true)
+
+if [ "$sdp_count" -gt 1 ]; then
+  echo "ERROR: $sdp_count NXP devices are in serial download mode:"
+  if [ "$uuu_count" -gt 0 ]; then
+    printf '%s\n' "$uuu_devices" | sed 's/^/  USB path /'
+  fi
+  printf '%s\n' "$sdp_lines" | sed 's/^/  lsusb: /'
+  echo "       uuu would take whichever enumerated first, so refusing rather than guessing."
+  echo "       Leave exactly one board in serial download mode and run again."
+  exit 1
+fi
+
+if [ "$uuu_count" -ne 1 ]; then
+  echo "ERROR: lsusb shows one NXP device but uuu recognises $uuu_count:"
+  printf '%s\n' "$sdp_lines" | sed 's/^/  lsusb: /'
+  if [ "$uuu_count" -gt 0 ]; then
+    printf '%s\n' "$uuu_devices" | sed 's/^/  USB path /'
+  fi
+  echo "       uuu cannot be pinned to a device it does not list. Check that this user"
+  echo "       can open the USB device (see 'uuu -udev') and that the device is a known i.MX."
+  exit 1
+fi
+
+read -r usb_path usb_chip usb_proto usb_id <<<"$uuu_devices"
+
+# --- Step 5b: Confirm the target ---
+# The retype target is the uuu USB path, the only name that selects the board
+# (uuu -m); lsusb bus/device numbers are never accepted. FORCE only skips the
+# retype: two boards were refused above whatever FORCE says.
+echo "Target device: USB ${usb_path} ${usb_id} (${usb_chip}, ${usb_proto})"
+echo "About to ERASE the eMMC (U-Boot mmc dev ${emmc_uboot_dev}) on this board."
+avocado_safe_disk_confirm "$usb_path" || exit 1
 
 # --- Step 6: Generate custom uuu script and flash ---
 # uuu resolves file paths relative to the .uuu script location,
@@ -170,6 +249,13 @@ echo ""
 cat "$uuu_script"
 echo ""
 
-uuu -v "$uuu_script"
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  # Same command line a real run uses, printed and never executed.
+  avocado_safe_disk_write uuu -v -m "$usb_path" "$uuu_script"
+  avocado_safe_disk_finish "$usb_path"
+  exit 0
+fi
+
+uuu -v -m "$usb_path" "$uuu_script"
 
 echo "=== eMMC provisioning complete ==="

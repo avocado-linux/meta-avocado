@@ -10,7 +10,7 @@
 
 archive_name=$(cat "$AVOCADO_STONE_MANIFEST" | jq -r .storage_devices.rootdisk.out)
 archive_file="${AVOCADO_STONE_BUILD_DIR}/${archive_name}"
-archive_image="${archive_file%%.*}.img"
+archive_image="${archive_file%.*}.img"
 
 # Check if AVOCADO_PROVISION_OUT is set and create directory
 if [ -n "${AVOCADO_PROVISION_OUT:-}" ]; then

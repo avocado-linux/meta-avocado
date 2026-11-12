@@ -173,6 +173,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gdisk dosfstools mtools device-tree-compiler cpp
+      - name: i.MX stone uuu-emmc device pin and confirmation (needs jq and script(1))
+        shell: bash
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends jq bsdutils
+          bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-uuu-emmc.sh
       - name: /var on the root's disk (avocado-on-root-disk; its GPT cases need sgdisk)
         shell: bash
         run: sh meta-avocado-distro/recipes-core/base-files/tests/test-avocado-on-root-disk.sh
@@ -184,6 +189,43 @@ jobs:
         run: |
           bash meta-avocado-nxp/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-device-tree-overlay-deliver.sh
           bash meta-avocado-nxp/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-boot-settings.sh
+      - name: stone sd/usb wrong-disk guards (shared library)
+        shell: bash
+        run: bash meta-avocado-distro/stone/tests/test-avocado-safe-disk.sh
+      - name: i.MX and Raspberry Pi stone sd provisioning guards
+        shell: bash
+        run: |
+          bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-sd-safe-disk.sh
+          bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-sd-safe-disk.sh meta-avocado-raspberrypi/stone/rpi/stone-provision-sd.sh
+      - name: stm32mp25-dk stone sd provisioning guards
+        shell: bash
+        run: bash meta-avocado-stm/stone/stm32mp25-dk/tests/test-stone-provision-sd-safe-disk.sh
+      - name: dd-family stone sd provisioning guards (alif, renesas, nanopi, orangepi)
+        shell: bash
+        run: |
+          t=meta-avocado-distro/stone/tests/test-dd-sd-profiles.sh
+          bash "$t" meta-avocado-alif/stone/alif-e8-devkit/stone-provision-sd.sh
+          bash "$t" meta-avocado-renesas/stone/rzv2n-sr-som/stone-provision-sd.sh
+          bash "$t" meta-avocado-rockchip/stone/nanopi-r5s/stone-provision-sd.sh
+          bash "$t" meta-avocado-rockchip/stone/orangepi-5-plus/stone-provision-sd.sh
+      - name: NanoPi R5S stone ums provisioning guards
+        shell: bash
+        run: bash meta-avocado-rockchip/stone/nanopi-r5s/tests/test-stone-provision-ums.sh
+      - name: Raspberry Pi stone usb provisioning safe-disk guards
+        shell: bash
+        run: bash meta-avocado-raspberrypi/stone/rpi/tests/test-stone-provision-usb-safe-disk.sh
+      - name: i.MX stone ums provisioning guards
+        shell: bash
+        run: bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-ums.sh
+      - name: arm64 and x86-64 stone usb provisioning guards
+        shell: bash
+        run: |
+          t=meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-usb.sh
+          bash "$t"
+          bash "$t" meta-avocado-arm64/stone/arm64-uefi-v9/stone-provision-usb.sh
+          for v in v2 v3 v4; do
+            bash "$t" "meta-avocado-x86-64/stone/intel-x86-64-$v/stone-provision-usb.sh"
+          done
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh
