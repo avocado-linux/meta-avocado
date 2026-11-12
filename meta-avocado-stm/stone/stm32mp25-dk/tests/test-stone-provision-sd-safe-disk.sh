@@ -134,7 +134,7 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "" AVOCADO_PROVISION_FORCE=1)
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -eq 0 ] && wrote_to "$w/dev/sdb" && echo "$out" | grep -q "Model:"; } \
   && ok "AVOCADO_PROVISION_FORCE=1 writes without asking and still shows the identity" || bad "force: rc=$rc out=[$out]"
@@ -142,7 +142,7 @@ rc=$?
 setup
 sata sda
 echo "$w/dev/sda disk 1" >"$w/st/lsblk"
-out=$(run "$w/dev/sda\n" AVOCADO_PROVISION_FORCE=1)
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sda" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "not a USB or MMC bus"; } \
   && ok "a SATA disk the kernel flags removable is refused, even with FORCE" || bad "sata removable: rc=$rc out=[$out]"
@@ -150,7 +150,7 @@ rc=$?
 setup
 usb sdb
 echo "$w/dev/sdb1 / ext4 rw 0 0" >"$w/st/mounts"
-out=$(run "" AVOCADO_PROVISION_FORCE=1)
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "running root"; } \
   && ok "the disk holding / is refused" || bad "root: rc=$rc out=[$out]"
@@ -158,7 +158,7 @@ rc=$?
 setup
 usb sdb
 echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/mounts"
-out=$(run "" AVOCADO_PROVISION_FORCE=1)
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "mounted or in use"; } \
   && ok "a partition still mounted after the unmount step is refused" || bad "mounted: rc=$rc out=[$out]"
@@ -207,7 +207,7 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "" AVOCADO_PROVISION_DRY_RUN=1)
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_DRY_RUN=1)
 rc=$?
 { [ $rc -eq 0 ] && ! wrote && ! grep -q '^dd ' "$w/log" && echo "$out" | grep -q "^dry-run: dd if=" \
   && echo "$out" | grep -q "dry run: nothing was written to $w/dev/sdb"; } \
@@ -216,7 +216,7 @@ rc=$?
 setup
 usb sdb
 echo "$w/dev/sdb1 / ext4 rw 0 0" >"$w/st/mounts"
-out=$(run "" AVOCADO_PROVISION_DRY_RUN=1)
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_DRY_RUN=1)
 rc=$?
 { [ $rc -ne 0 ] && echo "$out" | grep -q "running root"; } \
   && ok "a dry run still runs the guards" || bad "dry run guards: rc=$rc out=[$out]"
@@ -252,6 +252,26 @@ rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "cannot honour"; } \
   && ok "a task other than complete is refused" || bad "task upgrade: rc=$rc out=[$out]"
 
+# --- no device named: choosing a target is an answer only a terminal gives ----
+
+for case_ in "piped y|y\\n|" "empty stdin||" "FORCE=1 piped y|y\\n|AVOCADO_PROVISION_FORCE=1"; do
+  IFS='|' read -r label input envs <<<"$case_"
+  setup
+  usb sdb
+  # shellcheck disable=SC2086 # envs is zero or one NAME=value word
+  out=$(run "$input" $envs)
+  rc=$?
+  { [ $rc -ne 0 ] && ! wrote && ! grep -q '^dd ' "$w/log" && echo "$out" | grep -q "no device named and no terminal"; } \
+    && ok "no device named, no terminal ($label): refused before any write" || bad "unnamed no tty ($label): rc=$rc out=[$out] log=$(cat "$w/log")"
+done
+
+setup
+usb sdb
+out=$(trun "" AVOCADO_PROVISION_FORCE=1)
+rc=$?
+{ [ $rc -eq 0 ] && wrote_to "$w/dev/sdb"; } \
+  && ok "no device named, on a terminal, FORCE=1: the single USB disk is selected and written without a retype" || bad "unnamed tty force: rc=$rc out=[$out] log=$(cat "$w/log")"
+
 # A real terminal on stdin: the retype is read from it, and y does not confirm.
 if command -v script >/dev/null 2>&1; then
   # shellcheck source=/dev/null # sibling test helper, absent from a standalone lint
@@ -281,5 +301,5 @@ else
 fi
 
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/20 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 20 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/24 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 24 ]

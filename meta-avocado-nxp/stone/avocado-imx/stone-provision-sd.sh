@@ -132,6 +132,14 @@ else
   # Interactive mode: list available devices, let user select
   # =============================================================================
 
+  # Choosing the target is an answer, and only a terminal answers.
+  # AVOCADO_PROVISION_FORCE does not stand in for it.
+  if [[ ! -t 0 ]]; then
+    echo "ERROR: no device named and no terminal: cannot choose a target without a terminal." >&2
+    echo "Set AVOCADO_PROVISION_DEVICE=/dev/sdX for an unattended run." >&2
+    exit 1
+  fi
+
   echo "Detecting available storage devices..."
   echo ""
 

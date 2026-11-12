@@ -232,7 +232,7 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "y\n" AVOCADO_PROVISION_FORCE=1)
+out=$(run_tty "y\n" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -eq 0 ] && wrote_to "$w/dev/sdb"; } \
   && ok "interactive: AVOCADO_PROVISION_FORCE=1 skips the retype" || bad "interactive force: rc=$rc out=[$out]"
@@ -240,10 +240,23 @@ rc=$?
 setup
 sata sda
 echo "$w/dev/sda,8053063680" >"$w/st/fwup-devices"
-out=$(run "y\n$w/dev/sda\n" AVOCADO_PROVISION_FORCE=1)
+out=$(run_tty "y\n$w/dev/sda\n" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "not a USB or MMC bus"; } \
   && ok "interactive: a SATA disk fwup lists is refused even with FORCE" || bad "interactive sata: rc=$rc out=[$out]"
+
+# --- no device named: the selection is answered from a terminal only ----------
+
+for case_ in "piped y|y\\n|" "empty stdin||" "FORCE=1 piped y|y\\n|AVOCADO_PROVISION_FORCE=1"; do
+  IFS='|' read -r label input envs <<<"$case_"
+  setup
+  usb sdb
+  # shellcheck disable=SC2086 # envs is zero or one NAME=value word
+  out=$(run "$input" $envs)
+  rc=$?
+  { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "no device named and no terminal"; } \
+    && ok "no device named, no terminal ($label): refused before any write" || bad "unnamed no tty ($label): rc=$rc out=[$out] log=$(cat "$w/log")"
+done
 
 # --- a named device still retypes; only FORCE=1 skips -------------------------
 
@@ -325,7 +338,7 @@ rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "AVOCADO_PROVISION_DRY_RUN=2 is not valid"; } \
   && ok "dry run: a value other than 1 is refused, no write" || bad "dry run invalid: rc=$rc out=[$out]"
 
-total=23
+total=26
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$total run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$total" ]
