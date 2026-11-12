@@ -6,9 +6,9 @@
 # This is the primary method for initial provisioning of bare-metal arm64 UEFI
 # systems by cloning an Avocado OS image to a target disk.
 #
-# With AVOCADO_PROVISION_DEVICE set, that device is written without prompting
-# (for automated provisioning, e.g. a card handed over by a test fixture);
-# the safety checks below still apply.
+# With AVOCADO_PROVISION_DEVICE set, that device is used instead of asking for
+# one (e.g. a card handed over by a test fixture). The safety checks and the
+# retype still apply; an unattended run sets AVOCADO_PROVISION_FORCE=1.
 #
 # Environment variables provided by avocado/stone:
 # AVOCADO_STONE_MANIFEST  - path to manifest JSON file
@@ -35,6 +35,10 @@ done
 # this script (the manifest lists it under provision.files).
 # shellcheck source=/dev/null # sibling file, absent from a standalone lint
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
+# The write is a raw dd, so there is neither a dry run nor an fwup task to
+# honour; refuse both before any image is built or disk is listed.
+avocado_safe_disk_modes usb 0 0 || exit 1
 
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 # Never read below, but the assignment is load-bearing under `set -u`: it aborts
@@ -231,13 +235,9 @@ echo ""
 echo "Image to write: ${IMAGE_NAME} (${IMAGE_SIZE})"
 echo ""
 
-# Retype of the device path. A device given through AVOCADO_PROVISION_DEVICE is
-# an unattended run and is not asked; so is AVOCADO_PROVISION_FORCE=1.
-explicit_device=0
-if [ -n "${AVOCADO_PROVISION_DEVICE:-}" ]; then
-  explicit_device=1
-fi
-avocado_safe_disk_confirm "$target_device" "$explicit_device" || exit 1
+# Retype of the device path, also for a device named through
+# AVOCADO_PROVISION_DEVICE; only AVOCADO_PROVISION_FORCE=1 skips it.
+avocado_safe_disk_confirm "$target_device" || exit 1
 
 # =============================================================================
 # Step 5: Unmount any existing partitions

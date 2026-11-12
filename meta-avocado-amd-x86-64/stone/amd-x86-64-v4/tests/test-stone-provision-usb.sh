@@ -12,6 +12,8 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 script_src=$(readlink -f "${1:-$here/../stone-provision-usb.sh}")
 lib_src=$(readlink -f "$here/../../../../meta-avocado-distro/stone/avocado-safe-disk.sh")
+# shellcheck source=../../../../meta-avocado-distro/stone/tests/pty-run.sh
+. "$here/../../../../meta-avocado-distro/stone/tests/pty-run.sh"
 real_stat=$(command -v stat)
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
@@ -37,6 +39,8 @@ mkdisk() { # name path
   : >"$w/dev/$1"
   echo 1000000 >"$w/sys/$1/size"
   echo 0 >"$w/sys/$1/removable"
+  mkdir -p "$w/sys/$1/device"
+  echo TEST >"$w/sys/$1/device/vendor"
 }
 mkpart() { # disk path partition
   mkdir -p "$w/sysdev/$2/$1/$3"
@@ -366,25 +370,64 @@ rc=$?
 { [ $rc -eq 0 ] && wrote && echo "$out" | grep -q "FORCE=1"; } \
   && ok "AVOCADO_PROVISION_FORCE=1 writes with only the target typed" || bad "force: rc=$rc out=[$out]"
 
-# 24. AVOCADO_PROVISION_DEVICE is the unattended form: no prompt at all, stdin
-#     closed, and the write happens.
-#     Only the arm64 script reads the variable; the x86-64 scripts are always
-#     interactive, so the case is skipped for them rather than invented.
-expected=24
-if grep -q AVOCADO_PROVISION_DEVICE "$script_src"; then
-  expected=25
-  setup
-  : >"$w/log"
-  out=$(PATH="$w/bin:$PATH" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
-    AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
-    AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
-    bash "$script" 2>&1 </dev/null)
-  rc=$?
-  { [ $rc -eq 0 ] && wrote; } \
-    && ok "a device given through AVOCADO_PROVISION_DEVICE is written without a prompt" || bad "unattended: rc=$rc out=[$out]"
-fi
+# 24. A device named through AVOCADO_PROVISION_DEVICE does not skip the retype:
+#     only AVOCADO_PROVISION_FORCE=1 does. Run on a real terminal so the prompt
+#     is answered the way an operator answers it. A script that reads the
+#     variable takes only the retype from the keyboard; one that ignores it
+#     still asks for the device first.
+setup
+dev=$w/dev/sdb
+keys="${dev}\n"
+grep -q AVOCADO_PROVISION_DEVICE "$script_src" || keys="${dev}\n${dev}\n"
+: >"$w/log"
+out=$(run_with_tty "$keys" env PATH="$w/bin:$PATH" AVOCADO_PROVISION_DEVICE="$dev" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+  AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
+  AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
+  bash "$script" 2>&1)
+rc=$?
+{ [ $rc -eq 0 ] && wrote && echo "$out" | grep -q "Type the device path again" \
+  && ! echo "$out" | grep -q "not asking for confirmation"; } \
+  && ok "a named device is retyped before the write" || bad "named device retype: rc=$rc out=[$out]"
 
-# 25. A partition that is still mounted after the unmount step is not written under.
+# 25. The same named device with a wrong retype on the terminal writes nothing.
+setup
+keys="$w/dev/sda\n"
+grep -q AVOCADO_PROVISION_DEVICE "$script_src" || keys="${dev}\n$w/dev/sda\n"
+: >"$w/log"
+out=$(run_with_tty "$keys" env PATH="$w/bin:$PATH" AVOCADO_PROVISION_DEVICE="$dev" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+  AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
+  AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
+  bash "$script" 2>&1)
+rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "did not match"; } \
+  && ok "a named device with a wrong retype is not written" || bad "named device mismatch: rc=$rc out=[$out]"
+
+# 26. This profile has no dry run: AVOCADO_PROVISION_DRY_RUN=1 refuses before
+#     any device is listed, asked for or written, even with FORCE=1.
+setup
+: >"$w/log"
+out=$(printf '%s\n%s\n' "$w/dev/sdb" "$w/dev/sdb" | PATH="$w/bin:$PATH" AVOCADO_PROVISION_DRY_RUN=1 AVOCADO_PROVISION_FORCE=1 \
+  AVOCADO_PROVISION_SYSBLOCK="$w/sys" AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" \
+  AVOCADO_SAFE_DISK_DEVDIR="$w/dev" AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" \
+  AVOCADO_STONE_BUILD_DIR="$w/build" bash "$script" 2>&1)
+rc=$?
+{ [ $rc -ne 0 ] && ! grep -q '^dd' "$w/log" && ! grep -q '^lsblk' "$w/log" \
+  && echo "$out" | grep -q "does not support a dry run"; } \
+  && ok "AVOCADO_PROVISION_DRY_RUN=1 is refused before any work" || bad "dry run: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+# 27. A dd writer cannot run fwup's upgrade task: refused before any work.
+setup
+: >"$w/log"
+out=$(printf '%s\n%s\n' "$w/dev/sdb" "$w/dev/sdb" | PATH="$w/bin:$PATH" AVOCADO_PROVISION_FWUP_TASK=upgrade AVOCADO_PROVISION_FORCE=1 \
+  AVOCADO_PROVISION_SYSBLOCK="$w/sys" AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" \
+  AVOCADO_SAFE_DISK_DEVDIR="$w/dev" AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" \
+  AVOCADO_STONE_BUILD_DIR="$w/build" bash "$script" 2>&1)
+rc=$?
+{ [ $rc -ne 0 ] && ! grep -q '^dd' "$w/log" && ! grep -q '^lsblk' "$w/log" \
+  && echo "$out" | grep -q "AVOCADO_PROVISION_FWUP_TASK=upgrade"; } \
+  && ok "AVOCADO_PROVISION_FWUP_TASK=upgrade is refused before any work" || bad "task upgrade: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+# 28. A partition that is still mounted after the unmount step is not written under.
 setup
 echo "$w/dev/sdb1 /media/stick" >"$w/st/mounts"
 : >"$w/st/umount-noop"
@@ -394,5 +437,6 @@ rc=$?
   && ok "a partition still mounted after the unmount step stops the run" || bad "still mounted: rc=$rc out=[$out]"
 
 echo
+expected=28
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$expected run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$expected" ]
