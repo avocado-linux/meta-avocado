@@ -9,6 +9,17 @@ set -euo pipefail
 # AVOCADO_DEVICE_CERT - device certificate content (base64 encoded pem)
 # AVOCADO_DEVICE_KEY - device private key content (base64 encoded pem)
 # AVOCADO_DEVICE_ID - device ID
+# AVOCADO_PROVISION_FORCE - 1, 0 or unset; see confirm_device below
+
+# Checked first so a bad value stops the run before any image work.
+force="${AVOCADO_PROVISION_FORCE:-}"
+case "$force" in
+  1 | 0 | "") ;;
+  *)
+    echo "ERROR: AVOCADO_PROVISION_FORCE must be 1, 0 or unset, not '${force}'"
+    exit 1
+    ;;
+esac
 
 echo "=== iMX eMMC Provisioning via uuu ==="
 echo "Manifest: $AVOCADO_STONE_MANIFEST"
@@ -77,11 +88,31 @@ if [ ! -f "$imx_boot_path" ]; then
 fi
 echo "Using imx-boot: $imx_boot_path"
 
-# --- Step 5: Wait for device in serial download mode ---
+# --- Step 5: Wait for exactly one device in serial download mode, and pin it ---
 # NXP i.MX devices in serial download mode use USB vendor IDs:
 #   1fc9 (NXP) or 15a2 (Freescale legacy)
+#
+# Matching a vendor ID only answers "is any NXP device in serial download
+# mode", and uuu without -m takes whichever known device enumerated first. With
+# a second i.MX board on the bench that is the wrong board, so the target is
+# pinned: exactly one device, passed to uuu by its own path.
+nxp_lsusb_lines() {
+  lsusb 2>/dev/null | grep -Ei ' ID (1fc9|15a2):[0-9a-f]{4}' || true
+}
+
 check_sdp() {
-  lsusb -d 1fc9: >/dev/null 2>&1 || lsusb -d 15a2: >/dev/null 2>&1
+  [ -n "$(nxp_lsusb_lines)" ]
+}
+
+# uuu -m takes the path column of `uuu -lsusb` (bus:port chain, e.g. 1:2 or
+# 3:1-4), which is not the device number lsusb prints, so it is read from uuu.
+# Output per device: "<path> <chip> <protocol> <vid:pid>".
+uuu_known_devices() {
+  uuu -lsusb 2>/dev/null \
+    | awk '$1 ~ /^[0-9]+:[0-9]+([.-][0-9]+)*$/ {
+      vid = $4; pid = $5; sub(/^0x/, "", vid); sub(/^0x/, "", pid)
+      print $1, $2, $3, vid ":" pid
+    }' || true
 }
 
 if check_sdp; then
@@ -99,10 +130,77 @@ else
     sleep 1
   done
   if ! check_sdp; then
-    echo "ERROR: Device not detected in serial download mode (waited 60s)"
+    echo "ERROR: No NXP device detected in serial download mode (waited 60s)"
+    echo "       Set the board's boot-mode switches to serial download, power-cycle it,"
+    echo "       and connect its USB download port to this host."
     exit 1
   fi
 fi
+
+sdp_lines=$(nxp_lsusb_lines)
+sdp_count=$(printf '%s\n' "$sdp_lines" | grep -c . || true)
+uuu_devices=$(uuu_known_devices)
+uuu_count=$(printf '%s\n' "$uuu_devices" | grep -c . || true)
+
+if [ "$sdp_count" -gt 1 ]; then
+  echo "ERROR: $sdp_count NXP devices are in serial download mode:"
+  if [ "$uuu_count" -gt 0 ]; then
+    printf '%s\n' "$uuu_devices" | sed 's/^/  USB path /'
+  fi
+  printf '%s\n' "$sdp_lines" | sed 's/^/  lsusb: /'
+  echo "       uuu would take whichever enumerated first, so refusing rather than guessing."
+  echo "       Leave exactly one board in serial download mode and run again."
+  exit 1
+fi
+
+if [ "$uuu_count" -ne 1 ]; then
+  echo "ERROR: lsusb shows one NXP device but uuu recognises $uuu_count:"
+  printf '%s\n' "$sdp_lines" | sed 's/^/  lsusb: /'
+  if [ "$uuu_count" -gt 0 ]; then
+    printf '%s\n' "$uuu_devices" | sed 's/^/  USB path /'
+  fi
+  echo "       uuu cannot be pinned to a device it does not list. Check that this user"
+  echo "       can open the USB device (see 'uuu -udev') and that the device is a known i.MX."
+  exit 1
+fi
+
+read -r usb_path usb_chip usb_proto usb_id <<<"$uuu_devices"
+
+# --- Step 5b: Confirm the target ---
+# AVOCADO_PROVISION_FORCE has three states, shared with the Jetson flasher:
+#   1     skip the prompt
+#   0     always require a terminal to confirm on; refuse without one
+#   unset prompt on a terminal; with none, proceed and say the prompt was skipped
+confirm_device() {
+  case "$force" in
+    1)
+      echo "Device confirmation skipped: AVOCADO_PROVISION_FORCE=1"
+      return 0
+      ;;
+  esac
+  if [ ! -t 0 ]; then
+    if [ "$force" = 0 ]; then
+      echo "ERROR: AVOCADO_PROVISION_FORCE=0 requires confirmation but there is no terminal to confirm on"
+      exit 1
+    fi
+    echo "Device confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal"
+    return 0
+  fi
+  echo "About to ERASE the eMMC (U-Boot mmc dev ${emmc_uboot_dev}) on the board ${usb_id} (${usb_chip}, USB ${usb_path})."
+  printf 'All data on it will be lost. Type %s to continue: ' "$usb_path"
+  if ! read -r typed; then
+    echo ""
+    echo "ERROR: device confirmation failed: stdin closed before an answer was given"
+    exit 1
+  fi
+  if [ "$typed" != "$usb_path" ]; then
+    echo "ERROR: device confirmation failed: typed '${typed}', expected '${usb_path}'"
+    exit 1
+  fi
+}
+
+echo "Target device: USB ${usb_path} ${usb_id} (${usb_chip}, ${usb_proto})"
+confirm_device
 
 # --- Step 6: Generate custom uuu script and flash ---
 # uuu resolves file paths relative to the .uuu script location,
@@ -170,6 +268,6 @@ echo ""
 cat "$uuu_script"
 echo ""
 
-uuu -v "$uuu_script"
+uuu -v -m "$usb_path" "$uuu_script"
 
 echo "=== eMMC provisioning complete ==="

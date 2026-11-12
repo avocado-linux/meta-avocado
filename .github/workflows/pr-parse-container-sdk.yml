@@ -173,6 +173,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gdisk dosfstools mtools device-tree-compiler cpp
+      - name: i.MX stone uuu-emmc device pin and confirmation (needs jq and script(1))
+        shell: bash
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends jq bsdutils
+          bash meta-avocado-nxp/stone/avocado-imx/tests/test-stone-provision-uuu-emmc.sh
       - name: /var on the root's disk (avocado-on-root-disk; its GPT cases need sgdisk)
         shell: bash
         run: sh meta-avocado-distro/recipes-core/base-files/tests/test-avocado-on-root-disk.sh
