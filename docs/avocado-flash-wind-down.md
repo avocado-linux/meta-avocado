@@ -159,7 +159,7 @@ Do not remove the wrapper until both hold:
    - `AVOCADO_PROVISION_FORCE=1` skips the confirmation
    - NVMe boot
    - SD boot
-2. The avocado-cli change that exports `AVOCADO_PROVISION_FORCE` is settled. Without it, a run with no terminal flashes unconfirmed, and the engine cannot tell `--force` from a piped run.
+2. The avocado-cli change that exports `AVOCADO_PROVISION_FORCE` is settled. Without it, a run with no terminal flashes unconfirmed, and the engine cannot tell `--force` from a piped run. This is not met yet: avocado-cli 1.1.0 (`origin/main` at `2933188`) exports no such variable, and `--force` only sets `interactive: !force` (`src/commands/runtime/provision.rs`).
 
 ## 6. Out of scope
 
@@ -167,7 +167,7 @@ These stay in `scripts/avocado-flash`.
 
 - `fuse-srk` (i.MX93): an irreversible fuse write, and there is no stone profile for it.
 - `ssh-emmc` (AGX Orin on the J5012 carrier): no stone profile.
-- automated `ums`: no stone profile.
+- automated `ums`: no stone profile for the i.MX93 flow. The nanopi-r5s has `stone-provision-ums.sh` (profile `sd-usb`), but the operator types `ums` at the U-Boot prompt by hand, so it does not replace the automated flow.
 
 Winding any of them down means writing new stone profiles or dropping them,
 which is a separate design.
