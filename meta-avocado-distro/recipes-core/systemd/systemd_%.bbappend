@@ -1,7 +1,6 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI:append = " file://zram-generator.conf"
 SRC_URI:append = " file://wait-online-any.conf"
-SRC_URI:append = " file://networkd-after-extension.conf"
 
 do_install:append () {
     install -m 0644 ${UNPACKDIR}/zram-generator.conf ${D}${sysconfdir}/systemd/
@@ -38,12 +37,6 @@ do_install:append () {
             bbfatal "systemd-networkd.service still names systemd-networkd-wait-online; update the Also= removal"
         fi
     fi
-
-    # Order networkd after the extension merge, so a .network file an extension
-    # ships is on disk before networkd reads its configuration.
-    install -d ${D}${sysconfdir}/systemd/system/systemd-networkd.service.d
-    install -m 0644 ${UNPACKDIR}/networkd-after-extension.conf \
-        ${D}${sysconfdir}/systemd/system/systemd-networkd.service.d/
 
     # Mask upstream systemd-sysext/confext units.
     # Avocado replaces these with avocado-extension.service and
