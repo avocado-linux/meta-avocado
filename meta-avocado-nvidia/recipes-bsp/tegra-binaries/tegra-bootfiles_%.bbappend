@@ -9,8 +9,8 @@ ICAM540_FW_DIR := "${THISDIR}/${BPN}/icam-540"
 
 do_install:append:icam-540() {
     # Install Advantech custom BPMP firmware variants
-    # TE980M-A1: Orin NX 16GB (SKU D3, D4)
-    # TE950M-A1: Orin NX 8GB / Nano (SKU D5, D6)
+    # TE980M-A1: Orin NX 16GB and 8GB (chip SKU D3, D4)
+    # TE950M-A1: Orin Nano (chip SKU D5, D6)
     install -m 0644 ${ICAM540_FW_DIR}/bpmp_t234-TE980M-A1_prod.bin ${D}${datadir}/tegraflash/
     install -m 0644 ${ICAM540_FW_DIR}/bpmp_t234-TE950M-A1_prod.bin ${D}${datadir}/tegraflash/
 

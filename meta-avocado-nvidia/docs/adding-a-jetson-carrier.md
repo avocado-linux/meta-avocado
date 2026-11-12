@@ -158,7 +158,7 @@ Worked example for the iCAM-540
 ([carrier.env](../../../bsp/icam-540/stone/carrier-bsp/carrier.env)):
 
 ```
-CARRIER_LABEL="Advantech ICAM-540 (P3768-0000 + P3767-0001 Orin NX 16GB)"
+CARRIER_LABEL="Advantech ICAM-540 (P3768-0000 + P3767-0001 Orin NX 8GB)"
 
 # Kernel DTB — Advantech-specific (-nv suffix carries proper CSI/NVCSI
 # for the ICAM500 camera). Shipped in this overlay (not in upstream
@@ -167,6 +167,8 @@ CARRIER_ENV_DTBFILE="tegra234-p3768-0000+p3767-0001-nv.dtb"
 
 # BPMP DTB / firmware — Advantech variants. Shipped in this overlay.
 CARRIER_FV_BPFDTB_FILE="tegra234-bpmp-3767-0001-3509-a02.dtb"
+# The flash helper rewrites the TExxxM part by chip SKU: D3/D4
+# (Orin NX 16GB and 8GB) get TE980M, D5/D6 (Orin Nano) TE950M.
 CARRIER_FV_BPF_FILE="bpmp_t234-TE980M-A1_prod.bin"
 
 # Pinmux + pad-voltage dtsi — HDMI variants. Already in the
