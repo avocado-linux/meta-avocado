@@ -246,10 +246,17 @@ def _vector_rows():
     return rows
 
 
-def test_vectors_dry_run_rows_exist_and_are_not_applicable_to_the_engine():
+def test_vectors_cover_every_force_terminal_dry_run_combination_exactly_once():
+    rows = [tuple(r[:3]) for r in _vector_rows()]
+    wanted = [(f, t, d) for f in ("1", "0", "<unset>", "<empty>", "bogus") for t in ("yes", "no") for d in ("yes", "no")]
+    missing = [c for c in wanted if rows.count(c) != 1]
+    assert not missing, f"combinations missing or repeated: {missing}"
+    assert len(rows) == len(wanted), "rows outside the combination grid"
+
+
+def test_vectors_dry_run_rows_are_not_applicable_to_the_engine():
     # The engine has no dry-run mode; those rows belong to the shell library test only.
-    dry = [r for r in _vector_rows() if r[2] == "yes"]
-    assert len(dry) == 9
+    assert [r for r in _vector_rows() if r[2] == "yes"]
 
 
 def test_engine_agrees_with_every_non_dry_run_vector_row():
@@ -266,4 +273,4 @@ def test_engine_agrees_with_every_non_dry_run_vector_row():
             got = "refuse"
         assert got == want, f"row force={force} terminal={terminal}: engine {got}, vectors {want}"
         checked += 1
-    assert checked == 10
+    assert checked == len([r for r in _vector_rows() if r[2] == "no"])

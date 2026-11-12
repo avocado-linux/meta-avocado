@@ -24,6 +24,7 @@ bogus	no	no	refuse
 0	no	yes	proceed
 <unset>	yes	yes	proceed
 <unset>	no	yes	proceed
+<empty>	yes	yes	proceed
 <empty>	no	yes	proceed
 bogus	yes	yes	refuse
 bogus	no	yes	refuse

@@ -22,6 +22,13 @@ bad() {
   fail=$((fail + 1))
 }
 
+# The confirmation and pty checks need a terminal; without script(1) they cannot
+# run, and counting them as passed would print a green total over unrun checks.
+if ! command -v script >/dev/null 2>&1; then
+  echo "script(1) not found: install util-linux/bsdutils" >&2
+  exit 1
+fi
+
 # A disk lives at sys/devices/<path>/<name>, with its class/block entry a
 # symlink to it, as the kernel lays it out. Partitions nest under the disk.
 mkdisk() { # name path
@@ -363,8 +370,6 @@ printf 'ACME    ' >"$w/sys/devices/$USBPATH/sdb/device/vendor"
 printf 'Card Reader     ' >"$w/sys/devices/$USBPATH/sdb/device/model"
 # shellcheck source=pty-run.sh
 . "$here/pty-run.sh"
-have_tty=1
-command -v script >/dev/null 2>&1 || have_tty=0
 
 # conf <force-env-assignments> <typed|-> <terminal yes|no> [confirm args]: run
 # check_device then confirm. With a terminal the keystrokes in $2 are typed on a
@@ -388,11 +393,7 @@ conf() {
 
 out=$(conf "" "$w/dev/sdb\n" yes)
 rc=$?
-if [ "$have_tty" = 0 ]; then
-  pass=$((pass + 1))
-else
-  [ $rc -eq 0 ] && ok "retyping the device path on a terminal confirms" || bad "retype: rc=$rc out=[$out]"
-fi
+[ $rc -eq 0 ] && ok "retyping the device path on a terminal confirms" || bad "retype: rc=$rc out=[$out]"
 { echo "$out" | grep -q "Model: ACME Card Reader" && echo "$out" | grep -q "Size:  3.75 GiB" && echo "$out" | grep -q "Bus:   .*usb"; } \
   && ok "the identity shows model, size and bus before the prompt" || bad "identity: out=[$out]"
 
@@ -412,11 +413,6 @@ else
     esac
     [ "$vdry" = yes ] && venv="$venv AVOCADO_PROVISION_DRY_RUN=1"
     label="vector force=$vforce terminal=$vterm dry_run=$vdry -> $vwant"
-    if [ "$vterm" = yes ] && [ "$have_tty" = 0 ]; then
-      ok "$label (skipped: script(1) missing)"
-      [ "$vwant" = retype ] && pass=$((pass + 1))
-      continue
-    fi
     out=$(conf "$venv" "$w/dev/sdb\n" "$vterm")
     rc=$?
     case "$vwant" in
@@ -442,7 +438,20 @@ else
     esac
   done <"$vectors"
 fi
-[ "$vrows" -eq 19 ] && ok "all 19 vector rows were read" || bad "vector rows read: $vrows"
+# Every force x terminal x dry_run combination appears exactly once, so a gap
+# names itself instead of hiding behind a row count.
+vmiss=""
+vexp=0
+for vf in 1 0 "<unset>" "<empty>" bogus; do
+  for vt in yes no; do
+    for vd in yes no; do
+      vexp=$((vexp + 1))
+      vn=$(grep -c "^$(printf '%s\t%s\t%s\t' "$vf" "$vt" "$vd")" "$vectors")
+      [ "$vn" -eq 1 ] || vmiss="$vmiss [force=$vf terminal=$vt dry_run=$vd x$vn]"
+    done
+  done
+done
+[ -z "$vmiss" ] && [ "$vrows" -eq "$vexp" ] && ok "every vector combination appears exactly once ($vexp rows read)" || bad "vector combinations missing or repeated:$vmiss (rows read: $vrows)"
 
 out=$(conf "AVOCADO_PROVISION_FORCE=0" "" no)
 rc=$?
@@ -459,24 +468,20 @@ rc=$?
 { [ $rc -ne 0 ] && ! echo "$out" | grep -q "Model:"; } \
   && ok "an unknown FORCE value refuses before printing the identity" || bad "bogus: rc=$rc out=[$out]"
 
-if [ "$have_tty" = 1 ]; then
-  out=$(conf "" "yes\n" yes)
-  rc=$?
-  { [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
-    && ok "'yes' is not accepted: the path must be typed" || bad "yes: rc=$rc out=[$out]"
+out=$(conf "" "yes\n" yes)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
+  && ok "'yes' is not accepted: the path must be typed" || bad "yes: rc=$rc out=[$out]"
 
-  out=$(conf "AVOCADO_PROVISION_FORCE=0" "" yes 1)
-  rc=$?
-  { [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
-    && ok "a device named up front (second argument 1) still has to be retyped" || bad "named wrong: rc=$rc out=[$out]"
+out=$(conf "AVOCADO_PROVISION_FORCE=0" "" yes 1)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
+  && ok "a device named up front (second argument 1) still has to be retyped" || bad "named wrong: rc=$rc out=[$out]"
 
-  out=$(conf "AVOCADO_PROVISION_FORCE=0" "$w/dev/sdb\n" yes 1)
-  rc=$?
-  { [ $rc -eq 0 ] && echo "$out" | grep -q "Type the device"; } \
-    && ok "a device named up front is confirmed by retyping it" || bad "named right: rc=$rc out=[$out]"
-else
-  pass=$((pass + 3))
-fi
+out=$(conf "AVOCADO_PROVISION_FORCE=0" "$w/dev/sdb\n" yes 1)
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "Type the device"; } \
+  && ok "a device named up front is confirmed by retyping it" || bad "named right: rc=$rc out=[$out]"
 
 # Identity with no device/vendor or device/model files prints no shell error.
 rm -rf "$w/sys/devices/$USBPATH/sdb/device"
@@ -723,18 +728,13 @@ rc=$?
 
 # shellcheck source=pty-run.sh
 . "$here/pty-run.sh"
-if ! command -v script >/dev/null 2>&1; then
-  echo "  SKIP - script(1) missing: run_with_tty checks not run"
-  pass=$((pass + 3))
-else
-  out=$(run_with_tty 'hello\n' bash -c '[ -t 0 ] && echo tty-yes || echo tty-no')
-  echo "$out" | tr -d '\r' | grep -qx tty-yes && ok "run_with_tty gives the command a terminal on stdin" || bad "pty tty: [$out]"
-  # shellcheck disable=SC2016 # the $x expands in the inner bash
-  out=$(run_with_tty 'typed-line\n' bash -c 'read -r x; echo "got:$x"')
-  echo "$out" | tr -d '\r' | grep -qx 'got:typed-line' && ok "run_with_tty feeds the typed input to a prompt" || bad "pty input: [$out]"
-  run_with_tty 'x\n' bash -c 'exit 7' >/dev/null
-  [ $? -eq 7 ] && ok "run_with_tty returns the command's exit status" || bad "pty rc: $?"
-fi
+out=$(run_with_tty 'hello\n' bash -c '[ -t 0 ] && echo tty-yes || echo tty-no')
+echo "$out" | tr -d '\r' | grep -qx tty-yes && ok "run_with_tty gives the command a terminal on stdin" || bad "pty tty: [$out]"
+# shellcheck disable=SC2016 # the $x expands in the inner bash
+out=$(run_with_tty 'typed-line\n' bash -c 'read -r x; echo "got:$x"')
+echo "$out" | tr -d '\r' | grep -qx 'got:typed-line' && ok "run_with_tty feeds the typed input to a prompt" || bad "pty input: [$out]"
+run_with_tty 'x\n' bash -c 'exit 7' >/dev/null
+[ $? -eq 7 ] && ok "run_with_tty returns the command's exit status" || bad "pty rc: $?"
 
 # --- bus candidates ---------------------------------------------------------
 
@@ -753,7 +753,7 @@ idpath mmcblk0 "pci-0000:00:17.0-ata-2"
 out=$(call "avocado_safe_disk_bus_candidates")
 [ -z "$out" ] && ok "bus_candidates prints nothing when no disk is on a USB or MMC bus" || bad "candidates none: [$out]"
 
-N=125
+N=126
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]
