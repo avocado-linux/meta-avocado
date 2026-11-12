@@ -562,7 +562,48 @@ rc=$?
 { [ $rc -ne 0 ] && ! echo "$out" | grep -q "Model:" && ! echo "$out" | grep -q "^dry-run"; } \
   && ok "an unknown FORCE value refuses before any guard output" || bad "dry unknown force: rc=$rc out=[$out]"
 
-N=80
+# --- fwup task, device alias, pty helper ------------------------------------
+
+out=$(call "avocado_safe_disk_fwup_task")
+rc=$?
+{ [ $rc -eq 0 ] && [ "$out" = "complete" ]; } && ok "fwup_task defaults to complete" || bad "fwup default: rc=$rc out=[$out]"
+out=$(call "AVOCADO_PROVISION_FWUP_TASK=upgrade avocado_safe_disk_fwup_task")
+rc=$?
+{ [ $rc -eq 0 ] && [ "$out" = "upgrade" ]; } && ok "fwup_task returns upgrade when asked" || bad "fwup upgrade: rc=$rc out=[$out]"
+out=$(call "AVOCADO_PROVISION_FWUP_TASK=full avocado_safe_disk_fwup_task")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "FWUP_TASK=full"; } && ok "fwup_task refuses full" || bad "fwup full: rc=$rc out=[$out]"
+
+out=$(call "avocado_safe_disk_sd_device")
+rc=$?
+{ [ $rc -eq 0 ] && [ -z "$out" ]; } && ok "sd_device is empty when neither variable is set" || bad "sd none: rc=$rc out=[$out]"
+out=$(call "AVOCADO_PROVISION_DEVICE=/dev/sdb avocado_safe_disk_sd_device")
+[ "$out" = "/dev/sdb" ] && ok "sd_device reads AVOCADO_PROVISION_DEVICE" || bad "sd primary: [$out]"
+out=$(call "AVOCADO_SD_DEVICE=/dev/sdc avocado_safe_disk_sd_device")
+[ "$out" = "/dev/sdc" ] && ok "sd_device accepts the AVOCADO_SD_DEVICE alias" || bad "sd alias: [$out]"
+out=$(call "AVOCADO_PROVISION_DEVICE=/dev/sdb AVOCADO_SD_DEVICE=/dev/sdb avocado_safe_disk_sd_device")
+[ "$out" = "/dev/sdb" ] && ok "sd_device accepts both variables when they agree" || bad "sd agree: [$out]"
+out=$(call "AVOCADO_PROVISION_DEVICE=/dev/sdb AVOCADO_SD_DEVICE=/dev/sdc avocado_safe_disk_sd_device")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q AVOCADO_PROVISION_DEVICE && echo "$out" | grep -q AVOCADO_SD_DEVICE && ! echo "$out" | grep -qx "/dev/sd[bc]"; } \
+  && ok "sd_device refuses differing variables, naming both" || bad "sd differ: rc=$rc out=[$out]"
+
+# shellcheck source=pty-run.sh
+. "$here/pty-run.sh"
+if ! command -v script >/dev/null 2>&1; then
+  echo "  SKIP - script(1) missing: run_with_tty checks not run"
+  pass=$((pass + 3))
+else
+  out=$(run_with_tty 'hello\n' bash -c '[ -t 0 ] && echo tty-yes || echo tty-no')
+  echo "$out" | tr -d '\r' | grep -qx tty-yes && ok "run_with_tty gives the command a terminal on stdin" || bad "pty tty: [$out]"
+  # shellcheck disable=SC2016 # the $x expands in the inner bash
+  out=$(run_with_tty 'typed-line\n' bash -c 'read -r x; echo "got:$x"')
+  echo "$out" | tr -d '\r' | grep -qx 'got:typed-line' && ok "run_with_tty feeds the typed input to a prompt" || bad "pty input: [$out]"
+  run_with_tty 'x\n' bash -c 'exit 7' >/dev/null
+  [ $? -eq 7 ] && ok "run_with_tty returns the command's exit status" || bad "pty rc: $?"
+fi
+
+N=91
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]

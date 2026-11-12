@@ -415,3 +415,29 @@ avocado_safe_disk_finish() {
   [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ] || return 0
   echo "dry run: nothing was written to ${1:-$AVOCADO_SAFE_DISK_DEV}."
 }
+
+# Print the fwup task a writer should use. The only reader of
+# AVOCADO_PROVISION_FWUP_TASK for fwup writers: complete by default, upgrade
+# when asked, anything else refuses.
+avocado_safe_disk_fwup_task() {
+  case "${AVOCADO_PROVISION_FWUP_TASK:-}" in
+    "" | complete) echo complete ;;
+    upgrade) echo upgrade ;;
+    *)
+      _asd_err "AVOCADO_PROVISION_FWUP_TASK=${AVOCADO_PROVISION_FWUP_TASK} is not valid; use complete or upgrade"
+      return 1
+      ;;
+  esac
+}
+
+# Print the SD target given up front: AVOCADO_PROVISION_DEVICE, with
+# AVOCADO_SD_DEVICE as an alias. Prints nothing when neither is set; refuses
+# when both are set to different values rather than picking one.
+avocado_safe_disk_sd_device() {
+  local a=${AVOCADO_PROVISION_DEVICE:-} b=${AVOCADO_SD_DEVICE:-}
+  if [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]; then
+    _asd_err "AVOCADO_PROVISION_DEVICE=${a} and AVOCADO_SD_DEVICE=${b} differ; set only one"
+    return 1
+  fi
+  echo "${a:-$b}"
+}
