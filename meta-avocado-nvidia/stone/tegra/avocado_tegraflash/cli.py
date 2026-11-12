@@ -6,6 +6,7 @@ comments below say where each stage comes from.
 
 import argparse
 import contextlib
+import dataclasses
 import fcntl
 import os
 import sys
@@ -100,6 +101,19 @@ _UNPINNED_KERNEL = (
 )
 
 
+def _require_identified_board(force_raw):
+    """With no board id declared anywhere, an unattended run would flash whatever it finds."""
+    decision = confirm.decide_confirmation(force_raw, confirm.stdin_is_tty())
+    if decision == "skip":
+        raise EngineError(
+            "no USB id is declared for the board: the manifest has no rcm_ids and "
+            "AVOCADO_PROVISION_RCM_ID is not set, so an unattended run would flash any board in recovery mode.\n"
+            "Set AVOCADO_PROVISION_RCM_ID to the board's vendor:product id (lsusb), e.g. 0955:7523."
+        )
+    if decision == "retype":
+        print("WARNING: no USB id is declared for the board (set AVOCADO_PROVISION_RCM_ID); only your retyped confirmation identifies it")
+
+
 def _run(args, environ, runner, euid, sleep) -> int:
     # Deviation root-check-first: before the environment is read or anything is created.
     if not args.prepare_only and (os.geteuid() if euid is None else euid) != 0:
@@ -135,6 +149,11 @@ def _run(args, environ, runner, euid, sleep) -> int:
 
     # Oracle 58-103: manifest read.
     man = read_manifest(cfg.manifest)
+    # The override replaces the manifest list, so one id never widens the other.
+    if cfg.rcm_id:
+        man = dataclasses.replace(man, rcm_ids=(cfg.rcm_id,))
+    if not man.rcm_ids:
+        _require_identified_board(base.get("AVOCADO_PROVISION_FORCE"))
 
     # Oracle 105-247 and 249-342: reset, BSP, tools, carrier, images, overlay check.
     with _build_dir_lock(cfg.build_dir):

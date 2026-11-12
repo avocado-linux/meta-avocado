@@ -173,6 +173,8 @@ def build_env(case: Case, s: Setup) -> dict[str, str]:
     else:
         # The engine refuses an unpinned kernel; these cases exercise the prebuilt boot image.
         env["AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL"] = "1"
+    # Manifests without rcm_ids are refused unless an id is given; the stub board is 0955:7523.
+    env.setdefault("AVOCADO_PROVISION_RCM_ID", "0955:7523")
     env.update(case.env_dict)
     return env
 

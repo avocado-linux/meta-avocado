@@ -1,6 +1,7 @@
 """The engine's view of the environment the oracle reads (stone provision hook)."""
 
 import platform
+import re
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -12,6 +13,8 @@ _REQUIRED = (
     "AVOCADO_STONE_BUILD_DIR",
     "AVOCADO_STONE_DATA_DIR",
 )
+
+_RCM_ID = re.compile(r"[0-9a-f]{4}:[0-9a-f]{4}")
 
 _CMDLINE_VARS = ("AVOCADO_KERNEL_CMDLINE", "AVOCADO_KERNEL_CMDLINE_EXTRA")
 
@@ -41,6 +44,8 @@ class Config:
     force: bool | None = None
     # AVOCADO_PROVISION_NVME_PCI; empty when unset. Validated where it is used.
     nvme_pci: str = ""
+    # AVOCADO_PROVISION_RCM_ID, already validated; empty when unset. Replaces the manifest's rcm_ids.
+    rcm_id: str = ""
 
 
 def from_environ(environ: Mapping[str, str]) -> Config:
@@ -65,6 +70,14 @@ def from_environ(environ: Mapping[str, str]) -> Config:
     if force_raw not in ("", "0", "1"):
         raise EngineError(f"AVOCADO_PROVISION_FORCE must be 1, 0 or unset, not {force_raw!r}")
     force = None if force_raw == "" else force_raw == "1"
+
+    # An override that does not parse must stop the run: it names the one board that may be
+    # flashed, so a typo that quietly matched nothing would read as no restriction.
+    rcm_id = environ.get("AVOCADO_PROVISION_RCM_ID")
+    if rcm_id is not None and not _RCM_ID.fullmatch(rcm_id):
+        raise EngineError(
+            f"AVOCADO_PROVISION_RCM_ID must be a lowercase vendor:product pair such as 0955:7523, not {rcm_id!r}"
+        )
 
     def opt(name: str, default: str = "") -> str:
         return environ.get(name) or default
@@ -91,4 +104,5 @@ def from_environ(environ: Mapping[str, str]) -> Config:
         erase_only=environ.get("ERASE_ONLY") == "1",
         force=force,
         nvme_pci=opt("AVOCADO_PROVISION_NVME_PCI"),
+        rcm_id=rcm_id or "",
     )

@@ -484,9 +484,13 @@ def test_the_wait_is_given_the_manifest_ids_and_does_not_warn_about_identity(tmp
 
 
 @pytest.mark.deviation("recovery-id-pinned")
-def test_a_manifest_without_ids_flashes_one_device_after_a_warning(tmp_path, capsys):
+def test_a_manifest_without_ids_flashes_one_device_after_a_warning(tmp_path, capsys, monkeypatch):
+    _terminal(monkeypatch, "001:005")
     rig = make_rig(
-        tmp_path, runner=FakeRunner(lsusb=[[OTHER_ID_APX]]), manifest="stone-jetson-agx-orin.json"
+        tmp_path,
+        runner=FakeRunner(lsusb=[[OTHER_ID_APX]]),
+        manifest="stone-jetson-agx-orin.json",
+        env={"AVOCADO_PROVISION_FORCE": "0"},
     )
     rc, out, _ = rig.go(main, capsys)
     assert (rc, "not identity-checked" in out, len(rig.runner.named("initrd-flash"))) == (0, True, 1)
