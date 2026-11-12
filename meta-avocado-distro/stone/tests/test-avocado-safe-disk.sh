@@ -306,6 +306,77 @@ rc=$?
 { [ $rc -eq 0 ] && echo "$out" | grep -q "given up front"; } \
   && ok "a device named up front (unattended run) is not prompted for" || bad "explicit: rc=$rc out=[$out]"
 
+# --- privileged runner ------------------------------------------------------
+
+# A stub sudo records its argv one word per line and runs the command it was
+# given, so what the escalated process receives is observable. The tool is a
+# stub too, printing its own argv and LD_LIBRARY_PATH.
+runner_setup() {
+  setup
+  mkdir -p "$w/tools" "$w/empty"
+  cat >"$w/tools/fwup" <<S
+#!/bin/bash
+echo "TOOL argv=\$* ld=\${LD_LIBRARY_PATH:-unset}"
+S
+  chmod +x "$w/tools/fwup"
+  cat >"$w/bin/sudo" <<S
+#!/bin/bash
+printf '%s\n' "\$@" >"$w/st/sudo-argv"
+echo SUDO_CALLED
+exec "\$@"
+S
+  chmod +x "$w/bin/sudo"
+  : >"$w/st/sudo-argv"
+  rm -f "$w/st/sudo-argv"
+}
+# PATH with the stubs first and the system dirs after; a test that needs sudo
+# absent sets T_TAIL to an empty dir, since this host may have a real sudo.
+runcall() { # env prefix in $1, code in $2
+  env -i HOME="$w" PATH="$w/tools:$w/bin:${T_TAIL:-/usr/bin:/bin}" "${@:3}" \
+    AVOCADO_PROVISION_SYSBLOCK="$w/sys/class/block" "$BASH" -c ". '$lib'; $2" 2>&1
+}
+
+runner_setup
+out=$(runcall x "avocado_safe_disk_run fwup -a 1" AVOCADO_SAFE_DISK_EUID=0)
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "TOOL argv=-a 1" && ! echo "$out" | grep -q SUDO_CALLED && [ ! -e "$w/st/sudo-argv" ]; } \
+  && ok "as uid 0 the tool runs directly and sudo is never called" || bad "root: rc=$rc out=[$out]"
+
+runner_setup
+out=$(runcall x "avocado_safe_disk_run fwup -a 1" AVOCADO_SAFE_DISK_EUID=1000)
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q SUDO_CALLED && [ "$(grep -c "^$w/tools/fwup$" "$w/st/sudo-argv")" = 1 ] && ! grep -qx fwup "$w/st/sudo-argv"; } \
+  && ok "a non-root run escalates with the tool's absolute path, never bare" || bad "abs path: rc=$rc out=[$out] argv=[$(cat "$w/st/sudo-argv" 2>/dev/null)]"
+
+runner_setup
+out=$(runcall x "avocado_safe_disk_run fwup" AVOCADO_SAFE_DISK_EUID=1000 LD_LIBRARY_PATH=/sdk/lib)
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "ld=/sdk/lib" && grep -qx "LD_LIBRARY_PATH=/sdk/lib" "$w/st/sudo-argv"; } \
+  && ok "LD_LIBRARY_PATH is forwarded across sudo explicitly" || bad "ld forward: rc=$rc out=[$out]"
+
+runner_setup
+out=$(runcall x "avocado_safe_disk_run fwup" AVOCADO_SAFE_DISK_EUID=1000)
+{ echo "$out" | grep -q "ld=unset" && ! grep -q LD_LIBRARY_PATH "$w/st/sudo-argv"; } \
+  && ok "an unset LD_LIBRARY_PATH is not forwarded as an empty value" || bad "ld unset: out=[$out]"
+
+runner_setup
+out=$(runcall x "avocado_safe_disk_run nosuchtool-xyz" AVOCADO_SAFE_DISK_EUID=1000)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "nosuchtool-xyz" && ! echo "$out" | grep -q SUDO_CALLED; } \
+  && ok "a tool not on PATH is refused by name before sudo is invoked" || bad "no tool: rc=$rc out=[$out]"
+
+runner_setup
+rm -f "$w/bin/sudo"
+out=$(T_TAIL="$w/empty" runcall x "avocado_safe_disk_run fwup" AVOCADO_SAFE_DISK_EUID=1000)
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -qi "sudo" && echo "$out" | grep -q "fwup" && ! echo "$out" | grep -q "TOOL argv"; } \
+  && ok "without sudo the step is refused by name and nothing runs" || bad "no sudo: rc=$rc out=[$out]"
+
+runner_setup
+out=$(runcall x "avocado_safe_disk_run fwup" AVOCADO_SAFE_DISK_EUID=0 LD_LIBRARY_PATH=/sdk/lib)
+{ echo "$out" | grep -q "ld=/sdk/lib" && [ ! -e "$w/st/sudo-argv" ]; } \
+  && ok "as uid 0 the environment passes through untouched" || bad "root env: out=[$out]"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/34 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 34 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/41 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 41 ]

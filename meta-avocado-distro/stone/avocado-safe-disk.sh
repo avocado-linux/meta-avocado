@@ -26,6 +26,8 @@
 #   AVOCADO_SAFE_DISK_MOUNTS    mount table (default /proc/self/mounts)
 #   AVOCADO_SAFE_DISK_SWAPS     swap table (default /proc/swaps)
 #   AVOCADO_SAFE_DISK_DEVDIR    where device nodes live (default /dev)
+#   AVOCADO_SAFE_DISK_EUID      effective uid avocado_safe_disk_run acts on
+#                               (default: id -u); a test override
 #
 # Deliberately not used: lsblk and findmnt. The SDK images for several boards do
 # not carry them, and a hard dependency would turn a working provision into a
@@ -262,5 +264,41 @@ avocado_safe_disk_confirm() {
   if [ "$reply" != "$dev" ]; then
     _asd_err "confirmation did not match ${dev}; aborting"
     return 1
+  fi
+}
+
+# Run one privileged tool: the only place these scripts escalate. As uid 0 the
+# tool runs as is. Otherwise it is resolved to an absolute path here, as the
+# invoking user, and run through sudo with that path: sudo resets PATH to its
+# secure_path, which does not hold the SDK's fwup, and resets
+# LD_LIBRARY_PATH, which the SDK's tools need, so the latter is forwarded
+# explicitly through env. The guards never call this; they only read.
+#
+#   $1    tool name (resolved from PATH)
+#   rest  its arguments
+avocado_safe_disk_run() {
+  local tool=${1:-} path
+  [ -n "$tool" ] || {
+    _asd_err "no tool given to run"
+    return 1
+  }
+  shift
+  path=$(command -v -- "$tool") && case "$path" in /*) ;; *) path="" ;; esac
+  [ -n "$path" ] || {
+    _asd_err "${tool} not found on PATH; cannot run it"
+    return 1
+  }
+  if [ "${AVOCADO_SAFE_DISK_EUID:-$(id -u)}" = "0" ]; then
+    "$path" "$@"
+    return
+  fi
+  command -v sudo >/dev/null 2>&1 || {
+    _asd_err "writing the disk with ${tool} needs root and sudo is not installed; rerun as root"
+    return 1
+  }
+  if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    sudo env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" "$path" "$@"
+  else
+    sudo "$path" "$@"
   fi
 }
