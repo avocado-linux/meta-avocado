@@ -222,3 +222,24 @@ RDEPENDS:packagegroup-avocado-initramfs-modules-oot:append:tegra264 = " \
     nvidia-kernel-oot-base \
     kernel-module-pcie-tegra264-${KERNEL_VERSION} \
 "
+
+# Out-of-tree module builds against nvidia-oot (an SDK compile, e.g. a camera
+# driver) need nvidia-oot's headers, its generated conftest headers and its
+# Module.symvers, all from the build for the kernel they target: a kernel with
+# CONFIG_MODVERSIONS (L4T 6.8) refuses a module whose CRCs came from another
+# kernel's build. So -dev is one package per kernel, named after the full
+# KERNEL_VERSION as kernel-devsrc is. The name starts with `kernel-` so that
+# avocado-cli's off-kernel `kernel-*<kver>` excludes hide every other kernel's
+# copy. The bare name stays an RPROVIDES so a plain `nvidia-kernel-oot-dev`
+# request resolves to the selected kernel's copy.
+PKG:${PN}-dev = "kernel-nvidia-oot-dev-${KERNEL_VERSION}"
+RPROVIDES:${PN}-dev += "${PN}-dev"
+RREPLACES:${PN}-dev += "${PN}-dev"
+
+# The oot camera headers include <nvidia/conftest.h>, which the oot build
+# generates into ${S}/out/nvidia-conftest but do_install does not stage.
+do_install:append() {
+    install -d ${D}${includedir}/${BPN}/nvidia/conftest
+    install -m 0644 ${S}/out/nvidia-conftest/nvidia/conftest.h ${D}${includedir}/${BPN}/nvidia/conftest.h
+    install -m 0644 ${S}/out/nvidia-conftest/nvidia/conftest/*.h ${D}${includedir}/${BPN}/nvidia/conftest/
+}
