@@ -42,6 +42,23 @@ AGENT_SOCK_VAR = "AVOCADO_AGENT_SOCK"
 SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 SIGINT_EXIT = 130
 
+# Inherited variables removed from the child env (non-root runs inherit everything
+# outside OWNED_VARS). avocado-safe-disk.sh reads each with no test gate, so an
+# exported value would point the system-disk, mounted and swap checks at fake data:
+#   SYSBLOCK           sysfs block dir the root-disk and partition checks walk
+#   MOUNTS, SWAPS      mount and swap tables the "in use" checks read
+#   DEVDIR             where device nodes are resolved
+#   EUID               the uid the library claims to act as
+#   CONTAINER_MARKERS  files whose presence flips the container detection
+SEAM_VARS = (
+    "AVOCADO_PROVISION_SYSBLOCK",
+    "AVOCADO_SAFE_DISK_MOUNTS",
+    "AVOCADO_SAFE_DISK_SWAPS",
+    "AVOCADO_SAFE_DISK_DEVDIR",
+    "AVOCADO_SAFE_DISK_EUID",
+    "AVOCADO_SAFE_DISK_CONTAINER_MARKERS",
+)
+
 
 @dataclass
 class RunContext:
@@ -151,6 +168,12 @@ def run_stone(
     kernel = jetson_kernel_image(ctx.images_dir) if jetson else None
     var_bytes = var_size_bytes(ctx.manifest, ctx.images_dir)
     env, warnings = build_run_env(opts, environ, profile, kernel)
+    for var in SEAM_VARS:
+        if var in env:
+            warnings.append(
+                f"warning: ignoring inherited {var}={env.pop(var)!r}; "
+                "it is a test override of the safe-disk checks and is never passed to stone"
+            )
 
     lookup = sysroot_lookup or make_sysroot_lookup(ctx.deploy)
     stone, additions = find_stone(

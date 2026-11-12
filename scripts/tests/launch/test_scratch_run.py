@@ -42,6 +42,8 @@ class Env:
             "provision": {
                 "profiles": {
                     "sd": {},
+                    "uuu-emmc": {},
+                    "ums": {},
                     "tegraflash-nvme": {"config": {"dry_run": True}},
                 }
             },
@@ -91,6 +93,8 @@ class Env:
             "PATH": f"{self.bin}:/usr/bin:/bin:relative/dir::",
             "AVOCADO_AGENT_SOCK": "/run/agent.sock",
             "HOME": str(self.tmp),
+            "LANG": "C.UTF-8",
+            **self.extra_environ,
         }
 
     def run(self, opts, uid=UID, which=None, **kw):
@@ -106,6 +110,7 @@ class Env:
         )
 
     messages: list
+    extra_environ: dict = {}
 
     def scratches(self):
         return sorted(self.workdir.iterdir()) if self.workdir.exists() else []
@@ -401,3 +406,48 @@ def test_digest_detects_a_change(env):
     before = digest(env.deploy)
     (env.deploy / "Image").write_bytes(b"changed")
     assert digest(env.deploy) != before
+
+
+# --- test-seam variables never reach stone -------------------------------
+
+SEAMS = {
+    "AVOCADO_PROVISION_SYSBLOCK": "/fake/sys",
+    "AVOCADO_SAFE_DISK_MOUNTS": "/fake/mounts",
+    "AVOCADO_SAFE_DISK_SWAPS": "/fake/swaps",
+    "AVOCADO_SAFE_DISK_DEVDIR": "/fake/dev",
+    "AVOCADO_SAFE_DISK_EUID": "0",
+    "AVOCADO_SAFE_DISK_CONTAINER_MARKERS": "/fake/marker",
+}
+
+RUNS = {
+    "sd": LaunchOpts(medium="sd"),
+    "emmc": LaunchOpts(medium="emmc"),
+    "ums": LaunchOpts(medium="ums"),
+    "tegraflash-dry-run": LaunchOpts(medium="nvme", dry_run=True),
+    "tegraflash-real": LaunchOpts(medium="nvme", assume_yes=True),
+}
+
+
+@pytest.mark.parametrize("name", sorted(RUNS))
+def test_test_seam_variables_do_not_reach_stone_and_are_warned(env, name):
+    env.extra_environ = dict(SEAMS)
+    env.run(RUNS[name])
+    stone_env = read(env, "stone.env")
+    for var, value in SEAMS.items():
+        assert f"{var}=" not in stone_env, var
+        assert any(var in m and repr(value) in m for m in env.messages), var
+
+
+@pytest.mark.parametrize("name", ["sd", "emmc", "ums", "tegraflash-dry-run"])
+def test_ordinary_variables_still_reach_user_runs(env, name):
+    env.extra_environ = dict(SEAMS)
+    env.run(RUNS[name])
+    stone_env = read(env, "stone.env")
+    assert f"HOME={env.tmp}" in stone_env
+    assert "LANG=C.UTF-8" in stone_env
+    assert "PATH=" in stone_env
+
+
+def test_no_seam_warning_when_none_inherited(env):
+    env.run(LaunchOpts(medium="sd"))
+    assert not any("AVOCADO_SAFE_DISK" in m or "SYSBLOCK" in m for m in env.messages)
