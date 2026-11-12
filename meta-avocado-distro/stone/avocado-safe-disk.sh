@@ -1,0 +1,266 @@
+# shellcheck shell=bash
+#
+# Wrong-disk protections for stone provisioning scripts that write a whole disk
+# (sd and usb profiles). Sourced, never executed:
+#
+#   . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+#
+# Ships beside the script through the manifest's provision.files list, the same
+# way build-disk-image.sh does, so it is resolved from the script's own
+# directory in the stone data dir.
+#
+# fwup and dd both rewrite the partition table from sector 0, so a mistyped
+# letter destroys whatever it names with no undo, and a development host
+# routinely carries multi-terabyte disks on the same /dev/sd* namespace as the
+# card reader. The checks mirror scripts/avocado-flash (assert_safe_block_device
+# and confirm_destructive) so both ways of writing a card refuse the same
+# targets.
+#
+# Every function prints its reason to stderr and returns 1; callers write
+# `fn "$dev" || exit 1`. set -e is not relied on: it is suspended inside the
+# conditionals these calls often sit in.
+#
+# Environment:
+#   AVOCADO_PROVISION_FORCE=1   skip the retype confirmation (checks still run)
+#   AVOCADO_PROVISION_SYSBLOCK  sysfs block directory (default /sys/class/block)
+#   AVOCADO_SAFE_DISK_MOUNTS    mount table (default /proc/self/mounts)
+#   AVOCADO_SAFE_DISK_SWAPS     swap table (default /proc/swaps)
+#   AVOCADO_SAFE_DISK_DEVDIR    where device nodes live (default /dev)
+#
+# Deliberately not used: lsblk and findmnt. The SDK images for several boards do
+# not carry them, and a hard dependency would turn a working provision into a
+# refusal. Mounts come from /proc/self/mounts, which is what lsblk reads, and
+# the partition and root-disk relationships from sysfs.
+
+# Set by avocado_safe_disk_check_device: the canonical node, with symlinks such
+# as /dev/disk/by-id/... resolved, that every later check and the write use.
+AVOCADO_SAFE_DISK_DEV=""
+# Set by avocado_safe_disk_bus: what the bus decision was based on.
+AVOCADO_SAFE_DISK_BUS=""
+
+_asd_err() {
+  echo "ERROR: $*" >&2
+}
+
+_asd_sysblock() {
+  printf '%s' "${AVOCADO_PROVISION_SYSBLOCK:-/sys/class/block}"
+}
+
+_asd_is_block_node() {
+  # stat rather than [ -b ]: same answer on a real node, and a PATH stub can
+  # stand in for it where a test has no block device to point at.
+  [ "$(stat -Lc %F -- "$1" 2>/dev/null)" = "block special file" ]
+}
+
+# The whole disk a block device name belongs to: itself, or for a partition the
+# disk that holds it (sysfs nests a partition under its disk).
+_asd_parent_disk() {
+  local name=$1 sb real
+  sb=$(_asd_sysblock)
+  if [ -e "$sb/$name/partition" ]; then
+    real=$(readlink -f -- "$sb/$name") || return 1
+    basename -- "$(dirname -- "$real")"
+  else
+    printf '%s\n' "$name"
+  fi
+}
+
+# Every block device name under the device mounted at /: the device itself, the
+# disk beneath a partition, and whatever a dm/md/LVM volume is stacked on.
+_asd_chain() {
+  local name=$1 sb s
+  sb=$(_asd_sysblock)
+  printf '%s\n' "$name"
+  if [ -e "$sb/$name/partition" ]; then
+    _asd_chain "$(_asd_parent_disk "$name")" || return 1
+  fi
+  for s in "$sb/$name"/slaves/*; do
+    [ -e "$s" ] || continue
+    _asd_chain "$(basename -- "$s")" || return 1
+  done
+}
+
+# Refuse anything that is not a block node the kernel knows as a whole disk.
+# Sets AVOCADO_SAFE_DISK_DEV.
+avocado_safe_disk_whole_disk() {
+  local dev=$1 resolved name sb
+  sb=$(_asd_sysblock)
+  [ -n "$dev" ] || {
+    _asd_err "no device specified"
+    return 1
+  }
+  _asd_is_block_node "$dev" || {
+    _asd_err "${dev} is not a block device"
+    return 1
+  }
+  # /dev/disk/by-id and by-path entries are symlinks. Resolve before deriving
+  # the sysfs name, or they pass the block test and then look like partitions.
+  resolved=$(readlink -f -- "$dev") || {
+    _asd_err "cannot resolve ${dev}"
+    return 1
+  }
+  name=$(basename -- "$resolved")
+  [ -e "$sb/$name" ] || {
+    _asd_err "${dev} (${resolved}) is not a block device the kernel lists"
+    return 1
+  }
+  if [ -e "$sb/$name/partition" ]; then
+    _asd_err "${dev} is a partition; pass the whole disk (the image carries its own partition table)"
+    return 1
+  fi
+  AVOCADO_SAFE_DISK_DEV=$resolved
+}
+
+# Require a USB or MMC bus, taken from udev's ID_PATH and not from the kernel's
+# `removable` flag, which is wrong both ways: mmc_block never sets it, so a card
+# in a native SDHCI reader reads 0, while the SCSI layer copies the device's RMB
+# bit verbatim, so a USB enclosure asserting it passes. ID_PATH rather than
+# ID_BUS, which is empty for nvme.
+#
+# A container usually has udevadm without the udev database, or neither. Then
+# ID_PATH is empty and the decision uses the device's resolved sysfs path
+# instead, which is the string udev derives ID_PATH from and holds `usb<N>` for
+# a USB device and `mmc_host` for an MMC one. Only when neither can be read is
+# the device refused.
+avocado_safe_disk_bus() {
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} name sb id_path="" source="udev ID_PATH"
+  sb=$(_asd_sysblock)
+  name=$(basename -- "$(readlink -f -- "$dev")")
+  AVOCADO_SAFE_DISK_BUS=""
+  if command -v udevadm >/dev/null 2>&1; then
+    id_path=$(udevadm info --query=property --property=ID_PATH --value "$dev" 2>/dev/null) \
+      || id_path=""
+  fi
+  if [ -z "$id_path" ] && [ -e "$sb/$name" ]; then
+    id_path=$(readlink -f -- "$sb/$name" 2>/dev/null) || id_path=""
+    source="sysfs path"
+  fi
+  if [ -z "$id_path" ]; then
+    _asd_err "refusing ${dev}: neither udev nor sysfs says which bus it is on"
+    return 1
+  fi
+  case "$id_path" in
+    *-usb-* | */usb[0-9]*/* | *mmc*) ;;
+    *)
+      _asd_err "refusing ${dev}: it is on '${id_path}' (${source}), not a USB or MMC bus; pass a card reader, SD slot or USB stick"
+      return 1
+      ;;
+  esac
+  AVOCADO_SAFE_DISK_BUS="${id_path} (${source})"
+}
+
+# Refuse a device that backs the running root filesystem, including through
+# dm-crypt, LVM or md. A root on overlay, tmpfs or NFS has no local disk, which
+# is the normal case inside the SDK container, so the guard is then vacuous
+# rather than failing.
+avocado_safe_disk_not_root() {
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} mounts src real name target chain
+  mounts=${AVOCADO_SAFE_DISK_MOUNTS:-/proc/self/mounts}
+  [ -r "$mounts" ] || {
+    _asd_err "cannot read ${mounts}; refusing to guess what / is mounted from"
+    return 1
+  }
+  src=$(awk '$2 == "/" { s = $1 } END { print s }' "$mounts")
+  case "$src" in
+    "${AVOCADO_SAFE_DISK_DEVDIR:-/dev}"/*) ;;
+    *) return 0 ;;
+  esac
+  real=$(readlink -f -- "$src") || real=$src
+  name=$(basename -- "$real")
+  [ -e "$(_asd_sysblock)/$name" ] || {
+    _asd_err "cannot tell which disk holds the running root (${src}); refusing to guess"
+    return 1
+  }
+  target=$(basename -- "$(readlink -f -- "$dev")")
+  chain=$(_asd_chain "$name") || {
+    _asd_err "cannot trace the devices under /; refusing to guess"
+    return 1
+  }
+  if printf '%s\n' "$chain" | grep -qxF -- "$target"; then
+    _asd_err "${dev} holds the running root filesystem; refusing to overwrite"
+    return 1
+  fi
+}
+
+# Refuse a device, or any partition of it, that is mounted or in use as swap. A
+# filesystem still mounted while its disk is rewritten is corrupted. Reads the
+# mount tables directly, so this sees only this mount namespace: a host mount
+# is invisible from inside the SDK container.
+avocado_safe_disk_unmounted() {
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} target table src real name
+  target=$(basename -- "$(readlink -f -- "$dev")")
+  for table in "${AVOCADO_SAFE_DISK_MOUNTS:-/proc/self/mounts}" "${AVOCADO_SAFE_DISK_SWAPS:-/proc/swaps}"; do
+    [ -r "$table" ] || {
+      _asd_err "refusing ${dev}: cannot read ${table}, so its mount state is unknown"
+      return 1
+    }
+    while read -r src _; do
+      case "$src" in
+        "${AVOCADO_SAFE_DISK_DEVDIR:-/dev}"/*) ;;
+        *) continue ;;
+      esac
+      real=$(readlink -f -- "$src") || continue
+      name=$(basename -- "$real")
+      [ -e "$(_asd_sysblock)/$name" ] || continue
+      if [ "$(_asd_parent_disk "$name")" = "$target" ]; then
+        _asd_err "refusing ${dev}: ${src} is mounted or in use (${table##*/}); unmount it first"
+        return 1
+      fi
+    done <"$table"
+  done
+}
+
+# Print what is about to be overwritten.
+avocado_safe_disk_identity() {
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} name sb vendor model sectors size
+  sb=$(_asd_sysblock)
+  name=$(basename -- "$(readlink -f -- "$dev")")
+  vendor=$(tr -s ' ' <"$sb/$name/device/vendor" 2>/dev/null | xargs || true)
+  model=$(tr -s ' ' <"$sb/$name/device/model" 2>/dev/null | xargs || true)
+  sectors=$(cat "$sb/$name/size" 2>/dev/null || echo 0)
+  size=$(awk -v s="$sectors" 'BEGIN { printf "%.2f GiB", s * 512 / 1073741824 }')
+  echo "Target device: ${dev}"
+  echo "  Model: ${vendor:+$vendor }${model:-unknown}"
+  echo "  Size:  ${size}"
+  echo "  Bus:   ${AVOCADO_SAFE_DISK_BUS:-unchecked}"
+}
+
+# Whole disk, USB or MMC bus, and not the running root. The mount check is
+# separate (avocado_safe_disk_unmounted) because the scripts unmount the target
+# themselves and the check belongs after that.
+avocado_safe_disk_check_device() {
+  avocado_safe_disk_whole_disk "$1" || return 1
+  avocado_safe_disk_bus "$AVOCADO_SAFE_DISK_DEV" || return 1
+  avocado_safe_disk_not_root "$AVOCADO_SAFE_DISK_DEV" || return 1
+}
+
+# Show the target and require its path typed again.
+#
+#   $1  device (printed form is the canonical node)
+#   $2  1 when the operator named the device up front through
+#       AVOCADO_PROVISION_DEVICE, which by the existing convention means an
+#       unattended run: the identity is still printed and the prompt is skipped.
+#
+# AVOCADO_PROVISION_FORCE=1 skips the prompt for every caller. With neither and
+# no input to read, the run aborts rather than proceeding unconfirmed.
+avocado_safe_disk_confirm() {
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} explicit=${2:-0} reply=""
+  echo ""
+  avocado_safe_disk_identity "$dev"
+  echo ""
+  echo "WARNING: this overwrites everything on ${dev}."
+  if [ "${AVOCADO_PROVISION_FORCE:-0}" = "1" ]; then
+    echo "AVOCADO_PROVISION_FORCE=1: not asking for confirmation."
+    return 0
+  fi
+  if [ "$explicit" = "1" ]; then
+    echo "Device given up front (AVOCADO_PROVISION_DEVICE): not asking for confirmation."
+    return 0
+  fi
+  printf 'Type the device path again to confirm: ' >&2
+  IFS= read -r reply || reply=""
+  if [ "$reply" != "$dev" ]; then
+    _asd_err "confirmation did not match ${dev}; aborting"
+    return 1
+  fi
+}

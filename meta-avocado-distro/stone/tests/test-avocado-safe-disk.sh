@@ -1,0 +1,311 @@
+#!/usr/bin/env bash
+# Host test for avocado-safe-disk.sh, the wrong-disk guards the stone sd and usb
+# provisioning scripts source. Nothing here touches a disk: sysfs is a fake tree
+# under a temp dir, the mount tables are files, and udevadm and stat are PATH
+# stubs, so a failure to intercept writes into that dir and nowhere else.
+#   bash meta-avocado-distro/stone/tests/test-avocado-safe-disk.sh
+# shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+lib=${1:-$here/../avocado-safe-disk.sh}
+real_stat=$(command -v stat)
+w=$(mktemp -d)
+trap 'rm -rf "$w"' EXIT
+pass=0
+fail=0
+ok() {
+  echo "  ok   - $1"
+  pass=$((pass + 1))
+}
+bad() {
+  echo "  FAIL - $1"
+  fail=$((fail + 1))
+}
+
+# A disk lives at sys/devices/<path>/<name>, with its class/block entry a
+# symlink to it, as the kernel lays it out. Partitions nest under the disk.
+mkdisk() { # name path
+  mkdir -p "$w/sys/devices/$2/$1" "$w/sys/class/block"
+  ln -s "../../devices/$2/$1" "$w/sys/class/block/$1"
+  echo 7864320 >"$w/sys/devices/$2/$1/size"
+  echo 0 >"$w/sys/devices/$2/$1/removable"
+  : >"$w/dev/$1"
+}
+mkpart() { # disk path partition
+  mkdir -p "$w/sys/devices/$2/$1/$3"
+  echo 1 >"$w/sys/devices/$2/$1/$3/partition"
+  ln -s "../../devices/$2/$1/$3" "$w/sys/class/block/$3"
+  : >"$w/dev/$3"
+}
+
+USBPATH=pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/host6/target6:0:0/6:0:0:0/block
+ATAPATH=pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block
+NVMEPATH=pci0000:00/0000:00:1d.0/0000:3d:00.0/nvme/nvme0
+MMCPATH=pci0000:00/0000:00:1a.0/mmc_host/mmc0/mmc0:0001/block
+
+setup() {
+  rm -rf "${w:?}/sys" "${w:?}/dev" "${w:?}/st" "${w:?}/bin"
+  mkdir -p "$w/sys" "$w/dev/disk/by-id" "$w/dev/mapper" "$w/st" "$w/bin"
+  : >"$w/st/mounts"
+  : >"$w/st/swaps"
+  echo "overlay / overlay rw 0 0" >"$w/st/mounts"
+  mkdisk sdb "$USBPATH"
+  mkpart sdb "$USBPATH" sdb1
+  mkdisk sda "$ATAPATH"
+  mkpart sda "$ATAPATH" sda1
+  mkpart sda "$ATAPATH" sda2
+  mkdisk nvme0n1 "$NVMEPATH"
+  mkpart nvme0n1 "$NVMEPATH" nvme0n1p1
+  mkdisk mmcblk0 "$MMCPATH"
+  ln -s ../../sdb "$w/dev/disk/by-id/usb-Stick"
+  # The stubs. stat reports every file under dev/ as a block node and defers
+  # to the real tool for anything else; udevadm answers from st/idpath-<name>
+  # and prints nothing for a device without an entry, like a missing udev db.
+  cat >"$w/bin/stat" <<S
+#!/bin/bash
+if [ "\$1" = -Lc ] && [ "\$2" = %F ]; then
+  f=\$(readlink -f -- "\$4")
+  case "\$f" in $w/dev/*) [ -f "\$f" ] && { echo "block special file"; exit 0; } ;; esac
+fi
+exec $real_stat "\$@"
+S
+  cat >"$w/bin/udevadm" <<S
+#!/bin/bash
+[ -e "$w/st/udev-fail" ] && exit 1
+n=\$(basename "\$(readlink -f -- "\${@: -1}")")
+cat "$w/st/idpath-\$n" 2>/dev/null
+exit 0
+S
+  chmod +x "$w/bin/stat" "$w/bin/udevadm"
+}
+
+# Run one library call in a clean shell. $1 is the shell code to run after
+# sourcing; prints its stderr and stdout together and returns its status.
+call() {
+  PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys/class/block" \
+    AVOCADO_SAFE_DISK_MOUNTS="${T_MOUNTS:-$w/st/mounts}" AVOCADO_SAFE_DISK_SWAPS="${T_SWAPS:-$w/st/swaps}" \
+    AVOCADO_SAFE_DISK_DEVDIR="$w/dev" bash -c ". '$lib'; $1" 2>&1
+}
+idpath() { echo "$2" >"$w/st/idpath-$1"; }
+
+# --- whole disk -------------------------------------------------------------
+
+setup
+idpath sdb "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0"
+out=$(call "avocado_safe_disk_check_device $w/dev/sdb && echo DEV=\$AVOCADO_SAFE_DISK_DEV")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -qx "DEV=$w/dev/sdb"; } \
+  && ok "a whole USB disk passes and is returned as its canonical node" || bad "pass path: rc=$rc out=[$out]"
+
+out=$(call "avocado_safe_disk_check_device $w/dev/disk/by-id/usb-Stick && echo DEV=\$AVOCADO_SAFE_DISK_DEV")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -qx "DEV=$w/dev/sdb"; } \
+  && ok "a by-id alias resolves to the disk, not to a phantom partition" || bad "alias: rc=$rc out=[$out]"
+
+: >"$w/notblock"
+out=$(call "avocado_safe_disk_check_device $w/notblock")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "not a block device"; } \
+  && ok "a regular file is refused as not a block device" || bad "non-block: rc=$rc out=[$out]"
+
+out=$(call "avocado_safe_disk_check_device $w/dev/missing")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "not a block device"; } \
+  && ok "a path that does not exist is refused" || bad "missing: rc=$rc out=[$out]"
+
+out=$(call "avocado_safe_disk_check_device $w/dev/sdb1")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "partition"; } \
+  && ok "a partition is refused: whole disk only" || bad "partition: rc=$rc out=[$out]"
+
+: >"$w/dev/sdz"
+out=$(call "avocado_safe_disk_check_device $w/dev/sdz")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "kernel lists"; } \
+  && ok "a node the kernel does not list is refused" || bad "unlisted: rc=$rc out=[$out]"
+
+# --- bus --------------------------------------------------------------------
+
+setup
+idpath sda "pci-0000:00:17.0-ata-1"
+echo 1 >"$w/sys/devices/$ATAPATH/sda/removable"
+out=$(call "avocado_safe_disk_check_device $w/dev/sda")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "not a USB or MMC bus"; } \
+  && ok "a SATA disk is refused even when the kernel marks it removable" || bad "sata removable=1: rc=$rc out=[$out]"
+
+setup
+idpath nvme0n1 "pci-0000:3d:00.0-nvme-1"
+out=$(call "avocado_safe_disk_check_device $w/dev/nvme0n1")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "not a USB or MMC bus"; } \
+  && ok "an NVMe disk is refused" || bad "nvme: rc=$rc out=[$out]"
+
+setup
+idpath mmcblk0 "platform-fe2c0000.mmc"
+out=$(call "avocado_safe_disk_check_device $w/dev/mmcblk0")
+rc=$?
+{ [ $rc -eq 0 ] && grep -qx 0 "$w/sys/devices/$MMCPATH/mmcblk0/removable"; } \
+  && ok "an MMC card passes although the kernel reports removable=0" || bad "mmc removable=0: rc=$rc out=[$out]"
+
+setup
+out=$(call "avocado_safe_disk_check_device $w/dev/sdb && echo BUS=\$AVOCADO_SAFE_DISK_BUS")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "BUS=.*usb1.*(sysfs path)"; } \
+  && ok "with no udev data a USB disk is identified from its sysfs path" || bad "sysfs usb: rc=$rc out=[$out]"
+
+setup
+out=$(call "avocado_safe_disk_check_device $w/dev/sda")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "not a USB or MMC bus"; } \
+  && ok "with no udev data a SATA disk is refused from its sysfs path" || bad "sysfs sata: rc=$rc out=[$out]"
+
+setup
+out=$(call "avocado_safe_disk_check_device $w/dev/mmcblk0")
+rc=$?
+[ $rc -eq 0 ] && ok "with no udev data an MMC card is identified from its sysfs path" || bad "sysfs mmc: rc=$rc out=[$out]"
+
+setup
+: >"$w/st/udev-fail"
+out=$(call "avocado_safe_disk_check_device $w/dev/sdb")
+rc=$?
+[ $rc -eq 0 ] && ok "a failing udevadm falls back to sysfs rather than refusing a USB disk" || bad "udevadm fails: rc=$rc out=[$out]"
+
+setup
+mkdir -p "$w/nobin"
+ln -s "$(command -v bash)" "$w/nobin/bash"
+for t in stat readlink basename dirname awk grep cat tr xargs; do ln -sf "$(command -v $t)" "$w/nobin/$t"; done
+ln -sf "$w/bin/stat" "$w/nobin/stat"
+out=$(PATH="$w/nobin" AVOCADO_PROVISION_SYSBLOCK="$w/sys/class/block" AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" \
+  AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" bash -c ". '$lib'; avocado_safe_disk_check_device $w/dev/sdb" 2>&1)
+rc=$?
+[ $rc -eq 0 ] && ok "a missing udevadm binary is not fatal" || bad "no udevadm: rc=$rc out=[$out]"
+
+setup
+out=$(call "avocado_safe_disk_bus $w/dev/gone")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "neither udev nor sysfs"; } \
+  && ok "a device whose bus cannot be established is refused" || bad "bus unknown: rc=$rc out=[$out]"
+
+# --- running root -----------------------------------------------------------
+
+setup
+idpath sda "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0"
+echo "$w/dev/sda2 / ext4 rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_not_root $w/dev/sda")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "running root"; } \
+  && ok "the disk holding / is refused" || bad "root disk: rc=$rc out=[$out]"
+
+out=$(call "avocado_safe_disk_not_root $w/dev/sdb")
+rc=$?
+[ $rc -eq 0 ] && ok "a different disk is not mistaken for the root disk" || bad "other disk: rc=$rc out=[$out]"
+
+setup
+mkdisk dm-0 "virtual/block"
+mkdir -p "$w/sys/devices/virtual/block/dm-0/slaves"
+ln -s ../../../../pci0000:00/0000:00:1d.0/0000:3d:00.0/nvme/nvme0/nvme0n1/nvme0n1p1 "$w/sys/devices/virtual/block/dm-0/slaves/nvme0n1p1"
+ln -s "$w/dev/dm-0" "$w/dev/mapper/root"
+echo "$w/dev/mapper/root / ext4 rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_not_root $w/dev/nvme0n1")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "running root"; } \
+  && ok "the physical disk under a dm-crypt root is refused" || bad "dm root: rc=$rc out=[$out]"
+
+setup
+echo "$w/dev/root / ext4 rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_not_root $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "refusing to guess"; } \
+  && ok "an unresolvable /dev root fails closed" || bad "unresolvable root: rc=$rc out=[$out]"
+
+out=$(T_MOUNTS="$w/st/absent" call "avocado_safe_disk_not_root $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "cannot read"; } \
+  && ok "an unreadable mount table fails closed for the root check" || bad "no mounts (root): rc=$rc out=[$out]"
+
+# --- mounted ----------------------------------------------------------------
+
+setup
+echo "$w/dev/sdb1 /media/stick vfat rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "mounted"; } \
+  && ok "a disk with a mounted partition is refused" || bad "mounted: rc=$rc out=[$out]"
+
+echo "$w/dev/disk/by-id/usb-Stick /media/stick vfat rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+[ $rc -ne 0 ] && ok "a mount named through a symlink is still found" || bad "mounted via alias: rc=$rc out=[$out]"
+
+echo "$w/dev/sdb /media/raw ext4 rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+[ $rc -ne 0 ] && ok "a filesystem mounted on the bare disk is refused" || bad "mounted whole disk: rc=$rc out=[$out]"
+
+echo "$w/dev/sdb1 [SWAP]" >"$w/st/swaps"
+: >"$w/st/mounts"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "swaps"; } \
+  && ok "swap on a partition of the disk is refused" || bad "swap: rc=$rc out=[$out]"
+
+setup
+mkdisk sdbb "$USBPATH-other"
+mkpart sdbb "$USBPATH-other" sdbb1
+echo "$w/dev/sdbb1 /media/other vfat rw 0 0" >"$w/st/mounts"
+out=$(call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+[ $rc -eq 0 ] && ok "a mount on another disk sharing the name prefix is not blamed on this one" || bad "prefix: rc=$rc out=[$out]"
+
+out=$(T_SWAPS="$w/st/absent" call "avocado_safe_disk_unmounted $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "cannot read"; } \
+  && ok "an unreadable swap table fails closed" || bad "no swaps: rc=$rc out=[$out]"
+
+# --- confirmation -----------------------------------------------------------
+
+setup
+idpath sdb "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0"
+mkdir -p "$w/sys/devices/$USBPATH/sdb/device"
+printf 'ACME    ' >"$w/sys/devices/$USBPATH/sdb/device/vendor"
+printf 'Card Reader     ' >"$w/sys/devices/$USBPATH/sdb/device/model"
+conf() { # stdin, env prefix in $1, explicit flag in $2
+  printf '%b' "$3" | call "$1 avocado_safe_disk_check_device $w/dev/sdb && $1 avocado_safe_disk_confirm \$AVOCADO_SAFE_DISK_DEV $2"
+}
+out=$(conf "" 0 "$w/dev/sdb\n")
+rc=$?
+[ $rc -eq 0 ] && ok "retyping the device path confirms" || bad "retype: rc=$rc out=[$out]"
+{ echo "$out" | grep -q "Model: ACME Card Reader" && echo "$out" | grep -q "Size:  3.75 GiB" && echo "$out" | grep -q "Bus:   .*usb"; } \
+  && ok "the identity shows model, size and bus before the prompt" || bad "identity: out=[$out]"
+
+out=$(conf "" 0 "yes\n")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
+  && ok "'yes' is not accepted: the path must be typed" || bad "yes: rc=$rc out=[$out]"
+
+out=$(conf "" 0 "$w/dev/sdb1\n")
+rc=$?
+[ $rc -ne 0 ] && ok "a different path aborts" || bad "wrong path: rc=$rc out=[$out]"
+
+out=$(conf "" 0 "")
+rc=$?
+[ $rc -ne 0 ] && ok "no input aborts instead of proceeding unconfirmed" || bad "eof: rc=$rc out=[$out]"
+
+out=$(conf "AVOCADO_PROVISION_FORCE=1" 0 "")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "FORCE=1" && echo "$out" | grep -q "Model:"; } \
+  && ok "AVOCADO_PROVISION_FORCE=1 skips the prompt and still prints the identity" || bad "force: rc=$rc out=[$out]"
+
+out=$(conf "AVOCADO_PROVISION_FORCE=0" 0 "")
+rc=$?
+[ $rc -ne 0 ] && ok "AVOCADO_PROVISION_FORCE=0 does not skip the prompt" || bad "force=0: rc=$rc out=[$out]"
+
+out=$(conf "" 1 "")
+rc=$?
+{ [ $rc -eq 0 ] && echo "$out" | grep -q "given up front"; } \
+  && ok "a device named up front (unattended run) is not prompted for" || bad "explicit: rc=$rc out=[$out]"
+
+echo
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/34 run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 34 ]

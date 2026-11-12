@@ -184,6 +184,9 @@ jobs:
         run: |
           bash meta-avocado-nxp/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-device-tree-overlay-deliver.sh
           bash meta-avocado-nxp/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-boot-settings.sh
+      - name: stone sd/usb wrong-disk guards (shared library)
+        shell: bash
+        run: bash meta-avocado-distro/stone/tests/test-avocado-safe-disk.sh
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh

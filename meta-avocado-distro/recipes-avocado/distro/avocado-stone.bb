@@ -37,6 +37,11 @@ SRC_URI:append:stone-usb = " \
     file://stone-provision-usb.sh \
 "
 
+# Sourced by the sd and usb scripts from their own directory; a manifest lists
+# it under provision.files so stone bundle carries it beside them.
+SRC_URI:append:stone-sd = " file://avocado-safe-disk.sh"
+SRC_URI:append:stone-usb = " file://avocado-safe-disk.sh"
+
 inherit stone
 inherit deploy
 
@@ -71,6 +76,15 @@ do_deploy:append:stone-sd() {
 do_deploy:append:stone-usb() {
   install -d ${DEPLOYDIR}
   install -m 0755 ${UNPACKDIR}/stone-provision-usb.sh ${DEPLOYDIR}/stone-provision-usb.sh
+}
+
+do_deploy:append:stone-sd() {
+  install -m 0644 ${UNPACKDIR}/avocado-safe-disk.sh ${DEPLOYDIR}/avocado-safe-disk.sh
+}
+
+do_deploy:append:stone-usb() {
+  install -d ${DEPLOYDIR}
+  install -m 0644 ${UNPACKDIR}/avocado-safe-disk.sh ${DEPLOYDIR}/avocado-safe-disk.sh
 }
 
 do_deploy:append:stone-img() {
