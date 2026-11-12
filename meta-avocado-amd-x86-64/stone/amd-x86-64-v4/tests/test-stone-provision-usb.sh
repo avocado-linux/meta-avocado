@@ -261,8 +261,10 @@ rc=$?
   && ok "a btrfs subvolume root still protects its disk" || bad "btrfs: rc=$rc out=[$out]"
 
 # 11. A /dev root that cannot be resolved stops the run instead of dropping the guard.
+# The source is a path under the test's own dev dir that setup never creates; the
+# real /dev/root exists on some hosts (a CI runner) and would resolve.
 setup
-echo "/dev/root" >"$w/st/rootsrc"
+echo "$w/dev/root" >"$w/st/rootsrc"
 out=$(run "$w/dev/sdb")
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "root"; } \
