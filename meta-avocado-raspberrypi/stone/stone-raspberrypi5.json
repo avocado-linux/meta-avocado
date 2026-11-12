@@ -84,7 +84,10 @@
       "sd": {
         "script": "stone-provision-sd.sh",
         "envs": ["device_info"],
-        "requires": ["usb"]
+        "requires": ["usb"],
+        "config": {
+          "dry_run": true
+        }
       },
       "usb": {
         "script": "stone-provision-usb.sh",
