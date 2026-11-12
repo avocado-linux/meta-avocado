@@ -158,7 +158,7 @@ Worked example for the iCAM-540
 ([carrier.env](../../../bsp/icam-540/stone/carrier-bsp/carrier.env)):
 
 ```
-CARRIER_LABEL="Advantech ICAM-540 (P3768-0000 + P3767-0001 Orin NX 16GB)"
+CARRIER_LABEL="Advantech ICAM-540 (P3768-0000 + P3767-0001 Orin NX 8GB)"
 
 # Kernel DTB — Advantech-specific (-nv suffix carries proper CSI/NVCSI
 # for the ICAM500 camera). Shipped in this overlay (not in upstream
