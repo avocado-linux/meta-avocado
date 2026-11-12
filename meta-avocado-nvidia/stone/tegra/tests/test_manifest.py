@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+from pathlib import Path
 
 import pytest
 
@@ -334,3 +335,29 @@ def test_the_esp_image_may_itself_be_named_esp_img():
 
 def test_the_flash_initramfs_may_itself_be_named_initrd_flash_img():
     _named(tegraflash_initramfs="initrd-flash.img")
+
+
+ORIN_NANO = Path(__file__).resolve().parents[2] / "stone-jetson-orin-nano.json"
+
+
+def test_a_sibling_rcm_evidence_object_is_ignored_and_rcm_ids_still_read(tmp_path):
+    doc = rootdisk(tegraflash={"rcm_ids": ["0955:7523"], "rcm_evidence": {"0955:7523": "lsusb showed it"}})
+    assert read_manifest(write(tmp_path, doc)) == Manifest(rcm_ids=("0955:7523",))
+
+
+def test_the_orin_nano_manifest_records_evidence_for_exactly_its_declared_rcm_ids():
+    tegraflash = json.loads(ORIN_NANO.read_text())["storage_devices"]["rootdisk"]["tegraflash"]
+    evidence = tegraflash["rcm_evidence"]
+    assert sorted(evidence) == sorted(tegraflash["rcm_ids"]) == ["0955:7523"]
+    assert all(isinstance(v, str) and v.strip() for v in evidence.values())
+
+
+def test_the_engine_reads_the_shipped_orin_nano_manifest_with_its_evidence():
+    assert read_manifest(ORIN_NANO).rcm_ids == ("0955:7523",)
+
+
+def test_every_tegraflash_profile_of_the_orin_nano_declares_dry_run():
+    profiles = json.loads(ORIN_NANO.read_text())["provision"]["profiles"]
+    tegraflash = {name: p for name, p in profiles.items() if name.startswith("tegraflash")}
+    assert sorted(tegraflash) == ["tegraflash", "tegraflash-emmc", "tegraflash-mmc", "tegraflash-nvme", "tegraflash-sd"]
+    assert {name: p.get("config", {}).get("dry_run") for name, p in tegraflash.items()} == dict.fromkeys(tegraflash, True)
