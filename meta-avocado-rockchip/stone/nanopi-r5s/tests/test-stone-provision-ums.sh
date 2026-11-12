@@ -249,7 +249,7 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "y\n")
+out=$(run_tty 'y\n')
 rc=$?
 { [ $rc -ne 0 ] && ! wrote; } \
   && ok "answering y does not confirm; nothing is written" || bad "y answer: rc=$rc out=[$out]"

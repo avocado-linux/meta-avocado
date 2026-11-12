@@ -164,10 +164,10 @@ rc=$?
 
 setup
 reader_and_sata
-out=$(run "y\n" AVOCADO_PROVISION_DEVICE="$w/dev/sdb")
+out=$(run "y\n" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=0)
 rc=$?
-{ [ $rc -ne 0 ] && ! wrote; } \
-  && ok "a named device still needs the retype: a piped y does not confirm" || bad "named y unset force: rc=$rc out=[$out]"
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "no terminal to confirm on"; } \
+  && ok "a named device still needs the retype: a piped y does not confirm" || bad "named y force 0: rc=$rc out=[$out]"
 
 setup
 mkdisk nvme0n1 "$NVMEPATH"

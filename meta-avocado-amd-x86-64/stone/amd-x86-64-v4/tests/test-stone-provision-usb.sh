@@ -159,6 +159,18 @@ run() {
     bash "$script" 2>&1
 }
 wrote() { grep -q "^dd if=$w/build/" "$w/log"; }
+# trun <keys>: like run, but the keystrokes (target, then confirmation) are typed
+# on a real terminal, the only place a retype is read from.
+trun() {
+  : >"$w/log"
+  run_with_tty "$1" env PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+    AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
+    AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
+    bash "$script" >"$w/tty.out" 2>&1
+  local rc=$?
+  tr -d '\r' <"$w/tty.out"
+  return $rc
+}
 
 # 1. The happy path: a whole, unmounted, large-enough USB disk gets the image.
 setup
@@ -347,14 +359,14 @@ rc=$?
 
 # 21. The confirmation is the device path typed again, not 'yes'.
 setup
-out=$(T_CONFIRM=yes run "$w/dev/sdb")
+out=$(trun "$w/dev/sdb\\nyes\\n")
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "did not match"; } \
   && ok "'yes' no longer confirms the write" || bad "yes: rc=$rc out=[$out]"
 
 # 22. A different path at the confirmation aborts.
 setup
-out=$(T_CONFIRM="$w/dev/sda" run "$w/dev/sdb")
+out=$(trun "$w/dev/sdb\\n$w/dev/sda\\n")
 rc=$?
 { [ $rc -ne 0 ] && ! wrote; } \
   && ok "a mismatched retype aborts before any write" || bad "mismatch: rc=$rc out=[$out]"

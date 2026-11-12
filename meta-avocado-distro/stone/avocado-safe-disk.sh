@@ -21,7 +21,8 @@
 # conditionals these calls often sit in.
 #
 # Environment:
-#   AVOCADO_PROVISION_FORCE=1   skip the retype confirmation (checks still run)
+#   AVOCADO_PROVISION_FORCE     1 skips the retype (checks still run); 0 requires
+#                               a terminal; see avocado_safe_disk_confirm
 #   AVOCADO_PROVISION_DRY_RUN=1 run every guard, print each target-changing
 #                               command instead of running it (1 only; 0 and
 #                               anything else but unset or empty refuse)
@@ -253,8 +254,11 @@ avocado_safe_disk_identity() {
   local dev=${1:-$AVOCADO_SAFE_DISK_DEV} name sb vendor model sectors size
   sb=$(_asd_sysblock)
   name=$(basename -- "$(readlink -f -- "$dev")")
-  vendor=$(tr -s ' ' <"$sb/$name/device/vendor" 2>/dev/null | xargs || true)
-  model=$(tr -s ' ' <"$sb/$name/device/model" 2>/dev/null | xargs || true)
+  vendor="" model=""
+  # [ -r ] first: a redirect from a missing file prints the shell's own open
+  # error, which 2>/dev/null on the command does not cover.
+  [ -r "$sb/$name/device/vendor" ] && vendor=$(tr -s ' ' <"$sb/$name/device/vendor" 2>/dev/null | xargs || true)
+  [ -r "$sb/$name/device/model" ] && model=$(tr -s ' ' <"$sb/$name/device/model" 2>/dev/null | xargs || true)
   sectors=$(cat "$sb/$name/size" 2>/dev/null || echo 0)
   size=$(awk -v s="$sectors" 'BEGIN { printf "%.2f GiB", s * 512 / 1073741824 }')
   echo "Target device: ${dev}"
@@ -272,17 +276,30 @@ avocado_safe_disk_check_device() {
   avocado_safe_disk_not_root "$AVOCADO_SAFE_DISK_DEV" || return 1
 }
 
-# Show the target and require its path typed again.
+# Show the target and apply the confirmation table. The table is pinned by
+# tests/confirm-vectors.tsv, which the engine-side check reads too.
 #
 #   $1  device (printed form is the canonical node)
-#   $2  1 when the operator named the device up front through
-#       AVOCADO_PROVISION_DEVICE, which by the existing convention means an
-#       unattended run: the identity is still printed and the prompt is skipped.
+#   $2  ignored, kept so older callers that still pass it keep working; a device
+#       named up front no longer skips the retype
 #
-# AVOCADO_PROVISION_FORCE=1 skips the prompt for every caller. With neither and
-# no input to read, the run aborts rather than proceeding unconfirmed.
+# Retyping reads the terminal (stdin must be one) and accepts only exactly the
+# target; a piped answer never confirms.
+#
+#   AVOCADO_PROVISION_DRY_RUN=1  asks no retype and never refuses on policy
+#   AVOCADO_PROVISION_FORCE=1    skips the retype
+#   AVOCADO_PROVISION_FORCE=0    retypes on a terminal, refuses without one
+#   FORCE unset or empty         retypes on a terminal; without one proceeds
+#   any other FORCE value        refuses before printing anything
 avocado_safe_disk_confirm() {
-  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} explicit=${2:-0} reply=""
+  local dev=${1:-$AVOCADO_SAFE_DISK_DEV} reply="" force=${AVOCADO_PROVISION_FORCE:-}
+  case "$force" in
+    "" | 0 | 1) ;;
+    *)
+      _asd_err "AVOCADO_PROVISION_FORCE=${force} is not valid; use 1 or 0"
+      return 1
+      ;;
+  esac
   echo ""
   avocado_safe_disk_identity "$dev"
   echo ""
@@ -291,12 +308,17 @@ avocado_safe_disk_confirm() {
     return 0
   fi
   echo "WARNING: this overwrites everything on ${dev}."
-  if [ "${AVOCADO_PROVISION_FORCE:-0}" = "1" ]; then
-    echo "AVOCADO_PROVISION_FORCE=1: not asking for confirmation."
+  if [ "$force" = "1" ]; then
+    echo "confirmation skipped: AVOCADO_PROVISION_FORCE=1"
     return 0
   fi
-  if [ "$explicit" = "1" ]; then
-    echo "Device given up front (AVOCADO_PROVISION_DEVICE): not asking for confirmation."
+  if [ ! -t 0 ]; then
+    if [ "$force" = "0" ]; then
+      _asd_err "no terminal to confirm on; refusing to overwrite ${dev}"
+      return 1
+    fi
+    # devtool-debt: callers that export no AVOCADO_PROVISION_FORCE proceed unconfirmed without a terminal. Ceiling: callers passing no force signal. Upgrade trigger: the avocado-cli release exporting the signal becomes the minimum; the row then refuses.
+    echo "confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal"
     return 0
   fi
   printf 'Type the device path again to confirm: ' >&2

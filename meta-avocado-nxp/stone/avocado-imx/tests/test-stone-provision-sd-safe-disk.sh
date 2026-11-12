@@ -263,15 +263,15 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb")
+out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=0)
 rc=$?
-{ [ $rc -ne 0 ] && ! wrote; } \
-  && ok "named device: no terminal and no FORCE does not write" || bad "named no tty: rc=$rc out=[$out]"
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "no terminal to confirm on"; } \
+  && ok "named device: no terminal and FORCE=0 refuses and does not write" || bad "named no tty: rc=$rc out=[$out]"
 
 setup
 usb sdb
 : >"$w/log"
-out=$(yes | script_env AVOCADO_PROVISION_DEVICE="$w/dev/sdb" 2>&1)
+out=$(yes | script_env AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=0 2>&1)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote; } \
   && ok "named device: a piped yes never confirms" || bad "named piped yes: rc=$rc out=[$out]"

@@ -278,21 +278,21 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "$w/dev/sdb\n")
+out=$(run_tty "$w/dev/sdb\\n")
 rc=$?
 { [ $rc -eq 0 ] && wrote_to "$w/dev/sdb"; } \
-  && ok "retyping the device path confirms and writes" || bad "retype pass: rc=$rc out=[$out] log=$(cat "$w/log")"
+  && ok "retyping the device path on a terminal confirms and writes" || bad "retype pass: rc=$rc out=[$out] log=$(cat "$w/log")"
 
 setup
 usb sdb
-out=$(run "y\n")
+out=$(run_tty 'y\n')
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && ! cleared "$w/dev/sdb"; } \
   && ok "answering y no longer confirms; nothing is cleared or written" || bad "y answer: rc=$rc out=[$out]"
 
 setup
 usb sdb
-out=$(run "")
+out=$(run_tty "")
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && ! cleared "$w/dev/sdb"; } \
   && ok "end of input at the prompt aborts without FORCE" || bad "eof: rc=$rc out=[$out]"

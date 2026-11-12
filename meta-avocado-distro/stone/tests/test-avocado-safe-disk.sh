@@ -316,41 +316,129 @@ idpath sdb "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0"
 mkdir -p "$w/sys/devices/$USBPATH/sdb/device"
 printf 'ACME    ' >"$w/sys/devices/$USBPATH/sdb/device/vendor"
 printf 'Card Reader     ' >"$w/sys/devices/$USBPATH/sdb/device/model"
-conf() { # stdin, env prefix in $1, explicit flag in $2
-  printf '%b' "$3" | call "$1 avocado_safe_disk_check_device $w/dev/sdb && $1 avocado_safe_disk_confirm \$AVOCADO_SAFE_DISK_DEV $2"
+# shellcheck source=pty-run.sh
+. "$here/pty-run.sh"
+have_tty=1
+command -v script >/dev/null 2>&1 || have_tty=0
+
+# conf <force-env-assignments> <typed|-> <terminal yes|no> [confirm args]: run
+# check_device then confirm. With a terminal the keystrokes in $2 are typed on a
+# pty; without one they arrive on a pipe, which must never count as confirming.
+conf() {
+  local envs=$1 typed=$2 term=$3 args=${4:-} code rc
+  code="avocado_safe_disk_check_device $w/dev/sdb && avocado_safe_disk_confirm \$AVOCADO_SAFE_DISK_DEV $args"
+  if [ "$term" = yes ]; then
+    # shellcheck disable=SC2086 # envs is a list of NAME=value words, none with spaces
+    run_with_tty "$typed" env PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys/class/block" \
+      AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" \
+      AVOCADO_SAFE_DISK_DEVDIR="$w/dev" AVOCADO_SAFE_DISK_CONTAINER_MARKERS="$w/st/no-marker" \
+      $envs bash -c ". '$lib'; $code" >"$w/tty.out"
+    rc=$?
+    tr -d '\r' <"$w/tty.out"
+    return $rc
+  else
+    printf '%b' "$typed" | call "${envs:+export $envs;} $code"
+  fi
 }
-out=$(conf "" 0 "$w/dev/sdb\n")
+
+out=$(conf "" "$w/dev/sdb\n" yes)
 rc=$?
-[ $rc -eq 0 ] && ok "retyping the device path confirms" || bad "retype: rc=$rc out=[$out]"
+if [ "$have_tty" = 0 ]; then
+  pass=$((pass + 1))
+else
+  [ $rc -eq 0 ] && ok "retyping the device path on a terminal confirms" || bad "retype: rc=$rc out=[$out]"
+fi
 { echo "$out" | grep -q "Model: ACME Card Reader" && echo "$out" | grep -q "Size:  3.75 GiB" && echo "$out" | grep -q "Bus:   .*usb"; } \
   && ok "the identity shows model, size and bus before the prompt" || bad "identity: out=[$out]"
 
-out=$(conf "" 0 "yes\n")
-rc=$?
-{ [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
-  && ok "'yes' is not accepted: the path must be typed" || bad "yes: rc=$rc out=[$out]"
+vectors="$here/confirm-vectors.tsv"
+vrows=0
+if [ ! -r "$vectors" ]; then
+  bad "confirm-vectors.tsv is missing"
+else
+  while IFS=$'\t' read -r vforce vterm vdry vwant; do
+    case "$vforce" in '' | '#'* | force) continue ;; esac
+    vrows=$((vrows + 1))
+    venv=""
+    case "$vforce" in
+      "<unset>") ;;
+      "<empty>") venv="AVOCADO_PROVISION_FORCE=" ;;
+      *) venv="AVOCADO_PROVISION_FORCE=$vforce" ;;
+    esac
+    [ "$vdry" = yes ] && venv="$venv AVOCADO_PROVISION_DRY_RUN=1"
+    label="vector force=$vforce terminal=$vterm dry_run=$vdry -> $vwant"
+    if [ "$vterm" = yes ] && [ "$have_tty" = 0 ]; then
+      ok "$label (skipped: script(1) missing)"
+      [ "$vwant" = retype ] && pass=$((pass + 1))
+      continue
+    fi
+    out=$(conf "$venv" "$w/dev/sdb\n" "$vterm")
+    rc=$?
+    case "$vwant" in
+      skip)
+        { [ $rc -eq 0 ] && echo "$out" | grep -qx "confirmation skipped: AVOCADO_PROVISION_FORCE=1" && echo "$out" | grep -q "Model:" \
+          && ! echo "$out" | grep -q "Type the device"; } && ok "$label" || bad "$label: rc=$rc out=[$out]"
+        ;;
+      retype)
+        { [ $rc -eq 0 ] && echo "$out" | grep -q "Type the device"; } && ok "$label" || bad "$label: rc=$rc out=[$out]"
+        out=$(conf "$venv" "$w/dev/sdb1\n" yes)
+        rc=$?
+        { [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
+          && ok "$label: a different typed path aborts" || bad "$label wrong path: rc=$rc out=[$out]"
+        ;;
+      refuse)
+        { [ $rc -ne 0 ] && ! echo "$out" | grep -qx "dry run: not asking for confirmation." && ! echo "$out" | grep -q "^confirmation skipped"; } \
+          && ok "$label" || bad "$label: rc=$rc out=[$out]"
+        ;;
+      proceed)
+        { [ $rc -eq 0 ] && ! echo "$out" | grep -q "Type the device"; } && ok "$label" || bad "$label: rc=$rc out=[$out]"
+        ;;
+      *) bad "$label: unknown outcome in vector file" ;;
+    esac
+  done <"$vectors"
+fi
+[ "$vrows" -eq 19 ] && ok "all 19 vector rows were read" || bad "vector rows read: $vrows"
 
-out=$(conf "" 0 "$w/dev/sdb1\n")
+out=$(conf "AVOCADO_PROVISION_FORCE=0" "" no)
 rc=$?
-[ $rc -ne 0 ] && ok "a different path aborts" || bad "wrong path: rc=$rc out=[$out]"
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "no terminal to confirm on"; } \
+  && ok "FORCE=0 without a terminal names the missing terminal" || bad "force=0 msg: rc=$rc out=[$out]"
 
-out=$(conf "" 0 "")
+out=$(conf "" "no terminal\n" no)
 rc=$?
-[ $rc -ne 0 ] && ok "no input aborts instead of proceeding unconfirmed" || bad "eof: rc=$rc out=[$out]"
+{ [ $rc -eq 0 ] && echo "$out" | grep -qx "confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal"; } \
+  && ok "the legacy row prints its skip line and proceeds" || bad "legacy: rc=$rc out=[$out]"
 
-out=$(conf "AVOCADO_PROVISION_FORCE=1" 0 "")
+out=$(conf "AVOCADO_PROVISION_FORCE=bogus" "$w/dev/sdb\n" no)
 rc=$?
-{ [ $rc -eq 0 ] && echo "$out" | grep -q "FORCE=1" && echo "$out" | grep -q "Model:"; } \
-  && ok "AVOCADO_PROVISION_FORCE=1 skips the prompt and still prints the identity" || bad "force: rc=$rc out=[$out]"
+{ [ $rc -ne 0 ] && ! echo "$out" | grep -q "Model:"; } \
+  && ok "an unknown FORCE value refuses before printing the identity" || bad "bogus: rc=$rc out=[$out]"
 
-out=$(conf "AVOCADO_PROVISION_FORCE=0" 0 "")
-rc=$?
-[ $rc -ne 0 ] && ok "AVOCADO_PROVISION_FORCE=0 does not skip the prompt" || bad "force=0: rc=$rc out=[$out]"
+if [ "$have_tty" = 1 ]; then
+  out=$(conf "" "yes\n" yes)
+  rc=$?
+  { [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
+    && ok "'yes' is not accepted: the path must be typed" || bad "yes: rc=$rc out=[$out]"
 
-out=$(conf "" 1 "")
+  out=$(conf "AVOCADO_PROVISION_FORCE=0" "" yes 1)
+  rc=$?
+  { [ $rc -ne 0 ] && echo "$out" | grep -q "did not match"; } \
+    && ok "a device named up front (second argument 1) still has to be retyped" || bad "named wrong: rc=$rc out=[$out]"
+
+  out=$(conf "AVOCADO_PROVISION_FORCE=0" "$w/dev/sdb\n" yes 1)
+  rc=$?
+  { [ $rc -eq 0 ] && echo "$out" | grep -q "Type the device"; } \
+    && ok "a device named up front is confirmed by retyping it" || bad "named right: rc=$rc out=[$out]"
+else
+  pass=$((pass + 3))
+fi
+
+# Identity with no device/vendor or device/model files prints no shell error.
+rm -rf "$w/sys/devices/$USBPATH/sdb/device"
+out=$(call "avocado_safe_disk_identity $w/dev/sdb")
 rc=$?
-{ [ $rc -eq 0 ] && echo "$out" | grep -q "given up front"; } \
-  && ok "a device named up front (unattended run) is not prompted for" || bad "explicit: rc=$rc out=[$out]"
+{ [ $rc -eq 0 ] && ! echo "$out" | grep -qi "no such file" && echo "$out" | grep -q "Model: unknown"; } \
+  && ok "identity without vendor and model files prints Model: unknown and no shell error" || bad "identity missing: rc=$rc out=[$out]"
 
 # --- privileged runner ------------------------------------------------------
 
@@ -603,7 +691,7 @@ else
   [ $? -eq 7 ] && ok "run_with_tty returns the command's exit status" || bad "pty rc: $?"
 fi
 
-N=91
+N=115
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]

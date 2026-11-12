@@ -98,24 +98,36 @@ wrote() { grep -q "^dd if=$w/disk.img of=" "$w/log"; }
 wrote_to() { grep -q "^dd if=$w/disk.img of=$1 bs=4M" "$w/log"; }
 usb() { echo "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0" >"$w/st/idpath-$1"; }
 sata() { echo "pci-0000:00:17.0-ata-1" >"$w/st/idpath-$1"; }
+# shellcheck source=/dev/null # sibling test helper, absent from a standalone lint
+. "$pty_src"
+# trun <typed> [NAME=value ...]: run the script with the keystrokes typed on a real terminal.
+trun() {
+  local typed=$1
+  shift
+  : >"$w/log"
+  PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys/class/block" \
+    AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
+    AVOCADO_SAFE_DISK_EUID=0 \
+    run_with_tty "$typed" env "$@" bash "$w/run/stone-provision-sd.sh"
+}
 
 setup
 usb sdb
-out=$(run "$w/dev/sdb\n")
+out=$(trun "$w/dev/sdb\\n" AVOCADO_PROVISION_FORCE=0)
 rc=$?
 { [ $rc -eq 0 ] && wrote_to "$w/dev/sdb" && echo "$out" | grep -q "SD card written"; } \
-  && ok "a whole USB disk is written after the path is retyped" || bad "pass: rc=$rc out=[$out] log=$(cat "$w/log")"
+  && ok "a whole USB disk is written after the path is retyped on a terminal" || bad "pass: rc=$rc out=[$out] log=$(cat "$w/log")"
 
 setup
 usb sdb
-out=$(run "y\n")
+out=$(trun 'y\n' AVOCADO_PROVISION_FORCE=0)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote; } \
   && ok "y no longer confirms: the path must be typed" || bad "y: rc=$rc out=[$out]"
 
 setup
 usb sdb
-out=$(run "")
+out=$(trun "" AVOCADO_PROVISION_FORCE=0)
 rc=$?
 { [ $rc -ne 0 ] && ! wrote; } \
   && ok "end of input at the prompt aborts" || bad "eof: rc=$rc out=[$out]"
@@ -181,9 +193,9 @@ rc=$?
 
 setup
 usb sdb
-out=$(run "y\n" AVOCADO_SD_DEVICE="$w/dev/sdb")
+out=$(run "y\n" AVOCADO_SD_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=0)
 rc=$?
-{ [ $rc -ne 0 ] && ! wrote; } \
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "no terminal to confirm on"; } \
   && ok "a named device still needs the retype: a piped y does not confirm" || bad "named y: rc=$rc out=[$out]"
 
 setup
