@@ -1,11 +1,12 @@
 """Tests for avocado_tegraflash.confirm and the AVOCADO_PROVISION_FORCE tri-state."""
 
 import sys
+from pathlib import Path
 
 import pytest
 
 from avocado_tegraflash import EngineError, Media
-from avocado_tegraflash.confirm import confirm_device, stdin_is_tty
+from avocado_tegraflash.confirm import confirm_device, decide_confirmation, stdin_is_tty
 from avocado_tegraflash.env import from_environ
 from avocado_tegraflash.usb import UsbDevice
 
@@ -233,3 +234,36 @@ def test_emmc_implied_by_the_env_is_not_listed_twice_for_the_emmc_profile():
 
 def test_without_the_implied_erase_the_prompt_does_not_name_emmc():
     assert "emmc" not in _prompt_for(Media.NVME, device="nvme0n1").splitlines()[0]
+
+
+VECTORS = Path(__file__).resolve().parents[4] / "meta-avocado-distro" / "stone" / "tests" / "confirm-vectors.tsv"
+
+
+def _vector_rows():
+    lines = [ln for ln in VECTORS.read_text().splitlines() if ln and not ln.startswith("#")]
+    header, *rows = [ln.split("\t") for ln in lines]
+    assert header == ["force", "terminal", "dry_run", "outcome"]
+    return rows
+
+
+def test_vectors_dry_run_rows_exist_and_are_not_applicable_to_the_engine():
+    # The engine has no dry-run mode; those rows belong to the shell library test only.
+    dry = [r for r in _vector_rows() if r[2] == "yes"]
+    assert len(dry) == 9
+
+
+def test_engine_agrees_with_every_non_dry_run_vector_row():
+    checked = 0
+    for force, terminal, dry_run, outcome in _vector_rows():
+        if dry_run == "yes":
+            continue
+        raw = {"<unset>": None, "<empty>": ""}.get(force, force)
+        want = "skip" if outcome == "proceed" else outcome
+        try:
+            got = decide_confirmation(raw, terminal == "yes")
+        except EngineError as exc:
+            assert "AVOCADO_PROVISION_FORCE" in str(exc) and repr(force) in str(exc)
+            got = "refuse"
+        assert got == want, f"row force={force} terminal={terminal}: engine {got}, vectors {want}"
+        checked += 1
+    assert checked == 10

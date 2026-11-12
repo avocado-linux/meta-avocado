@@ -16,6 +16,21 @@ def stdin_is_tty() -> bool:
         return False
 
 
+def decide_confirmation(force_raw: str | None, terminal: bool) -> str:
+    """Return skip, retype or refuse for the raw AVOCADO_PROVISION_FORCE text and terminal state.
+
+    Mirrors meta-avocado-distro/stone/tests/confirm-vectors.tsv (dry run aside). Unset or empty
+    with no terminal is "skip": the engine proceeds without asking, logging a note.
+    """
+    if force_raw == "1":
+        return "skip"
+    if force_raw == "0":
+        return "retype" if terminal else "refuse"
+    if force_raw is None or force_raw == "":
+        return "retype" if terminal else "skip"
+    raise EngineError(f"AVOCADO_PROVISION_FORCE must be 1, 0 or unset, not {force_raw!r}")
+
+
 def confirm_device(
     board: UsbDevice,
     media: Media,
@@ -33,13 +48,14 @@ def confirm_device(
     force True skips the prompt; False always requires a terminal; None prompts on a terminal
     and otherwise proceeds with a logged note, so unattended runs without the signal still work.
     """
-    if force is True:
+    raw = "" if force is None else ("1" if force else "0")
+    decision = decide_confirmation(raw, isatty())
+    if decision == "skip":
+        if force is None:
+            log("device confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal")
         return
-    if not isatty():
-        if force is False:
-            raise EngineError("AVOCADO_PROVISION_FORCE=0 requires confirmation but there is no terminal to confirm on")
-        log("device confirmation skipped: no terminal and no AVOCADO_PROVISION_FORCE signal")
-        return
+    if decision == "refuse":
+        raise EngineError("AVOCADO_PROVISION_FORCE=0 requires confirmation but there is no terminal to confirm on")
     expected = f"{board.bus}:{board.device}"
     # The flags, not the profile alone, decide what the flash erases: ERASE_NVME
     # and ERASE_EMMC from the environment add media the operator did not pick.
