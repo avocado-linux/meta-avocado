@@ -31,6 +31,11 @@ for tool in findmnt lsblk blockdev; do
     }
 done
 
+# Wrong-disk guards shared with the other sd and usb profiles. Shipped beside
+# this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/avocado-safe-disk.sh"
+
 MANIFEST="$AVOCADO_STONE_MANIFEST"
 # Never read below, but the assignment is load-bearing under `set -u`: it aborts
 # the script here if stone did not export AVOCADO_STONE_DATA_DIR, rather than
@@ -194,6 +199,9 @@ fi
 # whole block device too, but writing a disk image over it destroys a volume.
 target_type=$(lsblk -dno TYPE "$target_device" 2>/dev/null) || target_type=
 [ "$target_type" = "disk" ] || die "${target_device} is a ${target_type:-unknown} device, not a disk"
+# The listing above trusts the kernel removable flag; a typed path does not get
+# that benefit. USB or MMC bus only, taken from udev rather than the flag.
+avocado_safe_disk_bus "$target_device" || exit 1
 
 # =============================================================================
 # Step 4: Safety checks
@@ -223,14 +231,13 @@ echo ""
 echo "Image to write: ${IMAGE_NAME} (${IMAGE_SIZE})"
 echo ""
 
-if [ -z "${AVOCADO_PROVISION_DEVICE:-}" ]; then
-  read -p "Are you sure you want to continue? Type 'yes' to confirm: " -r confirmation 2>&1
-
-  if [ "$confirmation" != "yes" ]; then
-    echo "Operation cancelled."
-    exit 1
-  fi
+# Retype of the device path. A device given through AVOCADO_PROVISION_DEVICE is
+# an unattended run and is not asked; so is AVOCADO_PROVISION_FORCE=1.
+explicit_device=0
+if [ -n "${AVOCADO_PROVISION_DEVICE:-}" ]; then
+  explicit_device=1
 fi
+avocado_safe_disk_confirm "$target_device" "$explicit_device" || exit 1
 
 # =============================================================================
 # Step 5: Unmount any existing partitions
@@ -256,6 +263,9 @@ while read -r part mnt; do
 done <<EOF
 $mounted
 EOF
+
+# Whatever is still mounted now was not unmounted above; never write under it.
+avocado_safe_disk_unmounted "$target_device" || exit 1
 
 # lsblk sees only this mount namespace. Inside the SDK container a partition
 # the host has mounted looks free; the kernel still refuses to re-read the

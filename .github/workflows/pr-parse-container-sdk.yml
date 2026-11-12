@@ -195,6 +195,15 @@ jobs:
       - name: stm32mp25-dk stone sd provisioning guards
         shell: bash
         run: bash meta-avocado-stm/stone/stm32mp25-dk/tests/test-stone-provision-sd-safe-disk.sh
+      - name: arm64 and x86-64 stone usb provisioning guards
+        shell: bash
+        run: |
+          t=meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-usb.sh
+          bash "$t"
+          bash "$t" meta-avocado-arm64/stone/arm64-uefi-v9/stone-provision-usb.sh
+          for v in v2 v3 v4; do
+            bash "$t" "meta-avocado-x86-64/stone/intel-x86-64-$v/stone-provision-usb.sh"
+          done
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh

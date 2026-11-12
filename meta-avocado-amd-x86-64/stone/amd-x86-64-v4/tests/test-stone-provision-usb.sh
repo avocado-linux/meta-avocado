@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # Host test for stone-provision-usb.sh: the target checks that stand between a
 # typed device path and a raw dd. Everything that touches a disk is a stub
-# (lsblk, findmnt, blockdev, umount, dd), sysfs is a fake tree, and the "disks"
-# are regular files under a temp dir, so a stub that fails to intercept writes
-# into that dir and nowhere else. Pass another copy of the script (the Intel
-# x86-64 siblings share it) as $1 to run the same cases against it.
+# (lsblk, findmnt, blockdev, umount, dd, udevadm, stat), sysfs is a fake tree,
+# and the "disks" are regular files under a temp dir, so a stub that fails to
+# intercept writes into that dir and nowhere else. Pass another copy of the
+# script (the arm64 and Intel x86-64 siblings share it) as $1 to run the same
+# cases against it. The script is copied next to the shared avocado-safe-disk.sh
+# before it runs, as stone bundle lays them out.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
-script=${1:-$here/../stone-provision-usb.sh}
+script_src=$(readlink -f "${1:-$here/../stone-provision-usb.sh}")
+lib_src=$(readlink -f "$here/../../../../meta-avocado-distro/stone/avocado-safe-disk.sh")
+real_stat=$(command -v stat)
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
+script=$w/run/stone-provision-usb.sh
 pass=0
 fail=0
 ok() {
@@ -24,33 +29,62 @@ bad() {
 
 IMG_BYTES=$((64 * 1048576))
 
+# A disk lives at sysdev/<path>/<name> with its class/block entry (sys/<name>) a
+# symlink to it, as the kernel lays it out; partitions nest under the disk.
+mkdisk() { # name path
+  mkdir -p "$w/sysdev/$2/$1"
+  ln -s "../sysdev/$2/$1" "$w/sys/$1"
+  : >"$w/dev/$1"
+  echo 1000000 >"$w/sys/$1/size"
+  echo 0 >"$w/sys/$1/removable"
+}
+mkpart() { # disk path partition
+  mkdir -p "$w/sysdev/$2/$1/$3"
+  ln -s "../sysdev/$2/$1/$3" "$w/sys/$3"
+  echo 1 >"$w/sys/$3/partition"
+  : >"$w/dev/$3"
+}
+
 setup() {
-  rm -rf "${w:?}/dev" "${w:?}/sys" "${w:?}/build" "${w:?}/st"
-  mkdir -p "$w/dev/disk/by-id" "$w/dev/mapper" "$w/sys" "$w/build" "$w/st"
+  rm -rf "${w:?}/dev" "${w:?}/sys" "${w:?}/sysdev" "${w:?}/build" "${w:?}/st" "${w:?}/run"
+  mkdir -p "$w/dev/disk/by-id" "$w/dev/mapper" "$w/sys" "$w/build" "$w/st" "$w/run"
+  cp "$script_src" "$script"
+  cp "$lib_src" "$w/run/avocado-safe-disk.sh"
   printf '{"runtime":{"platform":"avocado-amd-x86-64-v4"}}' >"$w/manifest.json"
   truncate -s "$IMG_BYTES" "$w/build/avocado-os-avocado-amd-x86-64-v4.img"
   # sda: the host's own disk (root on sda2). sdb: a USB stick. nvme0n1: a
   # second internal disk.
-  for d in sda sdb nvme0n1; do
-    mkdir -p "$w/sys/$d"
-    : >"$w/dev/$d"
-    echo 1000000 >"$w/sys/$d/size"
-    echo 0 >"$w/sys/$d/removable"
-  done
+  mkdisk sda pci/ata
+  mkdisk sdb pci/usb1
+  mkdisk nvme0n1 pci/nvme
   echo 1 >"$w/sys/sdb/removable"
-  for p in sda1 sda2 sdb1 nvme0n1p1; do
-    mkdir -p "$w/sys/$p"
-    echo 1 >"$w/sys/$p/partition"
-    : >"$w/dev/$p"
-  done
+  for p in sda1 sda2; do mkpart sda pci/ata "$p"; done
+  mkpart sdb pci/usb1 sdb1
+  mkpart nvme0n1 pci/nvme nvme0n1p1
   ln -s ../../sda "$w/dev/disk/by-id/ata-HOST-DISK"
+  echo "pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0" >"$w/st/idpath-sdb"
   echo "$w/dev/sda2" >"$w/st/rootsrc"
   printf 'sda2 part\nsda disk\n' >"$w/st/lsblk-root"
   echo $((256 * 1048576)) >"$w/st/size"
   : >"$w/st/mounts"
+  : >"$w/st/swaps"
   : >"$w/st/umount-fail"
 }
 
+mkdir -p "$w/bin"
+cat >"$w/bin/stat" <<S
+#!/bin/bash
+if [ "\$1" = -Lc ] && [ "\$2" = %F ]; then
+  f=\$(readlink -f -- "\$4")
+  case "\$f" in $w/dev/*) [ -f "\$f" ] && { echo "block special file"; exit 0; } ;; esac
+fi
+exec $real_stat "\$@"
+S
+cat >"$w/bin/udevadm" <<S
+#!/bin/bash
+cat "$w/st/idpath-\$(basename "\$(readlink -f -- "\${@: -1}")")" 2>/dev/null
+exit 0
+S
 mkdir -p "$w/bin"
 cat >"$w/bin/findmnt" <<S
 #!/bin/bash
@@ -92,6 +126,7 @@ cat >"$w/bin/umount" <<S
 echo "umount \$*" >> "$w/log"
 dev=\${@: -1}
 grep -qx "\$dev" "$w/st/umount-fail" && exit 32
+[ -e "$w/st/umount-noop" ] && exit 0
 grep -v "^\$dev " "$w/st/mounts" > "$w/st/m.tmp"; mv "$w/st/m.tmp" "$w/st/mounts"
 S
 cat >"$w/bin/swapoff" <<S
@@ -109,10 +144,13 @@ cat >"$w/bin/sync" <<S
 S
 chmod +x "$w/bin/"*
 
-# $1 = what the operator types as the target. Confirmation is always "yes".
+# $1 = what the operator types as the target. The confirmation retypes the
+# resolved path unless T_CONFIRM says otherwise.
 run() {
+  local confirm=${T_CONFIRM:-$(readlink -f -- "$1")}
   : >"$w/log"
-  printf '%s\nyes\n' "$1" | PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+  printf '%s\n%s\n' "$1" "$confirm" | PATH="$w/bin:$PATH" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+    AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
     AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
     bash "$script" 2>&1
 }
@@ -292,6 +330,69 @@ out=$(run "$w/dev/sda")
 rc=$?
 { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -qi "mounted from"; } \
   && ok "an unreadable / source fails closed" || bad "findmnt failure: rc=$rc out=[$out]"
+
+# 20. A disk on a non-USB, non-MMC bus is refused whatever the kernel's removable
+#     flag says, before anything is unmounted.
+setup
+echo "pci-0000:00:17.0-ata-3" >"$w/st/idpath-sdb"
+echo "$w/dev/sdb1 /media/stick" >"$w/st/mounts"
+out=$(run "$w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && ! wrote && ! grep -q '^umount' "$w/log" && echo "$out" | grep -q "not a USB or MMC bus"; } \
+  && ok "a SATA disk flagged removable is refused before any unmount or write" || bad "bus: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+# 21. The confirmation is the device path typed again, not 'yes'.
+setup
+out=$(T_CONFIRM=yes run "$w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "did not match"; } \
+  && ok "'yes' no longer confirms the write" || bad "yes: rc=$rc out=[$out]"
+
+# 22. A different path at the confirmation aborts.
+setup
+out=$(T_CONFIRM="$w/dev/sda" run "$w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && ! wrote; } \
+  && ok "a mismatched retype aborts before any write" || bad "mismatch: rc=$rc out=[$out]"
+
+# 23. AVOCADO_PROVISION_FORCE=1 skips the confirmation; the checks still ran.
+setup
+: >"$w/log"
+out=$(printf '%s\n' "$w/dev/sdb" | PATH="$w/bin:$PATH" AVOCADO_PROVISION_FORCE=1 AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+  AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
+  AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
+  bash "$script" 2>&1)
+rc=$?
+{ [ $rc -eq 0 ] && wrote && echo "$out" | grep -q "FORCE=1"; } \
+  && ok "AVOCADO_PROVISION_FORCE=1 writes with only the target typed" || bad "force: rc=$rc out=[$out]"
+
+# 24. AVOCADO_PROVISION_DEVICE is the unattended form: no prompt at all, stdin
+#     closed, and the write happens.
+#     Only the arm64 script reads the variable; the x86-64 scripts are always
+#     interactive, so the case is skipped for them rather than invented.
+expected=24
+if grep -q AVOCADO_PROVISION_DEVICE "$script_src"; then
+  expected=25
+  setup
+  : >"$w/log"
+  out=$(PATH="$w/bin:$PATH" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_SYSBLOCK="$w/sys" \
+    AVOCADO_SAFE_DISK_MOUNTS="$w/st/mounts" AVOCADO_SAFE_DISK_SWAPS="$w/st/swaps" AVOCADO_SAFE_DISK_DEVDIR="$w/dev" \
+    AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_DATA_DIR="$w" AVOCADO_STONE_BUILD_DIR="$w/build" \
+    bash "$script" 2>&1 </dev/null)
+  rc=$?
+  { [ $rc -eq 0 ] && wrote; } \
+    && ok "a device given through AVOCADO_PROVISION_DEVICE is written without a prompt" || bad "unattended: rc=$rc out=[$out]"
+fi
+
+# 25. A partition that is still mounted after the unmount step is not written under.
+setup
+echo "$w/dev/sdb1 /media/stick" >"$w/st/mounts"
+: >"$w/st/umount-noop"
+out=$(run "$w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "mounted or in use"; } \
+  && ok "a partition still mounted after the unmount step stops the run" || bad "still mounted: rc=$rc out=[$out]"
+
 echo
-echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/19 run)"
-[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq 19 ]
+echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$expected run)"
+[ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$expected" ]
