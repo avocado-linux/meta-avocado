@@ -19,11 +19,13 @@
 # shared arm64-uefi-v9 feed. systemd-bootconf keeps its name and version but
 # carries the console argument, and an ACPI machine would pick it up.
 #
-# SERIAL_CONSOLES is assigned weakly in the arm64 UEFI machine
-# (avocado-arm64-uefi.inc), so this local.conf value wins.
+# The value is set for the arm64-uefi machine override only, so chaining this
+# overlay onto another machine (a Raspberry Pi, a Qualcomm board) leaves that
+# machine's own SERIAL_CONSOLES alone. On an arm64-uefi machine it wins over
+# the machine's default, weak or not.
 header:
   version: 16
 
 local_conf_header:
   feature/pl011-console: |
-    SERIAL_CONSOLES = "115200;ttyAMA0"
+    SERIAL_CONSOLES:arm64-uefi = "115200;ttyAMA0"

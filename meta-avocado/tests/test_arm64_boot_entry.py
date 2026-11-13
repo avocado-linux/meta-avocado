@@ -276,7 +276,10 @@ class Pl011ConsoleOverlay(unittest.TestCase):
     def test_overlay_assigns_only_serial_consoles(self):
         text = self.OVERLAY.read_text()
         assigned = re.findall(r"^\s*([A-Za-z_][\w:.-]*)\s*(?:\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)\s*(.*)$", text, re.M)
-        self.assertEqual(assigned, [("SERIAL_CONSOLES", '"115200;ttyAMA0"')])
+        # Scoped to the arm64-uefi override so the overlay is a no-op on any
+        # other machine it is chained onto (BitBake's conf parser keeps the
+        # other machine's own default, checked by hand).
+        self.assertEqual(assigned, [("SERIAL_CONSOLES:arm64-uefi", '"115200;ttyAMA0"')])
 
     def test_overlay_is_not_referenced_by_any_other_kas_file(self):
         for path in sorted(self.KAS.rglob("*")):
