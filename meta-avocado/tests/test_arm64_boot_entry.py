@@ -11,9 +11,9 @@ to the options line.
 
 BitBake cannot run in CI, so two things are pinned structurally rather than
 executed: the arm64-uefi install and deploy steps both call the function with
-"${SERIAL_CONSOLES}", and the machine include assigns SERIAL_CONSOLES weakly,
-because BitBake parses local.conf before the machine file and a hard assignment
-there would silently overwrite a kas overlay's value.
+"${SERIAL_CONSOLES}", and the machine include assigns SERIAL_CONSOLES once,
+empty. The overlay sets the arm64-uefi override, which wins over that
+assignment wherever it is parsed.
 
 Run with:
     python3 -m unittest discover -s meta-avocado/tests
@@ -250,8 +250,8 @@ class FunctionSource(unittest.TestCase):
         self.assertRegex(body, r"(?m)^\s*chmod 0644 \$\{D\}/boot/loader/entries/avocado\.conf\s*$")
 
 
-class WeakDefault(unittest.TestCase):
-    def test_include_assigns_serial_consoles_once_weakly_and_empty(self):
+class MachineDefault(unittest.TestCase):
+    def test_include_assigns_serial_consoles_once_and_empty(self):
         hits = []
         for path in sorted(ARM64.rglob("*")):
             if path.is_file() and path.suffix in {".conf", ".inc", ".bb", ".bbappend", ".bbclass"}:
@@ -260,7 +260,7 @@ class WeakDefault(unittest.TestCase):
                     hits.append((path.relative_to(ARM64).as_posix(), line))
         self.assertEqual(
             hits,
-            [("conf/machine/include/avocado-arm64-uefi.inc", 'SERIAL_CONSOLES ?= ""')],
+            [("conf/machine/include/avocado-arm64-uefi.inc", 'SERIAL_CONSOLES = ""')],
         )
 
     def test_v9_machine_does_not_assign_serial_consoles(self):

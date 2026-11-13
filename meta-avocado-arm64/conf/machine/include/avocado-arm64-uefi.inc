@@ -16,11 +16,10 @@ KERNEL_IMAGETYPE = "Image"
 # The boot entry's kernel console also follows this variable: each <baud>;<tty>
 # entry adds console=<tty>,<baud>n8 to its options line, for device-tree
 # platforms, where the entry's console=tty0 keeps the kernel from using the
-# stdout-path UART. A kas overlay can set it in local.conf.
-# Keep the default weak: BitBake parses local.conf before the machine file, so
-# a hard assignment here would silently overwrite a plain SERIAL_CONSOLES set in
-# local.conf. The kas overlay sets the arm64-uefi override and wins either way.
-SERIAL_CONSOLES ?= ""
+# stdout-path UART. A kas overlay sets the arm64-uefi override in local.conf,
+# which wins over this assignment. A plain SERIAL_CONSOLES in local.conf does
+# not: BitBake parses local.conf before the machine file, so this one overwrites it.
+SERIAL_CONSOLES = ""
 
 MACHINE_FEATURES += "efi pci"
 
