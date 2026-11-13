@@ -213,5 +213,28 @@ class WeakDefault(unittest.TestCase):
         self.assertIsNone(ASSIGN.search(MACHINE.read_text()))
 
 
+class Pl011ConsoleOverlay(unittest.TestCase):
+    """kas/feature/pl011-console.yml opts a device-tree platform into a PL011 console."""
+
+    KAS = ROOT / "kas"
+    OVERLAY = KAS / "feature" / "pl011-console.yml"
+
+    def test_overlay_assigns_only_serial_consoles(self):
+        text = self.OVERLAY.read_text()
+        assigned = re.findall(r"^\s*([A-Za-z_][\w:.-]*)\s*(?:\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)\s*(.*)$", text, re.M)
+        self.assertEqual(assigned, [("SERIAL_CONSOLES", '"115200;ttyAMA0"')])
+
+    def test_overlay_is_not_referenced_by_any_other_kas_file(self):
+        for path in sorted(self.KAS.rglob("*")):
+            if path.is_file() and path != self.OVERLAY:
+                self.assertNotIn("pl011-console", path.read_text(), path.relative_to(self.KAS).as_posix())
+
+    def test_header_names_pl011_and_a_build_command_including_the_overlay(self):
+        header = [ln for ln in self.OVERLAY.read_text().splitlines() if ln.startswith("#")]
+        text = "\n".join(header)
+        self.assertIn("PL011", text)
+        self.assertRegex(text, r"bakar build \S*kas/machine/\S+\.yml:\S*kas/feature/pl011-console\.yml")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,19 @@
+# Put the console on a PL011 UART (ttyAMA0) for a device-tree platform.
+#
+#   bakar build meta-avocado/kas/machine/arm64-uefi-v9.yml:meta-avocado/kas/feature/pl011-console.yml
+#
+# For a device-tree platform whose console is a PL011 UART, such as a virtual
+# platform that models Arm Zena CSS, where the kernel takes no console from an
+# ACPI SPCR table. This adds `console=ttyAMA0,115200n8` to the boot entry.
+#
+# Opt-in because ACPI machines get their console from SPCR, and a getty on a
+# tty that is absent holds boot for 90 seconds. It also gives the image a
+# `serial-getty` unit for ttyAMA0, because that is what SERIAL_CONSOLES does in
+# OpenEmbedded. SERIAL_CONSOLES is assigned weakly in the arm64 UEFI machine
+# (avocado-arm64-uefi.inc), so this local.conf value wins.
+header:
+  version: 16
+
+local_conf_header:
+  feature/pl011-console: |
+    SERIAL_CONSOLES = "115200;ttyAMA0"
