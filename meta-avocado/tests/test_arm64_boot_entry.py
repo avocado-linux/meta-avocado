@@ -82,6 +82,7 @@ class BootEntryFunction(unittest.TestCase):
                 stderr=err,
                 timeout=30,
                 start_new_session=True,
+                cwd=self.tmp,
             )
         return proc.returncode, out, log.read_text()
 
@@ -119,13 +120,60 @@ class BootEntryFunction(unittest.TestCase):
         )
 
     def test_malformed_entry_fails_names_it_and_leaves_no_output(self):
-        for bad in ["ttyAMA0", "115200;", ";ttyAMA0", "ttyAMA0;115200", "11a200;ttyS0", "115200;/dev/ttyAMA0"]:
+        bad_entries = [
+            "ttyAMA0",  # no semicolon: cut returns the whole entry as the tty
+            "115200",  # no semicolon: the same, with a numeric whole entry
+            "115200;",
+            ";ttyAMA0",
+            "ttyAMA0;115200",  # swapped
+            "11a200;ttyS0",
+            "0;ttyAMA0",
+            "000;ttyAMA0",
+            "115200;/dev/ttyAMA0",
+            '115200;tty"',  # an unmatched quote swallows the rest of the command line
+            "115200;ttyAMA0,x",
+            "115200;tty=1",
+            "115200;..",
+            "115200;tty*",
+        ]
+        for i, bad in enumerate(bad_entries):
             with self.subTest(entry=bad):
-                out = self.tmp / ("bad-%d.conf" % len(bad))
+                out = self.tmp / ("bad-%d.conf" % i)
                 rc, out, err = self.run_func("9600;ttyS1 " + bad, out=out)
                 self.assertNotEqual(rc, 0)
                 self.assertIn(bad, err)
                 self.assertFalse(out.exists())
+
+    def test_glob_characters_never_expand_against_the_cwd(self):
+        # The task's working directory is not under the recipe's control: a
+        # file there must not turn a glob in the list into a tty name.
+        (self.tmp / "115200;ttyX1").write_text("")
+        rc, out, err = self.run_func("115200;tty*")
+        self.assertNotEqual(rc, 0, err)
+        self.assertFalse(out.exists())
+
+    def test_entry_without_an_options_line_fails_when_a_console_is_set(self):
+        sources = {
+            "no-options": b"title X\nlinux /Image\n",
+            "empty": b"",
+            "tab-separated": b"title X\noptions\troot=/dev/vda ro\n",
+        }
+        for name, content in sources.items():
+            with self.subTest(source=name):
+                src = self.tmp / (name + ".conf")
+                src.write_bytes(content)
+                out = self.tmp / (name + "-out.conf")
+                rc, out, err = self.run_func("115200;ttyAMA0", src=src, out=out)
+                self.assertNotEqual(rc, 0)
+                self.assertIn("options", err)
+                self.assertFalse(out.exists())
+
+    def test_empty_list_copies_an_entry_that_has_no_options_line(self):
+        src = self.tmp / "no-options.conf"
+        src.write_bytes(b"title X\nlinux /Image\n")
+        rc, out, err = self.run_func("", src=src)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out.read_bytes(), src.read_bytes())
 
     def test_shipped_file_is_never_written(self):
         before = SHIPPED.read_bytes()

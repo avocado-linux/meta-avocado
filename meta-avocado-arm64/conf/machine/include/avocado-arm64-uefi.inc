@@ -15,7 +15,8 @@ KERNEL_IMAGETYPE = "Image"
 #
 # The boot entry's kernel console also follows this variable: each <baud>;<tty>
 # entry adds console=<tty>,<baud>n8 to its options line, for device-tree
-# platforms that have no SPCR table. A kas overlay can set it in local.conf.
+# platforms, where the entry's console=tty0 keeps the kernel from using the
+# stdout-path UART. A kas overlay can set it in local.conf.
 # Keep the default weak: BitBake parses local.conf before the machine file, so
 # a hard assignment here would silently overwrite the overlay's value.
 SERIAL_CONSOLES ?= ""
