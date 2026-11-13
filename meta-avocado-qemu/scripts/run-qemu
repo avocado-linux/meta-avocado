@@ -1,0 +1,573 @@
+#!/usr/bin/env bash
+# Boot a provisioned Avocado image under QEMU for one of the supported machines.
+#
+# Usage: run-qemu <machine> [--tpm] [--image PATH] [--dry-run]
+#
+# Run it from the machine's kas work directory (the one holding build/tmp).
+# --image replaces the image lookup only: boot firmware is still found under the
+# work directory, so from any other directory the machine's override must name
+# it (RUN_QEMU_UBOOT_ROM for qemux86-64, RUN_QEMU_FLASH_BIN for qemuarm64).
+# --dry-run prints what the runner resolved and starts nothing.
+# A signal sent to the runner is forwarded to QEMU; a QEMU that ignores the
+# forwarded signal is killed after 5 seconds.
+set -euo pipefail
+
+PROG=run-qemu
+SUPPORTED_MACHINES=(qemux86-64 qemuarm64)
+
+MACHINE=""
+TPM=0
+IMAGE=""
+DRY_RUN=0
+RESIZE_MIB=0
+TPM_DIR=""
+TPM_SOCK=""
+TPM_SOCK_DIR=""
+TPM_PIDFILE=""
+TPM_TMP=0
+TPM_SOCK_TMP=0
+TPM_STARTED=0
+TPM_PID=""
+QEMU_PID=""
+TPM_SOCK_MAX=100
+
+die() {
+  local rc=$1
+  shift
+  printf '%s: %s\n' "$PROG" "$*" >&2
+  exit "$rc"
+}
+
+usage() {
+  {
+    echo "usage: $PROG <machine> [--tpm] [--image PATH] [--dry-run]"
+    echo "supported machines: ${SUPPORTED_MACHINES[*]}"
+    echo "--image PATH replaces the image lookup only; outside a work directory the"
+    echo "  machine's firmware variable below must name the boot firmware"
+    echo "environment: RUN_QEMU_FLASH_BIN=PATH  TF-A flash image for qemuarm64"
+    echo "  (default: build/tmp/deploy/stone/flash.bin, then .../stone/_build/flash.bin)"
+    echo "  RUN_QEMU_UBOOT_ROM=PATH  U-Boot image for qemux86-64"
+    echo "  (default: build/tmp/deploy/stone/u-boot.rom, then .../stone/_build/u-boot.rom)"
+    echo "  RUN_QEMU_TPM_SOCK_DIR=DIR  directory for the swtpm control socket with --tpm"
+    echo "  RUN_QEMU_TPM_WAIT_SECONDS=N  seconds to wait for that socket (default 10)"
+    echo "a signal sent to the runner is forwarded to QEMU; a QEMU that ignores the"
+    echo "  forwarded signal is killed after 5 seconds"
+  } >&2
+}
+
+is_supported() {
+  local m
+  for m in "${SUPPORTED_MACHINES[@]}"; do
+    [ "$m" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# Image names the stone scripts use, in the order the runner prefers them:
+# named after the platform, after the machine, then the bare root disk.
+image_candidates() {
+  local m=$1
+  echo "avocado-os-avocado-$m.img"
+  echo "avocado-os-$m.img"
+  echo "avocado-$m-rootdisk.img"
+}
+
+parse_args() {
+  local positional=()
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --tpm) TPM=1 ;;
+      --dry-run) DRY_RUN=1 ;;
+      --image)
+        [ $# -ge 2 ] || {
+          usage
+          die 2 "--image needs a path"
+        }
+        [ -n "$2" ] || {
+          usage
+          die 2 "--image needs a non-empty path"
+        }
+        IMAGE=$2
+        shift
+        ;;
+      -*)
+        usage
+        die 2 "unknown option '$1'"
+        ;;
+      *) positional+=("$1") ;;
+    esac
+    shift
+  done
+
+  MACHINE=${positional[0]:-}
+  if [ ${#positional[@]} -gt 1 ]; then
+    usage
+    die 2 "unexpected argument '${positional[1]}'"
+  fi
+  if ! is_supported "$MACHINE"; then
+    usage
+    die 2 "unsupported machine '$MACHINE' (supported: ${SUPPORTED_MACHINES[*]})"
+  fi
+  if [ "$TPM" -eq 1 ] && [ "$MACHINE" != qemux86-64 ]; then
+    die 2 "--tpm is only supported for qemux86-64"
+  fi
+}
+
+# Sets IMAGE from --image or from the work directory's stone deploy output.
+resolve_image() {
+  if [ -n "$IMAGE" ]; then
+    [ -f "$IMAGE" ] || die 1 "image not found: $IMAGE"
+    return
+  fi
+
+  local tmpdir deploy name
+  tmpdir="$PWD/build/tmp"
+  [ -d "$tmpdir" ] || die 1 "no build output at $tmpdir; run from the machine's kas work directory or pass --image"
+  deploy="$tmpdir/deploy/stone/_build"
+  while read -r name; do
+    if [ -f "$deploy/$name" ]; then
+      IMAGE="$deploy/$name"
+      return
+    fi
+  done < <(image_candidates "$MACHINE")
+  die 1 "no image for $MACHINE in $deploy; tried: $(image_candidates "$MACHINE" | paste -sd' ')"
+}
+
+# Sets RESIZE_MIB to the size the image must grow to, or 0 for none. Both
+# machines boot an SD card, so an image under 1024 MiB grows to 1024 MiB and
+# any other size pads up to the next power-of-two MiB, which QEMU insists on.
+# Never shrinks.
+plan_resize() {
+  local bytes mib p=1024
+  # -L: a symlinked image is measured at its target, not at the link's few bytes.
+  bytes=$(stat -L -c %s "$IMAGE")
+  mib=$(((bytes + 1048575) / 1048576))
+  while [ "$p" -lt "$mib" ]; do p=$((p * 2)); done
+  mib=$p
+  if [ $((mib * 1048576)) -le "$bytes" ]; then
+    mib=0
+  fi
+  RESIZE_MIB=$mib
+}
+
+# QEMU system binary for the machine.
+qemu_binary() {
+  case $MACHINE in
+    qemux86-64) echo qemu-system-x86_64 ;;
+    *) echo qemu-system-aarch64 ;;
+  esac
+}
+
+# Sets NATIVE_PREFIX to the command words that run a BitBake native binary: the
+# uninative glibc loader with every native sysroot lib dir on its library path.
+native_prefix() {
+  local comps uninative libs
+  comps="$PWD/build/tmp/sysroots-components/x86_64"
+  uninative="$PWD/build/tmp/sysroots-uninative/x86_64-linux/lib"
+  [ -x "$uninative/ld-linux-x86-64.so.2" ] || die 1 "native $1 needs the uninative loader, but $uninative/ld-linux-x86-64.so.2 is missing"
+  # find exits non-zero on one unreadable directory; the readable lib dirs still count.
+  libs=$({ find "$comps" -maxdepth 3 -name lib -type d 2>/dev/null || true; } | sort | paste -sd: -)
+  NATIVE_PREFIX=("$uninative/ld-linux-x86-64.so.2" --library-path "$uninative${libs:+:$libs}")
+}
+
+# Sets QEMU_BIN, QEMU_IMG, QEMU_DATA_DIR and QEMU_PREFIX (the command words that
+# launch a tool). QEMU_DATA_DIR is the data dir of BitBake's native QEMU and is
+# read only when that QEMU runs.
+# BitBake's native QEMU is an ELF bound to the uninative glibc, so it runs
+# through that loader with every native sysroot lib dir on its library path.
+# Without a native build the host's QEMU from PATH is used as is.
+resolve_qemu() {
+  local bin comps native
+  bin=$(qemu_binary)
+  comps="$PWD/build/tmp/sysroots-components/x86_64"
+  native="$comps/qemu-system-native/usr/bin"
+  QEMU_PREFIX=()
+  if [ -e "$native/$bin" ]; then
+    native_prefix "QEMU at $native/$bin"
+    QEMU_PREFIX=("${NATIVE_PREFIX[@]}")
+    QEMU_BIN="$native/$bin"
+    QEMU_IMG="$native/qemu-img"
+    QEMU_DATA_DIR="$comps/qemu-system-native/usr/share/qemu"
+  elif QEMU_BIN=$(command -v "$bin") && QEMU_IMG=$(command -v qemu-img); then
+    :
+  else
+    die 1 "no $bin at $native/$bin and none on PATH ($bin, qemu-img; PATH=$PATH)"
+  fi
+}
+
+# Sets BOOT_FW, the boot firmware image the machine starts QEMU with -bios:
+# flash.bin (TF-A) for qemuarm64, u-boot.rom for qemux86-64. The machine's
+# override variable wins; else build/tmp/deploy/stone, then the older
+# build/tmp/deploy/stone/_build, relative to $PWD. A missing image fails here,
+# not inside QEMU.
+find_boot_firmware() {
+  local name var override c searched=()
+  case $MACHINE in
+    qemuarm64)
+      name=flash.bin
+      var=RUN_QEMU_FLASH_BIN
+      ;;
+    *)
+      name=u-boot.rom
+      var=RUN_QEMU_UBOOT_ROM
+      ;;
+  esac
+  override=${!var:-}
+  if [ -n "$override" ]; then
+    [ -f "$override" ] || die 1 "$var names a file that does not exist: $override"
+    BOOT_FW=$override
+    return 0
+  fi
+  for c in "$PWD/build/tmp/deploy/stone/$name" "$PWD/build/tmp/deploy/stone/_build/$name"; do
+    if [ -f "$c" ]; then
+      BOOT_FW=$c
+      return 0
+    fi
+    searched+=("$c")
+  done
+  die 1 "no $name for $MACHINE; searched: ${searched[0]}; ${searched[1]} (or set $var)"
+}
+
+# QEMU splits an option on commas and reads ",," as a literal comma, so a path
+# carries its commas doubled or it can add options of its own.
+qpath() { printf '%s' "${1//,/,,}"; }
+
+# Sets TPM_DIR, TPM_SOCK and TPM_PIDFILE. The state lives under build/tmp when
+# the work directory has one, else in a temp dir removed on exit. The control
+# socket is kept apart from it, in RUN_QEMU_TPM_SOCK_DIR or a private temp dir
+# removed on exit, because an AF_UNIX path holds about 107 bytes and a kas work
+# directory alone can exceed that. A dry run creates nothing, so it names a
+# placeholder instead of making a temp dir.
+plan_tpm() {
+  if [ -d "$PWD/build/tmp" ]; then
+    TPM_DIR="$PWD/build/tmp/tpm-state"
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    TPM_DIR="${TMPDIR:-/tmp}/run-qemu-tpm.XXXXXX"
+  else
+    TPM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/run-qemu-tpm.XXXXXX") || die 1 "cannot create a TPM state directory"
+    TPM_TMP=1
+  fi
+  TPM_PIDFILE="$TPM_DIR/swtpm.pid"
+
+  if [ -n "${RUN_QEMU_TPM_SOCK_DIR:-}" ]; then
+    TPM_SOCK_DIR=$RUN_QEMU_TPM_SOCK_DIR
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    TPM_SOCK_DIR="${TMPDIR:-/tmp}/run-qemu-tpmsock.XXXXXX"
+  else
+    TPM_SOCK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/run-qemu-tpmsock.XXXXXX") || die 1 "cannot create a TPM socket directory"
+    TPM_SOCK_TMP=1
+    chmod 700 "$TPM_SOCK_DIR"
+  fi
+  TPM_SOCK="$TPM_SOCK_DIR/swtpm-sock"
+  # swtpm splits its option strings on commas and has no escape for one.
+  case $TPM_DIR in
+    *,*) die 1 "TPM state directory '$TPM_DIR' holds a comma; swtpm cannot take a comma in it (set TMPDIR, or run from a work directory, without one)" ;;
+  esac
+  case $TPM_SOCK in
+    *,*) die 1 "TPM socket path '$TPM_SOCK' holds a comma; swtpm cannot take a comma in it (set RUN_QEMU_TPM_SOCK_DIR to a directory without one)" ;;
+  esac
+  # A unix socket path is limited in bytes, so count bytes whatever the locale.
+  local sock_bytes
+  sock_bytes=$(
+    LC_ALL=C
+    echo "${#TPM_SOCK}"
+  )
+  if [ "$sock_bytes" -gt "$TPM_SOCK_MAX" ]; then
+    die 1 "TPM socket path is $sock_bytes bytes, over the $TPM_SOCK_MAX byte limit for a unix socket: $TPM_SOCK (set RUN_QEMU_TPM_SOCK_DIR to a shorter directory)"
+  fi
+}
+
+# True when <pid> is a live process whose command line carries every given word
+# exactly: a recycled pid, an unrelated process or a swtpm on a state dir whose
+# name only starts like ours never matches. Words are whole arguments, never
+# substrings.
+cmdline_has_words() {
+  local pid=$1 need w found words=()
+  shift
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  mapfile -d '' -t words 2>/dev/null <"/proc/$pid/cmdline" || return 1
+  for need in "$@"; do
+    found=0
+    for w in "${words[@]}"; do
+      if [ "$w" = "$need" ]; then
+        found=1
+        break
+      fi
+    done
+    [ "$found" -eq 1 ] || return 1
+  done
+}
+
+# True when <pid> is a swtpm on this run's state dir, whoever started it. Any
+# such swtpm holds the state lock, so it blocks a start.
+swtpm_on_state_dir() {
+  cmdline_has_words "$1" "dir=$TPM_DIR"
+}
+
+# True when <pid> is this run's own swtpm: on its state dir and on its own
+# control socket, so another run on the same state dir never matches.
+# shellcheck disable=SC2329 # reached only through stop_tpm, which the EXIT trap runs
+swtpm_owns_pid() {
+  cmdline_has_words "$1" "dir=$TPM_DIR" "type=unixio,path=$TPM_SOCK"
+}
+
+# Forwards a trapped signal to QEMU, waits up to 5 seconds for it, kills it if it
+# is still running, then exits 128+<number> so the EXIT trap stops swtpm only
+# after QEMU is gone. QEMU is addressed as job %1, the only background job: the
+# job table has no stale pid, and before QEMU starts or after it was reaped the
+# kill fails and nothing is signalled. A job that has ended is not "running" to
+# jobs -r, which is how the wait sees it end (kill -0 %1 succeeds on a dead job).
+# shellcheck disable=SC2329 # invoked through the INT, TERM, HUP and QUIT traps in main
+forward_signal() {
+  local n
+  if kill "-$1" %1 2>/dev/null; then
+    for ((n = 0; n < 50; n++)); do
+      [ -n "$(jobs -rp)" ] || break
+      sleep 0.1
+    done
+    if [ -n "$(jobs -rp)" ]; then
+      kill -KILL %1 2>/dev/null || true
+    fi
+    wait %1 2>/dev/null || true
+  fi
+  exit $((128 + $2))
+}
+
+# Sets TPM_PID from the pid file once it holds a number, and never replaces a pid
+# already recorded. A file that is missing, unreadable or not a number leaves it
+# alone.
+record_tpm_pid() {
+  local p=""
+  [ -z "$TPM_PID" ] || return 0
+  # cat, not $(<file): on bash 5.2 a $(<file) of a missing file under set -e ends
+  # the script even behind ||.
+  p=$(cat "$TPM_PIDFILE" 2>/dev/null) || p=""
+  case $p in
+    "" | *[!0-9]*) ;;
+    *) TPM_PID=$p ;;
+  esac
+}
+
+# Stops the swtpm this run started, by the pid recorded at its start, and removes
+# what the run made. Safe to call twice and when nothing started. Signals are
+# ignored from the first line: this runs from the EXIT trap, and a signal that
+# reached forward_signal now would exit without running the EXIT trap again,
+# leaving swtpm and the temp directories behind.
+# shellcheck disable=SC2329 # invoked through the EXIT trap in main
+stop_tpm() {
+  trap '' INT TERM HUP QUIT
+  # No pid recorded: a signal can end the run before start_tpm read the pid file,
+  # or the swtpm launcher can return before the daemon writes it. Adopt the file's
+  # pid only when it is this run's swtpm, as the pid file is shared with other runs.
+  # The daemon can still be starting, so the file is re-read for up to 2 seconds.
+  if [ "$TPM_STARTED" -eq 1 ] && [ -z "$TPM_PID" ]; then
+    local w
+    for w in $(seq 1 20); do
+      record_tpm_pid
+      [ -z "$TPM_PID" ] || break
+      sleep 0.1
+    done
+    if [ -n "$TPM_PID" ] && ! { [ "$TPM_PID" -gt 1 ] && swtpm_owns_pid "$TPM_PID"; }; then
+      TPM_PID=""
+    fi
+  fi
+  local pid=$TPM_PID s n cur=""
+  # A gone or recycled pid is not ours to signal; the files below still go. Only
+  # a real pid is signalled: 0 and 1 would reach a whole group or init.
+  if [ "$TPM_STARTED" -eq 1 ] && [[ $pid =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] && swtpm_owns_pid "$pid"; then
+    kill -TERM "$pid" 2>/dev/null || true
+    for n in $(seq 1 50); do
+      [ -r "/proc/$pid/stat" ] || break
+      # swtpm can vanish between the test above and this read, and under set -e
+      # a failure here would skip the cleanup below.
+      s=$(cat "/proc/$pid/stat" 2>/dev/null) || break
+      s=${s##*) }
+      # A zombie is already stopped: it only waits for a parent to reap it.
+      [ "${s%% *}" = Z ] && break
+      # The pid may have been recycled since the TERM; KILL only what is still ours.
+      if [ "$n" -eq 50 ] && swtpm_owns_pid "$pid"; then
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+      sleep 0.1
+    done
+  fi
+  if [ "$TPM_STARTED" -eq 1 ]; then
+    # The pid file is shared by every run on this state dir: remove it only while
+    # it still names our swtpm. A vanished or unreadable file means no pid.
+    cur=$(cat "$TPM_PIDFILE" 2>/dev/null) || cur=""
+    if [ -n "$TPM_PID" ] && [ "$cur" = "$TPM_PID" ]; then
+      rm -f "$TPM_PIDFILE"
+    fi
+    rm -f "$TPM_SOCK"
+    TPM_STARTED=0
+    TPM_PID=""
+  fi
+  if [ "$TPM_SOCK_TMP" -eq 1 ]; then
+    # The temp dir only ever holds the socket, so rmdir is enough.
+    rm -f "$TPM_SOCK"
+    rmdir "$TPM_SOCK_DIR" 2>/dev/null || true
+    TPM_SOCK_TMP=0
+  fi
+  if [ "$TPM_TMP" -eq 1 ]; then
+    rm -rf "$TPM_DIR"
+    TPM_TMP=0
+  fi
+}
+
+# Starts swtpm as a daemon and waits for its control socket. TPM_STARTED is set
+# before the launch so a failed start still stops whatever came up.
+start_tpm() {
+  local native bin wait n prefix=()
+  native="$PWD/build/tmp/sysroots-components/x86_64/swtpm-native/usr/bin/swtpm"
+  if [ -e "$native" ]; then
+    native_prefix "swtpm at $native"
+    prefix=("${NATIVE_PREFIX[@]}")
+    bin=$native
+  elif ! bin=$(command -v swtpm); then
+    die 1 "no swtpm at $native and none on PATH (PATH=$PATH)"
+  fi
+  wait=${RUN_QEMU_TPM_WAIT_SECONDS:-10}
+  [[ $wait =~ ^[0-9]+$ ]] || die 1 "RUN_QEMU_TPM_WAIT_SECONDS must be a whole number of seconds, got '$wait'"
+  # Base 10: a leading zero must not read as octal (08 is an error, 010 is 8).
+  wait=$((10#$wait))
+
+  mkdir -p "$TPM_DIR" "$TPM_SOCK_DIR"
+  # The state dir and its pid file are shared by every --tpm run in this work
+  # dir. A second run must not delete the first run's pid file (the first run's
+  # exit would then leave its swtpm behind) and swtpm cannot share the state
+  # lock anyway, so a live swtpm on this state dir stops the run instead. The
+  # command line is compared, not just the pid, so a recycled pid in a stale
+  # file does not block.
+  # devtool-debt: a running swtpm is found through its pid file only. Ceiling: one
+  # started without a pid file (the removed launcher's) is not detected and the
+  # new start fails on the state lock. Upgrade trigger: a report of 'swtpm failed
+  # to start' with a live swtpm on the state directory.
+  if [ -f "$TPM_PIDFILE" ]; then
+    local held=""
+    # A file that vanishes or cannot be read after the test above means no pid.
+    held=$(cat "$TPM_PIDFILE" 2>/dev/null) || held=""
+    case $held in
+      "" | *[!0-9]*) ;;
+      *)
+        if swtpm_on_state_dir "$held"; then
+          die 1 "swtpm $held is already running on $TPM_DIR (another run-qemu --tpm, or one that was killed); stop it first"
+        fi
+        ;;
+    esac
+  fi
+  rm -f "$TPM_SOCK" "$TPM_PIDFILE"
+  TPM_STARTED=1
+  echo "Starting swtpm (state: $TPM_DIR, log: $TPM_DIR/swtpm.log)"
+  "${prefix[@]}" "$bin" socket \
+    --tpmstate dir="$TPM_DIR" \
+    --ctrl type=unixio,path="$TPM_SOCK" \
+    --log file="$TPM_DIR/swtpm.log",level=5 \
+    --pid file="$TPM_PIDFILE" \
+    --tpm2 \
+    --daemon || die 1 "swtpm failed to start; QEMU was not started"
+  # Cleanup signals the pid recorded here, never one re-read from the pid file
+  # other runs share. The launcher can return before the daemon has written the
+  # file, so the wait below keeps reading until it holds a number.
+  record_tpm_pid
+
+  # devtool-debt: socket wait tests existence only. Ceiling: a swtpm that dies
+  # right after binding passes the wait. Upgrade trigger: a report of QEMU
+  # failing with a chardev connect error, or a second swtpm start path that needs
+  # the check.
+  for ((n = 0; n < wait; n++)); do
+    record_tpm_pid
+    [ -S "$TPM_SOCK" ] && return 0
+    sleep 1
+  done
+  [ -S "$TPM_SOCK" ] || die 1 "swtpm socket $TPM_SOCK did not appear after ${wait}s; QEMU was not started"
+}
+
+# Sets QEMU_ARGS to the machine's arguments, after the binary. No profile has a
+# display option: the console is the serial line on stdio.
+build_qemu_args() {
+  QEMU_ARGS=()
+  local image
+  image=$(qpath "$IMAGE")
+  [ ${#QEMU_PREFIX[@]} -eq 0 ] || QEMU_ARGS+=(-L "$QEMU_DATA_DIR")
+  # -bios takes a plain path, not a key-value list, so its commas stay single.
+  case $MACHINE in
+    qemux86-64)
+      QEMU_ARGS+=(-bios "$BOOT_FW"
+        -device sdhci-pci -device "sd-card,drive=mmc"
+        -drive "file=$image,if=none,format=raw,id=mmc"
+        -m 256 -cpu max)
+      ;;
+    qemuarm64)
+      QEMU_ARGS+=(-M "virt,secure=on,highmem=off,acpi=off" -cpu cortex-a53 -m 1024
+        -bios "$BOOT_FW"
+        -device sdhci-pci -device "sd-card,drive=mmc"
+        -drive "file=$image,if=none,format=raw,id=mmc")
+      ;;
+  esac
+  if [ "$TPM" -eq 1 ]; then
+    QEMU_ARGS+=(-chardev "socket,id=chrtpm,path=$(qpath "$TPM_SOCK")"
+    -tpmdev "emulator,id=tpm0,chardev=chrtpm"
+    -device "tpm-tis,tpmdev=tpm0")
+  fi
+  QEMU_ARGS+=(-nographic)
+}
+
+main() {
+  parse_args "$@"
+  trap stop_tpm EXIT
+  trap 'forward_signal INT 2' INT
+  trap 'forward_signal TERM 15' TERM
+  trap 'forward_signal HUP 1' HUP
+  trap 'forward_signal QUIT 3' QUIT
+  resolve_image
+  resolve_qemu
+  find_boot_firmware
+  plan_resize
+  [ "$TPM" -eq 0 ] || plan_tpm
+  build_qemu_args
+  local cmd=("${QEMU_PREFIX[@]}" "$QEMU_BIN" "${QEMU_ARGS[@]}")
+
+  local resize=()
+  if [ "$RESIZE_MIB" -gt 0 ]; then
+    resize=("${QEMU_PREFIX[@]}" "$QEMU_IMG" resize -f raw "$IMAGE" "${RESIZE_MIB}M")
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "image: $IMAGE"
+    echo "qemu: $(qemu_binary)"
+    if [ ${#resize[@]} -gt 0 ]; then
+      echo "resize: ${resize[*]}"
+    else
+      echo "resize: none"
+    fi
+    [ "$TPM" -eq 0 ] || echo "tpm: socket $TPM_SOCK"
+    echo "command: ${cmd[*]}"
+    exit 0
+  fi
+
+  # swtpm first: a missing swtpm, a held state dir or a socket timeout must not
+  # leave a grown image behind a run that never started QEMU. The EXIT trap stops
+  # swtpm if the resize then fails.
+  [ "$TPM" -eq 0 ] || start_tpm
+
+  if [ ${#resize[@]} -gt 0 ]; then
+    "${resize[@]}"
+  fi
+
+  # A background child that is waited for, not exec and not a foreground child:
+  # the exit status passes through this script, and bash runs a trapped signal
+  # at once instead of after QEMU exits. <&0 keeps the terminal for -nographic,
+  # which a background command would otherwise lose to /dev/null. The subshell
+  # resets INT and QUIT, which an asynchronous command starts out ignoring.
+  local rc=0
+  (
+    trap - INT QUIT
+    exec "${cmd[@]}"
+  ) <&0 &
+  QEMU_PID=$!
+  wait "$QEMU_PID" || rc=$?
+  QEMU_PID=""
+  exit "$rc"
+}
+
+main "$@"

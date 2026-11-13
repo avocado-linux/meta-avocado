@@ -1,0 +1,1555 @@
+#!/usr/bin/env bash
+# Host test for run-qemu: machine naming, the TPM restriction, the image lookup
+# under build/tmp/deploy/stone/_build, the explicit --image path, the resize
+# rule, QEMU selection, the boot-firmware lookup and the exact QEMU command
+# lines. Every case runs in its own temp work directory with stub QEMU tools, so
+# no real QEMU starts. Run it by hand after any change to the runner.
+# shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts, so bad runs only when the check failed
+set -u
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+script=${1:-$here/../run-qemu}
+# The scratch root is under /tmp whatever the caller's TMPDIR is, so a long
+# TMPDIR cannot push a socket path past the 100 byte limit in the cases that
+# do not mean to test it.
+w=$(mktemp -d -p /tmp)
+export TMPDIR=$w
+trap 'rm -rf "$w"' EXIT
+pass=0
+fail=0
+ok() {
+  echo "  ok   - $1"
+  pass=$((pass + 1))
+}
+bad() {
+  echo "  FAIL - $1"
+  fail=$((fail + 1))
+}
+
+# Stub QEMU tools. STUB_LOG collects what they were asked to do; the qemu-img
+# stub honours `resize -f raw <image> <N>M` by truncating the sparse image.
+log=$w/stub.log
+export STUB_LOG=$log
+: >"$log"
+hs=$w/hoststubs
+tools=$w/tools
+mkdir -p "$hs" "$tools"
+mkstubs() {
+  local d=$1
+  # shellcheck disable=SC2016 # $* belongs to the generated stub
+  printf '#!/bin/sh\necho "qemu-launch $*" >>"$STUB_LOG"\nexit "${STUB_QEMU_RC:-0}"\n' >"$d/qemu-system-x86_64"
+  cp "$d/qemu-system-x86_64" "$d/qemu-system-aarch64"
+  cat >"$d/qemu-img" <<'STUB'
+#!/bin/sh
+echo "qemu-img $*" >>"$STUB_LOG"
+[ "$1" = resize ] && truncate -s "$5" "$4"
+exit 0
+STUB
+  chmod +x "$d/qemu-system-x86_64" "$d/qemu-system-aarch64" "$d/qemu-img"
+}
+mkstubs "$hs"
+# A PATH holding only the commands the runner needs, so no real QEMU is found.
+for c in bash env paste stat find sort dirname tr cat; do ln -s "$(command -v "$c")" "$tools/$c"; done
+
+# mksysroot <workdir> -> native QEMU stubs and a stub uninative loader, which
+# logs its call and then execs the command after --library-path <dirs>.
+mksysroot() {
+  local d=$1 sr un
+  sr=$d/build/tmp/sysroots-components/x86_64
+  un=$d/build/tmp/sysroots-uninative/x86_64-linux/lib
+  mkdir -p "$sr/qemu-system-native/usr/bin" "$sr/qemu-system-native/usr/lib" "$sr/glib-native/usr/lib" "$un"
+  mkstubs "$sr/qemu-system-native/usr/bin"
+  # shellcheck disable=SC2016 # $* and $@ belong to the generated stub
+  printf '#!/bin/sh\necho "loader $*" >>"$STUB_LOG"\nshift 2\nexec "$@"\n' >"$un/ld-linux-x86-64.so.2"
+  chmod +x "$un/ld-linux-x86-64.so.2"
+}
+
+# workdir <name> -> a fresh kas work directory holding build/tmp and both boot
+# firmware images in the deploy output, printed. Firmware cases remove them.
+workdir() {
+  local d="$w/$1"
+  mkdir -p "$d/build/tmp/deploy/stone/_build"
+  : >"$d/build/tmp/deploy/stone/flash.bin"
+  : >"$d/build/tmp/deploy/stone/u-boot.rom"
+  echo "$d"
+}
+deploy() { echo "$1/build/tmp/deploy/stone/_build"; }
+
+# run <dir> <args...> -> runs the runner from <dir>, stdout and stderr merged.
+# RUNENV holds extra NAME=value words for env; runpath runs with a given PATH.
+RUNENV=()
+runpath() {
+  local p=$1 d=$2
+  shift 2
+  (cd "$d" && env PATH="$p" "${RUNENV[@]}" bash "$script" "$@" </dev/null 2>&1)
+}
+run() { runpath "$hs:$PATH" "$@"; }
+
+names_listed() { grep -q qemux86-64 <<<"$1" && grep -q qemuarm64 <<<"$1"; }
+
+# 1. An unsupported name exits 2 and lists the supported names.
+d=$(workdir unknown)
+out=$(run "$d" qemuriscv --dry-run)
+rc=$?
+{ [ $rc -eq 2 ] && grep -qF "run-qemu: unsupported machine 'qemuriscv'" <<<"$out" && names_listed "$out"; } \
+  && ok "an unsupported machine exits 2 and lists the supported names" || bad "unknown: rc=$rc out=[$out]"
+
+# 2. No machine at all exits 2 and lists the names.
+out=$(run "$d")
+rc=$?
+{ [ $rc -eq 2 ] && grep -qF "run-qemu: unsupported machine ''" <<<"$out" && names_listed "$out"; } \
+  && ok "a missing machine exits 2 and lists the supported names" || bad "none: rc=$rc out=[$out]"
+
+# 3. arm64-uefi-v9 is not a machine on this branch.
+p="$(deploy "$d")"
+truncate -s 1M "$p/avocado-os-avocado-arm64-uefi-v9.img"
+out=$(run "$d" arm64-uefi-v9 --dry-run)
+rc=$?
+{ [ $rc -eq 2 ] && grep -qF "run-qemu: unsupported machine 'arm64-uefi-v9'" <<<"$out" && names_listed "$out" \
+  && ! grep -q '^image:' <<<"$out"; } \
+  && ok "arm64-uefi-v9 exits 2 as an unsupported machine" || bad "arm64-uefi-v9: rc=$rc out=[$out]"
+
+# 4. An unknown option exits 2 naming it.
+out=$(run "$d" qemux86-64 --frobnicate)
+rc=$?
+{ [ $rc -eq 2 ] && grep -qF "run-qemu: unknown option '--frobnicate'" <<<"$out"; } \
+  && ok "an unknown option exits 2 naming it" || bad "option: rc=$rc out=[$out]"
+
+# 4b. A second positional argument exits 2 as an unexpected argument, even when
+#     it is a supported machine name, and prints the usage.
+for extra in qemux86-64 extra; do
+  out=$(run "$d" qemux86-64 "$extra" --dry-run)
+  rc=$?
+  { [ $rc -eq 2 ] && grep -qF "run-qemu: unexpected argument '$extra'" <<<"$out" && grep -qF 'usage: run-qemu' <<<"$out" \
+    && ! grep -qF 'unsupported machine' <<<"$out" && ! grep -q '^image:' <<<"$out"; } \
+    && ok "a second positional '$extra' exits 2 as an unexpected argument" || bad "extra arg $extra: rc=$rc out=[$out]"
+done
+
+# 5. --tpm with qemuarm64 exits 2 naming qemux86-64.
+d=$(workdir tpm-other)
+truncate -s 1M "$(deploy "$d")/avocado-os-avocado-qemuarm64.img"
+out=$(run "$d" --tpm qemuarm64 --dry-run)
+rc=$?
+{ [ $rc -eq 2 ] && grep -qF "run-qemu: --tpm is only supported for qemux86-64" <<<"$out" && ! grep -q '^image:' <<<"$out"; } \
+  && ok "--tpm with qemuarm64 exits 2 naming qemux86-64" || bad "tpm other: rc=$rc out=[$out]"
+
+# 6. --tpm with qemux86-64 is accepted.
+d=$(workdir tpm-x86)
+img="$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+truncate -s 1M "$img"
+out=$(run "$d" qemux86-64 --tpm --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "image: $img" <<<"$out"; } \
+  && ok "--tpm with qemux86-64 is accepted" || bad "tpm x86: rc=$rc out=[$out]"
+
+# 7. The platform-named image wins over the machine-named and root-disk images.
+d=$(workdir all-three)
+p="$(deploy "$d")"
+truncate -s 1M "$p/avocado-os-avocado-qemuarm64.img" "$p/avocado-os-qemuarm64.img" "$p/avocado-qemuarm64-rootdisk.img"
+out=$(run "$d" qemuarm64 --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "image: $p/avocado-os-avocado-qemuarm64.img" <<<"$out"; } \
+  && ok "the platform-named image is preferred" || bad "platform: rc=$rc out=[$out]"
+
+# 8. Only the platform-named image present is selected.
+d=$(workdir platform-only)
+p="$(deploy "$d")"
+truncate -s 1M "$p/avocado-os-avocado-qemuarm64.img"
+out=$(run "$d" qemuarm64 --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "image: $p/avocado-os-avocado-qemuarm64.img" <<<"$out"; } \
+  && ok "a lone platform-named image is selected" || bad "platform only: rc=$rc out=[$out]"
+
+# 9. The machine-named image wins over the root-disk image.
+d=$(workdir machine-named)
+p="$(deploy "$d")"
+truncate -s 1M "$p/avocado-os-qemux86-64.img" "$p/avocado-qemux86-64-rootdisk.img"
+out=$(run "$d" qemux86-64 --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "image: $p/avocado-os-qemux86-64.img" <<<"$out"; } \
+  && ok "the machine-named image is preferred over the root disk" || bad "machine: rc=$rc out=[$out]"
+
+# 10. The root-disk image is used when it is the only one.
+d=$(workdir rootdisk)
+p="$(deploy "$d")"
+truncate -s 1M "$p/avocado-qemuarm64-rootdisk.img"
+out=$(run "$d" qemuarm64 --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "image: $p/avocado-qemuarm64-rootdisk.img" <<<"$out"; } \
+  && ok "the root-disk image is the last fallback" || bad "rootdisk: rc=$rc out=[$out]"
+
+# 11. Another machine's image does not satisfy the lookup; no image exits 1
+#     naming the directory and all three names.
+d=$(workdir no-image)
+p="$(deploy "$d")"
+truncate -s 1M "$p/avocado-os-avocado-qemux86-64.img"
+out=$(run "$d" qemuarm64 --dry-run)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$p" <<<"$out" && grep -qF avocado-os-avocado-qemuarm64.img <<<"$out" \
+  && grep -qF avocado-os-qemuarm64.img <<<"$out" && grep -qF avocado-qemuarm64-rootdisk.img <<<"$out" \
+  && ! grep -q '^image:' <<<"$out"; } \
+  && ok "no image exits 1 naming the directory and the three names" || bad "no image: rc=$rc out=[$out]"
+
+# 12. Outside a work directory (no build/tmp) exits 1 naming build/tmp.
+d="$w/bare"
+mkdir -p "$d"
+out=$(run "$d" qemux86-64 --dry-run)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "no build output at $d/build/tmp" <<<"$out" && ! grep -q '^image:' <<<"$out"; } \
+  && ok "no build/tmp exits 1 naming it" || bad "bare: rc=$rc out=[$out]"
+
+# 13. --image replaces the lookup and needs no work directory.
+c="$w/copied"
+mkdir -p "$c"
+truncate -s 1M "$c/disk.img"
+RUNENV=(RUN_QEMU_FLASH_BIN="$c/flash.bin")
+: >"$c/flash.bin"
+out=$(run "$d" qemuarm64 --image "$c/disk.img" --dry-run)
+rc=$?
+RUNENV=()
+{ [ $rc -eq 0 ] && grep -qxF "image: $c/disk.img" <<<"$out"; } \
+  && ok "--image works outside a work directory" || bad "image path: rc=$rc out=[$out]"
+
+# 14. --image wins over an image the lookup would have found.
+d=$(workdir explicit-wins)
+truncate -s 1M "$(deploy "$d")/avocado-os-avocado-qemuarm64.img"
+out=$(run "$d" qemuarm64 --dry-run --image "$c/disk.img")
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "image: $c/disk.img" <<<"$out"; } \
+  && ok "--image replaces the work-directory lookup" || bad "image wins: rc=$rc out=[$out]"
+
+# 15. A missing --image file exits 1 naming it.
+out=$(run "$d" qemuarm64 --image "$c/absent.img" --dry-run)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$c/absent.img" <<<"$out" && ! grep -q '^image:' <<<"$out"; } \
+  && ok "a missing --image file exits 1 naming it" || bad "absent image: rc=$rc out=[$out]"
+
+# 16. --image with no value is a usage error, not a lookup.
+out=$(run "$d" qemuarm64 --image)
+rc=$?
+{ [ $rc -eq 2 ] && ! grep -q '^image:' <<<"$out"; } \
+  && ok "--image without a path exits 2" || bad "image no value: rc=$rc out=[$out]"
+
+# 17. --image with an empty path exits 2.
+out=$(run "$d" qemuarm64 --image "" --dry-run)
+rc=$?
+{ [ $rc -eq 2 ] && ! grep -q '^image:' <<<"$out"; } \
+  && ok "--image with an empty path exits 2" || bad "image empty: rc=$rc out=[$out]"
+
+# 17b. --image replaces the image lookup only: from a directory with no build
+#      output the boot firmware is still needed. Without the machine's override
+#      the run exits 1 naming that override; with it, the run resolves.
+e="$w/empty-cwd"
+mkdir -p "$e"
+for mv in qemux86-64:RUN_QEMU_UBOOT_ROM:u-boot.rom qemuarm64:RUN_QEMU_FLASH_BIN:flash.bin; do
+  m=${mv%%:*}
+  var=${mv#*:}
+  var=${var%%:*}
+  fw=${mv##*:}
+  out=$(run "$e" "$m" --image "$c/disk.img" --dry-run)
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "$var" <<<"$out" && grep -qF "no $fw" <<<"$out" && ! grep -q '^command:' <<<"$out"; } \
+    && ok "$m: --image with no firmware override outside a work directory exits 1 naming $var" || bad "image no fw $m: rc=$rc out=[$out]"
+  : >"$c/$fw"
+  RUNENV=("$var=$c/$fw")
+  out=$(run "$e" "$m" --image "$c/disk.img" --dry-run)
+  rc=$?
+  RUNENV=()
+  { [ $rc -eq 0 ] && grep -qxF "image: $c/disk.img" <<<"$out" && grep -qF -- "-bios $c/$fw" <<<"$out"; } \
+    && ok "$m: --image with $var resolves outside a work directory" || bad "image fw $m: rc=$rc out=[$out]"
+done
+
+# size_of <file> -> the file size in bytes.
+size_of() { stat -c %s "$1"; }
+
+# resize_case <name> <machine> <initial size> <expected MiB or none>
+# Runs through --dry-run: the runner reports the size it would grow the image to
+# and the image must be left untouched.
+resize_case() {
+  local name=$1 machine=$2 start=$3 want=$4 d i out rc before got q
+  d=$(workdir "rs-$name")
+  i="$(deploy "$d")/avocado-os-avocado-$machine.img"
+  truncate -s "$start" "$i"
+  before=$(size_of "$i")
+  : >"$log"
+  out=$(run "$d" "$machine" --dry-run)
+  rc=$?
+  got=$(size_of "$i")
+  q="$hs/qemu-img resize -f raw $i ${want}M"
+  if [ "$want" = none ]; then
+    { [ $rc -eq 0 ] && [ "$got" -eq "$before" ] && grep -qxF 'resize: none' <<<"$out" && [ ! -s "$log" ]; } \
+      && ok "$name: no resize" || bad "$name: rc=$rc out=[$out]"
+  else
+    { [ $rc -eq 0 ] && [ "$got" -eq "$before" ] && grep -qxF "resize: $q" <<<"$out" && [ ! -s "$log" ]; } \
+      && ok "$name: $start grows to ${want}M, image untouched" || bad "$name: rc=$rc out=[$out]"
+  fi
+}
+
+# 18. The resize rule, the same for both machines.
+resize_case x86-600M qemux86-64 600M 1024
+resize_case x86-1024M qemux86-64 1024M none
+resize_case x86-1500M qemux86-64 1500M 2048
+resize_case x86-2G qemux86-64 2G none
+resize_case arm-600M qemuarm64 600M 1024
+resize_case arm-1024M qemuarm64 1024M none
+resize_case arm-1500M qemuarm64 1500M 2048
+resize_case arm-2G qemuarm64 2G none
+resize_case arm-3000M qemuarm64 3000M 4096
+
+# 19. A symlinked image is measured at its target, not at the link.
+d=$(workdir symlink)
+p="$(deploy "$d")"
+truncate -s 1500M "$c/big.img"
+ln -s "$c/big.img" "$p/avocado-os-avocado-qemuarm64.img"
+out=$(run "$d" qemuarm64 --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qxF "resize: $hs/qemu-img resize -f raw $p/avocado-os-avocado-qemuarm64.img 2048M" <<<"$out"; } \
+  && ok "a symlinked 1500M image grows to 2048M" || bad "symlink: rc=$rc out=[$out]"
+
+# cmdline <output> -> the text after "command: " on the one command line.
+cmdline() { sed -n 's/^command: //p' <<<"$1"; }
+
+# 20. A native QEMU is preferred over the host's, runs through the uninative
+#     loader (uninative lib dir first, then every native lib dir) and gets -L
+#     with its own data dir first.
+d=$(workdir native)
+mksysroot "$d"
+img="$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+truncate -s 1M "$img"
+sr=$d/build/tmp/sysroots-components/x86_64
+un=$d/build/tmp/sysroots-uninative/x86_64-linux/lib
+out=$(run "$d" qemux86-64 --dry-run)
+rc=$?
+c=$(cmdline "$out")
+want="$un/ld-linux-x86-64.so.2 --library-path $un:$sr/glib-native/usr/lib:$sr/qemu-system-native/usr/lib $sr/qemu-system-native/usr/bin/qemu-system-x86_64 -L $sr/qemu-system-native/usr/share/qemu -bios "
+{ [ $rc -eq 0 ] && grep -qxF 'qemu: qemu-system-x86_64' <<<"$out" && [[ $c == "$want"* ]] \
+  && grep -qxF "resize: $un/ld-linux-x86-64.so.2 --library-path $un:$sr/glib-native/usr/lib:$sr/qemu-system-native/usr/lib $sr/qemu-system-native/usr/bin/qemu-img resize -f raw $img 1024M" <<<"$out"; } \
+  && ok "a native QEMU is selected and runs through the uninative loader" || bad "native: rc=$rc out=[$out]"
+
+# 21. The native resize and launch really go through the loader.
+: >"$log"
+out=$(run "$d" qemux86-64)
+rc=$?
+{ [ $rc -eq 0 ] && [ "$(grep -c '^loader ' "$log")" -eq 2 ] && grep -q '^qemu-launch -L ' "$log" \
+  && [ "$(size_of "$img")" -eq $((1024 * 1048576)) ]; } \
+  && ok "a native real run resizes and launches under the loader" || bad "native run: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 22. With no native QEMU the host's from PATH is used, without -L.
+d=$(workdir host)
+img="$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+truncate -s 1M "$img"
+out=$(run "$d" qemux86-64 --dry-run)
+rc=$?
+c=$(cmdline "$out")
+{ [ $rc -eq 0 ] && grep -qxF 'qemu: qemu-system-x86_64' <<<"$out" && [[ $c == "$hs/qemu-system-x86_64 -bios "* ]] \
+  && [[ $c != *" -L "* ]]; } \
+  && ok "the host QEMU is used when there is no native one" || bad "host: rc=$rc out=[$out]"
+
+# 23. Neither a native nor a host QEMU exits 1 naming both places.
+out=$(runpath "$tools" "$d" qemux86-64 --dry-run)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$d/build/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-x86_64" <<<"$out" \
+  && grep -qF 'none on PATH' <<<"$out" && ! grep -q '^command:' <<<"$out"; } \
+  && ok "no QEMU anywhere exits 1 naming both places" || bad "no qemu: rc=$rc out=[$out]"
+
+# 24. Native QEMU without the uninative loader exits 1 naming the loader.
+d=$(workdir no-loader)
+mksysroot "$d"
+rm "$d/build/tmp/sysroots-uninative/x86_64-linux/lib/ld-linux-x86-64.so.2"
+truncate -s 1M "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+out=$(run "$d" qemux86-64 --dry-run)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF ld-linux-x86-64.so.2 <<<"$out" && ! grep -q '^command:' <<<"$out"; } \
+  && ok "a missing uninative loader exits 1 naming it" || bad "no loader: rc=$rc out=[$out]"
+
+# fwcase <name> <machine> <image-name> <placement> -> workdir with the firmware
+# image only at <placement> (stone, build, none); prints the dry-run output.
+fwdir() {
+  local name=$1 machine=$2 fw=$3 where=$4 d
+  d=$(workdir "$name")
+  rm -f "$d/build/tmp/deploy/stone/flash.bin" "$d/build/tmp/deploy/stone/u-boot.rom"
+  truncate -s 1M "$(deploy "$d")/avocado-os-avocado-$machine.img"
+  case $where in
+    stone) : >"$d/build/tmp/deploy/stone/$fw" ;;
+    build) : >"$d/build/tmp/deploy/stone/_build/$fw" ;;
+    both)
+      echo new >"$d/build/tmp/deploy/stone/$fw"
+      echo old >"$d/build/tmp/deploy/stone/_build/$fw"
+      ;;
+  esac
+  echo "$d"
+}
+
+# 25. Firmware lookup: deploy output, older subdirectory, deploy output first.
+for spec in "qemux86-64 u-boot.rom" "qemuarm64 flash.bin"; do
+  read -r m fw <<<"$spec"
+  d=$(fwdir "fw-stone-$m" "$m" "$fw" stone)
+  out=$(run "$d" "$m" --dry-run)
+  rc=$?
+  { [ $rc -eq 0 ] && grep -qF " -bios $d/build/tmp/deploy/stone/$fw " <<<"$out"; } \
+    && ok "$m: $fw is found in the deploy output" || bad "$m stone: rc=$rc out=[$out]"
+  d=$(fwdir "fw-build-$m" "$m" "$fw" build)
+  out=$(run "$d" "$m" --dry-run)
+  rc=$?
+  { [ $rc -eq 0 ] && grep -qF " -bios $d/build/tmp/deploy/stone/_build/$fw " <<<"$out"; } \
+    && ok "$m: $fw is found in the older _build subdirectory" || bad "$m build: rc=$rc out=[$out]"
+  d=$(fwdir "fw-both-$m" "$m" "$fw" both)
+  out=$(run "$d" "$m" --dry-run)
+  rc=$?
+  { [ $rc -eq 0 ] && grep -qF " -bios $d/build/tmp/deploy/stone/$fw " <<<"$out"; } \
+    && ok "$m: the deploy output wins over _build" || bad "$m both: rc=$rc out=[$out]"
+done
+
+# 26. Overrides: RUN_QEMU_UBOOT_ROM for x86, RUN_QEMU_FLASH_BIN for arm64; each
+#     wins over the deploy output, and a missing file exits 1 naming both.
+for spec in "qemux86-64 u-boot.rom RUN_QEMU_UBOOT_ROM" "qemuarm64 flash.bin RUN_QEMU_FLASH_BIN"; do
+  read -r m fw var <<<"$spec"
+  d=$(fwdir "fw-ovr-$m" "$m" "$fw" stone)
+  : >"$w/custom-$fw"
+  RUNENV=("$var=$w/custom-$fw")
+  out=$(run "$d" "$m" --dry-run)
+  rc=$?
+  { [ $rc -eq 0 ] && grep -qF " -bios $w/custom-$fw " <<<"$out"; } \
+    && ok "$m: $var overrides the lookup" || bad "$m override: rc=$rc out=[$out]"
+  RUNENV=("$var=$w/absent-$fw")
+  out=$(run "$d" "$m" --dry-run)
+  rc=$?
+  RUNENV=()
+  { [ $rc -eq 1 ] && grep -qF "$var" <<<"$out" && grep -qF "$w/absent-$fw" <<<"$out" && ! grep -q '^command:' <<<"$out"; } \
+    && ok "$m: $var naming a missing file exits 1 naming both" || bad "$m override missing: rc=$rc out=[$out]"
+  d=$(fwdir "fw-none-$m" "$m" "$fw" none)
+  out=$(run "$d" "$m" --dry-run)
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "$d/build/tmp/deploy/stone/$fw" <<<"$out" && grep -qF "$d/build/tmp/deploy/stone/_build/$fw" <<<"$out" \
+    && ! grep -q '^command:' <<<"$out"; } \
+    && ok "$m: no $fw anywhere exits 1 listing both locations" || bad "$m none: rc=$rc out=[$out]"
+  : >"$log"
+  out=$(run "$d" "$m")
+  rc=$?
+  { [ $rc -eq 1 ] && ! grep -q qemu-launch "$log"; } \
+    && ok "$m: a missing $fw never reaches QEMU" || bad "$m none run: rc=$rc log=[$(cat "$log")]"
+done
+
+# 27. The exact command lines.
+d=$(workdir cmd-x86)
+img="$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+truncate -s 1M "$img"
+out=$(run "$d" qemux86-64 --dry-run)
+rc=$?
+want="$hs/qemu-system-x86_64 -bios $d/build/tmp/deploy/stone/u-boot.rom -device sdhci-pci -device sd-card,drive=mmc -drive file=$img,if=none,format=raw,id=mmc -m 256 -cpu max -nographic"
+{ [ $rc -eq 0 ] && [ "$(grep -c '^command: ' <<<"$out")" -eq 1 ] && [ "$(cmdline "$out")" = "$want" ] \
+  && ! grep -qE 'pflash|edk2' <<<"$out"; } \
+  && ok "the qemux86-64 command line is exact and has no pflash" || bad "cmd x86: rc=$rc out=[$out] want=[$want]"
+
+d=$(workdir cmd-arm)
+img="$(deploy "$d")/avocado-os-avocado-qemuarm64.img"
+truncate -s 1M "$img"
+out=$(run "$d" qemuarm64 --dry-run)
+rc=$?
+want="$hs/qemu-system-aarch64 -M virt,secure=on,highmem=off,acpi=off -cpu cortex-a53 -m 1024 -bios $d/build/tmp/deploy/stone/flash.bin -device sdhci-pci -device sd-card,drive=mmc -drive file=$img,if=none,format=raw,id=mmc -nographic"
+{ [ $rc -eq 0 ] && [ "$(cmdline "$out")" = "$want" ] && grep -q 'secure=on' <<<"$out" && ! grep -qE 'pflash|edk2' <<<"$out" \
+  && grep -qxF 'qemu: qemu-system-aarch64' <<<"$out"; } \
+  && ok "the qemuarm64 command line is exact and has secure=on" || bad "cmd arm: rc=$rc out=[$out] want=[$want]"
+
+# 28. Commas in the image path are doubled so QEMU reads them literally.
+d=$(workdir commas)
+mkdir -p "$w/a,b"
+truncate -s 1M "$w/a,b/disk.img"
+out=$(run "$d" qemuarm64 --image "$w/a,b/disk.img" --dry-run)
+rc=$?
+{ [ $rc -eq 0 ] && grep -qF -- "-drive file=$w/a,,b/disk.img,if=none" <<<"$out" && grep -qxF "image: $w/a,b/disk.img" <<<"$out"; } \
+  && ok "commas in the image path are doubled" || bad "commas: rc=$rc out=[$out]"
+
+# 29. A stubbed real run starts QEMU as a child, passes its exit status through
+#     and leaves no variable-store file beside the image.
+for m in qemux86-64 qemuarm64; do
+  d=$(workdir "real-$m")
+  i="$(deploy "$d")/avocado-os-avocado-$m.img"
+  truncate -s 600M "$i"
+  : >"$log"
+  RUNENV=(STUB_QEMU_RC=7)
+  out=$(run "$d" "$m")
+  rc=$?
+  RUNENV=()
+  n=$(find "$(deploy "$d")" -mindepth 1 | wc -l)
+  { [ $rc -eq 7 ] && grep -q "^qemu-img resize -f raw $i 1024M\$" "$log" && grep -q '^qemu-launch ' "$log" \
+    && [ "$n" -eq 1 ] && [ "$(size_of "$i")" -eq $((1024 * 1048576)) ]; } \
+    && ok "$m: a real run resizes, passes QEMU's status through and makes no variable store" \
+    || bad "$m real: rc=$rc n=$n out=[$out] log=[$(cat "$log")]"
+done
+
+# --- --tpm: swtpm lifecycle -------------------------------------------------
+# swtpm is a python3 stub that daemonizes like the real one (--daemon, --pid
+# file=), then either binds the --ctrl socket (mode sock) or never does (nosock).
+# The runs use PATH = the stubs plus coreutils only, so no real swtpm or QEMU is
+# needed, and the stub QEMU either exits at once or sleeps.
+for c in mktemp sleep cp mv chmod rm mkdir rmdir truncate seq; do ln -s "$(command -v "$c")" "$tools/$c" 2>/dev/null; done
+mkswtpm() {
+  local d=$1 mode=$2
+  mkdir -p "$d"
+  {
+    echo "#!$(command -v python3)"
+    echo "MODE = '$mode'"
+    echo "SLEEP = '$(command -v sleep)'"
+    cat <<'EOF'
+import os, signal, socket, sys, time
+args = sys.argv[1:]
+ctrl = pidfile = None
+for i, a in enumerate(args):
+    if a.startswith("type=unixio,path="):
+        ctrl = a.split("path=", 1)[1]
+    if a.startswith("file=") and args[i - 1] == "--pid":
+        pidfile = a[5:]
+with open(os.environ["STUB_LOG"], "a") as f:
+    f.write("swtpm " + " ".join(args) + "\n")
+if "--daemon" in args:
+    pid = os.fork()
+    if pid:
+        with open(pidfile, "w") as f:
+            f.write("%d\n" % pid)
+        with open(os.environ["STUB_LOG"], "a") as f:
+            f.write("swtpm-pid %d\n" % pid)
+        sys.exit(0)
+    os.setsid()
+    null = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(null, fd)
+def on_term(*_):
+    if MODE == "reexec":
+        os.execv(SLEEP, ["sleep", "60"])
+    if MODE == "swappid":
+        with open(pidfile, "w") as f:
+            f.write("4242424\n")
+    if MODE in ("rmpid", "dirpid"):
+        os.unlink(pidfile)
+    if MODE == "dirpid":
+        os.mkdir(pidfile)
+    os._exit(0)
+if MODE == "ignterm":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+elif MODE != "sock" and MODE != "nosock":
+    signal.signal(signal.SIGTERM, on_term)
+if MODE != "nosock":
+    s = socket.socket(socket.AF_UNIX)
+    s.bind(ctrl)
+    s.listen(1)
+time.sleep(60)
+EOF
+  } >"$d/swtpm"
+  chmod +x "$d/swtpm"
+}
+tpmhs=$w/tpmstubs
+nosockhs=$w/nosockstubs
+sleephs=$w/sleepstubs
+failhs=$w/tpmfailstubs
+noswtpmhs=$w/noswtpmstubs
+mkdir -p "$tpmhs" "$nosockhs" "$sleephs" "$failhs" "$noswtpmhs"
+mkstubs "$tpmhs"
+mkswtpm "$tpmhs" sock
+mkstubs "$nosockhs"
+mkswtpm "$nosockhs" nosock
+mkstubs "$sleephs"
+mkswtpm "$sleephs" sock
+# shellcheck disable=SC2016 # $* belongs to the generated stub
+printf '#!/bin/sh\necho "qemu-launch $*" >>"$STUB_LOG"\nsleep 30\n' >"$sleephs/qemu-system-x86_64"
+mkstubs "$failhs"
+mkswtpm "$failhs" sock
+printf '#!/bin/sh\nexit 7\n' >"$failhs/qemu-system-x86_64"
+mkstubs "$noswtpmhs"
+# swtpm variants for the cleanup cases: one that ignores TERM, one that turns into
+# an unrelated process on TERM, and two that damage their own pid file on TERM
+# (the QEMU stub exits 7 so the runner's status shows whether cleanup finished).
+ignhs=$w/igntermstubs
+reexechs=$w/reexecstubs
+rmpidhs=$w/rmpidstubs
+dirpidhs=$w/dirpidstubs
+sigqhs=$w/sigqstubs
+mkdir -p "$ignhs" "$reexechs" "$rmpidhs" "$dirpidhs" "$sigqhs"
+mkstubs "$ignhs"
+mkswtpm "$ignhs" ignterm
+mkstubs "$reexechs"
+mkswtpm "$reexechs" reexec
+swappidhs=$w/swappidstubs
+mkdir -p "$swappidhs"
+mkstubs "$swappidhs"
+mkswtpm "$swappidhs" swappid
+for v in "$rmpidhs:rmpid" "$dirpidhs:dirpid"; do
+  mkstubs "${v%%:*}"
+  mkswtpm "${v%%:*}" "${v##*:}"
+  printf '#!/bin/sh\nexit 7\n' >"${v%%:*}/qemu-system-x86_64"
+done
+# A QEMU that logs its pid, what it read from stdin and each signal it receives,
+# then waits until signalled. Traps are set before the pid is logged.
+mkstubs "$sigqhs"
+mkswtpm "$sigqhs" sock
+cat >"$sigqhs/qemu-system-x86_64" <<'STUB'
+#!/bin/sh
+trap 'echo "qemu-got TERM" >>"$STUB_LOG"; exit 0' TERM
+trap 'echo "qemu-got HUP" >>"$STUB_LOG"; exit 0' HUP
+trap 'echo "qemu-got INT" >>"$STUB_LOG"; exit 0' INT
+trap 'echo "qemu-got QUIT" >>"$STUB_LOG"; exit 0' QUIT
+echo "qemu-launch $*" >>"$STUB_LOG"
+echo "qemu-pid $$" >>"$STUB_LOG"
+IFS= read -r line
+echo "qemu-stdin $line" >>"$STUB_LOG"
+while :; do sleep 0.2; done
+STUB
+chmod +x "$sigqhs/qemu-system-x86_64"
+
+# alive <pid> -> true for a running process; a zombie is already dead.
+alive() {
+  local s
+  [ -r "/proc/$1/stat" ] || return 1
+  s=$(<"/proc/$1/stat")
+  s=${s##*) }
+  [ "${s%% *}" != Z ]
+}
+# trun <dir> <args...> -> like run, but PATH is $TPMSTUBS plus the coreutils.
+trun() {
+  local d=$1
+  shift
+  (cd "$d" && env PATH="${TPMSTUBS-$tpmhs}:$tools" \
+    RUN_QEMU_TPM_WAIT_SECONDS="${TPMWAIT-3}" TMPDIR="${TPMTMP-$w}" bash "$script" "$@" </dev/null 2>&1)
+}
+tpm_args_in() { grep -qF -- "-chardev socket,id=chrtpm,path=$2 -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-tis,tpmdev=tpm0" <<<"$1"; }
+
+# 33. --dry-run with --tpm prints the TPM arguments and starts and creates nothing.
+d=$(workdir tpm-dry)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm --dry-run)
+rc=$?
+sock=$(sed -n 's/^tpm: socket //p' <<<"$out")
+{ [ $rc -eq 0 ] && [ -n "$sock" ] && [ "${#sock}" -lt 100 ] && [[ $sock == "$w"/run-qemu-tpmsock.*/swtpm-sock ]] \
+  && tpm_args_in "$(cmdline "$out")" "$sock" && [ ! -s "$log" ] && [ ! -e "$d/build/tmp/tpm-state" ] \
+  && [ -z "$(ls -d "$w"/run-qemu-tpmsock.* 2>/dev/null)" ]; } \
+  && ok "--tpm --dry-run prints the TPM arguments and starts and creates nothing" || bad "tpm dry: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 34. A normal run starts swtpm before QEMU, wires it in, and leaves no swtpm behind.
+d=$(workdir tpm-run)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+sd="$d/build/tmp/tpm-state"
+tl=$(grep '^swtpm socket' "$log")
+sock=$(sed -n 's/.*--ctrl type=unixio,path=\([^ ]*\).*/\1/p' <<<"$tl")
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+st=$(grep -n '^swtpm socket' "$log" | head -1 | cut -d: -f1)
+ql=$(grep -n '^qemu-launch' "$log" | head -1 | cut -d: -f1)
+{ [ $rc -eq 0 ] && [ -n "$sock" ] && [ "${#sock}" -lt 100 ] && [ -n "$pid" ] && ! alive "$pid" && [ -n "$st" ] && [ -n "$ql" ] && [ "$st" -lt "$ql" ] \
+  && grep -qF -- "--tpmstate dir=$sd" <<<"$tl" && [[ $sock == "$w"/run-qemu-tpmsock.*/swtpm-sock ]] \
+  && grep -qF -- '--tpm2' <<<"$tl" && grep -qF -- '--daemon' <<<"$tl" && grep -qF -- "--pid file=$sd/swtpm.pid" <<<"$tl" \
+  && tpm_args_in "$(grep '^qemu-launch' "$log")" "$sock" && [ ! -e "$sock" ] && [ ! -e "$(dirname "$sock")" ] && [ ! -e "$sd/swtpm.pid" ]; } \
+  && ok "a normal --tpm run starts swtpm first, wires it in and stops it" || bad "tpm run: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+
+# 35. A group TERM while QEMU runs still stops swtpm.
+d=$(workdir tpm-term)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+(cd "$d" && exec setsid env PATH="$sleephs:$tools" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/term.out" 2>&1 </dev/null) &
+rp=$!
+for _ in $(seq 1 100); do
+  grep -q '^qemu-launch' "$log" && break
+  sleep 0.1
+done
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+rc=none
+if [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && grep -q '^qemu-launch' "$log"; then
+  kill -TERM -- "-$rp"
+  wait "$rp"
+  rc=$?
+fi
+{ [ "$rc" = 143 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "a TERM while QEMU runs stops swtpm" || bad "tpm term: rc=$rc pid=$pid out=[$(cat "$w/term.out")] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 36. A socket that never appears exits 1 naming it, never starts QEMU, and stops swtpm.
+d=$(workdir tpm-nosock)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$nosockhs TPMWAIT=1 trun "$d" qemux86-64 --tpm)
+rc=$?
+sock=$(sed -n 's/.*--ctrl type=unixio,path=\([^ ]*\).*/\1/p' "$log")
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 1 ] && [ -n "$sock" ] && grep -qF "$sock" <<<"$out" && [ ! -e "$(dirname "$sock")" ] && grep -qi 'qemu was not started' <<<"$out" && ! grep -q '^qemu-launch' "$log" \
+  && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a missing TPM socket exits 1 naming it, without starting QEMU" || bad "tpm nosock: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 37. With no build directory the state dir is a temp dir, removed on exit.
+mkdir -p "$w/tmpd" "$w/bare-tpm"
+truncate -s 1100M "$w/bare-tpm/disk.img"
+: >"$w/bare-tpm/u-boot.rom"
+: >"$log"
+out=$(RUN_QEMU_UBOOT_ROM=$w/bare-tpm/u-boot.rom TPMTMP=$w/tmpd trun "$w/bare-tpm" qemux86-64 --tpm --image "$w/bare-tpm/disk.img")
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && grep -qF -- "path=$w/tmpd/" "$log" && [ -z "$(ls -A "$w/tmpd")" ] && [ -n "$pid" ] && ! alive "$pid" \
+  && [ ! -e "$w/bare-tpm/build" ]; } \
+  && ok "without a build dir the TPM state is a temp dir removed on exit" || bad "tpm tmp: rc=$rc out=[$out] left=[$(ls -A "$w/tmpd")] log=[$(cat "$log")]"
+
+# 38. The QEMU exit status passes through and swtpm is still stopped.
+d=$(workdir tpm-fail)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$failhs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 7 ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "the QEMU exit status passes through and swtpm is stopped" || bad "tpm fail: rc=$rc pid=$pid out=[$out]"
+
+# 39. A native swtpm runs through the uninative loader in preference to the host's.
+d=$(workdir tpm-native)
+mksysroot "$d"
+sr="$d/build/tmp/sysroots-components/x86_64"
+mkswtpm "$sr/swtpm-native/usr/bin" sock
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$noswtpmhs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && grep -q "^loader --library-path .* $sr/swtpm-native/usr/bin/swtpm socket " "$log" && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a native swtpm runs under the uninative loader" || bad "tpm native: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+
+# 40. No swtpm native or on PATH exits 1 naming where it looked, before QEMU starts.
+d=$(workdir tpm-noswtpm)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$noswtpmhs trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$d/build/tmp/sysroots-components/x86_64/swtpm-native/usr/bin/swtpm" <<<"$out" \
+  && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "no swtpm anywhere exits 1 naming where it looked" || bad "tpm none: rc=$rc out=[$out]"
+
+# 41. A deliberately long work directory still works: the socket is short and
+# lives outside it, because an AF_UNIX path holds only about 107 bytes.
+longd="$w/tpm-long/$(printf 'long-directory-name-%.0s' 1 2 3 4 5 6)/work"
+mkdir -p "$longd/build/tmp/deploy/stone/_build"
+echo rom >"$longd/build/tmp/deploy/stone/u-boot.rom"
+truncate -s 2G "$longd/build/tmp/deploy/stone/_build/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$longd" qemux86-64 --tpm)
+rc=$?
+sock=$(sed -n 's/.*--ctrl type=unixio,path=\([^ ]*\).*/\1/p' "$log")
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ ${#longd} -gt 120 ] && [ $rc -eq 0 ] && [ -n "$sock" ] && [ ${#sock} -lt 100 ] && [[ $sock != "$longd"* ]] \
+  && tpm_args_in "$(grep '^qemu-launch' "$log")" "$sock" && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a long work directory still gets a short TPM socket outside it" || bad "tpm long: rc=$rc len=${#longd} sock=[$sock] out=[$out]"
+
+# 42. The temp socket dir is removed after a TERM while QEMU runs.
+d=$(workdir tpm-term2)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/termtmp"
+: >"$log"
+(cd "$d" && exec setsid env PATH="$sleephs:$tools" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w/termtmp" bash "$script" qemux86-64 --tpm >"$w/term2.out" 2>&1 </dev/null) &
+rp=$!
+for _ in $(seq 1 100); do
+  grep -q '^qemu-launch' "$log" && break
+  sleep 0.1
+done
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+existed=$(ls -A "$w/termtmp")
+rc=none
+if [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && grep -q '^qemu-launch' "$log"; then
+  kill -TERM -- "-$rp"
+  wait "$rp"
+  rc=$?
+fi
+{ [ "$rc" = 143 ] && [ -n "$existed" ] && [ -z "$(ls -A "$w/termtmp")" ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "the temp TPM socket dir is removed after a TERM" || bad "tpm term2: rc=$rc existed=[$existed] left=[$(ls -A "$w/termtmp")] out=[$(cat "$w/term2.out")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 43. RUN_QEMU_TPM_SOCK_DIR names where the socket goes; the dir itself stays.
+d=$(workdir tpm-override)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/ovr" "$w/ovrtmp"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/ovr TPMTMP=$w/ovrtmp trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && grep -qF -- "--ctrl type=unixio,path=$w/ovr/swtpm-sock" "$log" && tpm_args_in "$(grep '^qemu-launch' "$log")" "$w/ovr/swtpm-sock" \
+  && [ -d "$w/ovr" ] && [ ! -e "$w/ovr/swtpm-sock" ] && [ -z "$(ls -A "$w/ovrtmp")" ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "RUN_QEMU_TPM_SOCK_DIR places the socket and is left in place" || bad "tpm override: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 44. An override that makes the socket path over 100 bytes exits 1 naming it, before swtpm.
+d=$(workdir tpm-overlong)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+longo="$w/$(printf 'o%.0s' $(seq 1 95))"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$longo trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "$longo/swtpm-sock" <<<"$out" && grep -qE "$((${#longo} + 11))" <<<"$out" \
+  && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$longo" ]; } \
+  && ok "a too-long socket path exits 1 naming it and its length, starting nothing" || bad "tpm overlong: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 45. A live swtpm already on the state dir stops the run, and is left alone.
+d=$(workdir tpm-held)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+# A holder with no child process: `read -t` on a fifo it opens read-write waits without
+# forking, so killing the one pid leaves nothing holding the suite's stdout open.
+mkfifo "$w/hold-a.fifo"
+bash -c 'read -t 60 x <>"$1"; :' _ "$w/hold-a.fifo" swtpm socket --tpmstate "dir=$sd" &
+holder=$!
+echo "$holder" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "already running" <<<"$out" && grep -qF "$holder" <<<"$out" && alive "$holder" \
+  && [ "$(<"$sd/swtpm.pid")" = "$holder" ] && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a live swtpm on the state dir stops the run and keeps its pid file" || bad "tpm held: rc=$rc holder=$holder out=[$out] log=[$(cat "$log")]"
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+
+# 46. A pid file naming a process that is not swtpm on this state dir is stale and replaced.
+d=$(workdir tpm-stale)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+mkfifo "$w/hold-b.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "unrelated process" "$w/hold-b.fifo" &
+other=$!
+echo "$other" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && alive "$other" && [ -n "$pid" ] && [ "$pid" != "$other" ] && ! alive "$pid"; } \
+  && ok "a pid file naming an unrelated process is replaced, not obeyed" || bad "tpm stale: rc=$rc other=$other pid=$pid out=[$out]"
+kill "$other" 2>/dev/null
+wait "$other" 2>/dev/null
+
+# 47. swtpm splits an option string on commas with no escape, so a comma in the
+#     socket directory can never work: the run exits 1 naming the socket path and
+#     starts nothing, dry run included.
+d=$(workdir tpm-comma)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/c,d"
+for mode in real dry; do
+  : >"$log"
+  if [ $mode = dry ]; then
+    out=$(RUN_QEMU_TPM_SOCK_DIR=$w/c,d trun "$d" qemux86-64 --tpm --dry-run)
+  else
+    out=$(RUN_QEMU_TPM_SOCK_DIR=$w/c,d trun "$d" qemux86-64 --tpm)
+  fi
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "TPM socket path" <<<"$out" && grep -qF "$w/c,d/swtpm-sock" <<<"$out" && grep -qF "swtpm cannot take a comma" <<<"$out" \
+    && ! grep -q '^command:' <<<"$out" && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+    && ok "$mode: a comma in the socket directory exits 1 naming it, starting nothing" || bad "tpm comma $mode: rc=$rc out=[$out] log=[$(cat "$log")]"
+done
+
+# 47b. A comma in the TPM state directory (a TMPDIR with a comma, no build/tmp)
+#      is refused the same way, naming the state directory.
+mkdir -p "$w/t,mp" "$w/comma-tpm"
+truncate -s 1100M "$w/comma-tpm/disk.img"
+: >"$w/comma-tpm/u-boot.rom"
+for mode in real dry; do
+  : >"$log"
+  args=(qemux86-64 --tpm --image "$w/comma-tpm/disk.img")
+  [ $mode = dry ] && args+=(--dry-run)
+  out=$(RUN_QEMU_UBOOT_ROM=$w/comma-tpm/u-boot.rom RUN_QEMU_TPM_SOCK_DIR=$w/ovr TPMTMP=$w/t,mp trun "$w/comma-tpm" "${args[@]}")
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "TPM state directory" <<<"$out" && grep -qF "swtpm cannot take a comma" <<<"$out" \
+    && ! grep -q '^command:' <<<"$out" && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ -z "$(ls -A "$w/t,mp")" ]; } \
+    && ok "$mode: a comma in the TPM state directory exits 1 naming it, starting nothing" || bad "tpm state comma $mode: rc=$rc out=[$out] log=[$(cat "$log")]"
+done
+
+# 48. -bios is not a key-value option, so a comma in the firmware path stays single
+#     while the -drive file= path of an image under a comma directory is doubled.
+mkdir -p "$w/f,w"
+: >"$w/f,w/u-boot.rom"
+: >"$w/f,w/flash.bin"
+for spec in "qemux86-64 RUN_QEMU_UBOOT_ROM u-boot.rom" "qemuarm64 RUN_QEMU_FLASH_BIN flash.bin"; do
+  read -r m var fw <<<"$spec"
+  d=$(workdir "fw-comma-$m")
+  truncate -s 1M "$w/a,b/disk.img"
+  RUNENV=("$var=$w/f,w/$fw")
+  out=$(run "$d" "$m" --image "$w/a,b/disk.img" --dry-run)
+  rc=$?
+  RUNENV=()
+  c=$(cmdline "$out")
+  { [ $rc -eq 0 ] && [[ $c == *" -bios $w/f,w/$fw "* ]] && [[ $c != *" -bios $w/f,,w"* ]] \
+    && [[ $c == *"-drive file=$w/a,,b/disk.img,"* ]]; } \
+    && ok "$m: the -bios path keeps a single comma and the -drive path doubles it" || bad "bios comma $m: rc=$rc out=[$out]"
+done
+
+# 49. One unreadable directory in the native sysroot must not end the run: the
+#     readable lib dirs are still used.
+d=$(workdir native-unreadable)
+mksysroot "$d"
+truncate -s 1M "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$d/build/tmp/sysroots-components/x86_64/locked-native"
+chmod 000 "$d/build/tmp/sysroots-components/x86_64/locked-native"
+if [ "$(id -u)" -eq 0 ]; then
+  ok "unreadable native sysroot directory: skipped, root can read mode 000"
+else
+  out=$(run "$d" qemux86-64 --dry-run)
+  rc=$?
+  { [ $rc -eq 0 ] && grep -qF "$d/build/tmp/sysroots-components/x86_64/glib-native/usr/lib" <<<"$out" && grep -q '^command: ' <<<"$out"; } \
+    && ok "an unreadable native sysroot directory does not stop the run" || bad "native unreadable: rc=$rc out=[$out]"
+fi
+chmod 755 "$d/build/tmp/sysroots-components/x86_64/locked-native"
+
+# 50. The pid file names a live process that is not this run's swtpm: cleanup must
+#     not signal it. A stub swtpm binds the socket and writes that pid, then exits.
+foreignhs=$w/foreignstubs
+mkdir -p "$foreignhs"
+mkstubs "$foreignhs"
+{
+  echo "#!$(command -v python3)"
+  cat <<'EOF'
+import os, socket, sys
+args = sys.argv[1:]
+ctrl = pidfile = None
+for i, a in enumerate(args):
+    if a.startswith("type=unixio,path="):
+        ctrl = a.split("path=", 1)[1]
+    if a.startswith("file=") and args[i - 1] == "--pid":
+        pidfile = a[5:]
+s = socket.socket(socket.AF_UNIX)
+s.bind(ctrl)
+with open(pidfile, "w") as f:
+    f.write(os.environ["FOREIGN_PID"] + "\n")
+EOF
+} >"$foreignhs/swtpm"
+chmod +x "$foreignhs/swtpm"
+d=$(workdir tpm-foreign)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkfifo "$w/hold-c.fifo"
+bash -c 'read -t 60 x <>"$1"; :' "unrelated process" "$w/hold-c.fifo" &
+other=$!
+: >"$log"
+out=$(FOREIGN_PID=$other TPMSTUBS=$foreignhs trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 0 ] && alive "$other" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "cleanup does not signal a pid file naming a process that is not this swtpm" || bad "tpm foreign: rc=$rc other=$other out=[$out]"
+kill "$other" 2>/dev/null
+wait "$other" 2>/dev/null
+
+# 51. A TPM wait that is not a whole number exits 1 before swtpm or QEMU starts.
+for v in 10s x; do
+  d=$(workdir "tpm-wait-$v")
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  : >"$log"
+  out=$(TPMWAIT=$v trun "$d" qemux86-64 --tpm)
+  rc=$?
+  { [ $rc -eq 1 ] && grep -qF "RUN_QEMU_TPM_WAIT_SECONDS must be a whole number of seconds, got '$v'" <<<"$out" \
+    && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+    && ok "TPM wait '$v' exits 1 and starts nothing" || bad "tpm wait $v: rc=$rc out=[$out] log=[$(cat "$log")]"
+done
+
+# 51b. A wait with leading zeros is a decimal number: 08 is 8 and 010 is 10, not
+#      a bash arithmetic error or an octal 8. The observable is the count of
+#      `sleep 1` calls the runner makes before giving up, read from a stub sleep
+#      that logs and returns at once, so the case costs no wall-clock time.
+fastsleephs=$w/fastsleepstubs
+mkdir -p "$fastsleephs"
+mkstubs "$fastsleephs"
+mkswtpm "$fastsleephs" nosock
+# shellcheck disable=SC2016 # $1 and $* belong to the generated stub
+printf '#!/bin/sh\n[ "$1" = 1 ] || exec %s "$@"\necho "sleep $1" >>"$STUB_LOG"\n' "$(command -v sleep)" >"$fastsleephs/sleep"
+chmod +x "$fastsleephs/sleep"
+for v in 08:8 010:10 0:0; do
+  d=$(workdir "tpm-wait-zeros-${v%%:*}")
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  : >"$log"
+  out=$(TPMSTUBS=$fastsleephs TPMWAIT=${v%%:*} trun "$d" qemux86-64 --tpm)
+  rc=$?
+  pid=$(sed -n 's/^swtpm-pid //p' "$log")
+  { [ $rc -eq 1 ] && [ "$(grep -c '^sleep 1$' "$log")" -eq "${v##*:}" ] && grep -qF "did not appear after ${v##*:}s" <<<"$out" \
+    && ! grep -q 'value too great' <<<"$out"; } \
+    && ok "TPM wait '${v%%:*}' means ${v##*:} seconds" || bad "tpm wait zeros ${v%%:*}: rc=$rc sleeps=$(grep -c '^sleep 1$' "$log") out=[$out]"
+  if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
+done
+
+# 51c. The socket length limit counts bytes, not characters: a directory of
+#      multibyte characters whose path is under the limit in characters but over
+#      it in bytes is refused, naming the byte length and the override.
+#      Needs a UTF-8 locale on the host: en_US.UTF-8 when installed, else C.UTF-8,
+#      else any other; with none the case is skipped.
+utf8loc=""
+for pat in '^en_US\.utf-?8$' '^C\.utf-?8$' '\.utf-?8$'; do
+  utf8loc=$(locale -a 2>/dev/null | grep -i -m1 -E "$pat") && break
+  utf8loc=""
+done
+if [ -z "$utf8loc" ]; then
+  ok "multibyte socket path: skipped, no UTF-8 locale is installed"
+else
+  d=$(workdir tpm-multibyte)
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  mb="$w/$(printf 'é%.0s' $(seq 1 45))"
+  mbbytes=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=C wc -c)
+  mbchars=$(printf '%s' "$mb/swtpm-sock" | LC_ALL=$utf8loc wc -m)
+  : >"$log"
+  out=$(LC_ALL=$utf8loc RUN_QEMU_TPM_SOCK_DIR=$mb trun "$d" qemux86-64 --tpm)
+  rc=$?
+  { [ "$mbchars" -le 100 ] && [ "$mbbytes" -gt 100 ] && [ $rc -eq 1 ] && grep -qF "TPM socket path is $mbbytes bytes" <<<"$out" \
+    && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log" && [ ! -e "$mb" ]; } \
+    && ok "the socket path limit counts bytes, not characters ($utf8loc)" || bad "tpm multibyte: rc=$rc locale=$utf8loc chars=$mbchars bytes=$mbbytes out=[$out]"
+fi
+
+# 51d. The too-long message points at RUN_QEMU_TPM_SOCK_DIR as the way out.
+d=$(workdir tpm-overlong-hint)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$longo trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -qF "RUN_QEMU_TPM_SOCK_DIR" <<<"$out"; } \
+  && ok "a too-long socket path message names RUN_QEMU_TPM_SOCK_DIR" || bad "tpm overlong hint: rc=$rc out=[$out]"
+
+# 52. A failed mkdir of the TPM directories stops the run before QEMU starts.
+d=$(workdir tpm-mkdir)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$w/notadir"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/notadir/sock trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 1 ] && grep -q 'mkdir' <<<"$out" && ! grep -q '^swtpm ' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a failed mkdir exits 1 naming mkdir, without starting QEMU" || bad "tpm mkdir: rc=$rc out=[$out] log=[$(cat "$log")]"
+
+# 53. A group INT while QEMU runs exits 130 and still stops swtpm. python3 resets
+#     SIGINT first: a background job starts with it ignored, and bash cannot trap that.
+d=$(workdir tpm-int)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+(cd "$d" && exec python3 -c 'import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.setsid()
+os.execvp(sys.argv[1], sys.argv[1:])' env PATH="$sleephs:$tools" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/int.out" 2>&1 </dev/null) &
+rp=$!
+for _ in $(seq 1 100); do
+  grep -q '^qemu-launch' "$log" && break
+  sleep 0.1
+done
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+rc=none
+if [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && grep -q '^qemu-launch' "$log"; then
+  kill -INT -- "-$rp"
+  wait "$rp"
+  rc=$?
+fi
+{ [ "$rc" = 130 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "an INT while QEMU runs exits 130 and stops swtpm" || bad "tpm int: rc=$rc pid=$pid out=[$(cat "$w/int.out")] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# --- signals sent to the runner's pid alone, not its group -----------------------
+# Cases 35, 42 and 53 signal the whole group, so QEMU gets the signal directly.
+# These signal only the runner, which must pass it on to a QEMU that keeps stdin.
+# python3 resets INT and QUIT first: a background job starts with both ignored,
+# and bash cannot trap a signal that was ignored when it started.
+PYSTART='import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+os.setsid()
+os.execvp(sys.argv[1], sys.argv[1:])'
+
+# sigrun <name> <signal> <stdin file> -> starts the runner on the signalling QEMU
+# stub, sends <signal> to the runner's pid once QEMU has read its stdin, and sets
+# SIG_RC ("hung" when the runner outlives 6s), SIG_DIR, SIG_PID (swtpm), SIG_QPID
+# (QEMU), SIG_QALIVE/SIG_TALIVE (1 when still running after the runner left) and
+# SIG_MS (milliseconds from the signal to the runner's exit, to the 0.1s poll).
+# SIGHS names another stub directory, SIGPOLLS the number of 0.1s polls to wait.
+# Stragglers are killed by recorded pid and by the group this helper created.
+sigrun() {
+  local name=$1 sig=$2 in=$3 rp own=0 r _ t0
+  SIG_DIR=$(workdir "sig-$name")
+  truncate -s 2G "$(deploy "$SIG_DIR")/avocado-os-avocado-qemux86-64.img"
+  : >"$log"
+  (cd "$SIG_DIR" && exec python3 -c "$PYSTART" env PATH="${SIGHS-$sigqhs}:$tools" \
+    RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" bash "$script" qemux86-64 --tpm >"$w/sig-$name.out" 2>&1 <"$in") &
+  rp=$!
+  for _ in $(seq 1 100); do
+    grep -q '^qemu-stdin' "$log" && break
+    sleep 0.1
+  done
+  SIG_PID=$(sed -n 's/^swtpm-pid //p' "$log")
+  SIG_QPID=$(sed -n 's/^qemu-pid //p' "$log")
+  SIG_RC=none
+  SIG_MS=0
+  SIG_QALIVE=1
+  SIG_TALIVE=1
+  [ "$(ps -o pgid= -p "$rp" | tr -d ' ')" = "$rp" ] && own=1
+  if [ "$own" -eq 1 ] && [ -n "$SIG_QPID" ]; then
+    t0=$(date +%s%N)
+    kill "-$sig" "$rp"
+    for _ in $(seq 1 "${SIGPOLLS-60}"); do
+      alive "$rp" || break
+      sleep 0.1
+    done
+    SIG_MS=$((($(date +%s%N) - t0) / 1000000))
+    alive "$rp" && SIG_RC=hung
+    alive "$SIG_QPID" || SIG_QALIVE=0
+    { [ -z "$SIG_PID" ] || ! alive "$SIG_PID"; } && SIG_TALIVE=0
+  fi
+  [ -n "$SIG_QPID" ] && alive "$SIG_QPID" && kill "$SIG_QPID" 2>/dev/null
+  [ -n "$SIG_PID" ] && alive "$SIG_PID" && kill "$SIG_PID" 2>/dev/null
+  [ "$own" -eq 1 ] && kill -KILL -- "-$rp" 2>/dev/null
+  wait "$rp"
+  r=$?
+  [ "$SIG_RC" = hung ] || SIG_RC=$r
+  return 0
+}
+
+# 54. TERM, HUP, INT and QUIT sent to the runner alone are forwarded to QEMU, the
+#     runner exits 128+signal once QEMU is gone, and swtpm is stopped after it.
+#     The stub QEMU exits on the signal, so none of these may reach the 5 second
+#     bound on a QEMU that ignores it (case 70): each ends within 3 seconds.
+for spec in "TERM 143" "HUP 129" "INT 130" "QUIT 131"; do
+  read -r sig want <<<"$spec"
+  sigrun "$sig" "$sig" /dev/null
+  { [ "$SIG_RC" = "$want" ] && grep -qx "qemu-got $sig" "$log" && [ "$SIG_QALIVE" -eq 0 ] && [ -n "$SIG_PID" ] \
+    && [ "$SIG_TALIVE" -eq 0 ] && [ ! -e "$SIG_DIR/build/tmp/tpm-state/swtpm.pid" ] && [ "$SIG_MS" -lt 3000 ]; } \
+    && ok "a $sig sent to the runner alone reaches QEMU, exits $want and stops swtpm (${SIG_MS} ms)" \
+    || bad "runner $sig: rc=$SIG_RC want=$want ms=$SIG_MS qalive=$SIG_QALIVE talive=$SIG_TALIVE out=[$(cat "$w/sig-$sig.out")] log=[$(cat "$log")]"
+done
+
+# 55. QEMU keeps the runner's stdin: -nographic needs the terminal, and a
+#     background child would otherwise read /dev/null.
+echo "hello from stdin" >"$w/stdin.in"
+sigrun stdin TERM "$w/stdin.in"
+grep -qx 'qemu-stdin hello from stdin' "$log" \
+  && ok "QEMU reads the runner's stdin" || bad "qemu stdin: out=[$(cat "$w/sig-stdin.out")] log=[$(cat "$log")]"
+
+# --- per-run swtpm ownership --------------------------------------------------
+# hold <fifo> <words...> -> a process with no child whose command line carries the
+# given words, as one pid in $HELD (killed by the caller).
+hold() {
+  mkfifo "$1"
+  shift
+  bash -c 'read -t 60 x <>"$1"; :' _ "$@" &
+  HELD=$!
+}
+
+# 56. A pid file naming a process on a state dir that only starts with this one
+#     (.../tpm-state2) does not block the start and is not signalled by cleanup.
+d=$(workdir tpm-state2)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$sd"
+hold "$w/hold-d.fifo" "$w/hold-d.fifo" swtpm socket --tpmstate "dir=${sd}2"
+echo "$HELD" >"$sd/swtpm.pid"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && alive "$HELD" && [ -n "$pid" ] && [ "$pid" != "$HELD" ] && ! alive "$pid" && grep -q '^qemu-launch' "$log"; } \
+  && ok "a swtpm on tpm-state2 does not block a start on tpm-state" || bad "tpm-state2 start: rc=$rc held=$HELD out=[$out]"
+kill "$HELD" 2>/dev/null
+wait "$HELD" 2>/dev/null
+
+# The cleanup cases: the stub swtpm writes FOREIGN_PID into the pid file (case 50)
+# and the process behind that pid carries this run's socket but the state dir
+# tpm-state2, or this run's state dir but a socket whose name only starts like it.
+d=$(workdir tpm-state2-cleanup)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$w/sock-e"
+hold "$w/hold-e.fifo" "$w/hold-e.fifo" swtpm socket --tpmstate "dir=${sd}2" --ctrl "type=unixio,path=$w/sock-e/swtpm-sock"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/sock-e FOREIGN_PID=$HELD TPMSTUBS=$foreignhs trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 0 ] && alive "$HELD" && [ ! -e "$sd/swtpm.pid" ]; } \
+  && ok "cleanup does not signal a process on tpm-state2 even with this run's socket" || bad "tpm-state2 cleanup: rc=$rc held=$HELD out=[$out]"
+kill "$HELD" 2>/dev/null
+wait "$HELD" 2>/dev/null
+
+# 57. Two runs share one state dir with different sockets: this run's cleanup does
+#     not signal the other run's swtpm, even when its socket name starts the same.
+d=$(workdir tpm-shared-state)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sd=$d/build/tmp/tpm-state
+mkdir -p "$w/sock-f"
+hold "$w/hold-f.fifo" "$w/hold-f.fifo" swtpm socket --tpmstate "dir=$sd" --ctrl "type=unixio,path=$w/sock-f/swtpm-sock2"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/sock-f FOREIGN_PID=$HELD TPMSTUBS=$foreignhs trun "$d" qemux86-64 --tpm)
+rc=$?
+{ [ $rc -eq 0 ] && alive "$HELD" && [ ! -e "$sd/swtpm.pid" ]; } \
+  && ok "cleanup does not signal another run's swtpm on the same state dir" || bad "tpm shared state: rc=$rc held=$HELD out=[$out]"
+kill "$HELD" 2>/dev/null
+wait "$HELD" 2>/dev/null
+
+# 58. A swtpm that ignores TERM is killed once the window is over (about 5 seconds).
+d=$(workdir tpm-ignterm)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$ignhs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$d/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "a swtpm that ignores TERM is escalated to KILL" || bad "tpm ignterm: rc=$rc pid=$pid out=[$out]"
+if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
+
+# 59. A swtpm pid that stops being this run's swtpm during the TERM window (it turns
+#     into an unrelated process, as a recycled pid would) is not sent KILL (about 5 seconds).
+d=$(workdir tpm-reexec)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$reexechs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && [ -n "$pid" ] && alive "$pid"; } \
+  && ok "KILL is not sent once the pid no longer belongs to this swtpm" || bad "tpm reexec: rc=$rc pid=$pid out=[$out]"
+if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
+
+# 60. A pid file of 0 leaves every process group untouched: a kill of pid 0 would
+#     reach the runner's own group. A canary in this suite's group must live. This
+#     is a canary, not a guard test: swtpm_owns_pid 0 is already false because
+#     /proc/0 does not exist, so the runner's `-gt 1` check is belt and braces and
+#     removing it does not fail this case.
+d=$(workdir tpm-pid0)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+sleep 60 &
+canary=$!
+: >"$log"
+out=$(cd "$d" && FOREIGN_PID=0 env PATH="$foreignhs:$tools" \
+  RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$w" "$(command -v setsid)" --wait bash "$script" qemux86-64 --tpm </dev/null 2>&1)
+rc=$?
+{ [ $rc -eq 0 ] && alive "$canary"; } \
+  && ok "a pid file of 0 does not signal any process group" || bad "tpm pid0: rc=$rc out=[$out]"
+kill "$canary" 2>/dev/null
+wait "$canary" 2>/dev/null
+
+# --- pid file reads under set -e ---------------------------------------------------
+# 61. A pid file that vanishes, or turns into a directory, while swtpm is stopping
+#     must not abort cleanup: the temp socket dir still goes and QEMU's status (7) stands.
+for v in rmpid dirpid; do
+  d=$(workdir "tpm-$v")
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  mkdir -p "$w/$v-tmp"
+  : >"$log"
+  if [ "$v" = rmpid ]; then hs=$rmpidhs; else hs=$dirpidhs; fi
+  out=$(TPMSTUBS=$hs TPMTMP=$w/$v-tmp trun "$d" qemux86-64 --tpm)
+  rc=$?
+  pid=$(sed -n 's/^swtpm-pid //p' "$log")
+  { [ $rc -eq 7 ] && [ -n "$pid" ] && ! alive "$pid" && [ -z "$(ls -A "$w/$v-tmp")" ]; } \
+    && ok "$v: cleanup survives a damaged pid file and keeps QEMU's status" || bad "tpm $v: rc=$rc pid=$pid left=[$(ls -A "$w/$v-tmp")] out=[$out]"
+  if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
+done
+
+# 61b. A pid file that another run has rewritten to name its own swtpm is left alone.
+d=$(workdir tpm-swappid)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(TPMSTUBS=$swappidhs trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 0 ] && [ -n "$pid" ] && ! alive "$pid" && [ "$(<"$d/build/tmp/tpm-state/swtpm.pid")" = 4242424 ]; } \
+  && ok "cleanup keeps a pid file that no longer names this run's swtpm" || bad "tpm swappid: rc=$rc pid=$pid out=[$out]"
+if [ -n "$pid" ] && alive "$pid"; then kill -KILL "$pid" 2>/dev/null; fi
+
+# 62. A pid file that exists but cannot be read does not abort the start; it is replaced.
+if [ "$(id -u)" -eq 0 ]; then
+  ok "unreadable pid file: skipped, root can read mode 000"
+else
+  d=$(workdir tpm-unreadable)
+  truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+  sd=$d/build/tmp/tpm-state
+  mkdir -p "$sd"
+  echo 4242 >"$sd/swtpm.pid"
+  chmod 000 "$sd/swtpm.pid"
+  : >"$log"
+  out=$(trun "$d" qemux86-64 --tpm)
+  rc=$?
+  pid=$(sed -n 's/^swtpm-pid //p' "$log")
+  { [ $rc -eq 0 ] && [ -n "$pid" ] && ! alive "$pid" && grep -q '^qemu-launch' "$log"; } \
+    && ok "an unreadable pid file does not abort the start" || bad "tpm unreadable: rc=$rc pid=$pid out=[$out]"
+fi
+
+# --- resize order --------------------------------------------------------------------
+# 63. A swtpm whose socket never appears leaves the image at its size: no resize
+#     ran, and QEMU was not started.
+d=$(workdir tpm-resize-fail)
+img=$(deploy "$d")/avocado-os-avocado-qemux86-64.img
+truncate -s 600M "$img"
+: >"$log"
+out=$(TPMSTUBS=$nosockhs TPMWAIT=1 trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 1 ] && [ "$(size_of "$img")" -eq $((600 * 1048576)) ] && ! grep -q '^qemu-img' "$log" && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a failed swtpm start leaves the image unresized" || bad "tpm resize fail: rc=$rc size=$(size_of "$img") out=[$out] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# 64. A normal TPM run still grows the image, after swtpm is up and before QEMU starts.
+d=$(workdir tpm-resize-ok)
+img=$(deploy "$d")/avocado-os-avocado-qemux86-64.img
+truncate -s 600M "$img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+st=$(grep -n '^swtpm socket' "$log" | head -1 | cut -d: -f1)
+ri=$(grep -n '^qemu-img resize' "$log" | head -1 | cut -d: -f1)
+ql=$(grep -n '^qemu-launch' "$log" | head -1 | cut -d: -f1)
+{ [ $rc -eq 0 ] && [ "$(size_of "$img")" -eq $((1024 * 1048576)) ] && [ -n "$st" ] && [ -n "$ri" ] && [ -n "$ql" ] \
+  && [ "$st" -lt "$ri" ] && [ "$ri" -lt "$ql" ]; } \
+  && ok "a TPM run starts swtpm, then resizes, then starts QEMU" || bad "tpm resize order: rc=$rc st=$st ri=$ri ql=$ql out=[$out] log=[$(cat "$log")]"
+
+# 65. With a native swtpm AND a swtpm on PATH, the native one starts: the run
+#     goes through the uninative loader, which the host's swtpm would not.
+d=$(workdir tpm-both)
+mksysroot "$d"
+sr="$d/build/tmp/sysroots-components/x86_64"
+mkswtpm "$sr/swtpm-native/usr/bin" sock
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+: >"$log"
+out=$(trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ -x "$tpmhs/swtpm" ] && [ $rc -eq 0 ] && grep -q "^loader --library-path .* $sr/swtpm-native/usr/bin/swtpm socket " "$log" \
+  && [ "$(grep -c '^swtpm socket' "$log")" -eq 1 ] && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "the native swtpm is preferred over a swtpm on PATH" || bad "tpm both: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+
+# 66. A socket file left behind by an earlier run does not satisfy the wait: the
+#     runner removes it before swtpm starts, and a swtpm that never binds one
+#     still times out. python3 binds then closes a unix socket, which leaves a
+#     real socket file ([ -S ] is true for it).
+d=$(workdir tpm-stale-sock)
+truncate -s 2G "$(deploy "$d")/avocado-os-avocado-qemux86-64.img"
+mkdir -p "$w/stale-sock"
+python3 -I -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.close()' "$w/stale-sock/swtpm-sock"
+: >"$log"
+out=$(RUN_QEMU_TPM_SOCK_DIR=$w/stale-sock TPMSTUBS=$nosockhs TPMWAIT=1 trun "$d" qemux86-64 --tpm)
+rc=$?
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ $rc -eq 1 ] && grep -qF "$w/stale-sock/swtpm-sock did not appear" <<<"$out" && ! grep -q '^qemu-launch' "$log" \
+  && [ -n "$pid" ] && ! alive "$pid"; } \
+  && ok "a stale socket from an earlier run does not satisfy the wait" || bad "tpm stale sock: rc=$rc pid=$pid out=[$out] log=[$(cat "$log")]"
+if [ -n "$pid" ] && alive "$pid"; then kill "$pid" 2>/dev/null; fi
+
+# --- signals during cleanup, a late pid file, a QEMU that ignores the signal -------
+# A swtpm stub whose launcher differs from mkswtpm's, which writes the pid file
+# from the launcher before it exits (and so hides these cases). Both modes fork a
+# daemon child that binds the control socket and logs "swtpm-pid <its pid>":
+#   late  the launcher returns at once; the daemon writes the pid file 0.5s later
+#         and binds the socket after that.
+#   slow  the launcher writes the pid file, then lingers 1.5s before it returns.
+#   slowforeign  as slow, but the pid file names $FOREIGN_PID, as when another run
+#         has rewritten it; the log still names the daemon.
+mkswtpm_launch() {
+  local d=$1 mode=$2
+  mkdir -p "$d"
+  {
+    echo "#!$(command -v python3)"
+    echo "MODE = '$mode'"
+    cat <<'EOF'
+import os, socket, sys, time
+args = sys.argv[1:]
+ctrl = pidfile = None
+for i, a in enumerate(args):
+    if a.startswith("type=unixio,path="):
+        ctrl = a.split("path=", 1)[1]
+    if a.startswith("file=") and args[i - 1] == "--pid":
+        pidfile = a[5:]
+def publish(pid, filepid):
+    with open(pidfile, "w") as f:
+        f.write("%d\n" % filepid)
+    with open(os.environ["STUB_LOG"], "a") as f:
+        f.write("swtpm-pid %d\n" % pid)
+with open(os.environ["STUB_LOG"], "a") as f:
+    f.write("swtpm " + " ".join(args) + "\n")
+pid = os.fork()
+if pid:
+    if MODE == "slow":
+        publish(pid, pid)
+    if MODE == "slowforeign":
+        publish(pid, int(os.environ["FOREIGN_PID"]))
+    if MODE in ("slow", "slowforeign"):
+        time.sleep(1.5)
+    sys.exit(0)
+os.setsid()
+null = os.open(os.devnull, os.O_RDWR)
+for fd in (0, 1, 2):
+    os.dup2(null, fd)
+if MODE == "late":
+    time.sleep(float(os.environ.get("LATE_DELAY", "0.5")))
+    publish(os.getpid(), os.getpid())
+s = socket.socket(socket.AF_UNIX)
+s.bind(ctrl)
+s.listen(1)
+time.sleep(60)
+EOF
+  } >"$d/swtpm"
+  chmod +x "$d/swtpm"
+}
+latehs=$w/latestubs
+slowhs=$w/slowstubs
+ignqhs=$w/ignqstubs
+mkdir -p "$latehs" "$slowhs" "$ignqhs"
+mkstubs "$latehs"
+mkswtpm_launch "$latehs" late
+mkstubs "$slowhs"
+mkswtpm_launch "$slowhs" slow
+slowforeignhs=$w/slowforeignstubs
+mkdir -p "$slowforeignhs"
+mkstubs "$slowforeignhs"
+mkswtpm_launch "$slowforeignhs" slowforeign
+# A QEMU that ignores TERM, as a hung guest would: it logs its pid and what it read
+# from stdin, then runs until killed. The ignored signal is inherited by its sleeps.
+mkstubs "$ignqhs"
+mkswtpm "$ignqhs" sock
+cat >"$ignqhs/qemu-system-x86_64" <<'STUB'
+#!/bin/sh
+trap '' TERM
+echo "qemu-launch $*" >>"$STUB_LOG"
+echo "qemu-pid $$" >>"$STUB_LOG"
+IFS= read -r line
+echo "qemu-stdin $line" >>"$STUB_LOG"
+while :; do sleep 0.2; done
+STUB
+chmod +x "$ignqhs/qemu-system-x86_64"
+
+# plain_start <name> <stub dir> <1 for a work dir with build/tmp, 0 for none> ->
+# starts the runner with --tpm in its own session, with nothing on stdin, and sets
+# PLAIN_RP, PLAIN_WORK and PLAIN_TMP (the TMPDIR, so a leftover temp dir shows).
+# Without build/tmp the state dir is a temp dir too, and the image and boot
+# firmware come from --image and RUN_QEMU_UBOOT_ROM.
+plain_start() {
+  local name=$1 hs=$2 build=$3 args=(qemux86-64 --tpm) envs=()
+  PLAIN_TMP=$w/$name-tmp
+  mkdir -p "$PLAIN_TMP"
+  if [ "$build" -eq 1 ]; then
+    PLAIN_WORK=$(workdir "$name")
+    truncate -s 2G "$(deploy "$PLAIN_WORK")/avocado-os-avocado-qemux86-64.img"
+  else
+    PLAIN_WORK=$w/$name-work
+    mkdir -p "$PLAIN_WORK"
+    truncate -s 2G "$PLAIN_WORK/img"
+    : >"$PLAIN_WORK/fw"
+    args+=(--image "$PLAIN_WORK/img")
+    envs+=(RUN_QEMU_UBOOT_ROM="$PLAIN_WORK/fw")
+  fi
+  : >"$log"
+  (cd "$PLAIN_WORK" && exec python3 -c "$PYSTART" env PATH="$hs:$tools" "${envs[@]}" \
+    RUN_QEMU_TPM_WAIT_SECONDS=3 TMPDIR="$PLAIN_TMP" bash "$script" "${args[@]}" >"$w/$name.out" 2>&1 </dev/null) &
+  PLAIN_RP=$!
+}
+# log_wait <pattern> <polls> -> true once a log line matches, polling every 0.1s.
+log_wait() {
+  local _
+  for _ in $(seq 1 "$2"); do
+    grep -q "$1" "$log" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+# plain_wait <polls> -> sets PLAIN_RC to the runner's status, or "hung" when it
+# outlives <polls> 0.1s polls, and then kills the runner's own group.
+plain_wait() {
+  local _ hung=0
+  for _ in $(seq 1 "$1"); do
+    alive "$PLAIN_RP" || break
+    sleep 0.1
+  done
+  if alive "$PLAIN_RP"; then
+    hung=1
+    if [ "$(ps -o pgid= -p "$PLAIN_RP" | tr -d ' ')" = "$PLAIN_RP" ]; then
+      kill -KILL -- "-$PLAIN_RP" 2>/dev/null
+    else
+      kill -KILL "$PLAIN_RP" 2>/dev/null
+    fi
+  fi
+  wait "$PLAIN_RP"
+  PLAIN_RC=$?
+  [ "$hung" -eq 0 ] || PLAIN_RC=hung
+}
+# reap <pid> -> KILL a pid this suite started, if it is still alive.
+reap() {
+  if [ -n "$1" ] && alive "$1"; then kill -KILL "$1" 2>/dev/null; fi
+  return 0
+}
+
+# 67. A TERM that arrives while stop_tpm waits out a swtpm that ignores TERM must
+#     not cut the cleanup short: the swtpm is still KILLed after its 5 second window
+#     and the pid file, the temp socket dir and the temp state dir all go. The stub
+#     QEMU exits at once, so the whole run is the cleanup; the TERM is sent to the
+#     runner alone 1.5 seconds into it, and the status stays QEMU's 0 (not 143).
+plain_start cleanup-term "$ignhs" 0
+if log_wait '^qemu-launch' 100 && log_wait '^swtpm-pid' 10; then
+  sleep 1.5
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 150
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+left=$(ls -A "$PLAIN_TMP")
+{ [ "$PLAIN_RC" = 0 ] && [ -n "$pid" ] && ! alive "$pid" && [ -z "$left" ]; } \
+  && ok "a TERM during the swtpm stop does not cut cleanup short" \
+  || bad "cleanup term: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) left=[$left] out=[$(cat "$w/cleanup-term.out")]"
+reap "$pid"
+
+# 68. A swtpm whose launcher returns before the daemon has written the pid file
+#     (the daemon writes it 0.5s later, then binds the socket) is still stopped by
+#     cleanup, and its pid file removed.
+plain_start late-pid "$latehs" 1
+plain_wait 100
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 0 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ] \
+  && grep -q '^qemu-launch' "$log"; } \
+  && ok "a swtpm that writes its pid file after the launcher returned is stopped" \
+  || bad "late pid: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) out=[$(cat "$w/late-pid.out")] log=[$(cat "$log")]"
+reap "$pid"
+
+# 68b. A TERM right after the launcher returned, with the daemon writing its pid
+#      file 1.4s later: the runner's handler runs after about a second, before the
+#      file exists, so cleanup has to wait for it rather than read it once.
+LATE_DELAY=1.4 plain_start late-term "$latehs" 1
+if log_wait '^swtpm ' 100; then
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 100
+log_wait '^swtpm-pid' 30 || true
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 143 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "a TERM before the daemon writes its pid file still stops swtpm" \
+  || bad "late term: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) out=[$(cat "$w/late-term.out")] log=[$(cat "$log")]"
+reap "$pid"
+
+# 69. A TERM that arrives while the swtpm launcher is still running (it writes the
+#     pid file, then lingers 1.5s) runs its trap before the runner records any pid:
+#     the runner exits 143 without starting QEMU, and cleanup still finds the swtpm
+#     through the pid file, stops it and removes that file.
+plain_start term-in-launch "$slowhs" 1
+if log_wait '^swtpm-pid' 100; then
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 100
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 143 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ] \
+  && ! grep -q '^qemu-launch' "$log"; } \
+  && ok "a TERM while the swtpm launcher runs still stops swtpm and removes its pid file" \
+  || bad "term in launcher: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) pidfile=$([ -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ] && echo present || echo absent) out=[$(cat "$w/term-in-launch.out")] log=[$(cat "$log")]"
+reap "$pid"
+
+# 69b. The same TERM, with a pid file that names an unrelated process (as when
+#      another run has rewritten it): cleanup adopts a pid from the file only when
+#      it is this run's swtpm, so that process is not signalled. The stub's own
+#      daemon is left running by design here, and the test stops it.
+hold "$w/hold-g.fifo" "$w/hold-g.fifo" unrelated
+FOREIGN_PID=$HELD plain_start term-foreign-pid "$slowforeignhs" 1
+if log_wait '^swtpm-pid' 100; then
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 100
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 143 ] && alive "$HELD" && [ "$(<"$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid")" = "$HELD" ]; } \
+  && ok "a pid file naming another process is not adopted or signalled by cleanup" \
+  || bad "term foreign pid: rc=$PLAIN_RC held=$HELD out=[$(cat "$w/term-foreign-pid.out")]"
+reap "$pid"
+kill "$HELD" 2>/dev/null
+wait "$HELD" 2>/dev/null
+
+# 70. A QEMU that ignores TERM is killed after 5 seconds: a TERM sent to the runner
+#     alone ends with 143 after about that long, QEMU gone and swtpm stopped.
+SIGHS=$ignqhs SIGPOLLS=120 sigrun ignq TERM /dev/null
+{ [ "$SIG_RC" = 143 ] && [ "$SIG_QALIVE" -eq 0 ] && [ -n "$SIG_PID" ] && [ "$SIG_TALIVE" -eq 0 ] \
+  && [ ! -e "$SIG_DIR/build/tmp/tpm-state/swtpm.pid" ] && [ "$SIG_MS" -ge 4500 ] && [ "$SIG_MS" -lt 8000 ]; } \
+  && ok "a QEMU that ignores TERM is killed after 5 seconds, the runner exits 143 (${SIG_MS} ms)" \
+  || bad "ignoring qemu: rc=$SIG_RC ms=$SIG_MS qalive=$SIG_QALIVE talive=$SIG_TALIVE out=[$(cat "$w/sig-ignq.out")] log=[$(cat "$log")]"
+
+# No stub swtpm may outlive the suite.
+stray=$(pgrep -af "$w/.*swtpm" || true)
+[ -z "$stray" ] && ok "no stub swtpm survives" || bad "stray swtpm: [$stray]"
+
+echo "passed: $pass  failed: $fail"
+[ "$fail" -eq 0 ]
