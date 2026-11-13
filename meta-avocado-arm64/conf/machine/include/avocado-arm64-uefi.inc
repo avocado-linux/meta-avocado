@@ -12,7 +12,13 @@ KERNEL_IMAGETYPE = "Image"
 # serial-getty for an absent tty holds boot for the 90 s device timeout, as
 # ttyS0 did on the first Spark boot. The kernel takes its console from the ACPI
 # SPCR table, and systemd-getty-generator starts a getty on it when present.
-SERIAL_CONSOLES = ""
+#
+# The boot entry's kernel console also follows this variable: each <baud>;<tty>
+# entry adds console=<tty>,<baud>n8 to its options line, for device-tree
+# platforms that have no SPCR table. A kas overlay can set it in local.conf.
+# Keep the default weak: BitBake parses local.conf before the machine file, so
+# a hard assignment here would silently overwrite the overlay's value.
+SERIAL_CONSOLES ?= ""
 
 MACHINE_FEATURES += "efi pci"
 
