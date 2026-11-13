@@ -339,7 +339,9 @@ forward_signal() {
 record_tpm_pid() {
   local p=""
   [ -z "$TPM_PID" ] || return 0
-  { p=$(<"$TPM_PIDFILE"); } 2>/dev/null || p=""
+  # cat, not $(<file): on bash 5.2 a $(<file) of a missing file under set -e ends
+  # the script even behind ||.
+  p=$(cat "$TPM_PIDFILE" 2>/dev/null) || p=""
   case $p in
     "" | *[!0-9]*) ;;
     *) TPM_PID=$p ;;
@@ -378,7 +380,7 @@ stop_tpm() {
       [ -r "/proc/$pid/stat" ] || break
       # swtpm can vanish between the test above and this read, and under set -e
       # a failure here would skip the cleanup below.
-      s=$(<"/proc/$pid/stat") || break
+      s=$(cat "/proc/$pid/stat" 2>/dev/null) || break
       s=${s##*) }
       # A zombie is already stopped: it only waits for a parent to reap it.
       [ "${s%% *}" = Z ] && break
@@ -392,7 +394,7 @@ stop_tpm() {
   if [ "$TPM_STARTED" -eq 1 ]; then
     # The pid file is shared by every run on this state dir: remove it only while
     # it still names our swtpm. A vanished or unreadable file means no pid.
-    { cur=$(<"$TPM_PIDFILE"); } 2>/dev/null || cur=""
+    cur=$(cat "$TPM_PIDFILE" 2>/dev/null) || cur=""
     if [ -n "$TPM_PID" ] && [ "$cur" = "$TPM_PID" ]; then
       rm -f "$TPM_PIDFILE"
     fi
@@ -443,7 +445,7 @@ start_tpm() {
   if [ -f "$TPM_PIDFILE" ]; then
     local held=""
     # A file that vanishes or cannot be read after the test above means no pid.
-    { held=$(<"$TPM_PIDFILE"); } 2>/dev/null || held=""
+    held=$(cat "$TPM_PIDFILE" 2>/dev/null) || held=""
     case $held in
       "" | *[!0-9]*) ;;
       *)
