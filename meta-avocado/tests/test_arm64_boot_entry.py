@@ -19,6 +19,7 @@ Run with:
     python3 -m unittest discover -s meta-avocado/tests
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -206,6 +207,11 @@ class FunctionSource(unittest.TestCase):
     def test_shellcheck_posix(self):
         self.body()
         if shutil.which("shellcheck") is None:
+            # A CI job that installs shellcheck sets REQUIRE_SHELLCHECK, so a
+            # missing binary there fails instead of skipping the only POSIX
+            # lint this function gets.
+            if os.environ.get("REQUIRE_SHELLCHECK"):
+                self.fail("REQUIRE_SHELLCHECK is set but shellcheck is not installed")
             self.skipTest("shellcheck not installed; POSIX lint not run")
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "func.sh"
