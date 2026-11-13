@@ -20,8 +20,16 @@ avocado_arm64_boot_entry() {
             *';'*) ;;
             *) abe_tty= ;;
         esac
+        # A swapped entry such as ttyAMA0;115200 has fields, but would put a
+        # tty name where the baud goes and leave the console silent.
+        case $abe_baud in
+            *[!0-9]*) abe_baud= ;;
+        esac
+        case $abe_tty in
+            */*) abe_tty= ;;
+        esac
         if [ -z "$abe_baud" ] || [ -z "$abe_tty" ]; then
-            echo "avocado_arm64_boot_entry: malformed SERIAL_CONSOLES entry '$abe_entry', expected <baud>;<tty>" >&2
+            echo "avocado_arm64_boot_entry: malformed SERIAL_CONSOLES entry '$abe_entry', expected <baud>;<tty> with a numeric baud and a tty name without a slash" >&2
             return 1
         fi
         abe_args="$abe_args console=$abe_tty,$abe_baud""n8"

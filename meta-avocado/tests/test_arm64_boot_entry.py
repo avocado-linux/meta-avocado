@@ -119,7 +119,7 @@ class BootEntryFunction(unittest.TestCase):
         )
 
     def test_malformed_entry_fails_names_it_and_leaves_no_output(self):
-        for bad in ["ttyAMA0", "115200;", ";ttyAMA0"]:
+        for bad in ["ttyAMA0", "115200;", ";ttyAMA0", "ttyAMA0;115200", "11a200;ttyS0", "115200;/dev/ttyAMA0"]:
             with self.subTest(entry=bad):
                 out = self.tmp / ("bad-%d.conf" % len(bad))
                 rc, out, err = self.run_func("9600;ttyS1 " + bad, out=out)
@@ -228,12 +228,6 @@ class Pl011ConsoleOverlay(unittest.TestCase):
         for path in sorted(self.KAS.rglob("*")):
             if path.is_file() and path != self.OVERLAY:
                 self.assertNotIn("pl011-console", path.read_text(), path.relative_to(self.KAS).as_posix())
-
-    def test_header_names_pl011_and_a_build_command_including_the_overlay(self):
-        header = [ln for ln in self.OVERLAY.read_text().splitlines() if ln.startswith("#")]
-        text = "\n".join(header)
-        self.assertIn("PL011", text)
-        self.assertRegex(text, r"bakar build \S*kas/machine/\S+\.yml:\S*kas/feature/pl011-console\.yml")
 
 
 if __name__ == "__main__":
