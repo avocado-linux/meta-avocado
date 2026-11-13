@@ -357,8 +357,14 @@ stop_tpm() {
   # No pid recorded: a signal can end the run before start_tpm read the pid file,
   # or the swtpm launcher can return before the daemon writes it. Adopt the file's
   # pid only when it is this run's swtpm, as the pid file is shared with other runs.
+  # The daemon can still be starting, so the file is re-read for up to 2 seconds.
   if [ "$TPM_STARTED" -eq 1 ] && [ -z "$TPM_PID" ]; then
-    record_tpm_pid
+    local w
+    for w in $(seq 1 20); do
+      record_tpm_pid
+      [ -z "$TPM_PID" ] || break
+      sleep 0.1
+    done
     if [ -n "$TPM_PID" ] && ! { [ "$TPM_PID" -gt 1 ] && swtpm_owns_pid "$TPM_PID"; }; then
       TPM_PID=""
     fi

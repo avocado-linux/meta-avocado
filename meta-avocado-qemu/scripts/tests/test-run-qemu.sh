@@ -1363,7 +1363,7 @@ null = os.open(os.devnull, os.O_RDWR)
 for fd in (0, 1, 2):
     os.dup2(null, fd)
 if MODE == "late":
-    time.sleep(0.5)
+    time.sleep(float(os.environ.get("LATE_DELAY", "0.5")))
     publish(os.getpid(), os.getpid())
 s = socket.socket(socket.AF_UNIX)
 s.bind(ctrl)
@@ -1488,6 +1488,21 @@ pid=$(sed -n 's/^swtpm-pid //p' "$log")
   && grep -q '^qemu-launch' "$log"; } \
   && ok "a swtpm that writes its pid file after the launcher returned is stopped" \
   || bad "late pid: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) out=[$(cat "$w/late-pid.out")] log=[$(cat "$log")]"
+reap "$pid"
+
+# 68b. A TERM right after the launcher returned, with the daemon writing its pid
+#      file 1.4s later: the runner's handler runs after about a second, before the
+#      file exists, so cleanup has to wait for it rather than read it once.
+LATE_DELAY=1.4 plain_start late-term "$latehs" 1
+if log_wait '^swtpm ' 100; then
+  kill -TERM "$PLAIN_RP"
+fi
+plain_wait 100
+log_wait '^swtpm-pid' 30 || true
+pid=$(sed -n 's/^swtpm-pid //p' "$log")
+{ [ "$PLAIN_RC" = 143 ] && [ -n "$pid" ] && ! alive "$pid" && [ ! -e "$PLAIN_WORK/build/tmp/tpm-state/swtpm.pid" ]; } \
+  && ok "a TERM before the daemon writes its pid file still stops swtpm" \
+  || bad "late term: rc=$PLAIN_RC pid=$pid alive=$(alive "$pid" && echo yes || echo no) out=[$(cat "$w/late-term.out")] log=[$(cat "$log")]"
 reap "$pid"
 
 # 69. A TERM that arrives while the swtpm launcher is still running (it writes the
