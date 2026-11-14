@@ -18,4 +18,12 @@ PACKAGES = "${PN}"
 # not a subpackage: tegra-firmware-tegra234 gave Thor (tegra264) no GPU
 # firmware, and the SoC package alone misses what upstream splits out of it
 # (tegra-firmware-shared carries the NVJPG firmware).
-RDEPENDS:${PN} = "tegra-firmware"
+#
+# avocado-tegra-esp-generator is here rather than beside setup-nv-boot-control
+# because it corrects that package's ESP mount and has to be present wherever
+# the mount can be enabled, including images that pull the redundant-boot chain
+# in through the BSP extension rather than through a packagegroup.
+RDEPENDS:${PN} = " \
+  tegra-firmware \
+  avocado-tegra-esp-generator \
+"
