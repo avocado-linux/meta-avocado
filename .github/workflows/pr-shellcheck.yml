@@ -57,6 +57,19 @@ jobs:
           sudo install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
 
+      # The boot entry function in the arm64 systemd-bootconf bbappend is shell
+      # inside a recipe, so the discovery below never sees it. Its host test
+      # lints it with shellcheck -s sh, and that test skips on a host without
+      # shellcheck, which the container job that runs the other host tests is.
+      # Run it here, where shellcheck is installed, and fail if it is missing.
+      - name: Lint shell inside the arm64 boot entry recipe
+        shell: bash
+        env:
+          REQUIRE_SHELLCHECK: "1"
+        run: |
+          PYTHONPATH=meta-avocado/lib python3 -m unittest discover -s meta-avocado/tests -p test_arm64_boot_entry.py -v 2>&1 | tee /tmp/boot-entry-tests.log
+          grep -q 'test_shellcheck_posix.* ok' /tmp/boot-entry-tests.log
+
       - name: Lint every shell script
         shell: bash
         run: |
