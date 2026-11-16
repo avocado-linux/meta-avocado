@@ -128,3 +128,8 @@ jobs:
       - name: QEMU machine runner
         shell: bash
         run: bash meta-avocado-qemu/scripts/tests/test-run-qemu.sh
+      - name: Tegra boot.img packer and build-time kernel selection
+        shell: bash
+        run: |
+          bash meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-tegra-bootimg.sh
+          bash meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-tegra-build-bootimg.sh

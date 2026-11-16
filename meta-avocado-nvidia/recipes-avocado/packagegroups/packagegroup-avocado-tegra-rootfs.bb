@@ -21,3 +21,10 @@ RDEPENDS:${PN} = " \
   tegra-firmware-tegra234 \
   avocado-tegra-esp-generator \
 "
+
+# nvbootctrl is the slot tool for every Jetson OS update: the stone manifest's
+# slot_detection, activate and rollback actions all call it. It used to come
+# only from the board's BSP extension, but rollback runs at boot before
+# extensions merge, so it failed with "Failed to run slot action command: No
+# such file or directory" and left the board on the failed slot.
+RDEPENDS:${PN} += "tegra-redundant-boot-base"
