@@ -9,9 +9,13 @@ RDEPENDS:${PN}:append = " \
   nativesdk-mkfat \
   nativesdk-rpi-usbboot \
   nativesdk-avocado-dtc-overlay \
+  nativesdk-swig \
 "
 
 # DEPENDS as well as RDEPENDS: RDEPENDS alone leaves the wrapper out of the
 # build graph, so it never reaches the SDK feed and `avocado sdk install`
 # fails with "No match for argument" once a runtime declares an overlay.
-DEPENDS:append = " nativesdk-avocado-dtc-overlay"
+# nativesdk-swig is listed the same way: an extension that builds a Python
+# binding in the SDK container (lgpio) needs it, and without the DEPENDS entry
+# the feed never gets it.
+DEPENDS:append = " nativesdk-avocado-dtc-overlay nativesdk-swig"
