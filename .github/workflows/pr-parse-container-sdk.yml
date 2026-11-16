@@ -139,6 +139,9 @@ jobs:
       - name: Tegra OTA target partition resolution
         shell: bash
         run: bash meta-avocado-nvidia/stone/tegra/tests/test-ota-target-resolve.sh
+      - name: Tegra ESP mount follows the boot disk
+        shell: bash
+        run: bash meta-avocado-nvidia/stone/tegra/tests/test-esp-generator.sh
       - name: Tegra NVMe flash target pinned by PCIe address
         shell: bash
         run: |
