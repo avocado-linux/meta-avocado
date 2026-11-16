@@ -125,3 +125,6 @@ jobs:
       - name: stone sizeless var partition (renesas, alif, stm, rockchip)
         shell: bash
         run: bash meta-avocado-renesas/stone/tests/test-stone-sizeless-partition.sh
+      - name: QEMU machine runner
+        shell: bash
+        run: bash meta-avocado-qemu/scripts/tests/test-run-qemu.sh

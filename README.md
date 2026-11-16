@@ -26,13 +26,21 @@ See [docs/feature-groups.md](docs/feature-groups.md) for the model and worked
 
 ## Running in Qemu
 
-Qemu can be run with a swtpm with the following command
+From a machine's kas work directory, after a build that provisioned a disk image
+with `kas/target/qemu-provision.yml`, one script boots it:
 
 ```bash
-meta-avocado/meta-avocado-qemu/scripts/run-qemux86-64-swtpm
+meta-avocado/meta-avocado-qemu/scripts/run-qemu <machine>
 ```
 
-This will open a tmux session.
+Supported machines: `qemux86-64` and `qemuarm64`.
+
+- `--tpm` adds a software TPM (swtpm); it works for `qemux86-64` only.
+- `--image PATH` boots a copied image instead of the one under
+  `build/tmp/deploy/stone/_build/`. It replaces the image lookup only: outside
+  a work directory, set `RUN_QEMU_UBOOT_ROM` (`qemux86-64`) or
+  `RUN_QEMU_FLASH_BIN` (`qemuarm64`) to the boot firmware.
+- `--dry-run` prints what the runner resolved and starts nothing.
 
 ## Local package feed
 
