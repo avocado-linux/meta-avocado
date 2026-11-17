@@ -208,7 +208,7 @@ jobs:
         run: |
           t=meta-avocado-distro/stone/tests/test-dd-sd-profiles.sh
           bash "$t" meta-avocado-alif/stone/alif-e8-devkit/stone-provision-sd.sh
-          bash "$t" meta-avocado-renesas/stone/rzv2n-sr-som/stone-provision-sd.sh
+          T_EXPECT_IMAGE_FITS=1 bash "$t" meta-avocado-renesas/stone/rzv2n-sr-som/stone-provision-sd.sh
           bash "$t" meta-avocado-rockchip/stone/nanopi-r5s/stone-provision-sd.sh
           bash "$t" meta-avocado-rockchip/stone/orangepi-5-plus/stone-provision-sd.sh
       - name: NanoPi R5S stone ums provisioning guards

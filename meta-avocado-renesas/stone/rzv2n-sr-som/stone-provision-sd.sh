@@ -104,6 +104,10 @@ fi
 avocado_safe_disk_check_device "$target" || exit 1
 target="$AVOCADO_SAFE_DISK_DEV"
 
+# An image larger than the disk is refused before the retype and before any
+# write, not after dd has overwritten the card's partition table.
+avocado_safe_disk_image_fits "$DISK_IMAGE" "$target" || exit 1
+
 cat <<EOF
 
 RZ/V2N SoM SD provisioning
@@ -136,6 +140,8 @@ echo "Writing $(basename "$DISK_IMAGE") to $target..."
 # and visible.
 avocado_safe_disk_write dd if="$DISK_IMAGE" of="$target" bs=4M oflag=direct status=progress
 avocado_safe_disk_write sync
+# The board is power-cycled right after: flush the device's own buffers too.
+avocado_safe_disk_write blockdev --flushbufs "$target" || true
 
 avocado_safe_disk_finish "$target"
 if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then

@@ -32,6 +32,10 @@ trap 'rm -rf "$w"' EXIT
 pass=0
 fail=0
 expected=20
+# T_EXPECT_IMAGE_FITS=1 adds the check that an image larger than the disk is
+# refused. Only a profile that carries that check (renesas) is run with it; the
+# others do not refuse, so asserting it for them would fail by design.
+[ "${T_EXPECT_IMAGE_FITS:-0}" = 1 ] && expected=21
 ok() {
   echo "  ok   - $1"
   pass=$((pass + 1))
@@ -156,6 +160,17 @@ out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=1)
 rc=$?
 { [ $rc -eq 0 ] && wrote_to "$w/dev/sdb" && echo "$out" | grep -q "Model:"; } \
   && ok "a named USB disk with FORCE=1 is written and its identity shown" || bad "named force: rc=$rc out=[$out] log=$(cat "$w/log")"
+
+if [ "${T_EXPECT_IMAGE_FITS:-0}" = 1 ]; then
+  # The fake disk is 7864320 sectors of 512 bytes; the image is one byte more.
+  setup
+  reader_and_sata
+  truncate -s $((7864320 * 512 + 1)) "$w/disk.img"
+  out=$(run "" AVOCADO_PROVISION_DEVICE="$w/dev/sdb" AVOCADO_PROVISION_FORCE=1)
+  rc=$?
+  { [ $rc -ne 0 ] && ! wrote && echo "$out" | grep -q "does not fit"; } \
+    && ok "an image larger than the disk is refused before anything is written" || bad "image too large: rc=$rc out=[$out] log=$(cat "$w/log")"
+fi
 
 setup
 reader_and_sata

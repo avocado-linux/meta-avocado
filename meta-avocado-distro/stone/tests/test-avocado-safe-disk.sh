@@ -736,6 +736,34 @@ echo "$out" | tr -d '\r' | grep -qx 'got:typed-line' && ok "run_with_tty feeds t
 run_with_tty 'x\n' bash -c 'exit 7' >/dev/null
 [ $? -eq 7 ] && ok "run_with_tty returns the command's exit status" || bad "pty rc: $?"
 
+# --- image fits -------------------------------------------------------------
+# The fake disks are 7864320 sectors of 512 bytes. Sparse images stand in for
+# the real ones: only the byte count matters here.
+
+setup
+truncate -s $((7864320 * 512)) "$w/img"
+out=$(call "avocado_safe_disk_image_fits $w/img $w/dev/sdb")
+rc=$?
+[ $rc -eq 0 ] && ok "an image exactly the size of the disk fits" || bad "fits exactly: rc=$rc out=[$out]"
+
+truncate -s $((7864320 * 512 - 1)) "$w/img"
+out=$(call "avocado_safe_disk_image_fits $w/img $w/dev/sdb")
+rc=$?
+[ $rc -eq 0 ] && ok "an image smaller than the disk fits" || bad "fits smaller: rc=$rc out=[$out]"
+
+truncate -s $((7864320 * 512 + 1)) "$w/img"
+out=$(call "avocado_safe_disk_image_fits $w/img $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "does not fit"; } \
+  && ok "an image one byte larger than the disk is refused" || bad "too large: rc=$rc out=[$out]"
+
+truncate -s 1M "$w/img"
+rm "$w/sys/devices/$USBPATH/sdb/size"
+out=$(call "avocado_safe_disk_image_fits $w/img $w/dev/sdb")
+rc=$?
+{ [ $rc -ne 0 ] && echo "$out" | grep -q "size"; } \
+  && ok "a disk whose size cannot be read is refused, not assumed large enough" || bad "no size: rc=$rc out=[$out]"
+
 # --- bus candidates ---------------------------------------------------------
 
 setup
@@ -753,7 +781,7 @@ idpath mmcblk0 "pci-0000:00:17.0-ata-2"
 out=$(call "avocado_safe_disk_bus_candidates")
 [ -z "$out" ] && ok "bus_candidates prints nothing when no disk is on a USB or MMC bus" || bad "candidates none: [$out]"
 
-N=126
+N=130
 echo
 echo "passed: $pass  failed: $fail  (checks: $((pass + fail))/$N run)"
 [ "$fail" -eq 0 ] && [ $((pass + fail)) -eq "$N" ]

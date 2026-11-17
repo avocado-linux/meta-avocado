@@ -301,6 +301,33 @@ avocado_safe_disk_check_device() {
   avocado_safe_disk_not_root "$AVOCADO_SAFE_DISK_DEV" || return 1
 }
 
+# Refuse an image larger than the disk before anything is written. Without it
+# dd writes until the card is full and fails at the end, with the old partition
+# table already overwritten. A disk whose size cannot be read is refused too,
+# not assumed large enough.
+#
+#   $1  image file
+#   $2  device (default: the one the checks above returned)
+avocado_safe_disk_image_fits() {
+  local image=$1 dev=${2:-$AVOCADO_SAFE_DISK_DEV} name sectors img_bytes
+  name=$(basename -- "$(readlink -f -- "$dev")")
+  sectors=$(cat -- "$(_asd_sysblock)/$name/size" 2>/dev/null)
+  case "$sectors" in
+    "" | *[!0-9]*)
+      _asd_err "refusing ${dev}: cannot read its size, so the image cannot be checked against it"
+      return 1
+      ;;
+  esac
+  img_bytes=$(stat -c %s -- "$image" 2>/dev/null) || {
+    _asd_err "refusing ${dev}: cannot read the size of ${image}"
+    return 1
+  }
+  if [ "$img_bytes" -gt $((sectors * 512)) ]; then
+    _asd_err "refusing ${dev}: ${image} (${img_bytes} bytes) does not fit on the disk ($((sectors * 512)) bytes)"
+    return 1
+  fi
+}
+
 # Show the target and apply the confirmation table. The table is pinned by
 # tests/confirm-vectors.tsv, which the engine-side check reads too.
 #
