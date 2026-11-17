@@ -3,6 +3,8 @@
 # points iPXE at the installer and the disk image, and exits with the
 # installer's report (ok -> 0, fail -> 1, no report -> 1 at the timeout).
 # dnsmasq and ip are stubbed; the HTTP server and the /done handshake are real.
+# The server answers only a client whose ARP entry carries the target MAC; the
+# test points it at a fake ARP table for 127.0.0.1.
 # shellcheck disable=SC2015 # `check && ok || bad`: ok only echoes and counts
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -57,6 +59,9 @@ for f in snponly.efi vmlinuz initrd; do echo "$f" >"$w/payload/$f"; done
 echo 'apkovl=@BASE@/installer.apkovl.tar.gz' >"$w/payload/cmdline"
 echo '{"runtime": {"platform": "intel-x86-64-v3"}}' >"$w/manifest.json"
 echo disk-image-bytes >"$w/build/avocado-os-intel-x86-64-v3.img"
+# arp <mac>: the ARP table the server reads, with 127.0.0.1 at <mac>.
+arp() { printf 'IP address HW type Flags HW address Mask Device\n127.0.0.1 0x1 0x2 %s * lo\n' "$1" >"$w/arp"; }
+arp 78:d0:04:38:3b:25
 
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])'; }
 get() { python3 -c 'import sys, urllib.request; sys.stdout.write(urllib.request.urlopen(sys.argv[1], timeout=5).read().decode())' "$1" 2>/dev/null; }
@@ -69,7 +74,7 @@ start() {
   env PATH="$w/bin:$PATH" AVOCADO_STONE_MANIFEST="$w/manifest.json" \
     AVOCADO_STONE_BUILD_DIR="$w/build" AVOCADO_STONE_DATA_DIR="$w/data" \
     AVOCADO_PROVISION_PXE_PAYLOAD="$w/payload" AVOCADO_PROVISION_PXE_PORT="$port" \
-    "$@" bash "$v3" >"$log" 2>&1 &
+    AVOCADO_PROVISION_PXE_ADDR=127.0.0.1 PXE_ARP_TABLE="$w/arp" "$@" bash "$v3" >"$log" 2>&1 &
   pid=$!
   pids+=("$pid")
   for _ in $(seq 1 50); do
@@ -88,8 +93,8 @@ if start "$w/ok.log" AVOCADO_PROVISION_PXE_MAC=78-D0-04-38-3B-25 AVOCADO_PROVISI
     && ok "proxyDHCP answers only the normalised MAC on the default-route subnet" \
     || bad "dnsmasq.conf: $(tr '\n' ' ' <"$conf")"
   ipxe="$w/build/pxe/tftp/boot.ipxe"
-  grep -q "avocado.install.url=http://192.0.2.10:$port " "$ipxe" && grep -q 'avocado.install.disk=/dev/nvme0n1' "$ipxe" \
-    && grep -q "apkovl=http://192.0.2.10:$port/installer.apkovl.tar.gz" "$ipxe" \
+  grep -q "avocado.install.url=http://127.0.0.1:$port " "$ipxe" && grep -q 'avocado.install.disk=/dev/nvme0n1' "$ipxe" \
+    && grep -q "apkovl=http://127.0.0.1:$port/installer.apkovl.tar.gz" "$ipxe" \
     && ok "boot.ipxe carries the install URL, the disk and the payload cmdline" \
     || bad "boot.ipxe: $(tr '\n' ' ' <"$ipxe")"
   [ "$(get "http://127.0.0.1:$port/disk.img")" = disk-image-bytes ] && [ "$(get "http://127.0.0.1:$port/vmlinuz")" = vmlinuz ] \
@@ -118,7 +123,25 @@ else
   bad "the script never started serving: $(tail -n 3 "$w/fail.log")"
 fi
 
-# 3. No report before the timeout fails the run.
+# 3. Another host on the LAN is refused: no image, and its report is ignored.
+arp 02:00:00:00:00:99
+if start "$w/foreign.log" AVOCADO_PROVISION_PXE_MAC=78:d0:04:38:3b:25; then
+  [ -z "$(get "http://127.0.0.1:$port/disk.img")" ] \
+    && ok "a client without the target MAC cannot fetch the image" \
+    || bad "disk.img was served to a client without the target MAC"
+  get "http://127.0.0.1:$port/done?status=ok&disk=/dev/sda" >/dev/null
+  sleep 6
+  kill -0 "$pid" 2>/dev/null && [ ! -f "$w/build/pxe/done" ] \
+    && ok "a report from another client does not end the run" \
+    || bad "a forged report ended the run: $(tail -n 2 "$w/foreign.log")"
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+else
+  bad "the script never started serving: $(tail -n 3 "$w/foreign.log")"
+fi
+arp 78:d0:04:38:3b:25
+
+# 4. No report before the timeout fails the run.
 if start "$w/timeout.log" AVOCADO_PROVISION_PXE_MAC=78:d0:04:38:3b:25 AVOCADO_PROVISION_PXE_TIMEOUT=1; then
   wait "$pid"
   rc=$?
@@ -128,7 +151,7 @@ else
   bad "the script never started serving: $(tail -n 3 "$w/timeout.log")"
 fi
 
-# 4. No MAC refuses before serving anything.
+# 5. No MAC refuses before serving anything.
 env AVOCADO_STONE_MANIFEST="$w/manifest.json" AVOCADO_STONE_BUILD_DIR="$w/build" \
   AVOCADO_STONE_DATA_DIR="$w/data" PATH="$w/bin:$PATH" bash "$v3" >"$w/nomac.log" 2>&1
 rc=$?

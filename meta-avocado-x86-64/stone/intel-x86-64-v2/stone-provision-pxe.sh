@@ -10,7 +10,11 @@
 #   -> GET /done -> this script stops serving and exits.
 #
 # Your DHCP server keeps handing out addresses: dnsmasq answers as a proxy
-# with only the boot information, and only to the target's MAC. The container
+# with only the boot information, and only to the target's MAC. The HTTP
+# server binds to the serving address and answers only a client whose ARP
+# entry carries that MAC, so another host on the LAN can neither fetch the
+# image nor end the run with a forged report. The installer must therefore
+# use the NIC that PXE booted. The container
 # needs the host's network (container_args: --network=host, and NET_ADMIN +
 # NET_RAW or --privileged), so it works on a Linux host, not Docker Desktop.
 #
@@ -136,13 +140,26 @@ DNSMASQ
 # The installer reports with GET /done?status=ok|fail&disk=...&msg=...
 cat > "${SERVE}/server.py" <<'PY'
 import http.server, os, sys, urllib.parse
-root, port, done = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+root, addr, port, done, mac = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+arp = os.environ.get("PXE_ARP_TABLE", "/proc/net/arp")
+
+def is_target(ip):
+    # The client reached us on the LAN, so the host has its ARP entry.
+    with open(arp) as f:
+        for line in f:
+            col = line.split()
+            if len(col) > 3 and col[0] == ip and col[3].lower() == mac:
+                return True
+    return False
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=root, **k)
 
     def do_GET(self):
+        if not is_target(self.client_address[0]):
+            self.send_error(403)
+            return
         url = urllib.parse.urlparse(self.path)
         if url.path == "/done":
             q = urllib.parse.parse_qs(url.query)
@@ -155,7 +172,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
-http.server.ThreadingHTTPServer(("", port), Handler).serve_forever()
+http.server.ThreadingHTTPServer((addr, port), Handler).serve_forever()
 PY
 
 DONE="${SERVE}/done"
@@ -168,7 +185,7 @@ trap cleanup EXIT
 
 dnsmasq -k -C "${SERVE}/dnsmasq.conf" --log-facility=- &
 PIDS+=($!)
-python3 "${SERVE}/server.py" "${SERVE}/http" "$PORT" "$DONE" 2>"${SERVE}/http.log" &
+python3 "${SERVE}/server.py" "${SERVE}/http" "$ADDR" "$PORT" "$DONE" "$MAC" 2>"${SERVE}/http.log" &
 PIDS+=($!)
 sleep 1
 for p in "${PIDS[@]}"; do
