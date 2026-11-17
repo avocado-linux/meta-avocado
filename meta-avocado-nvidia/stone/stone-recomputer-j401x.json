@@ -75,6 +75,7 @@
         "tegraflash_esp": "tegra-espimage-avocado-recomputer-j401x.esp",
         "tegraflash_tos": "tos-avocado-recomputer-j401x.img",
         "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_engine": "tegraflash-engine",
         "tegraflash_tools": "tegraflash-tools"
       },
       "tegraflash": {

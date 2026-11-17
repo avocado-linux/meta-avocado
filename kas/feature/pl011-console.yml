@@ -1,0 +1,31 @@
+# Put the console on a PL011 UART (ttyAMA0) for a device-tree platform.
+#
+#   bakar build meta-avocado/kas/machine/arm64-uefi-v9.yml:meta-avocado/kas/feature/pl011-console.yml
+#
+# For a device-tree platform whose console is a PL011 UART, such as a virtual
+# platform that models Arm Zena CSS. The boot entry's console=tty0 keeps the
+# kernel from using the device tree's stdout-path UART, so this adds
+# `console=ttyAMA0,115200n8` to the entry. A CPU model that reports Armv8.2
+# features also needs kas/feature/armv8-userland.yml in the chain.
+#
+# Opt-in because ACPI machines get their console from SPCR, and a getty on a
+# tty that is absent holds boot for 90 seconds. It also gives the image a
+# `serial-getty` unit for ttyAMA0, because that is what SERIAL_CONSOLES does in
+# OpenEmbedded. Chained with kas/target/bringup.yml, whose root account has no
+# password, that getty is a passwordless root login: keep both out of
+# production images.
+#
+# Do not publish a package feed or sstate cache built with this overlay as the
+# shared arm64-uefi-v9 feed. systemd-bootconf keeps its name and version but
+# carries the console argument, and an ACPI machine would pick it up.
+#
+# The value is set for the arm64-uefi machine override only, so chaining this
+# overlay onto another machine (a Raspberry Pi, a Qualcomm board) leaves that
+# machine's own SERIAL_CONSOLES alone. On an arm64-uefi machine it wins over
+# the machine's default, weak or not.
+header:
+  version: 16
+
+local_conf_header:
+  feature/pl011-console: |
+    SERIAL_CONSOLES:arm64-uefi = "115200;ttyAMA0"

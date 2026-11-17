@@ -42,17 +42,23 @@ setup() {
 
 # fake_kernel <sys> <log>: serve bind/unbind until killed, one loop per file
 # so a second write to either never waits on the other.
+#
+# Each loop holds its FIFO open read-write for its whole life. Reopening it
+# per line leaves a gap with no reader: a second write that opened the FIFO
+# just before the reader closed it then dies of SIGPIPE (rc 141).
 fake_kernel() {
   local sys="$1" log="$2" drv="$1/bus/pci/drivers/nvme"
   (
-    while read -r a <"$drv/unbind"; do
+    exec 3<>"$drv/unbind"
+    while read -r a <&3; do
       echo "unbind $a" >>"$log"
       rm -f "$drv/$a"
       rm -rf "$sys/bus/pci/devices/$a/nvme/"nvme*
     done
   ) &
   (
-    while read -r a <"$drv/bind"; do
+    exec 3<>"$drv/bind"
+    while read -r a <&3; do
       # A real sysfs write returns after the driver is done; a FIFO write
       # returns once the line is read. Let an unbind written just before
       # finish first, as it would have in the kernel.

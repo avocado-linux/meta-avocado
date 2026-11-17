@@ -1,6 +1,7 @@
 # Depend on tegraflash-bsp, tools, and related images for provisioning
 do_compile[depends] += "tegraflash-bsp:do_deploy"
 do_compile[depends] += "tegraflash-tools-deploy:do_deploy"
+do_compile[depends] += "tegraflash-engine:do_deploy"
 do_compile[depends] += "tegra-espimage:do_image_complete"
 do_compile[depends] += "tos-optee:do_deploy"
 

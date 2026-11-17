@@ -139,10 +139,12 @@ jobs:
       - name: Tegra OTA target partition resolution
         shell: bash
         run: bash meta-avocado-nvidia/stone/tegra/tests/test-ota-target-resolve.sh
+      - name: Tegra ESP mount follows the boot disk
+        shell: bash
+        run: bash meta-avocado-nvidia/stone/tegra/tests/test-esp-generator.sh
       - name: Tegra NVMe flash target pinned by PCIe address
         shell: bash
         run: |
-          bash meta-avocado-nvidia/stone/tegra/tests/test-nvme-flash-target.sh
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvme-pin-for-flash.sh
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvdd-pin-gate.sh
       - name: Tegra setup-nv-boot-control ordered before the fTPM setup units

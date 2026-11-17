@@ -121,6 +121,7 @@
         "tegraflash_esp": "tegra-espimage-avocado-jetson-agx-orin.esp",
         "tegraflash_tos": "tos-avocado-jetson-agx-orin.img",
         "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_engine": "tegraflash-engine",
         "tegraflash_tools": "tegraflash-tools",
         "tegraflash_carrier_bsp": "carrier-bsp"
       },
