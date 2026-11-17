@@ -107,11 +107,13 @@
         "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano.esp",
         "tegraflash_tos": "tos-avocado-jetson-orin-nano.img",
         "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_engine": "tegraflash-engine",
         "tegraflash_tools": "tegraflash-tools",
         "tegraflash_carrier_bsp": "carrier-bsp"
       },
       "tegraflash": {
-        "sd_device": "mmcblk0"
+        "sd_device": "mmcblk0",
+        "rcm_ids": ["0955:7523"]
       }
     }
   }
