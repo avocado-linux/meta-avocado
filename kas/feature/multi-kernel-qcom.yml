@@ -29,11 +29,10 @@ header:
 # same shape as jetson-l4t:nvidia-kernel-oot. In-tree modules need nothing:
 # they come out of the kernel recipe itself.
 #
-# kernel-devsrc is deliberately left out: it is a separate recipe
-# whose PKGV is KERNEL_VERSION.split("-")[0] (kernelsrc.bbclass), i.e. plain
-# 6.18.37 for both kernels, so a second copy would be a same-NEVRA/different-
-# payload collision. Nothing in the RT mc's graph pulls it, so it is simply
-# never built there.
+# kernel-devsrc is a separate recipe, so it is listed too. Its PKGV is plain
+# 6.18.37 for both kernels (kernelsrc.bbclass), but the package NAME carries
+# the full KERNEL_VERSION (kernel-devsrc.bbappend), so the two copies do not
+# collide.
 #
 # Build invocation is unchanged:
 #   kas build kas/machine/rubikpi3.yml
@@ -47,4 +46,4 @@ header:
 local_conf_header:
   feature/multi-kernel-qcom: |
     BBMULTICONFIG += "qcom-rt"
-    AVOCADO_MULTIKERNEL_MC_RECIPES += "qcom-rt:linux-qcom-rt"
+    AVOCADO_MULTIKERNEL_MC_RECIPES += "qcom-rt:linux-qcom-rt qcom-rt:kernel-devsrc"

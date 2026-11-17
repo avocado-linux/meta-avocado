@@ -1,0 +1,45 @@
+From 92ef0f406e5bf210ec160949b6bdee4898be6052 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Tue, 10 Nov 2026 11:19:07 -0500
+Subject: [PATCH] rzv2n: solidrun: permit list for the saved environment
+
+With CONFIG_ENV_WRITEABLE_LIST only the A/B slot state (and the MAC
+addresses SolidRun's board code persists) is taken from the saved
+environment; the boot flow comes from the compiled-in default.
+
+Upstream-Status: Inappropriate [Avocado boot flow]
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ include/configs/rzv2n-solidrun.h | 18 ++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/include/configs/rzv2n-solidrun.h b/include/configs/rzv2n-solidrun.h
+index 7d2f3b95250..82d7f1e149d 100644
+--- a/include/configs/rzv2n-solidrun.h
++++ b/include/configs/rzv2n-solidrun.h
+@@ -87,6 +87,25 @@
+         "fdtfile=" CONFIG_DEFAULT_FDT_FILE "\0" \
+ BOOTENV
+ 
++/*
++ * With CONFIG_ENV_WRITEABLE_LIST (Avocado), only these variables are taken
++ * from the saved environment in the eMMC; everything else - the boot flow
++ * included - comes from the default environment compiled into U-Boot (and so
++ * is updated with the FIP). A writable environment that could redefine
++ * bootcmd would bypass whatever the boot chain enforces. Keep in sync with
++ * the stone manifest's update.activate/rollback/commit and the boot flow.
++ */
++#define CFG_ENV_FLAGS_LIST_STATIC \
++	"avocado_boot_slot:sw," \
++	"avocado_boot_tries:dw," \
++	"avocado_boot_disk:sw," \
++	"a.avocado_platform:sw," \
++	"a.avocado_architecture:sw," \
++	"b.avocado_platform:sw," \
++	"b.avocado_architecture:sw," \
++	"ethaddr:mw," \
++	"eth1addr:mw"
++
+ /* For board */
+ /* Ethernet RAVB */
+ #define CONFIG_BITBANGMII_MULTI

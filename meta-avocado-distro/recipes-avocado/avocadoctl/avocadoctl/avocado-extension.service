@@ -26,6 +26,16 @@ DefaultDependencies=no
 Requires=avocadoctl.socket
 After=local-fs.target avocadoctl.socket
 Before=sysinit.target systemd-tmpfiles-setup.service systemd-userdb-load-credentials.service
+# Services that read /usr/lib and /etc configuration once, at start-up, must
+# start after the merge, or they never see what an extension ships: sysctl.d,
+# .network/.netdev/.link, resolved.conf.d and .dnssd. All three are
+# DefaultDependencies=no, so Before=sysinit.target alone does not order them.
+# Before= on a unit that is not installed is a no-op.
+#
+# Not systemd-udev-trigger: this unit waits for local-fs.target, whose devices
+# (the /var partition, zram) only appear once coldplug has run, so ordering
+# coldplug after the merge hangs boot until the device jobs time out.
+Before=systemd-sysctl.service systemd-networkd.service systemd-resolved.service
 Conflicts=shutdown.target initrd-switch-root.target
 Before=shutdown.target initrd-switch-root.target
 

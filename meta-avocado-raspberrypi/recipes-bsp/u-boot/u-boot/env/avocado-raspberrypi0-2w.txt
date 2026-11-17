@@ -5,7 +5,6 @@ kernel_file=Image
 stderr=serial,vidconsole
 stdin=serial,usbkbd
 stdout=serial,vidconsole
-serial#=1000000088c98f3b
 
 initrd_high=ffffffffffffffff
 kernel_addr_r=0x00080000

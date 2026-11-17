@@ -325,11 +325,11 @@ OTA updates can flip slots without touching the bootloader.
         "kernel": "Image"
       },
       "partitions": [
-        { "name": "boot-a",   "image": "boot",   "partition_type": "EF00", "partition_uuid": "<uuid>", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
-        { "name": "boot-b",                      "partition_type": "EF00", "partition_uuid": "<uuid>", "size": 256,  "size_unit": "mebibytes" },
-        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "partition_uuid": "<uuid>", "size": 512,  "size_unit": "mebibytes" },
-        { "name": "rootfs-b",                    "partition_type": "8305", "partition_uuid": "<uuid>", "size": 512,  "size_unit": "mebibytes" },
-        { "name": "var",      "image": "var",    "partition_type": "8300", "partition_uuid": "4d21b016-b534-45c2-a9fb-5c16e091fd2d", "size": 1024, "size_unit": "mebibytes", "expand": "true" }
+        { "name": "boot-a",   "image": "boot",   "partition_type": "EF00", "offset": 1, "offset_unit": "mebibytes", "size": 256, "size_unit": "mebibytes" },
+        { "name": "boot-b",                      "partition_type": "EF00", "size": 256,  "size_unit": "mebibytes" },
+        { "name": "rootfs-a", "image": "rootfs", "partition_type": "8305", "size": 512,  "size_unit": "mebibytes" },
+        { "name": "rootfs-b",                    "partition_type": "8305", "size": 512,  "size_unit": "mebibytes" },
+        { "name": "var",      "image": "var",    "partition_type": "8300", "size": 1024, "size_unit": "mebibytes", "expand": "true" }
       ]
     }
   }
@@ -369,9 +369,15 @@ on its var partition to take part; MBR layouts do not.
 
 ### Notes on partition layout
 
-- The `var` partition UUID is canonical (`4d21b016-b534-45c2-a9fb-5c16e091fd2d`)
-  across all Avocado machines — it's baked into the rootfs `/etc/fstab`. Do not
-  generate a new one.
+- Pin a `partition_uuid` only when something names the partition by that
+  GUID: the UEFI ESP slot table derived from the manifest, or var on a machine
+  that keeps the default `AVOCADO_VAR_PART_DEV=PARTUUID=4d21b016-b534-45c2-a9fb-5c16e091fd2d`
+  (then pin var to exactly that value). Leave every other partition unpinned:
+  provisioning gives each disk its own GUIDs. A pinned GUID is the same on
+  every disk, so on a board with two Avocado disks (eMMC and microSD) a
+  `root=PARTUUID=` would name both, and `/var` and OTA, which follow the
+  root's disk, would follow the wrong one. Name var by label
+  (`/dev/disk/by-partlabel/var`) when its partition is unpinned.
 - Boot partitions use type `EF00` (EFI System) so the bootloader's distroboot
   scan finds them by GUID; rootfs slots use `8305` (Linux ARM root). For SoCs
   with a fixed first-stage offset (stm32mp2 FSBL, jetson tegra-bct, etc.) add
@@ -407,11 +413,15 @@ Profiles outside that set (e.g. `serial`, `emmc`) need to be wired up in
 | `img` | `stone-provision-img.sh` | Creates a raw disk image |
 | `sd` | `stone-provision-sd.sh` | Builds GPT image + writes to host-attached SD |
 | `usb` | `stone-provision-usb.sh` | Creates image + writes to USB device |
-| `emmc` | `stone-provision-emmc.sh` | Flashes onboard eMMC via U-Boot fastboot |
+| `emmc` | `stone-provision-emmc.sh` | Writes the onboard eMMC through the bootloader (rzv2n: U-Boot USB mass storage) |
 | `serial` | `stone-provision-serial.sh` | Bootloader bootstrap via UART/USB-DFU |
 
 For multi-stage targets (stm32mp2, rzv2n) the typical bring-up sequence is:
 `serial` (bootstrap bootloader) → `emmc`/`sd` (install OS image).
+
+For a Jetson board the `tegraflash` profiles run one shared engine, and the
+board also needs a registry entry for `avocado-flash nvme`; see
+[adding a flash board](adding-a-flash-board.md).
 
 For a Jetson board the `tegraflash` profiles run one shared engine, and the
 board also needs a registry entry for `avocado-flash nvme`; see
@@ -521,6 +531,10 @@ Jetson targets do not wire their own script this way: the manifest names the
 shared `stone-provision-tegraflash.sh` and the engine directory. See
 [adding a flash board](adding-a-flash-board.md).
 
+Jetson targets do not wire their own script this way: the manifest names the
+shared `stone-provision-tegraflash.sh` and the engine directory. See
+[adding a flash board](adding-a-flash-board.md).
+
 ---
 
 ## 9. Package Extension Mechanism
@@ -562,8 +576,10 @@ Create a `linux-yocto_%.bbappend` (or appropriate kernel recipe append).
 **Every avocado kernel bbappend must `inherit avocado-kernel-feed`** and pull
 in the per-kernel module packagegroup `.inc`. Together they wire the kernel
 into the avocado-cli kernel resolver, the auto-appended per-kernel module
-packagegroups, and the fully-qualified `kernel-{devsrc,devicetree,modules}`
+packagegroups, and the fully-qualified `kernel-{devicetree,modules}`
 packaging that lets multiple kernel versions coexist in a rolling feed.
+(`kernel-devsrc` is its own recipe; meta-avocado-distro's
+`kernel-devsrc.bbappend` qualifies it for every family, nothing to add here.)
 
 ```bitbake
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
@@ -577,7 +593,7 @@ SRC_URI:append:<machine> = " \
     file://<machine-specific>.cfg \
 "
 
-# Renames kernel-{devsrc,devicetree,modules} to include KERNEL_VERSION,
+# Renames kernel-{devicetree,modules} to include KERNEL_VERSION,
 # republishes the unqualified Provide for back-compat callers, and emits the
 # avocado-cli kernel-resolver virtual (`avocado-kernel-${KERNEL_VERSION}`).
 # All four boilerplate blocks live in the bbclass; see
@@ -596,7 +612,7 @@ require recipes-kernel/linux/avocado-kernel-modules-packagegroup.inc
 | Block | Purpose | Required? |
 |-------|---------|-----------|
 | `SRC_URI` with `avocado-core.cfg` / `avocado-extra.cfg` | Avocado-required kernel config (CONFIG_RD_ZSTD, CONFIG_OVERLAY_FS, etc. — see "Required Kernel Options" below) | Yes |
-| `inherit avocado-kernel-feed` | Provides: fully-qualified `kernel-{devsrc,devicetree,modules}-${KERNEL_VERSION}` PKG renames, unqualified+versioned `RPROVIDES` for back-compat, and `RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"` so avocado-cli's resolver can enumerate this kernel in the feed | Yes |
+| `inherit avocado-kernel-feed` | Provides: fully-qualified `kernel-{devicetree,modules}-${KERNEL_VERSION}` PKG renames, unqualified+versioned `RPROVIDES` for back-compat, and `RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"` so avocado-cli's resolver can enumerate this kernel in the feed | Yes |
 | `require .../avocado-kernel-modules-packagegroup.inc` | Emits `packagegroup-avocado-{rootfs,initramfs}-modules-${KERNEL_VERSION}` so avocado-cli can auto-append the correct kernel's modules at install time | Yes |
 
 The boilerplate is additive and harmless in single-kernel feeds — it only
@@ -771,5 +787,5 @@ To add a new machine called `acme-widget`:
 | `qemux86-64` | `meta-avocado-qemu` | U-Boot | img | QEMU testing |
 | `imx93-evk` | `meta-avocado-nxp` | U-Boot | img, sd | NXP i.MX93 |
 | `imx93-frdm` | `meta-avocado-nxp` | U-Boot | img, sd, uuu-emmc | NXP FRDM-IMX93, FAT boot + GPT-AB |
-| `rzv2n-sr-som` | `meta-avocado-renesas` | U-Boot (TF-A FIP) | sd, emmc, serial | SolidRun RZ/V2N SoM, FAT boot + GPT-AB, USB-OTG fastboot |
+| `rzv2n-sr-som` | `meta-avocado-renesas` | U-Boot (TF-A FIP) | sd, emmc, serial | SolidRun RZ/V2N SoM, FAT boot + GPT-AB on eMMC or microSD, U-Boot USB mass storage |
 | `stm32mp25-dk` | `meta-avocado-stm` | U-Boot (TF-A FIP + OP-TEE) | sd, emmc, serial | ST STM32MP257F-DK, FAT boot + GPT-AB, USB-DFU bootstrap |

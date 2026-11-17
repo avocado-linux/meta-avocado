@@ -1,0 +1,406 @@
+From 6cfb73bfe44913ac9ad7cf06888d3fc239b4a7b1 Mon Sep 17 00:00:00 2001
+From: Justin Schneck <j.schneck@peridio.com>
+Date: Mon, 9 Nov 2026 18:28:31 -0500
+Subject: [PATCH] usb: gadget: rcar: support the RZ/V2H(P) and RZ/V2N USBHS
+
+The legacy USBHS port knew only R-Car Gen3 and RZ/G2L addresses; on
+RZ/V2N it poked R-Car clock registers and the R-Car controller base.
+
+RZ/V2H(P)/V2N (CONFIG_R9A09G057/056) use the RZ/G2L USBHS at 0x15820000
+with the USB2 PHY at 0x15800200. U-Boot's CPG driver for them does not
+gate clocks, so release the USB2.0 clocks, bus master stops and resets
+directly, initialise the USB2PHY control block as Linux'
+reset-rzv2h-usb2phy does, and set up the PHY as Linux'
+phy-rcar-gen3-usb2 does for these SoCs (no ADP block, UTMI control),
+always in peripheral mode. Also fix two always-true guards.
+
+Upstream-Status: Pending
+Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+---
+ drivers/usb/gadget/rcar/Makefile       |  1 +
+ drivers/usb/gadget/rcar/common.c       | 15 ++---
+ drivers/usb/gadget/rcar/fifo.c         |  4 +-
+ drivers/usb/gadget/rcar/g2l.c          |  2 +-
+ drivers/usb/gadget/rcar/phy.c          | 48 +++++++++++++-
+ drivers/usb/gadget/rcar/renesas_usb.h  | 20 +++++-
+ drivers/usb/gadget/rcar/rzv2h.c        | 86 ++++++++++++++++++++++++++
+ drivers/usb/gadget/rcar/rzv2h.h        |  7 +++
+ drivers/usb/gadget/rcar/usbhs_gadget.c |  7 ++-
+ 9 files changed, 171 insertions(+), 19 deletions(-)
+ create mode 100644 drivers/usb/gadget/rcar/rzv2h.c
+ create mode 100644 drivers/usb/gadget/rcar/rzv2h.h
+
+diff --git a/drivers/usb/gadget/rcar/Makefile b/drivers/usb/gadget/rcar/Makefile
+index 10882d28ab4..9a73f1f975e 100644
+--- a/drivers/usb/gadget/rcar/Makefile
++++ b/drivers/usb/gadget/rcar/Makefile
+@@ -4,3 +4,4 @@
+ 
+ obj-$(CONFIG_USB_RENESAS_USBHS) += common.o mod.o pipe.o fifo.o rcar3.o \
+ 		 mod_gadget.o usbhs_gadget.o phy.o ehci-rcar_gen3.o g2l.o
++obj-$(CONFIG_USB_RENESAS_USBHS) += rzv2h.o
+diff --git a/drivers/usb/gadget/rcar/common.c b/drivers/usb/gadget/rcar/common.c
+index a92187f3f27..2034161f203 100644
+--- a/drivers/usb/gadget/rcar/common.c
++++ b/drivers/usb/gadget/rcar/common.c
+@@ -162,7 +162,7 @@ void usbhs_sys_function_ctrl(struct usbhs_priv *priv, int enable)
+ 	u16 val  = HSE | USBE;
+ 
+ 	/* CNEN bit is required for function operation */
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 	if (usbhs_get_dparam(priv, has_cnen)) {
+ 		mask |= CNEN;
+ 		val  |= CNEN;
+@@ -466,11 +466,6 @@ static int usbhsc_drvcllbck_notify_hotplug(struct platform_device *pdev)
+  */
+ 
+ 
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
+-#define USBHS_BASE      0x11c60000
+-#else /* !defined(CONFIG_R9A07G044L) */
+-#define USBHS_BASE	0xe6590000
+-#endif
+ int usbhs_probe(struct platform_device *pdev)
+ {
+ 	struct usbhs_priv *priv;
+@@ -492,20 +487,20 @@ int usbhs_probe(struct platform_device *pdev)
+ 	 * care platform info
+ 	 */
+ 	pr_dbg("priv->dparam.type = %ld\n", priv->dparam.type);
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 	priv->dparam.type = USBHS_TYPE_G2L;
+ #else /* !defined(CONFIG_R9A07G044L) */
+ 	priv->dparam.type = USBHS_TYPE_RCAR_GEN3;
+ #endif
+ 
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 	priv->pfunc = usbhs_g2l_ops;
+ #else /* !defined(CONFIG_R9A07G044L) */
+ 	priv->pfunc = usbhs_rcar3_ops;
+ #endif
+ 	if (!priv->dparam.pipe_configs) {
+ 		priv->dparam.pipe_configs = usbhsc_new_pipe;
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 		priv->dparam.has_cnen = 1;
+ 		priv->dparam.cfifo_byte_addr = 1;
+ #endif
+@@ -524,7 +519,7 @@ int usbhs_probe(struct platform_device *pdev)
+ 	priv->pdev	= pdev;
+ 	spin_lock_init(usbhs_priv_to_lock(priv));
+ 
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 	/* Fix fifo selection error */
+ 	if (priv->pfunc.power_ctrl) {
+ 		platform_set_drvdata(pdev, priv);
+diff --git a/drivers/usb/gadget/rcar/fifo.c b/drivers/usb/gadget/rcar/fifo.c
+index 22564635e12..530ab05d4e1 100644
+--- a/drivers/usb/gadget/rcar/fifo.c
++++ b/drivers/usb/gadget/rcar/fifo.c
+@@ -562,7 +562,7 @@ static int usbhsf_pio_try_push(struct usbhs_pkt *pkt, int *is_done)
+ 	}
+ 
+ 	/* the rest operation */
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+         if (usbhs_get_dparam(priv, cfifo_byte_addr)) {
+ 		for (i = 0; i < len; i++)
+ 			iowrite8(buf[i], addr + (i & 0x03));
+@@ -570,7 +570,7 @@ static int usbhsf_pio_try_push(struct usbhs_pkt *pkt, int *is_done)
+ #endif
+ 		for (i = 0; i < len; i++)
+ 			iowrite8(buf[i], addr + (0x03 - (i & 0x03)));
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 	}
+ #endif
+ 
+diff --git a/drivers/usb/gadget/rcar/g2l.c b/drivers/usb/gadget/rcar/g2l.c
+index 13549b961cc..846eeb57bae 100644
+--- a/drivers/usb/gadget/rcar/g2l.c
++++ b/drivers/usb/gadget/rcar/g2l.c
+@@ -16,7 +16,7 @@ static int usbhs_g2l_power_ctrl(struct platform_device *pdev,
+ {
+ 	struct usbhs_priv *priv = usbhs_pdev_to_priv(pdev);
+ 	int retval = 0;
+-#if !defined(CONFIG_R9A09G057) || !defined(CONFIG_R9A09G056)
++#if !defined(USBHS_RZV2H)
+ 	if (!priv->phy)
+ 		return -ENODEV;
+ #endif
+diff --git a/drivers/usb/gadget/rcar/phy.c b/drivers/usb/gadget/rcar/phy.c
+index 8086db69d31..c2824fff39c 100644
+--- a/drivers/usb/gadget/rcar/phy.c
++++ b/drivers/usb/gadget/rcar/phy.c
+@@ -21,6 +21,8 @@
+ 
+ /******* USB2.0 Host registers (original offset is +0x200) *******/
+ #define USB2_INT_ENABLE		0x000
++#define USB2_REGEN_CG_CTRL	0x104	/* RZ/V2H(P) only */
++#define USB2_UTMI_CTRL		0x118	/* RZ/V2H(P) only */
+ #define USB2_USBCTR		0x00c
+ #define USB2_SPD_RSM_TIMSET	0x10c
+ #define USB2_OC_TIMSET		0x110
+@@ -100,10 +102,27 @@ static void rcar_gen3_set_linectrl(struct rcar_gen3_chan *ch, int dp, int dm)
+ 	writel(val, usb2_base + USB2_LINECTRL1);
+ }
+ 
++/* RZ/V2H(P): no ADP block; VBUS is driven from VBCTRL, the ID pin is in LINECTRL1 */
++#define USB2_REGEN_CG_CTRL_UPHY_WEN	BIT(0)
++#define USB2_UTMI_CTRL_INIT		0x8000018f
++#define USB2_VBCTRL_VBOUT		BIT(0)
++#define USB2_OBINT_IDCHG_EN		BIT(0)
++
+ static void rcar_gen3_enable_vbus_ctrl(struct rcar_gen3_chan *ch, int vbus)
+ {
+ 	void __iomem *usb2_base = ch->usb2.base;
+-	u32 val = readl(usb2_base + USB2_ADPCTRL);
++	u32 val;
++
++#if defined(USBHS_RZV2H)
++	val = readl(usb2_base + USB2_VBCTRL);
++	if (vbus)
++		val |= USB2_VBCTRL_VBOUT;
++	else
++		val &= ~USB2_VBCTRL_VBOUT;
++	writel(val, usb2_base + USB2_VBCTRL);
++	return;
++#endif
++	val = readl(usb2_base + USB2_ADPCTRL);
+ 
+ 	dev_vdbg(&ch->phy->dev, "%s: %08x, %d\n", __func__, val, vbus);
+ 	if (vbus)
+@@ -161,7 +180,7 @@ static void rcar_gen3_device_recognition(struct rcar_gen3_chan *ch)
+ 	 * So the checking always return host mode.
+ 	 * We only use peripheral mode. So we just force
+ 	 * set is_host to false */
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU) || defined(CONFIG_R8A774C0)
++#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU) || defined(CONFIG_R8A774C0) || defined(USBHS_RZV2H)
+ 	is_host = false;
+ #endif
+ 	if (is_host)
+@@ -178,6 +197,19 @@ static void rcar_gen3_init_otg(struct rcar_gen3_chan *ch)
+ 
+ 	pr_dbg("++%s\n", __func__);
+ 
++#if defined(USBHS_RZV2H)
++	/* As Linux' phy-rcar-gen3-usb2 for no_adp_ctrl SoCs */
++	val = readl(usb2_base + USB2_LINECTRL1);
++	val = (val & ~USB2_LINECTRL1_DP_RPD) | USB2_LINECTRL1_DPRPD_EN |
++	      USB2_LINECTRL1_DMRPD_EN | USB2_LINECTRL1_DM_RPD;
++	writel(val, usb2_base + USB2_LINECTRL1);
++	mdelay(20);
++	writel(0xffffffff, usb2_base + USB2_OBINTSTA);
++	writel(USB2_OBINT_IDCHG_EN, usb2_base + USB2_OBINTEN);
++	rcar_gen3_device_recognition(ch);
++	pr_dbg("--%s\n", __func__);
++	return;
++#endif
+ 	val = readl(usb2_base + USB2_VBCTRL);
+ 	writel(val | USB2_VBCTRL_DRVVBUSSEL, usb2_base + USB2_VBCTRL);
+ 	writel(USB2_OBINT_BITS, usb2_base + USB2_OBINTSTA);
+@@ -210,6 +242,18 @@ static int rcar_gen3_phy_usb2_init(struct phy *p)
+ 	if (channel->has_otg)
+ 		rcar_gen3_init_otg(channel);
+ 
++#if defined(USBHS_RZV2H)
++	{
++		u32 val = readl(usb2_base + USB2_REGEN_CG_CTRL) |
++			  USB2_REGEN_CG_CTRL_UPHY_WEN;
++
++		writel(val, usb2_base + USB2_REGEN_CG_CTRL);
++		writel(USB2_UTMI_CTRL_INIT, usb2_base + USB2_UTMI_CTRL);
++		writel(val & ~USB2_REGEN_CG_CTRL_UPHY_WEN,
++		       usb2_base + USB2_REGEN_CG_CTRL);
++	}
++#endif
++
+ 	pr_dbg("--%s\n", __func__);
+ 
+ 	return 0;
+diff --git a/drivers/usb/gadget/rcar/renesas_usb.h b/drivers/usb/gadget/rcar/renesas_usb.h
+index 2697dca551d..be43910ac26 100644
+--- a/drivers/usb/gadget/rcar/renesas_usb.h
++++ b/drivers/usb/gadget/rcar/renesas_usb.h
+@@ -20,6 +20,15 @@
+  */
+ #ifndef RENESAS_USB_H
+ #define RENESAS_USB_H
++
++#if defined(CONFIG_R9A09G056) || defined(CONFIG_R9A09G057)
++#define USBHS_RZV2H		1
++#endif
++
++/* RZ/V2H(P) and RZ/V2N use the RZ/G2L USBHS (Linux: renesas,rzg2l-usbhs) */
++#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU) || defined(USBHS_RZV2H)
++#define USBHS_G2L_TYPE		1
++#endif
+ #include <linux/usb/ch9.h>
+ #include <common.h>
+ #include <dm.h>
+@@ -272,7 +281,7 @@ struct renesas_usbhs_driver_param {
+ 	u32 has_otg:1; /* for controlling PWEN/EXTLP */
+ 	u32 has_sudmac:1; /* for SUDMAC */
+ 	u32 has_usb_dmac:1; /* for USB-DMAC */
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ 	u32 has_cnen:1;
+ 	u32 cfifo_byte_addr:1;	/* CFIFO is byte addressable */
+ #endif
+@@ -281,7 +290,7 @@ struct renesas_usbhs_driver_param {
+ 
+ #define USBHS_TYPE_RCAR_GEN2	1
+ #define USBHS_TYPE_RCAR_GEN3	2
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_G2L_TYPE)
+ #define USBHS_TYPE_G2L		5
+ #endif
+ 
+@@ -445,7 +454,12 @@ static inline void *phy_get_drvdata(struct phy *phy)
+ 	})
+ 
+ 
+-#if defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_RZV2H)
++#define PHY_BASE	0x15800200
++#define RCAR3_PHY_DEVICE "RZV2H-PHY "
++#define USBHS_BASE	0x15820000
++#define RCAR3_USBHS_DEVICE "RZV2H-USBHS "
++#elif defined(CONFIG_R9A07G044L) || defined(CONFIG_R9A07G044C) || defined(CONFIG_R9A07G043U) || defined(CONFIG_R9A07G054L) || defined(CONFIG_ARCH_RZMPU)
+ #define PHY_BASE	0x11c50200
+ #define RCAR3_PHY_DEVICE "RZG2L-PHY "
+ #define USBHS_BASE	0x11c60000
+diff --git a/drivers/usb/gadget/rcar/rzv2h.c b/drivers/usb/gadget/rcar/rzv2h.c
+new file mode 100644
+index 00000000000..6609c7107f4
+--- /dev/null
++++ b/drivers/usb/gadget/rcar/rzv2h.c
+@@ -0,0 +1,86 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * RZ/V2H(P) and RZ/V2N USB2.0 channel 0 bring-up for the USBHS gadget.
++ *
++ * U-Boot's CPG driver for these SoCs does not gate clocks or resets, so the
++ * clocks, module stops and resets of the USB2.0 block are released here,
++ * then the USB2PHY control block is initialised as Linux'
++ * reset-rzv2h-usb2phy and mux-rzv2h-usb-vbenctl drivers do.
++ */
++
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/iopoll.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <asm/io.h>
++#include <log.h>
++#include "rzv2h.h"
++
++#define CPG_BASE		0x10420000
++#define CPG_CLKON(i)		(CPG_BASE + 0x600 + (i) * 4)
++#define CPG_RST(i)		(CPG_BASE + 0x900 + (i) * 4)
++#define CPG_RSTMON(i)		(CPG_BASE + 0xa00 + (i) * 4)
++#define CPG_BUS_MSTOP(m)	(CPG_BASE + 0xd00 + ((m) - 1) * 4)
++
++/* usb2_0_u2h0_hclk, usb2_0_u2p_exr_cpuclk, usb2_0_pclk_usbtst0 */
++#define USB2_CLKON_IDX		11
++#define USB2_CLKON_BITS		(BIT(3) | BIT(5) | BIT(6))
++/* their bus master stops */
++#define USB2_MSTOP_IDX		7
++#define USB2_MSTOP_BITS		(BIT(7) | BIT(9) | BIT(10))
++/* USB2_0_U2H0_HRESETN, USB2_0_U2P_EXL_SYSRST, USB2_0_PRESETN */
++#define USB2_RST_IDX		10
++#define USB2_RST_BITS		(BIT(12) | BIT(14) | BIT(15))
++#define USB2_RSTMON4_BITS	(BIT(29) | BIT(31))
++#define USB2_RSTMON5_BITS	BIT(0)
++
++/* USB2PHY control (usb20phy-reset@15830000) */
++#define USB2PHY_CTRL_BASE	0x15830000
++#define USB2PHY_RESET		0x000
++#define USB2PHY_RESET2		0xb04
++#define USB2PHY_VBENCTL		0xf0c
++
++static const struct { u16 reg; u16 val; } usb2phy_init_vals[] = {
++	{ 0xc10, 0x67c },
++	{ 0xc14, 0x1f },
++	{ 0x600, 0x909 },
++};
++
++int usbhs_rzv2h_lowlevel_init(void)
++{
++	void __iomem *phyctrl = (void __iomem *)USB2PHY_CTRL_BASE;
++	unsigned int i;
++	u32 val;
++	int ret;
++
++	/* Clocks on (upper half: write enable), bus master stops released */
++	writel((USB2_CLKON_BITS << 16) | USB2_CLKON_BITS,
++	       (void __iomem *)CPG_CLKON(USB2_CLKON_IDX));
++	writel(USB2_MSTOP_BITS << 16, (void __iomem *)CPG_BUS_MSTOP(USB2_MSTOP_IDX));
++
++	/* Resets deasserted, then wait for the monitors to report it */
++	writel((USB2_RST_BITS << 16) | USB2_RST_BITS,
++	       (void __iomem *)CPG_RST(USB2_RST_IDX));
++	ret = readl_poll_timeout((void __iomem *)CPG_RSTMON(4), val,
++				 !(val & USB2_RSTMON4_BITS), 1000);
++	if (!ret)
++		ret = readl_poll_timeout((void __iomem *)CPG_RSTMON(5), val,
++					 !(val & USB2_RSTMON5_BITS), 1000);
++	if (ret) {
++		printf("usbhs: USB2.0 resets did not release\n");
++		return ret;
++	}
++
++	/* USB2PHY control: prepare, then release the PHY reset */
++	for (i = 0; i < ARRAY_SIZE(usb2phy_init_vals); i++)
++		writel(usb2phy_init_vals[i].val, phyctrl + usb2phy_init_vals[i].reg);
++	writel(0x200, phyctrl + USB2PHY_RESET);
++	writel(0x3, phyctrl + USB2PHY_RESET2);
++	writel(0x0, phyctrl + USB2PHY_RESET);
++
++	/* VBUS enable control: mux state 1, as the PHY's mux-states asks */
++	setbits_le32(phyctrl + USB2PHY_VBENCTL, BIT(0));
++
++	return 0;
++}
+diff --git a/drivers/usb/gadget/rcar/rzv2h.h b/drivers/usb/gadget/rcar/rzv2h.h
+new file mode 100644
+index 00000000000..322cc43e5de
+--- /dev/null
++++ b/drivers/usb/gadget/rcar/rzv2h.h
+@@ -0,0 +1,7 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __USBHS_RZV2H_H__
++#define __USBHS_RZV2H_H__
++
++int usbhs_rzv2h_lowlevel_init(void);
++
++#endif
+diff --git a/drivers/usb/gadget/rcar/usbhs_gadget.c b/drivers/usb/gadget/rcar/usbhs_gadget.c
+index 9bef962c598..6cc275e0510 100644
+--- a/drivers/usb/gadget/rcar/usbhs_gadget.c
++++ b/drivers/usb/gadget/rcar/usbhs_gadget.c
+@@ -14,6 +14,7 @@
+ #include <linux/usb/ch9.h>
+ #include <linux/usb/gadget.h>
+ #include "ehci-rcar.h"
++#include "rzv2h.h"
+ 
+ struct platform_usbhs {
+ 	void *usbhs;
+@@ -86,7 +87,11 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
+ 	}
+ 
+ 	/*Register phy driver*/
+-#if !defined(CONFIG_R9A07G044L) || !defined(CONFIG_R9A07G044C) || !defined(CONFIG_R9A07G043U) || !defined(CONFIG_R9A07G054L) || !defined(CONFIG_ARCH_RZMPU)
++#if defined(USBHS_RZV2H)
++	ret = usbhs_rzv2h_lowlevel_init();
++	if (ret)
++		return ret;
++#elif !defined(CONFIG_R9A07G044L) || !defined(CONFIG_R9A07G044C) || !defined(CONFIG_R9A07G043U) || !defined(CONFIG_R9A07G054L) || !defined(CONFIG_ARCH_RZMPU)
+ 	ret = usbhs_lowlevel_init(USB_DEVICE_PORT, USB_INIT_DEVICE);
+ 	if (ret == -ENODEV) {	/* No such device. */
+ 		puts("Port not available.\n");

@@ -26,6 +26,8 @@ behavior across LOG_LEVEL settings and is invisible at boot scale.
 
 Signed-off-by: Avocado Linux <info@avocadolinux.org>
 Signed-off-by: Justin Schneck <j.schneck@peridio.com>
+
+Upstream-Status: Inappropriate [SolidRun RZ/V2N SoM specific]
 ---
  plat/renesas/rz/common/drivers/xspi.c | 12 ++++++++++++
  1 file changed, 12 insertions(+)

@@ -8,6 +8,15 @@
 #   AVOCADO_STONE_MANIFEST   - manifest JSON path
 #   AVOCADO_STONE_DATA_DIR   - directory containing BL2/FIP/Flash_Writer.mot
 #   AVOCADO_USB_PASSTHROUGH  - "1" when /dev/ttyUSB* is reachable from the SDK
+#   AVOCADO_RZ_BOARD_READY   - "1" when automation (a Rubicon's provision
+#                              hook) already powered the board into Serial
+#                              Downloader mode: no prompt, and the flash
+#                              writer does not wait for the ROM's banner,
+#                              which printed before the port was opened.
+#   AVOCADO_RZ_FLASH_LATER   - "1": check the artifacts and stop. For a test
+#                              fixture whose console UART is also the SCIF
+#                              port (a Rubicon): its after-hook reruns this
+#                              script with the UART attached.
 
 set -e
 set -u
@@ -38,6 +47,11 @@ for f in "$BL2" "$FIP" "$FW"; do
   fi
 done
 
+if [ "${AVOCADO_RZ_FLASH_LATER:-0}" = "1" ]; then
+  echo "AVOCADO_RZ_FLASH_LATER=1: artifacts present; the flash runs later with the UART attached."
+  exit 0
+fi
+
 PORT="${AVOCADO_RZ_SERIAL_PORT:-/dev/ttyUSB0}"
 SPEED="${AVOCADO_RZ_SERIAL_SPEED:-921600}"
 
@@ -59,13 +73,22 @@ Before continuing, confirm:
 
 Detected serial port: $PORT (override with AVOCADO_RZ_SERIAL_PORT)
 Transfer speed:       $SPEED baud (override with AVOCADO_RZ_SERIAL_SPEED)
-
-Press Enter to start flashing, or Ctrl-C to abort.
 ================================================================
 EOF
-read -r _
+
+wait_flag=()
+if [ "${AVOCADO_RZ_BOARD_READY:-0}" = "1" ]; then
+  echo "AVOCADO_RZ_BOARD_READY=1: the board is already in Serial Downloader mode."
+  wait_flag=(--no-wait-prompt)
+elif [ -t 0 ]; then
+  echo "Press Enter to start flashing, or Ctrl-C to abort."
+  read -r _
+else
+  echo "No terminal: power the board on in Serial Downloader mode within 30 s."
+fi
 
 rz-flash-writer-tool \
+  "${wait_flag[@]}" \
   --target spi \
   --fw "${DATA_DIR}/${FW}" \
   --bl2 "${DATA_DIR}/${BL2}" \
@@ -82,7 +105,9 @@ Next steps:
   1. Power off the SoM.
   2. Set DIP S5 to SPI boot mode (MD0=OFF, MD1=ON).
   3. Power on. BL2 will load from SPI, FIP will follow, U-Boot will run.
-  4. With no OS image present, U-Boot enters fastboot. Run
-     'avocado provision emmc' (or 'avocado provision sd') to install the OS.
+  4. With no OS on the eMMC or microSD, U-Boot stops in fastboot. Press
+     Ctrl-C on the console, run 'ums 0 mmc 0' (eMMC) or 'ums 0 mmc 1'
+     (microSD), then 'avocado provision emmc' (or 'sd' with
+     AVOCADO_RZ_SD_VIA_UMS=1) to install the OS over USB.
 ================================================================
 EOF

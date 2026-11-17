@@ -84,10 +84,11 @@ do_multikernel_merge() {
         # kernel.bbclass never version-qualifies those four names.
         #
         # Corollary: a recipe whose NEVRA genuinely collides across mcs must not
-        # be listed in AVOCADO_MULTIKERNEL_MC_RECIPES at all. kernel-devsrc is
-        # the live example -- kernelsrc.bbclass sets its PKGV to
+        # be listed in AVOCADO_MULTIKERNEL_MC_RECIPES at all. kernel-devsrc was
+        # the example -- kernelsrc.bbclass sets its PKGV to
         # KERNEL_VERSION.split("-")[0], so two kernels off one source tree share
-        # it -- which is why the qcom overlay lists only the kernel itself.
+        # it -- until kernel-devsrc.bbappend put the full KERNEL_VERSION in its
+        # package NAME, which is what makes it safe to list.
         # Plain $rpmroot, not ${rpmroot}: bitbake expands any ${...} it can
         # resolve before the shell sees the function, and a nested
         # ${src#${rpmroot}/} is not worth relying on it leaving alone.

@@ -11,6 +11,8 @@
 # AVOCADO_PROVISION_FORCE=1 skips the retype and never selects a disk.
 # AVOCADO_PROVISION_DRY_RUN=1 runs every guard and prints the write without
 # doing it.
+# AVOCADO_RZ_SD_VIA_UMS=1 targets the card in the board, exposed by U-Boot's
+# `ums 0 mmc 1`, found by its USB id instead of a named device.
 
 set -e
 set -u
@@ -22,6 +24,8 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # this script (the manifest lists it under provision.files).
 # shellcheck source=/dev/null # sibling file, absent from a standalone lint
 . "${SCRIPT_DIR}/avocado-safe-disk.sh"
+# shellcheck source=ums-disk.sh
+. "${SCRIPT_DIR}/ums-disk.sh"
 
 # A dry run goes through the write choke point; only the complete image is
 # written, so a task other than complete is refused.
@@ -57,8 +61,18 @@ fi
 
 sysblock=${AVOCADO_PROVISION_SYSBLOCK:-/sys/class/block}
 
-named=$(avocado_safe_disk_sd_device) || exit 1
-if [ -n "$named" ]; then
+named=""
+if [ "${AVOCADO_RZ_SD_VIA_UMS:-0}" != "1" ]; then
+  named=$(avocado_safe_disk_sd_device) || exit 1
+fi
+if [ "${AVOCADO_RZ_SD_VIA_UMS:-0}" = "1" ]; then
+  # The card in the board, exposed by U-Boot's `ums 0 mmc 1` (a Rubicon's
+  # provision hook starts it), rather than one in a USB card reader. Found by
+  # its USB id, so no device is named and no terminal is needed to choose it;
+  # the guards below still check what was found.
+  echo "Waiting for the board's microSD as a USB disk ($AVOCADO_RZ_UMS_ID)..."
+  target=$(wait_ums_disk 60) || exit 1
+elif [ -n "$named" ]; then
   target="$named"
 else
   # Choosing the target is an answer, and only a terminal answers.
@@ -98,7 +112,12 @@ EOF
 
 # Typed retype of the device path, skipped only by AVOCADO_PROVISION_FORCE=1;
 # naming the card does not skip it. A dry run asks nothing.
-avocado_safe_disk_confirm "$target" || exit 1
+# BOARD_READY skips the question only for the board's own UMS gadget, found by
+# its USB id; a disk picked on the host (named, or the bus scan) could be any
+# card or stick, so it is always confirmed.
+if [ "${AVOCADO_RZ_SD_VIA_UMS:-0}" != "1" ] || [ "${AVOCADO_RZ_BOARD_READY:-0}" != "1" ]; then
+  avocado_safe_disk_confirm "$target" || exit 1
+fi
 
 target_base=$(basename "$target")
 for partdir in "$sysblock/$target_base/$target_base"*; do
@@ -125,7 +144,7 @@ fi
 
 cat <<EOF
 
-SD card written. Eject, insert into the SoM, power-cycle.
-With Phase 1 done, U-Boot's distro_bootcmd will probe mmc0 (eMMC),
-then mmc1 (SD), and boot from /extlinux/extlinux.conf on boot-a.
+SD card written. Insert it into the SoM (or stop 'ums' if it was written
+in the board) and power-cycle. U-Boot boots the microSD's slot A when the
+eMMC carries no OS; with an OS on the eMMC, the eMMC boots.
 EOF

@@ -73,6 +73,8 @@ setup() {
   : >"$w/st/lsblk"
   cp "$script_src" "$w/run/stone-provision-sd.sh"
   cp "$lib_src" "$w/run/avocado-safe-disk.sh"
+  # A profile that sources a sibling helper (renesas ums-disk.sh) needs it beside the script.
+  [ -f "$(dirname "$script_src")/ums-disk.sh" ] && cp "$(dirname "$script_src")/ums-disk.sh" "$w/run/ums-disk.sh"
   : >"$w/disk.img"
   # The script runs this helper to build the image and uses its stdout as the path.
   printf '#!/bin/bash\necho "%s"\n' "$w/disk.img" >"$w/run/build-disk-image.sh"

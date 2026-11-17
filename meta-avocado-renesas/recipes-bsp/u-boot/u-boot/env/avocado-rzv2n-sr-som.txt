@@ -1,0 +1,6 @@
+# Saved environment for the uboot-env area (mkenvimage -r), written by stone
+# at provision time into the eMMC's user area before the first partition.
+# Only the A/B slot state lives here: U-Boot honours just the permit-listed
+# variables (0003-*.patch) and takes the boot flow from its compiled-in
+# default (avocado-rzv2n-sr-som.env). avocadoctl flips these with fw_setenv.
+avocado_boot_slot=a

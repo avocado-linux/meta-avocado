@@ -220,3 +220,9 @@ LIC_FILES_CHKSUM += "\
     file://pkg/mod/sigs.k8s.io/structured-merge-diff/v6@v6.4.2/LICENSE;md5=e3fc50a88d0a364313df4b21ef20c29e;spdx=Apache-2.0 \
     file://pkg/mod/sigs.k8s.io/yaml@v1.6.0/LICENSE;md5=b5d30dd5bc47d1b56b678ac06dead1c7;spdx=Apache-2.0 \
 "
+
+# zeebo/xxh3 imports klauspost/cpuid/v2 only from its amd64 sources, so Go
+# extracts the module, and with it this LICENSE, only when building for x86-64.
+LIC_FILES_CHKSUM:append:x86-64 = " \
+    file://pkg/mod/github.com/klauspost/cpuid/v2@v2.3.0/LICENSE;md5=00d6f962401947482d082858f7ba2ff3;spdx=MIT \
+"
