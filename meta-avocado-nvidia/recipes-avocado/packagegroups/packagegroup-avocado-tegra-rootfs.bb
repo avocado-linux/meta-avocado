@@ -28,3 +28,8 @@ RDEPENDS:${PN} = " \
 # extensions merge, so it failed with "Failed to run slot action command: No
 # such file or directory" and left the board on the failed slot.
 RDEPENDS:${PN} += "tegra-redundant-boot-base"
+
+# tegraflash expands the var partition to the rest of the medium and nothing
+# grows the btrfs inside it. Jetson has no fstab entry for /var to carry
+# x-systemd.growfs, so the grow is pulled in by this package instead.
+RDEPENDS:${PN} += "avocado-tegra-var-growfs"
