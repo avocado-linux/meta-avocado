@@ -282,6 +282,25 @@ else
   bad "hook refused a stock overlay the BSP already ships: $(cat "$work/case-shipped/err")"
 fi
 
+# On a Pi 5 boot FAT (overlay_map.dtb plus a bcm2712 device tree) the firmware
+# loads disable-bt-pi5.dtbo for `dtoverlay=disable-bt`, so a stock overlay is
+# delivered as that file; the line keeps the name. A stock overlay with no map
+# entry, a custom overlay, and one the FAT already ships under its mapped name
+# are handled as before.
+stone_pi5="$(jq -c '.storage_devices.rootdisk.images.boot.build_args.files += [{"in": "overlay_map.dtb", "out": "overlays/overlay_map.dtb"}, {"in": "bcm2712-rpi-5-b.dtb", "out": "bcm2712-rpi-5-b.dtb"}, {"in": "vc4-kms-v3d-pi5.dtbo", "out": "overlays/vc4-kms-v3d-pi5.dtbo"}]' "$work/stone.json")"
+if run_case pi5 '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "dwc2", "file": "dwc2.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "vc4-kms-v3d", "file": "vc4-kms-v3d.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "custom", "file": "custom.dtbo", "params": {}, "stock": false, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}' "$stone_pi5"; then
+  d="$work/case-pi5"
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=disable-bt\ndtoverlay=dwc2\ndtoverlay=vc4-kms-v3d\ndtoverlay=custom' ]] \
+    && [[ "$(jq -c "[${fa}[] | .in]" "$d/fragment.json")" == '["disable-bt-pi5.dtbo","dwc2.dtbo","custom.dtbo","avocado-overlays.txt"]' ]] \
+    && jq -e "${fa}[] | select(.out == \"overlays/disable-bt-pi5.dtbo\")" "$d/fragment.json" >/dev/null; then
+    ok "on a Pi 5 a stock overlay is delivered as the file the firmware's overlay map loads"
+  else
+    bad "Pi 5 stock overlay delivery wrong: txt=$(cat "$d/avocado-overlays.txt") fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook rejected a Pi 5 stock overlay: $(cat "$work/case-pi5/err")"
+fi
+
 # A boot_config line that changes the boot chain would make the firmware bypass
 # the image's own boot setup (A/B selection, verified boot), so the hook refuses
 # each such key, names the line, and writes nothing.

@@ -75,6 +75,36 @@ def find_boot_fat(stone):
     return matches[0]
 
 
+# The Pi 5 firmware reads overlays/overlay_map.dtb and loads another file for
+# these names: `dtoverlay=disable-bt` loads disable-bt-pi5.dtbo. A stock overlay
+# is delivered as the file the firmware will load; the dtoverlay= line keeps the
+# name. From the bcm2712 entries of the kernel's overlay_map.dts.
+# ponytail: a copy of the kernel's map; regenerate it when the kernel adds entries.
+BCM2712_OVERLAY_MAP = {
+    name: f"{name}-pi5"
+    for name in (
+        "audremap disable-bt disable-wifi draws ed-backlight-pwm gpclk "
+        "i2c0 i2c1 i2c2 i2c3 imx500 midi-uart0 midi-uart1 midi-uart2 "
+        "midi-uart3 midi-uart4 pcie-32bit-dma pisound ramoops sdio "
+        "spi2-1cs spi2-2cs spi3-1cs spi3-2cs spi5-1cs spi5-2cs tc358743 "
+        "uart0 uart1 uart2 uart3 uart4 vc4-kms-v3d vec-gpio w1-gpio "
+        "w1-gpio-pullup"
+    ).split()
+}
+BCM2712_OVERLAY_MAP.update({
+    "vc4-fkms-v3d": "vc4-fkms-v3d-pi4",
+    "vc4-kms-v3d-pi4": "vc4-kms-v3d-pi5",
+})
+
+
+def remaps_for_pi5(shipped):
+    """The boot FAT is a Pi 5 one when it ships the overlay map and a bcm2712
+    device tree; only then does the firmware load another file."""
+    return "overlays/overlay_map.dtb" in shipped and any(
+        out.startswith("bcm2712-") and out.endswith(".dtb") for out in shipped
+    )
+
+
 def overlay_line(overlay):
     line = f"dtoverlay={overlay['name']}"
     for key in sorted(overlay.get("params", {})):
@@ -163,6 +193,11 @@ def main():
         die(f"{', '.join(collisions)}: the BSP already ships an overlay of this "
             "name on the boot FAT; rename the overlay (a same-named overlay is "
             "dropped rather than applied, and the stock one ships instead)")
+
+    if remaps_for_pi5(shipped):
+        for ov in overlays:
+            if ov.get("stock") and ov["name"] in BCM2712_OVERLAY_MAP:
+                ov["file"] = BCM2712_OVERLAY_MAP[ov["name"]] + ".dtbo"
 
     # Additive delivery: each .dtbo into overlays/, plus the include file.
     # A stock overlay is one the BSP's own deploy directory already carries, so
