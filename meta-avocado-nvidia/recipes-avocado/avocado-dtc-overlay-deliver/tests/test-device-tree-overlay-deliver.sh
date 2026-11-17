@@ -308,16 +308,23 @@ fi
 rm -f "$work/tegra234-test-0005.dtb"
 
 # --- 7. drift guard: hook target must match the consumer's read -------------
-consumer="$here/../../../stone/tegra/stone-provision-tegraflash.sh"
-if [[ -f "$consumer" ]]; then
-  if grep -q '\.storage_devices\.rootdisk\.images\.dtb' "$consumer" \
-    && jq -e '.storage_devices.rootdisk.images.dtb' "$work/f1.json" >/dev/null; then
-    ok "hook writes the same path the provisioning script reads"
+# The provisioning run reads the manifest through the tegraflash engine, which
+# declares every key it reads in avocado_tegraflash/manifest.py (KEYS). The
+# launcher stone-provision-tegraflash.sh no longer names any of them.
+engine="$here/../../../stone/tegra"
+if [[ -f "$engine/avocado_tegraflash/manifest.py" ]]; then
+  if python3 - "$engine" <<'PY' && jq -e '.storage_devices.rootdisk.images.dtb' "$work/f1.json" >/dev/null; then
+import sys
+sys.path.insert(0, sys.argv[1])
+from avocado_tegraflash.manifest import KEYS
+sys.exit(0 if any(k.section == "images" and k.name == "dtb" for k in KEYS) else 1)
+PY
+    ok "hook writes the same path the engine reads"
   else
-    bad "hook target and consumer jq path have drifted apart"
+    bad "hook target and the engine's manifest key have drifted apart"
   fi
 else
-  bad "consumer script not found at $consumer; drift guard cannot run"
+  bad "engine manifest not found under $engine; drift guard cannot run"
 fi
 
 # --- 8. a malformed manifest entry fails clean, not with a traceback --------
