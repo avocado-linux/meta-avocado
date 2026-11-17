@@ -28,4 +28,10 @@ RDEPENDS:${PN} += "avocado-dtc-overlay-deliver"
 # its parsers, so a BSP extension or project can install them by name. Only
 # on parts with the Hantro VPU (imxvpu: i.MX8M Mini/Plus/Quad); the recipe's
 # imx-vpuwrap dependency does not exist elsewhere.
-RDEPENDS:${PN}:append:imxvpu = " imx-gst1.0-plugin"
+#
+# imx-vpu-hantro-daemon is the userspace half of the VPU's V4L2 encoder and
+# decoder. The NXP kernel registers the /dev/video* nodes and starts
+# /usr/bin/vsidaemon when one is opened; without it the nodes exist but fail
+# to open, and v4l2-ctl does not list them. Same parts: its
+# COMPATIBLE_MACHINE is i.MX8M Mini/Plus/Quad.
+RDEPENDS:${PN}:append:imxvpu = " imx-gst1.0-plugin imx-vpu-hantro-daemon"
