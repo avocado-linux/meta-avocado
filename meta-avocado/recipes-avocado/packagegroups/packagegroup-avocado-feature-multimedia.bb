@@ -61,6 +61,7 @@ GSTREAMER_PACKAGES = " \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly \
   gstreamer1.0-libav \
+  gstreamer1.0-rtsp-server \
 "
 
 # mpeg2dec is deliberately absent. No layer in this configuration provides
