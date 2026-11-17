@@ -1,8 +1,16 @@
 append_config_if_missing() {
     # Requires CONFIG to be set by the caller
-    # Adds the line to $CONFIG only if it is not already present
+    # Adds the line to $CONFIG only if it is not already present. Once the
+    # include line is in, a new line goes in ahead of it: the include stays last
+    # so a project's boot_config line overrides a machine default, not the
+    # other way round (machine appends run after the generic one).
     if ! grep -Fqx "$1" "$CONFIG"; then
-        echo "$1" >> "$CONFIG"
+        if grep -Fqx "include avocado-overlays.txt" "$CONFIG"; then
+            awk -v l="$1" '$0 == "include avocado-overlays.txt" { print l } { print }' \
+                "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+        else
+            echo "$1" >> "$CONFIG"
+        fi
     fi
 }
 
