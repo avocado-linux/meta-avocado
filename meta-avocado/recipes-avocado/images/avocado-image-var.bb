@@ -7,6 +7,11 @@ inherit deploy
 
 DEPENDS += "btrfs-tools-native"
 
+# mkfs.btrfs -r copies everything under btrfs_root. The directory is in
+# WORKDIR and outlives a do_compile run, so start each run from an empty one:
+# otherwise a file that an earlier run staged there stays in the image.
+do_compile[cleandirs] += "${WORKDIR}/btrfs_root"
+
 fakeroot do_compile() {
     # Create a temporary directory for the btrfs image
     install -o root -g root -d ${WORKDIR}/btrfs_root/lib/extensions
