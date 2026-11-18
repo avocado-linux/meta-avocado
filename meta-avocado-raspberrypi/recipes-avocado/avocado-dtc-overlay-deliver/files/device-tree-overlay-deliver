@@ -167,6 +167,12 @@ def main():
     boot_config = manifest.get("boot_config", [])
     if not overlays and not boot_config:
         die("hook invoked with no overlays or boot_config to deliver")
+    # Each entry is written as one line, so a line break inside one would add
+    # a line that none of the checks below has seen.
+    for line in boot_config + [overlay_line(ov) for ov in overlays]:
+        if "\n" in line or "\r" in line:
+            die(f"{line!r}: a line break inside an entry would write a second "
+                "config.txt line past these checks; remove it")
     refuse_boot_chain_keys(boot_config)
 
     with open(stone_path) as f:
