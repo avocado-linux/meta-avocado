@@ -6,7 +6,7 @@ append_config_if_missing() {
     # other way round (machine appends run after the generic one).
     if ! grep -Fqx "$1" "$CONFIG"; then
         if grep -Fqx "include avocado-overlays.txt" "$CONFIG"; then
-            awk -v l="$1" '$0 == "include avocado-overlays.txt" { print l } { print }' \
+            L="$1" awk '$0 == "include avocado-overlays.txt" { print ENVIRON["L"] } { print }' \
                 "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
         else
             echo "$1" >> "$CONFIG"

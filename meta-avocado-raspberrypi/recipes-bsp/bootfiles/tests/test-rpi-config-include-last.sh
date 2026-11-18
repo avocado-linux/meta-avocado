@@ -14,8 +14,9 @@ append_config_if_missing "include avocado-overlays.txt"
 append_config_if_missing "gpio=13=pu"
 append_config_if_missing "dtoverlay=i2c3,pins_4_5"
 append_config_if_missing "gpio=13=pu"
+append_config_if_missing 'dtparam=path=a\nb'
 
-want=$'arm_64bit=1\ngpio=13=pu\ndtoverlay=i2c3,pins_4_5\ninclude avocado-overlays.txt'
+want=$'arm_64bit=1\ngpio=13=pu\ndtoverlay=i2c3,pins_4_5\ndtparam=path=a\\nb\ninclude avocado-overlays.txt'
 if [ "$(cat "$CONFIG")" = "$want" ]; then
   echo "ok: include stays last, no duplicates"
 else

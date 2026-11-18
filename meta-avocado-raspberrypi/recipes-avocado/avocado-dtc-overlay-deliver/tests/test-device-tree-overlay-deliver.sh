@@ -239,7 +239,7 @@ stone_ships_bt="$(jq -c '.storage_devices.rootdisk.images.boot.build_args.files 
 # boot_config alone, no overlays: the hook must still deliver the include file.
 if run_case bc '{"version": 1, "overlays": [], "boot_config": ["dtparam=i2c_arm=on", "usb_max_current_enable=1"], "boot_config_claimed_by": null}' "$stone_plain"; then
   d="$work/case-bc"
-  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtparam=i2c_arm=on\nusb_max_current_enable=1' ]] \
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=\ndtparam=i2c_arm=on\nusb_max_current_enable=1' ]] \
     && [[ "$(jq -c "$fa" "$d/fragment.json")" == '[{"in":"avocado-overlays.txt","out":"avocado-overlays.txt"}]' ]] \
     && [[ "$(jq -r '.boot_config_claimed_by' "$d/overlays.manifest.json")" == "avocado-raspberrypi5" ]]; then
     ok "boot_config alone is written to the include file and claimed"
@@ -255,7 +255,7 @@ fi
 # overlay beside it is delivered as before.
 if run_case mix '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "custom", "file": "custom.dtbo", "params": {"a": "1"}, "stock": false, "claimed_by": null}], "boot_config": ["dtparam=i2c_arm=on"], "boot_config_claimed_by": null}' "$stone_plain"; then
   d="$work/case-mix"
-  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtparam=i2c_arm=on\ndtoverlay=disable-bt\ndtoverlay=custom,a=1' ]] \
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=\ndtparam=i2c_arm=on\ndtoverlay=disable-bt\ndtoverlay=custom,a=1' ]] \
     && jq -e "${fa}[] | select(.in == \"disable-bt.dtbo\" and .out == \"overlays/disable-bt.dtbo\")" "$d/fragment.json" >/dev/null \
     && jq -e "${fa}[] | select(.in == \"custom.dtbo\" and .out == \"overlays/custom.dtbo\")" "$d/fragment.json" >/dev/null \
     && [[ "$(jq -r "$fa | length" "$d/fragment.json")" == "3" ]]; then
@@ -317,7 +317,9 @@ fi
 i=0
 for line in 'initramfs other.cpio.zst followkernel' 'initramfs=other.cpio.zst' \
   'ramfsfile=other.cpio.zst' 'armstub=armstub8.bin' 'cmdline=other.txt' \
-  'include other.txt' '  INITRAMFS other.cpio.zst followkernel'; do
+  'include other.txt' '  INITRAMFS other.cpio.zst followkernel' 'start_x=1' 'start_debug=1' \
+  'start_cd=1' 'auto_initramfs=1' 'boot_ramdisk=1' 'upstream_kernel=1' 'arm_64bit=0' \
+  'kernel_old=1'; do
   i=$((i + 1))
   name="chain-word-$i"
   manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
@@ -437,6 +439,22 @@ EOF
     fi
   else
     bad "hook rejected stock overlays on a BCM2712 boot FAT: $(cat "$work/case-pi5/err")"
+  fi
+
+  # A custom overlay under a name the map redirects would never be loaded, so
+  # it is refused by name; without the map (a Pi 4) it is delivered.
+  custom_bt='{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": false, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}'
+  if AVOCADO_PREFIX="$work/prefix" run_case pi5-custom-mapped "$custom_bt" "$stone_pi5"; then
+    bad "hook delivered a custom overlay the BCM2712 map redirects"
+  elif grep -qF disable-bt "$work/case-pi5-custom-mapped/err" && [[ ! -e "$work/case-pi5-custom-mapped/avocado-overlays.txt" ]]; then
+    ok "a custom overlay under a name the BCM2712 map redirects is refused by name, nothing written"
+  else
+    bad "mapped-name refusal did not name the overlay or left output: $(cat "$work/case-pi5-custom-mapped/err")"
+  fi
+  if run_case pi4-custom-bt "$custom_bt" "$stone_plain"; then
+    ok "without an overlay map a custom disable-bt is delivered"
+  else
+    bad "a custom disable-bt was refused without an overlay map: $(cat "$work/case-pi4-custom-bt/err")"
   fi
 else
   echo "  SKIP - dtc not installed; BCM2712 overlay-map delivery not checked"
