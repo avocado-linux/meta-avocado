@@ -96,12 +96,13 @@ Claims themselves are unchanged: one per overlay, and one for the whole
 | Raspberry Pi | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
 | Qualcomm | yes | yes | `dt_overlay`, `kernel_args` |
 | NXP i.MX, loose-file U-Boot boot (ucm-imx8m-plus, imx95-frdm) | yes | yes | `dt_overlay`, `dt_overlay_stock`, `boot_config` |
+| NVIDIA Jetson Orin (tegra234) | yes | yes | `dt_overlay`, `kernel_args` |
 | All others | no | no | not stated; unchanged behaviour |
 
 A board without a hook fails a project that declares an overlay or
 `boot_config` at `avocado install`, as it always has. Boards that honour
-`kernel.cmdline_extra` without a hook (NVIDIA Jetson, the NXP FIT path) have no
-capability file yet, so they give no warning either way.
+`kernel.cmdline_extra` without a hook (the NXP FIT path) have no capability
+file yet, so they give no warning either way.
 
 ## NXP i.MX: overlays and the base device tree through U-Boot
 

@@ -249,3 +249,10 @@ TEGRA_TEST_PACKAGES = " \
 # Orin only for now: Thor's display stack (tegra-drm, openrm) is not yet
 # validated with it.
 RDEPENDS:${PN}:append:tegra234 = " nvidia-drm-loadconf"
+
+# avocado-dtc-overlay-deliver is the per-BSP device-tree overlay hook. The CLI
+# installs it BY NAME into the target sysroot the moment a runtime declares
+# `device_tree_overlays`, so it has to exist in the feed even though no image
+# RDEPENDS on it; without it that declaration fails at `avocado install` with
+# "No match for argument". Orin only: the recipe says why Thor is left out.
+RDEPENDS:${PN}:append:tegra234 = " avocado-dtc-overlay-deliver"

@@ -1,0 +1,3 @@
+# /etc/nvpmodel.conf points here. Until nvpmodel.service has picked the conf
+# for this module, it resolves to the machine default, as before.
+L /run/nvpmodel.conf - - - - /etc/nvpmodel/@NVPMODEL@.conf

@@ -147,6 +147,15 @@ jobs:
         run: |
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvme-pin-for-flash.sh
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvdd-pin-gate.sh
+      - name: Tegra setup-nv-boot-control ordered before the fTPM setup units
+        shell: bash
+        run: sh meta-avocado-nvidia/recipes-bsp/tools/tests/test-setup-nv-boot-control-order.sh
+      - name: P3767 nvpmodel conf picked from the device-tree compatible
+        shell: bash
+        run: bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvpmodel-select.sh
+      - name: Tegra fTPM setup units gated on the fTPM store
+        shell: bash
+        run: sh meta-avocado-nvidia/recipes-core/systemd/tests/test-tpm2-setup-gate.sh
       - name: /var udev match and device per AVOCADO_VAR_PART_DEV form
         shell: bash
         run: sh meta-avocado-distro/recipes-core/base-files/tests/test-var-udev-match.sh
@@ -187,6 +196,11 @@ jobs:
         run: |
           bash meta-avocado-nxp/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-device-tree-overlay-deliver.sh
           bash meta-avocado-nxp/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-boot-settings.sh
+      - name: Tegra device-tree overlay delivery hook
+        shell: bash
+        run: |
+          bash meta-avocado-nvidia/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-device-tree-overlay-deliver.sh
+          bash meta-avocado-nvidia/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-boot-settings.sh
       - name: amd-x86-64-v4 stone provision-img
         shell: bash
         run: bash meta-avocado-amd-x86-64/stone/amd-x86-64-v4/tests/test-stone-provision-img.sh
