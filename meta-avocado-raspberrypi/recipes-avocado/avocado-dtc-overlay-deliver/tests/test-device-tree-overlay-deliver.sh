@@ -334,9 +334,9 @@ for line in 'initramfs other.cpio.zst followkernel' 'initramfs=other.cpio.zst' \
   fi
 done
 
-# A section header stays in effect for the rest of config.txt, and the boards
-# append their own lines after `include avocado-overlays.txt`, so a `[pi4]` or
-# `[none]` line would filter those out. Any line that opens a section is refused.
+# A section header stays in effect for the rest of config.txt, past
+# `include avocado-overlays.txt`, so a `[pi4]` or `[none]` line would filter
+# out any line placed after it. Any line that opens a section is refused.
 i=0
 for line in '[pi4]' '[none]' '  [all]'; do
   i=$((i + 1))
@@ -354,6 +354,27 @@ for line in '[pi4]' '[none]' '  [all]'; do
     fi
   fi
 done
+
+# A line break inside an entry would write a second config.txt line that no
+# check has seen (a boot-chain key, a section header), so any entry, boot_config
+# or overlay param, that carries one is refused with nothing written.
+i=0
+for bc in '["dtparam=i2c_arm=on\nkernel=evil.img"]' '["dtparam=x\n[pi4]"]' '["dtparam=x\rkernel=evil.img"]'; do
+  i=$((i + 1))
+  name="linebreak-$i"
+  if run_case "$name" "{\"version\": 1, \"overlays\": [], \"boot_config\": $bc, \"boot_config_claimed_by\": null}" "$stone_plain"; then
+    bad "hook accepted a boot_config entry with a line break: $bc"
+  elif [[ -e "$work/case-$name/avocado-overlays.txt" || -e "$work/case-$name/fragment.json" ]]; then
+    bad "line-break entry $bc was refused but left output behind"
+  else
+    ok "boot_config entry $bc with a line break is refused, nothing written"
+  fi
+done
+if run_case linebreak-param '{"version": 1, "overlays": [{"name": "w1-gpio", "file": "w1-gpio.dtbo", "stock": true, "params": {"gpiopin": "4\nkernel=evil.img"}}], "boot_config": [], "boot_config_claimed_by": null}' "$stone_plain"; then
+  bad "hook accepted an overlay param with a line break"
+else
+  ok "an overlay param with a line break is refused"
+fi
 
 # Matching is on the whole key: device_tree_address is a different setting from
 # device_tree and must still be delivered.
