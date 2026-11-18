@@ -156,10 +156,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=root, **k)
 
-    def do_GET(self):
+    # Gate every method here, not in do_GET: HEAD and the rest would
+    # otherwise answer any host.
+    def parse_request(self):
+        if not super().parse_request():
+            return False
         if not is_target(self.client_address[0]):
             self.send_error(403)
-            return
+            return False
+        return True
+
+    def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         if url.path == "/done":
             q = urllib.parse.parse_qs(url.query)

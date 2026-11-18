@@ -65,6 +65,11 @@ arp 78:d0:04:38:3b:25
 
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])'; }
 get() { python3 -c 'import sys, urllib.request; sys.stdout.write(urllib.request.urlopen(sys.argv[1], timeout=5).read().decode())' "$1" 2>/dev/null; }
+# head <url>: the status a HEAD request gets (000 when refused outright).
+head() { python3 -c 'import sys, urllib.request, urllib.error
+try: print(urllib.request.urlopen(urllib.request.Request(sys.argv[1], method="HEAD"), timeout=5).status)
+except urllib.error.HTTPError as e: print(e.code)
+except Exception: print("000")' "$1"; }
 
 # start <log> [env...]: run the script in the background on a free port.
 start() {
@@ -98,6 +103,7 @@ if start "$w/ok.log" AVOCADO_PROVISION_PXE_MAC=78-D0-04-38-3B-25 AVOCADO_PROVISI
     && ok "boot.ipxe carries the install URL, the disk and the payload cmdline" \
     || bad "boot.ipxe: $(tr '\n' ' ' <"$ipxe")"
   [ "$(get "http://127.0.0.1:$port/disk.img")" = disk-image-bytes ] && [ "$(get "http://127.0.0.1:$port/vmlinuz")" = vmlinuz ] \
+    && [ "$(head "http://127.0.0.1:$port/disk.img")" = 200 ] \
     && ok "HTTP serves the disk image and the installer kernel" \
     || bad "HTTP did not serve disk.img and vmlinuz"
   get "http://127.0.0.1:$port/done?status=ok&disk=/dev/nvme0n1&msg=written" >/dev/null
@@ -129,6 +135,9 @@ if start "$w/foreign.log" AVOCADO_PROVISION_PXE_MAC=78:d0:04:38:3b:25; then
   [ -z "$(get "http://127.0.0.1:$port/disk.img")" ] \
     && ok "a client without the target MAC cannot fetch the image" \
     || bad "disk.img was served to a client without the target MAC"
+  [ "$(head "http://127.0.0.1:$port/disk.img")" = 403 ] \
+    && ok "a HEAD from a client without the target MAC is refused" \
+    || bad "HEAD /disk.img answered a client without the target MAC"
   get "http://127.0.0.1:$port/done?status=ok&disk=/dev/sda" >/dev/null
   sleep 6
   kill -0 "$pid" 2>/dev/null && [ ! -f "$w/build/pxe/done" ] \
