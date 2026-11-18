@@ -7,8 +7,8 @@
 #
 # Delivery on Tegra is a MERGED DTB published as
 # .storage_devices.rootdisk.images.dtb, not a list of .dtbo files. The
-# provisioning script reads that key at stone-provision-tegraflash.sh:73 and
-# copies it to <basename>.dtb and kernel_<basename>.dtb at :306-311; the
+# tegraflash engine reads that key (avocado_tegraflash/manifest.py) and stages
+# it as <basename>.dtb and kernel_<basename>.dtb (staging.copy_images); the
 # kernel_ copy is the file the flash writes to the kernel-dtb partition.
 #
 # Three properties are worth testing explicitly because each fails silently:
@@ -17,7 +17,7 @@
 #      perfectly with no overlay applied. The merge tests below are the guard.
 #   2. The destination is NOT discovered; the consumer reads a hardcoded
 #      rootdisk. The drift test is the guard on that coupling.
-#   3. tegraflash.overlays is advisory (:320-330 only warns on a missing file),
+#   3. tegraflash.overlays is advisory (staging.verify_overlays only warns on a missing file),
 #      so it is checked as provenance, never as the delivery mechanism.
 
 set -euo pipefail
@@ -429,6 +429,90 @@ else
   bad "runtime-dir shadowing case had no clear message: $(cat "$work/e12")"
 fi
 rm -f "$rt_dir/tegra234-test-0005.dtb"
+
+# --- 13. overlay params are refused, not dropped -----------------------------
+# fdtoverlay takes only the .dtbo files, so a parameter would build with the
+# compiled-in default while the overlay is still marked claimed. The CLI relies
+# on each hook to refuse what it cannot apply.
+make_staging "$work/s13" alpha
+jq '.overlays[0].params = {"bus_speed": "400000"}' "$work/s13/overlays.manifest.json" >"$work/s13/m.json"
+mv "$work/s13/m.json" "$work/s13/overlays.manifest.json"
+if run_hook "$work/s13" "$work/stone.json" "$work/f13.json" >/dev/null 2>"$work/e13"; then
+  bad "hook accepted an overlay with params it cannot apply"
+elif grep -q "alpha" "$work/e13" && grep -qi "params" "$work/e13"; then
+  ok "overlay params are a hard error naming the overlay"
+else
+  bad "params refusal did not name the overlay and params: $(cat "$work/e13")"
+fi
+
+# --- 14-16. a carrier BSP changes what gets flashed --------------------------
+# At provision time the engine copies the carrier slot into the work dir after
+# the stock BSP, applies carrier.env (CARRIER_ENV_DTBFILE re-points DTBFILE),
+# then stages images.dtb over whatever the carrier shipped under that name. The
+# merged stock tree is then either never flashed or replaces the carrier's own.
+write_stone_carrier() {
+  cat >"$1" <<'EOF2'
+{
+  "runtime": {"platform": "avocado-jetson-orin-nano"},
+  "storage_devices": {
+    "rootdisk": {
+      "images": {
+        "rootfs": "rootfs.erofs",
+        "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_carrier_bsp": "carrier-bsp"
+      }
+    }
+  }
+}
+EOF2
+}
+write_stone_carrier "$work/stone-carrier.json"
+carrier="$work/carrier-bsp"
+
+# 14. the carrier's env file re-points the DTB: the merged stock tree would not
+# be flashed.
+mkdir -p "$carrier"
+printf 'CARRIER_LABEL="Test carrier"\nCARRIER_ENV_DTBFILE="tegra234-test-carrier.dtb"\n' >"$carrier/carrier.env"
+make_staging "$work/s14" alpha
+if run_hook "$work/s14" "$work/stone-carrier.json" "$work/f14.json" >/dev/null 2>"$work/e14"; then
+  bad "hook merged into the stock DTB although the carrier re-points DTBFILE"
+elif grep -q "carrier-bsp" "$work/e14" && grep -q "CARRIER_ENV_DTBFILE" "$work/e14"; then
+  ok "a carrier that re-points DTBFILE is a hard error naming the carrier"
+else
+  bad "carrier DTBFILE refusal was unclear: $(cat "$work/e14")"
+fi
+
+# 15. the carrier ships a file under the base DTB's name: the merged stock tree
+# would replace it.
+rm -f "$carrier/carrier.env"
+cp "$bsp/tegra234-test-0005.dtb" "$carrier/tegra234-test-0005.dtb"
+make_staging "$work/s15" alpha
+if run_hook "$work/s15" "$work/stone-carrier.json" "$work/f15.json" >/dev/null 2>"$work/e15"; then
+  bad "hook accepted a carrier that ships a DTB under the base name"
+elif grep -q "carrier-bsp" "$work/e15" && grep -q "tegra234-test-0005.dtb" "$work/e15"; then
+  ok "a carrier DTB under the base name is a hard error naming the carrier"
+else
+  bad "carrier same-name refusal was unclear: $(cat "$work/e15")"
+fi
+
+# 16. an empty slot (only .placeholder) is the normal case and must not trip it.
+rm -f "$carrier/tegra234-test-0005.dtb"
+touch "$carrier/.placeholder"
+make_staging "$work/s16" alpha
+if run_hook "$work/s16" "$work/stone-carrier.json" "$work/f16.json" >/dev/null 2>"$work/e16"; then
+  ok "an empty carrier slot does not trip the carrier check"
+else
+  bad "empty carrier slot was refused: $(cat "$work/e16")"
+fi
+
+# 16b. a populated carrier that leaves DTBFILE alone (label, flashvars) is fine.
+printf 'CARRIER_LABEL="Test carrier"\n' >"$carrier/carrier.env"
+make_staging "$work/s16b" alpha
+if run_hook "$work/s16b" "$work/stone-carrier.json" "$work/f16b.json" >/dev/null 2>"$work/e16b"; then
+  ok "a carrier that leaves DTBFILE alone is accepted"
+else
+  bad "carrier without a DTB override was refused: $(cat "$work/e16b")"
+fi
 
 echo
 echo "passed: $pass  failed: $fail"

@@ -21,20 +21,23 @@ bad() {
   echo "not ok - $1"
 }
 
-gate=$(sed -n 's/^ConditionPathExists=//p' "$masks" "$init" | sort -u)
-case $gate in
-  /run/*)
-    if [ "$(printf '%s\n' "$gate" | wc -l)" -eq 1 ]; then
-      ok "both recipes gate on $gate"
-    else
-      bad "the recipes gate on different files: $gate"
-    fi
-    ;;
-  *)
-    bad "no /run gate in either recipe"
-    gate=/nonexistent/gate
-    ;;
-esac
+# Read each recipe's own gate. Collapsing both with sort -u would still show
+# one /run path after either recipe lost its ConditionPathExists=.
+masks_gate=$(sed -n 's/^ConditionPathExists=//p' "$masks")
+init_gate=$(sed -n 's/^ConditionPathExists=//p' "$init")
+gate=$masks_gate
+for pair in "systemd-jetson-masks_1.0.bb:$masks_gate" "avocado-tegra-init.bb:$init_gate"; do
+  case ${pair#*:} in
+    /run/*) ok "${pair%%:*} gates on ${pair#*:}" ;;
+    *) bad "${pair%%:*} has no /run gate" ;;
+  esac
+done
+if [ -n "$masks_gate" ] && [ "$masks_gate" = "$init_gate" ]; then
+  ok "both recipes gate on the same file: $gate"
+else
+  bad "the recipes gate on different files: masks='$masks_gate' init='$init_gate'"
+  [ -n "$gate" ] || gate=/nonexistent/gate
+fi
 
 # First non-comment line that redirects into the gate file, and the driver load.
 w=$(grep -nF "$gate" "$setup" | grep -vE '^[0-9]+:[[:space:]]*#' \

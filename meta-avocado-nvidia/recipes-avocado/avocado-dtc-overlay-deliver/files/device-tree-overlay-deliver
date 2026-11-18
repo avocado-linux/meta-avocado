@@ -12,17 +12,18 @@
 # nowhere to put loose overlays: the flashed partition set has no DTBO
 # partition, and the ESP carries only EFI/BOOT/bootaa64.efi. The overlay lists
 # that do exist in flashvars (OVERLAY_DTB_FILE, BOOTCONTROL_OVERLAYS,
-# PLUGIN_MANAGER_OVERLAYS) are consumed by the classic flash.sh path via
-# tegra-flash-helper.sh; initrd-flash.sh - the path Avocado uses - never reads
-# them, because it consumes binaries already signed at Yocto build time.
+# PLUGIN_MANAGER_OVERLAYS) are read by tegra234-flash-helper.sh, which
+# initrd-flash.sh runs with --sign when it signs at flash time. This hook does
+# not populate them: a staged .dtbo reaches the board only through the merged
+# DTB below.
 #
 # So this hook merges each staged overlay into the base DTB with fdtoverlay and
-# publishes the result as storage_devices.rootdisk.images.dtb. The provisioning
-# script reads that key (stone-provision-tegraflash.sh:73) and copies it to
-# <basename>.dtb and kernel_<basename>.dtb (:306-311), which is the file the
-# flash writes to the kernel-dtb partition. An OS update does not carry it:
-# update.os_artifacts names rootfs and boot only, so an overlay change reaches
-# a device by reflashing.
+# publishes the result as storage_devices.rootdisk.images.dtb. The tegraflash
+# engine reads that key (avocado_tegraflash/manifest.py) and stages it as
+# <basename>.dtb and kernel_<basename>.dtb (staging.copy_images), which is the
+# file the flash writes to the kernel-dtb partition. An OS update does not
+# carry it: update.os_artifacts names rootfs and boot only, so an overlay
+# change reaches a device by reflashing.
 #
 # Two deliberate choices worth keeping:
 #
@@ -34,7 +35,7 @@
 #     applied, which is the hardest kind of failure to notice.
 #
 # tegraflash.overlays is also populated, but only as provenance: the
-# provisioning script's read of it (:320-330) merely checks each named file
+# engine's read of it (staging.verify_overlays) merely checks each named file
 # exists and warns otherwise. It never applies anything.
 
 import json
@@ -43,8 +44,8 @@ import shutil
 import subprocess
 import sys
 
-# The device key the provisioning script reads. Keep in sync with
-# stone-provision-tegraflash.sh:73; the test suite has a drift guard on this.
+# The device key the tegraflash engine reads (avocado_tegraflash/manifest.py).
+# Keep in sync with it; the test suite has a drift guard on this.
 TARGET_DEVICE = "rootdisk"
 
 
@@ -119,14 +120,14 @@ def find_base_dtb(stone, data_dir):
 
     tegraflash-bsp.bb installs each kernel DTB into the BSP directory under its
     own name. The flash writes the kernel_<name>.dtb alias to the kernel-dtb
-    partition, and both the provisioning script and the signer derive that
+    partition, and both the tegraflash engine and the signer derive that
     alias from the un-prefixed file, so the un-prefixed file is the tree to
     merge into."""
     device = stone.get("storage_devices", {}).get(TARGET_DEVICE)
     if device is None:
         die(
             f"no '{TARGET_DEVICE}' storage device in the stone manifest; "
-            "stone-provision-tegraflash.sh reads that key by name, so delivery "
+            "the tegraflash engine reads that key by name, so delivery "
             "to any other device would never be seen"
         )
 
@@ -153,6 +154,61 @@ def find_base_dtb(stone, data_dir):
             "this machine boots, but the BSP does not ship it"
         )
     return bsp_dir, base_name
+
+
+def refuse_carrier_dtb_override(stone, data_dir, base_name):
+    """Refuse a carrier BSP that changes which DTB the flash writes.
+
+    At provision time the engine copies the stock BSP, then merges the carrier
+    slot over it and applies the carrier's env file (cli.py, carrier.apply_carrier),
+    and only then stages images.dtb (staging.copy_images). Two carrier shapes
+    leave the merged stock tree unflashed or clobbering the carrier's own:
+
+      * CARRIER_ENV_DTBFILE re-points DTBFILE at another tree, so the merged
+        stock tree is staged but the flash writes the carrier's choice.
+      * The carrier ships a file under the base DTB's name, which the staged
+        merged tree then replaces.
+
+    Merging into the carrier's tree is not attempted: this hook refuses rather
+    than guess which of the two trees the project means to overlay. An empty
+    slot (only .placeholder) is the normal case and passes, with the same
+    emptiness test apply_carrier uses."""
+    carrier_rel = (
+        stone.get("storage_devices", {})
+        .get(TARGET_DEVICE, {})
+        .get("images", {})
+        .get("tegraflash_carrier_bsp")
+    )
+    if not carrier_rel:
+        return
+    carrier_dir = os.path.join(data_dir, carrier_rel)
+    if not os.path.isdir(carrier_dir):
+        return
+    files = [
+        e.name
+        for e in os.scandir(carrier_dir)
+        if e.is_file(follow_symlinks=False) and e.name != ".placeholder"
+    ]
+    if not files:
+        return
+    if base_name in files:
+        die(
+            f"carrier BSP '{carrier_rel}' ships {base_name}, the base DTB this hook "
+            "merges into; the merged stock tree would replace the carrier's copy "
+            "when the engine stages images.dtb. Overlays on a carrier that ships "
+            "its own DTB are not supported"
+        )
+    carrier_env = os.path.join(carrier_dir, "carrier.env")
+    if os.path.isfile(carrier_env):
+        with open(carrier_env, errors="surrogateescape") as f:
+            for line in f.read().split("\n"):
+                if line.startswith("CARRIER_ENV_DTBFILE="):
+                    die(
+                        f"carrier BSP '{carrier_rel}' sets CARRIER_ENV_DTBFILE, which "
+                        f"re-points the flashed DTB away from {base_name}: the merged "
+                        "stock tree would be staged but never flashed. Overlays on a "
+                        "carrier that selects its own DTB are not supported"
+                    )
 
 
 def main():
@@ -202,14 +258,25 @@ def main():
                     f"overlays[{index}] has no '{key}': the CLI writes both for "
                     f"every declared overlay, so this manifest is malformed. Entry: {ov!r}"
                 )
+        # The CLI writes params into the manifest and relies on each hook to
+        # refuse what it cannot apply. fdtoverlay is given only the .dtbo
+        # files, so a parameter would build with the compiled-in default while
+        # the overlay is still claimed, and nothing would report it.
+        if ov.get("params"):
+            die(
+                f"overlay '{ov['name']}' sets params {ov['params']!r}, which this "
+                "hook cannot apply: fdtoverlay merges the compiled .dtbo as is. "
+                "Remove the params or bake the value into the overlay"
+            )
 
     with open(stone_path) as f:
         stone = json.load(f)
     bsp_dir, base_name = find_base_dtb(stone, data_dir)
+    refuse_carrier_dtb_override(stone, data_dir, base_name)
     platform = stone.get("runtime", {}).get("platform", "tegra")
 
     # Merge into a copy staged alongside the .dtbo files, so the BSP's own DTB
-    # is never mutated in place. Keep the base filename: the provisioning script
+    # is never mutated in place. Keep the base filename: the tegraflash engine
     # derives kernel_<basename>.dtb from it, and the flash layout expects the
     # name the BSP shipped.
     merged = os.path.join(staging, base_name)
@@ -263,8 +330,8 @@ def main():
         "storage_devices": {
             TARGET_DEVICE: {
                 "images": {"dtb": base_name},
-                # Provenance only. stone-provision-tegraflash.sh:320-330 checks
-                # each of these files exists and warns if not; it applies
+                # Provenance only. staging.verify_overlays checks each of
+                # these files exists and warns if not; it applies
                 # nothing. Recording them makes the flash log show what the
                 # merged DTB was built from.
                 "tegraflash": {"overlays": [ov["file"] for ov in overlays]},
