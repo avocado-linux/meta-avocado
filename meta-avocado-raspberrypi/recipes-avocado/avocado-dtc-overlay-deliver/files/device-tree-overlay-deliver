@@ -140,8 +140,8 @@ def refuse_boot_chain_keys(boot_config):
     where a line is tied to its extension.
 
     A section header (`[pi4]`, `[none]`) is refused as well. It stays in effect
-    for the rest of config.txt, and the boards append their own lines after
-    `include avocado-overlays.txt`, so a header here would filter those out."""
+    for the rest of config.txt, so a header here would filter out any line
+    placed after `include avocado-overlays.txt`."""
     for idx, line in enumerate(boot_config):
         text = line.strip()
         if text.startswith("["):
