@@ -53,3 +53,15 @@ RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
     kernel-module-i2c-tegra-${KERNEL_VERSION} \
     kernel-module-i2c-tegra-bpmp-${KERNEL_VERSION} \
 "
+
+# i2c-dev. setup-nv-boot-control (in every Jetson rootfs through
+# tegra-redundant-boot-base) reads the module EEPROM with tegra-boardspec,
+# which falls back to /dev/i2c-N when at24 has not bound the EEPROM. 6.8
+# builds i2c-dev as a module that only kernel-modules pulled in, so the unit
+# failed on every boot and /etc/nv_boot_control.conf was never written.
+# i2c-dev has no device alias and nothing loads it on demand, so autoload it
+# through modules-load.d. linux-yocto 6.18 builds it in.
+RDEPENDS:packagegroup-avocado-rootfs-modules:append = " \
+    kernel-module-i2c-dev-${KERNEL_VERSION} \
+"
+KERNEL_MODULE_AUTOLOAD:append = " i2c-dev"
