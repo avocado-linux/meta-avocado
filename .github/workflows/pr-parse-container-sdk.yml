@@ -249,6 +249,9 @@ jobs:
       - name: intel-x86-64 stone img sizing
         shell: bash
         run: bash meta-avocado-x86-64/stone/tests/test-stone-img-sizing.sh
+      - name: intel-x86-64 stone provision-pxe
+        shell: bash
+        run: bash meta-avocado-x86-64/stone/tests/test-stone-provision-pxe.sh
       - name: intel-x86-64 EFI slot entries
         shell: bash
         run: bash meta-avocado-x86-64/recipes-core/avocado-efi-slot-entries/tests/test-avocado-efi-slot-entries.sh

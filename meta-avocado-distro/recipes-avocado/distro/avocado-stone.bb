@@ -29,6 +29,10 @@ SRC_URI:append:stone-img = " \
     file://stone-provision-img.sh \
 "
 
+SRC_URI:append:stone-pxe = " \
+    file://stone-provision-pxe.sh \
+"
+
 SRC_URI:append:stone-sd = " \
     file://stone-provision-sd.sh \
 "
@@ -99,6 +103,11 @@ do_deploy:append:stone-uuu-emmc() {
 do_deploy:append:stone-ums() {
   install -d ${DEPLOYDIR}
   install -m 0644 ${UNPACKDIR}/avocado-safe-disk.sh ${DEPLOYDIR}/avocado-safe-disk.sh
+}
+
+do_deploy:append:stone-pxe() {
+  install -d ${DEPLOYDIR}
+  install -m 0755 ${UNPACKDIR}/stone-provision-pxe.sh ${DEPLOYDIR}/stone-provision-pxe.sh
 }
 
 do_deploy:append:stone-img() {
