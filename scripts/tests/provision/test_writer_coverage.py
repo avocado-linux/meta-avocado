@@ -167,6 +167,13 @@ CLASSIFICATION = {
             "qx",
         )
     },
+    **{
+        _p(k, "stone-provision-pxe.sh"): (
+            "nonwriter",
+            "serves the image over the network; the target's installer writes its disk",
+        )
+        for k in ("i2", "i3", "i4")
+    },
     _p("tegra", "stone-provision-noop.sh"): ("nonwriter", "does nothing"),
     _p("rb3", "stone-provision-noop.sh"): ("nonwriter", "does nothing"),
     _p("rubik", "stone-provision-noop.sh"): ("nonwriter", "does nothing"),
