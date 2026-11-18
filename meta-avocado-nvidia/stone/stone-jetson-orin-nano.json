@@ -65,23 +65,28 @@
     "profiles": {
       "tegraflash": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-nvme": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-mmc": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-emmc": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "tegraflash-sd": {
         "script": "stone-provision-tegraflash.sh",
-        "envs": ["flash_options"]
+        "envs": ["flash_options"],
+        "config": { "dry_run": true }
       },
       "noop": {
         "script": "stone-provision-noop.sh"
@@ -113,7 +118,10 @@
       },
       "tegraflash": {
         "sd_device": "mmcblk0",
-        "rcm_ids": ["0955:7523"]
+        "rcm_ids": ["0955:7523"],
+        "rcm_evidence": {
+          "0955:7523": "lsusb on the bench Orin Nano showed 0955:7523 NVIDIA Corp. APX"
+        }
       }
     }
   }

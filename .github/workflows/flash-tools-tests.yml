@@ -9,10 +9,12 @@ name: Flash-Tools-Tests
 # legacy shell script and is proven equivalent by a differential parity test
 # against that script, so a regression here is silent unless the suite runs.
 #
-# The two suites run as separate pytest invocations on purpose: both trees carry
-# a test file with the same basename (scripts/tests/remote/test_profile.py and
-# meta-avocado-nvidia/stone/tegra/tests/test_profile.py), and one combined run
-# trips pytest's duplicate-module-name collision.
+# The suites run as separate pytest invocations on purpose: the trees carry
+# test files with the same basename (scripts/tests/remote/test_profile.py and
+# meta-avocado-nvidia/stone/tegra/tests/test_profile.py; scripts/tests/launch/
+# test_inputs.py and scripts/tests/tegra/test_inputs.py; the provision tree
+# likewise), and one combined run trips pytest's duplicate-module-name
+# collision.
 #
 # The engine itself is standard library only, and targets Python 3.10 or newer.
 # pytest is the only Python dependency. The job pins 3.10 so the floor is the
@@ -25,6 +27,10 @@ on:
     paths:
       - "scripts/**"
       - "meta-avocado-nvidia/stone/**"
+      # The provision and launch tests exercise the per-board profile scripts
+      # and the shared stone library.
+      - "meta-avocado-*/stone/**"
+      - "meta-avocado-distro/stone/**"
       # A pin bump must run the upstream-drift test.
       - "kas/vendor/nvidia.yml"
       # Files the recipe wiring and partition-UUID tests read.
@@ -102,6 +108,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest scripts/tests/boards scripts/tests/tegra -q
+          python -m pytest scripts/tests/launch -q
+          python -m pytest scripts/tests/provision -q
 
       # -s keeps the parity test's `cases: N/M run` line on stdout, and the tee
       # keeps it for the next step. pipefail makes a pytest failure fail this

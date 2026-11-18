@@ -19,8 +19,8 @@ ums_disks() {
     dir=$(readlink -f "$blk/device")
     while [ -n "$dir" ] && [ "$dir" != "/" ]; do
       if [ -f "$dir/idVendor" ] && [ -f "$dir/idProduct" ]; then
-        if [ "$(cat "$dir/idVendor")" = "$want_vid" ] &&
-          [ "$(cat "$dir/idProduct")" = "$want_pid" ]; then
+        if [ "$(cat "$dir/idVendor")" = "$want_vid" ] \
+          && [ "$(cat "$dir/idProduct")" = "$want_pid" ]; then
           echo "/dev/$(basename "$blk")"
         fi
         break
@@ -35,8 +35,8 @@ wait_ums_disk() {
   local timeout=${1:-60} i disks
   for ((i = 0; i < timeout; i++)); do
     mapfile -t disks < <(ums_disks)
-    if [ ${#disks[@]} -eq 1 ] && [ -b "${disks[0]}" ] &&
-      [ "$(cat "/sys/block/$(basename "${disks[0]}")/size" 2>/dev/null || echo 0)" -gt 0 ]; then
+    if [ ${#disks[@]} -eq 1 ] && [ -b "${disks[0]}" ] \
+      && [ "$(cat "/sys/block/$(basename "${disks[0]}")/size" 2>/dev/null || echo 0)" -gt 0 ]; then
       echo "${disks[0]}"
       return 0
     fi

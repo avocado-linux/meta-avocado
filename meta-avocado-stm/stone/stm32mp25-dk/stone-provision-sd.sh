@@ -7,13 +7,26 @@
 #
 # The SD card must already be inserted in the host USB reader before invoking.
 # If no removable disk is detected the script exits immediately rather than
-# blocking on insertion. Override auto-detection with AVOCADO_SD_DEVICE=/dev/sdX.
+# blocking on insertion. Override auto-detection with AVOCADO_PROVISION_DEVICE=
+# /dev/sdX (AVOCADO_SD_DEVICE is an alias); naming the card does not skip the
+# retype, only AVOCADO_PROVISION_FORCE=1 does. AVOCADO_PROVISION_DRY_RUN=1 runs
+# every guard and prints the write without doing it.
 
 set -e
 set -u
 set -o pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+# Wrong-disk guards shared with the other sd and usb profiles. Shipped beside
+# this script (the manifest lists it under provision.files).
+# shellcheck source=/dev/null # sibling file, absent from a standalone lint
+. "${SCRIPT_DIR}/avocado-safe-disk.sh"
+
+# This profile honours a dry run (through the write choke point) but writes only
+# the complete image, so a task other than complete is refused.
+avocado_safe_disk_modes sd 1 0 || exit 1
+
 DISK_IMAGE=$("${SCRIPT_DIR}/build-disk-image.sh")
 
 # Docker Desktop / Windows / macOS path: produce the disk image and stop.
@@ -56,13 +69,17 @@ list_removable_disks() {
   fi
 }
 
-if [ -n "${AVOCADO_SD_DEVICE:-}" ]; then
-  target="$AVOCADO_SD_DEVICE"
-  if [ ! -b "$target" ]; then
-    echo "ERROR: AVOCADO_SD_DEVICE=$target is not a block device." >&2
+named=$(avocado_safe_disk_sd_device) || exit 1
+if [ -n "$named" ]; then
+  target="$named"
+else
+  # Choosing the target is an answer, and only a terminal answers.
+  # AVOCADO_PROVISION_FORCE does not stand in for it.
+  if [ ! -t 0 ]; then
+    echo "ERROR: no device named and no terminal: cannot choose a target without a terminal." >&2
+    echo "Set AVOCADO_PROVISION_DEVICE=/dev/sdX for an unattended run." >&2
     exit 1
   fi
-else
   mapfile -t candidates < <(list_removable_disks)
   case ${#candidates[@]} in
     0)
@@ -75,11 +92,16 @@ else
     *)
       echo "ERROR: multiple removable disks detected:" >&2
       printf '  %s\n' "${candidates[@]}" >&2
-      echo "Set AVOCADO_SD_DEVICE=/dev/sdX to pick one, or unplug the others." >&2
+      echo "Set AVOCADO_PROVISION_DEVICE=/dev/sdX to pick one, or unplug the others." >&2
       exit 1
       ;;
   esac
 fi
+
+# Whole disk on a USB or MMC bus that does not hold the running root. The
+# kernel removable flag the listing above uses is not trusted for this.
+avocado_safe_disk_check_device "$target" || exit 1
+target="$AVOCADO_SAFE_DISK_DEV"
 
 if command -v blockdev >/dev/null 2>&1; then
   size_bytes=$(blockdev --getsize64 "$target" 2>/dev/null || echo 0)
@@ -97,24 +119,31 @@ STM32MP25-DK SD provisioning
 
 WARNING: this will overwrite ALL data on $target.
 EOF
-read -r -p "Continue? [y/N] " confirm
-case "$confirm" in
-  [yY] | [yY][eE][sS]) ;;
-  *)
-    echo "Aborted."
-    exit 1
-    ;;
-esac
+
+# Typed retype of the device path, skipped only by AVOCADO_PROVISION_FORCE=1;
+# naming the card does not skip it. A dry run asks nothing.
+avocado_safe_disk_confirm "$target" || exit 1
 
 target_base=$(basename "$target")
-for partdir in /sys/block/"$target_base"/"$target_base"*; do
+# Partitions sit under the disk's sysfs directory; the same root the safe-disk
+# library reads, so a test's fake tree and the real one enumerate alike.
+disk_sysdir=$(readlink -f -- "${AVOCADO_PROVISION_SYSBLOCK:-/sys/class/block}/$target_base" 2>/dev/null || true)
+for partdir in "$disk_sysdir"/"$target_base"*; do
   [ -e "$partdir" ] || continue
-  umount "/dev/$(basename "$partdir")" 2>/dev/null || true
+  avocado_safe_disk_write umount "/dev/$(basename "$partdir")" 2>/dev/null || true
 done
 
+# Whatever is still mounted now was not unmounted above; never write under it.
+avocado_safe_disk_unmounted "$target" || exit 1
+
 echo "Writing $(basename "$DISK_IMAGE") to $target..."
-dd if="$DISK_IMAGE" of="$target" bs=4M oflag=direct status=progress
-sync
+avocado_safe_disk_write dd if="$DISK_IMAGE" of="$target" bs=4M oflag=direct status=progress
+avocado_safe_disk_write sync
+
+avocado_safe_disk_finish "$target"
+if [ "${AVOCADO_PROVISION_DRY_RUN:-}" = "1" ]; then
+  exit 0
+fi
 
 cat <<EOF
 

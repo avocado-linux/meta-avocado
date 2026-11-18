@@ -124,10 +124,10 @@ reset_tree() {
 # Result helpers for the two non-pinning outcomes.
 shipped() { [ "$rc" -eq 0 ] && [ ! -e "$out_dir/boot-efi.mount.d" ]; }
 skipped() {
-  [ "$rc" -eq 0 ] &&
-    [ "$(grep -c '^ConditionPathExists=/run/avocado-esp-unresolved$' "$out_dir/$dropin" 2>/dev/null)" = 1 ] &&
-    grep -q '^\[Unit\]$' "$out_dir/$dropin" &&
-    ! grep -q '^What=' "$out_dir/$dropin"
+  [ "$rc" -eq 0 ] \
+    && [ "$(grep -c '^ConditionPathExists=/run/avocado-esp-unresolved$' "$out_dir/$dropin" 2>/dev/null)" = 1 ] \
+    && grep -q '^\[Unit\]$' "$out_dir/$dropin" \
+    && ! grep -q '^What=' "$out_dir/$dropin"
 }
 state() { [ -e "$out_dir/boot-efi.mount.d" ] && echo dropin-present || echo dropin-absent; }
 
@@ -185,8 +185,8 @@ part sda sda1 APP
 part sda sda2 esp
 part sdb sdb1 esp
 run /dev/sda1
-if [ "$rc" -eq 0 ] && [ "$(grep '^What=' "$out_dir/$dropin" 2>/dev/null)" = "What=$work/dev/sda2" ] &&
-  ! grep -q '^ConditionPathExists=' "$out_dir/$dropin"; then
+if [ "$rc" -eq 0 ] && [ "$(grep '^What=' "$out_dir/$dropin" 2>/dev/null)" = "What=$work/dev/sda2" ] \
+  && ! grep -q '^ConditionPathExists=' "$out_dir/$dropin"; then
   pass "one esp on the booted disk is pinned even with another disk's esp present"
 else
   fail "pin with other disk: rc=$rc dropin=$(cat "$out_dir/$dropin" 2>/dev/null)"

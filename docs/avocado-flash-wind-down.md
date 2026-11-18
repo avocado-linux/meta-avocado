@@ -27,31 +27,36 @@ record (`meta-avocado-nvidia/stone/tegra/tests/parity/deviations.py`).
 - `device-confirmation`: `confirm.py` asks the operator to retype the target before writing, and the prompt names every medium the erase flags destroy, including the profile medium's device node, emmc when the flash would erase it, QSPI and UEFI variables; `AVOCADO_PROVISION_FORCE=1` skips it.
 - upstream-drift record: `meta-avocado-nvidia/stone/tegra/upstream-tracking.json`, checked by `meta-avocado-nvidia/stone/tegra/tests/test_upstream_drift.py`.
 
-## 3. Wrapper-only today: these BLOCK removal
+### 2.1 Release notes
 
-Six guards live only in the wrapper: the three in 3.1 to 3.3, the unpinned
-confirmed board in 3.4, and the two below in 3.5 and 3.6. Each needs a
-decision before removal. The options are listed; this document does not pick
-one.
+- `AVOCADO_FLASH_LAUNCHER=1` opts `avocado-flash` into the new launcher (`scripts/avocado_flash_launch/`), which covers sd, emmc, ums and nvme and runs the stone profile instead of the Python board tables. It is opt-in in this change; flipping it to the default is planned by this change's later work, and the registry and wrapper stay until then.
+- A named device no longer skips the retype. Before, passing an explicit device meant no confirmation. Now only `AVOCADO_PROVISION_FORCE=1` skips it. With no terminal and no signal the run proceeds with a notice; `AVOCADO_PROVISION_FORCE=0` with no terminal refuses; any value other than 1 or 0 refuses. The full table is `meta-avocado-distro/stone/tests/confirm-vectors.tsv`, shared by the shell library and the engine (`avocado_tegraflash/confirm.py`, `decide_confirmation`).
+- New variables: `AVOCADO_PROVISION_DRY_RUN=1` (run every guard, change nothing), `AVOCADO_PROVISION_RCM_ID`, `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`, `AVOCADO_PROVISION_FWUP_TASK` (only `complete` is accepted by the ums profile), `AVOCADO_PROVISION_HOST_MOUNTS` (a mount table exported by avocado-cli, read as a second table), and `AVOCADO_FLASH_LAUNCHER`.
+- The engine refuses a board nothing identifies, an unpinned kernel, and a `PATH` with relative entries is cleaned; see section 3.
 
-### 3.1 PATH hardening
+## 3. Wrapper-only guards: status
 
-Today: `scripts/avocado_flash_tegra/plan.py`, `safe_path()`, keeps only the
-absolute components of the caller's `PATH` (falling back to a system path)
-before running the script as root. An empty or relative component means the
-current directory, which is the deploy directory, so root could resolve `jq`,
-`cpp` or `fdtget` from a place the caller does not control.
+Six guards lived only in the wrapper. This change moves three into the engine
+(3.1, 3.3, 3.5), meets one in the launcher (3.6), and leaves two as follow-ups
+that still block removal (3.2, 3.4). The options for the open two are listed;
+this document does not pick one.
 
-Decision, one of:
+### 3.1 PATH hardening - moved into the engine
 
-- Move into the engine: sanitize `PATH` in the engine's toolchain/runner setup.
-- Move to avocado-cli: `avocado provision` sets a clean `PATH` when it launches the script as root.
-- Drop: accept that root runs with the caller's `PATH`.
+Was: `scripts/avocado_flash_tegra/plan.py`, `safe_path()`, kept only the
+absolute components of the caller's `PATH` before running the script as root,
+because an empty or relative component means the current directory, which is
+the deploy directory.
 
-### 3.2 Per-run log file
+Now: `meta-avocado-nvidia/stone/tegra/avocado_tegraflash/cli.py` (`_run`)
+replaces `PATH` with its absolute components (`_absolute_path`) before the
+engine resolves any tool, so the guard holds through `avocado provision` too.
+
+### 3.2 Per-run log file - follow-up, still open
 
 Today: `scripts/avocado_flash_tegra/runner.py`, `stream()`, tees the script's
-output to a log file for each run, so a failed flash leaves a record.
+output to a log file for each run, so a failed flash leaves a record. This
+change does not move it.
 
 Decision, one of:
 
@@ -59,20 +64,16 @@ Decision, one of:
 - Move to avocado-cli: `avocado provision` captures and keeps the output.
 - Drop: rely on the terminal scrollback.
 
-### 3.3 Refusing a run with no pinned kernel
+### 3.3 Refusing a run with no pinned kernel - moved into the engine
 
-Today: the wrapper requires the kernel `Image` in the deploy tree and refuses
-without it. Via `avocado provision`, the engine only warns and takes the
-prebuilt `boot.img` when `avocado install` pinned no kernel, so a board can be
-flashed with a kernel nobody chose.
+Was: the wrapper required the kernel `Image` in the deploy tree; the engine
+only warned and took the prebuilt `boot.img`.
 
-Decision, one of:
+Now: `avocado_tegraflash/cli.py` (`_run`) refuses when no kernel is pinned,
+naming the cause. `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1` (exactly `1`)
+accepts the prebuilt boot image explicitly.
 
-- Move into the engine: refuse instead of warn when no kernel is pinned.
-- Move to avocado-cli: `avocado provision` refuses before invoking the script when `avocado install` pinned no kernel.
-- Drop: keep the warning and the prebuilt-image fallback as the intended behavior.
-
-### 3.4 The confirmed board is not pinned to the flash
+### 3.4 The confirmed board is not pinned to the flash - follow-up, still open
 
 Today the wrapper has an operator retype the board's `bus:device`, then runs
 the engine with `AVOCADO_PROVISION_FORCE=1` and passes it no device identity.
@@ -83,7 +84,7 @@ flashed without the operator confirming it. `./initrd-flash` is also run with
 only the erase flags, so the tool chooses its device itself and the engine's
 choice is advisory. Under `avocado provision` the engine prompts after its
 wait, so staging is not exposed there; only the gap between the recheck and the
-tool's own enumeration remains.
+tool's own enumeration remains. This change does not close it.
 
 Decision, one of:
 
@@ -91,47 +92,33 @@ Decision, one of:
 - Move to avocado-cli: `avocado provision` confirms and passes the identity through.
 - Drop: accept that a swap during staging is the operator's responsibility.
 
-### 3.5 Refusing a machine with no recorded recovery id
+### 3.5 Refusing a machine with no recorded recovery id - moved into the engine
 
-Today: `scripts/avocado_flash_tegra/rcm.py`, `expected_rcm_id()`, raises
-`FlashError` when the machine has no registry entry or no recorded
-recovery-mode USB id, and tells the operator to pass `--rcm-id`. The engine
-does not refuse: `avocado_tegraflash/recovery.py`, `wait_for_single_board()`,
-only logs "the board is not identity-checked" and proceeds with the one device
-in recovery when `expected_ids` is empty. Six of the seven stone manifests
-declare no `rcm_ids`, so for those machines the engine has no identity check
-at all.
+Was: `scripts/avocado_flash_tegra/rcm.py`, `expected_rcm_id()`, raised
+`FlashError` for a machine with no recorded recovery-mode USB id. The engine
+only logged and proceeded.
 
-Removing the wrapper therefore drops a refusal. With
-`AVOCADO_PROVISION_FORCE=1`, or a run with no terminal, the engine skips the
-confirmation too, so a flash for a module with no declared id proceeds
-unconfirmed against whichever lone NVIDIA device is in recovery, for example
-an Orin Nano. Whether `initrd-flash` would then erase that board or fail when
-it boots the wrong RCM payload is unproven; do not rely on it failing.
+Now: `avocado_tegraflash/cli.py` (the check before staging) refuses when the
+manifest declares no `rcm_ids` and `AVOCADO_PROVISION_RCM_ID` is not set, in the
+cases where the confirmation would be skipped (`AVOCADO_PROVISION_FORCE=1`, or
+an unattended run). With a terminal it prints a warning and relies on the
+retyped confirmation. `AVOCADO_PROVISION_RCM_ID=<vendor:product>` supplies the
+id for a board whose manifest declares none. Recovery ids and their evidence
+live only in the stone manifest (`rcm_ids`, `rcm_evidence`); the launcher's
+`boards` verb (`scripts/avocado_flash_launch/boards.py`) lists them.
 
-Decision, one of:
+### 3.6 Work directory ownership and mode refusals - met by the launcher
 
-- Move into the engine: refuse when no ids are declared and `AVOCADO_PROVISION_FORCE=1` (or a non-tty run) would skip the confirmation.
-- Move into the engine: declare `rcm_ids` for every manifest, so the warning branch is unreachable.
-- Drop: accept the warning as the only protection.
+Was: `scripts/avocado_flash_tegra/workdir.py` refused a work directory that
+another user could pre-create or write, because the helper staged there runs as
+root.
 
-### 3.6 Work directory ownership and mode refusals
-
-Today: `scripts/avocado_flash_tegra/workdir.py` refuses, because the helper
-staged there runs as root:
-
-- `require_private_dir` (line 62): a work directory that is not a real directory (a symlink or other file), is not owned by the current user, or is writable by group or others.
-- `require_safe_ancestors` (line 81): any existing ancestor, symlinks resolved, that is not owned by root or the current user, or is writable by group or others without the sticky bit.
-- `create_workdir` (line 110): a default (tool-chosen) work directory that already exists, and an explicit one that fails `require_private_dir`.
-
-The engine has no equivalent of these checks, so another user who can pre-create
-or write the directory could choose what root executes.
-
-Decision, one of:
-
-- Move into the engine: apply the same checks to the engine's work directory before staging.
-- Move to avocado-cli: `avocado provision` creates the work directory privately and passes it in.
-- Drop: accept that the work directory is trusted.
+Now: the launcher creates its inputs in a private scratch directory
+(`scripts/avocado_flash_launch/scratch.py`): mode 0700, owned by the caller,
+carrying a marker with a random token, and removed only if the marker matches.
+This protects runs started through the launcher. The engine itself still has no
+such check on its own work directory, so a run through `avocado provision` that
+passes a shared directory is not covered; that stays with avocado-cli.
 
 ## 4. Removal list
 
@@ -154,7 +141,7 @@ Do not remove the wrapper until both hold:
    - an oversize image is refused before any erase
    - an empty or missing image is refused
    - a different Jetson in recovery is refused, naming both ids
-   - a board with no recorded id warns and proceeds (this changes if 3.5 moves the refusal into the engine)
+   - a board with no recorded id is refused when unattended and warns on a terminal (3.5), and `AVOCADO_PROVISION_RCM_ID` supplies the id
    - a wrong retype aborts
    - `AVOCADO_PROVISION_FORCE=1` skips the confirmation
    - NVMe boot
@@ -165,17 +152,18 @@ Do not remove the wrapper until both hold:
 
 These stay in `scripts/avocado-flash`.
 
-- `fuse-srk` (i.MX93): an irreversible fuse write, and there is no stone profile for it.
-- `ssh-emmc` (AGX Orin on the J5012 carrier): no stone profile.
-- automated `ums`: no stone profile for the i.MX93 flow. The nanopi-r5s has `stone-provision-ums.sh` (profile `sd-usb`), but the operator types `ums` at the U-Boot prompt by hand, so it does not replace the automated flow.
+- `fuse-srk` (i.MX93): an irreversible fuse write, and there is no stone profile for it. It survives the wind-down.
+- `ssh-emmc` (AGX Orin on the J5012 carrier): no stone profile. It survives the wind-down.
 
-Winding any of them down means writing new stone profiles or dropping them,
+The i.MX93 `ums` flow is no longer here. `meta-avocado-nxp/stone/avocado-imx/stone-provision-ums.sh` is its stone profile (`ums` in `stone-imx93-frdm.json`), and the launcher drives the board's USB mass storage export around it (`scripts/avocado_flash_launch/ums.py`) so the operator does not type `ums` by hand. The nanopi-r5s also has a `stone-provision-ums.sh` (profile `sd-usb`) where the operator still types `ums` at the U-Boot prompt.
+
+Winding down `fuse-srk` and `ssh-emmc` means writing new stone profiles or dropping them,
 which is a separate design.
 
 ## 7. Ordering and rollback
 
 Removal is a follow-up change. Nothing here deletes the wrapper, so until that
 change lands both doors keep working and a regression in the engine can be
-cross-checked against the wrapper. Settle the six decisions in section 3,
+cross-checked against the wrapper. Settle the two open decisions in section 3 (3.2 and 3.4),
 run the gate in section 5, then remove in one change so it reverts as one
 commit.

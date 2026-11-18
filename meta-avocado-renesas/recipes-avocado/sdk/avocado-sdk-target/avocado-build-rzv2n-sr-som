@@ -26,17 +26,17 @@ output_dir="$AVOCADO_PREFIX/output/runtimes/$RUNTIME_NAME/stone"
 input_dir="$AVOCADO_PREFIX/runtimes/$RUNTIME_NAME"
 extlinux_src="$input_dir/extlinux.conf-avocado-${target}"
 if [ -f "$extlinux_src" ]; then
-    rm -f "$input_dir/extlinux.conf"
-    awk -v line="${AVOCADO_KERNEL_CMDLINE:-}" -v extra="${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" '
+  rm -f "$input_dir/extlinux.conf"
+  awk -v line="${AVOCADO_KERNEL_CMDLINE:-}" -v extra="${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" '
         /^[[:space:]]*append[[:space:]]/ {
             if (line != "") { sub(/append .*/, "append " line) }
             if (extra != "") { $0 = $0 " " extra }
         }
         { print }
-    ' "$extlinux_src" > "$input_dir/extlinux.conf"
-    if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
-        echo "Kernel cmdline from project config: $(grep -m1 'append' "$input_dir/extlinux.conf")"
-    fi
+    ' "$extlinux_src" >"$input_dir/extlinux.conf"
+  if [ -n "${AVOCADO_KERNEL_CMDLINE:-}${AVOCADO_KERNEL_CMDLINE_EXTRA:-}" ]; then
+    echo "Kernel cmdline from project config: $(grep -m1 'append' "$input_dir/extlinux.conf")"
+  fi
 fi
 
 echo -e "\033[92m[SUCCESS]\033[0m Successfully ran SDK lifecycle hook '$hook' for target '$target'."

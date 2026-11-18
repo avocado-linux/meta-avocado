@@ -1,0 +1,30 @@
+# Confirmation table for avocado_safe_disk_confirm. Tab-separated; the header row is required.
+# force: the AVOCADO_PROVISION_FORCE text, or <unset> (variable absent) or <empty> (set to "").
+# terminal: yes when stdin is a terminal, no when it is not (a pipe carrying the right path counts as no).
+# dry_run: yes when AVOCADO_PROVISION_DRY_RUN=1.
+# outcome:
+#   skip     exit 0, no retype, prints "confirmation skipped: AVOCADO_PROVISION_FORCE=1"
+#   retype   the exact target is typed on the terminal; exit 0 on a match, nonzero otherwise
+#   refuse   exit nonzero, nothing proceeds
+#   proceed  exit 0, no retype asked (dry run, or the legacy row: no terminal and no force signal)
+force	terminal	dry_run	outcome
+1	yes	no	skip
+1	no	no	skip
+0	yes	no	retype
+0	no	no	refuse
+<unset>	yes	no	retype
+<unset>	no	no	proceed
+<empty>	yes	no	retype
+<empty>	no	no	proceed
+bogus	yes	no	refuse
+bogus	no	no	refuse
+1	yes	yes	proceed
+1	no	yes	proceed
+0	yes	yes	proceed
+0	no	yes	proceed
+<unset>	yes	yes	proceed
+<unset>	no	yes	proceed
+<empty>	yes	yes	proceed
+<empty>	no	yes	proceed
+bogus	yes	yes	refuse
+bogus	no	yes	refuse

@@ -369,6 +369,33 @@ ICAM-540 example above does.
 Regression test:
 [tests/test-module-sku-retarget.sh](../recipes-bsp/tegra-binaries/tests/test-module-sku-retarget.sh).
 
+## Recovery ids
+
+A carrier extension adds no recovery id. The USB `vendor:product` id the module
+shows in recovery mode belongs to the SOM, and it lives only in the SOM's stone
+manifest, under `storage_devices.rootdisk.tegraflash`:
+
+```json
+"rcm_ids": ["0955:7523"],
+"rcm_evidence": {
+  "0955:7523": "lsusb on the bench Orin Nano showed 0955:7523 NVIDIA Corp. APX"
+}
+```
+
+There is no Python board table to edit for an id. Record an id only after
+someone has seen the module in recovery mode, and put what was seen (the
+`lsusb` line) in `rcm_evidence`; the manifest tests
+(`scripts/tests/launch/test_boards_manifests.py` and the engine's manifest
+tests) refuse an id without evidence, evidence for an undeclared id, and an id
+that is not a lowercase `0955:xxxx` pair. `python3 scripts/avocado-flash boards`
+lists each Jetson manifest with its ids, or `none recorded`.
+
+A SOM manifest with no `rcm_ids` is refused on an unattended run. If your carrier
+uses a SOM whose id nobody has recorded, set
+`AVOCADO_PROVISION_RCM_ID=<vendor:product>` for that run, or add the id and its
+evidence to the SOM manifest once seen. See
+[adding-a-flash-board.md](../../docs/adding-a-flash-board.md).
+
 ## Caveats
 
 - **SD boot needs the card's device name declared per board.** The

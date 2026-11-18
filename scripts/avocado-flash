@@ -30,6 +30,7 @@ import struct
 import subprocess
 import sys
 import time
+import types
 from datetime import datetime
 from pathlib import Path
 
@@ -1021,6 +1022,8 @@ examples:
                          "'mmc list' names which is the SD)")
     ap.add_argument("--usb-controller", type=int, default=0,
                     help="USB controller index for 'ums' (default: %(default)s)")
+    ap.add_argument("--workdir", type=Path,
+                    help=argparse.SUPPRESS)  # launcher scratch parent; hidden while the launcher is opt-in
     ap.add_argument("medium", choices=["sd", "emmc", "ums", "fuse-srk"])
     ap.add_argument("device", nargs="?", help="block device for 'sd'")
     return ap
@@ -1068,6 +1071,44 @@ def dispatch_boards(argv: list[str]) -> int:
     return cli.main(argv)
 
 
+def launcher_enabled() -> bool:
+    """The stone-provision launcher is opt-in until the old write paths are retired."""
+    return os.environ.get("AVOCADO_FLASH_LAUNCHER") == "1"
+
+
+def _launcher_cli():
+    # Import by the script's own directory so it works however it is invoked.
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from avocado_flash_launch import cli
+
+    return cli
+
+
+def dispatch_launcher(argv: list[str], deploy: Path, machine: str) -> int:
+    """Run sd/emmc/ums through the launcher; resolution above stays in this script."""
+    cli = _launcher_cli()
+    host = types.SimpleNamespace(
+        UBoot=UBoot,
+        interrupt_to_uboot=interrupt_to_uboot,
+        ums_expose=ums_expose,
+        ums_release=ums_release,
+        block_devices=block_devices,
+        usb_gadget_present=usb_gadget_present,
+    )
+    return cli.main(
+        argv,
+        cli.Resolved(deploy=deploy, machine=machine, images_dir=deploy / "images" / machine),
+        host=host,
+    )
+
+
+def dispatch_launcher_nvme(argv: list[str]) -> int:
+    """nvme is first-argument only and parses its own options, so it never reaches build_parser()."""
+    return _launcher_cli().main_nvme(argv, resolve_deploy_dir, resolve_machine)
+
+
 def main() -> int:
     # ssh-emmc, nvme and boards must be the first argument; every other invocation is untouched.
     if len(sys.argv) > 1 and sys.argv[1] == "boards":
@@ -1075,6 +1116,8 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "ssh-emmc":
         return dispatch_ssh_emmc(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "nvme":
+        if launcher_enabled():
+            return dispatch_launcher_nvme(sys.argv[2:])
         return dispatch_nvme(sys.argv[2:])
     if "nvme" in sys.argv[1:]:
         raise Fatal("nvme must be the first argument: avocado-flash nvme [options]")
@@ -1084,6 +1127,9 @@ def main() -> int:
     machine = resolve_machine(deploy, args.machine)
     print(f"machine: {machine}")
     print(f"deploy:  {deploy}")
+
+    if launcher_enabled() and args.medium != "fuse-srk":
+        return dispatch_launcher(sys.argv[1:], deploy, machine)
 
     # Only fwup evaluates the manifest's tasks. Refusing rather than ignoring the
     # flag matters because the two differ in whether /var survives: a --task
