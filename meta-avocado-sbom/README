@@ -494,6 +494,25 @@ as an overlay: a file there replaces the same-named file from CVE_CHECK_DIR.
 cve-check's own output is never overwritten, so the before and the after both
 stay on disk and stay comparable - which is what an accuracy check needs.
 
+Every kernel the machine builds is filtered, not only the one the image
+installs. A multi-kernel machine's other kernels come from the multiconfig
+subdirectories avocado-multikernel.bbclass merges (see "More than one version
+of a recipe"); each is filtered on its own SPDX document, from
+${DEPLOY_DIR_SPDX}/<mc>, into ${CVE_CHECK_DIR}/<mc>/kernel-improved/. A
+multiconfig's kernels are the recipes it declares in
+AVOCADO_MULTIKERNEL_MC_RECIPES whose cve-check entry names the linux_kernel
+product, so a multiconfig can build any number of them (a Jetson's L4T kernel
+and its RT variant) and an out-of-tree module recipe beside them is left out.
+
+Each kernel's record, the entry and every alt_versions record alike, carries
+"kernel_filtered": true when its CVEs came from the filter, false when they
+are cve-check's own version-only results. A kernel without compiled sources in
+its SPDX document - a vendor kernel the debug-info switch does not reach - is
+false, and its count is the unfiltered one. Measured on a 2024 Pi 5, the
+feed-only 6.6.63 kernel listed 4,157 affected CVEs unfiltered against the
+shipped 6.12.93's 1,035 filtered. The key is optional and additive, like
+recipe_version, so the contract stays version 1.
+
 The script is run as a subprocess, never imported. It is GPL-2.0 and this layer
 is Apache-2.0; see "A format, not a tool" above for the same boundary.
 

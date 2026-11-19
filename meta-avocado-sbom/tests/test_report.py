@@ -931,6 +931,105 @@ class AltVersionsTests(unittest.TestCase):
             counts["cves"] + counts["alt_cves"],
         )
 
+class KernelFilteredTests(unittest.TestCase):
+    """Every kernel a machine builds is filtered on its own compiled sources.
+
+    The defect this prevents: only the default multiconfig's kernel was read
+    through kernel-improved, so a second kernel's raw version-only results
+    (4,157 against 1,035 filtered on a Pi 5) went into alt_versions with
+    nothing saying they were unfiltered.
+    """
+
+    # The multi-kernel fixture without AltVersionsTests' own tests.
+    setUp = AltVersionsTests.setUp
+    package = AltVersionsTests.package
+    write = AltVersionsTests.write
+    manifest = AltVersionsTests.manifest
+
+    KERNEL = [{"product": "linux_kernel", "cvesInRecord": "Yes"}]
+
+    def kernel(self, version, *ids):
+        return entry("linux-raspberrypi", version=version, products=self.KERNEL,
+                     issues=[{"id": i, "status": "Unpatched"} for i in ids])
+
+    def overlay(self, root, version, *ids):
+        directory = os.path.join(root, OVERLAY_DIRNAME)
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "linux-raspberrypi_cve.json"), "w") as f:
+            json.dump({"package": [self.kernel(version, *ids)]}, f)
+
+    def populate(self):
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63",
+                     root=self.alt_pkgdata)
+        self.write("linux-raspberrypi", self.kernel("6.12.25", "CVE-2026-1", "CVE-2026-9"))
+        self.write("linux-raspberrypi", self.kernel("6.6.63", "CVE-2026-2", "CVE-2026-8"),
+                   alt=True)
+
+    def build(self, **kw):
+        kw.setdefault("overlay_dir", os.path.join(self.cve_dir, OVERLAY_DIRNAME))
+        return AltVersionsTests.build(self, **kw)
+
+    def test_each_kernel_reads_its_own_overlay(self):
+        self.populate()
+        self.overlay(self.cve_dir, "6.12.25", "CVE-2026-1")
+        self.overlay(self.alt_cve_dir, "6.6.63", "CVE-2026-2")
+        doc, _ = self.build()
+        rec = doc["recipes"]["linux-raspberrypi"]
+        alt = rec["alt_versions"][0]
+        self.assertEqual([c["id"] for c in rec["cves"]], ["CVE-2026-1"])
+        self.assertEqual([c["id"] for c in alt["cves"]], ["CVE-2026-2"])
+        self.assertIs(rec["kernel_filtered"], True)
+        self.assertIs(alt["kernel_filtered"], True)
+        self.assertEqual(verify.check_report(doc, health=False), [])
+
+    def test_a_kernel_the_filter_missed_says_so(self):
+        # The L4T shape: no compiled-source list, so no overlay for it.
+        self.populate()
+        self.overlay(self.cve_dir, "6.12.25", "CVE-2026-1")
+        doc, _ = self.build()
+        rec = doc["recipes"]["linux-raspberrypi"]
+        alt = rec["alt_versions"][0]
+        self.assertIs(rec["kernel_filtered"], True)
+        self.assertIs(alt["kernel_filtered"], False)
+        self.assertEqual(sorted(c["id"] for c in alt["cves"]),
+                         ["CVE-2026-2", "CVE-2026-8"])
+
+    def test_the_default_overlay_does_not_reach_the_alt(self):
+        # One file name, two kernels: the default's overlay must not replace
+        # the alt's scan.
+        self.populate()
+        self.overlay(self.cve_dir, "6.12.25", "CVE-2026-1")
+        doc, _ = self.build()
+        alt = doc["recipes"]["linux-raspberrypi"]["alt_versions"][0]
+        self.assertEqual(alt["version"], "6.6.63")
+
+    def test_a_shipped_kernel_with_no_cves_keeps_its_flag(self):
+        # The entry is created for the alt to hang off; it still says whether
+        # the shipped kernel's (empty) list was filtered.
+        self.populate()
+        self.overlay(self.cve_dir, "6.12.25")
+        self.overlay(self.alt_cve_dir, "6.6.63", "CVE-2026-2")
+        doc, _ = self.build()
+        rec = doc["recipes"]["linux-raspberrypi"]
+        self.assertIs(rec["kernel_filtered"], True)
+        self.assertIs(rec["alt_versions"][0]["kernel_filtered"], True)
+
+    def test_a_recipe_that_is_not_a_kernel_carries_no_flag(self):
+        self.populate()
+        self.package("openssl", "openssl", "1.0")
+        self.write("openssl", entry(
+            "openssl", issues=[{"id": "CVE-2026-4", "status": "Unpatched"}]))
+        doc, _ = self.build()
+        self.assertNotIn("kernel_filtered", doc["recipes"]["openssl"])
+
+    def test_verify_rejects_a_non_boolean_flag(self):
+        self.populate()
+        doc, _ = self.build()
+        doc["recipes"]["linux-raspberrypi"]["alt_versions"][0]["kernel_filtered"] = "no"
+        self.assertTrue(any("kernel_filtered" in f
+                            for f in verify.check_report(doc, health=False)))
+
 class EvidenceTests(unittest.TestCase):
     """Who decided a status, and the one thing this field must never claim.
 

@@ -230,9 +230,36 @@ DEFAULT_STATUSES = ("Unpatched", "Patched")
 # consumer ends up filtering on a value nothing emits.
 CVE_EVIDENCE = ("cve-status", "patch-file", "cve-check")
 
-# Where do_kernel_cve_improve writes, under CVE_CHECK_DIR. Named here because
-# the recipe and the standalone reporter must agree on it.
+# Where do_kernel_cve_improve writes, under CVE_CHECK_DIR and under each
+# multiconfig subdirectory of it. Named here because the recipe and the
+# standalone reporter must agree on it.
 OVERLAY_DIRNAME = "kernel-improved"
+
+# The CVE_PRODUCT kernel.bbclass gives every kernel recipe. What makes a record
+# a kernel's, and so what carries "kernel_filtered".
+KERNEL_PRODUCT = "linux_kernel"
+
+def is_kernel_entry(entry):
+    """Whether a cve-check entry describes a kernel, from its products."""
+    products = entry.get("products")
+    return isinstance(products, list) and any(
+        isinstance(p, dict) and p.get("product") == KERNEL_PRODUCT
+        for p in products)
+
+def _overlaid(cve_dir, overlay_dir):
+    """cve_dir's *_cve.json, each paired with whether it came from overlay_dir:
+    a file there replaces the same-named one rather than adding to it.
+    """
+    by_name = {
+        os.path.basename(p): (p, False)
+        for p in glob.glob(os.path.join(cve_dir, "*_cve.json"))
+    }
+    if overlay_dir:
+        by_name.update(
+            (os.path.basename(p), (p, True))
+            for p in glob.glob(os.path.join(overlay_dir, "*_cve.json"))
+        )
+    return [by_name[name] for name in sorted(by_name)]
 
 _FILTERED_COUNTER = {
     "Unpatched": "unpatched_cves",
@@ -330,6 +357,13 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
     overlay_dir is do_kernel_cve_improve's output: a file there replaces the
     same-named one in cve_dir rather than adding to it, so cve-check's own
     result stays on disk beside the improved copy and the two stay comparable.
+    Each alt dir's overlay is its own OVERLAY_DIRNAME subdirectory, because
+    each multiconfig's kernel is filtered on its own compiled sources.
+
+    Every kernel record, entry or alt_versions, carries "kernel_filtered":
+    whether its CVEs came from an overlay. A kernel the filter could not reach
+    (no CNA data, no compiled-source list) is false, so a consumer can tell
+    its raw version-only count from a filtered one.
 
     Two versions in cve_dir itself are still merged by id: CVE_CHECK_DIR is
     never pruned, so a result left by an earlier build at an older PV is
@@ -352,22 +386,18 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
     default_versions = {}
     backports = backports or {}
 
-    by_name = {
-        os.path.basename(p): p
-        for p in glob.glob(os.path.join(cve_dir, "*_cve.json"))
-    }
-    if overlay_dir:
-        by_name.update(
-            (os.path.basename(p), p)
-            for p in glob.glob(os.path.join(overlay_dir, "*_cve.json"))
-        )
-    paths = [(by_name[name], False) for name in sorted(by_name)]
+    # Whether the default multiconfig's record of each kernel recipe was
+    # filtered, for the entry the alt merge below creates when that record
+    # carried no CVE at this status.
+    default_filtered = {}
+
+    paths = [(p, False, o) for p, o in _overlaid(cve_dir, overlay_dir)]
     for alt_dir in alt_cve_dirs or ():
-        paths += [(p, True)
-                  for p in sorted(glob.glob(os.path.join(alt_dir, "*_cve.json")))]
+        paths += [(p, True, o) for p, o in _overlaid(
+            alt_dir, os.path.join(alt_dir, OVERLAY_DIRNAME))]
     stats.cve_files = len(paths)
 
-    for path, is_alt in paths:
+    for path, is_alt, from_overlay in paths:
         try:
             with open(path) as f:
                 data = json.load(f)
@@ -408,8 +438,11 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                     continue
                 version = stripped
 
+            kernel = is_kernel_entry(entry)
             if not is_alt:
                 default_versions.setdefault(name, version)
+                if kernel:
+                    default_filtered.setdefault(name, from_overlay)
 
             raw_issues = entry.get("issue", [])
             if not isinstance(raw_issues, list) or not all(
@@ -478,6 +511,8 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                         "packaged": packaged,
                         "cves": [],
                     }
+                    if name in default_filtered:
+                        existing["kernel_filtered"] = default_filtered[name]
                     if packaged:
                         stats.packaged_recipes += 1
                 alt = next(
@@ -489,6 +524,8 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                     if not existing["alt_versions"]:
                         stats.alt_recipes += 1
                     alt = {"version": version, "packaged": packaged, "cves": []}
+                    if kernel:
+                        alt["kernel_filtered"] = from_overlay
                     existing["alt_versions"].append(alt)
                 seen_ids = {c.get("id") for c in alt["cves"]}
                 added = [c for c in issues if c.get("id") not in seen_ids]
@@ -525,6 +562,8 @@ def read_cve_data(cve_dir, recipe_versions, stats, status="Unpatched",
                 "packaged": packaged,
                 "cves": issues,
             }
+            if kernel:
+                recipes[name]["kernel_filtered"] = from_overlay
             stats.cves += len(issues)
 
             if packaged:
