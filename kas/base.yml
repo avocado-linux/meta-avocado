@@ -21,7 +21,7 @@ env:
   # observed 2026-09-04 with two libdevmapper, two lvm2 and two busybox
   # versions in a single qemux86-64 repo, against a build that produced exactly
   # one of each.
-  AVOCADO_RELEASE_YEAR: "2026"
+  AVOCADO_RELEASE_YEAR: "2024"
   AVOCADO_YOCTO_SERIES: "scarthgap"
   DISTRO_CHANNEL: "local"
 
