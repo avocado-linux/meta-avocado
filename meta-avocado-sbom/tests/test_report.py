@@ -11,6 +11,7 @@ which is the opposite of the truth.
   python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'
 """
 
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
@@ -30,6 +32,7 @@ from avocado_sbom.report import (  # noqa: E402
     AltMulticonfigTree,
     alt_multiconfig_trees,
     build_report,
+    packages_digest,
     default_manifests,
     default_paths,
     read_cve_data,
@@ -41,7 +44,7 @@ from avocado_sbom.report import (  # noqa: E402
     read_optouts,
     status_paths,
 )
-from avocado_sbom import verify  # noqa: E402
+from avocado_sbom import report, verify  # noqa: E402
 
 def entry(name, version="1.0", in_record="Yes", issues=(), products=None):
     if products is None:
@@ -676,6 +679,34 @@ class AltVersionsTests(unittest.TestCase):
             **kw
         )
 
+    def test_the_version_map_keeps_the_second_kernel_on_a_rescan(self):
+        # The second kernel's only package is "kernel", whose name the first
+        # pkgdata directory wins, and its PV is not its PKGV. The map must
+        # still carry both, or a rescan drops its alt_versions record as stale.
+        self.package("kernel", "linux-raspberrypi", "6.12.25")
+        self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+        path = os.path.join(self.alt_pkgdata, "runtime-reverse", "kernel")
+        with open(path, "w") as f:
+            f.write("PN: linux-raspberrypi\nPV: 6.6.63+git\n"
+                    "PKGV: 6.6.63+git1+562cd7badd\nPKGR: r0\n")
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.12.25",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("linux-raspberrypi", entry(
+            "linux-raspberrypi", version="6.6.63+git",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]), alt=True)
+        doc, _ = self.build()
+        self.assertEqual(doc["recipe_versions"]["linux-raspberrypi"],
+                         ["6.12.25", "6.6.63+git", "6.6.63+git1+562cd7badd"])
+
+        recipes, _, _ = read_cve_data(
+            self.cve_dir,
+            {n: set(v) for n, v in doc["recipe_versions"].items()},
+            Stats(), alt_cve_dirs=[self.alt_cve_dir])
+        alt = recipes["linux-raspberrypi"]["alt_versions"][0]
+        self.assertEqual(alt["version"], "6.6.63+git")
+        self.assertEqual([c["id"] for c in alt["cves"]], ["CVE-2026-2"])
+
     def test_the_second_version_is_carried_beside_the_first(self):
         self.populate()
         doc, _ = self.build()
@@ -1052,6 +1083,186 @@ class KernelFilteredTests(unittest.TestCase):
         doc["recipes"]["linux-raspberrypi"]["alt_versions"][0]["kernel_filtered"] = "no"
         self.assertTrue(any("kernel_filtered" in f
                             for f in verify.check_report(doc, health=False)))
+
+class RecipeVersionsTests(unittest.TestCase):
+    """recipe_versions is what lets a rescan without the build tree keep the
+    CVEs the build reported.
+
+    The defect it closes: a rescan matched scan entries against the packages'
+    PKGV-PKGR, so a recipe whose PV is not that (glibc 2.43+git, a +git
+    kernel) was dropped as stale, 76 CVEs against the build's 5,332.
+    """
+
+    setUp = BuildReportTests.setUp
+    write = BuildReportTests.write
+
+    def package(self, name, recipe, pv, pkgv):
+        path = os.path.join(self.pkgdata, "runtime-reverse", name)
+        with open(path, "w") as f:
+            f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n" % (recipe, pv, pkgv))
+
+    def populate(self):
+        self.package("libc6", "glibc", "2.43+git", "2.43+git1+562cd7badd")
+        self.package("glibc-utils", "glibc", "2.43+git", "2.43+git0+562cd7badd")
+        self.package("libssl3", "openssl", "3.5.7", "3.5.7")
+        # Scanned clean: in the map all the same, or a rescan cannot tell its
+        # current version from a stale one.
+        self.package("libz1", "zlib", "1.3.1", "1.3.1")
+        # No scan result at all this build; a later scan may have one.
+        self.package("libattr1", "attr", "2.5.2", "2.5.2")
+        self.write("glibc", entry(
+            "glibc", version="2.43+git",
+            issues=[{"id": "CVE-2026-1", "status": "Unpatched"}]))
+        self.write("openssl", entry(
+            "openssl", version="3.5.7",
+            issues=[{"id": "CVE-2026-2", "status": "Unpatched"}]))
+        self.write("zlib", entry("zlib", version="1.3.1"))
+
+    def test_every_pkgdata_version_is_listed_sorted(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        self.assertEqual(doc["recipe_versions"], {
+            "attr": ["2.5.2"],
+            "glibc": ["2.43+git", "2.43+git0+562cd7badd", "2.43+git1+562cd7badd"],
+            "openssl": ["3.5.7"],
+            "zlib": ["1.3.1"],
+        })
+        self.assertNotIn("zlib", doc["recipes"])
+        self.assertIn("attr", doc["unscanned_recipes"])
+
+    def test_the_lists_are_sorted_whatever_order_pkgdata_gives(self):
+        self.populate()
+        read = report.read_pkgdata
+
+        def reversed_sets(*args):
+            packages, versions, by_version, package_versions = read(*args)
+            versions = {n: sorted(v, reverse=True) for n, v in versions.items()}
+            return packages, versions, by_version, package_versions
+
+        with mock.patch.object(report, "read_pkgdata", reversed_sets):
+            doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        self.assertEqual(doc["recipe_versions"]["glibc"],
+                         ["2.43+git", "2.43+git0+562cd7badd", "2.43+git1+562cd7badd"])
+
+    def test_a_rescan_from_the_map_drops_a_clean_recipes_stale_entry(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        self.write("zlib", entry(
+            "zlib", version="1_1.3.0",
+            issues=[{"id": "CVE-2026-3", "status": "Unpatched"}]))
+        stats = Stats()
+        recipes, _, _ = read_cve_data(
+            self.cve_dir,
+            {n: set(v) for n, v in doc["recipe_versions"].items()},
+            stats)
+        self.assertNotIn("zlib", recipes)
+        self.assertEqual(stats.stale_dropped, 1)
+
+    def test_the_document_is_deterministic(self):
+        self.populate()
+        first, _ = build_report(self.cve_dir, [self.pkgdata])
+        second, _ = build_report(self.cve_dir, [self.pkgdata])
+        for doc in (first, second):
+            del doc["generated"]
+        self.assertEqual(json.dumps(first, sort_keys=True),
+                         json.dumps(second, sort_keys=True))
+
+    def test_a_rescan_from_the_map_keeps_what_the_build_kept(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+
+        from_map = Stats()
+        recipes, _, _ = read_cve_data(
+            self.cve_dir,
+            {n: set(v) for n, v in doc["recipe_versions"].items()},
+            from_map)
+        self.assertEqual(set(recipes), set(doc["recipes"]))
+        self.assertEqual(from_map.stale_dropped, 0)
+
+        # The control: the packages' own versions lose glibc.
+        from_packages = Stats()
+        package_versions = {}
+        for pkg in doc["packages"].values():
+            package_versions.setdefault(pkg["recipe"], set()).add(pkg["version"])
+        recipes, _, _ = read_cve_data(self.cve_dir, package_versions, from_packages)
+        self.assertNotIn("glibc", recipes)
+        self.assertGreater(from_packages.stale_dropped, 0)
+
+    def test_a_rescan_drops_a_stale_entry_for_a_recipe_never_scanned(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        self.write("attr", entry(
+            "attr", version="2.5.1",
+            issues=[{"id": "CVE-2026-4", "status": "Unpatched"}]))
+        stats = Stats()
+        recipes, _, _ = read_cve_data(
+            self.cve_dir,
+            {n: set(v) for n, v in doc["recipe_versions"].items()},
+            stats)
+        self.assertNotIn("attr", recipes)
+        self.assertEqual(stats.stale_dropped, 1)
+
+    def test_a_package_name_two_directories_claim_keeps_both_recipes(self):
+        # The first pkgdata directory wins the name, but the loser's recipe
+        # still matched its entry at build time, so the map carries it too.
+        self.populate()
+        sdk = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, sdk)
+        os.makedirs(os.path.join(sdk, "runtime-reverse"))
+        with open(os.path.join(sdk, "runtime-reverse", "libssl3"), "w") as f:
+            f.write("PN: openssl-vendor\nPV: 1.1.1w\nPKGV: 1.1.1w\nPKGR: r0\n")
+        # Clean at build time, so nothing in "recipes" names it.
+        self.write("openssl-vendor", entry("openssl-vendor", version="1.1.1w"))
+
+        doc, _ = build_report(self.cve_dir, [self.pkgdata, sdk])
+        self.assertEqual(doc["packages"]["libssl3"]["recipe"], "openssl")
+        self.assertEqual(doc["recipe_versions"]["openssl-vendor"], ["1.1.1w"])
+        self.assertNotIn("openssl-vendor", doc["recipes"])
+
+        # Its first CVE, in a later scan.
+        self.write("openssl-vendor", entry(
+            "openssl-vendor", version="1.1.1w",
+            issues=[{"id": "CVE-2026-5", "status": "Unpatched"}]))
+        recipes, _, _ = read_cve_data(
+            self.cve_dir,
+            {n: set(v) for n, v in doc["recipe_versions"].items()},
+            Stats())
+        self.assertIs(recipes["openssl-vendor"]["packaged"], True)
+
+    def test_packages_digest_does_not_cover_it(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        digest = hashlib.sha256()
+        for name in sorted(doc["packages"]):
+            pkg = doc["packages"][name]
+            digest.update(("%s\t%s\t%s\n" % (
+                name, pkg["recipe"], pkg["version"])).encode())
+        self.assertEqual(doc["packages_digest"], "sha256:" + digest.hexdigest())
+        self.assertEqual(packages_digest(doc["packages"]), doc["packages_digest"])
+
+    def test_verify_accepts_it_and_knows_the_key(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        self.assertEqual(verify.check_report(doc, health=False), [])
+        self.assertEqual(verify.additions(doc), [])
+
+    def test_verify_rejects_a_malformed_map(self):
+        self.populate()
+        doc, _ = build_report(self.cve_dir, [self.pkgdata])
+        for bad in (
+            ["glibc"],
+            {"glibc": "2.43+git"},
+            {"glibc": []},
+            {"glibc": ["2.43+git", 2]},
+            {"glibc": [""]},
+            {"glibc": ["2.43+git1", "2.43+git"]},
+            {"glibc": ["2.43+git", "2.43+git"]},
+            {"": ["1.0"]},
+        ):
+            doc["recipe_versions"] = bad
+            failures = verify.check_report(doc, health=False)
+            self.assertTrue(any("recipe_versions" in f for f in failures),
+                            "%r passed: %s" % (bad, failures))
 
 class EvidenceTests(unittest.TestCase):
     """Who decided a status, and the one thing this field must never claim.

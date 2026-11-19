@@ -798,6 +798,21 @@ Report format
 device_cves is the headline: CVEs over every recipe whose scope is anything but
 build-only. Read that one, not packaged_cves.
 
+"recipe_versions" maps every recipe in pkgdata to the versions its packages
+were built at, PV and PKGV, sorted and without repeats:
+
+  "recipe_versions": { "glibc": [ "2.43+git", "2.43+git1+562cd7badd" ] }
+
+These are the versions a scan entry is matched against: an entry for a recipe
+listed here is dropped as stale when neither its version nor that version with
+any EXTENDPE prefix ("2_0.10.0") stripped is one of them, and an entry for a
+recipe not listed is kept. A consumer rebuilding the report from a later scan
+without the build tree needs the map to reach the same CVEs: "packages"
+carries PKGV-PKGR, which is not what a scan entry records, and matching
+against it drops every recipe whose PV differs from it, as glibc's does.
+packages_digest does not cover the map, and it is optional and additive, so
+the contract stays version 1.
+
 packaged_cves counts pkgdata membership, which is not the same question and is
 wrong in both directions for this one. A deploy-only bootloader packages
 nothing and ships anyway, so it is missing from it; a nativesdk recipe packages

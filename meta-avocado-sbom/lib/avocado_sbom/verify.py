@@ -78,10 +78,13 @@ TOP_LEVEL_TYPES = {
     "no_cve_record_recipes": list,
 }
 
-# Written by the recipe, not by build_report: a standalone run lacks both.
+# build_report writes machine only when given one, and only the recipe writes
+# distro_version. recipe_versions is absent from reports written before it was
+# added.
 OPTIONAL_TOP_LEVEL_TYPES = {
     "machine": str,
     "distro_version": str,
+    "recipe_versions": dict,
 }
 
 def _is_int(value):
@@ -205,6 +208,25 @@ def _check_recipe_version(name, entry, recipes, fail):
         fail("%s is %r, which no record of %r carries (%s)"
              % (label, version, entry.get("recipe"),
                 ", ".join(str(v) for v in versions)))
+
+def _check_recipe_versions(report, fail):
+    """Optional. A rescan passes it to read_cve_data in place of pkgdata, so
+    every value must be usable as a set of versions to match an entry against.
+    """
+    versions = report.get("recipe_versions")
+    if not isinstance(versions, dict):
+        return
+    for name, values in versions.items():
+        label = "recipe_versions[%r]" % name
+        if not name:
+            fail("recipe_versions has an empty recipe name")
+        if (not isinstance(values, list) or not values
+                or not all(isinstance(v, str) and v for v in values)):
+            fail("%s is %r, expected a non-empty list of version strings"
+                 % (label, values))
+        elif values != sorted(set(values)):
+            fail("%s is %r, expected it sorted and without repeats"
+                 % (label, values))
 
 def _check_entries(report, fail):
     recipes = report.get("recipes")
@@ -521,6 +543,7 @@ def check_report(report, health=True):
     _check_envelope(report, failures.append)
     _check_counts(report, failures.append)
     _check_entries(report, failures.append)
+    _check_recipe_versions(report, failures.append)
     _check_derived(report, failures.append)
     if health:
         _check_health(report, failures.append)

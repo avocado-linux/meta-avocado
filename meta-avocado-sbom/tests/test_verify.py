@@ -630,6 +630,38 @@ class SchemaTests(unittest.TestCase):
         with self.assertRaises(jsonschema.ValidationError):
             jsonschema.validate(report, self.schema)
 
+    def with_recipe_versions(self):
+        report = load()
+        report["recipe_versions"] = {
+            name: sorted({"1.0", "1.0+git"})
+            for name in {p["recipe"] for p in report["packages"].values()}
+        }
+        return report
+
+    def test_schema_accepts_a_recipe_version_map(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        jsonschema.validate(self.with_recipe_versions(), self.schema)
+
+    def test_schema_rejects_a_malformed_recipe_version_map(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        for bad in (["libpng"], {"libpng": "1.0"}, {"libpng": []},
+                    {"libpng": [1]}, {"libpng": [""]},
+                    {"libpng": ["1.0", "1.0"]}, {"": ["1.0"]}):
+            report = self.with_recipe_versions()
+            report["recipe_versions"] = bad
+            with self.assertRaises(jsonschema.ValidationError, msg=repr(bad)):
+                jsonschema.validate(report, self.schema)
+
+    def test_schema_keeps_the_recipe_version_map_optional(self):
+        self.assertIn("recipe_versions", self.schema["properties"])
+        self.assertNotIn("recipe_versions", self.schema["required"])
+
     def test_schema_keeps_recipe_version_optional(self):
         # Required would make every report already published invalid, which
         # is a major bump, not an addition.

@@ -136,6 +136,12 @@ def trim(full):
     fixture["unscanned_recipes"] = unscanned
     fixture["no_cve_record_recipes"] = no_record
     fixture["packages_digest"] = packages_digest(packages)
+    if "recipe_versions" in full:
+        fixture["recipe_versions"] = {
+            name: versions
+            for name, versions in full["recipe_versions"].items()
+            if name in kept_recipes or name in recipes
+        }
     return fixture
 
 def main():
