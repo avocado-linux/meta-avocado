@@ -344,6 +344,13 @@ def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summ
         "recipes": recipes,
         "packages": packages,
         "unscanned_recipes": unscanned,
+        # What read_cve_data matched entries against. A rescan without the
+        # build tree needs it: packages carry PKGV-PKGR, which no entry does.
+        "recipe_versions": {
+            name: sorted(versions)
+            for name, versions in sorted(recipe_versions.items())
+            if versions
+        },
     }
     if machine:
         report["machine"] = machine

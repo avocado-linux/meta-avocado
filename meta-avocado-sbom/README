@@ -217,6 +217,22 @@ runtime package. Two different things land there:
   package_collisions    package names claimed by more than one recipe or
                         version; the first pkgdata directory won
 
+"recipe_versions" maps every recipe in pkgdata, scanned clean or not, to its
+packages' PV and plain PKGV, sorted and without repeats:
+
+  "recipe_versions": { "glibc": [ "2.43+git", "2.43+git1+562cd7badd" ] }
+
+A package's own PKGV:<package> (lvm2's libdevmapper at 1.02.213) is left out:
+no manifest entry carries it. These are the versions a manifest entry is
+matched against: an entry for a recipe listed here is dropped as stale when
+neither its version nor that version with any EXTENDPE prefix ("1_1.20.0")
+stripped is one of them, and an entry for a recipe not listed is kept. A
+consumer rebuilding the report from a later scan without the build tree needs
+the map to reach the same CVEs: "packages" carries PKGV-PKGR, which is not
+what a manifest entry records, and matching against it drops every recipe
+whose PV differs from it, as glibc's does. packages_digest does not cover the
+map, and it is optional and additive, so the report stays version 1.
+
 The RPM manifest
 ----------------
 
