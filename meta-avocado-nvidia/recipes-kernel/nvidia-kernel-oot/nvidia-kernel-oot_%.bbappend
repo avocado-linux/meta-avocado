@@ -12,6 +12,11 @@ SRC_URI += "file://0001-nvdisplay-nv-pci-handle-pci_resize_resource-exclude_bars
 # through to the pre-6.2 drm_fb_helper_alloc_fbi() and failed to build.
 SRC_URI += "file://0002-drm-tegra-fbdev-take-the-core-allocated-fb_info.patch"
 
+# nvdisplay's utils.mk stamps nvidia.ko and nvidia-modeset.ko with
+# (`whoami`@hostname) and `date`, so no two builds of either match. Command-line
+# values reach its sub-makes through MAKEFLAGS and beat its ?= and ifndef.
+EXTRA_OEMAKE += 'WHOAMI="echo oe-user" HOSTNAME=oe-host DATE="env LC_ALL=C date -u -d @${SOURCE_DATE_EPOCH}"'
+
 # nvidia-kernel-oot is built in both the default mc (linux-yocto 6.6) and the
 # jetson-l4t alt mc (linux-jammy-nvidia-tegra 5.15). Both builds share a single
 # PR service. Each mc's build gets a distinct PR suffix (different KERNEL_VERSION
