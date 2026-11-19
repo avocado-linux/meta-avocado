@@ -3,4 +3,4 @@ header:
 
 local_conf_header:
   feature/sbom: |
-    SPDX_INCLUDE_VEX ??= "current"
+    SPDX_INCLUDE_VEX ??= "all"
