@@ -218,6 +218,222 @@ else
   fi
 fi
 
+# boot_config and stock overlays. Each case gets its own staging directory so a
+# manifest the hook rewrote in one case cannot leak into the next.
+run_case() { # <name> <manifest-json> <stone-json>
+  local case_dir="$work/case-$1"
+  mkdir -p "$case_dir"
+  printf '%s\n' "$2" >"$case_dir/overlays.manifest.json"
+  printf '%s\n' "$3" >"$case_dir/stone.json"
+  : >"$case_dir/custom.dtbo"
+  AVOCADO_DTBO_STAGING="$case_dir" \
+    AVOCADO_OVERLAYS_MANIFEST="$case_dir/overlays.manifest.json" \
+    AVOCADO_DELIVERY_FRAGMENT="$case_dir/fragment.json" \
+    AVOCADO_STONE_MANIFEST="$case_dir/stone.json" \
+    "$hook" >"$case_dir/out" 2>"$case_dir/err"
+}
+
+stone_plain="$(cat "$work/stone.json")"
+stone_ships_bt="$(jq -c '.storage_devices.rootdisk.images.boot.build_args.files += [{"in": "disable-bt.dtbo", "out": "overlays/disable-bt.dtbo"}]' "$work/stone.json")"
+
+# boot_config alone, no overlays: the hook must still deliver the include file.
+if run_case bc '{"version": 1, "overlays": [], "boot_config": ["dtparam=i2c_arm=on", "usb_max_current_enable=1"], "boot_config_claimed_by": null}' "$stone_plain"; then
+  d="$work/case-bc"
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=\ndtparam=i2c_arm=on\nusb_max_current_enable=1' ]] \
+    && [[ "$(jq -c "$fa" "$d/fragment.json")" == '[{"in":"avocado-overlays.txt","out":"avocado-overlays.txt"}]' ]] \
+    && [[ "$(jq -r '.boot_config_claimed_by' "$d/overlays.manifest.json")" == "avocado-raspberrypi5" ]]; then
+    ok "boot_config alone is written to the include file and claimed"
+  else
+    bad "boot_config-only delivery wrong: txt=$(cat "$d/avocado-overlays.txt") fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook rejected a boot_config-only manifest: $(cat "$work/case-bc/err")"
+fi
+
+# A stock overlay the boot FAT does not ship is appended from the BSP's own
+# files, boot_config lines come before every dtoverlay line, and a custom
+# overlay beside it is delivered as before.
+if run_case mix '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "custom", "file": "custom.dtbo", "params": {"a": "1"}, "stock": false, "claimed_by": null}], "boot_config": ["dtparam=i2c_arm=on"], "boot_config_claimed_by": null}' "$stone_plain"; then
+  d="$work/case-mix"
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=\ndtparam=i2c_arm=on\ndtoverlay=disable-bt\ndtoverlay=custom,a=1' ]] \
+    && jq -e "${fa}[] | select(.in == \"disable-bt.dtbo\" and .out == \"overlays/disable-bt.dtbo\")" "$d/fragment.json" >/dev/null \
+    && jq -e "${fa}[] | select(.in == \"custom.dtbo\" and .out == \"overlays/custom.dtbo\")" "$d/fragment.json" >/dev/null \
+    && [[ "$(jq -r "$fa | length" "$d/fragment.json")" == "3" ]]; then
+    ok "stock overlay is appended from the BSP files and boot_config precedes dtoverlay lines"
+  else
+    bad "stock plus custom delivery wrong: txt=$(cat "$d/avocado-overlays.txt") fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook rejected a stock overlay the BSP can supply: $(cat "$work/case-mix/err")"
+fi
+
+# A stock overlay the boot FAT already ships is neither refused (the collision
+# rule is for custom overlays) nor appended a second time.
+if run_case shipped '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}' "$stone_ships_bt"; then
+  d="$work/case-shipped"
+  if [[ "$(jq -c "$fa" "$d/fragment.json")" == '[{"in":"avocado-overlays.txt","out":"avocado-overlays.txt"}]' ]] \
+    && [[ "$(cat "$d/avocado-overlays.txt")" == "dtoverlay=disable-bt" ]] \
+    && [[ "$(jq -r '.overlays[0].claimed_by' "$d/overlays.manifest.json")" == "avocado-raspberrypi5" ]]; then
+    ok "a stock overlay already on the boot FAT is referenced but not appended again"
+  else
+    bad "shipped stock overlay handled wrong: fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook refused a stock overlay the BSP already ships: $(cat "$work/case-shipped/err")"
+fi
+
+# On a Pi 5 boot FAT (overlay_map.dtb plus a bcm2712 device tree) the firmware
+# loads disable-bt-pi5.dtbo for `dtoverlay=disable-bt`, so a stock overlay is
+# delivered as that file; the line keeps the name. A stock overlay with no map
+# entry, a custom overlay, and one the FAT already ships under its mapped name
+# are handled as before.
+stone_pi5="$(jq -c '.storage_devices.rootdisk.images.boot.build_args.files += [{"in": "overlay_map.dtb", "out": "overlays/overlay_map.dtb"}, {"in": "bcm2712-rpi-5-b.dtb", "out": "bcm2712-rpi-5-b.dtb"}, {"in": "vc4-kms-v3d-pi5.dtbo", "out": "overlays/vc4-kms-v3d-pi5.dtbo"}]' "$work/stone.json")"
+if run_case pi5 '{"version": 1, "overlays": [{"name": "disable-bt", "file": "disable-bt.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "dwc2", "file": "dwc2.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "vc4-kms-v3d", "file": "vc4-kms-v3d.dtbo", "params": {}, "stock": true, "claimed_by": null}, {"name": "custom", "file": "custom.dtbo", "params": {}, "stock": false, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}' "$stone_pi5"; then
+  d="$work/case-pi5"
+  if [[ "$(cat "$d/avocado-overlays.txt")" == $'dtoverlay=disable-bt\ndtoverlay=dwc2\ndtoverlay=vc4-kms-v3d\ndtoverlay=custom' ]] \
+    && [[ "$(jq -c "[${fa}[] | .in]" "$d/fragment.json")" == '["disable-bt-pi5.dtbo","dwc2.dtbo","custom.dtbo","avocado-overlays.txt"]' ]] \
+    && jq -e "${fa}[] | select(.out == \"overlays/disable-bt-pi5.dtbo\")" "$d/fragment.json" >/dev/null; then
+    ok "on a Pi 5 a stock overlay is delivered as the file the firmware's overlay map loads"
+  else
+    bad "Pi 5 stock overlay delivery wrong: txt=$(cat "$d/avocado-overlays.txt") fa=$(jq -c "$fa" "$d/fragment.json")"
+  fi
+else
+  bad "hook rejected a Pi 5 stock overlay: $(cat "$work/case-pi5/err")"
+fi
+# A custom overlay named like a mapped stock one would be loaded as the stock
+# -pi5 file on a Pi 5, so it is refused by name there. A Pi 4 has no overlay map
+# and takes it.
+custom_uart0='{"version": 1, "overlays": [{"name": "uart0", "file": "uart0.dtbo", "params": {}, "stock": false, "claimed_by": null}], "boot_config": [], "boot_config_claimed_by": null}'
+if run_case pi5-custom-mapped "$custom_uart0" "$stone_pi5"; then
+  bad "hook delivered a custom overlay the Pi 5 overlay map redirects"
+elif grep -qF uart0 "$work/case-pi5-custom-mapped/err" && [[ ! -e "$work/case-pi5-custom-mapped/avocado-overlays.txt" ]]; then
+  ok "on a Pi 5 a custom overlay with a mapped name is refused by name, nothing written"
+else
+  bad "mapped-name refusal did not name the overlay or left output: $(cat "$work/case-pi5-custom-mapped/err")"
+fi
+if run_case pi4-custom-uart0 "$custom_uart0" "$stone_plain"; then
+  ok "without an overlay map a custom uart0 is delivered"
+else
+  bad "a custom uart0 was refused without an overlay map: $(cat "$work/case-pi4-custom-uart0/err")"
+fi
+
+# A boot_config line that changes the boot chain would make the firmware bypass
+# the image's own boot setup (A/B selection, verified boot), so the hook refuses
+# each such key, names the line, and writes nothing.
+for line in 'kernel=other.img' 'os_prefix=alt/' 'boot_partition=2' \
+  'device_tree=other.dtb' 'start_file=start_x.elf' 'fixup_file=fixup_x.dat'; do
+  key="${line%%=*}"
+  name="chain-$key"
+  if run_case "$name" "{\"version\": 1, \"overlays\": [], \"boot_config\": [\"dtparam=i2c_arm=on\", \"$line\"], \"boot_config_claimed_by\": null}" "$stone_plain"; then
+    bad "hook accepted boot-chain key '$key'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]] \
+      && [[ "$(jq -r '.boot_config_claimed_by' "$d/overlays.manifest.json")" == "null" ]]; then
+      ok "boot_config '$key=' is refused by line, with nothing written or claimed"
+    else
+      bad "'$key=' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# Case and surrounding space do not get a boot-chain key past the check.
+if run_case chain-case '{"version": 1, "overlays": [], "boot_config": ["KERNEL = other.img"], "boot_config_claimed_by": null}' "$stone_plain"; then
+  bad "hook accepted 'KERNEL = other.img'"
+else
+  ok "a boot-chain key is refused whatever its case or spacing"
+fi
+# Directives that take a space-separated value, not `key=value`, are boot-chain
+# keys too: the seeed machines append `initramfs <file> followkernel`, and the
+# key of such a line is its first word. The other keys here replace the code
+# that runs before the kernel (armstub), name the kernel command line file
+# (cmdline) or pull in a file the check never sees (include).
+i=0
+for line in 'initramfs other.cpio.zst followkernel' 'initramfs=other.cpio.zst' \
+  'ramfsfile=other.cpio.zst' 'armstub=armstub8.bin' 'cmdline=other.txt' \
+  'include other.txt' '  INITRAMFS other.cpio.zst followkernel' 'start_x=1' 'start_debug=1' \
+  'start_cd=1' 'auto_initramfs=1' 'boot_ramdisk=1' 'upstream_kernel=1' 'arm_64bit=0' \
+  'kernel_old=1'; do
+  i=$((i + 1))
+  name="chain-word-$i"
+  manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
+  if run_case "$name" "$manifest" "$stone_plain"; then
+    bad "hook accepted boot-chain line '$line'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]]; then
+      ok "boot_config '$line' is refused by line, with nothing written"
+    else
+      bad "'$line' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# A section header stays in effect for the rest of config.txt, past
+# `include avocado-overlays.txt`, so a `[pi4]` or `[none]` line would filter
+# out any line placed after it. Any line that opens a section is refused.
+i=0
+for line in '[pi4]' '[none]' '  [all]'; do
+  i=$((i + 1))
+  name="section-$i"
+  manifest="$(jq -nc --arg line "$line" '{version: 1, overlays: [], boot_config: ["dtparam=i2c_arm=on", $line], boot_config_claimed_by: null}')"
+  if run_case "$name" "$manifest" "$stone_plain"; then
+    bad "hook accepted section header '$line'"
+  else
+    d="$work/case-$name"
+    if grep -qF "boot_config[1]" "$d/err" && grep -qF "$line" "$d/err" \
+      && [[ ! -e "$d/avocado-overlays.txt" && ! -e "$d/fragment.json" ]]; then
+      ok "section header '$line' is refused by line, with nothing written"
+    else
+      bad "'$line' refused without naming the line or left output behind: $(cat "$d/err")"
+    fi
+  fi
+done
+
+# A line break inside an entry would write a second config.txt line that no
+# check has seen (a boot-chain key, a section header), so any entry, boot_config
+# or overlay param, that carries one is refused with nothing written.
+i=0
+for bc in '["dtparam=i2c_arm=on\nkernel=evil.img"]' '["dtparam=x\n[pi4]"]' '["dtparam=x\rkernel=evil.img"]'; do
+  i=$((i + 1))
+  name="linebreak-$i"
+  if run_case "$name" "{\"version\": 1, \"overlays\": [], \"boot_config\": $bc, \"boot_config_claimed_by\": null}" "$stone_plain"; then
+    bad "hook accepted a boot_config entry with a line break: $bc"
+  elif [[ -e "$work/case-$name/avocado-overlays.txt" || -e "$work/case-$name/fragment.json" ]]; then
+    bad "line-break entry $bc was refused but left output behind"
+  else
+    ok "boot_config entry $bc with a line break is refused, nothing written"
+  fi
+done
+if run_case linebreak-param '{"version": 1, "overlays": [{"name": "w1-gpio", "file": "w1-gpio.dtbo", "stock": true, "params": {"gpiopin": "4\nkernel=evil.img"}}], "boot_config": [], "boot_config_claimed_by": null}' "$stone_plain"; then
+  bad "hook accepted an overlay param with a line break"
+else
+  ok "an overlay param with a line break is refused"
+fi
+
+# Matching is on the whole key: device_tree_address is a different setting from
+# device_tree and must still be delivered.
+if run_case chain-near '{"version": 1, "overlays": [], "boot_config": ["device_tree_address=0x2000000", "kernel_address=0x80000"], "boot_config_claimed_by": null}' "$stone_plain" \
+  && grep -qx 'device_tree_address=0x2000000' "$work/case-chain-near/avocado-overlays.txt" \
+  && grep -qx 'kernel_address=0x80000' "$work/case-chain-near/avocado-overlays.txt"; then
+  ok "keys that only share a prefix with a boot-chain key are delivered"
+else
+  bad "a near-miss key was refused or not written: $(cat "$work/case-chain-near/err" 2>/dev/null)"
+fi
+
+# Nothing to deliver is an invocation error, not a silent success.
+if run_case empty '{"version": 1, "overlays": [], "boot_config": [], "boot_config_claimed_by": null}' "$stone_plain"; then
+  bad "hook accepted a manifest with neither overlays nor boot_config"
+else
+  if grep -q 'no overlays or boot_config' "$work/case-empty/err"; then
+    ok "an empty manifest is a hard error"
+  else
+    bad "empty manifest failed without a clear message: $(cat "$work/case-empty/err")"
+  fi
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [[ "$fail" -eq 0 ]]

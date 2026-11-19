@@ -24,6 +24,7 @@
 
 import json
 import os
+import re
 import sys
 
 
@@ -74,11 +75,90 @@ def find_boot_fat(stone):
     return matches[0]
 
 
+# The Pi 5 firmware reads overlays/overlay_map.dtb and loads another file for
+# these names: `dtoverlay=disable-bt` loads disable-bt-pi5.dtbo. A stock overlay
+# is delivered as the file the firmware will load; the dtoverlay= line keeps the
+# name. From the bcm2712 entries of the kernel's overlay_map.dts.
+# ponytail: a copy of the kernel's map; regenerate it when the kernel adds entries.
+BCM2712_OVERLAY_MAP = {
+    name: f"{name}-pi5"
+    for name in (
+        "audremap disable-bt disable-wifi draws ed-backlight-pwm gpclk "
+        "i2c0 i2c1 i2c2 i2c3 imx500 midi-uart0 midi-uart1 midi-uart2 "
+        "midi-uart3 midi-uart4 pcie-32bit-dma pisound ramoops sdio "
+        "spi2-1cs spi2-2cs spi3-1cs spi3-2cs spi5-1cs spi5-2cs tc358743 "
+        "uart0 uart1 uart2 uart3 uart4 vc4-kms-v3d vec-gpio w1-gpio "
+        "w1-gpio-pullup"
+    ).split()
+}
+BCM2712_OVERLAY_MAP.update({
+    "vc4-fkms-v3d": "vc4-fkms-v3d-pi4",
+    "vc4-kms-v3d-pi4": "vc4-kms-v3d-pi5",
+})
+
+
+def remaps_for_pi5(shipped):
+    """The boot FAT is a Pi 5 one when it ships the overlay map and a bcm2712
+    device tree; only then does the firmware load another file."""
+    return "overlays/overlay_map.dtb" in shipped and any(
+        out.startswith("bcm2712-") and out.endswith(".dtb") for out in shipped
+    )
+
+
 def overlay_line(overlay):
     line = f"dtoverlay={overlay['name']}"
     for key in sorted(overlay.get("params", {})):
         line += f",{key}={overlay['params'][key]}"
     return line
+
+
+# config.txt keys that decide what the firmware boots. One of these in an
+# extension makes the firmware bypass the image's own boot setup (A/B selection,
+# verified boot), so none may arrive through boot_config. `initramfs` and
+# `include` take a space-separated value rather than `=`, which is why a line's
+# key ends at the first `=` or whitespace.
+BOOT_CHAIN_KEYS = frozenset(
+    [
+        "kernel",
+        "os_prefix",
+        "boot_partition",
+        "device_tree",
+        "start_file",
+        "fixup_file",
+        "start_x",
+        "start_debug",
+        "start_cd",
+        "auto_initramfs",
+        "boot_ramdisk",
+        "upstream_kernel",
+        "arm_64bit",
+        "kernel_old",
+        "initramfs",
+        "ramfsfile",
+        "armstub",
+        "cmdline",
+        "include",
+    ]
+)
+
+
+def refuse_boot_chain_keys(boot_config):
+    """The manifest carries boot_config as bare lines with no extension name,
+    so the error names the line and its position; the CLI's own validation is
+    where a line is tied to its extension.
+
+    A section header (`[pi4]`, `[none]`) is refused as well. It stays in effect
+    for the rest of config.txt, so a header here would filter out any line
+    placed after `include avocado-overlays.txt`."""
+    for idx, line in enumerate(boot_config):
+        text = line.strip()
+        if text.startswith("["):
+            die(f"boot_config[{idx}] '{line}': a section header stays in effect "
+                "for the rest of config.txt, past this file; remove it")
+        key = re.split(r"[=\s]", text, maxsplit=1)[0].lower()
+        if key in BOOT_CHAIN_KEYS:
+            die(f"boot_config[{idx}] '{line}': '{key}' changes what the firmware "
+                "boots and would bypass the image's own boot setup; remove it")
 
 
 def main():
@@ -92,8 +172,16 @@ def main():
     if manifest.get("version") != 1:
         die("overlays.manifest.json: unsupported version")
     overlays = manifest.get("overlays", [])
-    if not overlays:
-        die("hook invoked with no overlays to deliver")
+    boot_config = manifest.get("boot_config", [])
+    if not overlays and not boot_config:
+        die("hook invoked with no overlays or boot_config to deliver")
+    # Each entry is written as one line, so a line break inside one would add
+    # a line that none of the checks below has seen.
+    for line in boot_config + [overlay_line(ov) for ov in overlays]:
+        if "\n" in line or "\r" in line:
+            die(f"{line!r}: a line break inside an entry would write a second "
+                "config.txt line past these checks; remove it")
+    refuse_boot_chain_keys(boot_config)
 
     with open(stone_path) as f:
         stone = json.load(f)
@@ -111,22 +199,54 @@ def main():
     boot_img = stone["storage_devices"][dev_key]["images"][img_key]
     shipped = set(fat_outputs(boot_img))
     collisions = sorted(
-        ov["name"] for ov in overlays if f"overlays/{ov['file']}" in shipped
+        ov["name"]
+        for ov in overlays
+        if not ov.get("stock") and f"overlays/{ov['file']}" in shipped
     )
     if collisions:
         die(f"{', '.join(collisions)}: the BSP already ships an overlay of this "
             "name on the boot FAT; rename the overlay (a same-named overlay is "
             "dropped rather than applied, and the stock one ships instead)")
 
+    if remaps_for_pi5(shipped):
+        # The overlay map redirects these names, so a custom overlay under one
+        # of them is never the file the firmware loads.
+        mapped = sorted(
+            ov["name"]
+            for ov in overlays
+            if not ov.get("stock") and ov["name"] in BCM2712_OVERLAY_MAP
+        )
+        if mapped:
+            die(f"{', '.join(mapped)}: on a Pi 5 the firmware loads the stock "
+                "overlay map's file for this name, not the delivered one; "
+                "rename the overlay")
+        for ov in overlays:
+            if ov.get("stock") and ov["name"] in BCM2712_OVERLAY_MAP:
+                ov["file"] = BCM2712_OVERLAY_MAP[ov["name"]] + ".dtbo"
+
     # Additive delivery: each .dtbo into overlays/, plus the include file.
+    # A stock overlay is one the BSP's own deploy directory already carries, so
+    # stone resolves `in` from its input path and a name that exists nowhere
+    # fails the bundle by name. One the boot FAT already ships needs no entry:
+    # an identical (in, out) pair would be dropped as a duplicate anyway.
     files_append = [
-        {"in": ov["file"], "out": f"overlays/{ov['file']}"} for ov in overlays
+        {"in": ov["file"], "out": f"overlays/{ov['file']}"}
+        for ov in overlays
+        if not (ov.get("stock") and f"overlays/{ov['file']}" in shipped)
     ]
     files_append.append(
         {"in": "avocado-overlays.txt", "out": "avocado-overlays.txt"}
     )
 
-    overlays_txt = "\n".join(overlay_line(ov) for ov in overlays) + "\n"
+    # boot_config first: a dtparam= line configures the base device tree and
+    # firmware reads config.txt top to bottom, so it has to precede the
+    # dtoverlay= lines that build on it. A bare dtoverlay= ahead of it ends
+    # the scope of the machine's last overlay in config.txt, so a dtparam=
+    # here reaches the base tree rather than that overlay.
+    lead = ["dtoverlay="] if boot_config else []
+    overlays_txt = "".join(
+        line + "\n" for line in lead + boot_config + [overlay_line(ov) for ov in overlays]
+    )
     with open(os.path.join(staging, "avocado-overlays.txt"), "w") as f:
         f.write(overlays_txt)
 
@@ -141,12 +261,15 @@ def main():
     # Record delivery so the CLI's post-hook check passes.
     for ov in overlays:
         ov["claimed_by"] = platform
+    if boot_config:
+        manifest["boot_config_claimed_by"] = platform
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
     names = ", ".join(ov["name"] for ov in overlays)
-    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) to "
-          f"{dev_key}/{img_key} for {platform}: {names}")
+    print(f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) and "
+          f"{len(boot_config)} boot_config line(s) to {dev_key}/{img_key} "
+          f"for {platform}: {names}")
 
 
 if __name__ == "__main__":
