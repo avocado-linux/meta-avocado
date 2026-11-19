@@ -437,6 +437,13 @@ fragment (avocado-cve-debug.cfg) on the same switch. The DWARF is split into
 kernel-dbg, so the packages a device installs stay stripped. The compiled-file
 list the filter reads comes from the recipe's SPDX document.
 
+The Raspberry Pi defconfigs, 6.12 and 6.6 alike, install modules
+xz-compressed, and OE-core only splits and strips files named .ko. With the
+switch on, the bbappend unpacks the modules in the packaging copy (PKGD) and
+compresses them again, with the kernel's xz options, once they are split, so
+their DWARF goes to kernel-dbg and their sources reach the list. The packages
+and the deploy modules tarball keep .ko.xz.
+
 Where CONFIG_DEBUG_KERNEL is already on without the switch, the switch adds
 debug info only. That is the Intel machines (from the in-tree
 x86_64_defconfig), the Jetson machines' linux-yocto kernel (genericarm64's
