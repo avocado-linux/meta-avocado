@@ -131,11 +131,15 @@ check_kind dt_overlay dt "$dt_manifest" "$overlay_claimed"
 check_kind dt_overlay_stock stock "$stock_manifest" "$overlay_claimed"
 check_kind boot_config bc "$bc_manifest" "$bc_claimed"
 
-# kernel_args is not delivered by this hook (a board applies it in its own build
-# or provisioning step), so there is nothing to claim here. Listing it would
-# have to be backed by that step, which this layer does not have today.
-if listed kernel_args; then
-  bad "kernel_args is listed but nothing in this layer applies kernel.cmdline*: no avocado-build hook reads it, and the Pi 5 stone manifest has no command-line variable"
+# kernel_args is not delivered by this hook: avocado-build-rpi writes
+# kernel.cmdline* into cmdline.txt. Listing it must stay backed by that step.
+build_hook="$here/../../sdk/avocado-sdk-target/avocado-build-rpi"
+if ! listed kernel_args; then
+  bad "kernel_args is not listed, but avocado-build-rpi applies kernel.cmdline*"
+elif ! grep -q 'AVOCADO_KERNEL_CMDLINE_EXTRA' "$build_hook"; then
+  bad "kernel_args is listed but avocado-build-rpi no longer reads AVOCADO_KERNEL_CMDLINE_EXTRA"
+else
+  ok "kernel_args is listed and avocado-build-rpi applies it"
 fi
 
 echo

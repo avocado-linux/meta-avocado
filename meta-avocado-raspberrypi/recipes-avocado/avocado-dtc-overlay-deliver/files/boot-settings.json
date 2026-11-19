@@ -1,4 +1,4 @@
 {
   "version": 1,
-  "kinds": ["dt_overlay", "dt_overlay_stock", "boot_config"]
+  "kinds": ["dt_overlay", "dt_overlay_stock", "boot_config", "kernel_args"]
 }
