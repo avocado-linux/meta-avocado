@@ -14,8 +14,11 @@ env:
 
 local_conf_header:
   ci-mirrors: |
-    DL_DIR = "${TMPDIR}/downloads"
-    SSTATE_DIR = "${TMPDIR}/sstate-cache"
+    # Under the default config's TMPDIR, as a fixed path rather than ${TMPDIR}:
+    # every multiconfig (alternate kernels, add-on feeds) then shares one sstate
+    # and download dir, reuses the base's objects, and is written back with them.
+    DL_DIR = "${TOPDIR}/tmp/downloads"
+    SSTATE_DIR = "${TOPDIR}/tmp/sstate-cache"
 
     SOURCE_MIRROR_URL ?= "${@os.getenv('SOURCE_MIRROR_URL', 'http://molcajete:30082/downloads')}"
     PREMIRRORS:prepend = "git://.*/.* ${SOURCE_MIRROR_URL} ftp://.*/.* ${SOURCE_MIRROR_URL} http://.*/.* ${SOURCE_MIRROR_URL} https://.*/.* ${SOURCE_MIRROR_URL} "
