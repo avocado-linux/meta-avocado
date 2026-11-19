@@ -175,5 +175,27 @@ SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled 
 # packagegroup-avocado-rootfs.bbappend and packagegroup-core-boot.bbappend
 # strip nvidia-kernel-oot-base from MACHINE_ESSENTIAL_EXTRA_RDEPENDS-
 # expanded RDEPENDS, so this is now the only path.
-RDEPENDS:packagegroup-avocado-rootfs-modules-oot = "nvidia-kernel-oot-base"
+#
+# The group names this kernel's modules, not nvidia-kernel-oot-base: both
+# kernels' builds publish -base under one name, and its bare module names are
+# provided by both, so dnf's NVR tie-break could hand a 5.15 rootfs the 6.6
+# modules. Set at packaging time, when KERNEL_VERSION is known and the module
+# packages exist. A base driver this kernel builds in tree has no OOT package
+# and resolves to the kernel's own kernel-module-<X>-<version>.
+python avocado_oot_group_this_kernel() {
+    prefix = d.getVar('KERNEL_MODULE_PACKAGE_PREFIX')
+    suffix = '-' + d.getVar('KERNEL_VERSION')
+    packages = d.getVar('PACKAGES').split()
+    deps = []
+    for dep in d.getVar('TEGRA_OOT_BASE_DRIVERS').split():
+        dep += suffix
+        deps.append(dep if dep in packages else dep[len(prefix):])
+    d.setVar('RDEPENDS:packagegroup-avocado-rootfs-modules-oot', ' '.join(deps))
+}
+PACKAGESPLITFUNCS += "avocado_oot_group_this_kernel"
+
+# The kernels link to packagegroup-avocado-rootfs-modules-oot-${KERNEL_VERSION};
+# the PKG rename above happens at packaging time, so parse-time resolution
+# finds this recipe through the pattern.
+PACKAGES_DYNAMIC += "^packagegroup-avocado-rootfs-modules-oot-.*"
 RDEPENDS:packagegroup-avocado-initramfs-modules-oot = ""

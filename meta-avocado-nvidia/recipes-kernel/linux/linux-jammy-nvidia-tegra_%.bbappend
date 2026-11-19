@@ -88,3 +88,10 @@ RDEPENDS:packagegroup-avocado-initramfs-modules = " \
     kernel-module-tegra-xudc-${KERNEL_VERSION} \
     ${@bb.utils.contains('DISTRO_FEATURES','zram','kernel-module-zram-${KERNEL_VERSION}','',d)} \
 "
+
+# The NVIDIA OOT modules (nvgpu, nvhost-nvdla, nvhost-pva and the rest of
+# nvidia-kernel-oot-base) are built for this kernel and grouped in
+# packagegroup-avocado-rootfs-modules-oot, but nothing pulled that group in, so
+# the DLA and PVA had no driver and no /dev/nvhost-ctrl-* nodes. Versioned, so
+# it lands on this kernel's group and not on another kernel's in the same feed.
+RDEPENDS:packagegroup-avocado-rootfs-modules:append = " packagegroup-avocado-rootfs-modules-oot-${KERNEL_VERSION}"
