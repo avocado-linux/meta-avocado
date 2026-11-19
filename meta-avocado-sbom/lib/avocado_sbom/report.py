@@ -1036,7 +1036,8 @@ def main():
         "version becomes an alt_versions record. Not discovered by walking "
         "--cve-dir, which on the unscoped upstream ${DEPLOY_DIR}/cve has one "
         "subdirectory per machine. Pass the matching --pkgdata-dir too, or "
-        "every entry is dropped as a stale version",
+        "every entry is dropped as a stale version. Each alt dir reads its own "
+        "kernel-improved/ overlay; --overlay-dir applies to --cve-dir only",
     )
     parser.add_argument(
         "--status",

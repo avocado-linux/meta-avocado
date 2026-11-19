@@ -1015,6 +1015,29 @@ class KernelFilteredTests(unittest.TestCase):
         self.assertIs(rec["kernel_filtered"], True)
         self.assertIs(rec["alt_versions"][0]["kernel_filtered"], True)
 
+    def test_a_pe_prefixed_alt_joins_the_same_with_or_without_its_overlay(self):
+        # meta-raspberrypi's scan says "1_6.6.63+git"; the overlay is written
+        # from a copy with the prefix stripped. Consumers join on the alt
+        # version and the packages' recipe_version, so both must agree.
+        def joins(overlay):
+            self.setUp()
+            self.package("kernel-6.12.25", "linux-raspberrypi", "6.12.25")
+            self.package("kernel-6.6.63", "linux-raspberrypi", "6.6.63+git",
+                         root=self.alt_pkgdata)
+            self.write("linux-raspberrypi", self.kernel("6.12.25", "CVE-2026-1"))
+            self.write("linux-raspberrypi",
+                       self.kernel("1_6.6.63+git", "CVE-2026-2", "CVE-2026-8"),
+                       alt=True)
+            if overlay:
+                self.overlay(self.alt_cve_dir, "6.6.63+git", "CVE-2026-2")
+            doc, _ = self.build()
+            alt = doc["recipes"]["linux-raspberrypi"]["alt_versions"][0]
+            self.assertIs(alt["kernel_filtered"], overlay)
+            return alt["version"], doc["packages"]["kernel-6.6.63"]["recipe_version"]
+
+        self.assertEqual(joins(False), ("6.6.63+git", "6.6.63+git"))
+        self.assertEqual(joins(True), ("6.6.63+git", "6.6.63+git"))
+
     def test_a_recipe_that_is_not_a_kernel_carries_no_flag(self):
         self.populate()
         self.package("openssl", "openssl", "1.0")
