@@ -569,8 +569,8 @@ TARGET=""
 EXTENSIONS=()
 BUILD_ALL=false
 LIST_ONLY=false
-# Combined extensions dir (all extensions as <type>-<name> subdirs). Empty = legacy
-# in-repo extensions/ + bsp/ layout. Env var provides a default for the
+# Combined extensions dir (all extensions as <type>-<name> subdirs). Empty = extensions/ and
+# bsp/ under the current directory. The env var provides the default for the
 # extensions directory.
 EXTENSIONS_DIR="${AVOCADO_EXTENSIONS_DIR:-}"
 

@@ -118,7 +118,7 @@ extensions:
 
     # The carrier overlay files in stone/ are made available to stone
     # via stone_include_paths. Path is relative to this extension's
-    # src_dir (= the root of your carrier repository).
+    # src_dir (= bsp/<my-carrier>/).
     stone_include_paths:
       - stone
 
@@ -287,7 +287,7 @@ extensions:
   avocado-bsp-<my-carrier>:
     source:
       type: path
-      path: /path/to/<my-carrier>
+      path: /path/to/bsp/<my-carrier>
   # ... avocado-ext-dev, etc.
 
 sdk:
