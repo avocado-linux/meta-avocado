@@ -4,8 +4,8 @@
 # This file can be sourced by both development scripts and CI/CD workflows
 
 # Default configuration values
-export AVOCADO_DEFAULT_DISTRO_CODENAME="2026/edge"
-export AVOCADO_DEFAULT_DISTRO_VERSION="2026"
+export AVOCADO_DEFAULT_DISTRO_CODENAME="2024/edge"
+export AVOCADO_DEFAULT_DISTRO_VERSION="2024"
 export AVOCADO_DEFAULT_REPO_BASE="https://repo.avocadolinux.org"
 
 # All supported machine targets

@@ -48,7 +48,7 @@ To serve a local package feed from your build outputs (sync packages, package
 extensions, and start a browsable repo server in one command):
 
 ```bash
-./scripts/dev-repo.sh 2026 qemux86-64
+./scripts/dev-repo.sh 2024 qemux86-64
 ```
 
 See [docs/local-package-feed.md](docs/local-package-feed.md) for the full guide.

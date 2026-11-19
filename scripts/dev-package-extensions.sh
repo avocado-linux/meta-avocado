@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default configuration
 DEFAULT_REPO_DIR="/tmp/avocado-dev-repo"
-DEFAULT_DISTRO_CODENAME="2026/edge"
+DEFAULT_DISTRO_CODENAME="2024/edge"
 DEFAULT_CONTAINER_NAME="avocado-dev-repo"
 DEFAULT_NETWORK_NAME=""
 DEFAULT_REPO_URL=""
@@ -372,7 +372,7 @@ package_extension() {
   # The extension's avocado.yaml selects its SDK image as
   # avocadolinux/sdk:${AVOCADO_DISTRO_RELEASE}-${AVOCADO_DISTRO_CHANNEL}. Derive
   # both from the distro codename (release/channel) so the tag matches the
-  # locally built/loaded SDK (e.g. 2026/edge -> sdk:2026-edge). Honor values
+  # locally built/loaded SDK (e.g. 2024/edge -> sdk:2024-edge). Honor values
   # already exported by the caller.
   export AVOCADO_DISTRO_RELEASE="${AVOCADO_DISTRO_RELEASE:-${DISTRO_CODENAME%%/*}}"
   export AVOCADO_DISTRO_CHANNEL="${AVOCADO_DISTRO_CHANNEL:-${DISTRO_CODENAME##*/}}"
