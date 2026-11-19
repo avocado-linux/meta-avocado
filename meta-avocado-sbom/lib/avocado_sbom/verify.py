@@ -161,6 +161,9 @@ def _check_record(label, entry, fail, per_cve_status=False):
     if entry.get("scope") not in SCOPES:
         fail("%s.scope is %r, expected one of %s"
              % (label, entry.get("scope"), ", ".join(SCOPES)))
+    if "kernel_filtered" in entry and not isinstance(entry["kernel_filtered"], bool):
+        fail("%s.kernel_filtered is %r, expected a boolean"
+             % (label, entry["kernel_filtered"]))
     cves = entry.get("cves")
     if not isinstance(cves, list):
         fail("%s.cves is not a list" % label)
