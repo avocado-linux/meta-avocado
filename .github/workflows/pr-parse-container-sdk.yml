@@ -104,8 +104,8 @@ jobs:
             echo "$1 -> '$got'"
           }
           out=$(resolve "" "" "")
-          expect DISTRO_CODENAME "$out" '2026-scarthgap/local'
-          expect DISTRO_VERSION "$out" '2026\.0\+[0-9]+\.g[0-9a-f]{8}(\.dirty)?'
+          expect DISTRO_CODENAME "$out" '2024-scarthgap/local'
+          expect DISTRO_VERSION "$out" '2024\.0\+[0-9]+\.g[0-9a-f]{8}(\.dirty)?'
           expect BUILD_ID "$out" '[0-9]+\.g[0-9a-f]{8}(\.dirty)?'
           out=$(resolve "2026/edge" "2026.17" "17")
           expect DISTRO_CODENAME "$out" '2026/edge'
