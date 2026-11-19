@@ -7,10 +7,10 @@
 #
 #     ./scripts/dev-repo.sh <year> <target> [target2 ...]
 #
-# e.g.  ./scripts/dev-repo.sh 2026 imx8mp-evk
+# e.g.  ./scripts/dev-repo.sh 2024 imx8mp-evk
 #
 # which expands to: sync packages + package extensions for the target into
-# <repo-root>/_repo under the 2026/edge feed, then (re)start the repo server.
+# <repo-root>/_repo under the 2024/edge feed, then (re)start the repo server.
 #
 # By default it is INCREMENTAL: it reuses a stable release id ("dev") so re-runs
 # overwrite in place instead of piling up timestamped releases — no need to wipe
@@ -48,7 +48,7 @@ Usage: $0 [OPTIONS] <year> <target> [target2 ...]
 command.
 
 Arguments:
-    year                Feed year / release (e.g. 2026). Combined with the
+    year                Feed year / release (e.g. 2024). Combined with the
                         channel to form the distro codename <year>/<channel>.
     target              One or more target names (e.g. imx8mp-evk).
 
@@ -71,11 +71,11 @@ Options:
     -h, --help              Show this help message.
 
 Examples:
-    $0 2026 imx8mp-evk                  # incremental sync + serve
-    $0 --clean 2026 imx8mp-evk          # reset just imx8mp-evk, then sync + serve
-    $0 2026 imx8mp-evk raspberrypi5     # multiple targets into one feed
-    $0 -c stable 2026 imx8mp-evk        # 2026/stable channel
-    $0 --build-ext 2026 imx8mp-evk      # build extensions, not just package
+    $0 2024 imx8mp-evk                  # incremental sync + serve
+    $0 --clean 2024 imx8mp-evk          # reset just imx8mp-evk, then sync + serve
+    $0 2024 imx8mp-evk raspberrypi5     # multiple targets into one feed
+    $0 -c stable 2024 imx8mp-evk        # 2024/stable channel
+    $0 --build-ext 2024 imx8mp-evk      # build extensions, not just package
 
 For a full wipe of everything (all targets, content pool included), just
 'rm -rf <repo-dir>' — that is the only thing this script deliberately won't do.
@@ -184,7 +184,7 @@ if [ -z "$YEAR" ] || [ ${#TARGETS[@]} -eq 0 ]; then
 fi
 
 if ! [[ "$YEAR" =~ ^[0-9]{4}$ ]]; then
-  echo "Error: '<year>' should be a 4-digit feed year (e.g. 2026), got '$YEAR'." >&2
+  echo "Error: '<year>' should be a 4-digit feed year (e.g. 2024), got '$YEAR'." >&2
   echo "       Did you swap the argument order? Usage: $0 <year> <target> ..." >&2
   exit 1
 fi

@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default configuration
 DEFAULT_REPO_DIR="/tmp/avocado-dev-repo"
-DEFAULT_DISTRO_CODENAME="2026/edge"
+DEFAULT_DISTRO_CODENAME="2024/edge"
 DEFAULT_RELEASE_ID="dev-$(date -u '+%Y%m%d-%H%M%S')"
 DEFAULT_PORT="8080"
 DEFAULT_CONTAINER_NAME="avocado-dev-repo"

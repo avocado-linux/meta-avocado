@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default configuration
 DEFAULT_REPO_DIR="/tmp/avocado-dev-repo"
-DEFAULT_DISTRO_CODENAME="2026/edge"
+DEFAULT_DISTRO_CODENAME="2024/edge"
 DEFAULT_RELEASE_ID="dev-$(date -u '+%Y%m%d-%H%M%S')"
 
 # Function to show usage
@@ -30,7 +30,7 @@ Options:
 
 Examples:
     $0 qemux86-64
-    $0 -r /opt/avocado-repo -d 2026/edge -i my-dev-build qemux86-64
+    $0 -r /opt/avocado-repo -d 2024/edge -i my-dev-build qemux86-64
     $0 --repo-dir /opt/avocado-repo --release-id stable-build raspberrypi4
 
 This script:

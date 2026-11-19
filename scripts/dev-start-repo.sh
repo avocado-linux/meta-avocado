@@ -17,7 +17,7 @@ DEFAULT_REPO_DIR="/tmp/avocado-dev-repo"
 DEFAULT_PORT="8080"
 DEFAULT_CONTAINER_NAME="avocado-dev-repo"
 DEFAULT_NETWORK_NAME="avocado-dev-network"
-DEFAULT_DISTRO_CODENAME="2026/edge"
+DEFAULT_DISTRO_CODENAME="2024/edge"
 DEFAULT_USER_ID="$(id -u)"
 DEFAULT_GROUP_ID="$(id -g)"
 
@@ -48,7 +48,7 @@ Options:
 Examples:
     $0                                          # Start with defaults
     $0 -r /opt/avocado-repo -p 9000            # Custom repo dir and port
-    $0 -d "2026/edge"                             # Custom distro codename
+    $0 -d "2024/edge"                             # Custom distro codename
     $0 --user-id 1000 --group-id 1000          # Custom user/group IDs
     $0 --stop                                   # Stop the server
     $0 --restart                               # Restart the server

@@ -58,7 +58,7 @@ between runs.
 - **A completed Yocto build** for each target, i.e. `build-<target>/build/tmp/deploy/rpm/`
   with an `avocado-repo.map`.
 - **SDK container images loaded locally**, tagged `avocadolinux/sdk:<year>-<channel>`
-  (e.g. `avocadolinux/sdk:2026-edge`). Extension packaging selects its SDK image by
+  (e.g. `avocadolinux/sdk:2024-edge`). Extension packaging selects its SDK image by
   this tag. Load them with `scripts/sdk-load-containers-local.sh <year>-<channel>`.
 - **The extension repos** checked out as a sibling of this repo
   (`../extensions`, holding the `bsp-*` and `ext-*` repos). Auto-detected; override
@@ -69,14 +69,14 @@ between runs.
 ## 3. The feed codename (year / channel)
 
 A feed is addressed by a **codename** of the form `<year>/<channel>`, e.g.
-`2026/edge`. `dev-repo.sh` builds it from the positional `<year>` argument and the
+`2024/edge`. `dev-repo.sh` builds it from the positional `<year>` argument and the
 `--channel` option (default `edge`).
 
 The codename is independent of the Yocto branch. `scarthgap`/`wrynose` is the
-**Yocto base**; `2026/edge` is the **Avocado release/channel** that is *built on*
+**Yocto base**; `2024/edge` is the **Avocado release/channel** that is *built on*
 that base. The codename also selects the SDK image tag used to package extensions:
-`<year>/<channel>` → `avocadolinux/sdk:<year>-<channel>`. So `2026/edge` packages
-against `avocadolinux/sdk:2026-edge`, which must be loaded locally (see
+`<year>/<channel>` → `avocadolinux/sdk:<year>-<channel>`. So `2024/edge` packages
+against `avocadolinux/sdk:2024-edge`, which must be loaded locally (see
 Prerequisites).
 
 ---
@@ -89,7 +89,7 @@ Prerequisites).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `<year>` | (required) | Feed year / release, 4 digits (e.g. `2026`). |
+| `<year>` | (required) | Feed year / release, 4 digits (e.g. `2024`). |
 | `<target>` | (required) | One or more targets (e.g. `imx8mp-evk`). |
 | `-c, --channel` | `edge` | Feed channel → codename `<year>/<channel>`. |
 | `-r, --repo-dir` | `<repo-root>/_repo` | Where the feed is built/served. |
@@ -103,10 +103,10 @@ Prerequisites).
 Examples:
 
 ```bash
-./scripts/dev-repo.sh 2026 imx8mp-evk                 # incremental sync + serve
-./scripts/dev-repo.sh --clean 2026 imx8mp-evk         # reset imx8mp-evk first
-./scripts/dev-repo.sh 2026 imx8mp-evk raspberrypi5    # multiple targets, one feed
-./scripts/dev-repo.sh -c stable 2026 imx8mp-evk       # 2026/stable channel
+./scripts/dev-repo.sh 2024 imx8mp-evk                 # incremental sync + serve
+./scripts/dev-repo.sh --clean 2024 imx8mp-evk         # reset imx8mp-evk first
+./scripts/dev-repo.sh 2024 imx8mp-evk raspberrypi5    # multiple targets, one feed
+./scripts/dev-repo.sh -c stable 2024 imx8mp-evk       # 2024/stable channel
 ```
 
 ---
