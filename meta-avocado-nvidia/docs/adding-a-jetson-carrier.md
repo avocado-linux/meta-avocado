@@ -1,7 +1,7 @@
 # Adding a new carrier to an existing Jetson SOM target
 
 This guide walks through bringing up a new carrier board on top of an
-existing SOM-targeted Yocto MACHINE in avocado-os, without authoring a
+existing SOM-targeted Yocto MACHINE in meta-avocado, without authoring a
 new MACHINE config. The worked example is the Advantech ICAM-540 — an
 Orin NX SOM in a custom Advantech carrier — running on top of the
 generic `jetson-orin-nx` MACHINE.
@@ -40,7 +40,7 @@ boards add `bsp/<my-carrier>/` and never touch the MACHINE config.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ avocado-os Yocto MACHINE: avocado-jetson-orin-nx           │
+│ meta-avocado Yocto MACHINE: avocado-jetson-orin-nx         │
 │   - require orin-nx.inc + devkit-wifi.inc                  │
 │   - produces full P3768/P3767 tegraflash-bsp                │
 │   - stone-jetson-orin-nx.json declares                      │
@@ -118,7 +118,7 @@ extensions:
 
     # The carrier overlay files in stone/ are made available to stone
     # via stone_include_paths. Path is relative to this extension's
-    # src_dir (= avocado-os/bsp/<my-carrier>/).
+    # src_dir (= the root of your carrier repository).
     stone_include_paths:
       - stone
 
@@ -287,7 +287,7 @@ extensions:
   avocado-bsp-<my-carrier>:
     source:
       type: path
-      path: /path/to/avocado-os/bsp/<my-carrier>
+      path: /path/to/<my-carrier>
   # ... avocado-ext-dev, etc.
 
 sdk:
