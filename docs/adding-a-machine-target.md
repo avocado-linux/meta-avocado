@@ -622,7 +622,7 @@ extensions:
     summary: Board support for <description>
     description: Board support for <description>
     license: Apache-2.0
-    url: https://github.com/avocado-linux/bsp-<name>
+    url: https://github.com/avocado-linux/bsp-<machine-short-name>
     vendor: Avocado Linux <info@avocadolinux.org>
 
     types:
