@@ -368,8 +368,8 @@ EXTENSIONS=()
 BUILD_ALL=false
 LIST_ONLY=false
 # Combined extensions dir (all extensions as <type>-<name> subdirs). Empty = legacy
-# in-repo extensions/ + bsp/ layout. Env var provides a default for the eventual
-# move of these scripts out of avocado-os.
+# in-repo extensions/ + bsp/ layout. Env var provides a default for the
+# extensions directory.
 EXTENSIONS_DIR="${AVOCADO_EXTENSIONS_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
