@@ -1,0 +1,45 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "http://spdx.org/spdxdocs/kernel/document",
+      "name": "recipe-linux-yocto"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "http://spdx.org/spdxdocs/kernel/source/1",
+      "name": "git",
+      "software_primaryPurpose": "source",
+      "software_downloadLocation": "git+https://example.com/linux-yocto.git"
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/kernel/source/2",
+      "name": "defconfig",
+      "software_primaryPurpose": "source",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "aa"}]
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/kernel/sourcefile/1",
+      "name": "linux-yocto-6.6.63/init/main.c",
+      "software_primaryPurpose": "source",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "bb"}]
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/kernel/sourcefile/2",
+      "name": "linux-yocto-6.6.63/include/linux/module.h",
+      "software_primaryPurpose": "source",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "cc"}]
+    },
+    {
+      "type": "software_File",
+      "spdxId": "http://spdx.org/spdxdocs/kernel/sourcefile/3",
+      "name": "linux-yocto-6.6.63/drivers/net/ethernet/intel/e1000/e1000_main.c",
+      "software_primaryPurpose": "source",
+      "verifiedUsing": [{"type": "Hash", "algorithm": "sha256", "hashValue": "dd"}]
+    }
+  ]
+}
