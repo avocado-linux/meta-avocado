@@ -65,8 +65,14 @@ def test_dry_run_option_sets_one():
 def test_task_sd_only():
     env, _ = build_run_env(opts(task="upgrade"), {}, "sd")
     assert env["AVOCADO_PROVISION_FWUP_TASK"] == "upgrade"
-    env, _ = build_run_env(opts(medium="emmc", task="upgrade"), {}, "uuu-emmc")
+    env, _ = build_run_env(opts(medium="emmc", task="complete"), {}, "uuu-emmc")
     assert "AVOCADO_PROVISION_FWUP_TASK" not in env
+
+
+@pytest.mark.parametrize("medium,profile", [("emmc", "uuu-emmc"), ("ums", "ums")])
+def test_task_upgrade_refused_off_sd(medium, profile):
+    with pytest.raises(LauncherError, match="sd medium only"):
+        build_run_env(opts(medium=medium, task="upgrade"), {}, profile)
 
 
 def test_device_passed_and_inherited_device_replaced():
