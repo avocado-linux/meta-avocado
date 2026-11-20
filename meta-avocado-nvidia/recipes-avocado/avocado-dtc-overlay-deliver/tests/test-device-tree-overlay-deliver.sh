@@ -137,6 +137,8 @@ run_hook() {
     AVOCADO_DELIVERY_FRAGMENT="$fragment" \
     AVOCADO_STONE_MANIFEST="$stone" \
     AVOCADO_STONE_DATA_DIR="$work" \
+    AVOCADO_STONE_INCLUDE_PATHS="${INC:-}" \
+    AVOCADO_SDK_PREFIX='' \
     "$hook"
 }
 
@@ -512,6 +514,35 @@ if run_hook "$work/s16b" "$work/stone-carrier.json" "$work/f16b.json" >/dev/null
   ok "a carrier that leaves DTBFILE alone is accepted"
 else
   bad "carrier without a DTB override was refused: $(cat "$work/e16b")"
+fi
+
+# --- 17-18. a carrier from an extension's stone_include_paths -----------------
+# Real carriers arrive through AVOCADO_STONE_INCLUDE_PATHS, which stone searches
+# before the runtime dir; the runtime dir keeps only the .placeholder stub.
+rm -f "$carrier/carrier.env"
+ext="$work/ext-carrier"
+mkdir -p "$work/inc-empty" "$ext/carrier-bsp"
+printf 'CARRIER_LABEL="Ext carrier"\nCARRIER_ENV_DTBFILE="tegra234-test-carrier.dtb"\n' >"$ext/carrier-bsp/carrier.env"
+
+# 17. the include-path carrier re-points DTBFILE: refused, naming where it is.
+make_staging "$work/s17" alpha
+if INC="$work/inc-empty::$ext" run_hook "$work/s17" "$work/stone-carrier.json" "$work/f17.json" >/dev/null 2>"$work/e17"; then
+  bad "hook merged into the stock DTB although an include-path carrier re-points DTBFILE"
+elif grep -q "$ext/carrier-bsp" "$work/e17" && grep -q "CARRIER_ENV_DTBFILE" "$work/e17"; then
+  ok "an include-path carrier that re-points DTBFILE is a hard error naming it"
+else
+  bad "include-path carrier refusal was unclear: $(cat "$work/e17")"
+fi
+
+# 18. first match wins, as in stone: an earlier include path's empty slot is the
+# one bundled, so the later carrier is not consulted.
+mkdir -p "$work/inc-stub/carrier-bsp"
+touch "$work/inc-stub/carrier-bsp/.placeholder"
+make_staging "$work/s18" alpha
+if INC="$work/inc-stub:$ext" run_hook "$work/s18" "$work/stone-carrier.json" "$work/f18.json" >/dev/null 2>"$work/e18"; then
+  ok "the first include path holding the carrier slot is the one checked"
+else
+  bad "a carrier shadowed by an earlier include path was refused: $(cat "$work/e18")"
 fi
 
 echo

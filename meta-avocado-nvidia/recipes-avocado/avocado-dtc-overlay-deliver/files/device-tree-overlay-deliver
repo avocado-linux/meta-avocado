@@ -156,6 +156,26 @@ def find_base_dtb(stone, data_dir):
     return bsp_dir, base_name
 
 
+def resolve_stone_input(name, data_dir):
+    """Return the path `stone bundle` would pick for an image name, or None.
+
+    The CLI runs stone with -i for each AVOCADO_STONE_INCLUDE_PATHS entry
+    (colon-separated) in order, then the runtime input dir, then the SDK stone
+    dir, and stone takes the first <dir>/<name> that exists. A carrier
+    extension's carrier-bsp/ reaches the bundle this way, ahead of the empty
+    stub tegraflash-bsp.bb deploys into the runtime dir."""
+    dirs = [d for d in os.environ.get("AVOCADO_STONE_INCLUDE_PATHS", "").split(":") if d]
+    dirs.append(data_dir)
+    sdk_prefix = os.environ.get("AVOCADO_SDK_PREFIX")
+    if sdk_prefix:
+        dirs.append(os.path.join(sdk_prefix, "stone"))
+    for d in dirs:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def refuse_carrier_dtb_override(stone, data_dir, base_name):
     """Refuse a carrier BSP that changes which DTB the flash writes.
 
@@ -172,7 +192,9 @@ def refuse_carrier_dtb_override(stone, data_dir, base_name):
     Merging into the carrier's tree is not attempted: this hook refuses rather
     than guess which of the two trees the project means to overlay. An empty
     slot (only .placeholder) is the normal case and passes, with the same
-    emptiness test apply_carrier uses."""
+    emptiness test apply_carrier uses. The slot is resolved the way stone
+    resolves it for the bundle, so a carrier from an extension's
+    stone_include_paths is the one checked."""
     carrier_rel = (
         stone.get("storage_devices", {})
         .get(TARGET_DEVICE, {})
@@ -181,8 +203,8 @@ def refuse_carrier_dtb_override(stone, data_dir, base_name):
     )
     if not carrier_rel:
         return
-    carrier_dir = os.path.join(data_dir, carrier_rel)
-    if not os.path.isdir(carrier_dir):
+    carrier_dir = resolve_stone_input(carrier_rel, data_dir)
+    if not carrier_dir or not os.path.isdir(carrier_dir):
         return
     files = [
         e.name
@@ -193,7 +215,7 @@ def refuse_carrier_dtb_override(stone, data_dir, base_name):
         return
     if base_name in files:
         die(
-            f"carrier BSP '{carrier_rel}' ships {base_name}, the base DTB this hook "
+            f"carrier BSP '{carrier_rel}' ({carrier_dir}) ships {base_name}, the base DTB this hook "
             "merges into; the merged stock tree would replace the carrier's copy "
             "when the engine stages images.dtb. Overlays on a carrier that ships "
             "its own DTB are not supported"
@@ -204,7 +226,7 @@ def refuse_carrier_dtb_override(stone, data_dir, base_name):
             for line in f.read().split("\n"):
                 if line.startswith("CARRIER_ENV_DTBFILE="):
                     die(
-                        f"carrier BSP '{carrier_rel}' sets CARRIER_ENV_DTBFILE, which "
+                        f"carrier BSP '{carrier_rel}' ({carrier_dir}) sets CARRIER_ENV_DTBFILE, which "
                         f"re-points the flashed DTB away from {base_name}: the merged "
                         "stock tree would be staged but never flashed. Overlays on a "
                         "carrier that selects its own DTB are not supported"
