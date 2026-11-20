@@ -935,7 +935,7 @@ The RPM manifest
   bitbake avocado-cve-report
 
 also writes ${DEPLOY_DIR}/avocado-cve/avocado-rpm-manifest-${MACHINE}.json:
-every RPM the build produced, each with the digest of its header. A service
+every RPM the build put in the feed, each with the digest of its header. A service
 that keeps a verdict per build needs it, because two builds of one
 name-version-release are different files with different headers, and neither
 Pulp nor the report records which build a file came from. It joins the report
@@ -971,7 +971,15 @@ named from pkgdata's PKGV-PKGR rather than globbed, and takes its arch from the
 directory it sits in. The header found there must then name the same package.
 
 A machine that builds a second kernel in another multiconfig lists that tree
-too, from tmp-<mc>. The two kernels package the same names at different
+too, from tmp-<mc>'s pkgdata, but only the RPMs avocado-distro's
+do_multikernel_merge put in the feed: it publishes the alternate kernel's
+version-tagged RPMs and nothing else, and writes what it published to
+${DEPLOY_DIR}/avocado-multikernel/<mc>-rpms.txt. Those are read from
+${DEPLOY_DIR_RPM}, the copy the feed serves, and named from pkgdata like the
+default tree's, so an older release in the list is not listed. A missing list,
+a listed file of this build's that is not there, or a list naming none of this
+build's packages fails the build; this task depends on the merge, so the list
+is always this build's. The two kernels package the same names at different
 versions, so a name is not an identity here; name, arch, version and release
 together are, and two files with that identity but different headers fail the
 build.

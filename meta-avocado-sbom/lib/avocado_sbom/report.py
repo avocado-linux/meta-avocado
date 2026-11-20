@@ -982,10 +982,10 @@ def default_manifests(tmpdir, machine=None):
     )
 
 AltMulticonfigTree = collections.namedtuple(
-    "AltMulticonfigTree", ("mc", "pkgdata_dir", "rpm_dir"))
+    "AltMulticonfigTree", ("mc", "pkgdata_dir"))
 
 def alt_multiconfig_trees(topdir, machine, mc_recipes):
-    """Each alternate multiconfig's pkgdata and RPM deploy directories.
+    """Each alternate multiconfig's pkgdata directory.
 
     mc_recipes is AVOCADO_MULTIKERNEL_MC_RECIPES, "<mc>:<recipe>" words; one
     tree per distinct mc, in declared order. tmp-<mc> under TOPDIR is the
@@ -1003,7 +1003,6 @@ def alt_multiconfig_trees(topdir, machine, mc_recipes):
         AltMulticonfigTree(
             mc=mc,
             pkgdata_dir=os.path.join(topdir, "tmp-%s" % mc, "pkgdata", machine),
-            rpm_dir=os.path.join(topdir, "tmp-%s" % mc, "deploy", "rpm"),
         )
         for mc in mcs
     ]

@@ -20,6 +20,9 @@
 #      version-tagged RPMs (the genuinely-unique ones — shared MACHINE_ARCH
 #      NEVRAs the default mc owns are skipped, else they collide with the
 #      default mc's own do_package_write_rpm), plus pulp-uploads/ additively.
+#      It lists the RPMs it published in
+#      ${DEPLOY_DIR}/avocado-multikernel/<mc>-rpms.txt, which avocado-cve-report's
+#      RPM manifest reads so it names exactly what the feed serves.
 #   3. Each alt-mc recipe's evidence — its cve-check results under
 #      CVE_CHECK_DIR, its SPDX documents under DEPLOY_DIR_SPDX — into a <mc>/
 #      subdirectory of each. Both mcs write the same recipe's results under one
@@ -51,6 +54,15 @@ python () {
 
 do_multikernel_merge[nostamp] = "1"
 do_multikernel_merge() {
+    # Each multiconfig's RPM list (see below), invalidated before anything is
+    # copied and published only after every entry for its multiconfig, so a
+    # merge that fails or is interrupted leaves no list rather than a
+    # partial or stale one. avocado_sbom.rpms reads it at this path.
+    for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
+        merged_list="${DEPLOY_DIR}/avocado-multikernel/${pair%%:*}-rpms.txt"
+        rm -f "${merged_list}" "${merged_list}.tmp"
+    done
+
     for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
         mc="${pair%%:*}"
         base="${TOPDIR}/tmp-${mc}/deploy"
@@ -108,6 +120,12 @@ do_multikernel_merge() {
             done
         fi
 
+        # The RPMs this merge put in the feed, one path under rpm/ per line,
+        # for avocado-cve-report's do_rpm_manifest: the alt tree also holds
+        # RPMs the filter below leaves out, and the manifest lists only what
+        # the feed serves.
+        merged_list="${DEPLOY_DIR}/avocado-multikernel/${mc}-rpms.txt"
+
         # The alt mc's UNIQUE contribution is everything built against its
         # kernel version. Every other RPM it emits (base-files, systemd-conf,
         # shadow-securetty, the unversioned packagegroup-avocado-* ...) is a
@@ -142,6 +160,8 @@ do_multikernel_merge() {
             bbfatal "avocado-multikernel: could not derive a kernel version for mc '${mc}' from ${base}/rpm; refusing to publish a feed without its kernel"
         fi
 
+        mkdir -p "$(dirname "${merged_list}")"
+        touch "${merged_list}.tmp"
         for subdir in rpm pulp-uploads; do
             src="${base}/${subdir}"
             if [ -d "${src}" ]; then
@@ -157,6 +177,8 @@ do_multikernel_merge() {
                             *"${altkver}"*) : ;;
                             *) continue ;;
                         esac
+                        # Already present is still published.
+                        printf '%s\n' "${f#./}" >> "${merged_list}.tmp"
                     fi
                     dest="${DEPLOY_DIR}/${subdir}/${f}"
                     if [ -e "${dest}" ] || [ -L "${dest}" ]; then
@@ -169,6 +191,13 @@ do_multikernel_merge() {
             fi
         done
 
+    done
+
+    for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
+        merged_list="${DEPLOY_DIR}/avocado-multikernel/${pair%%:*}-rpms.txt"
+        [ -f "${merged_list}.tmp" ] || continue
+        sort -u -o "${merged_list}.tmp" "${merged_list}.tmp"
+        mv -f "${merged_list}.tmp" "${merged_list}"
     done
 }
 addtask multikernel_merge after do_configure before do_compile
