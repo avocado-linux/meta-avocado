@@ -152,12 +152,12 @@ python oot_update_rprovides() {
             d.setVar('RDEPENDS:' + oot_pkg, newdepstr)
 }
 
-# Emit supplementary OOT rootfs/initramfs module packagegroups. Symmetric
-# with the kernel-owned packagegroups emitted from linux-jammy-nvidia-tegra_%.bbappend:
-# each recipe contributes only what it builds, and the kernel-owned
-# packagegroup RRECOMMENDS its OOT sibling so they install together when OOT
-# is present. Empty RDEPENDS initially; populate as OOT modules become
-# rootfs/initramfs-critical.
+# Per-kernel OOT rootfs/initramfs module packagegroups. nvidia-kernel-oot is
+# built once per kernel, and each build emits its own pair, renamed with its
+# KERNEL_VERSION. Each kernel's packagegroup-avocado-rootfs-modules RDEPENDS
+# its own -oot-${KERNEL_VERSION} group (linux-yocto_%.bbappend,
+# linux-jammy-nvidia-tegra_%.bbappend), so pinning a kernel installs that
+# kernel's OOT modules. The initramfs group stays empty.
 PACKAGES:append = " packagegroup-avocado-rootfs-modules-oot packagegroup-avocado-initramfs-modules-oot"
 PKG:packagegroup-avocado-rootfs-modules-oot = "packagegroup-avocado-rootfs-modules-oot-${KERNEL_VERSION}"
 PKG:packagegroup-avocado-initramfs-modules-oot = "packagegroup-avocado-initramfs-modules-oot-${KERNEL_VERSION}"
@@ -167,18 +167,32 @@ FILES:packagegroup-avocado-rootfs-modules-oot = ""
 FILES:packagegroup-avocado-initramfs-modules-oot = ""
 SUMMARY:packagegroup-avocado-rootfs-modules-oot = "OOT kernel modules pulled into the Avocado rootfs for kernel ${KERNEL_VERSION}"
 SUMMARY:packagegroup-avocado-initramfs-modules-oot = "OOT kernel modules pulled into the Avocado initramfs for kernel ${KERNEL_VERSION}"
-# nvidia-kernel-oot-base aggregates the OOT base drivers required for any
-# Tegra rootfs running the L4T kernel (TEGRA_OOT_BASE_DRIVERS — host1x,
-# nvgpu, tegra-bpmp, mc-utils, nvethernet, etc.). Pull it in via this
-# kernel-version-qualified packagegroup rather than via meta-tegra's
-# unconditional MACHINE_ESSENTIAL_EXTRA_RDEPENDS — the latter leaks 5.15
-# OOT modules into 6.6 builds because nvidia-kernel-oot is only built by
-# the alt mc (linux-jammy-nvidia-tegra 5.15). With this routing, the OOT
-# modules only land in the rootfs when avocado-cli auto-appends this
-# packagegroup, which only happens when an OOT-using kernel is pinned.
+# The rootfs group lists this kernel's TEGRA_OOT_BASE_DRIVERS (host1x, nvgpu,
+# tegra-bpmp, mc-utils, nvethernet, etc.) by their versioned package names.
+# It does not use nvidia-kernel-oot-base: every kernel's build publishes -base
+# under one name, and its bare module names are provided by every kernel, so
+# dnf's NVR tie-break could hand a 5.15 rootfs the 6.6 modules. Set at
+# packaging time, when KERNEL_VERSION is known and the module packages exist.
+# A base driver this kernel builds in tree has no OOT package and resolves to
+# the kernel's own kernel-module-<X>-<version>.
 #
-# packagegroup-avocado-rootfs.bbappend and packagegroup-core-boot.bbappend
+# packagegroup-avocado-rootfs.bb and packagegroup-core-boot.bbappend
 # strip nvidia-kernel-oot-base from MACHINE_ESSENTIAL_EXTRA_RDEPENDS-
-# expanded RDEPENDS, so this is now the only path.
-RDEPENDS:packagegroup-avocado-rootfs-modules-oot = "nvidia-kernel-oot-base"
+# expanded RDEPENDS, so this group is the only path.
+python avocado_oot_group_this_kernel() {
+    prefix = d.getVar('KERNEL_MODULE_PACKAGE_PREFIX')
+    suffix = '-' + d.getVar('KERNEL_VERSION')
+    packages = d.getVar('PACKAGES').split()
+    deps = []
+    for dep in d.getVar('TEGRA_OOT_BASE_DRIVERS').split():
+        dep += suffix
+        deps.append(dep if dep in packages else dep[len(prefix):])
+    d.setVar('RDEPENDS:packagegroup-avocado-rootfs-modules-oot', ' '.join(deps))
+}
+PACKAGESPLITFUNCS += "avocado_oot_group_this_kernel"
+
+# The kernels link to packagegroup-avocado-rootfs-modules-oot-${KERNEL_VERSION};
+# the PKG rename above happens at packaging time, so parse-time resolution
+# finds this recipe through the pattern.
+PACKAGES_DYNAMIC += "^packagegroup-avocado-rootfs-modules-oot-.*"
 RDEPENDS:packagegroup-avocado-initramfs-modules-oot = ""
