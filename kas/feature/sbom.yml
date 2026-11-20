@@ -3,4 +3,6 @@ header:
 
 local_conf_header:
   feature/sbom: |
-    SPDX_INCLUDE_VEX ??= "all"
+    # ?= rather than ??=: create-spdx-3.0 sets its own ??= "current", and of
+    # two weak defaults the one parsed last wins, which is the class's.
+    SPDX_INCLUDE_VEX ?= "all"
