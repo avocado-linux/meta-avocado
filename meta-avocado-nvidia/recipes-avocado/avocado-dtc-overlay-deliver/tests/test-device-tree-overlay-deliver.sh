@@ -137,6 +137,10 @@ run_hook() {
     AVOCADO_DELIVERY_FRAGMENT="$fragment" \
     AVOCADO_STONE_MANIFEST="$stone" \
     AVOCADO_STONE_DATA_DIR="$work" \
+    AVOCADO_STONE_INCLUDE_PATHS="${INC:-}" \
+    AVOCADO_PREFIX="$work/prefix" \
+    RUNTIME_NAME=rt \
+    AVOCADO_SDK_PREFIX='' \
     "$hook"
 }
 
@@ -357,6 +361,102 @@ for form in 'export DTBFILE="tegra234-test-0005.dtb"' \
   fi
 done
 write_env "tegra234-test-0005.dtb"
+
+# --- 10-13. a carrier BSP changes what gets flashed --------------------------
+# stone-provision-tegraflash.sh copies the carrier slot into its work dir after
+# the stock BSP, applies carrier.env (CARRIER_ENV_DTBFILE re-points DTBFILE),
+# then copies images.dtb over whatever the carrier shipped under that name. The
+# merged stock tree is then either never flashed or replaces the carrier's own.
+cat >"$work/stone-carrier.json" <<'EOF'
+{
+  "runtime": {"platform": "avocado-jetson-orin-nano"},
+  "storage_devices": {
+    "rootdisk": {
+      "images": {
+        "rootfs": "rootfs.erofs",
+        "tegraflash_bsp": "tegraflash-bsp",
+        "tegraflash_carrier_bsp": "carrier-bsp"
+      }
+    }
+  }
+}
+EOF
+# The runtime input dir, where the BSP's empty carrier-bsp stub lands.
+carrier="$work/prefix/runtimes/rt/carrier-bsp"
+mkdir -p "$carrier"
+
+# 10. the carrier's env file re-points the DTB: the merged stock tree would not
+# be flashed.
+printf 'CARRIER_LABEL="Test carrier"\nCARRIER_ENV_DTBFILE="tegra234-test-carrier.dtb"\n' >"$carrier/carrier.env"
+make_staging "$work/s10" alpha
+if run_hook "$work/s10" "$work/stone-carrier.json" "$work/f10.json" >/dev/null 2>"$work/e10"; then
+  bad "hook merged into the stock DTB although the carrier re-points DTBFILE"
+elif grep -q "carrier-bsp" "$work/e10" && grep -q "CARRIER_ENV_DTBFILE" "$work/e10"; then
+  ok "a carrier that re-points DTBFILE is a hard error naming the carrier"
+else
+  bad "carrier DTBFILE refusal was unclear: $(cat "$work/e10")"
+fi
+
+# 11. the carrier ships a file under the base DTB's name: the merged stock tree
+# would replace it.
+rm -f "$carrier/carrier.env"
+cp "$bsp/tegra234-test-0005.dtb" "$carrier/tegra234-test-0005.dtb"
+make_staging "$work/s11" alpha
+if run_hook "$work/s11" "$work/stone-carrier.json" "$work/f11.json" >/dev/null 2>"$work/e11"; then
+  bad "hook accepted a carrier that ships a DTB under the base name"
+elif grep -q "carrier-bsp" "$work/e11" && grep -q "tegra234-test-0005.dtb" "$work/e11"; then
+  ok "a carrier DTB under the base name is a hard error naming the carrier"
+else
+  bad "carrier same-name refusal was unclear: $(cat "$work/e11")"
+fi
+
+# 12. an empty slot (only .placeholder) is the normal case and must not trip it.
+rm -f "$carrier/tegra234-test-0005.dtb"
+touch "$carrier/.placeholder"
+make_staging "$work/s12" alpha
+if run_hook "$work/s12" "$work/stone-carrier.json" "$work/f12.json" >/dev/null 2>"$work/e12"; then
+  ok "an empty carrier slot does not trip the carrier check"
+else
+  bad "empty carrier slot was refused: $(cat "$work/e12")"
+fi
+
+# 13. a populated carrier that leaves DTBFILE alone (label, flashvars) is fine.
+printf 'CARRIER_LABEL="Test carrier"\n' >"$carrier/carrier.env"
+make_staging "$work/s13" alpha
+if run_hook "$work/s13" "$work/stone-carrier.json" "$work/f13.json" >/dev/null 2>"$work/e13"; then
+  ok "a carrier that leaves DTBFILE alone is accepted"
+else
+  bad "carrier without a DTB override was refused: $(cat "$work/e13")"
+fi
+
+# --- 14-15. a carrier from an extension's stone_include_paths -----------------
+# Real carriers arrive through AVOCADO_STONE_INCLUDE_PATHS, which stone searches
+# before the runtime dir; the runtime dir keeps only the .placeholder stub.
+rm -f "$carrier/carrier.env"
+ext="$work/ext-carrier"
+mkdir -p "$work/inc-empty" "$ext/carrier-bsp"
+printf 'CARRIER_LABEL="Ext carrier"\nCARRIER_ENV_DTBFILE="tegra234-test-carrier.dtb"\n' >"$ext/carrier-bsp/carrier.env"
+
+# 14. the include-path carrier re-points DTBFILE: refused, naming where it is.
+make_staging "$work/s14" alpha
+if INC="$work/inc-empty::$ext" run_hook "$work/s14" "$work/stone-carrier.json" "$work/f14.json" >/dev/null 2>"$work/e14"; then
+  bad "hook merged into the stock DTB although an include-path carrier re-points DTBFILE"
+elif grep -q "$ext/carrier-bsp" "$work/e14" && grep -q "CARRIER_ENV_DTBFILE" "$work/e14"; then
+  ok "an include-path carrier that re-points DTBFILE is a hard error naming it"
+else
+  bad "include-path carrier refusal was unclear: $(cat "$work/e14")"
+fi
+
+# 15. first match wins, as in stone: an earlier include path's empty slot is the
+# one copied, so the later carrier is not consulted.
+mkdir -p "$work/inc-stub/carrier-bsp"
+touch "$work/inc-stub/carrier-bsp/.placeholder"
+make_staging "$work/s15" alpha
+if INC="$work/inc-stub:$ext" run_hook "$work/s15" "$work/stone-carrier.json" "$work/f15.json" >/dev/null 2>"$work/e15"; then
+  ok "the first include path holding the carrier slot is the one checked"
+else
+  bad "a carrier shadowed by an earlier include path was refused: $(cat "$work/e15")"
+fi
 
 echo
 echo "passed: $pass  failed: $fail"
