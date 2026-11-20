@@ -1688,7 +1688,6 @@ class AltMulticonfigTreesTest(unittest.TestCase):
             [AltMulticonfigTree(
                 mc="jp6",
                 pkgdata_dir="/b/tmp-jp6/pkgdata/avocado-jetson",
-                rpm_dir="/b/tmp-jp6/deploy/rpm",
             )],
         )
 
