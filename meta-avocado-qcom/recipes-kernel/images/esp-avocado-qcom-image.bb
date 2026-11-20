@@ -18,6 +18,12 @@ inherit image
 IMAGE_FSTYPES = "vfat"
 IMAGE_FSTYPES_DEBUGFS = ""
 
+# The UFS LUN reports 4096-byte logical blocks and mkfs.vfat defaults to 512.
+# UEFI reads either, but Linux refuses the mismatch ("FAT-fs (sda1): logical
+# sector size too small for device"), so boot.mount, systemd-boot-update and
+# systemd-boot-random-seed all fail. Same fix as the wrynose recipe.
+EXTRA_IMAGECMD:vfat = "-S 4096"
+
 ROOTFS_SIZE ?= "614400"
 IMAGE_ROOTFS_EXTRA_SPACE="444000"
 
