@@ -150,6 +150,88 @@ def find_base_dtb(stone, data_dir):
     return bsp_dir, base_name
 
 
+def find_carrier_slot(name):
+    """Return the carrier slot directory the flash will apply, or None.
+
+    stone-provision-tegraflash.sh reads the slot from AVOCADO_STONE_DATA_DIR,
+    the build-time stone output. avocado-build-<target> (stone create) and the
+    CLI's stone bundle fill that from the first <dir>/<name> across
+    AVOCADO_STONE_INCLUDE_PATHS (colon-separated, in order), the runtime input
+    dir, then the SDK stone dir. Some board hooks list the SDK stone dir first,
+    but it holds no carrier slot on this line, so the first match is the same.
+    A carrier extension's carrier-bsp/ wins this way over the empty stub that
+    the runtime dir carries."""
+    dirs = [d for d in os.environ.get("AVOCADO_STONE_INCLUDE_PATHS", "").split(":") if d]
+    prefix = os.environ.get("AVOCADO_PREFIX")
+    runtime = os.environ.get("RUNTIME_NAME")
+    if prefix and runtime:
+        dirs.append(os.path.join(prefix, "runtimes", runtime))
+    sdk_prefix = os.environ.get("AVOCADO_SDK_PREFIX")
+    if sdk_prefix:
+        dirs.append(os.path.join(sdk_prefix, "stone"))
+    for d in dirs:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def refuse_carrier_dtb_override(stone, base_name):
+    """Refuse a carrier BSP that changes which DTB the flash writes.
+
+    stone-provision-tegraflash.sh copies the stock BSP, then copies the carrier
+    slot over it and applies carrier.env, and only then copies images.dtb into
+    place. Two carrier shapes leave the merged stock tree unflashed or
+    clobbering the carrier's own:
+
+      * CARRIER_ENV_DTBFILE re-points DTBFILE in .env.initrd-flash at another
+        tree, so the merged stock tree is staged but the flash writes the
+        carrier's choice.
+      * The carrier ships a file under the base DTB's name, which the merged
+        tree copied as images.dtb then replaces.
+
+    Merging into the carrier's tree is not attempted: this hook refuses rather
+    than guess which of the two trees the project means to overlay. An empty
+    slot (only .placeholder) is the normal case and passes, with the same
+    emptiness test the provisioning script uses."""
+    carrier_rel = (
+        stone.get("storage_devices", {})
+        .get(TARGET_DEVICE, {})
+        .get("images", {})
+        .get("tegraflash_carrier_bsp")
+    )
+    if not carrier_rel:
+        return
+    carrier_dir = find_carrier_slot(carrier_rel)
+    if not carrier_dir or not os.path.isdir(carrier_dir):
+        return
+    files = [
+        e.name
+        for e in os.scandir(carrier_dir)
+        if e.is_file(follow_symlinks=False) and e.name != ".placeholder"
+    ]
+    if not files:
+        return
+    if base_name in files:
+        die(
+            f"carrier BSP '{carrier_rel}' ({carrier_dir}) ships {base_name}, the base DTB this hook "
+            "merges into; the merged stock tree would replace the carrier's copy "
+            "when the flash copies images.dtb. Overlays on a carrier that ships "
+            "its own DTB are not supported"
+        )
+    carrier_env = os.path.join(carrier_dir, "carrier.env")
+    if os.path.isfile(carrier_env):
+        with open(carrier_env, errors="surrogateescape") as f:
+            for line in f.read().split("\n"):
+                if line.startswith("CARRIER_ENV_DTBFILE="):
+                    die(
+                        f"carrier BSP '{carrier_rel}' ({carrier_dir}) sets CARRIER_ENV_DTBFILE, which "
+                        f"re-points the flashed DTB away from {base_name}: the merged "
+                        "stock tree would be staged but never flashed. Overlays on a "
+                        "carrier that selects its own DTB are not supported"
+                    )
+
+
 def main():
     staging = env("AVOCADO_DTBO_STAGING")
     manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
@@ -193,6 +275,7 @@ def main():
     with open(stone_path) as f:
         stone = json.load(f)
     bsp_dir, base_name = find_base_dtb(stone, data_dir)
+    refuse_carrier_dtb_override(stone, base_name)
     platform = stone.get("runtime", {}).get("platform", "tegra")
 
     # Merge into a copy staged alongside the .dtbo files, so the BSP's own DTB

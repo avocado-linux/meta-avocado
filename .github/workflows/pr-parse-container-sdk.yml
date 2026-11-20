@@ -133,3 +133,13 @@ jobs:
         run: |
           bash meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-tegra-bootimg.sh
           bash meta-avocado-nvidia/recipes-avocado/sdk/avocado-sdk-target/tests/test-avocado-tegra-build-bootimg.sh
+      # The suite skips with success when dtc or fdtoverlay is missing, and the
+      # image ships neither.
+      - name: Install dtc for the Tegra device-tree overlay tests
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends device-tree-compiler
+      - name: Tegra device-tree overlay delivery hook
+        shell: bash
+        run: bash meta-avocado-nvidia/recipes-avocado/avocado-dtc-overlay-deliver/tests/test-device-tree-overlay-deliver.sh
