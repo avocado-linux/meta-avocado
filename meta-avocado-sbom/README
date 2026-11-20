@@ -979,10 +979,12 @@ ${DEPLOY_DIR_RPM}, the copy the feed serves, and named from pkgdata like the
 default tree's, so an older release in the list is not listed. A missing list,
 a listed file of this build's that is not there, or a list naming none of this
 build's packages fails the build; this task depends on the merge, so the list
-is always this build's. The two kernels package the same names at different
-versions, so a name is not an identity here; name, arch, version and release
-together are, and two files with that identity but different headers fail the
-build.
+is always this build's. The recipe deletes rm_work's do_rm_work_all, which
+would follow that dependency into the rest of avocado-distro and rebuild its
+images, repackaging the rootfs image while this task reads ${DEPLOY_DIR_RPM}.
+The two kernels package the same names at different versions, so a name is not
+an identity here; name, arch, version and release together are, and two files
+with that identity but different headers fail the build.
 
 A package pkgdata names that holds no files (PKGSIZE 0) and has no RPM is not
 listed and is not a failure: package_rpm writes no RPM for an empty package
