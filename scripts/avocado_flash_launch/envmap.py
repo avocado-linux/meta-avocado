@@ -81,6 +81,10 @@ def build_run_env(
 
     if opts.exported_device and opts.medium != "ums":
         raise LauncherError("an exported device only applies to the ums medium")
+    # Only the sd profiles run an fwup task. Dropping an upgrade request for
+    # another medium would run a whole-medium write that wipes var instead.
+    if opts.task not in (None, "complete") and opts.medium != "sd":
+        raise LauncherError(f"--task {opts.task} applies to the sd medium only (got medium '{opts.medium}')")
 
     jetson = profile.startswith("tegraflash-")
     nvme = opts.medium == "nvme"

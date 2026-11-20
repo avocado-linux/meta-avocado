@@ -132,6 +132,13 @@ def test_sd_passes_task_only_when_given(tree):
     assert tree.env("stone")["AVOCADO_PROVISION_FWUP_TASK"] == "upgrade"
 
 
+def test_emmc_task_upgrade_is_refused_before_stone(tree):
+    rc, out = tree.run("--workdir", str(tree.workdir), "--task", "upgrade", "emmc")
+    assert rc != 0
+    assert "sd medium only" in out
+    assert tree.started() == []
+
+
 def test_emmc_maps_to_uuu_emmc_and_starts_only_stone(tree):
     rc, out = tree.run("--workdir", str(tree.workdir), "emmc")
     assert rc == 0, out
