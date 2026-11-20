@@ -132,14 +132,14 @@ do_multikernel_merge() {
         # it tags every kernel RPM (PV 6.6.63+git..., KERNEL_VERSION 6.6.63-v8)
         # and none of the common NEVRAs (base-files 3.0.14, packagegroup 1.0,
         # shadow-securetty 4.6, ...). Match any kernel-<digit> package, not one
-        # localversion's shape: a pattern that misses only warns, and the alt
-        # kernel silently drops out of the feed.
+        # localversion's shape. A miss is fatal: every mc listed here builds a
+        # kernel, and skipping published a feed without it that only the CVE
+        # scan's digest gate noticed.
         altkver="$(ls "${base}/rpm/"*/kernel-[0-9]*.rpm 2>/dev/null \
                    | sed -nE 's#.*/kernel-([0-9]+\.[0-9]+\.[0-9]+)[-+].*#\1#p' \
                    | sort -u | head -1)"
         if [ -z "${altkver}" ]; then
-            bbwarn "avocado-multikernel: could not derive a kernel version for mc '${mc}' from ${base}/rpm; skipping its merge"
-            continue
+            bbfatal "avocado-multikernel: could not derive a kernel version for mc '${mc}' from ${base}/rpm; refusing to publish a feed without its kernel"
         fi
 
         for subdir in rpm pulp-uploads; do
