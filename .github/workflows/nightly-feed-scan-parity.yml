@@ -27,6 +27,8 @@ name: Nightly-Feed-Scan-Parity
 # (another kernel recipe, another multiconfig).
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   schedule:
     # Off the hour: GitHub delays or drops scheduled runs at :00 under load.
     - cron: "23 9 * * *"
@@ -69,7 +71,7 @@ jobs:
       - name: Checkout ${{ matrix.line }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.line }}
+          ref: ${{ (github.event_name == 'pull_request' && matrix.line == 'scarthgap') && github.event.pull_request.head.sha || matrix.line }}
           persist-credentials: false
       - name: Check that ${{ matrix.line }} carries the check
         id: carries
