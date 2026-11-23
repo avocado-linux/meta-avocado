@@ -225,8 +225,16 @@ no manifest, so a partial scan is never mistaken for a complete one.
 The document carries upstream VEX statements, so it is scan input only and is
 never published to customers.
 
-Alternate kernels are not part of this scope yet; that is to be completed in
-group 4.
+Alternate kernels are read from AVOCADO_MULTIKERNEL_MC_RECIPES, a list of
+<multiconfig>:<recipe> entries. Each alternate multiconfig's documents are
+loaded from its own TMPDIR, tmp-<multiconfig>. A kernel that passes is listed in
+alt_included as "<multiconfig>:<recipe>". A kernel is listed in alt_not_covered
+with a reason instead when a merge would point a vulnerability statement at the
+wrong kernel (reference collision), when it shares an identity alias with the
+default kernel that a statement or relationship refers to (alias collision),
+or when its document is missing. A malformed list entry is listed there too.
+The alternate kernels' packages stay out of the RPM manifest and the report's
+package map.
 
 Variables
 ---------
