@@ -77,8 +77,9 @@ class Tree:
         self.image_rpms = os.path.join(self.tmp, "image", "rpms.json")
 
         write_json(self.document, self.sbom_document(2, sboms=1))
-        write_json(self.coverage, {k: 2 if k == "roots" else []
-                                   for k in COVERAGE_KEYS})
+        write_json(self.coverage, {
+            "roots": 2, "no_document": [], "unresolved_ids": 0,
+            "alt_included": [], "alt_not_covered": []})
         write_json(self.feed_manifest, manifest(*IMAGE_PACKAGES, (
             "zlib", "1.3", issues())))
         write_json(self.image_manifest, manifest(*IMAGE_PACKAGES))
@@ -312,6 +313,66 @@ class FeedCheckTest(unittest.TestCase):
         code, out = tree.run("--image-manifest", tree.image_manifest)
         self.assertEqual(code, 1)
         self.assertEqual(self.failed(out), ["image-kernels"])
+
+    def test_a_context_list_holding_the_spdx_context_passes(self):
+        tree = Tree(self)
+        write_json(tree.document, Tree.sbom_document(2, context=["urn:x", CONTEXT]))
+        self.assertEqual(tree.run()[0], 0)
+
+    def test_a_spdx_prefixed_url_that_is_not_a_context_file_fails(self):
+        tree = Tree(self)
+        write_json(tree.document, Tree.sbom_document(
+            2, context="https://spdx.org/rdf/3.0.1/model"))
+        code, out = tree.run()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failed(out), ["feed-document-jsonld"])
+
+    def test_missing_rpm_manifest_fails_when_the_image_one_is_given(self):
+        tree = Tree(self)
+        os.remove(tree.rpms)
+        code, out = tree.run("--image-rpm-manifest", tree.image_rpms)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failed(out), ["rpm-manifest-keys"])
+
+    def test_a_boolean_roots_value_does_not_equal_a_root_count_of_one(self):
+        tree = Tree(self)
+        write_json(tree.document, Tree.sbom_document(1))
+        write_json(tree.coverage, {
+            "roots": True, "no_document": [], "unresolved_ids": 0,
+            "alt_included": [], "alt_not_covered": []})
+        code, out = tree.run()
+        self.assertEqual(code, 1)
+        self.assertIn("feed-document-roots", self.failed(out))
+        self.assertIn("coverage-record", self.failed(out))
+
+    def test_coverage_values_of_the_wrong_type_fail(self):
+        for key, bad in (("no_document", "x"), ("unresolved_ids", "3"),
+                         ("alt_included", {}), ("alt_not_covered", 0)):
+            tree = Tree(self)
+            record = {"roots": 2, "no_document": [], "unresolved_ids": 0,
+                      "alt_included": [], "alt_not_covered": []}
+            record[key] = bad
+            write_json(tree.coverage, record)
+            code, out = tree.run()
+            self.assertEqual(code, 1, key)
+            self.assertEqual(self.failed(out), ["coverage-record"], key)
+
+    def test_an_unhashable_issue_status_fails_without_a_traceback(self):
+        tree = Tree(self)
+        write_json(tree.feed_manifest, {"package": [
+            {"name": "acl", "version": "2.3.2", "issue": [{"status": ["x"]}]},
+            {"name": "linux-raspberrypi", "version": "6.12.87+git",
+             "issue": issues(unpatched=3, ignored=1)}]})
+        code, out = tree.run("--image-manifest", tree.image_manifest)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines()[-1], "checks: 8/8 passed")
+
+    def test_an_image_manifest_without_usable_entries_fails(self):
+        tree = Tree(self)
+        write_json(tree.image_manifest, {"package": [{"version": "1"}, "x"]})
+        code, out = tree.run("--image-manifest", tree.image_manifest)
+        self.assertEqual(code, 1)
+        self.assertIn("image-recipes", self.failed(out))
 
 if __name__ == "__main__":
     unittest.main()

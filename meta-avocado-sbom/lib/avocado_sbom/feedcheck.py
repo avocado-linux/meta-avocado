@@ -17,6 +17,7 @@ from avocado_sbom import report
 COVERAGE_KEYS = frozenset(
     ("roots", "no_document", "unresolved_ids", "alt_included", "alt_not_covered")
 )
+LIST_KEYS = frozenset(("no_document", "alt_included", "alt_not_covered"))
 SPDX_CONTEXT_PREFIX = "https://spdx.org/rdf/3."
 # Kernel recipes are the manifest entries named linux-*. The manifest carries no
 # flag for a kernel, and an alternate-kernel build names its recipe the same way
@@ -96,7 +97,8 @@ def check_document_roots(paths):
     roots = sboms[0].get("rootElement")
     count = len(roots) if isinstance(roots, list) else None
     expected = coverage.get("roots") if isinstance(coverage, dict) else None
-    if count is None or count != expected:
+    # True == 1 in Python, so a boolean in the record would read as a root count.
+    if count is None or type(expected) is not int or count != expected:
         return name, False, ("SBOM has %s rootElement entries, coverage record "
                              "says roots is %r" % (count, expected))
     return name, True, ""
@@ -112,6 +114,13 @@ def check_coverage_record(paths):
     if keys != COVERAGE_KEYS:
         return name, False, "missing %s, unexpected %s" % (
             sorted(COVERAGE_KEYS - keys), sorted(keys - COVERAGE_KEYS))
+    # The counts are integers and the rest lists; a record of another shape
+    # would read as a complete scan to a consumer that trusts the key names.
+    wrong = [key for key in sorted(COVERAGE_KEYS)
+             if not isinstance(coverage[key], list if key in LIST_KEYS else int)
+             or isinstance(coverage[key], bool)]
+    if wrong:
+        return name, False, "wrong value type for %s" % ", ".join(wrong)
     return name, True, ""
 
 def check_feed_manifest(paths):
@@ -161,9 +170,12 @@ def _read_manifest(path):
         key = (entry["name"], report._strip_pe(str(entry.get("version", ""))))
         counts = out.setdefault(key, {})
         for issue in entry.get("issue") or []:
-            if isinstance(issue, dict):
-                status = issue.get("status")
+            status = issue.get("status") if isinstance(issue, dict) else None
+            # An unhashable status would raise here instead of being reported.
+            if isinstance(status, str):
                 counts[status] = counts.get(status, 0) + 1
+    if not out:
+        return None, "%s has no usable package entries" % path
     return out, None
 
 def check_image_recipes(paths, image_manifest):

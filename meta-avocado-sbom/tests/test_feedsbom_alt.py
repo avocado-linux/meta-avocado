@@ -125,26 +125,40 @@ class DropAliasCollidedTest(unittest.TestCase):
 
     def test_kernel_with_referenced_shared_alias_is_not_covered(self):
         kept, not_covered = feedsbom.drop_alias_collided(
-            self.INCLUDED, {"kern": ["urn:a", "urn:b"]}, ["urn:b", "urn:zzz"]
+            self.INCLUDED, {"mc:kern": ["urn:a", "urn:b"]}, ["urn:b", "urn:zzz"]
         )
         self.assertEqual(kept, [("mc", "other", ["h2"])])
         self.assertEqual(len(not_covered), 1)
         self.assertEqual((not_covered[0]["mc"], not_covered[0]["recipe"]), ("mc", "kern"))
         self.assertEqual(not_covered[0]["reason"], "alias collision: urn:b")
 
+    def test_every_referenced_alias_is_named_in_sorted_order(self):
+        kept, not_covered = feedsbom.drop_alias_collided(
+            self.INCLUDED, {"mc:kern": ["urn:c", "urn:a", "urn:b"]}, ["urn:b", "urn:a"]
+        )
+        self.assertEqual([n["reason"] for n in not_covered], ["alias collision: urn:a, urn:b"])
+
     def test_shared_but_unreferenced_aliases_keep_the_kernel(self):
         kept, not_covered = feedsbom.drop_alias_collided(
-            self.INCLUDED, {"kern": ["urn:a"]}, ["urn:other"]
+            self.INCLUDED, {"mc:kern": ["urn:a"]}, ["urn:other"]
         )
         self.assertEqual(kept, self.INCLUDED)
         self.assertEqual(not_covered, [])
 
     def test_referenced_alias_of_another_recipe_does_not_count(self):
         kept, not_covered = feedsbom.drop_alias_collided(
-            self.INCLUDED, {"other": ["urn:a"]}, ["urn:a"]
+            self.INCLUDED, {"mc:other": ["urn:a"]}, ["urn:a"]
         )
         self.assertEqual([k[1] for k in kept], ["kern"])
         self.assertEqual([n["recipe"] for n in not_covered], ["other"])
+
+    def test_same_recipe_in_two_multiconfigs_is_judged_per_multiconfig(self):
+        included = [("mcA", "kern", ["hA"]), ("mcB", "kern", ["hB"])]
+        kept, not_covered = feedsbom.drop_alias_collided(
+            included, {"mcA:kern": ["urn:a"], "mcB:kern": []}, ["urn:a"]
+        )
+        self.assertEqual(kept, [("mcB", "kern", ["hB"])])
+        self.assertEqual([(n["mc"], n["recipe"]) for n in not_covered], [("mcA", "kern")])
 
 
 class DropWrongReferenceTest(unittest.TestCase):

@@ -234,7 +234,10 @@ wrong kernel (reference collision), when it shares an identity alias with the
 default kernel that a statement or relationship refers to (alias collision),
 or when its document is missing. A malformed list entry is listed there too.
 The alternate kernels' packages stay out of the RPM manifest and the report's
-package map.
+package map. A kernel in alt_included is in the scanned document and the scanner
+manifest, but the CVE report lists only versions the build's own package data
+holds, so an alternate kernel at another version is counted as scanned and its
+CVEs are not in the report.
 
 Variables
 ---------

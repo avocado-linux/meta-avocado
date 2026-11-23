@@ -52,9 +52,10 @@ class ClassifyTest(unittest.TestCase):
 class CheckMissingTest(unittest.TestCase):
     def test_over_ceiling_names_every_recipe(self):
         with self.assertRaises(feedsbom.FeedSbomError) as ctx:
-            feedsbom.check_missing(["a", "b", "c"], 2)
-        for name in ("a", "b", "c"):
-            self.assertIn(name, str(ctx.exception))
+            feedsbom.check_missing(["rec-a", "rec-b", "rec-c"], 2)
+        self.assertTrue(
+            str(ctx.exception).endswith(": rec-a, rec-b, rec-c"), str(ctx.exception)
+        )
 
     def test_at_ceiling_passes(self):
         self.assertIsNone(feedsbom.check_missing(["a", "b"], 2))
@@ -134,6 +135,21 @@ class WriteSummaryTest(unittest.TestCase):
             self.assertFalse(os.path.islink(path))
             with open(target, encoding="utf-8") as f:
                 self.assertEqual(f.read(), "keep")
+
+    def test_a_failed_write_leaves_no_old_record_and_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "coverage.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("old")
+            with self.assertRaises(TypeError):
+                feedsbom.write_summary(path, {"roots": object()})
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_the_record_is_world_readable_like_the_document_beside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "coverage.json")
+            feedsbom.write_summary(path, {"roots": 1})
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o644)
 
 
 class ScopeDependencyTest(unittest.TestCase):

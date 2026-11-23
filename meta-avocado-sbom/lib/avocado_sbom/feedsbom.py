@@ -134,19 +134,23 @@ def alt_label(mc, recipe):
     return "%s:%s" % (mc, recipe)
 
 
-def drop_alias_collided(included, shared_by_recipe, target_ids):
+def drop_alias_collided(included, shared_by_label, target_ids):
     """Split included into (kept, not covered) by whether a shared alias is targeted.
 
     Two kernels sharing an identity alias is harmless until something refers to
     that alias, because the assembled set then resolves it to whichever kernel
     it indexed last. target_ids must be the raw targets taken before assembly,
-    which resolves and strips aliases.
+    which resolves and strips aliases. shared_by_label is keyed by alt_label,
+    because one recipe can be built in more than one alternate multiconfig and
+    each is judged on its own aliases.
     """
     target_ids = set(target_ids)
     kept = []
     not_covered = []
     for mc, recipe, handles in included:
-        aliases = referenced_aliases(shared_by_recipe.get(recipe, ()), target_ids)
+        aliases = referenced_aliases(
+            shared_by_label.get(alt_label(mc, recipe), ()), target_ids
+        )
         if aliases:
             not_covered.append(
                 {
@@ -196,6 +200,9 @@ def write_summary(path, summary):
     directory = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".coverage-")
     try:
+        # mkstemp creates 0600; the document beside this record is written with
+        # the umask mode, and a consumer running as another user must read both.
+        os.fchmod(fd, 0o644)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(summary, f, sort_keys=True, indent=2)
             f.write("\n")
