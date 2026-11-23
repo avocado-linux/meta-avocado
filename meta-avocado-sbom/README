@@ -189,10 +189,52 @@ compiled.
 Only image scope gets this filtering. The world SBOM is built from recipe
 documents, which describe no build and so carry no compiled-source list.
 
+Feed scope
+----------
+
+Feed scope scans the whole package feed as one unit, the packages a user could
+install, without needing every world recipe to resolve. Stack the fragment with
+the SBOM and CVE fragments, build the feed, then run the report:
+
+  kas build kas/machine/<machine>.yml:kas/feature/sbom.yml:kas/feature/cve-check.yml:kas/feature/cve-check-feed.yml \
+      --target avocado-cve-report
+
+The fragment is kas/feature/cve-check-feed.yml. It sets AVOCADO_CVE_SCOPE =
+"feed" and nothing else. After the feed build, bitbake avocado-cve-report runs
+do_feed_sbom and then the scan. Three files come out, named by
+MACHINE_SHORT_NAME:
+
+  avocado-feed-<MACHINE_SHORT_NAME>.spdx.json
+      the feed SPDX document, built from every recipe that shipped a package
+  avocado-feed-<short>.sbom-cve-check.yocto.json
+      the scanner manifest that avocado-cve-report reads at this scope
+  avocado-feed-<short>.coverage.json
+      the coverage record, with the keys roots, no_document, unresolved_ids,
+      alt_included and alt_not_covered
+
+A recipe that shipped a package but has no recipe-level SPDX document is named
+in no_document and listed as unscanned in the report. On a Raspberry Pi 5 feed
+341 of 364 recipes had a document, so 23 were unscanned.
+AVOCADO_FEED_SBOM_MAX_MISSING is the ceiling of recipes without a document
+before do_feed_sbom fails; it defaults to 33.
+
+The task fails closed. An unresolved SPDX identifier, a missing build or more
+missing recipes than the ceiling fails do_feed_sbom and leaves no document and
+no manifest, so a partial scan is never mistaken for a complete one.
+
+The document carries upstream VEX statements, so it is scan input only and is
+never published to customers.
+
+Alternate kernels are not part of this scope yet; that is to be completed in
+group 4.
+
 Variables
 ---------
 
-  AVOCADO_CVE_SCOPE            "world" (default) or "image"; see Usage
+  AVOCADO_CVE_SCOPE            "world" (default), "image" or "feed"; see Usage
+                               and Feed scope
+  AVOCADO_FEED_SBOM_MAX_MISSING  ceiling of recipes without an SPDX document
+                               before do_feed_sbom fails, default 33
   AVOCADO_CVE_IMAGE            image scanned at image scope, avocado-image-rootfs
   AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
                                of them; defaults to the world SBOM's export in
