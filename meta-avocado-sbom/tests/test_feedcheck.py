@@ -314,6 +314,18 @@ class FeedCheckTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.failed(out), ["image-kernels"])
 
+    def test_firmware_and_headers_are_not_kernels(self):
+        tree = Tree(self)
+        only_non_kernels = manifest(
+            IMAGE_PACKAGES[0],
+            ("linux-firmware-rpidistro", "20240101", issues(unpatched=1)),
+            ("linux-libc-headers", "6.12", issues(unpatched=1)))
+        write_json(tree.image_manifest, only_non_kernels)
+        write_json(tree.feed_manifest, only_non_kernels)
+        code, out = tree.run("--image-manifest", tree.image_manifest)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failed(out), ["image-kernels"])
+
     def test_a_context_list_holding_the_spdx_context_passes(self):
         tree = Tree(self)
         write_json(tree.document, Tree.sbom_document(2, context=["urn:x", CONTEXT]))

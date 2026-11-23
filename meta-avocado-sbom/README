@@ -237,7 +237,9 @@ The alternate kernels' packages stay out of the RPM manifest and the report's
 package map. A kernel in alt_included is in the scanned document and the scanner
 manifest, but the CVE report lists only versions the build's own package data
 holds, so an alternate kernel at another version is counted as scanned and its
-CVEs are not in the report.
+CVEs are not in the report. Links from an alternate kernel's document to a recipe
+that only its multiconfig built do not resolve, and do_feed_sbom then fails on the
+unresolved identifier instead of moving that kernel to alt_not_covered.
 
 Variables
 ---------

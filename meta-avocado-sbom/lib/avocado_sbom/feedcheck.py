@@ -24,6 +24,9 @@ SPDX_CONTEXT_PREFIX = "https://spdx.org/rdf/3."
 # (linux-raspberrypi at another version), so the name is the one marker both
 # sides share.
 KERNEL_PREFIX = "linux-"
+# linux-* names that are not a kernel: firmware blobs and the userspace headers.
+# Counting them would let the kernel comparison pass without comparing a kernel.
+NOT_KERNELS = ("linux-firmware", "linux-libc-headers")
 
 def _load(path):
     """(data, None) or (None, why), so a check reports instead of raising."""
@@ -201,7 +204,8 @@ def check_image_kernels(paths, image_manifest):
     feed, why = _read_manifest(paths.manifest)
     if why:
         return name, False, why
-    kernels = sorted(k for k in image if k[0].startswith(KERNEL_PREFIX))
+    kernels = sorted(k for k in image if k[0].startswith(KERNEL_PREFIX)
+                     and not k[0].startswith(NOT_KERNELS))
     if not kernels:
         return name, False, "no %s* recipe in the image manifest" % KERNEL_PREFIX
     bad = []
