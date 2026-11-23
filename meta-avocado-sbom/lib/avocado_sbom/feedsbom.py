@@ -68,6 +68,62 @@ def coverage_summary(roots, missing, unresolved, alt_included=(), alt_not_covere
     }
 
 
+def parse_alt_recipes(text):
+    """Split the multi-kernel recipe list into ((mc, recipe) pairs, malformed entries).
+
+    Entries are whitespace-separated mc:recipe. Pairs keep first-seen order with
+    duplicates collapsed; an entry with no colon, no multiconfig or no recipe is
+    malformed.
+    """
+    pairs = []
+    malformed = []
+    for entry in text.split():
+        mc, sep, recipe = entry.partition(":")
+        if not sep or not mc or not recipe:
+            malformed.append(entry)
+        elif (mc, recipe) not in pairs:
+            pairs.append((mc, recipe))
+    return pairs, malformed
+
+
+def alt_tmpdir(topdir, mc):
+    """The alternate multiconfig's TMPDIR, as avocado-multikernel.bbclass builds it."""
+    return "%s/tmp-%s" % (topdir, mc)
+
+
+def classify_alt(pairs, find_alt_roots):
+    """Split (mc, recipe) pairs into (mc, recipe, handles) and those with no document.
+
+    find_alt_roots(mc, recipe) returns a list of root handles, empty when the
+    multiconfig's directory holds no document for the recipe.
+    """
+    included = []
+    not_covered = []
+    for mc, recipe in pairs:
+        handles = find_alt_roots(mc, recipe)
+        if handles:
+            included.append((mc, recipe, handles))
+        else:
+            not_covered.append(
+                {
+                    "mc": mc,
+                    "recipe": recipe,
+                    "reason": "no document in tmp-%s/deploy/spdx" % mc,
+                }
+            )
+    return included, not_covered
+
+
+def wrong_kernel_references(statements):
+    """Statements whose target_version differs from their kernel_version."""
+    return [s for s in statements if s["target_version"] != s["kernel_version"]]
+
+
+def alias_collisions(default_aliases, alt_aliases):
+    """Sorted identity aliases carried by both the default and the alternate kernel."""
+    return sorted(set(default_aliases) & set(alt_aliases))
+
+
 def write_summary(path, summary):
     """Replace the file at path with the summary as sorted-key JSON, atomically.
 
