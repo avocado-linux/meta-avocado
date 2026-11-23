@@ -246,6 +246,47 @@ def is_kernel_entry(entry):
         isinstance(p, dict) and p.get("product") == KERNEL_PRODUCT
         for p in products)
 
+# Files every kernel build compiles, as the CNA's programFiles name them.
+KERNEL_TREE_SOURCES = ("init/main.c", "include/linux/module.h")
+
+def spdx_compiled_sources(doc):
+    """The compiled-source list improve_kernel_cve_report.py reads from a
+    recipe SPDX document, normalized as it does: everything up to and
+    including the first "/" dropped, a name without one kept whole.
+    """
+    if not isinstance(doc, dict):
+        return set()
+    if doc.get("spdxVersion") == "SPDX-2.2":
+        names = [f.get("fileName", "") for f in doc.get("files") or []
+                 if isinstance(f, dict) and "SOURCE" in (f.get("fileTypes") or [])]
+    elif "@graph" in doc:
+        names = [n.get("name", "") for n in doc.get("@graph") or []
+                 if isinstance(n, dict)
+                 and n.get("software_primaryPurpose") == "source"]
+    else:
+        names = []
+    return {n[n.find("/") + 1:] for n in names if isinstance(n, str)}
+
+def is_kernel_tree(compiled):
+    """Whether a compiled-source list is a kernel tree the CNA's programFiles
+    can match.
+
+    The script compares those paths exactly, and every recipe document lists
+    its SRC_URI files (defconfig, config fragments) as sources, so a kernel
+    built without debug info has a list that matches nothing and every
+    in-range CVE that names its files comes out not compiled. sbom-cve-check
+    refuses a kernel list on the same two files; its "*.mod.c" alternative is
+    left out because it says nothing about the path prefix the exact match
+    depends on.
+
+    What this cannot tell apart: with SPDX_INCLUDE_COMPILED_SOURCES set and no
+    debug info, oe-core lists the whole patched tree as compiled, so the list
+    passes and the script finds every programFiles path compiled. Such a
+    kernel is marked filtered with nothing filtered out. Only set that switch
+    on a kernel built with DWARF.
+    """
+    return any(path in compiled for path in KERNEL_TREE_SOURCES)
+
 def _overlaid(cve_dir, overlay_dir):
     """cve_dir's *_cve.json, each paired with whether it came from overlay_dir:
     a file there replaces the same-named one rather than adding to it.

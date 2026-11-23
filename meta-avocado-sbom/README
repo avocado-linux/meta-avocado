@@ -494,7 +494,22 @@ Where the settings are unset, the task notes the absence and the report carries
 cve-check's own kernel results. That is also what a vendor kernel gets: neither
 the .scc nor the fragment reaches linux-imx and friends, so they produce no
 DWARF, and the task warns and leaves their scan alone rather than filtering it
-on an empty list.
+on a list that is not the kernel tree.
+
+The script matches the CNA's programFiles against the compiled-source list by
+exact path, after dropping the first path component of each name. Every
+recipe document lists its SRC_URI files (defconfig, config fragments) as
+sources, debug info or not, so having sources proves nothing: filtered on
+those, every in-range CVE that names its files comes out not compiled. The
+task filters a kernel only when its list, normalized the same way, holds
+init/main.c or include/linux/module.h, which every kernel build compiles.
+
+What the check cannot tell apart: with SPDX_INCLUDE_COMPILED_SOURCES set and
+no debug info, oe-core lists the whole patched tree as compiled, init/main.c
+included. That list passes, the script finds every programFiles path compiled,
+and the kernel is marked filtered with nothing filtered out. Set that switch
+only on a kernel built with DWARF; AVOCADO_KERNEL_DEBUGINFO does both for
+linux-yocto and linux-raspberrypi.
 
 The improved results are written to ${CVE_CHECK_DIR}/kernel-improved/ and read
 as an overlay: a file there replaces the same-named file from CVE_CHECK_DIR.
@@ -513,9 +528,9 @@ and its RT variant) and an out-of-tree module recipe beside them is left out.
 
 Each kernel's record, the entry and every alt_versions record alike, carries
 "kernel_filtered": true when its CVEs came from the filter, false when they
-are cve-check's own version-only results. A kernel without compiled sources in
-its SPDX document - a vendor kernel the debug-info switch does not reach - is
-false, and its count is the unfiltered one. Measured on a 2024 Pi 5, the
+are cve-check's own version-only results. A kernel without the kernel tree in
+its SPDX document's compiled sources - a vendor kernel the debug-info switch
+does not reach - is false, and its count is the unfiltered one. Measured on a 2024 Pi 5, the
 feed-only 6.6.63 kernel listed 4,157 affected CVEs unfiltered against the
 shipped 6.12.93's 1,035 filtered. The key is optional and additive, like
 recipe_version, so the contract stays version 1.
