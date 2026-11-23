@@ -19,14 +19,10 @@ COVERAGE_KEYS = frozenset(
 )
 LIST_KEYS = frozenset(("no_document", "alt_included", "alt_not_covered"))
 SPDX_CONTEXT_PREFIX = "https://spdx.org/rdf/3."
-# Kernel recipes are the manifest entries named linux-*. The manifest carries no
-# flag for a kernel, and an alternate-kernel build names its recipe the same way
-# (linux-raspberrypi at another version), so the name is the one marker both
-# sides share.
-KERNEL_PREFIX = "linux-"
-# linux-* names that are not a kernel: firmware blobs and the userspace headers.
-# Counting them would let the kernel comparison pass without comparing a kernel.
-NOT_KERNELS = ("linux-firmware", "linux-libc-headers")
+# The scanner manifest lists each recipe's CVE products. A kernel is the recipe
+# whose product is linux_kernel, which holds for an alternate-kernel build too
+# (the same recipe at another version) and for a vendor kernel with any name.
+KERNEL_PRODUCT = "linux_kernel"
 
 def _load(path):
     """(data, None) or (None, why), so a check reports instead of raising."""
@@ -159,34 +155,43 @@ def _same_keys(name, ours_path, theirs_path):
     return name, True, ""
 
 def _read_manifest(path):
-    """{(recipe, version): {status: count}} of an sbom-cve-check manifest."""
+    """({(recipe, version): {status: count}}, kernel keys, None) of a manifest.
+
+    A kernel is an entry that lists the CVE product linux_kernel, whatever the
+    recipe is called: a name test would count firmware and header recipes, and
+    miss a vendor kernel.
+    """
     data, why = _load(path)
     if why:
-        return None, why
+        return None, None, why
     entries = data.get("package") if isinstance(data, dict) else None
     if not isinstance(entries, list):
-        return None, "%s has no package list" % path
+        return None, None, "%s has no package list" % path
     out = {}
+    kernels = set()
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             continue
         key = (entry["name"], report._strip_pe(str(entry.get("version", ""))))
         counts = out.setdefault(key, {})
+        for product in entry.get("products") or []:
+            if isinstance(product, dict) and product.get("product") == KERNEL_PRODUCT:
+                kernels.add(key)
         for issue in entry.get("issue") or []:
             status = issue.get("status") if isinstance(issue, dict) else None
             # An unhashable status would raise here instead of being reported.
             if isinstance(status, str):
                 counts[status] = counts.get(status, 0) + 1
     if not out:
-        return None, "%s has no usable package entries" % path
-    return out, None
+        return None, None, "%s has no usable package entries" % path
+    return out, kernels, None
 
 def check_image_recipes(paths, image_manifest):
     name = "image-recipes"
-    image, why = _read_manifest(image_manifest)
+    image, _kernels, why = _read_manifest(image_manifest)
     if why:
         return name, False, why
-    feed, why = _read_manifest(paths.manifest)
+    feed, _kernels, why = _read_manifest(paths.manifest)
     if why:
         return name, False, why
     missing = sorted(set(image) - set(feed))
@@ -198,16 +203,16 @@ def check_image_recipes(paths, image_manifest):
 
 def check_image_kernels(paths, image_manifest):
     name = "image-kernels"
-    image, why = _read_manifest(image_manifest)
+    image, image_kernels, why = _read_manifest(image_manifest)
     if why:
         return name, False, why
-    feed, why = _read_manifest(paths.manifest)
+    feed, _kernels, why = _read_manifest(paths.manifest)
     if why:
         return name, False, why
-    kernels = sorted(k for k in image if k[0].startswith(KERNEL_PREFIX)
-                     and not k[0].startswith(NOT_KERNELS))
+    kernels = sorted(image_kernels)
     if not kernels:
-        return name, False, "no %s* recipe in the image manifest" % KERNEL_PREFIX
+        return name, False, "no recipe with the %s product in the image manifest" % (
+            KERNEL_PRODUCT)
     bad = []
     for key in kernels:
         for status in ("Unpatched", "Ignored"):

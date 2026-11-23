@@ -45,8 +45,14 @@ def issues(unpatched=0, ignored=0, patched=0):
     return out
 
 def manifest(*packages):
+    # The real scanner manifest lists each recipe's CVE products; a kernel is the
+    # one whose product is linux_kernel, whatever the recipe is called.
     return {"version": 1, "package": [
-        {"name": n, "version": v, "issue": i} for n, v, i in packages]}
+        {"name": n, "version": v, "issue": i,
+         "products": [{"product": "linux_kernel" if n in KERNEL_NAMES else n}]}
+        for n, v, i in packages]}
+
+KERNEL_NAMES = ("linux-raspberrypi", "vendor-kernel")
 
 IMAGE_PACKAGES = (
     ("acl", "2.3.2", issues(patched=2)),
@@ -314,11 +320,24 @@ class FeedCheckTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.failed(out), ["image-kernels"])
 
-    def test_firmware_and_headers_are_not_kernels(self):
+    def test_a_kernel_not_named_linux_is_found_by_its_product(self):
+        tree = Tree(self)
+        for path in (tree.image_manifest, tree.feed_manifest):
+            write_json(path, manifest(
+                ("vendor-kernel", "5.15", issues(unpatched=2, ignored=1))))
+        self.assertEqual(tree.run("--image-manifest", tree.image_manifest)[0], 0)
+        write_json(tree.feed_manifest, manifest(
+            ("vendor-kernel", "5.15", issues(unpatched=1, ignored=1))))
+        code, out = tree.run("--image-manifest", tree.image_manifest)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failed(out), ["image-kernels"])
+
+    def test_linux_named_recipes_without_the_kernel_product_are_not_kernels(self):
         tree = Tree(self)
         only_non_kernels = manifest(
             IMAGE_PACKAGES[0],
             ("linux-firmware-rpidistro", "20240101", issues(unpatched=1)),
+            ("linux-imx-headers", "6.1", issues(unpatched=1)),
             ("linux-libc-headers", "6.12", issues(unpatched=1)))
         write_json(tree.image_manifest, only_non_kernels)
         write_json(tree.feed_manifest, only_non_kernels)
@@ -374,6 +393,7 @@ class FeedCheckTest(unittest.TestCase):
         write_json(tree.feed_manifest, {"package": [
             {"name": "acl", "version": "2.3.2", "issue": [{"status": ["x"]}]},
             {"name": "linux-raspberrypi", "version": "6.12.87+git",
+             "products": [{"product": "linux_kernel"}],
              "issue": issues(unpatched=3, ignored=1)}]})
         code, out = tree.run("--image-manifest", tree.image_manifest)
         self.assertEqual(code, 0, out)
