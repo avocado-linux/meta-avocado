@@ -124,6 +124,67 @@ def alias_collisions(default_aliases, alt_aliases):
     return sorted(set(default_aliases) & set(alt_aliases))
 
 
+def referenced_aliases(shared, target_ids):
+    """Sorted aliases among shared that some relationship or statement targets."""
+    return sorted(set(shared) & set(target_ids))
+
+
+def alt_label(mc, recipe):
+    """How the coverage record names an alternate recipe it includes."""
+    return "%s:%s" % (mc, recipe)
+
+
+def drop_alias_collided(included, shared_by_recipe, target_ids):
+    """Split included into (kept, not covered) by whether a shared alias is targeted.
+
+    Two kernels sharing an identity alias is harmless until something refers to
+    that alias, because the assembled set then resolves it to whichever kernel
+    it indexed last. target_ids must be the raw targets taken before assembly,
+    which resolves and strips aliases.
+    """
+    target_ids = set(target_ids)
+    kept = []
+    not_covered = []
+    for mc, recipe, handles in included:
+        aliases = referenced_aliases(shared_by_recipe.get(recipe, ()), target_ids)
+        if aliases:
+            not_covered.append(
+                {
+                    "mc": mc,
+                    "recipe": recipe,
+                    "reason": "alias collision: %s" % ", ".join(aliases),
+                }
+            )
+        else:
+            kept.append((mc, recipe, handles))
+    return kept, not_covered
+
+
+def drop_wrong_reference(included, wrong):
+    """Split included into (kept, not covered) by whether a statement hit another version.
+
+    wrong holds wrong_kernel_references' output, each carrying the recipe name.
+    """
+    counts = {}
+    for statement in wrong:
+        counts[statement["recipe"]] = counts.get(statement["recipe"], 0) + 1
+    kept = []
+    not_covered = []
+    for mc, recipe, handles in included:
+        if recipe in counts:
+            not_covered.append(
+                {
+                    "mc": mc,
+                    "recipe": recipe,
+                    "reason": "reference collision: %d statement(s) target another version"
+                    % counts[recipe],
+                }
+            )
+        else:
+            kept.append((mc, recipe, handles))
+    return kept, not_covered
+
+
 def write_summary(path, summary):
     """Replace the file at path with the summary as sorted-key JSON, atomically.
 

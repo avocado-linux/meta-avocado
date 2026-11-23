@@ -106,5 +106,75 @@ class AliasCollisionsTest(unittest.TestCase):
         self.assertEqual(feedsbom.alias_collisions(["a", "a"], ["a", "a"]), ["a"])
 
 
+class ReferencedAliasesTest(unittest.TestCase):
+    def test_only_shared_aliases_that_something_targets(self):
+        self.assertEqual(
+            feedsbom.referenced_aliases(
+                ["urn:b", "urn:a", "urn:c"], iter(["urn:c", "urn:x", "urn:a", "urn:c"])
+            ),
+            ["urn:a", "urn:c"],
+        )
+
+    def test_nothing_shared_or_nothing_targeted(self):
+        self.assertEqual(feedsbom.referenced_aliases([], ["urn:a"]), [])
+        self.assertEqual(feedsbom.referenced_aliases(["urn:a"], []), [])
+
+
+class DropAliasCollidedTest(unittest.TestCase):
+    INCLUDED = [("mc", "kern", ["h"]), ("mc", "other", ["h2"])]
+
+    def test_kernel_with_referenced_shared_alias_is_not_covered(self):
+        kept, not_covered = feedsbom.drop_alias_collided(
+            self.INCLUDED, {"kern": ["urn:a", "urn:b"]}, ["urn:b", "urn:zzz"]
+        )
+        self.assertEqual(kept, [("mc", "other", ["h2"])])
+        self.assertEqual(len(not_covered), 1)
+        self.assertEqual((not_covered[0]["mc"], not_covered[0]["recipe"]), ("mc", "kern"))
+        self.assertEqual(not_covered[0]["reason"], "alias collision: urn:b")
+
+    def test_shared_but_unreferenced_aliases_keep_the_kernel(self):
+        kept, not_covered = feedsbom.drop_alias_collided(
+            self.INCLUDED, {"kern": ["urn:a"]}, ["urn:other"]
+        )
+        self.assertEqual(kept, self.INCLUDED)
+        self.assertEqual(not_covered, [])
+
+    def test_referenced_alias_of_another_recipe_does_not_count(self):
+        kept, not_covered = feedsbom.drop_alias_collided(
+            self.INCLUDED, {"other": ["urn:a"]}, ["urn:a"]
+        )
+        self.assertEqual([k[1] for k in kept], ["kern"])
+        self.assertEqual([n["recipe"] for n in not_covered], ["other"])
+
+
+class DropWrongReferenceTest(unittest.TestCase):
+    INCLUDED = [("mc", "kern", ["h"]), ("mc", "other", ["h2"])]
+
+    def test_recipe_named_by_a_wrong_statement_is_not_covered(self):
+        wrong = [
+            {"recipe": "kern", "kernel_version": "6.6", "target_version": "6.12"},
+            {"recipe": "kern", "kernel_version": "6.6", "target_version": None},
+        ]
+        kept, not_covered = feedsbom.drop_wrong_reference(self.INCLUDED, wrong)
+        self.assertEqual(kept, [("mc", "other", ["h2"])])
+        self.assertEqual(len(not_covered), 1)
+        self.assertEqual(not_covered[0]["recipe"], "kern")
+        self.assertEqual(
+            not_covered[0]["reason"],
+            "reference collision: 2 statement(s) target another version",
+        )
+
+    def test_no_wrong_statements_keeps_everything(self):
+        self.assertEqual(
+            feedsbom.drop_wrong_reference(self.INCLUDED, []), (self.INCLUDED, [])
+        )
+
+
+class AltLabelTest(unittest.TestCase):
+    def test_label_is_mc_colon_recipe(self):
+        self.assertEqual(feedsbom.alt_label("raspberrypi-6_6", "linux-raspberrypi"),
+                         "raspberrypi-6_6:linux-raspberrypi")
+
+
 if __name__ == "__main__":
     unittest.main()
