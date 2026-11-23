@@ -9,6 +9,7 @@ is left out of the list when the flag is absent, so the final count says which
 checks ran.
 """
 
+import glob
 import json
 import os
 
@@ -23,6 +24,11 @@ SPDX_CONTEXT_PREFIX = "https://spdx.org/rdf/3."
 # whose product is linux_kernel, which holds for an alternate-kernel build too
 # (the same recipe at another version) and for a vendor kernel with any name.
 KERNEL_PRODUCT = "linux_kernel"
+FEED_PREFIX = "avocado-feed-"
+# The recipe whose package collects the images directory.
+BOOTFILES_RPM = "avocado-img-bootfiles-*.rpm"
+# An RPM header is a few KiB; a file list of this package is well inside 8 MiB.
+RPM_HEAD_BYTES = 8 * 1024 * 1024
 
 def _load(path):
     """(data, None) or (None, why), so a check reports instead of raising."""
@@ -42,16 +48,20 @@ class Paths:
     def __init__(self, tmpdir, machine):
         short = _short_name(machine)
         deploy = os.path.join(tmpdir, "deploy")
-        images = os.path.join(deploy, "images", machine)
-        stem = os.path.join(images, "avocado-feed-%s" % short)
+        # The feed files sit with the report, not in the images directory: the
+        # bootfiles package collects everything in that one (see
+        # check_feed_files_not_in_images).
+        feed_dir = os.path.join(deploy, "avocado-cve")
+        stem = os.path.join(feed_dir, "avocado-feed-%s" % short)
         self.deploy = deploy
+        self.images = os.path.join(deploy, "images", machine)
         self.document = stem + ".spdx.json"
         self.coverage = stem + ".coverage.json"
         self.manifest = stem + ".sbom-cve-check.yocto.json"
         self.report = os.path.join(
-            deploy, "avocado-cve", "avocado-cve-report-%s.json" % machine)
+            feed_dir, "avocado-cve-report-%s.json" % machine)
         self.rpms = os.path.join(
-            deploy, "avocado-cve", "avocado-rpm-manifest-%s.json" % machine)
+            feed_dir, "avocado-rpm-manifest-%s.json" % machine)
 
 def check_document_exists(paths):
     ok = os.path.isfile(paths.document)
@@ -128,8 +138,8 @@ def check_feed_manifest(paths):
             "" if ok else "no feed manifest at %s" % paths.manifest)
 
 def check_no_document_copies(paths):
-    """The document must live beside the images only: a copy under the rpm or
-    spdx tree would be picked up as a package or as a recipe document.
+    """A copy of the document under the rpm or spdx tree would be picked up as a
+    package or as a recipe document.
     """
     found = []
     base = os.path.basename(paths.document)
@@ -139,6 +149,37 @@ def check_no_document_copies(paths):
                 found.append(os.path.join(root, base))
     return ("no-document-copies", not found,
             "found %s" % ", ".join(sorted(found)) if found else "")
+
+def check_feed_files_not_in_images(paths):
+    """avocado-img-bootfiles packages every file in the images directory that its
+    skip patterns do not name, so a feed document or scan export left there is
+    built into an RPM of the feed, with its VEX statements and CVE assessment.
+    """
+    found = sorted(glob.glob(os.path.join(paths.images, FEED_PREFIX + "*")))
+    return ("feed-files-not-in-images", not found,
+            "found %s" % ", ".join(found) if found else "")
+
+def check_feed_files_not_in_rpms(paths):
+    """No bootfiles RPM lists a feed file. The check above is about where files
+    sit now; this one is about what an earlier build already packaged, which a
+    later build reuses from sstate without looking at the directory again.
+
+    An RPM header names its files as plain strings ahead of the compressed
+    payload, so reading the head of the file is enough.
+    """
+    leaked = []
+    pattern = os.path.join(paths.deploy, "rpm", "**", BOOTFILES_RPM)
+    for rpm in sorted(glob.glob(pattern, recursive=True)):
+        try:
+            with open(rpm, "rb") as f:
+                head = f.read(RPM_HEAD_BYTES)
+        except OSError as e:
+            return ("feed-files-not-in-rpms", False,
+                    "cannot read %s: %s" % (rpm, e.strerror))
+        if FEED_PREFIX.encode() in head:
+            leaked.append(rpm)
+    return ("feed-files-not-in-rpms", not leaked,
+            "lists a feed file: %s" % ", ".join(leaked) if leaked else "")
 
 def _same_keys(name, ours_path, theirs_path):
     ours, why = _load(ours_path)
@@ -233,6 +274,8 @@ def run_checks(tmpdir, machine, image_manifest=None, image_report=None,
         check_coverage_record(paths),
         check_feed_manifest(paths),
         check_no_document_copies(paths),
+        check_feed_files_not_in_images(paths),
+        check_feed_files_not_in_rpms(paths),
     ]
     if image_report:
         results.append(_same_keys("report-keys", paths.report, image_report))

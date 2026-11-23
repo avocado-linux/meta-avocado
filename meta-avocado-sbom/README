@@ -200,9 +200,15 @@ the SBOM and CVE fragments, build the feed, then run the report:
       --target avocado-cve-report
 
 The fragment is kas/feature/cve-check-feed.yml. It sets AVOCADO_CVE_SCOPE =
-"feed" and nothing else. After the feed build, bitbake avocado-cve-report runs
-do_feed_sbom and then the scan. Three files come out, named by
-MACHINE_SHORT_NAME:
+"feed" and nothing else. Run bitbake avocado-cve-report as its own invocation
+after the feed build has finished, not in the same command as the feed target:
+do_feed_sbom has no dependency on packaging, so run together it could assemble
+the document while packages are still being written. It runs do_feed_sbom and
+then the scan. Three files come out in AVOCADO_FEED_SBOM_DIR, which defaults to
+the directory of the CVE report and the RPM manifest
+(${DEPLOY_DIR}/avocado-cve, that is tmp/deploy/avocado-cve), named by
+MACHINE_SHORT_NAME, the MACHINE without its avocado- prefix (raspberrypi5 for
+avocado-raspberrypi5):
 
   avocado-feed-<MACHINE_SHORT_NAME>.spdx.json
       the feed SPDX document, built from every recipe that shipped a package
@@ -210,20 +216,31 @@ MACHINE_SHORT_NAME:
       the scanner manifest that avocado-cve-report reads at this scope
   avocado-feed-<short>.coverage.json
       the coverage record, with the keys roots, no_document, unresolved_ids,
-      alt_included and alt_not_covered
+      alt_included and alt_not_covered. roots counts the recipe documents in the
+      feed document, alternate kernels included, so roots plus no_document is
+      not the number of recipes that shipped.
 
 A recipe that shipped a package but has no recipe-level SPDX document is named
 in no_document and listed as unscanned in the report. On a Raspberry Pi 5 feed
-341 of 364 recipes had a document, so 23 were unscanned.
+344 of 367 recipes had a document, so 23 were unscanned.
 AVOCADO_FEED_SBOM_MAX_MISSING is the ceiling of recipes without a document
-before do_feed_sbom fails; it defaults to 33.
+before do_feed_sbom fails; it defaults to 33. The list of what shipped is the
+build's package data, so it must come from the same build tree as the documents:
+a package data directory shortened by another bitbake invocation shortens the
+scan without a trace.
 
 The task fails closed. An unresolved SPDX identifier, a missing build or more
 missing recipes than the ceiling fails do_feed_sbom and leaves no document and
-no manifest, so a partial scan is never mistaken for a complete one.
+no manifest, so a partial scan is never mistaken for a complete one. A scan
+whose manifest is missing or is not JSON removes the document and record too.
 
-The document carries upstream VEX statements, so it is scan input only and is
-never published to customers.
+The files stay out of the image deploy directory on purpose. The bootfiles
+package (avocado-img-bootfiles) collects every file in that directory whose name
+its skip patterns do not match, so a feed document or manifest left there would
+be built into an RPM of the feed. The document carries upstream VEX statements,
+so it is scan input only and is never published to customers; python3 -m
+avocado_sbom.feedcheck fails if an avocado-feed- file sits in the image deploy
+directory or a bootfiles RPM lists one.
 
 Alternate kernels are read from AVOCADO_MULTIKERNEL_MC_RECIPES, a list of
 <multiconfig>:<recipe> entries. Each alternate multiconfig's documents are
@@ -248,6 +265,9 @@ Variables
                                and Feed scope
   AVOCADO_FEED_SBOM_MAX_MISSING  ceiling of recipes without an SPDX document
                                before do_feed_sbom fails, default 33
+  AVOCADO_FEED_SBOM_DIR        where the feed document, manifest and coverage
+                               record go, default the CVE report directory; never
+                               the image deploy directory
   AVOCADO_CVE_IMAGE            image scanned at image scope, avocado-image-rootfs
   AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
                                of them; defaults to the world SBOM's export in

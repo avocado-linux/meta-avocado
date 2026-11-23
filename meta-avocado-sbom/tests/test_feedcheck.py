@@ -68,12 +68,15 @@ class Tree:
         self.tmp = holder.name
         self.deploy = os.path.join(self.tmp, "deploy")
         self.images = os.path.join(self.deploy, "images", MACHINE)
+        # The feed files sit with the report, not in the images directory: the
+        # bootfiles package collects everything in that one.
+        self.feed_dir = os.path.join(self.deploy, "avocado-cve")
         self.document = os.path.join(
-            self.images, "avocado-feed-%s.spdx.json" % SHORT)
+            self.feed_dir, "avocado-feed-%s.spdx.json" % SHORT)
         self.coverage = os.path.join(
-            self.images, "avocado-feed-%s.coverage.json" % SHORT)
+            self.feed_dir, "avocado-feed-%s.coverage.json" % SHORT)
         self.feed_manifest = os.path.join(
-            self.images, "avocado-feed-%s.sbom-cve-check.yocto.json" % SHORT)
+            self.feed_dir, "avocado-feed-%s.sbom-cve-check.yocto.json" % SHORT)
         self.report = os.path.join(
             self.deploy, "avocado-cve", "avocado-cve-report-%s.json" % MACHINE)
         self.rpms = os.path.join(
@@ -122,14 +125,14 @@ class FeedCheckTest(unittest.TestCase):
     def test_good_tree_passes_with_the_count_of_checks_run(self):
         code, out = Tree(self).run()
         self.assertEqual(code, 0, out)
-        self.assertEqual(out.splitlines()[-1], "checks: 6/6 passed")
+        self.assertEqual(out.splitlines()[-1], "checks: 8/8 passed")
 
     def test_every_option_adds_its_checks_to_the_count(self):
         code, out = Tree(self).run_all()
         self.assertEqual(code, 0, out)
-        self.assertEqual(out.splitlines()[-1], "checks: 10/10 passed")
+        self.assertEqual(out.splitlines()[-1], "checks: 12/12 passed")
         self.assertEqual(len([l for l in out.splitlines()
-                              if l.startswith("ok ")]), 10)
+                              if l.startswith("ok ")]), 12)
 
     def test_missing_document_fails(self):
         tree = Tree(self)
@@ -139,7 +142,7 @@ class FeedCheckTest(unittest.TestCase):
         self.assertEqual(self.failed(out),
                          ["feed-document-exists", "feed-document-jsonld",
                           "feed-document-roots"])
-        self.assertIn("checks: 3/6 passed", out)
+        self.assertIn("checks: 5/8 passed", out)
 
     def test_document_without_the_spdx_context_fails(self):
         tree = Tree(self)
@@ -223,6 +226,47 @@ class FeedCheckTest(unittest.TestCase):
         tree = Tree(self)
         write_json(os.path.join(tree.deploy, "spdx", "3.0.1", "x",
                                 "acl.spdx.json"), {})
+        self.assertEqual(tree.run()[0], 0)
+
+    def test_a_feed_file_in_the_images_directory_fails(self):
+        # avocado-img-bootfiles packages whatever sits in that directory.
+        for name in ("avocado-feed-%s.spdx.json" % SHORT,
+                     "avocado-feed-%s.sbom-cve-check.yocto.json" % SHORT,
+                     "avocado-feed-%s.sbom-cve-check.spdx.json" % SHORT,
+                     "avocado-feed-%s.coverage.json" % SHORT):
+            tree = Tree(self)
+            write_json(os.path.join(tree.images, name), {})
+            code, out = tree.run()
+            self.assertEqual(code, 1, name)
+            self.assertEqual(self.failed(out), ["feed-files-not-in-images"], name)
+
+    def test_other_files_in_the_images_directory_pass(self):
+        tree = Tree(self)
+        write_json(os.path.join(tree.images, "avocado-image-rootfs-%s.sbom-cve-check.yocto.json" % SHORT), {})
+        self.assertEqual(tree.run()[0], 0)
+
+    def test_a_bootfiles_rpm_that_lists_a_feed_file_fails(self):
+        tree = Tree(self)
+        rpm = os.path.join(tree.deploy, "rpm", "avocado_raspberrypi5",
+                           "avocado-img-bootfiles-1.0-r0.1.avocado_raspberrypi5.rpm")
+        os.makedirs(os.path.dirname(rpm), exist_ok=True)
+        with open(rpm, "wb") as f:
+            # An RPM header lists file basenames as plain NUL-terminated strings
+            # ahead of the compressed payload.
+            f.write(b"\xed\xab\xee\xdb" + b"Image\x00avocado-feed-%s.spdx.json\x00" % SHORT.encode()
+                    + b"\x00" * 64)
+        code, out = tree.run()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failed(out), ["feed-files-not-in-rpms"])
+        self.assertIn("avocado-img-bootfiles", out)
+
+    def test_a_bootfiles_rpm_without_feed_files_passes(self):
+        tree = Tree(self)
+        rpm = os.path.join(tree.deploy, "rpm", "avocado_raspberrypi5",
+                           "avocado-img-bootfiles-1.0-r0.1.avocado_raspberrypi5.rpm")
+        os.makedirs(os.path.dirname(rpm), exist_ok=True)
+        with open(rpm, "wb") as f:
+            f.write(b"\xed\xab\xee\xdb" + b"Image\x00bcm2712-rpi-5-b.dtb\x00" + b"\x00" * 64)
         self.assertEqual(tree.run()[0], 0)
 
     def test_report_with_other_top_level_keys_than_the_image_report_fails(self):
@@ -397,7 +441,7 @@ class FeedCheckTest(unittest.TestCase):
              "issue": issues(unpatched=3, ignored=1)}]})
         code, out = tree.run("--image-manifest", tree.image_manifest)
         self.assertEqual(code, 0, out)
-        self.assertEqual(out.splitlines()[-1], "checks: 8/8 passed")
+        self.assertEqual(out.splitlines()[-1], "checks: 10/10 passed")
 
     def test_an_image_manifest_without_usable_entries_fails(self):
         tree = Tree(self)
