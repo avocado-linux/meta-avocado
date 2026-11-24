@@ -5,7 +5,7 @@ SRC_URI:append = " \
   file://avocado-extra.cfg \
 "
 
-# DWARF for the kernel CVE filter (do_kernel_cve_improve in meta-avocado-sbom).
+# DWARF for the kernel CVE filter (sbom-cve-check, see meta-avocado-sbom/README).
 # linux-raspberrypi never reads KERNEL_EXTRA_FEATURES, which only the
 # linux-yocto recipes consume, so the debug feature the filter needs arrives as
 # a config fragment, on the switch avocado-kernel-feed uses for linux-yocto.

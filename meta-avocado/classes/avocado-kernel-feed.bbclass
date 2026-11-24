@@ -34,8 +34,8 @@ RPROVIDES:${KERNEL_PACKAGE_NAME}-modules     += "kernel-modules kernel-modules-$
 
 RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"
 
-# Debug-info kernel. The kernel CVE filter (do_kernel_cve_improve in
-# meta-avocado-sbom) needs the kernel's DWARF to know which sources this
+# Debug-info kernel. The kernel CVE filter (sbom-cve-check's, see
+# meta-avocado-sbom/README) needs the kernel's DWARF to know which sources this
 # configuration compiles, and a scan run on top of a feed build has to see the
 # kernel the feed published. kas/feature/sbom.yml and kas/feature/cve-check.yml
 # set this. The DWARF is split into ${KERNEL_PACKAGE_NAME}-dbg, so the packages
