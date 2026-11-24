@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 
-"""The RPM manifest lists exactly the alternate-kernel RPMs the merge published.
+"""do_multikernel_merge publishes, and lists, exactly the alternate kernel's RPMs.
 
 Runs avocado-multikernel.bbclass's do_multikernel_merge under bash, against a
-fake pair of deploy trees, then builds the manifest from the list it wrote.
+fake pair of deploy trees, then reads the list it wrote. The RPM manifest does
+not read that list (it covers the default multiconfig only, as the report
+does), so the list is read here directly.
 
   python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'
 """
@@ -21,7 +23,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 sys.path.insert(0, HERE)
 
-from avocado_sbom import rpms  # noqa: E402
 from test_rpms import rpm_bytes  # noqa: E402
 
 BBCLASS = os.path.join(HERE, "..", "..", "meta-avocado", "classes",
@@ -76,7 +77,10 @@ class MergeListTests(unittest.TestCase):
                               text=True, check=check)
 
     def listed(self):
-        return rpms.read_merged_rpms(rpms.merged_rpms_path(self.deploy, MC))
+        # Raises OSError when the merge left no list. The class spells the path.
+        path = os.path.join(self.deploy, "avocado-multikernel", "%s-rpms.txt" % MC)
+        with open(path) as f:
+            return {line.strip() for line in f if line.strip()}
 
     def build_alt_tree(self):
         self.rpm(self.alt_rpm, "kernel-%s" % L4T, "5.15.199+git0+abc")
@@ -137,29 +141,6 @@ class MergeListTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     self.listed()
 
-    def test_the_manifest_leaves_out_what_the_merge_did_not_publish(self):
-        self.build_alt_tree()
-        self.rpm(self.feed, "kernel-6.6", "6.6.111", "r0.1")
-        self.merge()
-
-        def pkgdata(names):
-            return {n: {"recipe": "x", "version": v, "origin": "x"}
-                    for n, v in names.items()}
-
-        alt = pkgdata({
-            "kernel-%s" % L4T: "5.15.199-git0-abc-r0.1",
-            "nv-kernel-module-nvidia-%s" % L4T: "36.5.2-r0.3",
-            "nvidia-kernel-oot": "36.5.2-r0.3",
-            "base-files": "3.0.14-r0.1",
-        })
-        doc = rpms.build_manifest(
-            [(pkgdata({"kernel-6.6": "6.6.111-r0.1"}), self.feed),
-             (alt, self.feed, self.listed())],
-            machine="avocado-test")
-        self.assertEqual(sorted(p["name"] for p in doc["packages"]),
-                         ["kernel-%s" % L4T, "kernel-6.6",
-                          "nv-kernel-module-nvidia-%s" % L4T])
-        self.assertEqual(rpms.check_manifest(doc), [])
 
 if __name__ == "__main__":
     unittest.main()

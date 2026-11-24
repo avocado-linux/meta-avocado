@@ -7,780 +7,223 @@ which CVEs affect the packages installed in their image.
 Sources
 -------
 
-Two artifacts a world build already leaves in TMPDIR, both persistent across
-builds:
+Two artifacts a build leaves in TMPDIR, both persistent across builds:
 
-  ${CVE_CHECK_DIR}/<PN>_cve.json          cve-check results, per recipe
+  ${DEPLOY_DIR_IMAGE}/avocado-image-rootfs-${MACHINE_SHORT_NAME}.sbom-cve-check.yocto.json
+                                          CVE analysis of the image's SBOM
   ${TMPDIR}/pkgdata/*/runtime-reverse/*   runtime package name -> recipe
 
-cve-check defaults CVE_CHECK_DIR to ${DEPLOY_DIR}/cve; the configuration below
-scopes it per machine.
+The first is written by sbom-cve-check. The sbom-cve-check tool reads an SPDX
+3.0 document, matches its purl/CPE identifiers against the cvelistV5 and NVD
+databases, applies the VEX statements in that same document, and exports the
+result as a manifest in the JSON shape OE-core's cve-check class writes per
+recipe. scarthgap OE-core has no sbom-cve-check, so this layer carries it: the
+tool (python3-sbom-cve-check 1.4.0 and python3-spdx-python-model), the two
+database recipes (sbom-cve-check-update-nvd-native and
+sbom-cve-check-update-cvelist-native) and the classes, as OE-core has them on
+wrynose. The image class scans the SBOM of avocado-image-rootfs.
+DEPLOY_DIR_IMAGE is already ${DEPLOY_DIR}/images/${MACHINE}, so nothing has to
+be scoped by hand.
 
-They are joined on the recipe name. CVEs are stored once per recipe and
+The two are joined on the recipe name. CVEs are stored once per recipe and
 packages only reference it, so a recipe shipping many packages does not
 duplicate its CVE list.
 
-A format, not a tool
---------------------
+The report generator, avocado_sbom/report.py, is the same on scarthgap and
+wrynose.
 
-The Patched and Ignored subtraction in read_cve_data reads the cve-check JSON
-shape - package[].issue[].status - and nothing else. It does not import, link
-against or extend whatever wrote those files. Keep it that way.
+A tool, not a library
+---------------------
 
-The correlation engine selected to replace in-build cve-check, sbom-cve-check,
-is GPL-2.0 and exports yocto-cve-check-manifest. Pointing --cve-dir at that
-export is a path change, so the engine ships unmodified and the only obligation
-that ever attaches is conveying its public source. Implementing this same
-subtraction as a plugin inside that engine would make it a derivative work
-instead, and shipping it into a customer's on-prem install is a distribution -
-which would put our subtraction under GPL-2.0 too. This layer is Apache-2.0 and
-remains so exactly as long as the boundary holds.
-
-So extend the reader here, never the engine there. If the export turns out to
-be one merged document rather than <PN>_cve.json per recipe, widen the glob in
-read_cve_data; that is still the right side of the line.
+sbom-cve-check is GPL-2.0. This layer runs it as a program and reads the
+manifest it exports; it never imports, links against or extends it. This layer
+is Apache-2.0 and stays so exactly as long as that boundary holds, so extend
+the reader here, never the scanner there.
 
 Requirements
 ------------
 
-  kas build kas/machine/<machine>.yml:kas/feature/cve-check.yml
+  kas build kas/machine/<machine>.yml:kas/feature/cve-check-image.yml \
+      --target avocado-cve-report
 
-That fragment carries this layer and the cve-check configuration. The SPDX
-fragment, kas/feature/sbom.yml, is independent - this report reads
-${DEPLOY_DIR}/cve, not the SPDX documents.
+kas/feature/cve-check-image.yml includes kas/feature/cve-check.yml, which
+carries this layer, switches the build to create-spdx-3.0 (scarthgap's
+create-spdx is 2.2, and the scan reads 3.0), raises SPDX_INCLUDE_VEX to "all"
+so the scan can see the Patched and Ignored statements, and points the CVE
+database recipes at AUTOREV. kas/feature/sbom.yml is the SPDX fragment feed
+builds stack, and sets the same SPDX values, so a scan on top of a feed build
+reuses its SPDX.
 
-Outside kas, the equivalent in local.conf, with this layer in bblayers.conf:
+Outside kas, with this layer in bblayers.conf, the equivalent in local.conf:
 
-  INHERIT += "cve-check"
-  INHERIT += "avocado-cve-optout"
-  INHERIT += "avocado-cve-backports"
-  CVE_CHECK_DIR = "${DEPLOY_DIR}/cve/${MACHINE}"
+  INHERIT:remove = "create-spdx"
+  INHERIT += "create-spdx-3.0"
+  SPDX_INCLUDE_VEX = "all"
+  SRCREV:pn-sbom-cve-check-update-nvd-native = "${AUTOREV}"
+  SRCREV:pn-sbom-cve-check-update-cvelist-native = "${AUTOREV}"
+  AVOCADO_CVE_SCOPE = "image"
+  IMAGE_CLASSES:append = " sbom-cve-check"
 
-Both have to be in place before the build that produces the packages, not just
-before this recipe runs.
+plus the four kernel lines under "Kernel CVEs" below.
+
+SPDX_INCLUDE_VEX = "all" changes the signature of every recipe's SPDX tasks,
+so the first build with it rebuilds all SPDX documents once. It has to be in
+place before the build that produces the SPDX documents, not just before this
+recipe runs.
 
 Usage
 -----
 
-  bitbake world
   bitbake avocado-cve-report
 
-Writes ${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json and
--patched.json: one document per status in AVOCADO_CVE_REPORT_STATUS, which
-defaults to both. The first status keeps the unsuffixed name, so the file
-existing consumers fetch keeps holding what it always held; each further status
-adds a suffixed document beside it.
+with kas/feature/cve-check-image.yml stacked. Writes
+${DEPLOY_DIR}/avocado-cve/avocado-cve-report-${MACHINE}.json.
 
-The two are one build's evidence, split by what a consumer does with each half.
-Unpatched is what a user can act upon. Patched is what our patches and
-CVE_STATUS declarations already fix - the half no server can reconstruct from
-an SBOM, because "openssl 3.0.12" plus an advisory feed cannot know this recipe
-carries a backport. Both carry the same packages_digest, which is what proves
-they describe the same build.
+This is image scope: the report scans the SBOM of one image, the packages that
+image installs. AVOCADO_CVE_IMAGE names the image, avocado-image-rootfs by
+default. do_cve_report depends on the image's do_sbom_cve_check, so the command
+builds the image and runs the scan itself. The report format is the same as at
+any scope, and pkgdata still describes every package the build made, so
+counts.packages is build-wide while the CVEs are the image's. A recipe that
+shipped packages but is not in the image is listed in "unscanned_recipes":
+nothing examined it, which is not the same as clean.
 
-A consumer that rejects a document holding one status asks for All, after the
-other two:
-
-  AVOCADO_CVE_REPORT_STATUS = "Unpatched Patched All"
-
-That adds -all.json: one document listing every CVE of every status, each CVE
-carrying its own in "status" (Unpatched, Patched or Ignored). The document's
-own "status" is then All, which is a kind of report and not something
-cve-check emits. Evidence is attributed per CVE, off its own status, as it is
-in the single-status documents. At All, counts.unpatched_cves, patched_cves
-and ignored_cves count what the document lists, alt_versions records included,
-so on a multi-kernel machine the three sum to cves plus alt_cves rather than to
-cves; at any other status they still count the CVEs of the other statuses it
-left out, and are not derivable from it. So a fix reads as a CVE changing
-status between two builds instead of one disappearing.
-
-All is not in the default, and only a status after the first is suffixed.
-Asked for alone, or first, All takes the unsuffixed name and replaces the
-Unpatched document existing consumers fetch there.
+World scope, the default of AVOCADO_CVE_SCOPE, scans OE-core's
+meta-world-recipe-sbom. scarthgap OE-core does not have that recipe, so with
+kas/feature/cve-check.yml alone avocado-cve-report is skipped, and bitbake says
+why when asked to build it. Reporting on the whole package feed needs a feed
+SBOM, which scarthgap does not build yet.
 
 The same code can run standalone against a build tree, if needed:
 
   PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
       --tmpdir build/tmp --machine <machine> -o avocado-cve-report.json
 
+A later scan of the same build's SBOM, with newer CVE data, can be turned into
+a report without the build tree. The previous report stands in for pkgdata:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --from-report avocado-cve-report-<machine>.json \
+      --manifest <image>.sbom-cve-check.yocto.json -o avocado-cve-report.json
+
+The result is byte for byte the report this layer would have written for that
+manifest, apart from "generated": "packages", "recipe_versions",
+packages_digest, pkgdata_unreadable, package_collisions, machine and
+distro_version carry over, and the status does too unless --status is given.
+--no-summary is not recorded in a report, so pass it again if the previous
+report was written with it. A report without "recipe_versions" is refused,
+since matching against the packages' versions loses CVEs (see "Report
+format"), as is one whose packages do not hash to its packages_digest.
+build_report_from_anchor() in avocado_sbom/report.py is the same as a
+function.
+
+Kernel CVEs
+-----------
+
+sbom-cve-check filters kernel CVEs on configuration by itself. A CVE whose
+affected files (the kernel CNA's programFiles, in cvelistV5) are none of the
+files the kernel compiled is not affected, "Source code not compiled by
+config". The scanner takes that file list from the hasInput sources of the
+kernel's build in the SPDX document, and trusts it only if it names
+init/main.c, include/linux/module.h or a *.mod.c file. Otherwise it warns that
+the list is "missing important files" and matches the kernel on version ranges
+alone.
+
+OE-core writes the list when SPDX_INCLUDE_COMPILED_SOURCES is "1" for the
+kernel recipe, from the sources the kernel's debug info names, so the kernel
+has to carry debug info. kas/feature/sbom.yml sets:
+
+  AVOCADO_KERNEL_DEBUGINFO = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
+
+The switch changes the kernel's packages, so it is in sbom.yml, which feed
+builds stack: a scan has to see the kernel the feed published, or the kernel's
+RPM digests match nothing in the feed. kas/feature/cve-check.yml repeats the
+lines for a scan stacked without sbom.yml. The SPDX lines are :pn-scoped
+because the variable also turns on SPDX_INCLUDE_SOURCES for the recipe, which
+tree-wide would list every source file of every recipe.
+
+avocado-kernel-feed.bbclass reads the switch for linux-yocto and
+linux-yocto-dev and adds features/debug/debug-kernel.scc to
+KERNEL_EXTRA_FEATURES. The bbappend in meta-avocado-raspberrypi adds
+avocado-cve-debug.cfg to linux-raspberrypi on the same switch. The DWARF lands
+in kernel-dbg; what a device installs stays stripped. Vendor kernels are left
+as they are, and the scan matches them on version ranges.
+
+Where CONFIG_DEBUG_KERNEL is already on without the switch, the switch adds
+debug info only: the Intel machines (from the in-tree x86_64_defconfig), the
+Jetson machines' linux-yocto (genericarm64's security fragment sets
+CONFIG_EXPERT, which selects it), the Orange Pi's linux-yocto-dev (from the
+in-tree arm64 defconfig) and linux-raspberrypi.
+
+On the QEMU machines CONFIG_DEBUG_KERNEL is off without the switch, so turning
+it on also un-gates runtime debug options that their BSP's kernel-cache
+fragments request or that default on under it: KGDB and KDB with their console
+hooks, SCHED_DEBUG, CGROUP_DEBUG, RCU_TRACE, DEBUG_MISC and X86_DEBUG_FPU.
+meta-avocado-qemu's linux-yocto bbappend sets
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF = "1" for its machines, which adds
+avocado/debug-kernel-runtime-off.scc (meta-avocado/files/avocado-kmeta) after
+every other feature and turns them back off. A layer whose linux-yocto machine
+has CONFIG_DEBUG_KERNEL off without the switch should set
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF for that machine too.
+
+The Raspberry Pi defconfigs install modules xz-compressed, and OE-core only
+splits and strips files named .ko. With the switch on, the bbappend unpacks the
+modules in the packaging copy (PKGD) and compresses them again, with the
+kernel's xz options, once they are split, so their DWARF goes to kernel-dbg and
+their sources reach the list. The packages and the deploy modules tarball keep
+.ko.xz.
+
+With SPDX_INCLUDE_COMPILED_SOURCES set and no debug info, OE-core lists the
+whole patched tree as compiled, init/main.c included, so the scanner trusts the
+list and filters nothing. Set that switch only on a kernel built with DWARF;
+AVOCADO_KERNEL_DEBUGINFO does both for linux-yocto and linux-raspberrypi.
+
+The scan covers the kernel the image installs. A machine that builds a second
+kernel in another multiconfig (AVOCADO_MULTIKERNEL_MC_RECIPES, the Raspberry
+Pi's 6.6 kernel) publishes that kernel in the feed, but it is in no image SBOM,
+so the report has no record of it and its packages get no verdict.
+
 Variables
 ---------
 
+  AVOCADO_CVE_SCOPE            "world" (default) or "image"; on scarthgap
+                               only "image" reports, see Usage
+  AVOCADO_CVE_IMAGE            image scanned at image scope, avocado-image-rootfs
+  AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
+                               of them; defaults to the world SBOM's export in
+                               ${DEPLOY_DIR_IMAGE}, or the image's at image scope
   AVOCADO_CVE_REPORT_FILE      output path
-  AVOCADO_CVE_REPORT_STATUS    cve-check statuses to report, one document
-                               each, default "Unpatched Patched". The first
-                               keeps AVOCADO_CVE_REPORT_FILE verbatim; each
-                               further one is suffixed with its status.
-                               "All" lists every status in one document, each
-                               CVE carrying its own; see above
-                               Add "Ignored" to audit what
+  AVOCADO_CVE_REPORT_STATUS    CVE status to report, default "Unpatched".
+                               Set to "Ignored" to audit what
                                cve-extra-exclusions.inc and any local
                                CVE_STATUS declaration suppress; each issue then
                                carries "detail" (the CVE_STATUS keyword -
                                cpe-incorrect is a false positive,
                                upstream-wontfix is not) and "description" (the
                                maintainer's rationale), which is the whole
-                               point of running that mode
+                               point of running that mode. Both reach the
+                               manifest as the VEX status notes and statement.
+                               "Patched" is the mode that needs
+                               SPDX_INCLUDE_VEX = "all": under "current" the
+                               fixed-version and cpe-stable-backport statements
+                               never reach the document to be reported on.
+                               "All" lists every status in one report and puts
+                               a "status" on each CVE, so a fix shows up as a
+                               CVE moving from Unpatched to Patched between
+                               builds and Patched, Ignored and absent stay
+                               distinguishable. At "All", counts.unpatched_cves,
+                               patched_cves and ignored_cves count what the
+                               report lists, so they add up to counts.cves; at
+                               any single status they count the CVEs of the
+                               other statuses left out of it. When two
+                               manifests name one recipe, a CVE id is listed
+                               once, with the status of the first manifest
+  AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
   AVOCADO_RPM_MANIFEST_FILE    output path of the RPM manifest, see "The RPM
                                manifest" below
-  AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
-  AVOCADO_CVE_REPORT_STRICT    "0" turns a well-formed report that lost data
-                               into a warning instead of a build failure -
-                               for a build knowingly sharing a CVE_CHECK_DIR
-                               or knowingly interrupted. Default "1". A
-                               malformed report fails the build either way
-  AVOCADO_CVE_REPORT_OPTOUT_DIR
-                               where avocado-cve-optout.bbclass leaves its
-                               markers. Defaults to CVE_CHECK_DIR, beside the
-                               cve-check results they explain
-  AVOCADO_CVE_REPORT_MANIFESTS space-separated globs of image manifests
-                               naming the base runtime. Defaults to the two
-                               images that ship, as two patterns under
-                               ${DEPLOY_DIR_IMAGE}: avocado-image-rootfs-*
-                               .manifest and avocado-image-initramfs-*
-                               .manifest. Matching nothing is not an error -
-                               see "Scope" below
-  AVOCADO_CVE_BOOT_CHAIN       recipes that run on the device but are
-                               installed by no package manager, so no manifest
-                               names them. Defaults to "u-boot
-                               trusted-firmware-a optee-os". Override per
-                               machine: a board with a different
-                               secure-firmware stack has a different list.
-                               avocado-imx.inc, avocado-raspberrypi.inc and
-                               avocado-jetson.inc append theirs - the default
-                               names three generic recipes and i.MX builds
-                               none of them. Append rather than set, or the
-                               default's optee-os goes with it
-
-Evidence
---------
-
-An issue carries an "evidence" when something decided its status. The
-distinction is the point of the patched half.
-
-  cve-status   A recipe declared it. "detail" names the CVE_STATUS keyword and
-               "description" carries the maintainer's rationale. A claim
-               inherited from layer metadata - true of the version, not of what
-               this build compiled.
-
-  patch-file   A patch this recipe applies names the CVE, so the fix is one we
-               carry. This is the fact a consumer holding the same SBOM and the
-               same advisory feed cannot reconstruct, and the set a correlation
-               service subtracts.
-
-  cve-check    cve-check decided a Patched issue itself and neither of the
-               above applies, which normally means the shipped version falls
-               outside every affected range in the CVE database.
-
-Absent only on an Unpatched issue with no detail: nothing decided it, it is
-what the scan found.
-
-cve-check's own output cannot express the middle value. It marks a CVE patched
-by three routes and only the first leaves a trace: a CVE_STATUS declaration
-sets "detail", while an applied patch and a version that predates the CVE both
-arrive with no detail at all. The two are the majority of the patched set, and
-conflating them would hand a consumer a subtraction set built on a guess.
-
-The split is not derivable after the build but is trivial during one, which is
-what avocado-cve-backports.bbclass exists for. get_patched_cves() is exactly
-patch-file CVEs plus CVE_STATUS ones, so subtracting the CVE_STATUS varflags
-leaves the backports. It rescans on every call, so the class is unaffected by
-check_cves() adding its version-comparison verdicts to cve-check's own copy.
-The class writes them per recipe as <PN>_backports.json beside the cve-check
-results, and read_backports() joins them here.
-
-Without the class inherited no issue reports "patch-file" and those issues
-report "cve-check" instead - a build that says less rather than one that
-guesses. do_cve_report notes it rather than failing: unlike a missing opt-out
-marker, a missing backport marker is indistinguishable from a recipe that
-patches no CVE, so there is no residual to assert against.
-
-
-Scope
------
-
-Every recipe entry carries a "scope": which surface of the device it occupies.
-
-  boot-chain    runs on the device, installed by no package manager
-  base-runtime  ships in the image as an installed package
-  feed          built and installable, not in this image
-  build-only    never reaches the device as itself (-native, -cross, nativesdk)
-
-"build-only" is the only value that asserts a recipe is absent from the device,
-so it has to be earned rather than defaulted to. A recipe that produced no
-package is host tooling only if it is named like host tooling - a -native,
--cross, -crosssdk, -initial or -source suffix, or -cross- or -source- inside
-the name, checked against all 94 package-less recipes on a qemuarm64 world
-build; otherwise it is a deploy-only target recipe that ships outside any
-package manager - imx-atf,
-imx-boot, firmware-*, a u-boot with PACKAGES = "" - and it scopes boot-chain.
-See the "packaged" section below, which lists those recipes and says their CVEs
-are real and on the device. Naming each one in AVOCADO_CVE_BOOT_CHAIN would not
-be a fix: a vendor layer adds recipes the default list has never heard of, and
-the mislabel would be silent. A host-side deploy recipe caught by that fallback
-is over-reported, which is the safe direction to be wrong in.
-
-It is a label on the finding, never a filter on the report. That distinction is
-the decision itself, so it is worth stating why the obvious alternative -
-generating the report against the image manifest instead of pkgdata - is wrong
-in three separate directions:
-
-  - A feed package is installable, so "not in the image" is not "not shipped".
-    An image-scoped report says the base runtime is clean while saying nothing
-    about what the customer is about to install.
-  - Static linking breaks package presence. A Go or Rust binary carries its
-    dependencies inside it; the toolchain recipe that built it need not be
-    installed anywhere. A rule keyed on package presence clears findings that
-    are genuinely reachable, so a statically-linked language runtime must be
-    attributed to the dependent package rather than to the toolchain. Stated
-    on principle: no configuration this layer builds today ships one, and the
-    carve-out is not written into the scope function until one does.
-  - The boot chain is in no manifest at all. u-boot and trusted-firmware-a
-    reach the device through avocado-img-bootfiles, which copies out of
-    DEPLOY_DIR_IMAGE wholesale; IMAGE_BOOT_FILES on qemuarm64 is just the
-    kernel. Image-manifest scope silently drops the most privileged code on
-    the device.
-
-That last point is why boot-chain is decided by recipe name, from
-AVOCADO_CVE_BOOT_CHAIN. It also makes the label independent of whether a given
-machine's u-boot sets PACKAGES = "" (see "packaged" below): the bootloader
-scopes boot-chain either way.
-
-An installed package still wins over the name. firmware-imx and tegra-firmware
-are boot chain and also ship packages the rootfs installs, and base-runtime is
-the set a consumer filters on to ask what is in the rootfs, so they must not
-leave it. Naming a recipe in AVOCADO_CVE_BOOT_CHAIN therefore only ever adds
-scope to a recipe no manifest names; it never moves one out of base-runtime.
-
-The coverage denominator does not move. unscanned_recipes and
-no_cve_record_recipes are derived from pkgdata - everything this build produced
-- and reading an image manifest leaves both untouched, which
-tests/test_report.py
-asserts directly by building the same tree twice. Scoping the findings to an
-image without also scoping that denominator would leave a coverage counter
-measuring a different population than the findings beside it; scope being a
-field and not a filter is what avoids the question.
-
-Per-scope totals are deliberately not counters. Every recipe entry carries its
-own scope, so any aggregate a consumer wants is one pass over "recipes" and
-cannot drift from the entries it summarises - which is the failure the derived
--count checks in verify.py exist to catch for the counters that do exist.
-
-device_recipes and device_cves are not an exception to that. They are not a
-per-scope total but the partition the report exists to answer - on the device
-or not - and they are counters for the one reason a per-scope breakdown is not:
-every consumer needs that number, so leaving it out puts the same pass in each
-of them, spelt differently. They are derived after the scope pass and
-re-derived by verify.py from the entries, so they are held to the same standard
-as the aggregates that are not counters.
-
-When no manifest is read, manifests_read is 0 and every packaged recipe scopes
-"feed". do_cve_report is ordered before do_build only, so it can legitimately
-run before the image tasks have written anything - the recipe warns, and the
-degradation is deliberately toward the wider claim. Feed scope over-reports
-what a device carries; base-runtime scope would under-report it, and for a CVE
-report only one of those is safe to get wrong.
-
-Which manifests get read is the same argument one level down, and the default
-has to be narrow because everything it over-reads scopes base-runtime. A
-machine deploys manifests that are not the runtime - Jetson writes six, two of
-them flashing images that run on the host (gptfdisk, e2fsprogs-mke2fs, a dozen
-kernel-module-*) - and avocado-image-container is the SDK container, which no
-device carries. So the two images that ship are named rather than globbed.
-
-Their machine suffix is globbed, because it is not the one in the path:
-avocado.inc sets MACHINE_SHORT_NAME by stripping the avocado- prefix, and the
-images are named with it, so DEPLOY_DIR_IMAGE is avocado-qemuarm64 while the
-manifests inside it are avocado-image-rootfs-qemuarm64.manifest. Anchoring on
-${MACHINE} matches no shipping image on any machine. The directory already
-scopes the machine, so the glob costs nothing. Override the whole default for
-a board whose runtime image is named differently.
-
-More than one version of a recipe
---------------------------------
-
-Raspberry Pi and Jetson build two kernels, in two multiconfigs, and both ship
-in the same feed. The second multiconfig has its own TMPDIR, so its cve-check
-results are not the ones this report reads until avocado-multikernel.bbclass
-merges that kernel recipe's own results into ${CVE_CHECK_DIR}/<mc>.
-
-Where that leaves a recipe built at two versions - linux-raspberrypi at 6.12
-and 6.6 - the entry stays the version the image installs, and the other one is
-an "alt_versions" record on it:
-
-  "linux-raspberrypi": {
-    "version": "6.12.25+git",
-    "packaged": true,
-    "scope": "base-runtime",
-    "cves": [ ... ],
-    "alt_versions": [
-      { "version": "6.6.63+git", "packaged": true, "scope": "feed",
-        "cves": [ ... ] }
-    ]
-  }
-
-A record carries the same four fields as the entry and is read the same way.
-Its scope is its own: one kernel is in the rootfs manifest and the other is
-only in the feed, which is exactly the distinction scope exists to make.
-
-The entry's own "cves", and the "cves" and "packaged_cves" counters, exclude
-them. A consumer that ignores the key reads counters describing exactly what
-it read, and "alt_recipes" and "alt_cves" say what it skipped. Both are zero on
-every single-kernel machine, where no key is emitted at all.
-
-A zero there means one kernel, never a merge that did not run: a machine that
-declares a second multiconfig and finds neither its merged results nor its
-pkgdata fails the task rather than writing the same zero from half the
-evidence.
-
-Two versions in CVE_CHECK_DIR itself are still merged into one entry by CVE id.
-That directory is never pruned, so a result left behind by an earlier build at
-an older PV is indistinguishable from a current one; only a multiconfig
-subdirectory says a second version was built in this build.
-
-The alt multiconfig's pkgdata is read in place, from
-${TOPDIR}/tmp-<mc>/pkgdata/${MACHINE}, and cannot be merged - it is the default
-multiconfig's own sstate-managed directory. Without it nothing declares the
-second kernel's version and every entry is dropped as stale, so the two are
-found together or neither is used. Its packages come last, because a name both
-kernels package - kernel, kernel-dbg, kernel-dev - goes to the first pkgdata
-directory, and that has to be the kernel the image installs. Scope leans on
-the same order: a manifest names a package without a version, so an installed
-name counts for the version that won it, and the feed-only kernel reads "feed"
-rather than base-runtime on a name it shares.
-
-Both kernels' packages name the same recipe, so "recipe" alone cannot join
-kernel-module-*-6.6.63 or kernel-devsrc to the 6.6 record's CVEs. Each package
-whose recipe has a record at its version also carries "recipe_version", the
-version of that record - the entry's or one alt_versions record's - so the join
-is on recipe and recipe_version together:
-
-  "kernel-module-foo-6.6.63": { "recipe": "linux-raspberrypi",
-                                "version": "6.6.63+git-r0",
-                                "origin": "raspberrypi4-64",
-                                "recipe_version": "6.6.63+git" }
-
-It is optional and additive, so the contract stays version 1 and a report
-written before it lacks the key. In a report that writes it, an absent key means
-no record at the package's version is in this document, so no CVE at this
-status belongs to it; falling back to the entry would file a second-kernel
-package under the shipped kernel's CVEs. A name both kernels package names the
-version that won it, as scope does. The check fails a recipe_version that names
-no record of the package's recipe.
-
-Standalone, the same shape needs both directories named:
-
-  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
-      --cve-dir build/tmp/deploy/cve/$MACHINE \
-      --alt-cve-dir build/tmp/deploy/cve/$MACHINE/raspberrypi-6_6 \
-      --pkgdata-dir build/tmp/pkgdata/$MACHINE \
-      --pkgdata-dir build/tmp-raspberrypi-6_6/pkgdata/$MACHINE \
-      --machine $MACHINE -o avocado-cve-report.json
-
-Known ceiling: the opt-out and backport markers merged into that subdirectory
-are keyed by recipe name, and read_optouts/read_backports glob the top level
-only. So a backport carried by the second kernel alone reports "cve-check"
-evidence rather than "patch-file" - understating what the build patched, never
-overstating it. Neither kernel emits a backport marker today; key them by
-(name, version) when either one does.
-
-The kernel, and why it is filtered separately
----------------------------------------------
-
-The kernel is 72% of the report and most of it does not apply. cve-check flags a
-CVE when the vulnerable *source* is present; the kernel CNA records which files
-each CVE lives in, and the kernel's SPDX document records which files this
-configuration compiles. do_kernel_cve_improve joins the three, by running
-oe-core's scripts/contrib/improve_kernel_cve_report.py.
-
-Measured on qemuarm64, linux-yocto 6.6.142+git, 2026-08-28:
-
-  raw cve-check                795 unpatched   43 critical, 347 high
-  + version analysis alone   2,310 unpatched
-  + compiled-files filter      700 unpatched   13 critical, 123 high
-
-Read the middle row before treating this as a filter. The script is an
-enrichment tool first: it merges the CNA's whole vulnerable set for our version
-into the report, which on its own makes the report three times louder. The
-compiled-files filter is what pays for that - it is not an optimisation on top
-of a small win, it is the thing that makes the tool adoptable. Of the original
-795, 494 clear; 399 findings are new, and 395 of those carry no CVSS at all
-because the kernel CNA assigns none. A consumer gating on severity has to decide
-what an unscored kernel finding means; the report states the absence rather than
-inventing a score.
-
-These settings arm it, and the task says so when one is missing rather than
-quietly filtering nothing:
-
-  AVOCADO_KERNEL_DEBUGINFO = "1"
-  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
-  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
-  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
-  AVOCADO_CVE_KERNEL_VULNS_DIR = "${DL_DIR}/kernel-vulns"
-
-The first four are in kas/feature/sbom.yml, so every build that stacks it
-builds a debug-info kernel, the feed builds included. A scan run on top of a
-feed build has to see the kernel the feed published: a kernel built for the
-scan alone would differ from it, its packages' RPM digests would match nothing
-in the feed, and they would get no verdict. kas/feature/cve-check.yml repeats
-the four, so a scan stacked without sbom.yml still filters, and adds the
-fifth.
-
-The switch is load-bearing: without kernel DWARF the debugsources hold 351
-binaries and zero sources, and the filter cuts nothing. It is read in two
-places. avocado-kernel-feed.bbclass appends features/debug/debug-kernel.scc to
-KERNEL_EXTRA_FEATURES, which only the linux-yocto recipes read; that feature
-sets CONFIG_DEBUG_KERNEL, CONFIG_DEBUG_INFO and
-CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT. linux-raspberrypi ignores
-KERNEL_EXTRA_FEATURES, so its bbappend in meta-avocado-raspberrypi adds a config
-fragment (avocado-cve-debug.cfg) on the same switch. The DWARF is split into
-kernel-dbg, so the packages a device installs stay stripped. The compiled-file
-list the filter reads comes from the recipe's SPDX document.
-
-The Raspberry Pi defconfigs, 6.12 and 6.6 alike, install modules
-xz-compressed, and OE-core only splits and strips files named .ko. With the
-switch on, the bbappend unpacks the modules in the packaging copy (PKGD) and
-compresses them again, with the kernel's xz options, once they are split, so
-their DWARF goes to kernel-dbg and their sources reach the list. The packages
-and the deploy modules tarball keep .ko.xz.
-
-Where CONFIG_DEBUG_KERNEL is already on without the switch, the switch adds
-debug info only. That is the Intel machines (from the in-tree
-x86_64_defconfig), the Jetson machines' linux-yocto kernel (genericarm64's
-security fragment sets CONFIG_EXPERT, which selects it), the Orange Pi's
-linux-yocto-dev (from the in-tree arm64 defconfig) and linux-raspberrypi. The
-runtime debug options their BSPs request already ship there.
-
-On the QEMU machines CONFIG_DEBUG_KERNEL is off without the switch, so turning
-it on also un-gates runtime debug options that kernel-cache fragments in the
-BSP request, or that default on under it. On qemux86-64 (linux-yocto 6.6.151)
-the switch turned these on:
-
-  KGDB, KGDB_KDB, KGDB_SERIAL_CONSOLE, KGDB_LOW_LEVEL_TRAP,
-  KGDB_HONOUR_BLOCKLIST, KDB_KEYBOARD, CONSOLE_POLL,
-  KDB_DEFAULT_ENABLE=0x1, KDB_CONTINUE_CATASTROPHIC=0,
-  SCHED_DEBUG, CGROUP_DEBUG, RCU_TRACE, DEBUG_MISC, X86_DEBUG_FPU
-
-meta-avocado-qemu's linux-yocto bbappend sets
-AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF = "1" for its machines, and with the
-switch on avocado-kernel-feed.bbclass then adds
-avocado/debug-kernel-runtime-off.scc (meta-avocado/files/avocado-kmeta) to
-KERNEL_FEATURES, which turns them back off. It is added from anonymous python
-so it lands after every other feature and wins over the fragments that request
-them. The two KDB values go with KGDB_KDB. A layer whose linux-yocto machine
-has CONFIG_DEBUG_KERNEL off without the switch should set
-AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF = "1" for it too; elsewhere the variable
-defaults to "0" and the off-list is not applied.
-
-The SPDX lines are :pn-scoped because SPDX_INCLUDE_COMPILED_SOURCES sets
-SPDX_INCLUDE_SOURCES in that recipe's datastore alone (spdx-common.bbclass:44).
-Tree-wide it measured 5.36 GB of SPDX and ~50-70 GB to parse; kernel-only it
-costs 63 MB. The last line points at a clone of the CNA data and pulls in
-avocado-cve-kernel-vulns-native to keep it current. It stays in cve-check.yml:
-the clone is only needed where the filter runs.
-
-Measured on a Pi 5 (avocado-raspberrypi5, linux-raspberrypi 6.12.25),
-Unpatched Patched All, 2026-10-28: the shipped kernel's Unpatched count fell
-from 3,314 to 1,710, with 6,378 CVEs ignored as not compiled. All 6,919 CVEs the
-script adds carry no CVSS score, 923 of them Unpatched.
-
-The task runs the script with bitbake's interpreter, which under buildtools has
-no packaging module, so the recipe depends on python3-packaging-native and
-extends PYTHONPATH. It also hands the script a copy of the cve-check JSON with
-the "1_" prefix meta-raspberrypi puts on its kernel PV removed, because
-packaging.Version rejects it.
-
-Where the settings are unset, the task notes the absence and the report carries
-cve-check's own kernel results. That is also what a vendor kernel gets: neither
-the .scc nor the fragment reaches linux-imx and friends, so they produce no
-DWARF, and the task warns and leaves their scan alone rather than filtering it
-on a list that is not the kernel tree.
-
-The script matches the CNA's programFiles against the compiled-source list by
-exact path, after dropping the first path component of each name. Every
-recipe document lists its SRC_URI files (defconfig, config fragments) as
-sources, debug info or not, so having sources proves nothing: filtered on
-those, every in-range CVE that names its files comes out not compiled. The
-task filters a kernel only when its list, normalized the same way, holds
-init/main.c or include/linux/module.h, which every kernel build compiles.
-
-What the check cannot tell apart: with SPDX_INCLUDE_COMPILED_SOURCES set and
-no debug info, oe-core lists the whole patched tree as compiled, init/main.c
-included. That list passes, the script finds every programFiles path compiled,
-and the kernel is marked filtered with nothing filtered out. Set that switch
-only on a kernel built with DWARF; AVOCADO_KERNEL_DEBUGINFO does both for
-linux-yocto and linux-raspberrypi.
-
-The improved results are written to ${CVE_CHECK_DIR}/kernel-improved/ and read
-as an overlay: a file there replaces the same-named file from CVE_CHECK_DIR.
-cve-check's own output is never overwritten, so the before and the after both
-stay on disk and stay comparable - which is what an accuracy check needs.
-
-Every kernel the machine builds is filtered, not only the one the image
-installs. A multi-kernel machine's other kernels come from the multiconfig
-subdirectories avocado-multikernel.bbclass merges (see "More than one version
-of a recipe"); each is filtered on its own SPDX document, from
-${DEPLOY_DIR_SPDX}/<mc>, into ${CVE_CHECK_DIR}/<mc>/kernel-improved/. A
-multiconfig's kernels are the recipes it declares in
-AVOCADO_MULTIKERNEL_MC_RECIPES whose cve-check entry names the linux_kernel
-product, so a multiconfig can build any number of them (a Jetson's L4T kernel
-and its RT variant) and an out-of-tree module recipe beside them is left out.
-
-Each kernel's record, the entry and every alt_versions record alike, carries
-"kernel_filtered": true when its CVEs came from the filter, false when they
-are cve-check's own version-only results. A kernel without the kernel tree in
-its SPDX document's compiled sources - a vendor kernel the debug-info switch
-does not reach - is false, and its count is the unfiltered one. Measured on a 2024 Pi 5, the
-feed-only 6.6.63 kernel listed 4,157 affected CVEs unfiltered against the
-shipped 6.12.93's 1,035 filtered. The key is optional and additive, like
-recipe_version, so the contract stays version 1.
-
-The script is run as a subprocess, never imported. It is GPL-2.0 and this layer
-is Apache-2.0; see "A format, not a tool" above for the same boundary.
-
-The frozen contract
--------------------
-
-The report shape is frozen; its contents are not. Two independent codebases
-build against it - the producer here, and the consumers in avocado-cli and at
-Peridio - and neither can wait on the other to ship.
-
-Three artifacts hold the line:
-
-  schema/avocado-cve-report-v1.schema.json  the envelope, as JSON Schema
-  tests/fixtures/avocado-cve-report.json    a real report, cut down small
-  lib/avocado_sbom/verify.py                the check both CI and the build run
-
-  Frozen                             Not frozen
-  ---------------------------------  -------------------------------------
-  Top-level keys and their types     Which packages, recipes or CVEs appear
-  The counter namespace              Any package identifier or CVE id
-  Every counter present and numeric  The value of any count
-  Health counters zero               Version strings, scores, links
-  Entry shape - every recipe alike   How many of anything there are
-
-The distinction is load-bearing. A fixture pinned to package versions or CVE
-counts turns every mapping correction into a red build, and the natural fix -
-regenerating the fixture - destroys the regression test in the process. So the
-assertion is "every health counter is present and equals zero", never "the
-report contains exactly these 6,224 packages". The first catches the failure
-this exists for; the second breaks whenever anyone does real work.
-
-Checking a report
------------------
-
-  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.verify REPORT.json
-
-Exits non-zero and prints every violation. --strict also fails on keys the
-checker does not know about, which is what CI uses against the fixture.
-
-The same check runs inside do_cve_report against every report the build
-produces, after the existing counter diagnostics, in three severities:
-
-  malformed    the shape is wrong - a missing counter, a count that disagrees
-               with what the document holds, a digest that no longer matches
-               the package set. Never publishable, so it fails the build
-               whatever AVOCADO_CVE_REPORT_STRICT says
-  incomplete   the shape is right and data is missing - a non-zero health
-               counter, or recipes carrying CVEs with none of them correlated
-               to an installed package. Fails the build by default;
-               AVOCADO_CVE_REPORT_STRICT = "0" downgrades it to a warning
-  undeclared   the report is complete and a recipe in unscanned_recipes
-               declares no reason for being there - the scan changed shape, not
-               the data. Same severity as incomplete
-
-check_report(report, health=False) and check_health(report) are the two halves,
-if you need them separately. check_unscanned_declared(report, declared) is the
-third and stays out of both: it needs the opt-out markers, which live beside
-the build's cve-check results rather than in the report, so a consumer holding
-only the JSON cannot run it. The CLI takes the directory as --optout-dir DIR.
-
-Why reasons and not a count
----------------------------
-
-The first version of this check declared the number of unscanned recipes and
-failed when the build disagreed. It was replaced because a count cannot answer
-the question it raises. When it fires, the only information it carries is that
-the number moved - so the only available fix is to copy the new number back
-into the configuration, which is a check nobody can fail. Worse, one opt-out
-gained while one scan was silently lost leaves the total unchanged and the
-check quiet, which is exactly the event it existed to catch.
-
-The recipes in that list are not an arbitrary set that happens to have a size.
-Every one of them declared, in its own metadata, that it has no CVE surface:
-
-  CVE_PRODUCT = ""              set by packagegroup.bbclass for every
-                                packagegroup, and by recipes whose CVEs belong
-                                to another recipe - glibc-locale defers to
-                                glibc
-  CVE_CHECK_SKIP_RECIPE         PN listed explicitly
-  CVE_CHECK_LAYER_EXCLUDELIST   the layer opted out
-  CVE_CHECK_LAYER_INCLUDELIST   the layer was never opted in
-
-avocado-cve-optout.bbclass records which of these fired, per recipe, as
-${CVE_CHECK_DIR}/${PN}_optout.json, at the moment cve-check decides to write
-nothing. do_cve_report then asserts that every unscanned recipe has a marker.
-
-So a packagegroup added today declares itself and no one edits anything, while
-a recipe that stops being scanned and declares nothing fails the build naming
-itself. The check also stops being machine-specific: it asserts that each
-recipe said why, never how many did, so it holds on every MACHINE and image
-scope - which the count never could, and which is why the count had nowhere to
-live.
-
-What it does not separate is intent, and the four mechanisms above are why. The
-reason is derived from the same predicates cve-check bails on, so a CVE_PRODUCT
-cleared by a bad rebase writes the same "CVE_PRODUCT is empty" marker that
-glibc-locale's deliberate deferral does - on a feed-scoped qemux86-64 build all
-15 markers carry exactly that reason. An accidental opt-out through any of the
-four is therefore declared, and passes. What fails is a recipe with no result
-and no marker at all, which is the scan not having run: an interrupted build,
-this class not inherited, or a recipe still in pkgdata that the build's graph no
-longer reaches. Separating accident from intent would need the marker to record
-what was intended rather than which predicate fired, which is a different
-mechanism from this one.
-
-The reverse case is a warning, not a failure: a recipe that declared an opt-out
-and was scanned anyway means a marker outlived its declaration. The report is
-complete, so the build passes, but the stale marker is widening what the check
-accepts and is worth clearing. CVE_CHECK_DIR is never pruned, so the class
-removes a marker whenever a recipe stops opting out.
-
-Markers outnumber unscanned_recipes, and that is not the reverse case: a recipe
-that opts out and ships no runtime package writes one too, and was never a
-candidate for the list - a feed-scoped qemux86-64 build wrote 15 markers for 11
-unscanned recipes. Only declarations by recipes that shipped a package are held
-against the report.
-
-A build with something unscanned and no markers at all fails as incomplete
-rather than skipping the check: nothing distinguishes "no recipe opts out" -
-which no real build has been - from avocado-cve-optout not being inherited, and
-silently skipping is the failure mode the whole check exists to prevent. Add
-INHERIT += "avocado-cve-optout", or stack kas/feature/cve-check.yml.
-
-A build with nothing unscanned needs no markers and is not held to this: there
-is no recipe to excuse, so a missing marker cannot be hiding one.
-
-A build with no unpatched CVEs at all is not a failure of either kind. Zero
-recipes, zero CVEs and zero packaged recipes is what a fully patched build
-correctly reports, and it passes.
-
-What it checks beyond the schema: seven counters are re-derived from the document
-that reported them, and packages_digest is recomputed from the package set.
-counts.packages and len(packages) come out of the same code path in the
-generator, so they can only disagree if something dropped packages after the
-fact - which is the failure that shipped a report missing 61 of 139 packages
-and went unnoticed for weeks.
-
-Six counters (cve_files, manifests_read, unpatched_cves, ignored_cves,
-patched_cves, unknown_status_cves) count inputs that are not in the report and
-cannot be re-derived from it. They are carried for fidelity and their values
-are never asserted on. One exception, and only at zero: cve_files = 0 fails,
-because no cve-check file was consumed at all and every other counter is
-describing a scan that never happened.
-
-The fixture
------------
-
-tests/fixtures/avocado-cve-report.json is a real report with whole recipes and
-whole packages removed, small enough to read in a diff. No record in it was
-edited by hand; only the counters describing the trimmed set were rewritten,
-and the six underivable counters above are carried from the source report
-unchanged - which is why cve_files and patched_cves are far larger than seven
-recipes would produce. Regenerate rather than hand-edit:
-
-  python3 tests/fixtures/make-fixture.py FULL-REPORT.json \
-      -o tests/fixtures/avocado-cve-report.json
-
-It carries no customer-specific data. The package set is ours, the CVE matches
-come from public advisories, the counters are our own computation; which
-organisation runs which image is not in the report at all.
-
-tests/test_verify.py proves the check by mutation - it breaks the fixture the
-way a real regression would, thirty-odd ways, and asserts each break is caught.
-The controls at the end of that file matter as much as the mutations: a new
-advisory with the counters updated, and a package remapped onto another recipe,
-both have to pass. A check that fires on ordinary CVE churn gets switched off
-within a week.
-
-  python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'
-
-Compatibility policy
---------------------
-
-"version" is the major, and it is currently "1". A consumer must reject a major
-it does not implement rather than reading the parts it recognises.
-
-Allowed without a bump, so consumers must ignore what they do not know:
-
-  - a new top-level key
-  - a new counter in "counts"
-  - a new field inside a CVE record
-  - any change in values, counts, or which entries appear
-
-Requires a new major:
-
-  - removing or renaming a top-level key or a counter
-  - changing the type of an existing key, or the meaning of one
-  - changing what a counter counts, including how packages_digest is computed
-  - making an optional key required, or dropping "machine"/"distro_version"
-
-Adding a counter means updating four files in one change: the Stats namespace
-and the counts block in report.py, the schema, REPORT_COUNTERS in verify.py,
-and the counts block in tests/fixtures/make-fixture.py. Tests bind the schema,
-the checker and Stats to each other, so a change that touches only some of the
-first three fails before it reaches a consumer. make-fixture.py has no such
-test - binding it would mean running it, which needs a real report - and it
-builds counts from its own key list, so a counter missing there is only found
-when someone regenerates the fixture and CI reports it missing. It does import
-HEALTH_COUNTERS from verify rather than restating it, so at least the question
-of which counters must be zero has one answer and not two.
-
-The status "All" is an addition under these rules and not a new major. It is
-requested by name and never in the default, so no document an existing consumer
-fetches carries it; one that meets it rejects it on "status" being a value it
-does not know, which is the check it already makes. What the three per-status
-counters count at All differs from what they count at any other status, which
-the schema says beside each of them: the meaning is a function of the document's
-own "status", and at every status that existed before it is unchanged.
-
-One change was made under these rules that they would otherwise forbid.
-unscanned_recipes originally counted recipes with no cve-check result *and*
-recipes cve-check looked up and found no NVD record for, which made it read as
-a coverage gap when most of it was a scan result; the second group moved to
-no_cve_record_recipes, and both new keys are required rather than optional.
-That is "changing what a counter counts" and it would need a major. It was made
-at version 1 because version 1 had no consumer at the time - the report was
-produced by this layer and read by nothing outside it. The rules above apply
-from here without that exemption.
-
-A second change was made under these rules that they would otherwise forbid.
-"scope" was added to every recipe entry as a required field, so a report
-generated before it fails the current checker. The rules do not actually name
-this case - "making an optional key required" is a different thing, since scope
-was never optional, and the allowed list covers a new field inside a CVE record
-rather than inside a recipe entry. Read against their intent it is a new major.
-It was made at version 1 deliberately: an optional scope is worse than none,
-because a consumer would have to guess what
-an absent scope meant, and the only safe guess - "feed" - is exactly the value
-a producer that had read no manifest would have written anyway. The two cases
-are indistinguishable and one of them is wrong. Requiring it makes a producer
-that cannot label a finding say so through manifests_read instead. The cost is
-bounded: do_cve_report is nostamp, so every build regenerates the report, and
-ENG-2363 rejects stale documents at the Connect boundary regardless.
-
-A third, on the same footing. device_recipes and device_cves are new counters,
-which the rules allow, but both are required rather than optional, so an
-archived pre-PR report fails the current checker. Same reasoning as scope: an
-optional counter a consumer has to guess the absence of is worse than one it
-can rely on, and do_cve_report is nostamp so every build regenerates.
-
-Consumers reading version 1 are unaffected either way - this tightens what a
-producer must emit, never what a reader must understand.
-
-"machine" and "distro_version" are optional by construction rather than by
-policy: build_report never writes them, the recipe does, so a standalone run
-legitimately lacks both.
 
 Report format
 -------------
@@ -792,21 +235,18 @@ Report format
     "packages_digest": "sha256:0f3c...",
     "status": "Unpatched",
     "unscanned_recipes": [ "packagegroup-core-boot", "..." ],
-    "no_cve_record_recipes": [ "attr", "..." ],
     "counts": { "recipes": 225, "cves": 2206,
                 "packaged_recipes": 177, "packaged_cves": 1927,
-                "device_recipes": 181, "device_cves": 1963,
-                "packages": 30747, "cve_files": 3571, "stale_dropped": 0,
-                "unscanned_recipes": 71, "no_cve_record_recipes": 402,
-                "cve_files_unreadable": 0,
-                "pkgdata_unreadable": 0, "package_collisions": 0,
-                "unpatched_cves": 0, "patched_cves": 0, "ignored_cves": 0,
-                "unknown_status_cves": 0, "manifests_read": 2 },
+                "packages": 30747, "cve_files": 1, "stale_dropped": 0,
+                "unscanned_recipes": 34, "cve_files_unreadable": 0,
+                "entries_unreadable": 0, "pkgdata_unreadable": 0,
+                "package_collisions": 0, "unpatched_cves": 0,
+                "patched_cves": 0, "ignored_cves": 0,
+                "unknown_status_cves": 0 },
     "recipes": {
       "openssl": {
         "version": "3.5.7",
         "packaged": true,
-        "scope": "base-runtime",
         "cves": [ { "id": "CVE-...", "scorev3": "7.5", "vector": "NETWORK",
                     "summary": "...", "link": "https://nvd.nist.gov/..." } ]
       }
@@ -817,35 +257,8 @@ Report format
     }
   }
 
-device_cves is the headline: CVEs over every recipe whose scope is anything but
-build-only. Read that one, not packaged_cves.
-
-"recipe_versions" maps every recipe in pkgdata to the versions its packages
-were built at, PV and PKGV, sorted and without repeats:
-
-  "recipe_versions": { "glibc": [ "2.43+git", "2.43+git1+562cd7badd" ] }
-
-These are the versions a scan entry is matched against: an entry for a recipe
-listed here is dropped as stale when neither its version nor that version with
-any EXTENDPE prefix ("2_0.10.0") stripped is one of them, and an entry for a
-recipe not listed is kept. A consumer rebuilding the report from a later scan
-without the build tree needs the map to reach the same CVEs: "packages"
-carries PKGV-PKGR, which is not what a scan entry records, and matching
-against it drops every recipe whose PV differs from it, as glibc's does.
-packages_digest does not cover the map, and it is optional and additive, so
-the contract stays version 1.
-
-packaged_cves counts pkgdata membership, which is not the same question and is
-wrong in both directions for this one. A deploy-only bootloader packages
-nothing and ships anyway, so it is missing from it; a nativesdk recipe packages
-something and reaches no device, so it is inside it. Both counters are kept:
-the compatibility policy below makes redefining one a new major, and the
-pkgdata number is still what answers "how much of this correlated to something
-installed". Where they differ, the difference is the two cases above plus the
-stale leftover below, and every recipe entry says which it is.
-
 "packaged": false marks a recipe absent from pkgdata, i.e. one that produced no
-runtime package. Three different things land there:
+runtime package. Two different things land there:
 
   - -native and -cross recipes, which run on the build host and correlate to
     nothing installed. They are kept because they still describe the build's
@@ -853,96 +266,57 @@ runtime package. Three different things land there:
   - deploy-only target recipes, which do ship on the device but outside any
     package: imx-atf and imx-boot (do_install[noexec], inherit deploy),
     u-boot variants with PACKAGES = "", optee-os, firmware-* recipes. Their
-    CVEs are real and on the device, they scope boot-chain, and device_cves
-    counts them. packaged_cves does not, which is why it is not the headline.
-  - recipes this build no longer produces at all, whose <PN>_cve.json is left
-    over from an earlier configuration. Switching
-    PREFERRED_PROVIDER_virtual/kernel, or dropping an AVOCADO_FEATURE_GROUPS
-    entry, leaves the old recipe's file in ${DEPLOY_DIR}/cve forever: nothing
-    upstream removes it, do_cve_check is nostamp with no sstate so cleanall
-    never reaches it, and stale_dropped cannot see it either - that counter
-    only fires when pkgdata knows the recipe at some other version. Delete
-    ${DEPLOY_DIR}/cve when you change what a machine builds.
+    CVEs are real and on the device.
+  - recipes this build no longer produces at all. The manifest is rewritten
+    whole by each scan, so these cannot pile up across configuration changes
+    the way per-recipe result files could; stale_dropped only fires when
+    pkgdata knows the recipe at some other version.
 
-A recipe that shipped a package and is absent from "recipes" is in exactly one
-of three states, and the report says which:
-
-  - scanned, the NVD has records for its product, none matched at the reported
-    status. Clean, and in neither list.
-  - scanned, the NVD holds no record for its product at all. In
-    "no_cve_record_recipes".
-  - not scanned. In "unscanned_recipes".
-
-The two lists are disjoint and both are scoped to recipes in "packages", so
-together with the clean ones they account for every shipped recipe exactly
-once. Do not add them together and call the result a coverage gap: only the
-third state is one.
-
-The partition assumes stale_dropped is zero, which is the condition for
-publishing at all. A recipe whose only cve-check entry was dropped as stale was
-scanned, so it is in neither list - but its CVEs were discarded, so it is not
-clean either, and it reads as the first state. That is why stale_dropped is a
-health counter: a report carrying one is not fit to publish, and
-AVOCADO_CVE_REPORT_STRICT = "0" publishes it anyway with a warning.
-
-  device_recipes        recipes whose scope is anything but build-only, and so
-                        not the same set as packaged_recipes - see the
-                        "packaged" section above
-  device_cves           CVEs over those recipes. The headline number, and the
-                        one the layer's own output leads with
-  cve_files             cve-check files consumed
-  unscanned_recipes     recipes that shipped packages and have no cve-check
-                        entry at all - nothing looked at them. Named
-                        individually in the top-level "unscanned_recipes" list.
-                        Normally non-zero: a recipe opts out with
-                        CVE_PRODUCT = "", which packagegroup.bbclass sets for
-                        every packagegroup. Do not gate on the number and do
-                        not trend it: it moves whenever our own configuration
-                        changes, in both directions, and a stale
-                        ${DEPLOY_DIR}/cve or pkgdata moves it too - both
-                        accumulate across builds and nothing prunes either.
-                        What is checked is the membership, not the size:
-                        avocado-cve-optout records why each of these recipes
-                        was skipped and do_cve_report fails on any that gives
-                        no reason. See "Why reasons and not a count".
-                        Measured for orientation, not as a threshold: both
-                        avocado-qemuarm64 and avocado-qemux86-64 feed-scoped
-                        read 11 on 2026-08-20 - the same 6 packagegroups, 4
-                        avocado meta-recipes and glibc-locale, over 222 and 218
-                        shipped recipes respectively. The set is structural
-                        rather than per-MACHINE, which is more than the check
-                        needs and less than a threshold: nothing gates on that
-                        number, it is deliberately in no conf file, and another
-                        MACHINE or image scope may read a different one and not
-                        be wrong
-  no_cve_record_recipes recipes that shipped packages and were scanned, but
-                        whose products came back cvesInRecord "No" - the NVD
-                        holds no record under that product name - and that
-                        carry no CVE at the reported status. Both conditions
-                        matter: cve-check writes "No" for a product whose every
-                        record it ignored or found patched, so at a status
-                        other than "Unpatched" a recipe can be marked with no
-                        record and still report CVEs. Those are in "recipes",
-                        which is the leg of the partition that wins. Named in
-                        the top-level "no_cve_record_recipes" list. This is a scan
-                        result, not a coverage gap, and it is normally the
-                        larger of the two: most of a rootfs is software the NVD
-                        has never had an advisory for. A CVE_PRODUCT that names
-                        no real product looks identical from here, so check
-                        this list when a recipe you expect CVEs for is quiet.
-                        Trend it, do not gate on it: it moves when the NVD
-                        grows an advisory for something already shipped, which
-                        is not this build breaking. A sharp rise still deserves
-                        a look, for the CVE_PRODUCT reason above
-  stale_dropped         cve-check entries discarded because no recipe in
-                        pkgdata built that version
-  cve_files_unreadable  cve-check files that would not parse, including files
-                        that are valid JSON of the wrong shape
+  cve_files             manifests consumed; one, unless AVOCADO_CVE_MANIFEST
+                        points at a directory holding several
+  unscanned_recipes     recipes that shipped packages but are absent from the
+                        manifest - unscanned, not clean. Named individually in
+                        the top-level "unscanned_recipes" list, so a consumer
+                        can tell a recipe nothing examined from one that was
+                        examined and found clean; both are absent from
+                        "recipes". At image scope this is every recipe that
+                        shipped packages the image does not install, so it is
+                        most of the feed. A recipe that was scanned and came
+                        back clean is not here - it has an entry in the
+                        manifest with an empty issue list
+  stale_dropped         manifest entries discarded because no recipe in
+                        pkgdata built that version. Their recipes still count
+                        as scanned, so they are not in "unscanned_recipes" as
+                        well - a version mismatch and a recipe nothing looked
+                        at stay distinguishable
+  cve_files_unreadable  manifests that would not parse, including files that
+                        are valid JSON of the wrong shape
+  entries_unreadable    single manifest entries of the wrong shape, skipped
+                        one by one; the rest of that manifest is still read
+  unknown_status_cves   CVEs filtered out on a status that is not one of
+                        Unpatched, Patched or Ignored - nothing sbom-cve-check
+                        is known to emit, so a non-zero value means the report
+                        is not describing everything the scan found. The
+                        bitbake task warns on it
   pkgdata_unreadable    pkgdata entries that would not parse
   package_collisions    package names claimed by more than one recipe or
-                        version; the first pkgdata directory won. Not a health
-                        counter: the winner is deterministic and the report is
-                        complete, so it is noted rather than failed on
+                        version; the first pkgdata directory won
+
+"recipe_versions" maps every recipe in pkgdata, scanned clean or not, to its
+packages' PV and plain PKGV, sorted and without repeats:
+
+  "recipe_versions": { "glibc": [ "2.43+git", "2.43+git1+562cd7badd" ] }
+
+A package's own PKGV:<package> (lvm2's libdevmapper at 1.02.213) is left out:
+no manifest entry carries it. These are the versions a manifest entry is
+matched against: an entry for a recipe listed here is dropped as stale when
+neither its version nor that version with any EXTENDPE prefix ("1_1.20.0")
+stripped is one of them, and an entry for a recipe not listed is kept. A
+consumer rebuilding the report from a later scan without the build tree needs
+the map to reach the same CVEs: "packages" carries PKGV-PKGR, which is not
+what a manifest entry records, and matching against it drops every recipe
+whose PV differs from it, as glibc's does. packages_digest does not cover the
+map, and it is optional and additive, so the report stays version 1.
 
 The RPM manifest
 ----------------
@@ -950,11 +324,12 @@ The RPM manifest
   bitbake avocado-cve-report
 
 also writes ${DEPLOY_DIR}/avocado-cve/avocado-rpm-manifest-${MACHINE}.json:
-every RPM the build put in the feed, each with the digest of its header. A service
+every RPM the build produced, each with the digest of its header. A service
 that keeps a verdict per build needs it, because two builds of one
 name-version-release are different files with different headers, and neither
 Pulp nor the report records which build a file came from. It joins the report
-on the package name and a repository on the header digest.
+on the package name and a repository on the header digest. The format is the
+same on scarthgap and wrynose, so one consumer reads both.
 
   {
     "version": "1",
@@ -977,44 +352,58 @@ which also covers the payload. file is relative to ${DEPLOY_DIR_RPM}. version
 has a "+" where the upstream version has a "-", because rpm refuses a hyphen
 there.
 
-It lists everything pkgdata names, the -dbg, -dev and -src packages included,
-not only what an image installs: a service rescanning the whole feed, and
-customer runtimes that pull packages the reference image does not have, need
-all of it. Pkgdata says which version and release of each package this build
-made, and ${DEPLOY_DIR_RPM} keeps every release ever built, so each file is
-named from pkgdata's PKGV-PKGR rather than globbed, and takes its arch from the
-directory it sits in. The header found there must then name the same package.
+It lists everything ${PKGDATA_DIR} names, the -dbg, -dev and -src packages
+included, not only what an image installs: a service rescanning the whole feed,
+and customer runtimes that pull packages the reference image does not have,
+need all of it. This holds at both report scopes. Pkgdata says which version
+and release of each package this build made, and ${DEPLOY_DIR_RPM} keeps every
+release ever built, so each file is named from pkgdata's PKGV-PKGR rather than
+globbed, and takes its arch from the directory it sits in. A package with its
+own PKGV (lvm2's libdevmapper) is named by that one. The header found there
+must then name the same package.
 
-A machine that builds a second kernel in another multiconfig lists that tree
-too, from tmp-<mc>'s pkgdata, but only the RPMs avocado-distro's
-do_multikernel_merge put in the feed: it publishes the alternate kernel's
-version-tagged RPMs and nothing else, and writes what it published to
-${DEPLOY_DIR}/avocado-multikernel/<mc>-rpms.txt. Those are read from
-${DEPLOY_DIR_RPM}, the copy the feed serves, and named from pkgdata like the
-default tree's, so an older release in the list is not listed. A missing list,
-a listed file of this build's that is not there, or a list naming none of this
-build's packages fails the build; this task depends on the merge, so the list
-is always this build's. The recipe deletes rm_work's do_rm_work_all, which
-would follow that dependency into the rest of avocado-distro and rebuild its
-images, repackaging the rootfs image while this task reads ${DEPLOY_DIR_RPM}.
-The two kernels package the same names at different versions, so a name is not
-an identity here; name, arch, version and release together are, and two files
-with that identity but different headers fail the build.
+It reads the same machine pkgdata as the report, because the two are consumed
+as a pair and a manifest naming a package the report lacks is rejected
+downstream. So on a machine that builds a second kernel in another multiconfig
+(AVOCADO_MULTIKERNEL_MC_RECIPES), only the default multiconfig's RPMs are
+listed: the report does not read tmp-<mc> pkgdata, and the task notes this in
+the build log. SDK pkgdata is not listed either.
 
 A package pkgdata names that holds no files (PKGSIZE 0) and has no RPM is not
 listed and is not a failure: package_rpm writes no RPM for an empty package
 unless ALLOW_EMPTY, while pkgdata still names it - avocado-core-dbg reads this
 way. An empty package that does have an RPM, a packagegroup, is listed. A
-package whose size pkgdata does not state is never excused.
+package whose size pkgdata does not state is not excused this way.
 
-A package that cannot be listed fails the build with every such package named:
-no RPM on disk, a version with no release, an arch that is ambiguous, a file
-whose header names something else, or one whose signature header records a
-different SHA256HEADER than its main header hashes to. Nothing is skipped,
-because a package missing here reads as unassessed downstream. The previous
-build's file is removed first, so a failure leaves no list at all. Pkgdata is
-written before the RPM, so running this while a build is still packaging fails
-for the packages it has not finished.
+Any other package with no RPM depends on whether the scanned image ships it:
+
+  the image ships it           the build fails
+  the image does not ship it   left out, with a build warning that names it
+
+At image scope pkgdata also names packages the image does not install, some
+built only as build-time dependencies, which may have no RPM. Those are on no
+device, so leaving them out costs nothing, and every name that is listed is
+still in the report's "packages". A package the image does install must be
+listed, so a missing RPM for it is a failure: it means pkgdata names a version
+whose RPM was never written, as when another target's build refreshes a
+dependency's pkgdata at a new PKGR. "Ships" is read from the image's
+installed-package manifest in ${DEPLOY_DIR_IMAGE}, the one write_image_manifest
+writes beside the image; if it cannot be read, the task warns and treats every
+package as shipped.
+
+At world scope there is no image to ask, and the feed publishes everything the
+world build packaged, so every package with no RPM fails the build.
+
+Anything else wrong with a package fails the build, with every such package
+named: a version with no release, an arch that is ambiguous, a file whose
+header names something else or will not read as an RPM, or one whose signature
+header records a different SHA256HEADER than its main header hashes to. The
+previous build's file is removed first, so a failure leaves no list at all.
+
+The task runs after do_cve_report. At image scope that means after the image:
+do_cve_report waits for the image's do_sbom_cve_check, which follows the
+rootfs, and do_rootfs waits for the do_package_write_rpm of everything it
+installs.
 
 The same limit as the report's counters applies: pkgdata and ${DEPLOY_DIR_RPM}
 accumulate and nothing prunes either, so a recipe that no longer builds but was
@@ -1022,8 +411,11 @@ built once into this TMPDIR is still listed.
 
 The reader is avocado_sbom/rpms.py. It reads the lead and the two headers and
 never the payload, and needs neither rpm nor rpm-native. The contract is
-schema/avocado-rpm-manifest-v1.schema.json, with the same compatibility policy
-as the report: additions do not bump the major.
+schema/avocado-rpm-manifest-v1.schema.json: unknown keys are permitted, and
+additions do not bump the major. The tests build their RPMs byte by byte, so
+they need no build either:
+
+  cd meta-avocado-sbom/tests && PYTHONPATH=../lib python3 -m unittest discover -p 'test_*.py'
 
 Publishing SPDX
 ---------------
@@ -1128,15 +520,20 @@ changes the gate catches it: an id naming a CVE is exactly what it looks for, so
 the run fails and the document is not written. Fail closed, rather than a pruner
 maintained against a shape nothing emits.
 
-Three things sit beside that document and are NOT filtered, because they are not
-SPDX and the filter only reads *.spdx.json:
+Beside that document sit the CVE scan's exports and the packed documents:
 
-  avocado-image-rootfs-<machine>.cve            cve-check text
-  avocado-image-rootfs-<machine>.json           the same assessment, JSON
+  avocado-image-rootfs-<machine>.sbom-cve-check.yocto.json
+                                   the scan's result, JSON; not SPDX, so not
+                                   filtered
+  avocado-image-rootfs-<machine>.sbom-cve-check.spdx.json
+                                   the scanned SBOM with the scan's
+                                   assessment added; it is *.spdx.json, so an
+                                   --in that holds it filters it like any
+                                   other document
   avocado-image-rootfs-<machine>.spdx.tar.zst   packed per-image documents
 
-All three are assessment, none is publishable, and keeping them off the feed is
-the publish step's job rather than this filter's. Note *.json cannot be globbed
+All three are assessment or a copy of it, none is publishable, and keeping
+them off the feed is the publish step's job rather than this filter's. Note *.json cannot be globbed
 blind - *.testdata.json, stone-<machine>.json and the image manifests share the
 extension and are not paid surface.
 

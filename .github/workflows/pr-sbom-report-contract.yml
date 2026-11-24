@@ -1,7 +1,7 @@
 name: PR-SBOM-Report-Contract
 
-# Checks the report contract against the committed fixture, so no build and no
-# Yocto. do_cve_report runs the same check against every generated report.
+# Runs meta-avocado-sbom's unit tests: the report generator, the RPM manifest
+# and its schema, and the layer's sbom-cve-check recipes. No build and no Yocto.
 
 on:
   pull_request:
@@ -40,14 +40,7 @@ jobs:
         # the suite rather than fail it. Own step keeps that visible.
         run: python -m pip install --quiet jsonschema
 
-      - name: Check the fixture against the frozen envelope
+      - name: Unit tests
         run: |
-          PYTHONPATH=meta-avocado-sbom/lib python -m avocado_sbom.verify \
-            --strict meta-avocado-sbom/tests/fixtures/avocado-cve-report.json
-
-      - name: Prove the check by mutation
-        # Without this the step above is indistinguishable from one that
-        # always passes.
-        run: |
-          python -m unittest discover -v \
-            -s meta-avocado-sbom/tests -p 'test_*.py'
+          cd meta-avocado-sbom/tests
+          PYTHONPATH=../lib python -m unittest discover -v -p 'test_*.py'
