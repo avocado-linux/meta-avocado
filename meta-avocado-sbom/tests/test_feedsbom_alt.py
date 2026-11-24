@@ -183,6 +183,41 @@ class DropWrongReferenceTest(unittest.TestCase):
             feedsbom.drop_wrong_reference(self.INCLUDED, []), (self.INCLUDED, [])
         )
 
+    def test_a_reference_traced_to_one_multiconfig_drops_that_build_only(self):
+        included = [("good-mc", "linux", ["hg"]), ("bad-mc", "linux", ["hb"])]
+        wrong = [{"mc": "bad-mc", "recipe": "linux",
+                  "kernel_version": "6.1", "target_version": "6.12"}]
+        kept, not_covered = feedsbom.drop_wrong_reference(included, wrong)
+        self.assertEqual(kept, [("good-mc", "linux", ["hg"])])
+        self.assertEqual([(n["mc"], n["recipe"], n["reason"]) for n in not_covered],
+                         [("bad-mc", "linux",
+                           "reference collision: 1 statement(s) target another version")])
+
+    def test_a_reference_traced_to_none_drops_every_build_of_the_recipe(self):
+        included = [("good-mc", "linux", ["hg"]), ("bad-mc", "linux", ["hb"]),
+                    ("good-mc", "other", ["ho"])]
+        for wrong in ([{"mc": "", "recipe": "linux", "kernel_version": "6.12",
+                        "target_version": "6.1"}],
+                      [{"recipe": "linux", "kernel_version": "6.12",
+                        "target_version": "6.1"}]):
+            with self.subTest(wrong=wrong):
+                kept, not_covered = feedsbom.drop_wrong_reference(included, wrong)
+                self.assertEqual(kept, [("good-mc", "other", ["ho"])])
+                self.assertEqual(sorted(n["mc"] for n in not_covered),
+                                 ["bad-mc", "good-mc"])
+
+    def test_the_count_adds_the_untraced_references(self):
+        included = [("bad-mc", "linux", ["hb"])]
+        wrong = [{"mc": "bad-mc", "recipe": "linux", "kernel_version": "6.1",
+                  "target_version": "6.12"},
+                 {"mc": "", "recipe": "linux", "kernel_version": "6.12",
+                  "target_version": "6.1"},
+                 {"mc": "other-mc", "recipe": "linux", "kernel_version": "6.6",
+                  "target_version": None}]
+        _kept, not_covered = feedsbom.drop_wrong_reference(included, wrong)
+        self.assertEqual(not_covered[0]["reason"],
+                         "reference collision: 2 statement(s) target another version")
+
 
 class AltLabelTest(unittest.TestCase):
     def test_label_is_mc_colon_recipe(self):

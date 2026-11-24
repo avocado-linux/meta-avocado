@@ -51,9 +51,12 @@ class Tree:
         for d in (self.machine, self.sdk):
             os.makedirs(os.path.join(d, "runtime-reverse"))
         self.dirs = [self.machine, self.sdk]
+        self.alt = os.path.join(root, "tmp-alt", "pkgdata", "raspberrypi5")
+        os.makedirs(os.path.join(self.alt, "runtime-reverse"))
+        self.alt_trees = ()
 
-    def pkg(self, name, text, sdk=False):
-        base = self.sdk if sdk else self.machine
+    def pkg(self, name, text, sdk=False, alt=False):
+        base = self.alt if alt else self.sdk if sdk else self.machine
         with open(os.path.join(base, "runtime-reverse", name), "w") as f:
             f.write(text)
 
@@ -79,10 +82,10 @@ def as_bytes(doc, root):
     os.unlink(path)
     return data
 
-def in_build(manifests, dirs, machine, status, summary, distro="2026.1"):
+def in_build(manifests, dirs, machine, status, summary, distro="2026.1", alt_trees=()):
     """What do_cve_report writes."""
     doc, stats = build_report(manifests, dirs, machine=machine,
-                              status=status, summary=summary)
+                              status=status, summary=summary, alt_trees=alt_trees)
     if distro:
         doc["distro_version"] = distro
     return doc, stats
@@ -239,11 +242,31 @@ class RandomizedEquivalenceTests(unittest.TestCase):
                     tree.pkg("%s-%d" % (r, i),
                              "PN: %s\nPV: 1.0\nPKGV: 1.0\nPKGR: r0\n" % other, sdk=True)
 
+        # An alternate multiconfig: some recipes again at another version, some
+        # at the same one, one only it builds, and names both trees package.
+        alt_pv = {}
+        if rng.random() < 0.5:
+            for r in rng.sample(recipes, rng.randint(1, len(recipes))):
+                alt_pv[r] = rng.choice(self.VERSIONS + ("9.9-alt", "7.7-alt"))
+            alt_pv["alt-only"] = "4.2"
+            for r, v in alt_pv.items():
+                for i in range(rng.randint(1, 3)):
+                    name = "%s-%d" % (r, i) if rng.random() < 0.3 else "%s-%s-%d" % (r, v, i)
+                    tree.pkg(name, "PN: %s\nPV: %s\nPKGV: %s\nPKGR: r%d\n" % (r, v, v, i),
+                             alt=True)
+            named = set(alt_pv) if rng.random() < 0.7 else None
+            tree.alt_trees = [(tree.alt, named)]
+
         def scan(name):
             names = recipes + ["%s-sdk" % r for r in recipes] + ["stray"]
+            names += ["%s@alt" % r for r in alt_pv]
             entries = []
             for n in rng.sample(names, rng.randint(0, len(names))):
-                v = pv.get(n, "1.0")
+                if n.endswith("@alt"):
+                    n = n[:-len("@alt")]
+                    v = alt_pv[n]
+                else:
+                    v = pv.get(n, "1.0")
                 roll = rng.random()
                 if roll < 0.1:
                     v = "1_" + v
@@ -268,7 +291,24 @@ class RandomizedEquivalenceTests(unittest.TestCase):
             manifests.append(tree.manifest("bad", "[]"))
         return tree, scan("build"), manifests
 
+    def assert_accounted(self, doc, seed):
+        """At All, every shipped recipe is in exactly one list, and every
+        package whose recipe has a record carries the version of one."""
+        lists = (set(doc["recipes"]), set(doc["no_cve_record_recipes"]),
+                 set(doc["unscanned_recipes"]))
+        for pkg in doc["packages"].values():
+            recipe = pkg["recipe"]
+            self.assertEqual(sum(recipe in each for each in lists), 1,
+                             "seed %d: %s" % (seed, recipe))
+            version = pkg.get("recipe_version")
+            if version is not None:
+                record = doc["recipes"][recipe]
+                self.assertIn(version, [r["version"] for r in
+                                        [record] + record.get("alt_versions", [])],
+                              "seed %d: %s" % (seed, recipe))
+
     def test_generated_builds(self):
+        with_alt = 0
         for seed in range(300):
             rng = random.Random(seed)
             root = tempfile.mkdtemp()
@@ -277,18 +317,25 @@ class RandomizedEquivalenceTests(unittest.TestCase):
                 status = rng.choice(REPORT_STATUSES)
                 summary = rng.random() < 0.5
                 anchor_doc, stats = in_build([build_scan], tree.dirs, "m",
-                                             rng.choice(REPORT_STATUSES), True)
+                                             rng.choice(REPORT_STATUSES), True,
+                                             alt_trees=tree.alt_trees)
                 if not stats.packages:
                     continue
                 anchor = round_trip(anchor_doc, root)
-                want, want_stats = in_build(manifests, tree.dirs, "m", status, summary)
+                want, want_stats = in_build(manifests, tree.dirs, "m", status, summary,
+                                            alt_trees=tree.alt_trees)
                 got, got_stats = build_report_from_anchor(
                     manifests, anchor, status=status, summary=summary)
                 self.assertEqual(as_bytes(got, root), as_bytes(want, root),
                                  "seed %d" % seed)
                 self.assertEqual(dict(got_stats), dict(want_stats), "seed %d" % seed)
+                if tree.alt_trees and want["alt_packages"]:
+                    with_alt += 1
+                if status == "All":
+                    self.assert_accounted(want, seed)
             finally:
                 shutil.rmtree(root)
+        self.assertGreater(with_alt, 30)
 
 class AnchorRefusalTests(unittest.TestCase):
 

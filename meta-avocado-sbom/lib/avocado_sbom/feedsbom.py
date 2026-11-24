@@ -147,6 +147,30 @@ def alt_tmpdir(topdir, mc):
     return "%s/tmp-%s" % (topdir, mc)
 
 
+def alt_path(topdir, tmpdir, path, mc):
+    """path, a directory under the default TMPDIR, in the multiconfig's TMPDIR.
+
+    Raises FeedSbomError when path is not under tmpdir, since the multiconfig's
+    copy then cannot be derived from it.
+    """
+    tmpdir = tmpdir.rstrip("/")
+    if not path.startswith(tmpdir + "/"):
+        raise FeedSbomError("%s is not under TMPDIR %s" % (path, tmpdir))
+    return alt_tmpdir(topdir, mc) + path[len(tmpdir):]
+
+
+def alt_recipes_by_mc(pairs):
+    """{mc: set of recipes} from parse_alt_recipes' pairs, in first-seen order.
+
+    These are the recipes of each multiconfig that reach the feed, so the only
+    ones whose packages the report and the RPM manifest read from its tree.
+    """
+    by_mc = {}
+    for mc, recipe in pairs:
+        by_mc.setdefault(mc, set()).add(recipe)
+    return by_mc
+
+
 def classify_alt(pairs, find_alt_roots):
     """Split (mc, recipe) pairs into (mc, recipe, handles) and those with no document.
 
@@ -223,21 +247,29 @@ def drop_alias_collided(included, shared_by_label, target_ids):
 def drop_wrong_reference(included, wrong):
     """Split included into (kept, not covered) by whether a statement hit another version.
 
-    wrong holds wrong_kernel_references' output, each carrying the recipe name.
+    wrong holds wrong_kernel_references' output, each carrying the recipe name and
+    "mc", the alternate multiconfig the reference was traced to. One traced to a
+    multiconfig drops that multiconfig's build of the recipe only, since one
+    recipe can be built in several (Jetson builds nvidia-kernel-oot in three).
+    One traced to none, "mc" empty or absent, drops every alternate build of the
+    recipe: it came from the default kernel's side and any of them may be the
+    other end.
     """
     counts = {}
     for statement in wrong:
-        counts[statement["recipe"]] = counts.get(statement["recipe"], 0) + 1
+        key = (statement.get("mc") or "", statement["recipe"])
+        counts[key] = counts.get(key, 0) + 1
     kept = []
     not_covered = []
     for mc, recipe, handles in included:
-        if recipe in counts:
+        count = counts.get((mc, recipe), 0) + counts.get(("", recipe), 0)
+        if count:
             not_covered.append(
                 {
                     "mc": mc,
                     "recipe": recipe,
                     "reason": "reference collision: %d statement(s) target another version"
-                    % counts[recipe],
+                    % count,
                 }
             )
         else:
