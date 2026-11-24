@@ -6,3 +6,14 @@ local_conf_header:
     # ?= rather than ??=: create-spdx-3.0 sets its own ??= "current", and of
     # two weak defaults the one parsed last wins, which is the class's.
     SPDX_INCLUDE_VEX ?= "all"
+
+    # Kernel CVE filtering: the kernel's SPDX document lists the sources its
+    # configuration compiles, and sbom-cve-check drops a CVE whose affected
+    # files are not among them. The list comes from the kernel's debug sources,
+    # so the kernel is built with debug info (avocado-kernel-feed.bbclass).
+    # Here rather than in cve-check.yml because it changes the kernel's
+    # packages, and a scan has to see the kernel the feed published.
+    AVOCADO_KERNEL_DEBUGINFO = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"

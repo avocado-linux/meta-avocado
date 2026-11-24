@@ -33,14 +33,16 @@ Requirements
 
 That fragment carries this layer, raises SPDX_INCLUDE_VEX to "all" so the scan
 can see the Patched and Ignored statements, and points the CVE database recipes
-at AUTOREV. kas/feature/sbom.yml is the SPDX-only fragment: stacking it as well
-is harmless, but this report needs the cve-check one.
+at AUTOREV. kas/feature/sbom.yml is the SPDX fragment feed builds stack:
+stacking it as well is harmless, but this report needs the cve-check one.
 
 Outside kas, with this layer in bblayers.conf, the equivalent in local.conf:
 
   SPDX_INCLUDE_VEX = "all"
   SRCREV:pn-sbom-cve-check-update-nvd-native = "${AUTOREV}"
   SRCREV:pn-sbom-cve-check-update-cvelist-native = "${AUTOREV}"
+
+plus the four kernel lines under "Kernel CVEs" below.
 
 create-spdx does not have to be inherited by hand: OE-core does it through
 INHERIT_DISTRO, and there create-spdx is create-spdx-3.0.
@@ -95,6 +97,79 @@ The same code can run standalone against a build tree, if needed:
 
   PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
       --tmpdir build/tmp --machine <machine> -o avocado-cve-report.json
+
+Kernel CVEs
+-----------
+
+sbom-cve-check filters kernel CVEs on configuration by itself. A CVE whose
+affected files (the kernel CNA's programFiles, in cvelistV5) are none of the
+files the kernel compiled is not affected, "Source code not compiled by
+config". The scanner takes that file list from the hasInput sources of the
+kernel's build in the SPDX document, and trusts it only if it names
+init/main.c, include/linux/module.h or a *.mod.c file. Otherwise it warns that
+the list is "missing important files" and matches the kernel on version ranges
+alone.
+
+OE-core writes the list when SPDX_INCLUDE_COMPILED_SOURCES is "1" for the
+kernel recipe, from the sources the kernel's debug info names, so the kernel
+has to carry debug info. kas/feature/sbom.yml sets:
+
+  AVOCADO_KERNEL_DEBUGINFO = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
+
+The switch changes the kernel's packages, so it is in sbom.yml, which feed
+builds stack: a scan has to see the kernel the feed published, or the kernel's
+RPM digests match nothing in the feed. kas/feature/cve-check.yml repeats the
+lines for a scan stacked without sbom.yml. The SPDX lines are :pn-scoped
+because the variable also turns on SPDX_INCLUDE_SOURCES for the recipe, which
+tree-wide would list every source file of every recipe.
+
+avocado-kernel-feed.bbclass reads the switch for linux-yocto and
+linux-yocto-dev and adds features/debug/debug-kernel.scc to KERNEL_FEATURES.
+The bbappend in meta-avocado-raspberrypi adds avocado-cve-debug.cfg to
+linux-raspberrypi on the same switch. The DWARF lands in kernel-dbg; what a
+device installs stays stripped. linux-yocto-rt, the L4T kernels and the vendor
+kernels are left as they are, and the scan matches them on version ranges.
+
+What the switch does to each machine's kernel configuration:
+
+  no change, debug info is          amd-x86-64-v4, arm64-uefi-v9, the Jetson
+  already on                        machines' linux-yocto, nanopi-r5s,
+                                    orangepi-5-plus
+  adds debug info only              intel-x86-64-v2/v3/v4 (DEBUG_KERNEL from
+                                    x86_64_defconfig), the Raspberry Pi
+                                    machines (EXPERT in the bcm27xx defconfigs
+                                    selects DEBUG_KERNEL)
+  DEBUG_KERNEL is off without it    qemux86-64, qemuarm64
+
+On the QEMU machines, turning DEBUG_KERNEL on also un-gates runtime debug
+options that their BSP's kernel-cache fragments request or that default on
+under it: KGDB and KDB with their console hooks, CGROUP_DEBUG, RCU_TRACE,
+DEBUG_MISC and X86_DEBUG_FPU. meta-avocado-qemu's linux-yocto bbappend sets
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF = "1" for its machines, which adds
+avocado/debug-kernel-runtime-off.scc (meta-avocado/files/avocado-kmeta) after
+every other feature and turns them back off. DEBUG_KERNEL itself stays on,
+since debug info depends on it, and the BPF verifier tests it directly: an
+internal verifier error also raises a kernel warning there. A layer whose
+linux-yocto machine has DEBUG_KERNEL off without the switch should set
+AVOCADO_KERNEL_DEBUGINFO_RUNTIME_OFF for that machine too.
+
+The Raspberry Pi defconfigs install modules xz-compressed, and OE-core only
+splits and strips files named .ko. With the switch on, the bbappend unpacks the
+modules in the packaging copy (PKGD) and compresses them again, with the
+kernel's xz options, once they are split, so their DWARF goes to kernel-dbg and
+their sources reach the list. The packages and the deploy modules tarball keep
+.ko.xz.
+
+A build with the module-signing distro feature keeps linux-yocto and its SPDX
+as they are: OE-core does not split or strip a signed module either, so its
+sources would be missing from the list and a CVE in it would read as not
+compiled.
+
+Only image scope gets this filtering. The world SBOM is built from recipe
+documents, which describe no build and so carry no compiled-source list.
 
 Variables
 ---------
