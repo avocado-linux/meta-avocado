@@ -131,7 +131,11 @@
         "tegraflash_carrier_bsp": "carrier-bsp"
       },
       "tegraflash": {
-        "sd_device": "mmcblk1"
+        "sd_device": "mmcblk1",
+        "rcm_ids": ["0955:7023"],
+        "rcm_evidence": {
+          "0955:7023": "the bench AGX Orin devkit and an AGX Orin module on a MIC-733 carrier both enumerated 0955:7023 NVIDIA Corp. APX in recovery, and a provision pinned to it flashed the devkit"
+        }
       }
     }
   }

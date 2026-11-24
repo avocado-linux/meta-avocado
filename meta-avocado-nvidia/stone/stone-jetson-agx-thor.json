@@ -94,6 +94,12 @@
         "tegraflash_engine": "tegraflash-engine",
         "tegraflash_tools": "tegraflash-tools",
         "tegraflash_carrier_bsp": "carrier-bsp"
+      },
+      "tegraflash": {
+        "rcm_ids": ["0955:7026"],
+        "rcm_evidence": {
+          "0955:7026": "the bench AGX Thor devkit enumerated 0955:7026 NVIDIA Corp. APX in recovery, before the 0955:7100 flash gadget"
+        }
       }
     }
   }
