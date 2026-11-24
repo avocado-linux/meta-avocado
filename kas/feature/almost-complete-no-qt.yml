@@ -27,6 +27,8 @@ header:
   - repo: meta-avocado
     file: kas/feature/clang.yml
   - repo: meta-avocado
+    file: kas/feature/cloud-aws.yml
+  - repo: meta-avocado
     file: kas/feature/java.yml
   - repo: meta-avocado
     file: kas/feature/containers.yml

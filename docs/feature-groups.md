@@ -54,7 +54,7 @@ web engines: it leaves out `browsers` (chromium) and sets
 | browsers     | `browsers`    | chromium-ozone-wayland                          | meta-browser            | DISTRO_FEATURES opengl wayland |
 | web-engines  | `web-engines` | chromium-ozone-wayland and qtwebengine only (opt-in, for use with `almost-complete.yml`) | meta-browser, meta-qt5 | DISTRO_FEATURES opengl (wayland for chromium) |
 | cameras      | `cameras`     | librealsense2, Basler pylon                     | meta-intel-realsense, meta-basler-tools | **unavailable on wrynose** |
-| cloud-aws    | `cloud-aws`   | greengrass-bin, aws-iot-device-client           | meta-aws                | **unavailable on wrynose** |
+| cloud-aws    | `cloud-aws`   | Greengrass (nucleus and Lite), IoT device client and SDKs, SSM and CloudWatch agents, secure tunneling, FleetWise, Kinesis Video and WebRTC, AWS CLI v2, boto3 | meta-aws | Greengrass nucleus, CloudWatch, KVS C++ and WebRTC: aarch64/x86_64 |
 | java         | `java`        | openjdk-17 jdk/jre                              | meta-openjdk-temurin (base) | aarch64/x86_64 |
 | containers   | `containers`  | docker, podman, podman-compose, k3s             | meta-virtualization     | DISTRO_FEATURES virtualization |
 | observability| `observability` | Fluent Bit log and metric collector            | (none)                  | -        |
@@ -97,14 +97,14 @@ third group, add it there rather than widening the base packagegroup.
 
 ### Groups this branch cannot build
 
-`cameras` and `cloud-aws` are in tree but not wired into `complete.yml`. Their
-vendor layers - meta-basler-tools, meta-intel-realsense and meta-aws - have no
-wrynose branch, and each declares a `LAYERSERIES_COMPAT` that predates
-wrynose, so provisioning one fails the compatibility check and takes the whole
-build down rather than skipping a group. The fragments keep their scarthgap
-pins deliberately: including one fails loudly at parse rather than silently
-shipping less than asked for. Repin the fragment and add its `complete.yml`
-line back in the same commit.
+`cameras` is in tree but not wired into `complete.yml`. Its vendor layers -
+meta-basler-tools and meta-intel-realsense - have no wrynose branch, and each
+declares a `LAYERSERIES_COMPAT` that predates wrynose, so provisioning one
+fails the compatibility check and takes the whole build down rather than
+skipping a group. The fragment keeps its scarthgap pins deliberately:
+including it fails loudly at parse rather than silently shipping less than
+asked for. Repin the fragment and add its `complete.yml` line back in the same
+commit.
 
 Two members are missing from groups for the same reason: `graphics` drops
 wpewebkit, wpebackend-fdo and cog (meta-webkit), and `system-base` drops

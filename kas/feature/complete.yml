@@ -8,12 +8,12 @@ header:
 # (machine.yml:kas/feature/complete.yml) to ship the full image. Dev/minimal
 # targets stack a smaller set of fragments instead.
 #
-# Two fragments scarthgap lists here are omitted on wrynose - cameras
-# (meta-basler-tools, meta-intel-realsense) and cloud-aws (meta-aws). Neither
-# fork has a wrynose branch, so including them would fail the layer
-# compatibility check and take the whole build down rather than just skipping
-# a group. The fragment files are still in tree with their scarthgap pins; add
-# the line back here when the fork gains a branch.
+# One fragment scarthgap lists here is omitted on wrynose: cameras
+# (meta-basler-tools, meta-intel-realsense). Neither fork has a wrynose branch,
+# so including it would fail the layer compatibility check and take the whole
+# build down rather than just skipping a group. The fragment file is still in
+# tree with its scarthgap pins; add the line back here when the forks gain a
+# branch.
   includes:
   - repo: meta-avocado
     file: kas/feature/system-base.yml
@@ -33,6 +33,8 @@ header:
     file: kas/feature/python-ai.yml
   - repo: meta-avocado
     file: kas/feature/clang.yml
+  - repo: meta-avocado
+    file: kas/feature/cloud-aws.yml
   - repo: meta-avocado
     file: kas/feature/java.yml
   - repo: meta-avocado
