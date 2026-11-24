@@ -1,4 +1,4 @@
-"""nvme and ums through the launcher (AVOCADO_FLASH_LAUNCHER=1).
+"""nvme and ums through the launcher.
 
 Hermetic: stone, sudo, lsusb and the Jetson host tools are shell stubs in a tmp
 PATH dir that append to one process log. Nothing here touches a board, a serial
@@ -99,7 +99,7 @@ def jt(tmp_path):
 
 
 def test_nvme_not_first_is_refused_before_any_usb_action(jt):
-    env = {"PATH": f"{jt.bin}:/usr/bin:/bin", "HOME": str(jt.tmp), "AVOCADO_FLASH_LAUNCHER": "1"}
+    env = {"PATH": f"{jt.bin}:/usr/bin:/bin", "HOME": str(jt.tmp)}
     rc, out = jt._spawn([sys.executable, str(SCRIPT), "-m", MACHINE, "nvme"], env)
     assert rc != 0
     assert "nvme must be the first argument" in out

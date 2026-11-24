@@ -1,4 +1,4 @@
-"""End to end through scripts/avocado-flash; sd and ums reach the launcher by default.
+"""End to end through scripts/avocado-flash; every write medium goes through the launcher.
 
 Hermetic: stone, fwup, uuu, dd, bmaptool and sudo are shell stubs in a tmp PATH
 dir. Each appends its argv and its parent's name to one log, so the tests assert
@@ -133,21 +133,21 @@ def test_sd_passes_task_only_when_given(tree):
 
 
 def test_emmc_task_upgrade_is_refused_before_stone(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "--task", "upgrade", "emmc", launcher="1")
+    rc, out = tree.run("--workdir", str(tree.workdir), "--task", "upgrade", "emmc")
     assert rc != 0
     assert "sd medium only" in out
     assert tree.started() == []
 
 
 def test_emmc_maps_to_uuu_emmc_and_starts_only_stone(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "emmc", launcher="1")
+    rc, out = tree.run("--workdir", str(tree.workdir), "emmc")
     assert rc == 0, out
     assert tree.started() == ["stone"]
     assert tree.env("stone")["AVOCADO_PROVISION_PROFILE"] == "uuu-emmc"
 
 
 def test_dry_run_on_declared_profile_sets_dry_run(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "--dry-run", "emmc", launcher="1")
+    rc, out = tree.run("--workdir", str(tree.workdir), "--dry-run", "emmc")
     assert rc == 0, out
     assert tree.env("stone")["AVOCADO_PROVISION_DRY_RUN"] == "1"
 
@@ -162,7 +162,7 @@ def test_dry_run_on_undeclared_profile_is_refused_before_stone(tree):
 
 def test_missing_profile_is_refused_naming_machine_and_profile(tmp_path):
     t = Tree(tmp_path, profiles={"sd": {}})
-    rc, out = t.run("--workdir", str(t.workdir), "emmc", launcher="1")
+    rc, out = t.run("--workdir", str(t.workdir), "emmc")
     assert rc != 0
     assert MACHINE in out and "uuu-emmc" in out
     assert t.started() == []
@@ -187,10 +187,10 @@ def test_bmaptool_is_refused_with_no_process_started(tree):
 
 
 def test_two_deploy_trees_still_refused(tmp_path):
-    # Resolution stays in avocado-flash: ensure it still refuses with the opt-in on.
+    # Resolution stays in avocado-flash: ensure it still refuses with several build trees.
     for n in ("build-a", "build-b"):
         (tmp_path / "ws" / n / "build" / "tmp" / "deploy").mkdir(parents=True)
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "AVOCADO_FLASH_LAUNCHER": "1"}
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "sd", "/dev/fakedisk"], env=env, cwd=tmp_path / "ws",
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
@@ -205,3 +205,11 @@ def test_sd_reaches_the_launcher_whatever_the_old_opt_in_says(tree, value):
     rc, out = tree.run("--workdir", str(tree.workdir), "sd", "/dev/fakedisk", launcher=value)
     assert rc == 0, out
     assert tree.started() == ["stone"]
+
+
+@pytest.mark.parametrize("value", [None, "0", "1"])
+def test_emmc_reaches_the_launcher_whatever_the_old_opt_in_says(tree, value):
+    rc, out = tree.run("--workdir", str(tree.workdir), "emmc", launcher=value)
+    assert rc == 0, out
+    assert tree.started() == ["stone"]
+    assert tree.env("stone")["AVOCADO_PROVISION_PROFILE"] == "uuu-emmc"

@@ -29,9 +29,9 @@ record (`meta-avocado-nvidia/stone/tegra/tests/parity/deviations.py`).
 
 ### 2.1 Release notes
 
-- `avocado-flash` sd, ums and nvme now run through the launcher (`scripts/avocado_flash_launch/`), which runs the stone profile instead of the Python board tables; the registry, the wrapper and the old sd, ums and nvme write paths are removed. The emmc medium still uses the old uuu path unless `AVOCADO_FLASH_LAUNCHER=1` is set, until that path is retired.
+- `avocado-flash` sd, emmc, ums and nvme now run through the launcher (`scripts/avocado_flash_launch/`), which runs the stone profile instead of the Python board tables; the registry, the wrapper and the old sd, emmc, ums and nvme write paths are removed, and `AVOCADO_FLASH_LAUNCHER` is no longer read. fuse-srk and ssh-emmc are unchanged.
 - A named device no longer skips the retype. Before, passing an explicit device meant no confirmation. Now only `AVOCADO_PROVISION_FORCE=1` skips it. With no terminal and no signal the run proceeds with a notice; `AVOCADO_PROVISION_FORCE=0` with no terminal refuses; any value other than 1 or 0 refuses. The full table is `meta-avocado-distro/stone/tests/confirm-vectors.tsv`, shared by the shell library and the engine (`avocado_tegraflash/confirm.py`, `decide_confirmation`).
-- New variables: `AVOCADO_PROVISION_DRY_RUN=1` (run every guard, change nothing), `AVOCADO_PROVISION_RCM_ID`, `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`, `AVOCADO_PROVISION_FWUP_TASK` (only `complete` is accepted by the ums profile), `AVOCADO_PROVISION_HOST_MOUNTS` (a mount table exported by avocado-cli, read as a second table), and `AVOCADO_FLASH_LAUNCHER`.
+- New variables: `AVOCADO_PROVISION_DRY_RUN=1` (run every guard, change nothing), `AVOCADO_PROVISION_RCM_ID`, `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`, `AVOCADO_PROVISION_FWUP_TASK` (only `complete` is accepted by the ums profile), `AVOCADO_PROVISION_HOST_MOUNTS` (a mount table exported by avocado-cli, read as a second table).
 - The engine refuses a board nothing identifies, an unpinned kernel, and a `PATH` with relative entries is cleaned; see section 3.
 
 ## 3. Wrapper-only guards: status

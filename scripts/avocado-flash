@@ -114,133 +114,13 @@ def resolve_machine(deploy: Path, explicit: str | None) -> str:
     raise Fatal(f"several machines built ({' '.join(dirs)}); pass --machine")
 
 
-def resolve_raw_image(deploy: Path, machine: str) -> Path:
-    """Both globs are scoped to the machine.
-
-    The second used to search the flat, shared stone/_build with no machine
-    filter, so asking for a machine that had not been provisioned matched
-    whatever *-rootdisk.img was there and wrote that machine's image to the card,
-    while the error one line below claimed per-machine scoping.
-    """
-    for cand in sorted((deploy / "images" / machine).glob("*.wic")):
-        if cand.is_file():
-            return cand
-    cand = deploy / "stone/_build" / f"{machine}-rootdisk.img"
-    if cand.is_file():
-        return cand
-
-    # Name the producer. Nothing in the Yocto build writes this file, so a bare
-    # "not found" reads as a broken build rather than a step not run.
-    raise Fatal(
-        f"no raw .wic or rootdisk.img found for {machine}\n"
-        f"  expected: {deploy}/stone/_build/{machine}-rootdisk.img\n"
-        "  produce it with the provisioning step that builds the stone archive, or\n"
-        "  from an existing archive with:\n"
-        f"    fwup -a -i {deploy}/stone/_build/{machine}-rootdisk.zip \\\n"
-        f"         -d {deploy}/stone/_build/{machine}-rootdisk.img -t complete"
-    )
-
-
 # ------------------------------------------------------------- native tools
 
 
 # ------------------------------------------------------------------- safety
 
 
-def confirm_destructive(target: str, payload: str | None, dry_run: bool, assume_yes: bool) -> None:
-    """Ask before a destructive write, showing what is about to be written where.
-
-    The payload is resolved by the caller first: the prompt used to come before
-    that, so the retype gate - the only thing between a typo and a wiped disk -
-    was cleared as a reflex before the tool had established it had anything to
-    write at all.
-    """
-    if dry_run or assume_yes:
-        return
-
-    print(f"=== writing the whole OS to {target} (destructive) ===")
-    if payload:
-        print(f"  payload: {payload}")
-    if Path(target).exists() and Path(target).is_block_device():
-        subprocess.run(["lsblk", "-o", "NAME,SIZE,TYPE,RM,MODEL", target])
-    print()
-    reply = input("type the target again to confirm: ").strip()
-    if reply != target:
-        raise Fatal("mismatch, aborting")
-
-
-def execute(cmd: list[str], dry_run: bool) -> None:
-    if dry_run:
-        print("dry-run: " + " ".join(cmd))
-        return
-    proc = subprocess.run(cmd)
-    if proc.returncode != 0:
-        raise Fatal(f"command failed with exit {proc.returncode}: {' '.join(cmd)}")
-
-
-def finish(next_step: str, target: str, dry_run: bool) -> None:
-    """Close out a write, or say plainly that none happened.
-
-    Neither the sync nor the completion message used to be guarded, so a dry run
-    printed "done. set the board's boot switches..." having written nothing: an
-    operator powers the board, sees the previous image, and concludes the flash
-    failed rather than that it never ran. sync is also a real syscall against
-    every mounted filesystem, so running it broke the dry-run promise.
-    """
-    if dry_run:
-        print(f"dry run: nothing was written to {target}.")
-        return
-    os.sync()
-    print(f"done. {next_step}")
-
-
 # ----------------------------------------------------------------- backends
-
-
-def flash_uuu(deploy: Path, machine: str, dry_run: bool, assume_yes: bool) -> None:
-    boot = deploy / "images" / machine / "imx-boot"
-    if not boot.is_file():
-        raise Fatal(f"no imx-boot for {machine}")
-    image = resolve_raw_image(deploy, machine)
-
-    # Pin the target instead of matching a vendor ID and hoping. `lsusb -d 1fc9:`
-    # answers "is any NXP device in SDP mode", and uuu without -m then takes
-    # whichever known device enumerated first - so with a second i.MX board on the
-    # bench for an unrelated bisect, this wrote to that one.
-    proc = subprocess.run(["lsusb"], capture_output=True, text=True)
-    devices = []
-    for line in proc.stdout.splitlines():
-        m = re.search(r"Bus (\d+) Device (\d+): ID ((?:1fc9|15a2):[0-9a-f]{4})", line)
-        if m:
-            devices.append((f"{m.group(1)}:{m.group(2)}", m.group(3)))
-
-    if not devices:
-        raise Fatal("no NXP device in serial download mode (check the boot switches)")
-    if len(devices) > 1:
-        listed = "\n".join(f"  {p} {i}" for p, i in devices)
-        raise Fatal(
-            "several NXP devices in serial download mode:\n" + listed + "\n"
-            "  uuu would take whichever enumerated first, so refusing rather than guessing.\n"
-            "  Leave exactly one board in serial download mode."
-        )
-    usb_path, usb_id = devices[0]
-
-    if not shutil.which("uuu"):
-        raise Fatal("uuu not installed")
-
-    info(f"bootloader: {boot}")
-    info(f"image:      {image} ({image.stat().st_size // (1024 * 1024)} MiB)")
-    info(f"usb path:   {usb_path} ({usb_id})")
-
-    # The eMMC write is as destructive as the SD one and used to reach uuu with
-    # no prompt at all, so -y was irrelevant on this path because nothing asked.
-    confirm_destructive(usb_path, str(image), dry_run, assume_yes)
-
-    # emmc_all, not emmc. Both built-ins default the image to the bootloader when
-    # it is omitted, so `uuu -b emmc <boot>` wrote imx-boot into the eMMC boot
-    # partition and nothing else - the board came back running whatever OS was
-    # already on it, under a new bootloader, which looks like a successful flash.
-    execute(["sudo", "uuu", "-m", usb_path, "-b", "emmc_all", str(boot), str(image)], dry_run)
 
 
 # ------------------------------------------------------- reaching U-Boot
@@ -857,11 +737,6 @@ def dispatch_boards(argv: list[str]) -> int:
     return boards.boards(Path(__file__).resolve(), None)
 
 
-def launcher_enabled() -> bool:
-    """Only the emmc medium still consults this: it stays on the old uuu path until that path is retired."""
-    return os.environ.get("AVOCADO_FLASH_LAUNCHER") == "1"
-
-
 def _launcher_cli():
     # Import by the script's own directory so it works however it is invoked.
     here = str(Path(__file__).resolve().parent)
@@ -912,25 +787,16 @@ def main() -> int:
     print(f"machine: {machine}")
     print(f"deploy:  {deploy}")
 
-    if args.medium in ("sd", "ums") or (args.medium == "emmc" and launcher_enabled()):
+    if args.medium != "fuse-srk":
         return dispatch_launcher(sys.argv[1:], deploy, machine)
 
-    # The old paths below take no fwup task, so refuse the flag rather than ignore it.
+    # fuse-srk takes no fwup task, so refuse the flag rather than ignore it.
     if args.task != "complete":
         raise Fatal(f"--task applies to the fwup backend only (medium '{args.medium}')")
 
-    if args.medium == "emmc":
-        backend = args.backend or "uuu"
-        if backend != "uuu":
-            raise Fatal(f"backend {backend} cannot write over serial download")
-        flash_uuu(deploy, machine, args.dry_run, args.assume_yes)
-        finish("set the board's boot switches to the eMMC position and power on.",
-               "the board", args.dry_run)
-
-    else:
-        if args.device:
-            raise Fatal(f"fuse-srk takes no device argument (got {args.device})")
-        fuse_srk(args, deploy, machine)
+    if args.device:
+        raise Fatal(f"fuse-srk takes no device argument (got {args.device})")
+    fuse_srk(args, deploy, machine)
 
     return 0
 
