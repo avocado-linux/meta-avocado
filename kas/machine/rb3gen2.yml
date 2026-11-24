@@ -52,4 +52,12 @@ local_conf_header:
     # kernel-module-avocado-shm-6.18.37-... and -6.18.37-rt-... get built.
     AVOCADO_MULTIKERNEL_MC_RECIPES += "qcom-rt:avocado-shm"
 
+    # Camera -> NPU -> display stack (see packagegroup-avocado-qcom-extra):
+    # libcamerasrc, kmssink, and the IM SDK plugins with only the ML/video set
+    # (drop Kafka/MQTT/Redis, GTK python apps and the CamX camera service).
+    PACKAGECONFIG:append:pn-libcamera = " gst"
+    PACKAGECONFIG:append:pn-gstreamer1.0-plugins-bad = " kms"
+    PACKAGECONFIG:remove:pn-gst-plugins-imsdk-oss = "messaging python-apps redissink sample-apps builder-cpp"
+    PACKAGECONFIG:remove:pn-gst-plugins-imsdk-prop = "camera camera-apps smartvencbin"
+
 machine: avocado-rb3gen2
