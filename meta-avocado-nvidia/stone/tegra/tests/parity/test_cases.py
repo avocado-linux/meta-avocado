@@ -42,7 +42,7 @@ def test_base_case_shape():
             continue
         assert dict(c.env)["AVOCADO_PROVISION_PROFILE"] in _profiles(c.manifest)
         assert c.tree["kernel"] is True
-        assert c.scenario["lsusb"] == [["Bus 001 Device 005: ID 0955:7523 NVIDIA Corp. APX"]]
+        assert c.scenario["lsusb"] == [[cases._board(c.manifest)]]
 
 
 def test_ids_unique_and_descriptive():

@@ -196,6 +196,12 @@ def test_the_orin_nano_manifest_pins_only_the_bench_observed_recovery_id():
     assert read_manifest(TEMPLATE).rcm_ids == ("0955:7523",)
 
 
+def test_the_agx_manifests_pin_their_bench_observed_recovery_ids():
+    # Without one, the engine refuses every unattended flash of the board.
+    for machine, rcm in (("jetson-agx-orin", "0955:7023"), ("jetson-agx-thor", "0955:7026")):
+        assert read_manifest(TEMPLATE.parent / f"stone-{machine}.json").rcm_ids == (rcm,), machine
+
+
 def test_every_stone_manifest_reads_with_valid_nvidia_rcm_ids():
     # A board gains rcm_ids when someone observes one on hardware, so this checks
     # the contract (readable, NVIDIA vendor), not which boards carry ids today.

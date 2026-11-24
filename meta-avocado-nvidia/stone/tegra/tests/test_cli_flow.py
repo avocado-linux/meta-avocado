@@ -489,7 +489,7 @@ def test_a_manifest_without_ids_flashes_one_device_after_a_warning(tmp_path, cap
     rig = make_rig(
         tmp_path,
         runner=FakeRunner(lsusb=[[OTHER_ID_APX]]),
-        manifest="stone-jetson-agx-orin.json",
+        manifest="stone-jetson-orin-nx.json",
         env={"AVOCADO_PROVISION_FORCE": "0"},
     )
     rc, out, _ = rig.go(main, capsys)

@@ -35,6 +35,13 @@ SCRIPT = "stone-provision-tegraflash.sh"
 STONE_DIR = Path(__file__).resolve().parents[3]
 
 APX = "Bus 001 Device 005: ID 0955:7523 NVIDIA Corp. APX"
+
+
+def _board(manifest: Path) -> str:
+    """The stub board: the manifest's first declared recovery id, else the Orin Nano's."""
+    data = json.loads(manifest.read_text())
+    ids = (data.get("storage_devices", {}).get("rootdisk", {}).get("tegraflash") or {}).get("rcm_ids") or []
+    return APX.replace("0955:7523", ids[0]) if ids else APX
 EMMC_PROFILES = ("tegraflash-mmc", "tegraflash-emmc")
 NVME_PROFILES = ("tegraflash", "tegraflash-nvme")
 PIN = "0005:01:00.0"
@@ -82,7 +89,7 @@ def _case(manifest: Path, profile: str, variant: str, env=None, scenario=None, t
         manifest=manifest,
         profile=profile,
         env=tuple(sorted(full_env.items())),
-        scenario={"lsusb": [[APX]], **(scenario or {})},
+        scenario={"lsusb": [[_board(manifest)]], **(scenario or {})},
         tree={"carrier": None, "kernel": True, "drop": (), **(tree or {})},
         deviation=deviation,
     )
@@ -108,6 +115,7 @@ def all_cases(stone_dir: Path | None = None) -> list[Case]:
                 if not _declares_sd_device(manifest):
                     out.append(_case(manifest, profile, "sd-undeclared"))
         first = profiles[0]
+        apx = _board(manifest)
         # The wait for a board runs before any manifest-specific stage and the
         # oracle polls 60 times with about a dozen stub calls each, so this case
         # runs for the first manifest only.
@@ -118,9 +126,9 @@ def all_cases(stone_dir: Path | None = None) -> list[Case]:
             _case(manifest, first, "carrier", tree={"carrier": dict(CARRIER)}),
             _case(manifest, first, "erase-emmc", env={"ERASE_EMMC": "1"}),
             _case(manifest, first, "erase-only", env={"ERASE_ONLY": "1"}),
-            _case(manifest, first, "boardctl-ok", env={"BOARDCTL_TARGET": "topo"}, scenario={"boardctl_rc": 0, "lsusb": [[], [APX]]}),
-            _case(manifest, first, "boardctl-fail", env={"BOARDCTL_TARGET": "topo"}, scenario={"boardctl_rc": 1, "lsusb": [[], [APX]]}),
-            _case(manifest, first, "third-poll", scenario={"lsusb": [[], [], [APX]]}),
+            _case(manifest, first, "boardctl-ok", env={"BOARDCTL_TARGET": "topo"}, scenario={"boardctl_rc": 0, "lsusb": [[], [apx]]}),
+            _case(manifest, first, "boardctl-fail", env={"BOARDCTL_TARGET": "topo"}, scenario={"boardctl_rc": 1, "lsusb": [[], [apx]]}),
+            _case(manifest, first, "third-poll", scenario={"lsusb": [[], [], [apx]]}),
             _case(manifest, first, "missing-bsp", tree={"drop": ("tegraflash_bsp",)}),
             _case(manifest, first, "missing-appuuid", tree={"drop": ("appuuid",)}),
             _case(manifest, first, "flash-exit-7", scenario={"flash_rc": 7}),
