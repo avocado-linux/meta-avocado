@@ -301,6 +301,104 @@ def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summ
 
     stats = Stats()
     packages, recipe_versions = read_pkgdata(pkgdata_dirs, stats)
+    return _assemble(manifests, packages, recipe_versions, stats,
+                     machine, status, summary)
+
+def packages_digest(packages):
+    digest = hashlib.sha256()
+    for name in sorted(packages):
+        pkg = packages[name]
+        digest.update(
+            ("%s\t%s\t%s\n" % (name, pkg["recipe"], pkg["version"])).encode()
+        )
+    return "sha256:" + digest.hexdigest()
+
+def _anchor_error(path, what):
+    return ValueError("%s: %s" % (path, what))
+
+def _anchor_parts(anchor, path):
+    """The pkgdata a build's report carries: packages, recipe_versions and the
+    two pkgdata counters, checked for the shape build_report writes."""
+    if not isinstance(anchor, dict):
+        raise _anchor_error(path, "not a CVE report object")
+    if anchor.get("version") != REPORT_VERSION:
+        raise _anchor_error(
+            path, "report version %r, expected %r"
+            % (anchor.get("version"), REPORT_VERSION))
+    if "recipe_versions" not in anchor:
+        raise _anchor_error(
+            path, "no recipe_versions; the build was scanned before the report "
+            "carried them, so it cannot be rebuilt from a later scan")
+
+    packages = anchor.get("packages")
+    if not isinstance(packages, dict) or not packages or not all(
+            isinstance(n, str) and isinstance(p, dict)
+            and all(isinstance(p.get(k), str) for k in ("recipe", "version", "origin"))
+            for n, p in packages.items()):
+        raise _anchor_error(path, "packages is missing, empty or malformed")
+
+    versions = anchor["recipe_versions"]
+    if not isinstance(versions, dict) or not all(
+            isinstance(v, list) and v and all(isinstance(x, str) and x for x in v)
+            for v in versions.values()):
+        raise _anchor_error(path, "recipe_versions is malformed")
+
+    for key in ("machine", "distro_version"):
+        value = anchor.get(key)
+        if key in anchor and not (isinstance(value, str) and value):
+            raise _anchor_error(path, "%s is malformed" % key)
+
+    counts = anchor.get("counts")
+    if not isinstance(counts, dict):
+        raise _anchor_error(path, "counts is missing")
+    carried = {}
+    for key in ("pkgdata_unreadable", "package_collisions"):
+        value = counts.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise _anchor_error(path, "counts.%s is missing or malformed" % key)
+        carried[key] = value
+
+    if anchor.get("packages_digest") != packages_digest(packages):
+        raise _anchor_error(path, "packages do not match packages_digest")
+
+    # read_pkgdata keys every recipe that wrote a pkgdata file, and the report
+    # drops the ones with no version. Restore those for the "packaged" test. One
+    # that also lost every package name to an earlier directory cannot be restored;
+    # runtime-reverse files always carry PV, so no real build has one.
+    recipe_versions = {name: set(v) for name, v in versions.items()}
+    for pkg in packages.values():
+        recipe_versions.setdefault(pkg["recipe"], set())
+    return packages, recipe_versions, carried
+
+def build_report_from_anchor(manifests, anchor, status=None, summary=True,
+                             anchor_path="anchor report"):
+    """The report build_report would have written for `manifests`, from a
+    previous report of the same build instead of its pkgdata.
+
+    `anchor` is that report as parsed. It needs recipe_versions, so a report
+    written before they were added is refused. machine, distro_version and,
+    unless `status` is given, the status are taken from it.
+    """
+    packages, recipe_versions, carried = _anchor_parts(anchor, anchor_path)
+    if status is None:
+        status = anchor.get("status")
+    if status not in REPORT_STATUSES:
+        raise ValueError(
+            "unknown CVE status %r; expected one of %s"
+            % (status, ", ".join(REPORT_STATUSES))
+        )
+
+    stats = Stats()
+    stats.packages = len(packages)
+    for key, value in carried.items():
+        stats[key] = value
+    report, stats = _assemble(manifests, packages, recipe_versions, stats,
+                              anchor.get("machine"), status, summary)
+    if anchor.get("distro_version"):
+        report["distro_version"] = anchor["distro_version"]
+    return report, stats
+
+def _assemble(manifests, packages, recipe_versions, stats, machine, status, summary):
     recipes, scanned = read_cve_data(
         manifests, recipe_versions, stats, status=status, summary=summary
     )
@@ -308,20 +406,13 @@ def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summ
     unscanned = sorted({p["recipe"] for p in packages.values()} - scanned)
     stats.unscanned_recipes = len(unscanned)
 
-    digest = hashlib.sha256()
-    for name in sorted(packages):
-        pkg = packages[name]
-        digest.update(
-            ("%s\t%s\t%s\n" % (name, pkg["recipe"], pkg["version"])).encode()
-        )
-
     report = {
         "version": REPORT_VERSION,
         "generated": datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z"),
-        "packages_digest": "sha256:" + digest.hexdigest(),
+        "packages_digest": packages_digest(packages),
         "status": status,
         "counts": {
             "recipes": len(recipes),
@@ -483,10 +574,17 @@ def main():
         "subdirectory the manifest is read from",
     )
     parser.add_argument(
+        "--from-report",
+        metavar="REPORT",
+        help="a previous report of the same build, read instead of pkgdata: "
+        "rebuild the report for a later scan of that build's SBOM. Needs "
+        "--manifest; its machine, distro_version and status carry over",
+    )
+    parser.add_argument(
         "--status",
-        default="Unpatched",
         choices=REPORT_STATUSES,
-        help="CVE status to list. All lists every status, each CVE carrying "
+        help="CVE status to list, default Unpatched (with --from-report, that "
+        "report's). All lists every status, each CVE carrying "
         "its own, and then counts.unpatched_cves, patched_cves and ignored_cves "
         "count what is listed instead of what was left out",
     )
@@ -495,6 +593,11 @@ def main():
     )
     parser.add_argument("-o", "--output", required=True)
     args = parser.parse_args()
+
+    if args.from_report:
+        return _main_from_report(parser, args)
+    if args.status is None:
+        args.status = "Unpatched"
 
     manifests, pkgdata_dirs = ([], [])
     if args.tmpdir:
@@ -566,18 +669,74 @@ def main():
         )
         return 1
 
-    write_report(report, args.output)
+    return _write_and_summarize(report, stats, args.output, args.status)
+
+def _main_from_report(parser, args):
+    import sys
+
+    if args.tmpdir or args.pkgdata_dir or args.machine:
+        parser.error("--from-report replaces --tmpdir, --pkgdata-dir and --machine")
+    if not args.manifest:
+        parser.error("--from-report needs --manifest")
+    manifests = []
+    for path in args.manifest:
+        found = find_manifests(path)
+        if not found:
+            parser.error("no sbom-cve-check manifest at %s" % path)
+        manifests.extend(found)
+    if os.path.isdir(args.output):
+        parser.error("--output %s is a directory" % args.output)
+    # The output is removed before anything can fail, and write_report() writes
+    # output + ".tmp" first: neither may be one of the inputs.
+    for out in (args.output, args.output + ".tmp"):
+        if os.path.exists(out) and any(
+                os.path.exists(p) and os.path.samefile(out, p)
+                for p in [args.from_report] + manifests):
+            parser.error("--output %s is one of the inputs" % out)
+
+    if os.path.exists(args.output):
+        os.unlink(args.output)
+
+    try:
+        with open(args.from_report) as f:
+            anchor = json.load(f)
+    except (OSError, ValueError) as e:
+        print("cannot read %s: %s" % (args.from_report, e), file=sys.stderr)
+        return 1
+
+    try:
+        report, stats = build_report_from_anchor(
+            manifests, anchor, status=args.status,
+            summary=not args.no_summary, anchor_path=args.from_report)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    if stats.cve_files_unreadable >= stats.cve_files:
+        print(
+            "all %d manifest(s) failed to parse (%s); nothing was scanned."
+            % (stats.cve_files, ", ".join(manifests)),
+            file=sys.stderr,
+        )
+        return 1
+
+    return _write_and_summarize(report, stats, args.output, report["status"])
+
+def _write_and_summarize(report, stats, output, status):
+    import sys
+
+    write_report(report, output)
 
     counts = report["counts"]
 
     print(
         "%s: %d packages, %d recipes, %d %s CVEs (%d recipes, %d CVEs packaged)"
         % (
-            args.output,
+            output,
             counts["packages"],
             counts["recipes"],
             counts["cves"],
-            args.status.lower(),
+            status.lower(),
             counts["packaged_recipes"],
             counts["packaged_cves"],
         ),
