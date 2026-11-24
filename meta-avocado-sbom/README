@@ -98,6 +98,24 @@ The same code can run standalone against a build tree, if needed:
   PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
       --tmpdir build/tmp --machine <machine> -o avocado-cve-report.json
 
+A later scan of the same build's SBOM, with newer CVE data, can be turned into
+a report without the build tree. The previous report stands in for pkgdata:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --from-report avocado-cve-report-<machine>.json \
+      --manifest <image>.sbom-cve-check.yocto.json -o avocado-cve-report.json
+
+The result is byte for byte the report this layer would have written for that
+manifest, apart from "generated": "packages", "recipe_versions",
+packages_digest, pkgdata_unreadable, package_collisions, machine and
+distro_version carry over, and the status does too unless --status is given.
+--no-summary is not recorded in a report, so pass it again if the previous
+report was written with it. A report without "recipe_versions" is refused,
+since matching against the packages' versions loses CVEs (see "Report
+format"), as is one whose packages do not hash to its packages_digest.
+build_report_from_anchor() in avocado_sbom/report.py is the same as a
+function.
+
 Kernel CVEs
 -----------
 
