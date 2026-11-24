@@ -16,9 +16,8 @@ A flash board is three pieces that have to agree:
 - The recovery id and its evidence in the same manifest
   (`tegraflash.rcm_ids` and `tegraflash.rcm_evidence`). No Python board table is
   involved: the engine and the launcher's `boards` verb read the manifest. The
-  old registry in `scripts/avocado_flash_boards/` still exists but is retired by
-  this change's default flip of the launcher (`AVOCADO_FLASH_LAUNCHER`); do not
-  add a board to it.
+  old Python registry is gone with the launcher's default flip; there is nothing
+  else to add a board to.
 
 Two doors write a board, and both run the same file. The host door,
 `avocado-flash nvme`, runs `stone-provision-tegraflash.sh` from the deploy
@@ -252,7 +251,7 @@ This section is the release note for the move to the shared engine.
 | The boardctl target and serial are single arguments (`boardctl-single-arguments`) | A boardctl target or serial containing whitespace, which used to be split | Nothing; the value now arrives whole |
 | A named device no longer skips the retype; only `AVOCADO_PROVISION_FORCE=1` does. With no terminal and no signal the run proceeds with a notice, and `AVOCADO_PROVISION_FORCE=0` with no terminal refuses | Anyone who passed an explicit device to skip the prompt, and unattended runs | Set `AVOCADO_PROVISION_FORCE=1` where skipping is intended |
 | The engine refuses a run with no pinned kernel, and an unattended run for a board with no declared recovery id | Downstream manifests and lab scripts | Pin the kernel, or set `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`; declare `rcm_ids` or set `AVOCADO_PROVISION_RCM_ID` |
-| `AVOCADO_FLASH_LAUNCHER=1` routes `avocado-flash` through the stone-profile launcher (opt-in; the default flip is planned by this change) | Anyone driving `avocado-flash` | Nothing yet |
+| `avocado-flash` sd, ums and nvme run through the stone-profile launcher by default; emmc keeps the old uuu path unless `AVOCADO_FLASH_LAUNCHER=1` is set | Anyone driving `avocado-flash` | Nothing for sd, ums and nvme; set the variable to try emmc through the launcher |
 | `avocado-flash nvme` requires python3 3.10 or newer, `cpp`, `fdtget`, `fdtput` and `lsusb` on the host, and no longer needs `jq`. It requires the engine directory in the deploy tree | Everyone using the host door | Install the tools; rebuild an older image tree with the `avocado-stone` target (it is refused with that message) |
 | An image tree built before this change keeps the old 694-line script, and none of the new refusals apply to it | Anyone running an old tree | Nothing; reverting the series restores the old behaviour everywhere |
 

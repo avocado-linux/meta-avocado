@@ -67,7 +67,7 @@ class JTree(Tree):
         )
         path.chmod(0o755)
 
-    def nvme(self, *args, launcher="1", path=None):
+    def nvme(self, *args, launcher=None, path=None):
         env = {"PATH": path or f"{self.bin}:/usr/bin:/bin", "HOME": str(self.tmp)}
         if launcher is not None:
             env["AVOCADO_FLASH_LAUNCHER"] = launcher
@@ -197,14 +197,12 @@ def test_nvme_options_reach_the_launcher_before_the_shared_parser(jt):
     assert env["AVOCADO_PROVISION_RCM_ID"] == "0955:7523"
 
 
-def test_opt_in_unset_keeps_the_old_nvme_path(jt):
-    # The old parser offers only nvme and sd; the launcher also offers emmc.
-    rc, out = jt.nvme("--boot-media", "emmc", launcher=None)
-    assert rc == 2
-    assert "invalid choice" in out
-    rc, out = jt.nvme("--boot-media", "emmc", launcher="1")
+def test_nvme_reaches_the_launcher_without_the_old_opt_in(jt):
+    # The old parser offered only nvme and sd; emmc as a boot medium exists only in the launcher.
+    rc, out = jt.nvme("--boot-media", "emmc")
     assert rc == 1
     assert "tegraflash-emmc" in out
+    assert "invalid choice" not in out
     assert jt.started() == []
 
 

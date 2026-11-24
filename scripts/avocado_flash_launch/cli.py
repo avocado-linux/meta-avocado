@@ -1,4 +1,4 @@
-"""`avocado-flash` launcher entry (opt-in, AVOCADO_FLASH_LAUNCHER=1).
+"""`avocado-flash` launcher entry (default for sd, ums and nvme; emmc with AVOCADO_FLASH_LAUNCHER=1).
 
     main(argv, resolved) -> exit status
 

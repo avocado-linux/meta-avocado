@@ -1,4 +1,4 @@
-"""Fixtures for the existing-media regression baseline.
+"""Fixtures for driving scripts/avocado-flash from the ssh-emmc dispatch tests.
 
 The script under test is `scripts/avocado-flash`: a hyphenated name with no
 .py suffix, so it cannot be imported by name. `load_avocado_flash` loads it by
@@ -9,12 +9,6 @@ Two ways of driving it, chosen per case:
 - Argument errors run the real script as a subprocess. argparse rejects them
   before anything touches the host, so nothing needs stubbing and the exit
   status is the one a caller actually sees.
-- The sd dry run runs `main()` in process, because its first guard,
-  `assert_safe_block_device`, needs a real whole-disk block device (a
-  `Path.is_block_device()` stat plus a /sys/block entry) that no stub on PATH
-  can provide. Only that one guard is replaced; everything after it - deploy
-  and machine resolution, payload lookup, the freshness check, the fwup
-  command line and the dry-run close-out - runs unmodified.
 
 Output is normalised so a golden can be compared byte for byte: the temporary
 root becomes `<TMP>`, timestamps are pinned with os.utime and rendered in UTC,
@@ -175,28 +169,3 @@ def run_script(argv: list[str], root: Path, bindir: Path) -> Result:
             child.wait()
             raise
     return Result(code, out_path.read_text(), err_path.read_text())
-
-
-def render_case(name: str, argv: list[str], result: Result, root: Path) -> str:
-    return (
-        f"=== CASE {name}\n"
-        f"argv: {normalise(' '.join(argv), root)}\n"
-        f"exit: {result.exit}\n"
-        "--- stdout\n"
-        f"{normalise(result.stdout, root)}"
-        "--- stderr\n"
-        f"{normalise(result.stderr, root)}"
-    )
-
-
-def golden_cases(path: Path) -> dict[str, str]:
-    """Split a golden file into its `=== CASE <name>` sections, verbatim."""
-    cases: dict[str, str] = {}
-    current = None
-    for line in path.read_text().splitlines(keepends=True):
-        if line.startswith("=== CASE "):
-            current = line[len("=== CASE "):].strip()
-            cases[current] = ""
-        if current is not None:
-            cases[current] += line
-    return cases

@@ -29,7 +29,7 @@ record (`meta-avocado-nvidia/stone/tegra/tests/parity/deviations.py`).
 
 ### 2.1 Release notes
 
-- `AVOCADO_FLASH_LAUNCHER=1` opts `avocado-flash` into the new launcher (`scripts/avocado_flash_launch/`), which covers sd, emmc, ums and nvme and runs the stone profile instead of the Python board tables. It is opt-in in this change; flipping it to the default is planned by this change's later work, and the registry and wrapper stay until then.
+- `avocado-flash` sd, ums and nvme now run through the launcher (`scripts/avocado_flash_launch/`), which runs the stone profile instead of the Python board tables; the registry, the wrapper and the old sd, ums and nvme write paths are removed. The emmc medium still uses the old uuu path unless `AVOCADO_FLASH_LAUNCHER=1` is set, until that path is retired.
 - A named device no longer skips the retype. Before, passing an explicit device meant no confirmation. Now only `AVOCADO_PROVISION_FORCE=1` skips it. With no terminal and no signal the run proceeds with a notice; `AVOCADO_PROVISION_FORCE=0` with no terminal refuses; any value other than 1 or 0 refuses. The full table is `meta-avocado-distro/stone/tests/confirm-vectors.tsv`, shared by the shell library and the engine (`avocado_tegraflash/confirm.py`, `decide_confirmation`).
 - New variables: `AVOCADO_PROVISION_DRY_RUN=1` (run every guard, change nothing), `AVOCADO_PROVISION_RCM_ID`, `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`, `AVOCADO_PROVISION_FWUP_TASK` (only `complete` is accepted by the ums profile), `AVOCADO_PROVISION_HOST_MOUNTS` (a mount table exported by avocado-cli, read as a second table), and `AVOCADO_FLASH_LAUNCHER`.
 - The engine refuses a board nothing identifies, an unpinned kernel, and a `PATH` with relative entries is cleaned; see section 3.
@@ -124,14 +124,14 @@ passes a shared directory is not covered; that stays with avocado-cli.
 
 Every path below was checked to exist in this tree.
 
-- [ ] `scripts/avocado_flash_tegra/`
-- [ ] `scripts/avocado_flash_boards/`, together with the `boards` dispatch in `scripts/avocado-flash` (`dispatch_boards` and its branch in `main`, which import `avocado_flash_boards.cli`) and the `boards` lines in its help text; otherwise `avocado-flash boards` imports a deleted package. If the board listing is still wanted, it must move instead of being deleted.
-- [ ] `scripts/tests/boards`
-- [ ] `scripts/tests/tegra`
-- [ ] the `nvme` dispatch in `scripts/avocado-flash`: `dispatch_nvme` and its two `nvme` branches in `main`, plus the `nvme` lines in the help text
+- [x] `scripts/avocado_flash_tegra/`
+- [x] `scripts/avocado_flash_boards/`, together with the `boards` dispatch in `scripts/avocado-flash` (`dispatch_boards` and its branch in `main`, which import `avocado_flash_boards.cli`) and the `boards` lines in its help text; otherwise `avocado-flash boards` imports a deleted package. If the board listing is still wanted, it must move instead of being deleted.
+- [x] `scripts/tests/boards`
+- [x] `scripts/tests/tegra`
+- [x] the `nvme` dispatch in `scripts/avocado-flash`: `dispatch_nvme` and its two `nvme` branches in `main`, plus the `nvme` lines in the help text
 - [ ] the "Host tool tests" step in `.github/workflows/flash-tools-tests.yml`, and its path filter entries that only serve it (`scripts/**`; keep the `meta-avocado-nvidia/stone/**` entries, the engine tests still run)
-- [ ] the host-door step in `docs/adding-a-flash-board.md` (the `scripts/avocado_flash_boards/tegra.py` registry entry and the host-door paragraphs)
-- [ ] `scripts/tests/boards/golden/help.txt`, which lists `nvme`; it goes with `scripts/tests/boards`, and any remaining help golden must be regenerated without `nvme`
+- [x] the host-door step in `docs/adding-a-flash-board.md` (the `scripts/avocado_flash_boards/tegra.py` registry entry and the host-door paragraphs)
+- [x] `scripts/tests/boards/golden/help.txt`, which lists `nvme`; it goes with `scripts/tests/boards`, and any remaining help golden must be regenerated without `nvme`
 
 ## 5. The gate
 

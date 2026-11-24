@@ -1,4 +1,4 @@
-"""End to end through scripts/avocado-flash with AVOCADO_FLASH_LAUNCHER=1.
+"""End to end through scripts/avocado-flash; sd and ums reach the launcher by default.
 
 Hermetic: stone, fwup, uuu, dd, bmaptool and sudo are shell stubs in a tmp PATH
 dir. Each appends its argv and its parent's name to one log, so the tests assert
@@ -65,7 +65,7 @@ class Tree:
             return []
         return [line.split(" ", 1)[0] for line in self.log.read_text().splitlines()]
 
-    def run(self, *args, launcher="1", extra_env=None):
+    def run(self, *args, launcher=None, extra_env=None):
         env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.tmp)}
         if launcher is not None:
             env["AVOCADO_FLASH_LAUNCHER"] = launcher
@@ -133,21 +133,21 @@ def test_sd_passes_task_only_when_given(tree):
 
 
 def test_emmc_task_upgrade_is_refused_before_stone(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "--task", "upgrade", "emmc")
+    rc, out = tree.run("--workdir", str(tree.workdir), "--task", "upgrade", "emmc", launcher="1")
     assert rc != 0
     assert "sd medium only" in out
     assert tree.started() == []
 
 
 def test_emmc_maps_to_uuu_emmc_and_starts_only_stone(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "emmc")
+    rc, out = tree.run("--workdir", str(tree.workdir), "emmc", launcher="1")
     assert rc == 0, out
     assert tree.started() == ["stone"]
     assert tree.env("stone")["AVOCADO_PROVISION_PROFILE"] == "uuu-emmc"
 
 
 def test_dry_run_on_declared_profile_sets_dry_run(tree):
-    rc, out = tree.run("--workdir", str(tree.workdir), "--dry-run", "emmc")
+    rc, out = tree.run("--workdir", str(tree.workdir), "--dry-run", "emmc", launcher="1")
     assert rc == 0, out
     assert tree.env("stone")["AVOCADO_PROVISION_DRY_RUN"] == "1"
 
@@ -162,7 +162,7 @@ def test_dry_run_on_undeclared_profile_is_refused_before_stone(tree):
 
 def test_missing_profile_is_refused_naming_machine_and_profile(tmp_path):
     t = Tree(tmp_path, profiles={"sd": {}})
-    rc, out = t.run("--workdir", str(t.workdir), "emmc")
+    rc, out = t.run("--workdir", str(t.workdir), "emmc", launcher="1")
     assert rc != 0
     assert MACHINE in out and "uuu-emmc" in out
     assert t.started() == []
@@ -200,10 +200,8 @@ def test_two_deploy_trees_still_refused(tmp_path):
 
 
 @pytest.mark.parametrize("value", [None, "0", "true", ""])
-def test_opt_in_unset_or_other_keeps_the_old_path(tree, value):
-    # The old sd path refuses a non-block device before writing anything; the
-    # launcher would instead have started stone.
-    rc, out = tree.run("sd", "/dev/fakedisk", launcher=value)
-    assert rc != 0
-    assert tree.started() == []
-    assert "stone" not in out
+def test_sd_reaches_the_launcher_whatever_the_old_opt_in_says(tree, value):
+    # The retired opt-in no longer selects the old write path: sd starts stone.
+    rc, out = tree.run("--workdir", str(tree.workdir), "sd", "/dev/fakedisk", launcher=value)
+    assert rc == 0, out
+    assert tree.started() == ["stone"]
