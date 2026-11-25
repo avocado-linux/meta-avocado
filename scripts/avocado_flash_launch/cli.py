@@ -148,7 +148,21 @@ def _nvme_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _manifest_rcm_ids(manifest: dict) -> list:
+    rootdisk = (manifest.get("storage_devices") or {}).get("rootdisk") or {}
+    return (rootdisk.get("tegraflash") or {}).get("rcm_ids") or []
+
+
 def route_nvme(resolved: Resolved, args) -> int:
+    ctx = _context(resolved, args)
+    # The engine only refuses an unattended run with no id; interactively it accepts a
+    # retype of whatever board is in recovery, which cannot tell one Jetson from another.
+    if not args.dry_run and not args.rcm_id and not _manifest_rcm_ids(ctx.manifest):
+        raise LauncherError(
+            f"no recovery-mode USB id is recorded for {resolved.machine}: the manifest has no "
+            "tegraflash.rcm_ids, so the board in recovery cannot be checked against the image.\n"
+            "Pass the board's id with --rcm-id vvvv:pppp (lsusb shows it in recovery mode)."
+        )
     opts = LaunchOpts(
         medium="nvme",
         assume_yes=args.assume_yes,
@@ -164,7 +178,7 @@ def route_nvme(resolved: Resolved, args) -> int:
         if "kept:" in message:
             kept.append(message.rsplit("kept:", 1)[1].strip())
 
-    rc = run_stone(opts, _context(resolved, args), out=out)
+    rc = run_stone(opts, ctx, out=out)
     if rc == 0:
         if opts.dry_run:
             print("dry run: stone prepared the inputs only; the board was not contacted")

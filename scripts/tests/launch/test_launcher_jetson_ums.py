@@ -5,6 +5,7 @@ PATH dir that append to one process log. Nothing here touches a board, a serial
 console, USB, or real sudo. ums runs in process with a fake console driver.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -48,6 +49,18 @@ class JTree(Tree):
         (self.bin / "python3").chmod(0o755)
         self._stub("lsusb")
         self.set_sudo()
+        # A real nvme run needs a recorded recovery id; the refusal test strips it.
+        self.set_rcm_ids(["0955:7523"])
+
+    def set_rcm_ids(self, ids):
+        path = self.deploy / "stone" / "stone-test.json"
+        manifest = json.loads(path.read_text())
+        tegraflash = manifest["storage_devices"]["rootdisk"].setdefault("tegraflash", {})
+        if ids:
+            tegraflash["rcm_ids"] = ids
+        else:
+            tegraflash.pop("rcm_ids", None)
+        path.write_text(json.dumps(manifest))
 
     def _quiet(self, name):
         (self.bin / name).write_text("#!/bin/sh\nexit 0\n")
@@ -154,6 +167,38 @@ def test_real_nvme_runs_stone_whole_under_sudo_and_prints_the_next_steps(jt):
     assert "recovery jumper" in out and "power-cycle" in out
     assert "work directory" in out
     assert list(jt.workdir.iterdir()) == []  # the scratch is gone, the named parent is never deleted
+
+
+def test_real_nvme_with_no_recovery_id_anywhere_is_refused_before_any_process(jt):
+    # Interactive or not: the retype alone cannot tell an Orin Nano from an Orin NX in recovery.
+    jt.set_rcm_ids(None)
+    rc, out = jt.nvme("--workdir", str(jt.workdir))
+    assert rc == 1, out
+    assert "--rcm-id" in out
+    assert jt.started() == []
+    assert not jt.workdir.exists()
+
+
+@NEEDS_USER
+def test_real_nvme_with_a_manifest_recovery_id_needs_no_rcm_id(jt):
+    rc, out = jt.nvme("--workdir", str(jt.workdir))
+    assert rc == 0, out
+    assert "stone" in jt.started()
+
+
+@NEEDS_USER
+def test_real_nvme_with_rcm_id_and_no_manifest_id_runs(jt):
+    jt.set_rcm_ids(None)
+    rc, out = jt.nvme("--workdir", str(jt.workdir), "--rcm-id", "0955:7523")
+    assert rc == 0, out
+    assert jt.env("stone")["AVOCADO_PROVISION_RCM_ID"] == "0955:7523"
+
+
+def test_nvme_dry_run_with_no_recovery_id_still_prepares(jt):
+    jt.set_rcm_ids(None)
+    rc, out = jt.nvme("--dry-run", "--workdir", str(jt.workdir))
+    assert rc == 0, out
+    assert jt.started() == ["stone"]
 
 
 def test_nvme_dry_run_runs_stone_as_the_user_with_dry_run_set(jt):
