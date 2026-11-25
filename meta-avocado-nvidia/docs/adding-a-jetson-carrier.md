@@ -245,7 +245,10 @@ tree with `CARRIER_ENV_DTBFILE`: the default tree is the 0005 one, and
 the flash helper's rewrite of `p3701-0000` to the module's SKU no longer
 matches the default name. Device-tree overlay delivery refuses a carrier
 that redirects the tree and one that ships a file under the stock name,
-so such a carrier cannot use it.
+so such a carrier cannot use it. The provisioning engine prints a WARNING
+naming both files when a carrier ships a P3701 tree under a name the flash
+does not select, such as a merged tree still named for p3701-0000; the fix
+is to shadow the 0005 name.
 
 For the iCAM-540, these are six files (~2.5 MB total):
 
