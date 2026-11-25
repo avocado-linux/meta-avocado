@@ -190,5 +190,33 @@ class AltLabelTest(unittest.TestCase):
                          "raspberrypi-6_6:linux-raspberrypi")
 
 
+
+class DropCompiledSourceKernelsTest(unittest.TestCase):
+    INCLUDED = [
+        ("mc6", "linux", ["h1"]),
+        ("mc6", "kernel-devsrc", ["h2"]),
+    ]
+
+    def test_alternate_kernel_of_a_compiled_source_recipe_is_not_covered(self):
+        kept, not_covered = feedsbom.drop_compiled_source_kernels(
+            self.INCLUDED, ["linux"])
+        self.assertEqual(kept, [("mc6", "kernel-devsrc", ["h2"])])
+        self.assertEqual(len(not_covered), 1)
+        self.assertEqual(not_covered[0]["mc"], "mc6")
+        self.assertEqual(not_covered[0]["recipe"], "linux")
+        self.assertIn("compiled source", not_covered[0]["reason"])
+
+    def test_nothing_dropped_when_no_recipe_includes_compiled_sources(self):
+        kept, not_covered = feedsbom.drop_compiled_source_kernels(self.INCLUDED, [])
+        self.assertEqual(kept, self.INCLUDED)
+        self.assertEqual(not_covered, [])
+
+    def test_every_multiconfig_of_the_recipe_is_dropped(self):
+        included = [("mc6", "linux", ["h1"]), ("mc7", "linux", ["h3"])]
+        kept, not_covered = feedsbom.drop_compiled_source_kernels(included, ["linux"])
+        self.assertEqual(kept, [])
+        self.assertEqual([n["mc"] for n in not_covered], ["mc6", "mc7"])
+
+
 if __name__ == "__main__":
     unittest.main()

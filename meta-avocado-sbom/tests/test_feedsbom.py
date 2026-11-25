@@ -49,6 +49,73 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(feedsbom.classify([], lambda r: ["x"]), ([], []))
 
 
+class CollectBuildsTest(unittest.TestCase):
+    def test_only_recipes_with_a_builds_document_in_recipe_order(self):
+        found = {"kernel": "k-doc", "bash": None, "glibc": "g-doc"}
+        got = feedsbom.collect_builds(["kernel", "bash", "glibc"], found.__getitem__)
+        self.assertEqual(got, ["k-doc", "g-doc"])
+
+    def test_a_recipe_listed_twice_is_looked_up_once(self):
+        calls = []
+
+        def find(recipe):
+            calls.append(recipe)
+            return recipe + "-doc"
+
+        got = feedsbom.collect_builds(["a", "a", "b"], find)
+        self.assertEqual(got, ["a-doc", "b-doc"])
+        self.assertEqual(calls, ["a", "b"])
+
+    def test_no_recipes(self):
+        self.assertEqual(feedsbom.collect_builds([], lambda r: "x"), [])
+
+
+class PackagesOfTest(unittest.TestCase):
+    PACKAGES = {
+        "kernel-image": {"recipe": "linux", "version": "6", "origin": "pkgdata"},
+        "kernel-module-a": {"recipe": "linux", "version": "6", "origin": "pkgdata"},
+        "bash": {"recipe": "bash", "version": "5", "origin": "pkgdata"},
+        "libc": {"recipe": "glibc", "version": "2", "origin": "pkgdata"},
+    }
+
+    def test_package_names_of_the_given_recipes_sorted(self):
+        got = feedsbom.packages_of(self.PACKAGES, ["linux", "glibc"])
+        self.assertEqual(got, ["kernel-image", "kernel-module-a", "libc"])
+
+    def test_a_recipe_with_no_package_adds_nothing(self):
+        self.assertEqual(feedsbom.packages_of(self.PACKAGES, ["nothing"]), [])
+
+    def test_no_recipes_means_no_packages(self):
+        self.assertEqual(feedsbom.packages_of(self.PACKAGES, []), [])
+
+
+class CompiledSourceRecipesTest(unittest.TestCase):
+    @staticmethod
+    def getvar(values):
+        return values.get
+
+    def test_only_recipes_that_opt_in_by_name(self):
+        values = {"SPDX_INCLUDE_COMPILED_SOURCES:pn-linux": "1"}
+        got = feedsbom.compiled_source_recipes(
+            ["bash", "linux", "glibc"], self.getvar(values))
+        self.assertEqual(got, ["linux"])
+
+    def test_the_global_setting_selects_every_recipe(self):
+        values = {"SPDX_INCLUDE_COMPILED_SOURCES": "1"}
+        got = feedsbom.compiled_source_recipes(["bash", "linux"], self.getvar(values))
+        self.assertEqual(got, ["bash", "linux"])
+
+    def test_a_recipe_can_opt_out_of_the_global_setting(self):
+        values = {"SPDX_INCLUDE_COMPILED_SOURCES": "1",
+                  "SPDX_INCLUDE_COMPILED_SOURCES:pn-bash": "0"}
+        got = feedsbom.compiled_source_recipes(["bash", "linux"], self.getvar(values))
+        self.assertEqual(got, ["linux"])
+
+    def test_nothing_set_selects_nothing(self):
+        self.assertEqual(
+            feedsbom.compiled_source_recipes(["bash"], self.getvar({})), [])
+
+
 class CheckMissingTest(unittest.TestCase):
     def test_over_ceiling_names_every_recipe(self):
         with self.assertRaises(feedsbom.FeedSbomError) as ctx:
