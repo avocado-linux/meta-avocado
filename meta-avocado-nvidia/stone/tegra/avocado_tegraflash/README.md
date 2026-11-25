@@ -45,6 +45,27 @@ Run the same command again with sudo, keeping the environment and PATH:
 - `boot-tools-from-tools-dir`: the engine starts `avocado-tegra-bootimg` and `mkbootimg` by absolute path from the tools directory the manifest names and never consults `PATH`, so a same-named program earlier on `PATH` cannot stand in for a helper that runs as root, where the legacy script looks them up through `PATH`.
 - `force-policy-table`: `AVOCADO_PROVISION_FORCE` follows one decision table shared with the shell library's `confirm-vectors.tsv`: `1` skips the prompt, `0` retypes on a terminal and refuses without one, unset or empty retypes on a terminal and proceeds with a logged note without one, and any other value is refused naming the variable and value, where the legacy script has no confirmation.
 - `erase-flag-spellings`: the engine reads `ERASE_NVME`, `ERASE_EMMC` and `ERASE_ONLY` as erase when the value is `1` or `true` and as no erase when unset, empty, `0` or `false`, case-insensitively, and refuses any other value naming the variable and value before staging, where the legacy script erases only on exactly `1` and silently ignores everything else, so the `true` that the stone manifests' boolean fields produce never erased.
+- `boot-overlay-list-unreadable-refused`: the engine refuses, naming the file, line and variable, a `BOOTCONTROL_OVERLAYS`, `PLUGIN_MANAGER_OVERLAYS` or `OVERLAY_DTB_FILE` assignment in `flashvars` that it cannot read exactly, before any board contact, where the legacy script never reads these assignments.
+- `devkit-camera-fragments-stripped`: with a carrier device tree in use and no carrier `PLUGIN_MANAGER_OVERLAYS`, the engine removes the devkit camera fragments from the work directory's dynamic overlay, drops the camera-module overlays from the list and warns that integrator-set properties are reset, where the legacy script flashes them unchanged.
+- `modified-boot-overlay-refused`: the engine refuses when a replay failure names an overlay whose bytes the camera policy rewrote (the stripped dynamic overlay), or when a kept fragment references a node inside a removed camera fragment, where the legacy script has no replay and flashes whatever the overlay holds. A failure in an overlay the policy left untouched only warns.
+
+## Boot overlay stage
+
+UEFI applies the overlays named by `BOOTCONTROL_OVERLAYS`, `PLUGIN_MANAGER_OVERLAYS` and `OVERLAY_DTB_FILE` at every boot, on top of the tree the flash writes. The stage runs after the images are staged and before any board contact, and also under `--prepare-only`, so a refusal never costs a flash attempt. It works on the work directory only; the BSP and carrier directories are never edited.
+
+It prints the three lists as the flash will see them (with the carrier's `PLUGIN_MANAGER_OVERLAYS` rewrite applied), then the camera policy, then the replay result, and ends with one line starting `Boot overlays at flash:`. That line is printed again just before the recovery wait, because the stage output scrolls away during the boot image repack. A BSP without `flashvars` prints the lists as unknown and skips the rest.
+
+The camera policy runs when a carrier device tree is in use and the carrier sets no `PLUGIN_MANAGER_OVERLAYS` of its own. It removes the devkit camera fragments from the work directory's dynamic overlay, drops the camera-module overlays from the list, and prints one `devkit camera fragments:` line per removed fragment and dropped overlay, or the reason nothing was changed.
+
+The replay applies the overlay chain to the flashed tree with `fdtoverlay` and compares the result with the stock tree. It prints a `WARNING:` line for each integrator-set property an overlay changes, with the node, the property and the value before and after, and a `WARNING:` line for each overlay that fails to apply. It is skipped with a printed reason when `DTBFILE` is unset or the flashed tree is absent.
+
+The engine refuses, before any board contact, in three cases:
+
+- a list assignment it cannot read exactly, naming the file, line and variable;
+- a replay failure that names an overlay whose bytes the camera policy rewrote (the stripped dynamic overlay);
+- a kept fragment that references a node inside a removed camera fragment.
+
+A failure in an overlay the policy left untouched, including one that only lost its list entry, is a warning and the run continues.
 
 ## Staged env file
 
