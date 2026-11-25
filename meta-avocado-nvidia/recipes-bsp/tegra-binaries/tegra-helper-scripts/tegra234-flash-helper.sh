@@ -58,7 +58,12 @@ get_value_from_PT_table() {
   eval "$varname=\"$value\""
 }
 
+# initrd-flash.sh branches on exit status 3 ("board did not answer the board-info read").
 read_boardinfo_t234() {
+  local cold_entry="Power the board off and put it into recovery mode from cold (hold the recovery button while powering on): a warm re-enumeration of a board whose recovery session was spent is not enough."
+  # A file left by an earlier read must not stand in for this one: the check
+  # below is what tells a read that returned without an answer.
+  rm -f chip_info.bin_bak
   # inst_args, skipuid and keyargs are argument lists; quoting them would
   # pass one word. MISC_CONFIG comes from the sourced flashvars.
   # shellcheck disable=SC2086,SC2153
@@ -68,13 +73,15 @@ read_boardinfo_t234() {
     --cfg readinfo_t234_min_prod.xml \
     --device_config "$DEVICE_CONFIG" --misc_config "$MISC_CONFIG" --bins "mb2_applet applet_t234.bin" \
     --cmd "readfuses fuse_t234.bin fuse_t234.xml; dump eeprom cvm ${cvm_bin}; dump try_custinfo ${custinfo_out}; reboot recovery"; then
-    echo "ERR: could not retrieve EEPROM board information" >&2
-    exit 1
+    echo "ERR: the board did not answer the board-info read over USB recovery mode (RCM): read failed" >&2
+    echo "$cold_entry" >&2
+    exit 3
   fi
   # The chip_info.bin_bak file is created as a side effect of the above tegraflash.py invocation
-  if [ ! -e chip_info.bin_bak ]; then
-    echo "ERR: chip_info.bin_bak missing after dumping boardinfo" >&2
-    exit 1
+  if [ ! -s chip_info.bin_bak ]; then
+    echo "ERR: the board did not answer the board-info read over USB recovery mode (RCM): chip information file missing or empty" >&2
+    echo "$cold_entry" >&2
+    exit 3
   fi
   CHIP_SKU=$("$here"/chkbdinfo -C chip_info.bin_bak | tr -d '[:space:]')
   board_ramcode=$("$here"/chkbdinfo -R chip_info.bin_bak)
