@@ -103,7 +103,10 @@ manifest declares no `rcm_ids` and `AVOCADO_PROVISION_RCM_ID` is not set, in the
 cases where the confirmation would be skipped (`AVOCADO_PROVISION_FORCE=1`, or
 an unattended run). With a terminal it prints a warning and relies on the
 retyped confirmation. `AVOCADO_PROVISION_RCM_ID=<vendor:product>` supplies the
-id for a board whose manifest declares none. Recovery ids and their evidence
+id for a board whose manifest declares none. `avocado-flash nvme` keeps the
+wrapper's stricter rule: the launcher (`scripts/avocado_flash_launch/cli.py`,
+`route_nvme`) refuses every real run, with or without a terminal, unless the
+manifest declares `rcm_ids` or `--rcm-id` is given. Recovery ids and their evidence
 live only in the stone manifest (`rcm_ids`, `rcm_evidence`); the launcher's
 `boards` verb (`scripts/avocado_flash_launch/boards.py`) lists them.
 
