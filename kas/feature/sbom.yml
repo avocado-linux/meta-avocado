@@ -7,6 +7,11 @@ local_conf_header:
     INHERIT:remove = "create-spdx"
     INHERIT += "create-spdx-3.0"
 
+    # The CVE_STATUS detail in each VEX statement's status notes, which
+    # scarthgap's create-spdx-3.0 leaves out; see the class. cve-check.yml
+    # inherits it too, so both stacks build the same SPDX.
+    INHERIT += "avocado-spdx-vex-notes"
+
     # "all", where the create-spdx-3.0 default is "current": "current" drops
     # every CVE_STATUS whose detail is fixed-version or cpe-stable-backport,
     # and the CVE scan (kas/feature/cve-check.yml) reads Patched and Ignored

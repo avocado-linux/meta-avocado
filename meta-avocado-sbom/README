@@ -49,7 +49,8 @@ Requirements
 kas/feature/cve-check-image.yml includes kas/feature/cve-check.yml, which
 carries this layer, switches the build to create-spdx-3.0 (scarthgap's
 create-spdx is 2.2, and the scan reads 3.0), raises SPDX_INCLUDE_VEX to "all"
-so the scan can see the Patched and Ignored statements, and points the CVE
+so the scan can see the Patched and Ignored statements, inherits
+avocado-spdx-vex-notes so those statements say why, and points the CVE
 database recipes at AUTOREV. kas/feature/sbom.yml is the SPDX fragment feed
 builds stack, and sets the same SPDX values, so a scan on top of a feed build
 reuses its SPDX.
@@ -58,6 +59,7 @@ Outside kas, with this layer in bblayers.conf, the equivalent in local.conf:
 
   INHERIT:remove = "create-spdx"
   INHERIT += "create-spdx-3.0"
+  INHERIT += "avocado-spdx-vex-notes"
   SPDX_INCLUDE_VEX = "all"
   SRCREV:pn-sbom-cve-check-update-nvd-native = "${AUTOREV}"
   SRCREV:pn-sbom-cve-check-update-cvelist-native = "${AUTOREV}"
@@ -66,8 +68,16 @@ Outside kas, with this layer in bblayers.conf, the equivalent in local.conf:
 
 plus the four kernel lines under "Kernel CVEs" below.
 
-SPDX_INCLUDE_VEX = "all" changes the signature of every recipe's SPDX tasks,
-so the first build with it rebuilds all SPDX documents once. It has to be in
+The status notes are the CVE_STATUS detail of each VEX statement
+(upstream-wontfix, cpe-stable-backport, ...), which sbom-cve-check exports as
+the CVE's "detail". OE-core writes them from wrynose on; scarthgap's
+create-spdx-3.0 does not, so meta-avocado's avocado-spdx-vex-notes class adds
+them. Without them an upstream-wontfix CVE reads as plain Ignored, and a CVE
+whose status came from the SPDX carries no detail at all.
+
+SPDX_INCLUDE_VEX = "all" and the notes class change the signature of every
+recipe's SPDX tasks, so the first build with them rebuilds all SPDX documents
+once. It has to be in
 place before the build that produces the SPDX documents, not just before this
 recipe runs.
 
