@@ -83,6 +83,32 @@ write_env() {
 }
 write_env "tegra234-test-0005.dtb"
 
+# The flash layouts the BSP ships (the engine reads internal-flash-emmc.xml and
+# external-flash.xml.in). The hook takes the kernel-dtb slot size from them.
+# write_layouts EMMC_SIZE EXTERNAL_SIZE
+write_layouts() {
+  local spec size
+  for spec in "internal-flash-emmc.xml:$1" "external-flash.xml.in:$2"; do
+    size="${spec#*:}"
+    cat >"$bsp/${spec%%:*}" <<EOF
+<partition_layout version="01.00.0000">
+    <device type="sdmmc_user" instance="3">
+        <partition name="A_kernel" type="kernel">
+            <size> 134217728 </size>
+        </partition>
+        <partition name="A_kernel-dtb" type="kernel_dtb">
+            <size> $size </size>
+        </partition>
+        <partition name="B_kernel-dtb" type="kernel_dtb">
+            <size> $size </size>
+        </partition>
+    </device>
+</partition_layout>
+EOF
+  done
+}
+write_layouts 786432 786432
+
 # Overlay fixtures, each adding an identifiable property to the same target.
 make_dtbo() {
   local out="$1" prop="$2"
@@ -800,6 +826,101 @@ elif [[ ! -e "$work/s30/tegra234-test-0005.dtb" && ! -e "$work/f30.json" ]]; the
   ok "an fdtoverlay failure leaves no staged tree and no fragment"
 else
   bad "failed merge left a staged tree or fragment behind"
+fi
+
+# --- 31-34. the OS update carries the merged tree too -------------------------
+# update.os_artifacts names kernel_dtb_ota, which stone resolves against the
+# staging dir first, so the hook publishes the same bytes it publishes as
+# images.dtb. A copy that differs would put a different tree on the inactive
+# slot than the flash writes.
+
+# check_ota LABEL STAGING FRAGMENT PUBLISHED_NAME
+check_ota() {
+  local label="$1" staging="$2" fragment="$3" published="$4"
+  if [[ -f "$staging/kernel-dtb-ota.dtb" ]] && cmp -s "$staging/kernel-dtb-ota.dtb" "$staging/$published"; then
+    ok "$label: the staged update tree is byte-identical to the published merged tree"
+  else
+    bad "$label: kernel-dtb-ota.dtb is missing or differs from $published"
+  fi
+  if [[ "$(jq -r '.storage_devices.rootdisk.images.kernel_dtb_ota // empty' "$fragment")" == "kernel-dtb-ota.dtb" &&
+  "$(jq -r '.storage_devices.rootdisk.images.dtb' "$fragment")" == "$published" ]]; then
+    ok "$label: the fragment names kernel_dtb_ota and leaves images.dtb alone"
+  else
+    bad "$label: fragment images: $(jq -c '.storage_devices.rootdisk.images' "$fragment")"
+  fi
+}
+check_ota "no carrier" "$work/s1" "$work/f1.json" tegra234-test-0005.dtb
+check_ota "Shape A" "$work/s19" "$work/f19.json" tegra234-test-0005.dtb
+check_ota "Shape B" "$work/s20" "$work/f20.json" tegra234-test-sel.dtb
+
+# The update tree is the merged one, not the stock tree.
+if [[ "$(prop "$work/s19/kernel-dtb-ota.dtb" / marker)" == "carrier-a" &&
+"$(prop "$work/s19/kernel-dtb-ota.dtb" /target-node alpha)" == "present" ]]; then
+  ok "the staged update tree carries the carrier marker and the overlay"
+else
+  bad "the staged update tree lacks the carrier marker or the overlay"
+fi
+
+# 32. a merged tree larger than the kernel-dtb slot is refused, naming the tree,
+# its size and the slot size, and nothing is left staged or published.
+write_layouts 100 100
+make_staging "$work/s32" alpha
+if run_hook "$work/s32" "$work/stone.json" "$work/f32.json" >/dev/null 2>"$work/e32"; then
+  bad "hook published a merged tree larger than the kernel-dtb partition"
+elif grep -q "tegra234-test-0005.dtb" "$work/e32" && grep -q "A_kernel-dtb" "$work/e32" && grep -q "100" "$work/e32" \
+  && [[ ! -e "$work/s32/tegra234-test-0005.dtb" && ! -e "$work/s32/kernel-dtb-ota.dtb" && ! -e "$work/f32.json" ]]; then
+  ok "an oversized merged tree is refused and leaves nothing published"
+else
+  bad "oversize refusal was unclear or left files behind: $(cat "$work/e32")"
+fi
+
+# 33. layouts that disagree on the slot size are refused: the profile is not
+# known here, and either could be the one flashed.
+write_layouts 786432 524288
+make_staging "$work/s33" alpha
+if run_hook "$work/s33" "$work/stone.json" "$work/f33.json" >/dev/null 2>"$work/e33"; then
+  bad "hook accepted layouts that disagree on the kernel-dtb size"
+elif grep -q "786432" "$work/e33" && grep -q "524288" "$work/e33" \
+  && [[ ! -e "$work/s33/tegra234-test-0005.dtb" && ! -e "$work/s33/kernel-dtb-ota.dtb" && ! -e "$work/f33.json" ]]; then
+  ok "layouts that disagree on the kernel-dtb size are refused naming both sizes"
+else
+  bad "layout disagreement refusal was unclear or left files behind: $(cat "$work/e33")"
+fi
+
+# 34. a missing layout is refused by name rather than skipping the size check.
+write_layouts 786432 786432
+mv "$bsp/external-flash.xml.in" "$work/stashed-layout"
+make_staging "$work/s34" alpha
+if run_hook "$work/s34" "$work/stone.json" "$work/f34.json" >/dev/null 2>"$work/e34"; then
+  bad "hook skipped the size check with a layout missing"
+elif grep -q "external-flash.xml" "$work/e34" \
+  && [[ ! -e "$work/s34/tegra234-test-0005.dtb" && ! -e "$work/s34/kernel-dtb-ota.dtb" && ! -e "$work/f34.json" ]]; then
+  ok "a missing layout is refused naming it, and nothing is published"
+else
+  bad "missing-layout refusal was unclear or left files behind: $(cat "$work/e34")"
+fi
+mv "$work/stashed-layout" "$bsp/external-flash.xml.in"
+
+# 35. a merge result that is not a flattened tree is refused. A stand-in
+# fdtoverlay that corrupts the magic models a tool that exits 0 with garbage.
+mkdir -p "$work/fakebin"
+real_fdtoverlay="$(command -v fdtoverlay)"
+cat >"$work/fakebin/fdtoverlay" <<EOF
+#!/usr/bin/env bash
+"$real_fdtoverlay" "\$@" || exit \$?
+out=""
+while [[ \$# -gt 0 ]]; do [[ "\$1" == "-o" ]] && out="\$2"; shift; done
+printf '\\x00\\x00\\x00\\x00' | dd of="\$out" bs=1 conv=notrunc 2>/dev/null
+EOF
+chmod +x "$work/fakebin/fdtoverlay"
+make_staging "$work/s35" alpha
+if PATH="$work/fakebin:$PATH" run_hook "$work/s35" "$work/stone.json" "$work/f35.json" >/dev/null 2>"$work/e35"; then
+  bad "hook published a merge result that is not a flattened tree"
+elif grep -qi "flattened\|magic" "$work/e35" \
+  && [[ ! -e "$work/s35/tegra234-test-0005.dtb" && ! -e "$work/s35/kernel-dtb-ota.dtb" && ! -e "$work/f35.json" ]]; then
+  ok "a merge result that is not a flattened tree is refused and leaves nothing published"
+else
+  bad "invalid-tree refusal was unclear or left files behind: $(cat "$work/e35")"
 fi
 
 echo

@@ -24,9 +24,9 @@
 # publishes the result as storage_devices.rootdisk.images.dtb. The tegraflash
 # engine reads that key (avocado_tegraflash/manifest.py) and stages it as
 # <basename>.dtb and kernel_<basename>.dtb (staging.copy_images), which is the
-# file the flash writes to the kernel-dtb partition. An OS update does not
-# carry it: update.os_artifacts names rootfs and boot only, so an overlay
-# change reaches a device by reflashing.
+# file the flash writes to the kernel-dtb partition. An OS update carries the
+# same tree to the inactive kernel-dtb slot (update.os_artifacts names it), but
+# the boot overlay lists above still need a reflash.
 #
 # The tree merged into is the one the flash writes (resolve_carrier_tree):
 #   * no carrier tree: the stock BSP's base DTB;
@@ -54,12 +54,17 @@
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 # The device key the tegraflash engine reads (avocado_tegraflash/manifest.py).
 # Keep in sync with it; the test suite has a drift guard on this.
 TARGET_DEVICE = "rootdisk"
+
+# The image name update.os_artifacts.dtb points at in the stone manifest.
+OTA_NAME = "kernel-dtb-ota.dtb"
 
 
 def die(msg):
@@ -291,6 +296,69 @@ def resolve_carrier_tree(stone, data_dir, bsp_dir, base_name):
     return stock
 
 
+def kernel_dtb_slot_size(bsp_dir):
+    """Return the A_kernel-dtb partition size the BSP's flash layouts agree on.
+
+    The hook does not know which profile (eMMC or external) will flash, so both
+    layouts must be present and name one size. A missing or disagreeing layout
+    is refused: skipping the check would let an oversized tree reach the
+    inactive slot, which only fails at the next boot."""
+    sizes = {}
+    for names in (("internal-flash-emmc.xml",), ("external-flash.xml", "external-flash.xml.in")):
+        path = next(
+            (p for p in (os.path.join(bsp_dir, n) for n in names) if os.path.isfile(p)),
+            None,
+        )
+        if path is None:
+            die(
+                f"flash layout {names[0]} not found in {bsp_dir}: its A_kernel-dtb "
+                "partition size bounds the device tree an OS update can carry"
+            )
+        try:
+            root = ET.parse(path).getroot()
+        except ET.ParseError as exc:
+            die(f"{path} is not valid XML ({exc}); cannot read the A_kernel-dtb size")
+        size = None
+        for part in root.iter("partition"):
+            if part.get("name") == "A_kernel-dtb":
+                text = (part.findtext("size") or "").strip()
+                try:
+                    size = int(text, 0)
+                except ValueError:
+                    die(f"{path}: A_kernel-dtb size {text!r} is not a number")
+                break
+        if size is None:
+            die(f"{path} has no A_kernel-dtb partition; cannot bound the update tree")
+        sizes[path] = size
+    if len(set(sizes.values())) != 1:
+        detail = ", ".join(f"{p}: {s}" for p, s in sizes.items())
+        die(f"the flash layouts disagree on the A_kernel-dtb size ({detail})")
+    return next(iter(sizes.values()))
+
+
+def check_update_tree(path, name, limit):
+    """Refuse a tree that is not a flattened device tree or exceeds the slot."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        header = f.read(8)
+    magic, totalsize = struct.unpack(">II", header) if len(header) == 8 else (None, None)
+    if magic != 0xD00DFEED:
+        die(
+            f"{name} is not a flattened device tree (magic {magic!r}, expected "
+            "0xd00dfeed): the OS update would write it to the inactive kernel-dtb slot"
+        )
+    if totalsize < 40 or totalsize > size:
+        die(
+            f"{name} has an implausible header totalsize {totalsize} for a "
+            f"{size}-byte file"
+        )
+    if size > limit:
+        die(
+            f"{name} is {size} bytes, larger than the {limit}-byte A_kernel-dtb "
+            "partition in the BSP flash layouts"
+        )
+
+
 def main():
     staging = env("AVOCADO_DTBO_STAGING")
     manifest_path = env("AVOCADO_OVERLAYS_MANIFEST")
@@ -408,10 +476,24 @@ def main():
             "no overlay applied"
         )
 
+    # The same tree travels in an OS update. Stone searches the staging dir
+    # first, so this copy wins over any kernel-dtb-ota.dtb the build left in
+    # the runtime input dir. Validated before anything is published: a bad tree
+    # in the inactive slot only shows at the next boot.
+    ota = os.path.join(staging, OTA_NAME)
+    try:
+        check_update_tree(merged, published, kernel_dtb_slot_size(bsp_dir))
+        shutil.copy2(merged, ota)
+    except BaseException:
+        for leftover in (merged, ota):
+            if os.path.exists(leftover):
+                os.remove(leftover)
+        raise
+
     fragment = {
         "storage_devices": {
             TARGET_DEVICE: {
-                "images": {"dtb": published},
+                "images": {"dtb": published, "kernel_dtb_ota": OTA_NAME},
                 # Provenance only. staging.verify_overlays checks each of
                 # these files exists and warns if not; it applies
                 # nothing. Recording them makes the flash log show what the
