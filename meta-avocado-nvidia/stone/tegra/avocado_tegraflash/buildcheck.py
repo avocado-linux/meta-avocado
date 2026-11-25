@@ -17,9 +17,12 @@ from . import EngineError
 from .bootoverlays import EffectiveView, overlay_chain
 from .bootstage import stage
 from .carrier import _selected_tree, carrier_patches
+from .fdtreplay import read_tree
 from .files import join_name, read_text_preserving
-from .manifest import read_manifest
+from .fit import DUPLICATE, _parse_layout
+from .manifest import read_manifest, read_ota_image
 from .runner import SubprocessRunner
+from .settings import EMMC_LAYOUT, EXTERNAL_LAYOUT
 
 _ENV_FILE = ".env.initrd-flash"
 _NOT_VISIBLE = (
@@ -27,6 +30,11 @@ _NOT_VISIBLE = (
     "it is checked at provision."
 )
 _TOOLS = ("fdtoverlay", "fdtput")
+_OTA_PARTITION = "A_kernel-dtb"
+_OTA_NOTE = (
+    "The OS update replaces the kernel device tree only; the boot overlay lists in the bootloader "
+    "stay as last flashed, so a change to them or to the CARRIER_FV knobs needs a reflash."
+)
 
 
 def _resolve_dir(name: str, roots: list[str]) -> Path | None:
@@ -91,6 +99,54 @@ def _scratch(scratch: Path, bsp: Path, carrier: Path | None) -> tuple[EffectiveV
     return EffectiveView.work_dir(str(scratch)), stock, flashed
 
 
+def _partition_size(bsp: Path) -> int:
+    """The A_kernel-dtb size both flash layouts the BSP ships agree on.
+
+    The build does not know which profile will provision, so either layout may be
+    the one flashed and a disagreement leaves no limit that is true for both.
+    """
+    sizes = {}
+    for name in (EXTERNAL_LAYOUT, EMMC_LAYOUT):
+        path = bsp / name
+        if not path.is_file():
+            continue
+        layout = _parse_layout(path)
+        if layout.error is not None:
+            raise EngineError(f"{path}: cannot read the flash layout ({layout.error})")
+        size = layout.sizes.get(_OTA_PARTITION)
+        if size is None or size is DUPLICATE or not isinstance(size, int):
+            raise EngineError(f"{path}: partition {_OTA_PARTITION} has no usable size (found {size!r})")
+        sizes[name] = size
+    if not sizes:
+        raise EngineError(f"{bsp}: no flash layout ({EXTERNAL_LAYOUT} or {EMMC_LAYOUT}) to read the {_OTA_PARTITION} size from")
+    if len(set(sizes.values())) > 1:
+        detail = ", ".join(f"{name} {size}" for name, size in sizes.items())
+        raise EngineError(f"the flash layouts disagree on the {_OTA_PARTITION} size ({detail}); no single limit applies")
+    return next(iter(sizes.values()))
+
+
+def _publish(name: str, tree: Path, partition: int, input_dir: Path) -> None:
+    """Validate `tree`, then replace <input dir>/`name` with it atomically."""
+    size = tree.stat().st_size
+    where = f"{tree.name} ({size} bytes, {_OTA_PARTITION} is {partition} bytes)"
+    try:
+        read_tree(tree)
+    except EngineError as exc:
+        raise EngineError(f"{where}: not a valid device tree: {exc}") from exc
+    if size > partition:
+        raise EngineError(f"{where}: larger than the {_OTA_PARTITION} partition; refusing to publish it")
+    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", dir=input_dir)
+    try:
+        with os.fdopen(fd, "wb") as out, open(tree, "rb") as src:
+            shutil.copyfileobj(src, out)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, input_dir / name)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
 def check(args: argparse.Namespace, log=print) -> int:
     """Run the check; return the process exit status."""
     missing = [tool for tool in _TOOLS if shutil.which(tool) is None]
@@ -118,6 +174,16 @@ def check(args: argparse.Namespace, log=print) -> int:
 
     with tempfile.TemporaryDirectory(prefix="avocado-buildcheck-") as tmp:
         view, stock, flashed = _scratch(Path(tmp), bsp, carrier)
+        ota_name = read_ota_image(args.manifest_file)
+        snapshot = None
+        if ota_name:
+            # Taken before the stage so the update carries the tree provisioning starts from, whatever the stage does to its copies.
+            tree = flashed or stock
+            if tree is None:
+                raise EngineError("no device tree to publish: neither the carrier nor the BSP provides the selected tree")
+            snapshot = Path(tmp) / ".ota" / tree.name
+            snapshot.parent.mkdir()
+            shutil.copyfile(tree, snapshot)
         summary = stage(
             view,
             stock,
@@ -127,8 +193,12 @@ def check(args: argparse.Namespace, log=print) -> int:
             carrier_dir=str(carrier) if carrier else None,
             base_tree_name=os.path.basename(_selected_tree(str(bsp))),
         )
+        if snapshot is not None:
+            _publish(ota_name, snapshot, _partition_size(bsp), Path(args.input_dir))
     log(summary)
     log(_NOT_VISIBLE)
+    if snapshot is not None:
+        log(_OTA_NOTE)
     return 0
 
 
