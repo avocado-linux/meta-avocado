@@ -13,7 +13,11 @@ local_conf_header:
     # so the kernel is built with debug info (avocado-kernel-feed.bbclass).
     # Here rather than in cve-check.yml because it changes the kernel's
     # packages, and a scan has to see the kernel the feed published.
+    # linux-qcom and linux-qcom-rt need no switch: their own configuration
+    # (defconfig plus qcom.config) already builds full debug info.
     AVOCADO_KERNEL_DEBUGINFO = "1"
     SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
     SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
     SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-qcom = "1"
+    SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-qcom-rt = "1"

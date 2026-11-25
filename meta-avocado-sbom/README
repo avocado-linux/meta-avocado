@@ -136,6 +136,8 @@ has to carry debug info. kas/feature/sbom.yml sets:
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-qcom = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-qcom-rt = "1"
 
 The switch changes the kernel's packages, so it is in sbom.yml, which feed
 builds stack: a scan has to see the kernel the feed published, or the kernel's
@@ -148,8 +150,17 @@ avocado-kernel-feed.bbclass reads the switch for linux-yocto and
 linux-yocto-dev and adds features/debug/debug-kernel.scc to KERNEL_FEATURES.
 The bbappend in meta-avocado-raspberrypi adds avocado-cve-debug.cfg to
 linux-raspberrypi on the same switch. The DWARF lands in kernel-dbg; what a
-device installs stays stripped. linux-yocto-rt, the L4T kernels and the vendor
-kernels are left as they are, and the scan matches them on version ranges.
+device installs stays stripped.
+
+linux-qcom and linux-qcom-rt (rb3gen2, rubikpi3) do not read the switch and
+need nothing from it. They build from their own kernel tree with its arm64
+defconfig, which turns debug info on, and qcom.config, which turns reduced
+debug info off, and their modules are plain .ko, so the DWARF already lands in
+kernel-dbg and the SPDX lines alone give them the list. Their packages do not
+change.
+
+linux-yocto-rt, the L4T kernels and the other vendor kernels are left as they
+are, and the scan matches them on version ranges.
 
 What the switch does to each machine's kernel configuration:
 
