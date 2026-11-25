@@ -95,6 +95,20 @@ def test_another_dry_run_value_is_refused_naming_variable_and_value(tmp_path, ca
     assert (rc != 0, DRY in err, "'yes'" in err, rig.work.exists(), rig.runner.calls) == (True, True, True, False, [])
 
 
+@pytest.mark.deviation("erase-flag-spellings")
+def test_erase_emmc_true_on_nvme_media_adds_both_erase_flags(tmp_path, capsys):
+    rig = make_rig(tmp_path, env={"ERASE_EMMC": "true"})
+    rc, out, _ = rig.go(main, capsys, argv=["--prepare-only"], euid=1000)
+    assert (rc, "Flash arguments: --erase-emmc --erase-nvme" in out) == (0, True)
+
+
+@pytest.mark.deviation("erase-flag-spellings")
+def test_erase_only_yes_is_refused_naming_variable_and_value_before_staging(tmp_path, capsys):
+    rig = make_rig(tmp_path, env={"ERASE_ONLY": "yes"})
+    rc, _, err = rig.go(main, capsys)
+    assert (rc != 0, "ERASE_ONLY" in err, "'yes'" in err, "1, true, 0 or false" in err, rig.work.exists(), rig.runner.calls) == (True, True, True, True, False, [])
+
+
 @pytest.mark.deviation("fwup-task-refused")
 def test_a_non_complete_firmware_update_task_is_refused_before_staging(tmp_path, capsys):
     rig = make_rig(tmp_path, env={TASK: "upgrade"})

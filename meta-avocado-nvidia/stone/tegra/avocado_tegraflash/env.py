@@ -30,6 +30,22 @@ def dry_run_requested(environ: Mapping[str, str]) -> bool:
     return raw == "1"
 
 
+def erase_requested(environ: Mapping[str, str], name: str) -> bool:
+    """ERASE_NVME, ERASE_EMMC, ERASE_ONLY follow the stone manifests' boolean type.
+
+    Unset or empty is no erase; 1 or true erases, 0 or false does not, in any letter case.
+    Anything else is refused: this setting gates an irreversible erase, and an unrecognised
+    spelling must not be read as either answer. Whitespace is not stripped.
+    """
+    raw = environ.get(name, "")
+    folded = raw.lower()
+    if folded in ("", "0", "false"):
+        return False
+    if folded in ("1", "true"):
+        return True
+    raise EngineError(f"{name} must be 1, true, 0 or false (any letter case) or unset, not {raw!r}")
+
+
 @dataclass(frozen=True)
 class Config:
     manifest: str
@@ -119,9 +135,9 @@ def from_environ(environ: Mapping[str, str]) -> Config:
         boardctl_serial=opt("BOARDCTL_SERIAL"),
         pythonwarnings=opt("PYTHONWARNINGS", DEFAULT_PYTHONWARNINGS),
         home=opt("HOME", "/root"),
-        erase_nvme=environ.get("ERASE_NVME") == "1",
-        erase_emmc=environ.get("ERASE_EMMC") == "1",
-        erase_only=environ.get("ERASE_ONLY") == "1",
+        erase_nvme=erase_requested(environ, "ERASE_NVME"),
+        erase_emmc=erase_requested(environ, "ERASE_EMMC"),
+        erase_only=erase_requested(environ, "ERASE_ONLY"),
         force=force,
         nvme_pci=opt("AVOCADO_PROVISION_NVME_PCI"),
         rcm_id=rcm_id or "",
