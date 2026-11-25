@@ -24,14 +24,14 @@ zeromq              | zeromq                 | libzmq.so.5   | yes  |
 # (no vroot device, no veritysetup invocation, no root-hash generation) -
 # both would be guaranteed red on every run, at a full image cycle each.
 # Add them in the same commit that wires the feature into this script's
-# target machine, matching the rule below for cameras/cloud-aws.
+# target machine, matching the rule below for cameras.
 # One representative package per feature group, so a group that stops
 # producing anything fails here rather than silently shipping an empty feed.
 # The visual groups also run the boot e2e; the rest assert feed presence only.
 #
-# No cameras or cloud-aws case: meta-basler-tools, meta-intel-realsense and
-# meta-aws have no wrynose branch, so those groups cannot be selected here yet.
-# Add the case in the same commit that adds the layer back.
+# No cameras case: meta-basler-tools and meta-intel-realsense have no wrynose
+# branch, so that group cannot be selected here yet. Add the case in the same
+# commit that adds the layers back.
 system-base         | vim                    |               | no   |
 networking          | networkmanager         |               | no   |
 multimedia          | gstreamer1.0           |               | no   |
@@ -43,3 +43,4 @@ ai                  | dx-driver              |               | no   |
 java                | openjdk-17-jre         |               | no   |
 containers          | podman                 |               | no   |
 observability       | fluentbit              |               | no   |
+cloud-aws           | aws-iot-device-client  |               | no   |
