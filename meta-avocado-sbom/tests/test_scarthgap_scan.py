@@ -8,7 +8,8 @@ them. These are the parts that differ from OE-core's or from the wrynose
 layer's, each read straight from the file that carries it:
 
   - avocado-cve-report is skipped at world scope, since scarthgap OE-core has
-    no meta-world-recipe-sbom to scan;
+    no meta-world-recipe-sbom to scan; feed scope builds its own document from
+    package documents instead (test_feedsbom_scarthgap.py);
   - the CVE databases unpack into S, since scarthgap's fetcher has no
     UNPACKDIR;
   - the NVD database's license, cve-tou, comes from the database itself
@@ -61,13 +62,17 @@ class Fatal(Exception):
     pass
 
 
-def fake_bb(fetch=None):
+def fake_bb(fetch=None, tasks=None):
     def fatal(msg):
         raise Fatal(msg)
+
+    def addtask(task, before, after, d):
+        tasks.append((task, before, after))
     return types.SimpleNamespace(
         parse=types.SimpleNamespace(SkipRecipe=SkipRecipe),
         fatal=fatal,
         fetch2=fetch,
+        build=types.SimpleNamespace(addtask=addtask),
     )
 
 
@@ -82,16 +87,21 @@ class Data:
     def appendVarFlag(self, var, flag, value):
         self.flags[(var, flag)] = self.flags.get((var, flag), "") + value
 
+    def setVarFlag(self, var, flag, value):
+        self.flags[(var, flag)] = value
+
 
 class ReportScopeTests(unittest.TestCase):
     def run_anonymous(self, **values):
         d = Data(**values)
-        python_function(REPORT_BB, "python ()")(d, fake_bb())
+        d.tasks = []
+        python_function(REPORT_BB, "python ()")(d, fake_bb(tasks=d.tasks))
         return d
 
     def test_world_scope_skips_the_recipe(self):
         with self.assertRaises(SkipRecipe) as cm:
             self.run_anonymous(AVOCADO_CVE_SCOPE="world")
+        self.assertIn("kas/feature/cve-check-feed.yml", str(cm.exception))
         self.assertIn("kas/feature/cve-check-image.yml", str(cm.exception))
 
     def test_world_is_still_the_default(self):
@@ -105,9 +115,26 @@ class ReportScopeTests(unittest.TestCase):
         self.assertEqual(d.flags[("do_cve_report", "depends")],
                          " avocado-image-rootfs:do_sbom_cve_check")
 
+    def test_image_scope_adds_no_feed_task(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="image",
+                               AVOCADO_CVE_IMAGE="avocado-image-rootfs")
+        self.assertEqual(d.tasks, [])
+
+    def test_feed_scope_runs_its_own_tasks(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                               SBOM_CVE_CHECK_UPDATE_DB_DEPENDENCIES=" db-native:do_patch")
+        self.assertEqual(d.tasks, [("do_feed_sbom", "do_cve_report", None),
+                                   ("do_feed_scan", "do_cve_report", "do_feed_sbom")])
+        self.assertNotIn(("do_cve_report", "depends"), d.flags)
+        self.assertEqual(d.flags[("do_feed_sbom", "nostamp")], "1")
+        self.assertEqual(d.flags[("do_feed_scan", "nostamp")], "1")
+        self.assertEqual(d.flags[("do_feed_scan", "depends")].split(),
+                         ["python3-sbom-cve-check-native:do_populate_sysroot",
+                          "db-native:do_patch"])
+
     def test_an_unknown_scope_is_fatal(self):
         with self.assertRaises(Fatal):
-            self.run_anonymous(AVOCADO_CVE_SCOPE="feed")
+            self.run_anonymous(AVOCADO_CVE_SCOPE="bogus")
 
     def test_the_recipe_uses_the_layer_nospdx(self):
         # avocado-nospdx also deletes the runtime SPDX task scarthgap's nospdx
