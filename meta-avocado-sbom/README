@@ -217,6 +217,17 @@ Image and feed scope get this filtering (see "Feed scope"). The world SBOM is
 built from recipe documents, which describe no build and so carry no
 compiled-source list.
 
+The scanner takes every source file a build lists as compiled, and for a
+product other than the kernel it checks nothing. A recipe built without the
+switch lists only the files it fetched (its local file:// entries), so a CVE
+whose record names a source file reads as not compiled and comes back Ignored,
+not-applicable-config. The report therefore keeps that result only for a
+recipe built with SPDX_INCLUDE_COMPILED_SOURCES, which do_cve_report reads per
+recipe as for the feed document, and lists the CVE of any other recipe as
+Unpatched with no detail (the filter replaced the scanner's version result,
+so which one it was is unknown) and what the scanner said under "scanner" (see "Report format"). A recipe's own CVE_STATUS with the same
+detail is a different statement and stays Ignored.
+
 Feed scope
 ----------
 
@@ -368,7 +379,10 @@ Variables
                                any single status they count the CVEs of the
                                other statuses left out of it. When two
                                manifests name one recipe, a CVE id is listed
-                               once, with the status of the first manifest
+                               once, with the status of the first manifest,
+                               unless that one carries "scanner" (the
+                               compiled-source filter was not trusted) and a
+                               later one is Unpatched outright
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
   AVOCADO_RPM_MANIFEST_FILE    output path of the RPM manifest, see "The RPM
                                manifest" below
@@ -392,7 +406,9 @@ Report format
                 "entries_unreadable": 0, "pkgdata_unreadable": 0,
                 "package_collisions": 0, "unpatched_cves": 0,
                 "patched_cves": 0, "ignored_cves": 0,
-                "unknown_status_cves": 0 },
+                "unknown_status_cves": 0,
+                "unverified_compiled_source_cves": 0 },
+    "compiled_source_recipes": [ "linux-yocto" ],
     "recipes": {
       "openssl": {
         "version": "3.5.7",
@@ -469,6 +485,25 @@ runtime package. Two different things land there:
   pkgdata_unreadable    pkgdata entries that would not parse
   package_collisions    package names claimed by more than one recipe or
                         version; the first pkgdata directory won
+  unverified_compiled_source_cves
+                        CVEs listed as Unpatched, with no detail, that
+                        the scanner
+                        ignored as not compiled for a recipe whose build lists
+                        only the files it fetched. Each carries the scanner's
+                        status, detail and description under "scanner":
+
+    { "id": "CVE-...", "status": "Unpatched",
+      "scanner": { "status": "Ignored", "detail": "not-applicable-config",
+                   "description": "vulnerable_code_not_present: Source code not compiled by config" } }
+
+"compiled_source_recipes" names the recipes in package data built with
+SPDX_INCLUDE_COMPILED_SOURCES, whose not-applicable-config results from the
+compiled-source filter stand. A rescan from the report applies the same list.
+A report without it (written before it was added, or by report.py without
+--compiled-source-recipe) keeps that result for kernels only, which is what
+the switch was set for, and the scanner rejects a kernel's list that did not
+come from a source walk. The field is optional and additive, so the report
+stays version 1.
 
 "recipe_versions" maps every recipe in pkgdata, scanned clean or not, to its
 packages' PV and plain PKGV, sorted and without repeats:
