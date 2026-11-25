@@ -44,6 +44,7 @@ Run the same command again with sudo, keeping the environment and PATH:
 - `fwup-task-refused`: the engine refuses, naming `AVOCADO_PROVISION_FWUP_TASK` and its value, when it is set to anything but `complete`, before staging, where the legacy script has no firmware update task and always flashes a full image.
 - `boot-tools-from-tools-dir`: the engine starts `avocado-tegra-bootimg` and `mkbootimg` by absolute path from the tools directory the manifest names and never consults `PATH`, so a same-named program earlier on `PATH` cannot stand in for a helper that runs as root, where the legacy script looks them up through `PATH`.
 - `force-policy-table`: `AVOCADO_PROVISION_FORCE` follows one decision table shared with the shell library's `confirm-vectors.tsv`: `1` skips the prompt, `0` retypes on a terminal and refuses without one, unset or empty retypes on a terminal and proceeds with a logged note without one, and any other value is refused naming the variable and value, where the legacy script has no confirmation.
+- `erase-flag-spellings`: the engine reads `ERASE_NVME`, `ERASE_EMMC` and `ERASE_ONLY` as erase when the value is `1` or `true` and as no erase when unset, empty, `0` or `false`, case-insensitively, and refuses any other value naming the variable and value before staging, where the legacy script erases only on exactly `1` and silently ignores everything else, so the `true` that the stone manifests' boolean fields produce never erased.
 
 ## Staged env file
 
