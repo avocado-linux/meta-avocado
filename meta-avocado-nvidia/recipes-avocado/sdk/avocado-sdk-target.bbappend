@@ -25,9 +25,12 @@ DEPENDS:append = " nativesdk-avocado-dtc-overlay"
 
 # Shared boot.img packer for the A_kernel/B_kernel partitions, called by the
 # Jetson build hooks (OTA payload) and stone-provision-tegraflash.sh (flash).
-SRC_URI += "file://avocado-tegra-bootimg file://avocado-tegra-build-bootimg"
-FILES:${PN} += "${SDKPATHNATIVE}${bindir}/avocado-tegra-bootimg ${SDKPATHNATIVE}${bindir}/avocado-tegra-build-bootimg"
+# avocado-tegra-boot-overlays is the build hooks' check of the boot-time
+# device-tree overlay inputs, run through the tegraflash engine.
+SRC_URI += "file://avocado-tegra-bootimg file://avocado-tegra-build-bootimg file://avocado-tegra-boot-overlays"
+FILES:${PN} += "${SDKPATHNATIVE}${bindir}/avocado-tegra-bootimg ${SDKPATHNATIVE}${bindir}/avocado-tegra-build-bootimg ${SDKPATHNATIVE}${bindir}/avocado-tegra-boot-overlays"
 do_install:append() {
     install -m 0755 ${UNPACKDIR}/avocado-tegra-bootimg ${D}${SDKPATHNATIVE}${bindir}
     install -m 0755 ${UNPACKDIR}/avocado-tegra-build-bootimg ${D}${SDKPATHNATIVE}${bindir}
+    install -m 0755 ${UNPACKDIR}/avocado-tegra-boot-overlays ${D}${SDKPATHNATIVE}${bindir}
 }

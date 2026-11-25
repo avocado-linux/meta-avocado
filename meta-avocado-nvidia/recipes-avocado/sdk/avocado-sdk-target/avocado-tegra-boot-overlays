@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Build-time check of the boot-time device-tree overlay inputs, run by the Jetson
+# build hooks before `stone bundle`.
+#
+#   avocado-tegra-boot-overlays <runtime input dir> <manifest>
+#
+# The check is the tegraflash engine's own buildcheck module, so build and
+# provision refuse exactly the same inputs. This helper only locates the engine
+# and starts it the way stone-provision-tegraflash.sh does.
+#
+# The engine is searched in the order stone itself resolves its include paths:
+# AVOCADO_STONE_INCLUDE_PATHS entries first (a project overrides the stock
+# engine), then the runtime input dir, then the SDK's own stone directory.
+#
+# A missing engine is a warning, not a failure, because an older SDK or image
+# tree has nothing to check. The exception is a manifest that declares
+# images.kernel_dtb_ota: `stone bundle` would then fail on the missing overlay
+# tree with an error that names neither the engine nor the cause.
+set -eu
+
+[ $# -eq 2 ] || {
+  echo "usage: $0 <runtime input dir> <manifest>" >&2
+  exit 2
+}
+input_dir=$1 manifest=$2
+include_paths=${AVOCADO_STONE_INCLUDE_PATHS:-}
+sdk_stone=${AVOCADO_SDK_PREFIX:-}/stone
+
+searched=()
+engine_dir=
+IFS=: read -r -a entries <<<"$include_paths"
+for d in "${entries[@]}" "$input_dir" "$sdk_stone"; do
+  [ -n "$d" ] || continue
+  searched+=("$d")
+  if [ -f "$d/tegraflash-engine/avocado_tegraflash/__main__.py" ]; then
+    engine_dir=$d/tegraflash-engine
+    break
+  fi
+done
+
+# Exit 3 only for a declaration; any other status means "not declared", so an
+# unreadable manifest is left for the engine and stone to report.
+declares_ota() {
+  local status=0
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -I -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        m = json.load(f)
+    images = m["storage_devices"]["rootdisk"]["images"]
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit(0)
+sys.exit(3 if isinstance(images, dict) and "kernel_dtb_ota" in images else 0)
+' "$manifest" || status=$?
+    [ "$status" -eq 3 ]
+  else
+    grep -q '"kernel_dtb_ota"[[:space:]]*:' "$manifest"
+  fi
+}
+
+unavailable=
+if [ -z "$engine_dir" ]; then
+  unavailable="no tegraflash engine found in: ${searched[*]}"
+elif ! command -v python3 >/dev/null 2>&1 \
+  || ! python3 -I -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+  unavailable="python3 3.10 or newer is needed to run the engine in $engine_dir"
+fi
+
+if [ -n "$unavailable" ]; then
+  if declares_ota; then
+    echo "ERROR: $manifest declares images.kernel_dtb_ota but $unavailable" >&2
+    exit 1
+  fi
+  echo "WARNING: boot-time overlay check skipped, $unavailable" >&2
+  exit 0
+fi
+
+# -I drops PYTHONPATH and the user site, -B keeps bytecode out of the input
+# directory. The engine path travels as an argument and is appended, never
+# prepended: a stray json.py in a project directory must not shadow the
+# standard library.
+exec python3 -I -B -c '
+import runpy, sys
+sys.path.append(sys.argv[1])
+del sys.argv[1]
+runpy.run_module("avocado_tegraflash.buildcheck", run_name="__main__", alter_sys=True)
+' "$engine_dir" --input-dir "$input_dir" --manifest "$manifest" \
+  --include-paths "$include_paths" --sdk-stone-dir "$sdk_stone"
