@@ -417,6 +417,56 @@ bootloader on QSPI, written at flash-time signing. Editing a list, the
 camera opt-in or a carrier tree on a provisioned board has no effect until
 you reflash it.
 
+### Updating the device tree over the air
+
+The Orin Nano and AGX Orin stone manifests
+(`stone-jetson-orin-nano.json`, `stone-jetson-agx-orin.json`) declare
+`images.kernel_dtb_ota` (the file `kernel-dtb-ota.dtb`) and an
+`os_artifacts` entry `dtb` that writes it to the `A_kernel-dtb` and
+`B_kernel-dtb` partitions. An OS update therefore writes the kernel device
+tree to the inactive slot's kernel-dtb partition, the same way it writes the
+kernel to `A_kernel` or `B_kernel`.
+
+**Where the tree comes from.**
+
+- With overlays declared, the delivery hook publishes its merged tree as
+  `kernel-dtb-ota.dtb` in the overlay staging directory, which stone searches
+  first.
+- Otherwise `avocado_tegraflash.buildcheck` (run by `avocado build`) writes the
+  tree provisioning would flash, carrier tree or stock tree, to
+  `kernel-dtb-ota.dtb` in the runtime input directory. It only does so when the
+  manifest declares `images.kernel_dtb_ota`.
+
+**Checks before the tree is published.** The hook and the build check refuse a
+tree that is not a flattened device tree (the hook reports `is not a
+flattened device tree`, with the bad magic) or that is larger than the
+`A_kernel-dtb` partition. The hook also refuses an implausible header
+`totalsize`. The partition size is read from the BSP flash layouts; the
+hook refuses when a layout is missing or unreadable, and the build check
+refuses when the two layouts disagree on the size. The build check ends with a
+note that the OS update replaces the kernel device tree only.
+
+**What stays flash-time.** An OS update does not change any of these; each
+needs a reflash:
+
+- The `CARRIER_FV_*` knobs.
+- Carrier files that shadow BSP files outside the kernel tree.
+- The boot overlay lists (`BOOTCONTROL_OVERLAYS`,
+  `PLUGIN_MANAGER_OVERLAYS`, `OVERLAY_DTB_FILE`), which live in the
+  bootloader on QSPI. The update does not touch the bootloader.
+
+**Scope.** This applies to unfused boards only.
+
+**When an updated tree fails to boot: unverified.** No hardware result has
+been recorded for either board, so this guide does not state what happens.
+In particular it does not claim that the board falls back to the previous
+slot. The two boards are tracked separately:
+
+- Orin Nano: unverified, no hardware result recorded yet.
+- AGX Orin: unverified, no hardware result recorded yet. An Orin Nano result
+  will not stand in for AGX Orin, because the AGX Orin has its own UEFI slot
+  selection.
+
 ## Module SKU auto-detection (T264 / Thor)
 
 On Thor a carrier does **not** pin its module SKU. `initrd-flash.sh`
