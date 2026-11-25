@@ -64,25 +64,48 @@ read_boardinfo_t234() {
   # A file left by an earlier read must not stand in for this one: the check
   # below is what tells a read that returned without an answer.
   rm -f chip_info.bin_bak
+  # devtool-debt: a dead recovery session is told from other read failures by this text in tegraflash's output.
+  # Ceiling: only the USB timeout text tegrarcm_v2 is known to print (the RCM boot step logs it); another
+  # spelling of a dead session gets the generic message and the log tail, without the cold-entry advice.
+  # Upgrade trigger: the real output of a spent session is captured on hardware; add the text it shows.
+  local dead_session='timeout in USB (read|write)' read_out read_err read_rc
+  # Status 3 and the cold-entry advice only for the dead-session signature; any other
+  # failure of the read is a plain failure of the helper (status 1) whose cause is in the output.
+  boardinfo_fail() {
+    if grep -Eqi "$dead_session" "$read_out" "$read_err" 2>/dev/null; then
+      rm -f "$read_out" "$read_err"
+      echo "ERR: the board did not answer the board-info read over USB recovery mode (RCM): $1" >&2
+      echo "$cold_entry" >&2
+      exit 3
+    fi
+    rm -f "$read_out" "$read_err"
+    echo "ERR: the board-info read failed ($1); the tegraflash output, on the terminal and in the flash log, has the cause" >&2
+    exit 1
+  }
+  read_out=$(mktemp)
+  read_err=$(mktemp)
   # inst_args, skipuid and keyargs are argument lists; quoting them would
   # pass one word. MISC_CONFIG comes from the sourced flashvars.
   # shellcheck disable=SC2086,SC2153
-  if ! python3 "$flashappname" ${inst_args} --chip 0x23 $skipuid $keyargs \
+  python3 "$flashappname" ${inst_args} --chip 0x23 $skipuid $keyargs \
     --applet mb1_t234_prod.bin \
     --dev_params "$EMC_FUSE_DEV_PARAMS" \
     --cfg readinfo_t234_min_prod.xml \
     --device_config "$DEVICE_CONFIG" --misc_config "$MISC_CONFIG" --bins "mb2_applet applet_t234.bin" \
-    --cmd "readfuses fuse_t234.bin fuse_t234.xml; dump eeprom cvm ${cvm_bin}; dump try_custinfo ${custinfo_out}; reboot recovery"; then
-    echo "ERR: the board did not answer the board-info read over USB recovery mode (RCM): read failed" >&2
-    echo "$cold_entry" >&2
-    exit 3
+    --cmd "readfuses fuse_t234.bin fuse_t234.xml; dump eeprom cvm ${cvm_bin}; dump try_custinfo ${custinfo_out}; reboot recovery" \
+    2> >(tee "$read_err" >&2) | tee "$read_out"
+  read_rc=${PIPESTATUS[0]}
+  # Both copies stream while the read runs, so an interrupted read keeps its output:
+  # stdout reaches the flash log, stderr the terminal. wait lets the stderr copy finish.
+  wait
+  if [ "$read_rc" -ne 0 ]; then
+    boardinfo_fail "read failed"
   fi
   # The chip_info.bin_bak file is created as a side effect of the above tegraflash.py invocation
   if [ ! -s chip_info.bin_bak ]; then
-    echo "ERR: the board did not answer the board-info read over USB recovery mode (RCM): chip information file missing or empty" >&2
-    echo "$cold_entry" >&2
-    exit 3
+    boardinfo_fail "chip information file missing or empty"
   fi
+  rm -f "$read_out" "$read_err"
   CHIP_SKU=$("$here"/chkbdinfo -C chip_info.bin_bak | tr -d '[:space:]')
   board_ramcode=$("$here"/chkbdinfo -R chip_info.bin_bak)
   if [ -z "$board_ramcode" ]; then
