@@ -13,9 +13,12 @@
 # partition, and the ESP carries only EFI/BOOT/bootaa64.efi. The overlay lists
 # that do exist in flashvars (OVERLAY_DTB_FILE, BOOTCONTROL_OVERLAYS,
 # PLUGIN_MANAGER_OVERLAYS) are read by tegra234-flash-helper.sh, which
-# initrd-flash.sh runs with --sign when it signs at flash time. This hook does
-# not populate them: a staged .dtbo reaches the board only through the merged
-# DTB below.
+# initrd-flash.sh runs with --sign when it signs at flash time. The helper
+# composes them into the bootloader, and UEFI applies the named DTBOs onto the
+# flashed kernel tree at every boot, so the merged tree is not the last word on
+# what the kernel sees. This hook does not populate the lists; the engine's
+# boot-overlay stage (avocado_tegraflash/bootstage.py) reports them, applies the
+# camera policy and replays the chain before any board contact.
 #
 # So this hook merges each staged overlay into the base DTB with fdtoverlay and
 # publishes the result as storage_devices.rootdisk.images.dtb. The tegraflash
@@ -24,6 +27,16 @@
 # file the flash writes to the kernel-dtb partition. An OS update does not
 # carry it: update.os_artifacts names rootfs and boot only, so an overlay
 # change reaches a device by reflashing.
+#
+# The tree merged into is the one the flash writes (resolve_carrier_tree):
+#   * no carrier tree: the stock BSP's base DTB;
+#   * Shape A: the carrier slot ships a file named like the base DTB and does
+#     not redirect; merge into the carrier's copy, publish under the base name;
+#   * Shape B: carrier.env sets CARRIER_ENV_DTBFILE to another tree R; merge
+#     into R (resolved in the carrier slot first, the stock BSP second) and
+#     publish under R.
+# A carrier that does both (ships the base name and redirects elsewhere), an
+# unsafe redirect value, or a redirect target found nowhere is refused.
 #
 # Two deliberate choices worth keeping:
 #

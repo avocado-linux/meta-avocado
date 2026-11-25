@@ -206,7 +206,7 @@ CARRIER_FV_CHECK_BOARDSKU="0001"
 | `PINMUX_CONFIG`, `PMC_CONFIG` | Pinmux + pad-voltage dtsi (often carrier-keyed for display variants) |
 | `WB0SDRAM_BCT` | Warm-boot SDRAM init dts; SKU-specific |
 | `MB2BCT_CFG`, `BR_CMD_CONFIG`, `DEV_PARAMS`, `DEV_PARAMS_B`, `DEVICEPROD_CONFIG`, `DEVICE_CONFIG`, `GPIOINT_CONFIG`, `MISC_CONFIG`, `PROD_CONFIG`, `SCR_CONFIG`, `PMIC_CONFIG`, `MINRATCHET_CONFIG`, `UPHY_CONFIG` | SOM/carrier-keyed BCT configs |
-| `OVERLAY_DTB_FILE`, `PLUGIN_MANAGER_OVERLAYS`, `BOOTCONTROL_OVERLAYS` | Runtime DTBO selection |
+| `OVERLAY_DTB_FILE`, `PLUGIN_MANAGER_OVERLAYS`, `BOOTCONTROL_OVERLAYS` | Boot overlay lists: the DTBOs UEFI applies onto the flashed kernel tree at every boot. See "Boot overlays and device-tree overlay delivery" below |
 | `RCM_UEFI_IMAGE`, `UEFI_IMAGE`, `TBCDTB_FILE` | Bootloader binaries / templates |
 
 `.env.initrd-flash` knobs (set via `CARRIER_ENV_<NAME>`):
@@ -243,9 +243,9 @@ with `CARRIER_ENV_DTBFILE` is unaffected. A carrier that re-pins
 `CARRIER_FV_CHECK_BOARDSKU` to another P3701 SKU must also redirect the
 tree with `CARRIER_ENV_DTBFILE`: the default tree is the 0005 one, and
 the flash helper's rewrite of `p3701-0000` to the module's SKU no longer
-matches the default name. Device-tree overlay delivery refuses a carrier
-that redirects the tree and one that ships a file under the stock name,
-so such a carrier cannot use it. The provisioning engine prints a WARNING
+matches the default name. Device-tree overlay delivery merges into the
+carrier's tree in both shapes (see "Boot overlays and device-tree overlay
+delivery" below) and refuses a carrier that does both at once. The provisioning engine prints a WARNING
 naming both files when a carrier ships a P3701 tree under a name the flash
 does not select, such as a merged tree still named for p3701-0000; the fix
 is to shadow the 0005 name.
@@ -341,6 +341,81 @@ The parser refuses to append new lines defensively — silently adding
 unknown vars can break the flash flow. Either remove the unused knob
 from carrier.env, or fix the variable name (a typo is the most common
 cause).
+
+## Boot overlays and device-tree overlay delivery
+
+`OVERLAY_DTB_FILE`, `BOOTCONTROL_OVERLAYS` and `PLUGIN_MANAGER_OVERLAYS`
+are not inert. The flash helper composes them into the bootloader at
+flash-time signing, and UEFI applies the named DTBOs onto the flashed
+kernel tree at every boot. The merged tree that device-tree overlay
+delivery publishes is therefore not the last word on what the kernel sees.
+
+**Order.** UEFI applies `BOOTCONTROL_OVERLAYS` first, then
+`PLUGIN_MANAGER_OVERLAYS`, then `OVERLAY_DTB_FILE`.
+
+**Report lines.** The engine's boot-overlay stage runs on the staged work
+directory before any board contact, and `avocado build` runs the same stage
+through `avocado_tegraflash.buildcheck`. Both print the lists:
+
+```text
+UEFI applies these boot overlays at every boot, in this order:
+  BOOTCONTROL_OVERLAYS: <list or <unset>>
+  PLUGIN_MANAGER_OVERLAYS: <list or <unset>>
+  OVERLAY_DTB_FILE: <list or <unset>>
+```
+
+The stage then prints the camera policy lines (below), a replay result, and
+a one-line summary starting `Boot overlays at flash:` that gives the count
+per list, whether the camera policy modified anything, and the replay
+outcome. A tree merged from declared overlays exists only at provision, so
+the build-time run says it cannot see it.
+
+**Camera strip.** When a carrier device tree is in use (Shape A or Shape B
+below) and the carrier does not set its own `PLUGIN_MANAGER_OVERLAYS`, the
+stage strips the devkit camera fragments from the work directory's copy of
+the dynamic overlay and drops the camera-module overlays from the list. Each
+change is reported with a `devkit camera fragments: ` prefix, for example
+`removed fragment-camera... from <overlay> (carrier device tree in use)` and
+`dropped <overlay> from PLUGIN_MANAGER_OVERLAYS (carrier device tree in use)`.
+The reason: the devkit camera fragments point at the devkit tree's nodes and
+reset a carrier's own camera setup. To keep the stock list and overlay, set
+your own list with `CARRIER_FV_PLUGIN_MANAGER_OVERLAYS`; the stage then
+reports `the carrier sets its own PLUGIN_MANAGER_OVERLAYS; its list and the
+stock dynamic overlay are used unchanged`. Without a carrier tree it prints
+`no carrier device tree in use; left unchanged`. The engine refuses, before
+any board contact, a strip that would leave a kept fragment pointing into a
+removed one, and a list or assignment it cannot read exactly (it names file,
+line and name).
+
+**Replay warnings.** The stage replays the overlay chain onto the flashed tree
+with `fdtoverlay` in a scratch directory. It prints
+`WARNING: integrator-set property <prop> of <path> changed by <overlay>: <before> -> <after>`
+when an overlay changes a property your carrier tree set differently from the
+stock tree, and `WARNING: boot overlay <overlay> failed to apply in the
+replay` when one fails. These are warnings: UEFI applies the same overlays at
+boot, so read them. A failure in an overlay the camera policy rewrote is a
+refusal. When the flashed tree equals the stock tree there is nothing
+integrator-set to compare, and the replay says so.
+
+**Declared overlays merge into a carrier tree.** Device-tree overlay
+delivery merges the overlays your project declares into the tree the flash
+writes, in two shapes:
+
+- Shape A: the carrier slot ships a tree under the BSP's own tree name and
+  does not redirect. The overlays merge into the carrier's copy, published
+  under the base name.
+- Shape B: `CARRIER_ENV_DTBFILE` names another tree. The overlays merge into
+  that tree, found in the carrier slot first and the stock BSP second, and
+  it is published under the redirected name.
+
+The hook refuses a carrier that ships the base tree and also redirects to a
+different one (two trees would be selected), a redirect value that is not a
+plain file name, and a redirect target found in neither place.
+
+**Changing any of this needs a reflash.** The overlay lists live in the
+bootloader on QSPI, written at flash-time signing. Editing a list, the
+camera opt-in or a carrier tree on a provisioned board has no effect until
+you reflash it.
 
 ## Module SKU auto-detection (T264 / Thor)
 
