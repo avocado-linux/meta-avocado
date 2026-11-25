@@ -68,11 +68,14 @@ def fake_bb(fetch=None, tasks=None):
 
     def addtask(task, before, after, d):
         tasks.append((task, before, after))
+
+    def deltask(task, d):
+        tasks.append(("deleted", task))
     return types.SimpleNamespace(
         parse=types.SimpleNamespace(SkipRecipe=SkipRecipe),
         fatal=fatal,
         fetch2=fetch,
-        build=types.SimpleNamespace(addtask=addtask),
+        build=types.SimpleNamespace(addtask=addtask, deltask=deltask),
     )
 
 
@@ -131,6 +134,26 @@ class ReportScopeTests(unittest.TestCase):
         self.assertEqual(d.flags[("do_feed_scan", "depends")].split(),
                          ["python3-sbom-cve-check-native:do_populate_sysroot",
                           "db-native:do_patch"])
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+
+    def test_feed_scope_on_a_multi_kernel_machine_reruns_the_merge(self):
+        # The RPM manifest reads the list of RPMs the merge published, which is
+        # this build's only if the merge reran. On the first feed task, so an
+        # alternate kernel the merge's dependencies rebuild is complete before
+        # the document reads it.
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi")
+        self.assertEqual(d.flags[("do_feed_sbom", "depends")],
+                         " avocado-distro:do_multikernel_merge")
+        self.assertNotIn(("do_rpm_manifest", "depends"), d.flags)
+        self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
+
+    def test_image_scope_leaves_the_merge_alone(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="image", AVOCADO_CVE_IMAGE="x",
+                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi")
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+        self.assertNotIn(("do_rpm_manifest", "depends"), d.flags)
+        self.assertEqual(d.tasks, [])
 
     def test_an_unknown_scope_is_fatal(self):
         with self.assertRaises(Fatal):

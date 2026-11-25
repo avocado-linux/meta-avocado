@@ -29,14 +29,10 @@
 #      filename (linux-raspberrypi_cve.json), so no additive copy keeps both,
 #      and a subdirectory is a path no task installs — which is what keeps
 #      do_create_spdx's "files already exist" shared-area guard out of it.
-#      avocado-cve-report reads it back as alt_versions on the recipe.
-#
-#      ponytail: the opt-out and backport markers land there too, and
-#      read_optouts/read_backports glob the top level only, so an alt-mc
-#      backport reports "cve-check" evidence instead of "patch-file" —
-#      understating what we patched. Neither kernel emits one today; fix it
-#      when either one gains a backport or opt-out marker. The fix is a
-#      (name, version) key, which reaches check_unscanned_declared too.
+#      avocado-cve-report does not read these copies: at feed scope it reads
+#      the alt mc's documents and package data in tmp-<mc>, and reports the
+#      second kernel as alt_versions of the recipe when the default mc built
+#      that recipe too (the Pi's 6.6), as its own recipe otherwise (Jetson L4T).
 
 python () {
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()

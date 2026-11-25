@@ -91,6 +91,30 @@ def alt_tmpdir(topdir, mc):
     return "%s/tmp-%s" % (topdir, mc)
 
 
+def alt_path(topdir, tmpdir, path, mc):
+    """path, a directory under the default TMPDIR, in the multiconfig's TMPDIR.
+
+    Raises FeedSbomError when path is not under tmpdir, since the multiconfig's
+    copy then cannot be derived from it.
+    """
+    tmpdir = tmpdir.rstrip("/")
+    if not path.startswith(tmpdir + "/"):
+        raise FeedSbomError("%s is not under TMPDIR %s" % (path, tmpdir))
+    return alt_tmpdir(topdir, mc) + path[len(tmpdir):]
+
+
+def alt_recipes_by_mc(pairs):
+    """{mc: set of recipes} from parse_alt_recipes' pairs, in first-seen order.
+
+    These are the recipes of each multiconfig that reach the feed, so the only
+    ones whose packages the report and the RPM manifest read from its tree.
+    """
+    by_mc = {}
+    for mc, recipe in pairs:
+        by_mc.setdefault(mc, set()).add(recipe)
+    return by_mc
+
+
 def classify_alt(pairs, find_alt_roots):
     """Split (mc, recipe) pairs into (mc, recipe, handles) and those with no document.
 

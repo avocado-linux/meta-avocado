@@ -33,9 +33,11 @@ header:
 # build inherits cve-check) are merged too, but into a <mc>/ subdirectory of
 # ${DEPLOY_DIR_SPDX} (and ${CVE_CHECK_DIR}) rather than alongside the default
 # mc's: both mcs describe the same recipe at two versions under one filename,
-# so there is no additive copy that keeps both. avocado-cve-report scans the
-# image's SBOM, so it reports the kernel the image installs and has no record
-# of the second one.
+# so there is no additive copy that keeps both. At image scope
+# avocado-cve-report scans the image's SBOM and has no record of the second
+# kernel; at feed scope (kas/feature/cve-check-feed.yml) it reads the second
+# kernel's documents and package data from tmp-<mc> and reports it as an
+# alt_versions record.
 #
 # Reterminal-specific OOT modules (kernel-module-seeed-mipi-dsi,
 # kernel-module-rtc-pcf8563w, kernel-module-ltr30x, kernel-module-ili9881d,
