@@ -35,7 +35,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "lib"))
 
-from avocado_sbom import feedcheck, feedsbom, spdxalias  # noqa: E402
+from avocado_sbom import feedcheck, feedsbom, report, spdxalias  # noqa: E402
 
 RECIPE = HERE.parent / "recipes-avocado" / "avocado-cve-report" / "avocado-cve-report.bb"
 
@@ -113,9 +113,10 @@ def scanner():
     return tool if tool and os.access(tool, os.X_OK) else None
 
 
-def cve_record(cve, program_files):
-    """A cvelistV5 record: linux_kernel below 6.18.99 affected, its fix in
+def cve_record(cve, program_files, product="linux_kernel", less_than="6.18.99"):
+    """A cvelistV5 record: product below less_than affected, its fix in
     program_files."""
+    vendor = "linux" if product == "linux_kernel" else product
     return {
         "dataType": "CVE_RECORD", "dataVersion": "5.1",
         "cveMetadata": {"cveId": cve, "state": "PUBLISHED",
@@ -126,10 +127,10 @@ def cve_record(cve, program_files):
                                  "dateUpdated": "2026-01-01T00:00:00.000Z"},
             "descriptions": [{"lang": "en", "value": "test record %s" % cve}],
             "affected": [{
-                "vendor": "Linux", "product": "Linux",
-                "cpes": ["cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"],
+                "vendor": vendor, "product": product,
+                "cpes": ["cpe:2.3:o:%s:%s:*:*:*:*:*:*:*:*" % (vendor, product)],
                 "defaultStatus": "unaffected",
-                "versions": [{"version": "0", "lessThan": "6.18.99", "status": "affected",
+                "versions": [{"version": "0", "lessThan": less_than, "status": "affected",
                               "versionType": "semver"}],
                 "programFiles": list(program_files),
             }],
@@ -514,7 +515,7 @@ class RealLibTest(unittest.TestCase):
 
     def kernel_trees(self, alt_mc=MC, alt_pn="linux-raspberrypi", alt_version="6.6.63",
                      alt_cves=("CVE-2024-0001",), default_cves=("CVE-2024-0001",),
-                     alt_deps=(), alt_pv=None):
+                     alt_deps=(), alt_pv=None, busybox_cpe=None, busybox_sources=None):
         """A default kernel and an alternate one, both linux_kernel by CPE and
         both listing their compiled sources, with busybox beside them."""
         alt_tmp = self.top / ("tmp-" + alt_mc)
@@ -527,7 +528,8 @@ class RealLibTest(unittest.TestCase):
                           cpe=KERNEL_CPE % "6.12.47", sources=DEFAULT_SOURCES)
         self.write_pkgdata(self.tmp, "linux-raspberrypi", "6.12.47", ["kernel", "kernel-module-a"])
         self.write_recipe(self.tmp, "busybox", "1.36.1", "3" * 64, ["busybox"],
-                          ["CVE-2026-38752"], arch="cortexa76")
+                          ["CVE-2026-38752"], arch="cortexa76", cpe=busybox_cpe,
+                          sources=busybox_sources)
         self.write_pkgdata(self.tmp, "busybox", "1.36.1", ["busybox"])
         self.alt_kernel_build = self.write_recipe(alt_tmp, alt_pn, alt_pv or alt_version, "4" * 64,
                           ["kernel", "kernel-module-a-" + alt_version], alt_cves,
@@ -665,21 +667,23 @@ class RealLibTest(unittest.TestCase):
         self.assertEqual(sorted(e["recipe"] for e in coverage["alt_not_covered"]),
                          ["linux-raspberrypi", "rpi-module"])
 
-    def scan(self):
+    def scan(self, records=()):
         """{(entry name, version): {CVE: (status, detail)}} from sbom-cve-check
-        run on the feed document against a cvelist database of the RECORDS."""
+        run on the feed document against a cvelist database of the RECORDS and
+        records, cve_record arguments."""
         db = self.top / "cvelist"
-        for cve, files in RECORDS:
+        for args in tuple(RECORDS) + tuple(records):
+            cve = args[0]
             year, number = cve.split("-")[1:]
             path = db / "cves" / year / (number[:-3] + "xxx") / (cve + ".json")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(cve_record(cve, files)))
+            path.write_text(json.dumps(cve_record(*args)))
         git = ["git", "-C", str(db), "-c", "user.name=t", "-c", "user.email=t@t",
                "-c", "commit.gpgsign=false"]
         subprocess.run(git[:3] + ["init", "-q"], check=True)
         subprocess.run(git + ["add", "-A"], check=True)
         subprocess.run(git + ["commit", "-q", "-m", "records"], check=True)
-        out = self.top / "scan.yocto.json"
+        out = self.scan_path = self.top / "scan.yocto.json"
         document = self.tmp / "deploy" / "avocado-cve" / "avocado-feed-raspberrypi5.spdx.json"
         subprocess.run(
             [scanner(), "--sbom-path", str(document), "--disable-auto-updates",
@@ -703,6 +707,29 @@ class RealLibTest(unittest.TestCase):
         self.assertEqual(default["CVE-2026-2002"][0], "Unpatched")
         self.assertEqual(alt["CVE-2026-2001"][0], "Unpatched")
         self.assertEqual(alt["CVE-2026-2002"], ("Ignored", "not-applicable-config"))
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_a_recipe_that_lists_only_fetched_files_gets_unpatched(self):
+        # Every recipe's build reaches the feed document here. busybox's lists
+        # only the configuration it fetched, which the scanner reads as its
+        # compiled sources, so a CVE in a source file reads as not compiled.
+        self.run_feed_sbom(mc_recipes=self.kernel_trees(
+            busybox_cpe="cpe:2.3:a:busybox:busybox:1.36.1:*:*:*:*:*:*:*",
+            busybox_sources=("defconfig",)))
+        record = ("CVE-2026-2101", ["networking/httpd.c"], "busybox", "1.37.0")
+        scanned = self.scan([record])
+        self.assertEqual(scanned[("busybox", "1.36.1")]["CVE-2026-2101"],
+                         ("Ignored", "not-applicable-config"))
+        doc, _stats = report.build_report(
+            [str(self.scan_path)], [str(self.tmp / "pkgdata" / "raspberrypi5")],
+            status=report.STATUS_ALL, compiled_sources={"linux-raspberrypi"})
+        busybox = {c["id"]: c for c in doc["recipes"]["busybox"]["cves"]}
+        self.assertEqual(busybox["CVE-2026-2101"]["status"], "Unpatched")
+        self.assertNotIn("detail", busybox["CVE-2026-2101"])
+        self.assertEqual(busybox["CVE-2026-2101"]["scanner"]["detail"], "not-applicable-config")
+        kernel = {c["id"]: c for c in doc["recipes"]["linux-raspberrypi"]["cves"]}
+        self.assertEqual((kernel["CVE-2026-2001"]["status"], kernel["CVE-2026-2001"]["detail"]),
+                         ("Ignored", "not-applicable-config"))
 
     def test_constants_match_oe_sbom30(self):
         sbom30 = self.oe.sbom30

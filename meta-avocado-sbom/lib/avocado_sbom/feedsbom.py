@@ -49,6 +49,62 @@ def classify(recipes, find_roots):
     return roots, sorted(missing)
 
 
+COMPILED_SOURCES_VAR = "SPDX_INCLUDE_COMPILED_SOURCES"
+
+
+def compiled_source_recipes(recipes, getvar):
+    """The recipes whose SPDX is built to include their compiled source files.
+
+    Only these recipes have a use for their builds document, and a builds
+    document refers to the builds of the recipe's dependencies, which are not
+    all in the feed: an image recipe's does, to a recipe with no document. A
+    per-recipe setting wins over the global one, as OE-Core reads it.
+    getvar(name) returns the variable's value, or None when it is not set.
+    """
+    default = getvar(COMPILED_SOURCES_VAR)
+    selected = []
+    for recipe in recipes:
+        value = getvar("%s:pn-%s" % (COMPILED_SOURCES_VAR, recipe))
+        if (default if value is None else value) == "1":
+            selected.append(recipe)
+    return selected
+
+
+def collect_builds(recipes, find_build):
+    """The builds documents of the recipes that have one, in recipe order.
+
+    A recipe's compiled-source files and its build element live in its builds
+    document, not in the recipe-level document the feed starts from. OE-Core
+    pulls a document in only when something references it, and nothing in the
+    recipe-level documents does, so the scanner would find no compiled sources
+    to filter a kernel's CVEs with. find_build(recipe) returns the document, or
+    None when the recipe has none; each recipe is looked up once.
+    """
+    found = []
+    seen = set()
+    for recipe in recipes:
+        if recipe in seen:
+            continue
+        seen.add(recipe)
+        doc = find_build(recipe)
+        if doc is not None:
+            found.append(doc)
+    return found
+
+
+def packages_of(packages, recipes):
+    """Sorted names of the packages that belong to the given recipes.
+
+    The scanner links a recipe's build to its compiled sources through the
+    recipe's installable packages, whose documents hold the build's output
+    relationships, so the feed hands those over beside the builds document.
+    packages is the pkgdata mapping of package name to its record.
+    """
+    wanted = set(recipes)
+    return sorted(name for name, record in packages.items()
+                  if record["recipe"] in wanted)
+
+
 def check_missing(missing, ceiling):
     """Fail, naming every recipe, when more have no document than the ceiling allows."""
     if len(missing) > ceiling:
