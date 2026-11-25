@@ -235,6 +235,18 @@ DTB, custom BPMP firmware, etc.), drop them into
 copied as part of the overlay step and shadow any same-named MACHINE
 file.
 
+The AGX Orin target flashes `tegra234-p3737-0000+p3701-0005-nv.dtb`. A
+carrier that overrides the tree by shipping a file under the stock name
+must use that name, because a file still named for p3701-0000 is no
+longer flashed. A carrier that redirects the tree to its own file name
+with `CARRIER_ENV_DTBFILE` is unaffected. A carrier that re-pins
+`CARRIER_FV_CHECK_BOARDSKU` to another P3701 SKU must also redirect the
+tree with `CARRIER_ENV_DTBFILE`: the default tree is the 0005 one, and
+the flash helper's rewrite of `p3701-0000` to the module's SKU no longer
+matches the default name. Device-tree overlay delivery refuses a carrier
+that redirects the tree and one that ships a file under the stock name,
+so such a carrier cannot use it.
+
 For the iCAM-540, these are six files (~2.5 MB total):
 
 - `tegra234-p3768-0000+p3767-0001-nv.dtb` — kernel DTB
@@ -464,10 +476,9 @@ evidence to the SOM manifest once seen. See
   meta-tegra `tegraflash-bsp/` into a `nativesdk-tegra-bsp-common`
   package available to all Jetson targets via SDK. BSP extensions
   would then ship only their per-carrier delta.
-- **SOM-SKU detection on Orin** — T264 does this already (see
-  *Module SKU auto-detection* above). T234's per-SKU file naming is
-  irregular enough that the same one-token substitution does not
-  cover it, so Orin carriers still pin `CHECK_BOARDSKU`.
+- AGX Orin derives its kernel device tree from TEGRA_BOARDSKU at build
+  time; flash-time SKU detection is needed only when a target drops the
+  SKU pin.
 
 ## See also
 
