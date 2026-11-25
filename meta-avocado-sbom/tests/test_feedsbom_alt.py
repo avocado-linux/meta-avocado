@@ -219,6 +219,103 @@ class DropWrongReferenceTest(unittest.TestCase):
                          "reference collision: 2 statement(s) target another version")
 
 
+def build(products, versions, statements=()):
+    return {"products": set(products), "versions": set(versions),
+            "statements": set(statements)}
+
+
+STOCK = build(["linux_kernel"], ["6.18.52", "6.18.52+git"],
+              [("CVE-1", "VexFixed", "fixed-version", "", "")])
+
+
+class VexOverlapTest(unittest.TestCase):
+    def test_shared_product_and_version_with_other_statements(self):
+        rt = build(["linux_kernel"], ["6.18.52", "6.18.52+git"])
+        self.assertEqual(feedsbom.vex_overlap(rt, STOCK), ("linux_kernel", "6.18.52"))
+
+    def test_the_same_statements_cannot_change_a_result(self):
+        rt = build(["linux_kernel"], ["6.18.52"], STOCK["statements"])
+        self.assertIsNone(feedsbom.vex_overlap(rt, STOCK))
+
+    def test_another_version_does_not_overlap(self):
+        other = build(["linux_kernel"], ["6.18.53", "6.18.53+git"])
+        self.assertIsNone(feedsbom.vex_overlap(other, STOCK))
+
+    def test_another_product_at_the_same_version_overlaps(self):
+        # The scanner matches a statement's package by version before any CPE.
+        for other in (build(["busybox"], ["6.18.52"]), build([], ["6.18.52"])):
+            with self.subTest(other=other):
+                self.assertEqual(feedsbom.vex_overlap(other, STOCK), (None, "6.18.52"))
+
+    def test_another_product_names_the_version_alone(self):
+        kept, not_covered = feedsbom.drop_vex_overlap(
+            [("mc", "oot", ["h"])], {"mc:oot": build(["oot"], ["6.18.52"])},
+            {"linux-yocto": STOCK})
+        self.assertEqual(kept, [])
+        self.assertEqual(not_covered[0]["reason"],
+                         "VEX overlap: 6.18.52 is also linux-yocto, with other statements")
+
+    def test_any_statement_field_counts(self):
+        for statement in (("CVE-1", "VexNotAffected", "fixed-version", "", ""),
+                          ("CVE-1", "VexFixed", "backported-patch", "", ""),
+                          ("CVE-1", "VexFixed", "fixed-version", "x", ""),
+                          ("CVE-2", "VexFixed", "fixed-version", "", "")):
+            with self.subTest(statement=statement):
+                rt = build(["linux_kernel"], ["6.18.52"], [statement])
+                self.assertIsNotNone(feedsbom.vex_overlap(rt, STOCK))
+
+
+class DropVexOverlapTest(unittest.TestCase):
+    def test_an_alternate_with_other_statements_is_not_covered(self):
+        included = [("jetson-rt", "linux-yocto-rt", ["h"]), ("jetson-l4t", "linux-l4t", ["h2"])]
+        alt = {"jetson-rt:linux-yocto-rt": build(["linux_kernel"], ["6.18.52"]),
+               "jetson-l4t:linux-l4t": build(["linux_kernel"], ["6.8.12"])}
+        kept, not_covered = feedsbom.drop_vex_overlap(included, alt, {"linux-yocto": STOCK})
+        self.assertEqual(kept, [("jetson-l4t", "linux-l4t", ["h2"])])
+        self.assertEqual(not_covered, [{
+            "mc": "jetson-rt", "recipe": "linux-yocto-rt",
+            "reason": "VEX overlap: linux_kernel 6.18.52 is also linux-yocto, with other statements"}])
+
+    def test_of_two_overlapping_alternates_the_first_stays(self):
+        included = [("a", "k1", ["h1"]), ("b", "k2", ["h2"])]
+        alt = {"a:k1": build(["linux_kernel"], ["6.8.12"], [("CVE-9", "VexFixed", "", "", "")]),
+               "b:k2": build(["linux_kernel"], ["6.8.12"])}
+        kept, not_covered = feedsbom.drop_vex_overlap(included, alt, {"linux-yocto": STOCK})
+        self.assertEqual(kept, [("a", "k1", ["h1"])])
+        self.assertEqual(not_covered[0]["reason"],
+                         "VEX overlap: linux_kernel 6.8.12 is also a:k1, with other statements")
+
+    def test_a_dropped_alternate_is_not_compared_with(self):
+        # k1 overlaps the default and goes; k2 overlaps only k1, so it stays.
+        included = [("a", "k1", ["h1"]), ("b", "k2", ["h2"])]
+        alt = {"a:k1": build(["linux_kernel"], ["6.18.52", "6.8.12"]),
+               "b:k2": build(["linux_kernel"], ["6.8.12"], [("CVE-9", "VexFixed", "", "", "")])}
+        kept, not_covered = feedsbom.drop_vex_overlap(included, alt, {"linux-yocto": STOCK})
+        self.assertEqual(kept, [("b", "k2", ["h2"])])
+        self.assertEqual([n["recipe"] for n in not_covered], ["k1"])
+
+    def test_an_alternate_without_a_build_is_kept(self):
+        included = [("a", "k1", ["h1"])]
+        self.assertEqual(feedsbom.drop_vex_overlap(included, {}, {"linux-yocto": STOCK}),
+                         (included, []))
+
+
+class DropUnresolvedTest(unittest.TestCase):
+    def test_an_alternate_whose_own_link_is_unresolved_is_not_covered(self):
+        included = [("jetson-rt", "linux-yocto-rt", ["h"]), ("jetson-l4t", "linux-l4t", ["h2"])]
+        needs = {"jetson-rt:linux-yocto-rt": {"alias/a", "alias/b", "alias/c"},
+                 "jetson-l4t:linux-l4t": {"alias/c"}}
+        kept, not_covered = feedsbom.drop_unresolved(included, needs, ["alias/a", "alias/b"])
+        self.assertEqual(kept, [("jetson-l4t", "linux-l4t", ["h2"])])
+        self.assertEqual(not_covered, [{"mc": "jetson-rt", "recipe": "linux-yocto-rt",
+                                        "reason": "unresolved reference: 2 identifier(s)"}])
+
+    def test_nothing_unresolved_keeps_everything(self):
+        included = [("a", "k", ["h"])]
+        self.assertEqual(feedsbom.drop_unresolved(included, {"a:k": {"x"}}, set()),
+                         (included, []))
+
+
 class AltLabelTest(unittest.TestCase):
     def test_label_is_mc_colon_recipe(self):
         self.assertEqual(feedsbom.alt_label("raspberrypi-6_6", "linux-raspberrypi"),

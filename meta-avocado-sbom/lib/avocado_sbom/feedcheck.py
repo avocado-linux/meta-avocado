@@ -130,6 +130,9 @@ def check_coverage_record(paths):
              or isinstance(coverage[key], bool)]
     if wrong:
         return name, False, "wrong value type for %s" % ", ".join(wrong)
+    # do_feed_sbom writes no document with a hole in it.
+    if coverage["unresolved_ids"]:
+        return name, False, "%d unresolved identifier(s)" % coverage["unresolved_ids"]
     return name, True, ""
 
 def check_feed_manifest(paths):

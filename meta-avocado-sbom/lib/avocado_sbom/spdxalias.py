@@ -9,10 +9,10 @@ two multiconfigs writes two documents under one name for one PN, so both
 documents carry the same aliases, and a link from one resolves to whichever
 document was indexed last.
 
-On scarthgap that matters for the feed scan: a package document names the build
-that produced it and the CVEs its VEX statements are about by alias, so the
-alternate kernel's packages would bind to the default kernel's build. The
-alternate multiconfig's documents are loaded as JSON, their aliases are
+That matters for the feed scan: a package document names the build that
+produced it by alias (and on scarthgap the CVEs its VEX statements are about),
+so the alternate kernel's packages would bind to the default kernel's build.
+The alternate multiconfig's documents are loaded as JSON, their aliases are
 qualified with the multiconfig here, and only then deserialized, so links
 between them resolve to each other and every other link is left alone.
 

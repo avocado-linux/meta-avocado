@@ -10,21 +10,21 @@ multi-kernel machine write their documents under the same names and carry the
 same identity aliases, so the alternate kernel's documents get aliases of their
 own (avocado_sbom.spdxalias) before they are deserialized.
 
-SpdxAliasTest is plain logic and always runs. RealLibTest writes a default tree
-and an alternate multiconfig's tree with scarthgap OE-core's own oe.sbom30, runs
-the recipe's do_feed_sbom on them and reads the document it writes; it runs when
-OE_CORE_LIB names scarthgap OE-core's meta/lib.
+RealLibTest writes a default tree and an alternate multiconfig's tree with
+scarthgap OE-core's own oe.sbom30, runs the recipe's do_feed_sbom on them and
+reads the document it writes; it runs when OE_CORE_LIB names scarthgap
+OE-core's meta/lib. test_spdxalias.py covers avocado_sbom.spdxalias on its own.
 
   cd meta-avocado-sbom/tests && PYTHONPATH=../lib python3 -m unittest discover -p 'test_*.py'
 """
 
-import copy
 import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -35,96 +35,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "lib"))
 
-from avocado_sbom import feedcheck, spdxalias  # noqa: E402
+from avocado_sbom import feedcheck, feedsbom, spdxalias  # noqa: E402
 
 RECIPE = HERE.parent / "recipes-avocado" / "avocado-cve-report" / "avocado-cve-report.bb"
-
-DOC_ALIAS = (spdxalias.DOC_ALIAS_PREFIX + "linux-raspberrypi/recipe-linux-raspberrypi/"
-             "linux-raspberrypi/UNIHASH/document/recipe-linux-raspberrypi")
-OTHER_ALIAS = (spdxalias.DOC_ALIAS_PREFIX + "openssl-native/recipe-openssl-native/"
-               "openssl-native/UNIHASH/document/recipe-openssl-native")
-
-
-def alias_doc(doc_alias, refs):
-    """A parsed document whose SpdxDocument carries doc_alias and whose one
-    relationship refers to each of refs."""
-    return {
-        "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
-        "@graph": [
-            {"type": "SpdxDocument", "spdxId": "http://x/doc",
-             "extension": [{"type": spdxalias.ALIAS_TYPE, spdxalias.ALIAS_KEY: doc_alias}]},
-            {"type": "Relationship", "spdxId": "http://x/rel",
-             "from": refs[0], "to": refs[1:], "relationshipType": "hasOutput"},
-        ],
-    }
-
-
-class SpdxAliasTest(unittest.TestCase):
-    def test_element_prefix_hashes_the_document_alias(self):
-        self.assertEqual(
-            spdxalias.element_prefix(DOC_ALIAS),
-            spdxalias.ALIAS_PREFIX + hashlib.sha256(DOC_ALIAS.encode()).hexdigest() + "/")
-
-    def test_document_alias_is_read_from_the_document_node(self):
-        self.assertEqual(spdxalias.document_alias(alias_doc(DOC_ALIAS, ["a"])), DOC_ALIAS)
-
-    def test_document_alias_absent(self):
-        doc = alias_doc(DOC_ALIAS, ["a"])
-        doc["@graph"][0]["extension"] = []
-        for data in (doc, {}, {"@graph": "x"}, [], None):
-            with self.subTest(data=data):
-                self.assertIsNone(spdxalias.document_alias(data))
-
-    def test_document_alias_ignores_other_nodes_and_extensions(self):
-        doc = alias_doc(DOC_ALIAS, ["a"])
-        doc["@graph"][0]["extension"].insert(0, {"type": "http://other", spdxalias.ALIAS_KEY: "no"})
-        doc["@graph"][1]["extension"] = [{"type": spdxalias.ALIAS_TYPE, spdxalias.ALIAS_KEY: "rel"}]
-        self.assertEqual(spdxalias.document_alias(doc), DOC_ALIAS)
-
-    def test_multiconfig_alias_cannot_be_a_pn(self):
-        new = spdxalias.multiconfig_alias(DOC_ALIAS, "raspberrypi-6_6")
-        self.assertEqual(new, spdxalias.DOC_ALIAS_PREFIX + "multiconfig:raspberrypi-6_6/"
-                         + DOC_ALIAS[len(spdxalias.DOC_ALIAS_PREFIX):])
-        self.assertNotEqual(spdxalias.multiconfig_alias(DOC_ALIAS, "other"), new)
-
-    def test_map_holds_each_alias_and_its_prefix(self):
-        mapping = spdxalias.multiconfig_map([DOC_ALIAS, None, ""], "mc")
-        new = spdxalias.multiconfig_alias(DOC_ALIAS, "mc")
-        self.assertEqual(mapping, {
-            DOC_ALIAS: new,
-            spdxalias.element_prefix(DOC_ALIAS): spdxalias.element_prefix(new),
-        })
-
-    def test_remap_rewrites_aliases_of_mapped_documents_only(self):
-        mine = spdxalias.element_prefix(DOC_ALIAS)
-        other = spdxalias.element_prefix(OTHER_ALIAS)
-        data = alias_doc(DOC_ALIAS, [mine + "linux-raspberrypi/UNIHASH/build/recipe",
-                                     other + "openssl-native/UNIHASH/build/recipe",
-                                     "http://spdx.org/spdxdocs/linux/abc/package/kernel"])
-        before = copy.deepcopy(data)
-        mapping = spdxalias.multiconfig_map([DOC_ALIAS], "mc")
-        out = spdxalias.remap(data, mapping)
-        self.assertEqual(data, before, "the input is left as it was")
-        new_prefix = spdxalias.element_prefix(spdxalias.multiconfig_alias(DOC_ALIAS, "mc"))
-        rel = out["@graph"][1]
-        self.assertEqual(rel["from"], new_prefix + "linux-raspberrypi/UNIHASH/build/recipe")
-        self.assertEqual(rel["to"], before["@graph"][1]["to"])
-        self.assertEqual(out["@graph"][0]["extension"][0][spdxalias.ALIAS_KEY],
-                         spdxalias.multiconfig_alias(DOC_ALIAS, "mc"))
-        self.assertEqual(out["@context"], before["@context"])
-
-    def test_remap_leaves_keys_and_non_strings(self):
-        mine = spdxalias.element_prefix(DOC_ALIAS)
-        data = {mine + "k": [1, None, True, {"x": 2.5}]}
-        self.assertEqual(spdxalias.remap(data, spdxalias.multiconfig_map([DOC_ALIAS], "mc")), data)
-
-    def test_remap_needs_the_whole_prefix(self):
-        mine = spdxalias.element_prefix(DOC_ALIAS)
-        mapping = spdxalias.multiconfig_map([DOC_ALIAS], "mc")
-        for value in (mine[:-1], mine[:-1] + "0/x", spdxalias.ALIAS_PREFIX + "nohash"):
-            with self.subTest(value=value):
-                self.assertEqual(spdxalias.remap(value, mapping), value)
-
 
 def recipe_python(name):
     """The body of the recipe's python task name, as source."""
@@ -184,6 +97,45 @@ class D:
 MACHINE = "avocado-raspberrypi5"
 MC = "raspberrypi-6_6"
 ARCHS = "allarch cortexa76 raspberrypi5 x86_64"
+
+KERNEL_CPE = "cpe:2.3:o:linux:linux_kernel:%s:*:*:*:*:*:*:*"
+# Compiled sources of the two kernels. init/main.c passes the scanner's check
+# that a kernel's list is real.
+DEFAULT_SOURCES = ("init/main.c", "kernel/fork.c")
+ALT_SOURCES = ("init/main.c", "drivers/only66.c")
+# 2001 is fixed in a file only the 6.6 kernel compiles, 2002 in one only the
+# 6.12 kernel compiles.
+RECORDS = (("CVE-2026-2001", ["drivers/only66.c"]), ("CVE-2026-2002", ["kernel/fork.c"]))
+
+
+def scanner():
+    tool = os.environ.get("SBOM_CVE_CHECK")
+    return tool if tool and os.access(tool, os.X_OK) else None
+
+
+def cve_record(cve, program_files):
+    """A cvelistV5 record: linux_kernel below 6.18.99 affected, its fix in
+    program_files."""
+    return {
+        "dataType": "CVE_RECORD", "dataVersion": "5.1",
+        "cveMetadata": {"cveId": cve, "state": "PUBLISHED",
+                        "datePublished": "2026-01-01T00:00:00.000Z",
+                        "dateUpdated": "2026-01-01T00:00:00.000Z"},
+        "containers": {"cna": {
+            "providerMetadata": {"orgId": "00000000-0000-0000-0000-000000000000",
+                                 "dateUpdated": "2026-01-01T00:00:00.000Z"},
+            "descriptions": [{"lang": "en", "value": "test record %s" % cve}],
+            "affected": [{
+                "vendor": "Linux", "product": "Linux",
+                "cpes": ["cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"],
+                "defaultStatus": "unaffected",
+                "versions": [{"version": "0", "lessThan": "6.18.99", "status": "affected",
+                              "versionType": "semver"}],
+                "programFiles": list(program_files),
+            }],
+        }},
+    }
+
 
 
 @unittest.skipUnless(os.environ.get("OE_CORE_LIB"),
@@ -249,10 +201,12 @@ class RealLibTest(unittest.TestCase):
         sbom30.write_jsonld_doc(d, objset, tmp / "deploy" / "spdx" / "bitbake.spdx.json")
 
     def write_recipe(self, tmp, pn, version, unihash, packages, cves=(), deps=(),
-                     arch="raspberrypi5", link_build=True):
+                     arch="raspberrypi5", link_build=True, cpe=None, sources=None):
         """recipes/recipe-<pn> and packages-staging/package-<name>, as
         scarthgap's create_spdx writes them: the build and the CVE elements in
-        the recipe document, each package naming them by alias."""
+        the recipe document, each package naming them by alias. sources are
+        the build's compiled source files, as the source walk keeps them under
+        SPDX_INCLUDE_COMPILED_SOURCES."""
         sbom30, spdx30 = self.oe.sbom30, self.oe.spdx30
         d = self.datastore(tmp, pn, unihash, arch)
         deploy = Path(d.getVar("DEPLOY_DIR_SPDX"))
@@ -261,13 +215,29 @@ class RealLibTest(unittest.TestCase):
         build_objset.set_element_alias(build)
         build_objset.doc.rootElement.append(build)
         vulns = []
+        notes = {}
         for cve in cves:
+            # (CVE, status notes) as avocado-spdx-vex-notes writes them.
+            cve, notes[cve] = cve if isinstance(cve, tuple) else (cve, None)
             v = build_objset.new_cve_vuln(cve)
             build_objset.set_element_alias(v)
             vulns.append(v)
         for dep in deps:
             build_objset.new_scoped_relationship(
                 [build], spdx30.RelationshipType.dependsOn, spdx30.LifecycleScopeType.build, [dep])
+        if sources:
+            workdir = Path(tmp) / "work" / pn
+            files = []
+            for i, name in enumerate(sources, 1):
+                path = workdir / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("%s %s %s\n" % (tmp, pn, name))
+                files.append(build_objset.new_file(
+                    build_objset.new_spdxid("sourcefile", str(i)), name, path,
+                    purposes=[spdx30.software_SoftwarePurpose.source]))
+            build_objset.new_scoped_relationship(
+                [build], spdx30.RelationshipType.hasInput, spdx30.LifecycleScopeType.build,
+                sorted(files, key=lambda f: f._id))
         for name in packages:
             pkg_objset = sbom30.ObjectSet.new_objset(d, "package-" + name)
             pkg = pkg_objset.add_root(spdx30.software_Package(
@@ -277,13 +247,16 @@ class RealLibTest(unittest.TestCase):
                 software_primaryPurpose=spdx30.software_SoftwarePurpose.install))
             pkg.externalIdentifier.append(spdx30.ExternalIdentifier(
                 externalIdentifierType=spdx30.ExternalIdentifierType.cpe23,
-                identifier="cpe:2.3:*:*:%s:%s:*:*:*:*:*:*:*" % (pn, version)))
+                identifier=cpe or "cpe:2.3:*:*:%s:%s:*:*:*:*:*:*:*" % (pn, version)))
             if link_build:
                 pkg_objset.new_scoped_relationship(
                     [sbom30.get_element_link_id(build)], spdx30.RelationshipType.hasOutput,
                     spdx30.LifecycleScopeType.build, [pkg])
-            for v in vulns:
-                pkg_objset.new_vex_patched_relationship([sbom30.get_element_link_id(v)], [pkg])
+            for v, cve in zip(vulns, notes):
+                for rel in pkg_objset.new_vex_patched_relationship(
+                        [sbom30.get_element_link_id(v)], [pkg]):
+                    if notes[cve]:
+                        rel.security_statusNotes = notes[cve]
             if vulns:
                 pkg_objset.new_relationship(
                     [pkg], spdx30.RelationshipType.hasAssociatedVulnerability,
@@ -536,6 +509,200 @@ class RealLibTest(unittest.TestCase):
         self.assertEqual(builds[("kernel", "6.12.47")], ["linux-raspberrypi:do_create_spdx:recipe@2"])
         self.assertEqual(builds[("kernel", "6.6.63")], ["linux-raspberrypi:do_create_spdx:recipe@4"])
         self.assertNotIn(("kernel", "6.1.99"), builds)
+
+    # --- the kernel CVE filter, VEX overlap, unresolved alternate links -----
+
+    def kernel_trees(self, alt_mc=MC, alt_pn="linux-raspberrypi", alt_version="6.6.63",
+                     alt_cves=("CVE-2024-0001",), default_cves=("CVE-2024-0001",),
+                     alt_deps=(), alt_pv=None):
+        """A default kernel and an alternate one, both linux_kernel by CPE and
+        both listing their compiled sources, with busybox beside them."""
+        alt_tmp = self.top / ("tmp-" + alt_mc)
+        for tmp in (self.tmp, alt_tmp):
+            self.write_bitbake(tmp)
+        openssl = self.write_recipe(self.tmp, "openssl-native", "3.2.6", "1" * 64, [],
+                                    arch="x86_64")
+        self.write_recipe(self.tmp, "linux-raspberrypi", "6.12.47", "2" * 64,
+                          ["kernel", "kernel-module-a"], default_cves, [openssl],
+                          cpe=KERNEL_CPE % "6.12.47", sources=DEFAULT_SOURCES)
+        self.write_pkgdata(self.tmp, "linux-raspberrypi", "6.12.47", ["kernel", "kernel-module-a"])
+        self.write_recipe(self.tmp, "busybox", "1.36.1", "3" * 64, ["busybox"],
+                          ["CVE-2026-38752"], arch="cortexa76")
+        self.write_pkgdata(self.tmp, "busybox", "1.36.1", ["busybox"])
+        self.alt_kernel_build = self.write_recipe(alt_tmp, alt_pn, alt_pv or alt_version, "4" * 64,
+                          ["kernel", "kernel-module-a-" + alt_version], alt_cves,
+                          [openssl] + list(alt_deps), cpe=KERNEL_CPE % alt_version,
+                          sources=ALT_SOURCES)
+        self.write_pkgdata(alt_tmp, alt_pn, alt_pv or alt_version,
+                           ["kernel", "kernel-module-a-" + alt_version])
+        return "%s:%s" % (alt_mc, alt_pn)
+
+    def sources_of(self, document):
+        """{root package version: compiled source names} as the scanner reads
+        them: the build that has the package as output (hasOutput, scope
+        build), that build's hasInput source files."""
+        nodes = self.graph(document)
+        found = {}
+        for n in nodes.values():
+            if (n.get("relationshipType") != "hasOutput" or n.get("scope") != "build"
+                    or nodes[n["from"]].get("type") != "build_Build"):
+                continue
+            for t in n["to"]:
+                pkg = nodes.get(t, {})
+                if pkg.get("type") != "software_Package":
+                    continue
+                found[pkg["software_packageVersion"]] = sorted(
+                    nodes[f]["name"] for r in nodes.values()
+                    if r.get("relationshipType") == "hasInput" and r["from"] == n["from"]
+                    for f in r["to"]
+                    if nodes.get(f, {}).get("software_primaryPurpose") == "source")
+        return found
+
+    def test_each_kernel_reaches_the_scan_with_its_own_compiled_sources(self):
+        mc_recipes = self.kernel_trees()
+        document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes)
+        self.assertEqual(coverage["alt_included"], [mc_recipes])
+        self.assertEqual(self.sources_of(document), {
+            "6.12.47": sorted(DEFAULT_SOURCES), "6.6.63": sorted(ALT_SOURCES),
+            "1.36.1": []})
+
+    def test_an_alternate_with_other_statements_is_left_out(self):
+        mc_recipes = self.kernel_trees(alt_mc="jetson-rt", alt_pn="linux-yocto-rt",
+                                       alt_version="6.12.47",
+                                       alt_cves=("CVE-2024-0001", "CVE-2026-1003"))
+        document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes)
+        self.assertEqual(coverage["alt_included"], [])
+        self.assertEqual(coverage["alt_not_covered"], [{
+            "mc": "jetson-rt", "recipe": "linux-yocto-rt",
+            "reason": "VEX overlap: linux_kernel 6.12.47 is also linux-raspberrypi, "
+                      "with other statements"}])
+        self.assertNotIn("CVE-2026-1003", json.dumps(document))
+
+    def test_a_statement_differing_in_notes_only_counts_as_other(self):
+        mc_recipes = self.kernel_trees(alt_mc="jetson-rt", alt_pn="linux-yocto-rt",
+                                       alt_version="6.12.47",
+                                       alt_cves=[("CVE-2024-0001", "backported-patch")],
+                                       default_cves=[("CVE-2024-0001", "fixed-version")])
+        _document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes)
+        self.assertEqual([e["recipe"] for e in coverage["alt_not_covered"]], ["linux-yocto-rt"])
+
+    def test_the_cpe_version_alone_overlaps(self):
+        # Another package version, the same CPE version: the scanner matches
+        # statements on either.
+        mc_recipes = self.kernel_trees(alt_mc="jetson-rt", alt_pn="linux-yocto-rt",
+                                       alt_version="6.12.47", alt_pv="6.12.47-rt",
+                                       alt_cves=("CVE-2024-0001", "CVE-2026-1003"))
+        _document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes)
+        self.assertEqual([e["recipe"] for e in coverage["alt_not_covered"]], ["linux-yocto-rt"])
+
+    def test_a_module_of_a_kernel_left_out_is_left_out_too(self):
+        # The RT kernel goes on VEX overlap; a module built for it in the same
+        # multiconfig then links to a build no loaded document defines.
+        self.kernel_trees(alt_mc="jetson-rt", alt_pn="linux-yocto-rt", alt_version="6.12.47",
+                          alt_cves=("CVE-2024-0001", "CVE-2026-1003"))
+        alt_tmp = self.top / "tmp-jetson-rt"
+        self.write_recipe(alt_tmp, "rt-module", "1.0", "c" * 64, ["kernel-module-rt"],
+                          deps=[self.alt_kernel_build])
+        self.write_pkgdata(alt_tmp, "rt-module", "1.0", ["kernel-module-rt"])
+        _document, coverage = self.run_feed_sbom(
+            mc_recipes="jetson-rt:linux-yocto-rt jetson-rt:rt-module")
+        self.assertEqual(coverage["alt_included"], [])
+        reasons = {e["recipe"]: e["reason"].split(":")[0] for e in coverage["alt_not_covered"]}
+        self.assertEqual(reasons, {"linux-yocto-rt": "VEX overlap",
+                                   "rt-module": "unresolved reference"})
+        self.assertEqual(coverage["unresolved_ids"], 0)
+
+    def test_an_alternate_with_the_same_statements_stays(self):
+        mc_recipes = self.kernel_trees(alt_mc="jetson-rt", alt_pn="linux-yocto-rt",
+                                       alt_version="6.12.47")
+        _document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes)
+        self.assertEqual(coverage["alt_included"], [mc_recipes])
+        self.assertEqual(coverage["alt_not_covered"], [])
+
+    def test_a_link_only_the_alternate_multiconfig_resolves_leaves_that_kernel_out(self):
+        alt_tmp = self.top / ("tmp-" + MC)
+        self.write_bitbake(alt_tmp)
+        only_here = self.write_recipe(alt_tmp, "rt-only-tool-native", "1.0", "7" * 64, [],
+                                      arch="x86_64")
+        mc_recipes = self.kernel_trees(alt_deps=[only_here])
+        document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes)
+        self.assertEqual(coverage["alt_included"], [])
+        entry, = coverage["alt_not_covered"]
+        self.assertEqual((entry["mc"], entry["recipe"]), (MC, "linux-raspberrypi"))
+        self.assertTrue(entry["reason"].startswith("unresolved reference: "), entry)
+        self.assertEqual(coverage["unresolved_ids"], 0)
+        self.assertEqual(sorted(self.sources_of(document)), ["1.36.1", "6.12.47"])
+
+    def test_a_module_of_a_kernel_left_out_never_finds_the_default_kernel(self):
+        # The 6.6 kernel goes on an unresolved link; its module names its build
+        # by the same alias as the default kernel's, which must not catch it.
+        alt_tmp = self.top / ("tmp-" + MC)
+        self.write_bitbake(alt_tmp)
+        only_here = self.write_recipe(alt_tmp, "rt-only-tool-native", "1.0", "7" * 64, [],
+                                      arch="x86_64")
+        mc_recipes = self.kernel_trees(alt_deps=[only_here])
+        self.write_recipe(alt_tmp, "rpi-module", "1.0", "c" * 64, ["kernel-module-x"],
+                          deps=[self.alt_kernel_build])
+        self.write_pkgdata(alt_tmp, "rpi-module", "1.0", ["kernel-module-x"])
+        _document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes + " %s:rpi-module" % MC)
+        self.assertEqual(coverage["alt_included"], [])
+        self.assertEqual(sorted(e["recipe"] for e in coverage["alt_not_covered"]),
+                         ["linux-raspberrypi", "rpi-module"])
+
+    def test_a_module_of_a_kernel_without_its_package_document_is_left_out_too(self):
+        # The 6.6 kernel has its build document but no package document, so it
+        # is not covered; a module linking to its build must not find the
+        # default kernel's build under the same alias.
+        alt_tmp = self.top / ("tmp-" + MC)
+        mc_recipes = self.kernel_trees()
+        for doc in (alt_tmp / "deploy" / "spdx").glob("*/packages-staging/package-kernel*.spdx.json"):
+            doc.unlink()
+        self.write_recipe(alt_tmp, "rpi-module", "1.0", "c" * 64, ["kernel-module-x"],
+                          deps=[self.alt_kernel_build])
+        self.write_pkgdata(alt_tmp, "rpi-module", "1.0", ["kernel-module-x"])
+        _document, coverage = self.run_feed_sbom(mc_recipes=mc_recipes + " %s:rpi-module" % MC)
+        self.assertEqual(coverage["alt_included"], [])
+        self.assertEqual(sorted(e["recipe"] for e in coverage["alt_not_covered"]),
+                         ["linux-raspberrypi", "rpi-module"])
+
+    def scan(self):
+        """{(entry name, version): {CVE: (status, detail)}} from sbom-cve-check
+        run on the feed document against a cvelist database of the RECORDS."""
+        db = self.top / "cvelist"
+        for cve, files in RECORDS:
+            year, number = cve.split("-")[1:]
+            path = db / "cves" / year / (number[:-3] + "xxx") / (cve + ".json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(cve_record(cve, files)))
+        git = ["git", "-C", str(db), "-c", "user.name=t", "-c", "user.email=t@t",
+               "-c", "commit.gpgsign=false"]
+        subprocess.run(git[:3] + ["init", "-q"], check=True)
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", "records"], check=True)
+        out = self.top / "scan.yocto.json"
+        document = self.tmp / "deploy" / "avocado-cve" / "avocado-feed-raspberrypi5.spdx.json"
+        subprocess.run(
+            [scanner(), "--sbom-path", str(document), "--disable-auto-updates",
+             "--ignore-default-config", "--offline-mode",
+             "--no-builtin-products-db", "--export-process-native",
+             "--add-db", "cve-db-cvelist", str(db), "offline_mode=true",
+             "--export-type", "yocto-cve-check-manifest", "--export-path", str(out)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        return {(e["name"], e["version"]): {i["id"]: (i["status"], i.get("detail"))
+                                           for i in e["issue"]}
+                for e in json.loads(out.read_text())["package"]}
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_the_scan_filters_each_kernel_on_its_own_sources(self):
+        mc_recipes = self.kernel_trees()
+        self.run_feed_sbom(mc_recipes=mc_recipes)
+        result = self.scan()
+        default = next(v for (n, ver), v in result.items() if ver == "6.12.47")
+        alt = next(v for (n, ver), v in result.items() if ver == "6.6.63")
+        self.assertEqual(default["CVE-2026-2001"], ("Ignored", "not-applicable-config"))
+        self.assertEqual(default["CVE-2026-2002"][0], "Unpatched")
+        self.assertEqual(alt["CVE-2026-2001"][0], "Unpatched")
+        self.assertEqual(alt["CVE-2026-2002"], ("Ignored", "not-applicable-config"))
 
     def test_constants_match_oe_sbom30(self):
         sbom30 = self.oe.sbom30

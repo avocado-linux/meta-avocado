@@ -256,7 +256,9 @@ one per binary package, and every package of a recipe carries the recipe's
 version, CPEs and VEX statements. The scanner groups packages by the build that
 produced them, so do_feed_sbom takes one package of each recipe, the first by
 name that has a document, and the build document comes along through the
-package's links. That keeps one copy of each recipe's statements: under
+package's links. A kernel's build document lists the sources it compiled
+(SPDX_INCLUDE_COMPILED_SOURCES), so the kernel CVE filter applies at this
+scope as at image scope, each kernel on its own list. That keeps one copy of each recipe's statements: under
 SPDX_INCLUDE_VEX = "all" every kernel package document carries the kernel's
 whole cve-exclusion list, and the kernel ships thousands of packages. The
 package document read is the one do_create_spdx writes (packages-staging), the
@@ -299,8 +301,19 @@ is listed in alt_included as "<multiconfig>:<recipe>". A kernel is listed in
 alt_not_covered with a reason instead when a merge would point a vulnerability
 statement at the wrong kernel or link its packages to a build that produced
 another version (reference collision), when it shares an identity alias with
-the default kernel that a relationship refers to (alias collision), or when its
-documents are missing. A malformed list entry is listed there too. Each
+the default kernel that a relationship refers to (alias collision), when its
+documents refer to something only its own multiconfig built, which the default
+tree cannot resolve (unresolved reference), when it shares a version with
+another build in the document but not that build's VEX statements (VEX
+overlap; the scanner matches a statement by version before it looks at the
+product), or when its documents are missing. A malformed list entry is
+listed there too. A VEX overlap is decided in the document because
+sbom-cve-check applies a statement to every build at the version of the package
+it is about: an RT kernel's backport left in beside a stock kernel of the same
+version would mark the stock kernel patched, and rescans run the same scanner
+on the same document. Kernels that carry the same statements stay; on this
+line OE-core's linux-yocto-rt leaves out the cve-exclusion.inc statements
+linux-yocto carries, so the two at one version would not. Each
 multiconfig is judged on its own, since one recipe can be built in several: a
 reference collision traced to one alternate multiconfig drops that build only,
 and one seen only on the default kernel's side, which cannot say which
@@ -315,10 +328,9 @@ version as "recipe_version" (see "Report format"). The task fails when a
 declared multiconfig's package data is missing or holds no package of a recipe
 it declares, rather than leave that kernel's RPMs out of both documents. A
 kernel in alt_not_covered is not in the scanned document, so its version has no
-record and its packages carry no "recipe_version". Links from an alternate
-kernel's document to a recipe that only its multiconfig built do not resolve,
-and do_feed_sbom then fails on the unresolved identifier instead of moving that
-kernel to alt_not_covered.
+record and its packages carry no "recipe_version". An identifier left
+unresolved that no alternate kernel's own documents refer to is a hole in the
+default tree and still fails do_feed_sbom.
 
 Variables
 ---------
