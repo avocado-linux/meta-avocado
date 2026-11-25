@@ -5,7 +5,7 @@ medium needs - and, separately, program its AHAB SRK hash fuses.
 Backends are selected from the medium rather than hardcoded, so a board that
 provisions over a different transport is a new backend rather than a new tool.
 
-  sd        removable block device   fwup (default) or bmaptool
+  sd        removable block device   fwup
   emmc      USB serial download      uuu
   fuse-srk  serial console           one-time programmable fuses
 
@@ -662,8 +662,6 @@ backends:
   fwup      writes the stone fwup archive. The default for 'sd' because it is the
             only backend that evaluates the manifest, so partitions marked expand
             grow to fill the medium.
-  bmaptool  writes a raw .wic/.img, skipping unmapped blocks and verifying a
-            SHA256 per mapped region.
   uuu       NXP serial-download protocol; the board must already be in serial
             download mode.
 
