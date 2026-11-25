@@ -8,6 +8,11 @@ SRC_URI += " \
     file://avocado-core.cfg \
     file://avocado-extra.cfg \
 "
+
+# Device classes customers plug in (USB serial, CAN, container networking,
+# input, USB audio, Bluetooth, USB Ethernet), as modules. Checked against this
+# kernel's defconfig: no option it builds in is demoted.
+require recipes-kernel/linux/avocado-device-classes-kernel.inc
 SRC_URI:append:rubikpi3 = " file://rubikpi3-wifi.cfg file://rubikpi3-thermal.cfg file://qcs6490-thundercomm-rubikpi3.dts"
 
 # rb3gen2: disable the broken USB-C DP altmode output (mdss_dp @ae90000). Its
