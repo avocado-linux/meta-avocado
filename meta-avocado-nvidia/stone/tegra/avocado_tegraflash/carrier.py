@@ -115,30 +115,51 @@ def _warn_unselected_trees(source: str, work_dir: str, log: Callable[[str], None
             )
 
 
+def carrier_label(env_text: str) -> str | None:
+    """The first `CARRIER_LABEL=` value with double quotes stripped; None when no line matches."""
+    for line in env_text.split("\n"):
+        if line.startswith("CARRIER_LABEL="):
+            return _strip_quotes(line[len("CARRIER_LABEL=") :], ('"',))
+    return None
+
+
+def carrier_patches(env_text: str, validate: bool = True) -> list[tuple[str, str, str]]:
+    """`(target_file, name, value)` for each CARRIER_FV_/CARRIER_ENV_ line, in file order.
+
+    A repeated name stays in the list so a caller applying in order gets last-wins.
+    `validate=False` lets apply_carrier run the shell-safety refusal per entry as it
+    applies it, so the lines before an unsafe one are still logged and rewritten.
+    """
+    patches = []
+    for line in env_text.split("\n"):
+        if line.startswith(_FV):
+            target, prefix = "flashvars", _FV
+        elif line.startswith(_ENV):
+            target, prefix = ".env.initrd-flash", _ENV
+        else:
+            continue
+        key, sep, rest = line.partition("=")
+        val = _strip_quotes(rest if sep else line)
+        name = key[len(prefix) :]
+        if validate:
+            _require_shell_safe(prefix + name, name, val, target)
+        patches.append((target, name, val))
+    return patches
+
+
 def _apply_env(work_dir: str, log: Callable[[str], None]) -> None:
     carrier_env = os.path.join(work_dir, "carrier.env")
     if not os.path.isfile(carrier_env):
         return
     with open(carrier_env, encoding="utf-8", errors="surrogateescape") as fh:
-        env_lines = fh.read().split("\n")
+        env_text = fh.read()
 
-    for line in env_lines:
-        if line.startswith("CARRIER_LABEL="):
-            label = _strip_quotes(line[len("CARRIER_LABEL=") :], ('"',))
-            if label:
-                log(f"  Carrier: {label}")
-            break
+    label = carrier_label(env_text)
+    if label:
+        log(f"  Carrier: {label}")
 
-    for line in env_lines:
-        if line.startswith(_FV):
-            target = "flashvars"
-        elif line.startswith(_ENV):
-            target = ".env.initrd-flash"
-        else:
-            continue
-        key, sep, rest = line.partition("=")
-        val = _strip_quotes(rest if sep else line)
-        name = key[len(_FV if target == "flashvars" else _ENV) :]
+    for target, name, val in carrier_patches(env_text, validate=False):
+        key = (_FV if target == "flashvars" else _ENV) + name
         _require_shell_safe(key, name, val, target)
         if _rewrite(os.path.join(work_dir, target), name, val):
             log(f"  {target}: {name}={val}")
