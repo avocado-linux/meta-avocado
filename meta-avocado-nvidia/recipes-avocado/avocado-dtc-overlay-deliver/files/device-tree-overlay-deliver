@@ -176,25 +176,59 @@ def resolve_stone_input(name, data_dir):
     return None
 
 
-def refuse_carrier_dtb_override(stone, data_dir, base_name):
-    """Refuse a carrier BSP that changes which DTB the flash writes.
+def strip_quotes(val):
+    """Strip quotes exactly as the engine's carrier._strip_quotes does: for the
+    double quote and then the single quote, one leading and one trailing."""
+    for quote in ('"', "'"):
+        if val.startswith(quote):
+            val = val[1:]
+        if val.endswith(quote):
+            val = val[:-1]
+    return val
 
-    At provision time the engine copies the stock BSP, then merges the carrier
-    slot over it and applies the carrier's env file (cli.py, carrier.apply_carrier),
-    and only then stages images.dtb (staging.copy_images). Two carrier shapes
-    leave the merged stock tree unflashed or clobbering the carrier's own:
 
-      * CARRIER_ENV_DTBFILE re-points DTBFILE at another tree, so the merged
-        stock tree is staged but the flash writes the carrier's choice.
-      * The carrier ships a file under the base DTB's name, which the staged
-        merged tree then replaces.
+def carrier_redirect(carrier_env):
+    """Return the carrier's CARRIER_ENV_DTBFILE value, or None when unset.
 
-    Merging into the carrier's tree is not attempted: this hook refuses rather
-    than guess which of the two trees the project means to overlay. An empty
-    slot (only .placeholder) is the normal case and passes, with the same
-    emptiness test apply_carrier uses. The slot is resolved the way stone
-    resolves it for the bundle, so a carrier from an extension's
-    stone_include_paths is the one checked."""
+    Read with the engine's rules (carrier.apply_carrier): only column-0 lines
+    count, the value is quote-stripped as above and the last assignment wins.
+    Reading it any other way would pick a tree the flash never writes."""
+    if not os.path.isfile(carrier_env):
+        return None
+    value = None
+    with open(carrier_env, errors="surrogateescape") as f:
+        for line in f.read().split("\n"):
+            if line.startswith("CARRIER_ENV_DTBFILE="):
+                value = strip_quotes(line[len("CARRIER_ENV_DTBFILE=") :])
+    return value
+
+
+def resolve_carrier_tree(stone, data_dir, bsp_dir, base_name):
+    """Pick the tree to merge into and the name to publish it under.
+
+    At provision time the engine copies the stock BSP, lays the carrier slot
+    over it, applies the carrier's env file (cli.py, carrier.apply_carrier) and
+    only then stages images.dtb under both the plain and kernel_ names, so the
+    merged tree reaches the kernel-dtb partition only if it replaces the tree
+    the flash selects. Two carrier shapes change that selection:
+
+      * Shape A: the slot ships a file named like the base DTB and does not
+        redirect. The flash writes the carrier's copy, so merge into it and
+        publish under the base name.
+      * Shape B: CARRIER_ENV_DTBFILE names another tree R. The flash writes R,
+        so merge into R and publish under R. R is resolved in the slot first
+        and the stock BSP second, the precedence provisioning gives the laid
+        carrier over the BSP.
+
+    Any other combination is refused rather than guessed, since a wrong guess
+    merges into a tree that is never flashed. A slot with only unrelated files,
+    or no carrier at all, merges into the stock base tree as before. The slot
+    is resolved the way stone resolves it for the bundle, and its emptiness
+    test (only .placeholder) is the one apply_carrier uses.
+
+    Returns (source_path, published_name, slot_dir); slot_dir is set when the
+    carrier decided the tree."""
+    stock = (os.path.join(bsp_dir, base_name), base_name, None)
     carrier_rel = (
         stone.get("storage_devices", {})
         .get(TARGET_DEVICE, {})
@@ -202,35 +236,46 @@ def refuse_carrier_dtb_override(stone, data_dir, base_name):
         .get("tegraflash_carrier_bsp")
     )
     if not carrier_rel:
-        return
+        return stock
     carrier_dir = resolve_stone_input(carrier_rel, data_dir)
     if not carrier_dir or not os.path.isdir(carrier_dir):
-        return
+        return stock
     files = [
         e.name
         for e in os.scandir(carrier_dir)
         if e.is_file(follow_symlinks=False) and e.name != ".placeholder"
     ]
     if not files:
-        return
-    if base_name in files:
+        return stock
+
+    who = f"carrier BSP '{carrier_rel}' ({carrier_dir})"
+    redirect = carrier_redirect(os.path.join(carrier_dir, "carrier.env"))
+    if redirect is not None and (not redirect or "/" in redirect or redirect in (".", "..")):
         die(
-            f"carrier BSP '{carrier_rel}' ({carrier_dir}) ships {base_name}, the base DTB this hook "
-            "merges into; the merged stock tree would replace the carrier's copy "
-            "when the engine stages images.dtb. Overlays on a carrier that ships "
-            "its own DTB are not supported"
+            f"{who} sets CARRIER_ENV_DTBFILE to {redirect!r}, which is not a "
+            "plain file name (empty, containing '/', '.' or '..'): the tree "
+            "the flash writes cannot be identified, so nothing is merged"
         )
-    carrier_env = os.path.join(carrier_dir, "carrier.env")
-    if os.path.isfile(carrier_env):
-        with open(carrier_env, errors="surrogateescape") as f:
-            for line in f.read().split("\n"):
-                if line.startswith("CARRIER_ENV_DTBFILE="):
-                    die(
-                        f"carrier BSP '{carrier_rel}' ({carrier_dir}) sets CARRIER_ENV_DTBFILE, which "
-                        f"re-points the flashed DTB away from {base_name}: the merged "
-                        "stock tree would be staged but never flashed. Overlays on a "
-                        "carrier that selects its own DTB are not supported"
-                    )
+    if redirect is not None and redirect != base_name:
+        if base_name in files:
+            die(
+                f"{who} ships {base_name} and also sets CARRIER_ENV_DTBFILE to "
+                f"{redirect}: two different trees are selected, so there is no "
+                "safe tree to merge into. Keep either the file or the redirect"
+            )
+        if redirect in files:
+            return os.path.join(carrier_dir, redirect), redirect, carrier_dir
+        if os.path.isfile(os.path.join(bsp_dir, redirect)):
+            return os.path.join(bsp_dir, redirect), redirect, carrier_dir
+        die(
+            f"{who} sets CARRIER_ENV_DTBFILE to {redirect}, which exists "
+            f"neither in the carrier slot ({carrier_dir}) nor in the stock BSP "
+            f"({bsp_dir}): the tree the flash writes cannot be found, so "
+            "nothing is merged"
+        )
+    if base_name in files:
+        return os.path.join(carrier_dir, base_name), base_name, carrier_dir
+    return stock
 
 
 def main():
@@ -294,14 +339,14 @@ def main():
     with open(stone_path) as f:
         stone = json.load(f)
     bsp_dir, base_name = find_base_dtb(stone, data_dir)
-    refuse_carrier_dtb_override(stone, data_dir, base_name)
+    source, published, slot_dir = resolve_carrier_tree(stone, data_dir, bsp_dir, base_name)
     platform = stone.get("runtime", {}).get("platform", "tegra")
 
     # Merge into a copy staged alongside the .dtbo files, so the BSP's own DTB
     # is never mutated in place. Keep the base filename: the tegraflash engine
     # derives kernel_<basename>.dtb from it, and the flash layout expects the
     # name the BSP shipped.
-    merged = os.path.join(staging, base_name)
+    merged = os.path.join(staging, published)
 
     # images.dtb is resolved by name against stone's input dirs, first match
     # wins, and the merged DTB has to keep the base name because the flash
@@ -320,7 +365,7 @@ def main():
     # shadowed lookup ships an unmerged tree, and the board boots cleanly with
     # no overlay applied and nothing reported. The Raspberry Pi hook refuses by
     # name for the same class of shadowing.
-    shadow = os.path.join(data_dir, base_name)
+    shadow = os.path.join(data_dir, published)
     if os.path.exists(shadow):
         die(
             f"{shadow} would shadow the merged DTB: stone resolves images.dtb "
@@ -329,8 +374,6 @@ def main():
             "Remove it or rename the deployed DTB"
         )
 
-    shutil.copy2(os.path.join(bsp_dir, base_name), merged)
-
     # fdtoverlay applies in argument order, and order is load-bearing: a later
     # overlay may target a node an earlier one created.
     dtbo_paths = [os.path.join(staging, ov["file"]) for ov in overlays]
@@ -338,12 +381,16 @@ def main():
         if not os.path.isfile(path):
             die(f"staged overlay missing: {path}")
 
+    shutil.copy2(source, merged)
+
     cmd = ["fdtoverlay", "-i", merged, "-o", merged, *dtbo_paths]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        # A stock or half-merged copy left in staging would be bundled by name.
+        os.remove(merged)
         die(
             "fdtoverlay failed to merge the overlays into "
-            f"{base_name}: {result.stderr.strip() or result.stdout.strip()}. "
+            f"{published}: {result.stderr.strip() or result.stdout.strip()}. "
             "Refusing to publish an unmerged DTB, which would boot cleanly with "
             "no overlay applied"
         )
@@ -351,7 +398,7 @@ def main():
     fragment = {
         "storage_devices": {
             TARGET_DEVICE: {
-                "images": {"dtb": base_name},
+                "images": {"dtb": published},
                 # Provenance only. staging.verify_overlays checks each of
                 # these files exists and warns if not; it applies
                 # nothing. Recording them makes the flash log show what the
@@ -370,9 +417,10 @@ def main():
         json.dump(manifest, f, indent=2)
 
     names = ", ".join(ov["name"] for ov in overlays)
+    origin = f" from carrier slot {slot_dir}" if slot_dir else ""
     print(
         f"device-tree-overlay-deliver: delivered {len(overlays)} overlay(s) "
-        f"merged into {base_name} for {platform}: {names}"
+        f"merged into {published}{origin} for {platform}: {names}"
     )
 
 
