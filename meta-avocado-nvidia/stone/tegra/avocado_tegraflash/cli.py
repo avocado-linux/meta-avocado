@@ -18,6 +18,7 @@ from . import (
     EngineError,
     bootimg,
     bootpriority,
+    bootstage,
     carrier,
     confirm,
     cpp,
@@ -174,6 +175,9 @@ def _run(args, environ, runner, euid, sleep) -> int:
             carrier.apply_carrier(cfg.data_dir, man.tegraflash_carrier_bsp, str(work))
         staging.copy_images(cfg.data_dir, man, work)
         staging.verify_overlays(man, work)
+        # Before any board contact, and under --prepare-only, so a refusal never costs a flash attempt.
+        boot_summary = bootstage.stage_for_provision(cfg.data_dir, man, work, runner)
+        print(boot_summary)
 
         # Oracle 344-346: the wrapper directory is removed on every way out.
         with tempfile.TemporaryDirectory() as wrapper_dir:
@@ -181,14 +185,14 @@ def _run(args, environ, runner, euid, sleep) -> int:
             # see. Deviation absolute-cpp-wrapper.
             target = cpp.resolve_cpp(path=path_env, sdk_arch=cfg.sdk_arch, cc=cfg.cc)
             cpp.write_wrapper(wrapper_dir, target)
-            return _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep)
+            return _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep, boot_summary)
 
 
 def _boot_tools_dir(cfg, man, work):
     return join_name(cfg.data_dir, man.tegraflash_tools) if man.tegraflash_tools else work
 
 
-def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) -> int:
+def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep, boot_summary) -> int:
     # Oracle 382-431: the pins and the command line extra exist only on the kernel path.
     pins = partuuid.new_pins() if cfg.kernel_image else None
     extra = {}
@@ -218,6 +222,8 @@ def _provision(args, cfg, man, media, work, wrapper_dir, base, runner, sleep) ->
         bootimg.refuse_cmdline_without_kernel(cfg.kernel_cmdline, cfg.kernel_cmdline_extra)
         bootimg.warn_prebuilt_boot_image()
 
+    # Repeated here because the stage output scrolls away during a long repack and the wait that follows.
+    print(boot_summary)
     # Oracle 456-510: the recovery wait. Deviation one-board-only; deviation
     # prepare-only makes no board contact at all.
     board = None
