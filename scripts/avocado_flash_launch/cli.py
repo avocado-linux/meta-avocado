@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,9 +97,29 @@ def _context(resolved: Resolved, args) -> RunContext:
     )
 
 
+def _refuse_mounted(device: str) -> None:
+    """Refuse a target with anything mounted on it, dry runs included.
+
+    The sd profiles unmount the target after the confirmation, which -y skips, so
+    a stale device path naming a mounted disk would be unmounted and erased. The
+    operator unmounts; this never does. A failing lsblk refuses rather than
+    reading as "nothing is mounted".
+    """
+    try:
+        proc = subprocess.run(["lsblk", "-nro", "MOUNTPOINT", device], capture_output=True, text=True)
+    except OSError:
+        proc = None
+    if proc is None or proc.returncode != 0:
+        raise LauncherError(f"refusing {device}: cannot read its mount state (lsblk failed)")
+    if any(line.strip() for line in proc.stdout.splitlines()):
+        raise LauncherError(f"refusing {device}: it has mounted partitions; unmount them and run again")
+
+
 def _provision(resolved: Resolved, opts: LaunchOpts, args) -> int:
     # The bmaptool refusal precedes every other piece of work, manifest reading included.
     build_run_env(opts, {}, map_profile(opts.medium, opts.boot_media))
+    if opts.medium == "sd":
+        _refuse_mounted(opts.device)
     return run_stone(opts, _context(resolved, args))
 
 

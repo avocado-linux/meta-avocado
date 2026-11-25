@@ -48,6 +48,13 @@ class Tree:
         self.workdir = tmp / "work"
         for name in STUBS:
             self._stub(name)
+        self.set_lsblk()
+
+    def set_lsblk(self, mountpoints="", rc=0):
+        """lsblk answers the sd mount check; it is not a write tool, so it does not log."""
+        path = self.bin / "lsblk"
+        path.write_text(f"#!/bin/sh\nprintf '%s' '{mountpoints}'\nexit {rc}\n")
+        path.chmod(0o755)
 
     def _stub(self, name):
         path = self.bin / name
@@ -117,6 +124,24 @@ def test_sd_starts_only_stone_with_absolute_input_and_var_size(tree):
     assert env["AVOCADO_PROVISION_FORCE"] == "0"
     assert "AVOCADO_PROVISION_DRY_RUN" not in env
     assert "sudo" not in tree.started()
+
+
+@pytest.mark.parametrize("dry", [[], ["--dry-run"]], ids=["real", "dry-run"])
+def test_sd_refuses_a_mounted_target_before_stone(tree, dry):
+    # A stale path naming a mounted disk must stop here, not be unmounted by the profile.
+    tree.set_lsblk("\n/run/media/user/BACKUP\n")
+    rc, out = tree.run("--workdir", str(tree.workdir), "-y", *dry, "sd", "/dev/fakedisk")
+    assert rc == 1, out
+    assert "refusing /dev/fakedisk: it has mounted partitions" in out
+    assert tree.started() == []
+
+
+def test_sd_refuses_when_the_mount_state_cannot_be_read(tree):
+    tree.set_lsblk(rc=32)
+    rc, out = tree.run("--workdir", str(tree.workdir), "-y", "sd", "/dev/fakedisk")
+    assert rc == 1, out
+    assert "cannot read its mount state" in out
+    assert tree.started() == []
 
 
 def test_sd_stone_is_started_by_the_python_launcher_not_a_shell_chain(tree):
