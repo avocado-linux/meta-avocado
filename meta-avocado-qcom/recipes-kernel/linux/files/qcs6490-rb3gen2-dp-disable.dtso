@@ -44,3 +44,18 @@
 &mdss_dp {
 	status = "disabled";
 };
+
+/*
+ * The sound card has a DisplayPort0 Playback link whose codec is mdss_dp.
+ * With mdss_dp disabled that DAI never registers and snd-sc8280xp defers the
+ * WHOLE card ("DisplayPort0 Playback: codec dai not found"): no speakers, no
+ * mics, no HDMI audio. The qcom ASoC parser walks only available links, so
+ * disable this one with its controller. Measured on the RB3 Gen 2 (2026-11-25).
+ * A sound sub-node, not a display node: the UEFI DT-fixup warning above is
+ * about display nodes.
+ */
+&sound {
+	dp-dai-link {
+		status = "disabled";
+	};
+};
