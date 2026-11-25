@@ -432,6 +432,14 @@ class FeedCheckTest(unittest.TestCase):
             self.assertEqual(code, 1, key)
             self.assertEqual(self.failed(out), ["coverage-record"], key)
 
+    def test_unresolved_identifiers_fail(self):
+        tree = Tree(self)
+        write_json(tree.coverage, {"roots": 2, "no_document": [], "unresolved_ids": 7,
+                                   "alt_included": [], "alt_not_covered": []})
+        code, out = tree.run()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.failed(out), ["coverage-record"])
+
     def test_an_unhashable_issue_status_fails_without_a_traceback(self):
         tree = Tree(self)
         write_json(tree.feed_manifest, {"package": [

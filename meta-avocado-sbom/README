@@ -213,9 +213,9 @@ as they are: OE-core does not split or strip a signed module either, so its
 sources would be missing from the list and a CVE in it would read as not
 compiled.
 
-Image scope and feed scope (for the default kernel, see below) get this filtering.
-The world SBOM is built from recipe documents, which describe no build and so
-carry no compiled-source list.
+Image and feed scope get this filtering (see "Feed scope"). The world SBOM is
+built from recipe documents, which describe no build and so carry no
+compiled-source list.
 
 Feed scope
 ----------
@@ -272,13 +272,31 @@ directory or a bootfiles RPM lists one.
 
 Alternate kernels are read from AVOCADO_MULTIKERNEL_MC_RECIPES, a list of
 <multiconfig>:<recipe> entries. Each alternate multiconfig's documents are
-loaded from its own TMPDIR, tmp-<multiconfig>. A kernel that passes is listed in
-alt_included as "<multiconfig>:<recipe>". A kernel is listed in alt_not_covered
-with a reason instead when a merge would point a vulnerability statement at the
-wrong kernel (reference collision), when it shares an identity alias with the
-default kernel that a statement or relationship refers to (alias collision),
-when the default kernel's compiled-source documents are in the feed document (see
-below), or when its document is missing. A malformed list entry is listed there too.
+loaded from its own TMPDIR, tmp-<multiconfig>, with its builds document and
+package documents for a kernel that lists its compiled sources (see below). Both
+kernels write their documents under the same names, so both carry the same
+identity aliases, the IDs a package document names its build and its recipe by.
+Left alone, the alternate kernel's packages would link to the default kernel's
+build and recipe, and the scanner would report the alternate kernel at the
+default kernel's version. So the alternate multiconfig's documents get aliases of their own before
+they are read (avocado_sbom/spdxalias.py qualifies them with the multiconfig),
+and every other link is left as it is. A kernel that passes is listed in
+alt_included as "<multiconfig>:<recipe>". A kernel is listed in
+alt_not_covered with a reason instead when a merge would point a vulnerability
+statement at the wrong kernel (reference collision), when it shares an identity
+alias with the default kernel that a statement or relationship refers to (alias
+collision), when its documents refer to something only its own multiconfig
+built, which the default tree cannot resolve (unresolved reference), when it
+shares a version with another build in the document but not that build's VEX
+statements (VEX overlap; the scanner matches a statement by version before it
+looks at the product), or when its document is missing. A
+malformed list entry is listed there too. A VEX overlap is decided in the
+document because sbom-cve-check applies a statement to every build at the
+version of the package it is about: an RT kernel's backport left in beside a
+stock kernel of the same version would mark the stock kernel patched, and
+rescans run the same scanner on the same document. Kernels that carry the same
+statements stay, as OE-core's linux-yocto and linux-yocto-rt do (both include
+cve-exclusion.inc).
 Each multiconfig is judged on its own, since one recipe can be built in
 several: a reference collision traced to one alternate multiconfig drops that
 build only, and one seen only on the default kernel's side, which cannot say
@@ -295,21 +313,20 @@ also built is the same recipe at a second version: its CVEs go into an
 data is missing or holds no package of a recipe it declares, rather than
 leave that kernel's RPMs out of both documents. A
 kernel in alt_not_covered is not in the scanned document, so its version has no
-record and its packages carry no "recipe_version". Links from an alternate kernel's document to a recipe
-that only its multiconfig built do not resolve, and do_feed_sbom then fails on the
-unresolved identifier instead of moving that kernel to alt_not_covered.
+record and its packages carry no "recipe_version". An identifier left
+unresolved that no alternate kernel's own documents refer to is a hole in the
+default tree and still fails do_feed_sbom.
 
-Feed scope does filter the default kernel's CVEs on configuration, as image scope
-does. A recipe whose SPDX is built with compiled sources (the
-SPDX_INCLUDE_COMPILED_SOURCES settings above) has its builds document and its
-package documents added to the feed document, because the scanner reaches the
-compiled-source list through the recipe's installable packages. Other recipes'
-builds documents are left out: they refer to the builds of recipes that have no
+Feed scope filters kernel CVEs on configuration, as image scope does. A recipe
+whose SPDX is built with compiled sources (the SPDX_INCLUDE_COMPILED_SOURCES
+settings above) has its builds document and its package documents added to the
+feed document, because the scanner reaches the compiled-source list through the
+recipe's installable packages. An alternate kernel of such a recipe brings its
+own, from its own multiconfig, under aliases of its own (see above), so each
+kernel is filtered on its own list at its own version. Other recipes' builds
+documents are left out: they refer to the builds of recipes that have no
 document, and the scan would fail on those identifiers. The document grows by
-the size of that list, about 70 MB for a kernel. An alternate kernel of such a
-recipe is listed in alt_not_covered instead of joining the same document: with
-both in it the scanner reported the alternate kernel at the default kernel's
-version, probably because the two kernels' documents share identity aliases.
+the size of that list, about 70 MB for a kernel.
 
 Variables
 ---------
