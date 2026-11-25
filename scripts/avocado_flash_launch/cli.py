@@ -47,7 +47,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--stale-ok", action="store_true")
     ap.add_argument("-y", "--assume-yes", action="store_true")
     ap.add_argument("--workdir", type=Path)
-    # Accepted so a shared command line parses; fuse-srk and ums read them in avocado-flash.
+    # Accepted so a shared command line parses; fuse-srk reads them in avocado-flash, ums here.
     ap.add_argument("-p", "--port", default="/dev/ttyACM0")
     ap.add_argument("-k", "--keys", type=Path)
     ap.add_argument("--key-type")
@@ -121,7 +121,7 @@ def route_ums(resolved: Resolved, args, host=None) -> int:
     # Refusals that need no board come before the export is started.
     build_run_env(opts, {}, map_profile("ums"))
     ctx = _context(resolved, args)
-    with ums_session(host, args.port, args.usb_controller, args.ums_dev) as disk:
+    with ums_session(host, args.port, args.usb_controller, args.ums_dev, interrupt=args.interrupt) as disk:
         opts.exported_device = disk
         return run_stone(opts, ctx)
 

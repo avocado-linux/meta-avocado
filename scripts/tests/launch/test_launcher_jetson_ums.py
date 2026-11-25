@@ -221,6 +221,9 @@ class FakeHost:
     def interrupt_to_uboot(self, ub):
         self.calls.append(("interrupt",))
 
+    def wait_for_uboot(self, ub):
+        self.calls.append(("wait",))
+
     def block_devices(self):
         return {"sda", "sdb"} if self.exported else {"sda"}
 
@@ -254,7 +257,14 @@ def test_ums_sets_the_new_disk_as_device_and_releases(ums_tree):
     env = ums_tree.env("stone")
     assert env["AVOCADO_PROVISION_DEVICE"] == "/dev/sdb"
     assert env["AVOCADO_PROVISION_PROFILE"] == "ums"
-    assert host.calls == [("UBoot", "/dev/ttyUSB9"), ("interrupt",), ("expose", 1, "mmc 0"), ("release",)]
+    assert host.calls == [("UBoot", "/dev/ttyUSB9"), ("wait",), ("expose", 1, "mmc 0"), ("release",)]
+
+
+def test_ums_interrupt_flag_reaches_the_session(ums_tree):
+    rc, host = ums_run(ums_tree, "--interrupt")
+    assert rc == 0
+    assert host.calls[:2] == [("UBoot", "/dev/ttyACM0"), ("interrupt",)]
+    assert ("wait",) not in host.calls
 
 
 def test_ums_dry_run_still_exports_and_releases(ums_tree):

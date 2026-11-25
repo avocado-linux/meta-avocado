@@ -747,12 +747,19 @@ def _launcher_cli():
     return cli
 
 
+def wait_for_uboot(ub: "UBoot") -> None:
+    """Without --interrupt the board must already sit at a U-Boot prompt; never reboot it."""
+    ub.sync()
+    info("at a U-Boot prompt")
+
+
 def dispatch_launcher(argv: list[str], deploy: Path, machine: str) -> int:
     """Run sd/emmc/ums through the launcher; resolution above stays in this script."""
     cli = _launcher_cli()
     host = types.SimpleNamespace(
         UBoot=UBoot,
         interrupt_to_uboot=interrupt_to_uboot,
+        wait_for_uboot=wait_for_uboot,
         ums_expose=ums_expose,
         ums_release=ums_release,
         block_devices=block_devices,
