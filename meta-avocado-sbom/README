@@ -197,13 +197,102 @@ as they are: OE-core does not split or strip a signed module either, so its
 sources would be missing from the list and a CVE in it would read as not
 compiled.
 
-Only image scope gets this filtering. The world SBOM is built from recipe
-documents, which describe no build and so carry no compiled-source list.
+Image scope and feed scope (for the default kernel, see below) get this filtering.
+The world SBOM is built from recipe documents, which describe no build and so
+carry no compiled-source list.
+
+Feed scope
+----------
+
+Feed scope scans the whole package feed as one unit, the packages a user could
+install, without needing every world recipe to resolve. Stack the fragment with
+the SBOM and CVE fragments, build the feed, then run the report:
+
+  kas build kas/machine/<machine>.yml:kas/feature/sbom.yml:kas/feature/cve-check.yml:kas/feature/cve-check-feed.yml \
+      --target avocado-cve-report
+
+The fragment is kas/feature/cve-check-feed.yml. It sets AVOCADO_CVE_SCOPE =
+"feed" and nothing else. Run bitbake avocado-cve-report as its own invocation
+after the feed build has finished, not in the same command as the feed target:
+do_feed_sbom has no dependency on packaging, so run together it could assemble
+the document while packages are still being written. It runs do_feed_sbom and
+then the scan. Three files come out in AVOCADO_FEED_SBOM_DIR, which defaults to
+the directory of the CVE report and the RPM manifest
+(${DEPLOY_DIR}/avocado-cve, that is tmp/deploy/avocado-cve), named by
+MACHINE_SHORT_NAME, the MACHINE without its avocado- prefix (raspberrypi5 for
+avocado-raspberrypi5):
+
+  avocado-feed-<MACHINE_SHORT_NAME>.spdx.json
+      the feed SPDX document, built from every recipe that shipped a package
+  avocado-feed-<short>.sbom-cve-check.yocto.json
+      the scanner manifest that avocado-cve-report reads at this scope
+  avocado-feed-<short>.coverage.json
+      the coverage record, with the keys roots, no_document, unresolved_ids,
+      alt_included and alt_not_covered. roots counts the recipe documents in the
+      feed document, alternate kernels included, so roots plus no_document is
+      not the number of recipes that shipped.
+
+A recipe that shipped a package but has no recipe-level SPDX document is named
+in no_document and listed as unscanned in the report. On a Raspberry Pi 5 feed
+344 of 367 recipes had a document, so 23 were unscanned.
+AVOCADO_FEED_SBOM_MAX_MISSING is the ceiling of recipes without a document
+before do_feed_sbom fails; it defaults to 33. The list of what shipped is the
+build's package data, so it must come from the same build tree as the documents:
+a package data directory shortened by another bitbake invocation shortens the
+scan without a trace.
+
+The task fails closed. An unresolved SPDX identifier, a missing build or more
+missing recipes than the ceiling fails do_feed_sbom and leaves no document and
+no manifest, so a partial scan is never mistaken for a complete one. A scan
+whose manifest is missing or is not JSON removes the document and record too.
+
+The files stay out of the image deploy directory on purpose. The bootfiles
+package (avocado-img-bootfiles) collects every file in that directory whose name
+its skip patterns do not match, so a feed document or manifest left there would
+be built into an RPM of the feed. The document carries upstream VEX statements,
+so it is scan input only and is never published to customers; python3 -m
+avocado_sbom.feedcheck fails if an avocado-feed- file sits in the image deploy
+directory or a bootfiles RPM lists one.
+
+Alternate kernels are read from AVOCADO_MULTIKERNEL_MC_RECIPES, a list of
+<multiconfig>:<recipe> entries. Each alternate multiconfig's documents are
+loaded from its own TMPDIR, tmp-<multiconfig>. A kernel that passes is listed in
+alt_included as "<multiconfig>:<recipe>". A kernel is listed in alt_not_covered
+with a reason instead when a merge would point a vulnerability statement at the
+wrong kernel (reference collision), when it shares an identity alias with the
+default kernel that a statement or relationship refers to (alias collision),
+when the default kernel's compiled-source documents are in the feed document (see
+below), or when its document is missing. A malformed list entry is listed there too.
+The alternate kernels' packages stay out of the RPM manifest and the report's
+package map. A kernel in alt_included is in the scanned document and the scanner
+manifest, but the CVE report lists only versions the build's own package data
+holds, so an alternate kernel at another version is counted as scanned and its
+CVEs are not in the report. Links from an alternate kernel's document to a recipe
+that only its multiconfig built do not resolve, and do_feed_sbom then fails on the
+unresolved identifier instead of moving that kernel to alt_not_covered.
+
+Feed scope does filter the default kernel's CVEs on configuration, as image scope
+does. A recipe whose SPDX is built with compiled sources (the
+SPDX_INCLUDE_COMPILED_SOURCES settings above) has its builds document and its
+package documents added to the feed document, because the scanner reaches the
+compiled-source list through the recipe's installable packages. Other recipes'
+builds documents are left out: they refer to the builds of recipes that have no
+document, and the scan would fail on those identifiers. The document grows by
+the size of that list, about 70 MB for a kernel. An alternate kernel of such a
+recipe is listed in alt_not_covered instead of joining the same document: with
+both in it the scanner reported the alternate kernel at the default kernel's
+version, probably because the two kernels' documents share identity aliases.
 
 Variables
 ---------
 
-  AVOCADO_CVE_SCOPE            "world" (default) or "image"; see Usage
+  AVOCADO_CVE_SCOPE            "world" (default), "image" or "feed"; see Usage
+                               and Feed scope
+  AVOCADO_FEED_SBOM_MAX_MISSING  ceiling of recipes without an SPDX document
+                               before do_feed_sbom fails, default 33
+  AVOCADO_FEED_SBOM_DIR        where the feed document, manifest and coverage
+                               record go, default the CVE report directory; never
+                               the image deploy directory
   AVOCADO_CVE_IMAGE            image scanned at image scope, avocado-image-rootfs
   AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
                                of them; defaults to the world SBOM's export in
