@@ -1,0 +1,118 @@
+name: Nightly-Feed-Scan-Parity
+
+# Report-only, never a required check. A CVE scan build stacks
+# kas/feature/cve-check.yml on a feed configuration and should take almost
+# everything from the feed build's sstate. A setting in the scan's stack that
+# changes a task signature the feed's does not makes that work rebuild from
+# scratch (a weak SPDX_INCLUDE_VEX default once did it to every recipe's SPDX
+# tasks, with their fetch, unpack and patch). Each job parses both stacks for
+# one machine on one release line and compares the signatures of the sstate
+# tasks the scan reuses, without building anything.
+#
+# Two full parses are too slow for pull requests, so this runs nightly on the
+# head of each line, and on demand. GitHub schedules a workflow only from the
+# default branch and offers a dispatch only once the workflow is there, so this
+# file lives there alone. Whichever ref starts it, each job checks out its
+# line's branch and runs that branch's scripts/feed-scan-parity.sh, so the
+# chains and exclusions stay with the layer they describe. A line whose branch
+# does not carry the script is skipped, not failed.
+#
+# "Compare" exits 1 only for a real signature difference on that line; an exit
+# of 2 means the dumps could not be read, and its summary says so. A failing
+# "Parse" step is a parse or fetch error, not drift, and says so too. "Explain"
+# only adds bitbake-diffsigs output and never fails the job.
+#
+# More machines: add them to `machine` below. Each is one more job per line,
+# about as long as the others; pick one that covers another part of the graph
+# (another kernel recipe, another multiconfig).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    # Off the hour: GitHub delays or drops scheduled runs at :00 under load.
+    - cron: "23 9 * * *"
+  workflow_dispatch:
+    inputs:
+      line:
+        description: Release line to check
+        type: choice
+        options: [both, scarthgap, wrynose]
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  feed-scan-parity:
+    name: ${{ matrix.line }} ${{ matrix.machine }}
+    if: github.repository == 'avocado-linux/meta-avocado'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: avocadolinux/ci-build:ubuntu-24.04
+    # One run per line and machine at a time. Later ones queue rather than
+    # cancel a running or a waiting one, so a dispatch cannot drop a nightly.
+    concurrency:
+      group: feed-scan-parity-${{ matrix.line }}-${{ matrix.machine }}
+      cancel-in-progress: false
+      queue: max
+    strategy:
+      fail-fast: false
+      matrix:
+        # A schedule has no inputs, so it takes both.
+        line: ${{ fromJSON((inputs.line == 'scarthgap' && '["scarthgap"]') || (inputs.line == 'wrynose' && '["wrynose"]') || '["scarthgap", "wrynose"]') }}
+        # Multikernel (a second kernel in its own multiconfig), so the
+        # multiconfig half of the graph is compared too.
+        machine: [raspberrypi5]
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout ${{ matrix.line }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ (github.event_name == 'pull_request' && matrix.line == 'scarthgap') && github.event.pull_request.head.sha || matrix.line }}
+          persist-credentials: false
+      - name: Check that ${{ matrix.line }} carries the check
+        id: carries
+        shell: bash
+        run: |
+          if [ -f scripts/feed-scan-parity.sh ] && [ -f scripts/feed-scan-parity.py ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            { echo "## Feed/scan parity: not checked on ${{ matrix.line }}"
+              echo "This line's branch has no scripts/feed-scan-parity.sh."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # kas copies GITCONFIG_FILE into its own HOME; the checkout belongs to
+      # another user, so without it git refuses the layer.
+      - name: Parse the feed and scan stacks (${{ matrix.line }}, ${{ matrix.machine }})
+        if: steps.carries.outputs.run == 'true'
+        shell: bash
+        run: |
+          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/kas-gitconfig"
+          export GITCONFIG_FILE="$RUNNER_TEMP/kas-gitconfig"
+          if ! bash scripts/feed-scan-parity.sh dump ${{ matrix.machine }}; then
+            echo "## Feed/scan parity: could not parse, nothing was compared" >> "$GITHUB_STEP_SUMMARY"
+            echo "A parse or fetch error, not a signature difference: see the step log." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Compare task signatures (${{ matrix.line }}, ${{ matrix.machine }})
+        id: compare
+        if: steps.carries.outputs.run == 'true'
+        shell: bash
+        run: |
+          rc=0
+          bash scripts/feed-scan-parity.sh compare || rc=$?
+          if [ "${rc}" -ge 2 ]; then
+            { echo "## Feed/scan parity: could not compare the dumps"
+              echo "An error reading the signatures, not a signature difference: see the step log."
+            } >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          exit "${rc}"
+      - name: Explain the differences (${{ matrix.line }}, ${{ matrix.machine }})
+        if: ${{ !cancelled() && steps.compare.outcome != 'skipped' }}
+        continue-on-error: true
+        shell: bash
+        run: bash scripts/feed-scan-parity.sh explain
