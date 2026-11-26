@@ -104,6 +104,23 @@ class SpdxAliasTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(spdxalias.remap(value, mapping), value)
 
+    def test_alias_recipe_is_the_pn_after_the_hash(self):
+        prefix = spdxalias.element_prefix(spdxalias.DOC_ALIAS_PREFIX + "jsoncpp-native/UNIHASH/static")
+        self.assertEqual(spdxalias.alias_recipe(prefix + "jsoncpp-native/UNIHASH/recipe-jsoncpp-native"),
+                         "jsoncpp-native")
+        # A qualified alias keeps the PN in place.
+        mapped = spdxalias.multiconfig_map([spdxalias.DOC_ALIAS_PREFIX + "x/UNIHASH/static"], "rt")
+        value = spdxalias.remap(spdxalias.element_prefix(spdxalias.DOC_ALIAS_PREFIX + "x/UNIHASH/static")
+                                + "linux-yocto-rt/UNIHASH/recipe-linux-yocto-rt", mapped)
+        self.assertEqual(spdxalias.alias_recipe(value), "linux-yocto-rt")
+
+    def test_alias_recipe_of_anything_else_is_none(self):
+        for value in (None, 7, "", "http://spdx.org/spdxdocs/x/UNIHASH/recipe-x",
+                      spdxalias.ALIAS_PREFIX, spdxalias.ALIAS_PREFIX + "abc",
+                      spdxalias.ALIAS_PREFIX + "abc/x", spdxalias.ALIAS_PREFIX + "abc//x"):
+            with self.subTest(value=value):
+                self.assertIsNone(spdxalias.alias_recipe(value))
+
 
 if __name__ == "__main__":
     unittest.main()

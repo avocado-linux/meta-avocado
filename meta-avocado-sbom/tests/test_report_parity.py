@@ -102,6 +102,73 @@ class Tree:
     def alt_trees(self):
         return [(self.alt, {"linux-raspberrypi", "kernel-devsrc"})]
 
+class SharedNameReleasesTests(unittest.TestCase):
+    """Jetson: nvidia-kernel-oot built against four kernels, at one recipe
+    version. With a PR server each multiconfig's build gets its own release,
+    so nvidia-kernel-oot-base is four RPMs of one name, while the modules
+    carry the kernel version in their names."""
+
+    MCS = (("jetson-l4t", "r0.7", "6.8.12-l4t"), ("jetson-rt", "r0.8", "6.18.52-rt"),
+           ("jetson-l4t-rt", "r0.9", "6.8.12-l4t-rt"))
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.trees = []
+        for mc, release, kver in (("", "r0.6", "6.18.52"),) + self.MCS:
+            base = os.path.join(self.root, "tmp-" + mc if mc else "tmp", "pkgdata", "jetson")
+            reverse = os.path.join(base, "runtime-reverse")
+            os.makedirs(reverse)
+            for name in ("nvidia-kernel-oot-base", "nv-kernel-module-x-" + kver):
+                with open(os.path.join(reverse, name), "w") as f:
+                    f.write("PN: nvidia-kernel-oot\nPV: 39.2.1\nPKGV: 39.2.1\nPKGR: %s\n"
+                            % release)
+            self.trees.append(base)
+        self.scan = os.path.join(self.root, "feed" + MANIFEST_SUFFIX)
+        with open(self.scan, "w") as f:
+            # One scanner entry per build, the same CVEs in each: they share
+            # product and statements, or the feed document left them out.
+            json.dump({"package": [entry("nvidia-kernel-oot", "39.2.1", issue("CVE-2026-7"))
+                                   for _ in range(4)]}, f)
+
+    def test_one_record_and_each_module_bound_to_it(self):
+        doc, _stats = build_report([self.scan], [self.trees[0]], machine="m", status="All",
+                                   alt_trees=[(t, {"nvidia-kernel-oot"}) for t in self.trees[1:]])
+        record = doc["recipes"]["nvidia-kernel-oot"]
+        self.assertEqual([c["id"] for c in record["cves"]], ["CVE-2026-7"])
+        self.assertNotIn("alt_versions", record)
+        packages = doc["packages"]
+        self.assertEqual(packages["nvidia-kernel-oot-base"]["version"], "39.2.1-r0.6")
+        for _mc, release, kver in self.MCS:
+            module = packages["nv-kernel-module-x-" + kver]
+            self.assertEqual((module["version"], module["recipe_version"]),
+                             ("39.2.1-" + release, "39.2.1"))
+
+        def rpm(name, release, arch="jetson"):
+            return {"name": name, "version": "39.2.1", "release": release, "arch": arch}
+        manifest = {"packages": [rpm("nvidia-kernel-oot-base", r)
+                                 for r in ("r0.6", "r0.7", "r0.8", "r0.9")]
+                    + [rpm("nv-kernel-module-x-" + k, r) for _mc, r, k in self.MCS]}
+        verdicts = binding_rules.rpm_verdicts(doc, manifest)
+        checked = ("checked", {"CVE-2026-7": "affected"})
+        # The default's release binds; the alternates' releases of the shared
+        # name meet the default's version in the package map, and bind nothing.
+        self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", "r0.6", "jetson")],
+                         checked)
+        for release in ("r0.7", "r0.8", "r0.9"):
+            self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", release, "jetson")],
+                             ("not_checked", "version-mismatch"))
+        for _mc, release, kver in self.MCS:
+            self.assertEqual(verdicts[("nv-kernel-module-x-" + kver, "39.2.1", release, "jetson")],
+                             checked)
+        # Two rows of the default's release, one per arch, both match: ambiguous.
+        manifest["packages"].append(rpm("nvidia-kernel-oot-base", "r0.6", "armv8a"))
+        verdicts = binding_rules.rpm_verdicts(doc, manifest)
+        for arch in ("jetson", "armv8a"):
+            self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", "r0.6", arch)],
+                             ("not_checked", "ambiguous-version"))
+
+
 class AltVersionsTests(unittest.TestCase):
 
     def setUp(self):

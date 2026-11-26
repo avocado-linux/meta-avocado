@@ -231,7 +231,8 @@ STOCK = build(["linux_kernel"], ["6.18.52", "6.18.52+git"],
 class VexOverlapTest(unittest.TestCase):
     def test_shared_product_and_version_with_other_statements(self):
         rt = build(["linux_kernel"], ["6.18.52", "6.18.52+git"])
-        self.assertEqual(feedsbom.vex_overlap(rt, STOCK), ("linux_kernel", "6.18.52"))
+        self.assertEqual(feedsbom.vex_overlap(rt, STOCK),
+                         ("linux_kernel", "6.18.52", "CVE-1"))
 
     def test_the_same_statements_cannot_change_a_result(self):
         rt = build(["linux_kernel"], ["6.18.52"], STOCK["statements"])
@@ -242,18 +243,20 @@ class VexOverlapTest(unittest.TestCase):
         self.assertIsNone(feedsbom.vex_overlap(other, STOCK))
 
     def test_another_product_at_the_same_version_overlaps(self):
-        # The scanner matches a statement's package by version before any CPE.
+        # A record can name both products, and the scanner aliases products,
+        # so a shared version alone is enough.
         for other in (build(["busybox"], ["6.18.52"]), build([], ["6.18.52"])):
             with self.subTest(other=other):
-                self.assertEqual(feedsbom.vex_overlap(other, STOCK), (None, "6.18.52"))
+                self.assertEqual(feedsbom.vex_overlap(other, STOCK), (None, "6.18.52", "CVE-1"))
 
-    def test_another_product_names_the_version_alone(self):
-        kept, not_covered = feedsbom.drop_vex_overlap(
-            [("mc", "oot", ["h"])], {"mc:oot": build(["oot"], ["6.18.52"])},
-            {"linux-yocto": STOCK})
-        self.assertEqual(kept, [])
-        self.assertEqual(not_covered[0]["reason"],
-                         "VEX overlap: 6.18.52 is also linux-yocto, with other statements")
+    def test_statements_are_compared_one_cve_at_a_time(self):
+        # The same statement about CVE-1, and one about CVE-2 the stock kernel
+        # lacks: CVE-2 is the one named.
+        rt = build(["linux_kernel"], ["6.18.52"],
+                   list(STOCK["statements"]) + [("CVE-2", "VexFixed", "backported-patch",
+                                                 "", "")])
+        self.assertEqual(feedsbom.vex_overlap(rt, STOCK),
+                         ("linux_kernel", "6.18.52", "CVE-2"))
 
     def test_any_statement_field_counts(self):
         for statement in (("CVE-1", "VexNotAffected", "fixed-version", "", ""),
@@ -265,6 +268,38 @@ class VexOverlapTest(unittest.TestCase):
                 self.assertIsNotNone(feedsbom.vex_overlap(rt, STOCK))
 
 
+class VexTwinTest(unittest.TestCase):
+    def test_a_default_build_with_the_same_products_versions_and_statements(self):
+        twin = build(["linux_kernel"], ["6.18.52", "6.18.52+git"], STOCK["statements"])
+        self.assertTrue(feedsbom.vex_twin(twin, {"x": build(["x"], ["1"]), "y": twin}))
+
+    def test_another_cpe_or_package_version_is_no_twin(self):
+        # One product and version set, but the scanner matches vendor and
+        # part, and the package version before any CPE.
+        def full(cpe, package_version):
+            return dict(build(["edk2"], ["39.2.1+git", "202505"]), cpes={cpe},
+                        package_version=package_version)
+        default = full("cpe:2.3:a:tianocore:edk2:202505:*:*:*:*:*:*:*", "39.2.1+git")
+        self.assertTrue(feedsbom.vex_twin(dict(default), {"edk2": default}))
+        for other in (full("cpe:2.3:a:*:edk2:202505:*:*:*:*:*:*:*", "39.2.1+git"),
+                      full("cpe:2.3:o:tianocore:edk2:202505:*:*:*:*:*:*:*", "39.2.1+git"),
+                      full("cpe:2.3:a:tianocore:edk2:202505:*:*:*:*:*:*:*", "202505")):
+            with self.subTest(other=other):
+                self.assertFalse(feedsbom.vex_twin(other, {"edk2": default}))
+
+    def test_any_difference_is_no_twin(self):
+        base = (["jetson_linux"], ["39.2.1"], [("CVE-1", "VexFixed", "", "", "")])
+        for changed in ((["edk2"], base[1], base[2]), (base[0], ["39.2.0"], base[2]),
+                        (base[0], base[1], [])):
+            with self.subTest(changed=changed):
+                self.assertFalse(feedsbom.vex_twin(build(*changed), {"oot": build(*base)}))
+
+
+EDK2 = build(["edk2"], ["39.2.1+git", "202505"], [("CVE-1", "VexFixed", "fixed-version", "", "")])
+OOT = build(["jetson_linux"], ["39.2.1", "39.2.1+git"])
+JETSON_ALTS = [(mc, "nvidia-kernel-oot", [mc]) for mc in ("jetson-l4t", "jetson-rt", "jetson-l4t-rt")]
+
+
 class DropVexOverlapTest(unittest.TestCase):
     def test_an_alternate_with_other_statements_is_not_covered(self):
         included = [("jetson-rt", "linux-yocto-rt", ["h"]), ("jetson-l4t", "linux-l4t", ["h2"])]
@@ -274,7 +309,17 @@ class DropVexOverlapTest(unittest.TestCase):
         self.assertEqual(kept, [("jetson-l4t", "linux-l4t", ["h2"])])
         self.assertEqual(not_covered, [{
             "mc": "jetson-rt", "recipe": "linux-yocto-rt",
-            "reason": "VEX overlap: linux_kernel 6.18.52 is also linux-yocto, with other statements"}])
+            "reason": "VEX overlap: linux_kernel 6.18.52 is also linux-yocto, with other "
+                      "statements on CVE-1"}])
+
+    def test_another_product_names_the_version_and_the_cve(self):
+        kept, not_covered = feedsbom.drop_vex_overlap(
+            [("mc", "oot", ["h"])], {"mc:oot": build(["oot"], ["6.18.52"])},
+            {"linux-yocto": STOCK})
+        self.assertEqual(kept, [])
+        self.assertEqual(not_covered[0]["reason"],
+                         "VEX overlap: 6.18.52 is also linux-yocto, with other statements "
+                         "on CVE-1")
 
     def test_of_two_overlapping_alternates_the_first_stays(self):
         included = [("a", "k1", ["h1"]), ("b", "k2", ["h2"])]
@@ -283,7 +328,8 @@ class DropVexOverlapTest(unittest.TestCase):
         kept, not_covered = feedsbom.drop_vex_overlap(included, alt, {"linux-yocto": STOCK})
         self.assertEqual(kept, [("a", "k1", ["h1"])])
         self.assertEqual(not_covered[0]["reason"],
-                         "VEX overlap: linux_kernel 6.8.12 is also a:k1, with other statements")
+                         "VEX overlap: linux_kernel 6.8.12 is also a:k1, with other statements "
+                         "on CVE-9")
 
     def test_a_dropped_alternate_is_not_compared_with(self):
         # k1 overlaps the default and goes; k2 overlaps only k1, so it stays.
@@ -298,6 +344,37 @@ class DropVexOverlapTest(unittest.TestCase):
         included = [("a", "k1", ["h1"])]
         self.assertEqual(feedsbom.drop_vex_overlap(included, {}, {"linux-yocto": STOCK}),
                          (included, []))
+
+    def test_every_twin_of_a_default_module_recipe_stays_beside_firmware_of_its_version(self):
+        # Jetson: the default multiconfig's nvidia-kernel-oot and
+        # edk2-firmware-tegra share version 39.2.1, and three alternate
+        # multiconfigs build nvidia-kernel-oot again with the same statements.
+        alt = {feedsbom.alt_label(mc, r): build(["jetson_linux"], ["39.2.1", "39.2.1+git"])
+               for mc, r, _h in JETSON_ALTS}
+        defaults = {"edk2-firmware-tegra": EDK2, "nvidia-kernel-oot": OOT}
+        self.assertEqual(feedsbom.drop_vex_overlap(JETSON_ALTS, alt, defaults), (JETSON_ALTS, []))
+        # Without its twin in the default multiconfig, the version it shares
+        # with the firmware is an overlap.
+        kept, not_covered = feedsbom.drop_vex_overlap(
+            JETSON_ALTS[:1], alt, {"edk2-firmware-tegra": EDK2})
+        self.assertEqual(kept, [])
+        self.assertEqual(not_covered[0]["reason"],
+                         "VEX overlap: 39.2.1+git is also edk2-firmware-tegra, with other "
+                         "statements on CVE-1")
+
+    def test_an_alternate_with_a_statement_its_default_twin_lacks_is_not_covered(self):
+        alt = {feedsbom.alt_label(mc, r): build(["jetson_linux"], ["39.2.1", "39.2.1+git"])
+               for mc, r, _h in JETSON_ALTS}
+        alt["jetson-rt:nvidia-kernel-oot"] = build(
+            ["jetson_linux"], ["39.2.1", "39.2.1+git"],
+            [("CVE-3", "VexNotAffected", "cpe-incorrect", "", "")])
+        kept, not_covered = feedsbom.drop_vex_overlap(
+            JETSON_ALTS, alt, {"edk2-firmware-tegra": EDK2, "nvidia-kernel-oot": OOT})
+        self.assertEqual([mc for mc, _r, _h in kept], ["jetson-l4t", "jetson-l4t-rt"])
+        self.assertEqual(not_covered, [{
+            "mc": "jetson-rt", "recipe": "nvidia-kernel-oot",
+            "reason": "VEX overlap: 39.2.1+git is also edk2-firmware-tegra, with other "
+                      "statements on CVE-1"}])
 
 
 class DropUnresolvedTest(unittest.TestCase):

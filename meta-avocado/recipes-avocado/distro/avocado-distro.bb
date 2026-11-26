@@ -4,6 +4,9 @@ LICENSE = "Apache-2.0"
 PV = "${DISTRO_VERSION}"
 
 inherit avocado-repo-map avocado-multikernel
+# Ships no package, and its build SPDX task would follow do_compile through the
+# whole feed (a feed-scope report asks for every recipe's in this graph).
+inherit avocado-nospdx
 
 # Ensure compile task runs after dependencies
 do_compile[depends] += "avocado-core:do_build"

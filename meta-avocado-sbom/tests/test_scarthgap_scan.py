@@ -127,7 +127,8 @@ class ReportScopeTests(unittest.TestCase):
         d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
                                SBOM_CVE_CHECK_UPDATE_DB_DEPENDENCIES=" db-native:do_patch")
         self.assertEqual(d.tasks, [("do_feed_sbom", "do_cve_report", None),
-                                   ("do_feed_scan", "do_cve_report", "do_feed_sbom")])
+                                   ("do_feed_scan", "do_cve_report", "do_feed_sbom"),
+                                   ("deleted", "do_rm_work_all")])
         self.assertNotIn(("do_cve_report", "depends"), d.flags)
         self.assertEqual(d.flags[("do_feed_sbom", "nostamp")], "1")
         self.assertEqual(d.flags[("do_feed_scan", "nostamp")], "1")
@@ -142,15 +143,47 @@ class ReportScopeTests(unittest.TestCase):
         # alternate kernel the merge's dependencies rebuild is complete before
         # the document reads it.
         d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
-                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi")
+                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi",
+                               AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
         self.assertEqual(d.flags[("do_feed_sbom", "depends")],
                          " avocado-distro:do_multikernel_merge")
         self.assertNotIn(("do_rpm_manifest", "depends"), d.flags)
         self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
 
+    def test_feed_scope_asks_for_every_spdx_task_of_the_feed_targets(self):
+        # A recipe's build links to its build dependencies' builds, and sstate
+        # restores those only for a task that runs. The targets' graph is read
+        # through a task that is never scheduled.
+        for mc_recipes in ("", "raspberrypi-6_6:linux-raspberrypi"):
+            with self.subTest(mc_recipes=mc_recipes):
+                d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                                       AVOCADO_MULTIKERNEL_MC_RECIPES=mc_recipes,
+                                       AVOCADO_FEED_SBOM_TARGETS="avocado-distro extra-feed")
+                self.assertEqual(d.flags[("do_feed_sbom", "recrdeptask")],
+                                 " do_create_spdx do_create_package_spdx")
+                self.assertEqual(d.flags[("do_feed_sbom", "recideptask")], "do_feed_targets")
+                self.assertEqual(d.flags[("do_feed_targets", "depends")].split(),
+                                 ["avocado-distro:do_build", "extra-feed:do_build"])
+                self.assertEqual(d.flags[("do_feed_targets", "noexec")], "1")
+                self.assertIn(("do_feed_targets", None, None), d.tasks)
+                self.assertNotIn(":do_build", d.flags.get(("do_feed_sbom", "depends"), ""))
+                # Through the SPDX tasks rm_work would schedule their recipes' rm_work.
+                self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
+
+    def test_no_feed_target_asks_for_nothing_beyond_this_recipe(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="")
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+        self.assertNotIn(("do_feed_sbom", "recrdeptask"), d.flags)
+        self.assertFalse([t for t in d.tasks if t[0] == "do_feed_targets"])
+
+    def test_the_default_feed_target_is_avocado_distro(self):
+        self.assertRegex(read(REPORT_BB), r'(?m)^AVOCADO_FEED_SBOM_TARGETS \?= "avocado-distro"$')
+
     def test_image_scope_leaves_the_merge_alone(self):
         d = self.run_anonymous(AVOCADO_CVE_SCOPE="image", AVOCADO_CVE_IMAGE="x",
-                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi")
+                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi",
+                               AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
+        self.assertNotIn(("do_feed_sbom", "recrdeptask"), d.flags)
         self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
         self.assertNotIn(("do_rpm_manifest", "depends"), d.flags)
         self.assertEqual(d.tasks, [])

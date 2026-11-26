@@ -211,6 +211,13 @@ class TrustTest(unittest.TestCase):
         self.assertFalse(report.trusts_compiled_sources("libpam", set(), None))
 
 
+    def test_a_malformed_product_neither_aborts_nor_establishes_trust(self):
+        entry = {"products": [{"product": []}, {"product": {"x": 1}}, "linux_kernel",
+                              {"product": "linux_kernel"}, {}]}
+        self.assertEqual(report._entry_products(entry), {"linux_kernel"})
+        self.assertEqual(report._entry_products({"products": [{"product": None}]}), set())
+
+
 class FromAnchorTest(Build, unittest.TestCase):
     def rebuild(self, anchor):
         doc, _stats = report.build_report_from_anchor([self.manifest], anchor)

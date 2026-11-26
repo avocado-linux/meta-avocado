@@ -79,3 +79,41 @@ def verdict(report, package):
     if kind == "not_checked":
         return kind, value
     return "checked", {c["id"]: finding(c) for c in value if finding(c)}
+
+
+def _normalize(version):
+    if ":" in version and version.split(":", 1)[0].isdigit():
+        version = version.split(":", 1)[1]
+    return version.replace("+", "-")
+
+
+def rpm_verdicts(report, manifest):
+    """{(name, version, release, arch): verdict or ("not_checked", reason)}
+    for each RPM of a manifest, joined to the report as the consumer joins
+    them: by name to the report's package map, then the map entry's version
+    against the RPM's version-release; two rows of one name that both match
+    are ambiguous."""
+    joins = []
+    for rpm in manifest["packages"]:
+        entry = report["packages"].get(rpm["name"])
+        if entry is None:
+            join = ("not_checked", "no-report-entry")
+        elif not entry.get("version"):
+            join = ("not_checked", "ambiguous-version")
+        elif _normalize(entry["version"]) != _normalize(
+                "%s-%s" % (rpm["version"], rpm["release"])):
+            join = ("not_checked", "version-mismatch")
+        else:
+            join = None
+        joins.append((rpm, join))
+    matched = {}
+    for rpm, join in joins:
+        if join is None:
+            matched[rpm["name"]] = matched.get(rpm["name"], 0) + 1
+    result = {}
+    for rpm, join in joins:
+        if join is None:
+            join = (("not_checked", "ambiguous-version") if matched[rpm["name"]] > 1
+                    else verdict(report, rpm["name"]))
+        result[(rpm["name"], rpm["version"], rpm["release"], rpm["arch"])] = join
+    return result

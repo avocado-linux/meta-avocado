@@ -35,6 +35,9 @@ SRC_URI:append:stone-usb = " \
 
 inherit stone
 inherit deploy
+# Ships no package, and its build SPDX task would follow do_compile through the
+# images (a feed-scope report asks for every recipe's in this graph).
+inherit avocado-nospdx
 
 do_compile[depends] += "avocado-core:do_compile"
 do_compile[depends] += "avocado-image-initramfs:do_image_complete"

@@ -304,7 +304,8 @@ def _entry_products(entry):
     products = entry.get("products")
     if not isinstance(products, list):
         return set()
-    return {p.get("product") for p in products if isinstance(p, dict)}
+    return {p["product"] for p in products
+            if isinstance(p, dict) and isinstance(p.get("product"), str)}
 
 def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary=True,
                   alt_versions=None, compiled_sources=None):

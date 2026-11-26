@@ -244,9 +244,22 @@ then run the report:
 The fragment is kas/feature/cve-check-feed.yml. It sets AVOCADO_CVE_SCOPE =
 "feed" and nothing else. Run bitbake avocado-cve-report as its own invocation
 after the feed build has finished, not in the same command as the feed target:
-do_feed_sbom has no dependency on packaging, so run together it could assemble
-the document while packages are still being written. It runs do_feed_sbom and
-then the scan. Three files come out in AVOCADO_FEED_SBOM_DIR, which defaults to
+do_feed_sbom does not wait for the feed's packages, so run together it could
+assemble the document while packages are still being written. It does wait for
+the SPDX tasks whose documents the feed document can link to: a recipe's build
+links to those of its build dependencies, recursively, and OE-Core's sstate
+restores a dependency's SPDX documents only for a task that actually runs, so
+in a tree restored from sstate a recipe whose own documents came from sstate
+links to documents nothing wrote. do_feed_sbom asks for the SPDX tasks of every
+recipe in the task graph of the feed's meta-targets, AVOCADO_FEED_SBOM_TARGETS
+(avocado-distro), through recrdeptask, as OE-Core's image SBOM task does for an
+image. avocado-distro and avocado-stone ship no package and inherit
+avocado-nospdx: their build SPDX task would follow their do_compile through the
+whole feed and its images. It never schedules the meta-targets' own tasks: their graph is read for
+its recipes (recideptask) and nothing else, so the report run restores or runs
+only the SPDX tasks whose documents the tree lacks, and the scan's sysroot
+holds the scanner and its databases, not the targets'.
+It runs do_feed_sbom and then the scan. Three files come out in AVOCADO_FEED_SBOM_DIR, which defaults to
 the directory of the CVE report and the RPM manifest
 (${DEPLOY_DIR}/avocado-cve, that is tmp/deploy/avocado-cve), named by
 MACHINE_SHORT_NAME, the MACHINE without its avocado- prefix (raspberrypi5 for
@@ -288,7 +301,8 @@ of what shipped is the build's package data, so it must come from the same
 build tree as the documents: a package data directory shortened by another
 bitbake invocation shortens the scan without a trace.
 
-The task fails closed. An unresolved SPDX identifier, a missing build or more
+The task fails closed. An unresolved SPDX identifier (the failure names the
+recipes whose missing documents define it), a missing build or more
 missing recipes than the ceiling fails do_feed_sbom and leaves no document and
 no manifest, so a partial scan is never mistaken for a complete one. A scan
 whose manifest is missing or is not JSON removes the document and record too.
@@ -320,14 +334,19 @@ documents refer to something only its own multiconfig built, which the default
 tree cannot resolve (unresolved reference), when it shares a version with
 another build in the document but not that build's VEX statements (VEX
 overlap; the scanner matches a statement by version before it looks at the
-product), or when its documents are missing. A malformed list entry is
-listed there too. A VEX overlap is decided in the document because
-sbom-cve-check applies a statement to every build at the version of the package
-it is about: an RT kernel's backport left in beside a stock kernel of the same
-version would mark the stock kernel patched, and rescans run the same scanner
-on the same document. Kernels that carry the same statements stay; on this
-line OE-core's linux-yocto-rt leaves out the cve-exclusion.inc statements
-linux-yocto carries, so the two at one version would not. Each
+product; the reason names the first CVE they differ on), or when its documents
+are missing. A malformed list entry is listed there too. A VEX overlap is
+decided in the document because sbom-cve-check applies a statement to every
+build at the version of the package it is about: an RT kernel's backport left
+in beside a stock kernel of the same version would mark the stock kernel
+patched, and rescans run the same scanner on the same document. Kernels that
+carry the same statements stay; on this line OE-core's linux-yocto-rt leaves
+out the cve-exclusion.inc statements linux-yocto carries, so the two at one
+version would not. So does an alternate build whose products, versions and
+statements a default build has too: the scanner treats the two alike, so
+whatever the alternate would give another build of its version, or take from
+it, the default build already does (nvidia-kernel-oot built in an alternate
+multiconfig, beside edk2-firmware-tegra of the same version). Each
 multiconfig is judged on its own, since one recipe can be built in several: a
 reference collision traced to one alternate multiconfig drops that build only,
 and one seen only on the default kernel's side, which cannot say which
@@ -354,6 +373,10 @@ Variables
                                and Feed scope
   AVOCADO_FEED_SBOM_MAX_MISSING  ceiling of recipes without an SPDX document
                                before do_feed_sbom fails, default 33
+  AVOCADO_FEED_SBOM_TARGETS    the meta-targets that build the feed, default
+                               avocado-distro; do_feed_sbom waits for the SPDX
+                               tasks of every recipe in their graph, not for
+                               the targets themselves
   AVOCADO_FEED_SBOM_DIR        where the feed document, manifest and coverage
                                record go, default the CVE report directory; never
                                the image deploy directory
@@ -629,7 +652,10 @@ downstream. So on a machine that builds a second kernel in another multiconfig
 (AVOCADO_MULTIKERNEL_MC_RECIPES), the second kernel's RPMs are listed at feed
 scope, the only scope that scans it: the recipes that variable names, read from
 tmp-<mc> pkgdata. Both kernels' "kernel", "kernel-dev" and "kernel-dbg" are
-listed, as two packages of one name at two versions. At world and image scope
+listed, as two packages of one name at two versions. The report's package map
+holds one entry per name, the default multiconfig's, so a consumer that joins
+an RPM to it by name and version finds no entry for the alternate's package of
+a shared name. At world and image scope
 only the default multiconfig's RPMs are listed, and the task notes this in the
 build log. SDK pkgdata is not listed either.
 

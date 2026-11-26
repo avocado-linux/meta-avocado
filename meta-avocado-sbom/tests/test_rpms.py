@@ -44,19 +44,21 @@ def header(tags):
             data += value.encode() + b"\0"
     return MAGIC + struct.pack(">II", len(tags), len(data)) + index + data
 
-def main_header(name, version, release, arch, epoch=None):
+def main_header(name, version, release, arch, epoch=None, buildtime=None):
     tags = [(1000, STRING, name), (1001, STRING, version), (1002, STRING, release)]
     if epoch is not None:
         tags.append((1003, INT32, epoch))
+    if buildtime is not None:
+        tags.append((1006, INT32, buildtime))
     tags.append((1022, STRING, arch))
     return header(tags)
 
 def rpm_bytes(name="foo", version="1.0", release="r0.1", arch="cortexa76",
-              epoch=None, sig_digest="auto", payload=b"payload"):
+              epoch=None, sig_digest="auto", payload=b"payload", buildtime=None):
     """A whole RPM. sig_digest "auto" signs the main header correctly, None
     leaves the signature header without a SHA256HEADER, anything else is
     written as given."""
-    main = main_header(name, version, release, arch, epoch)
+    main = main_header(name, version, release, arch, epoch, buildtime)
     sig_tags = [(1000, INT32, len(main) + len(payload))]
     if sig_digest == "auto":
         sig_tags.append((273, STRING, hashlib.sha256(main).hexdigest()))

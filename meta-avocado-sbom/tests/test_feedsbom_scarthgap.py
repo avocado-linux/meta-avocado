@@ -99,6 +99,10 @@ MC = "raspberrypi-6_6"
 ARCHS = "allarch cortexa76 raspberrypi5 x86_64"
 
 KERNEL_CPE = "cpe:2.3:o:linux:linux_kernel:%s:*:*:*:*:*:*:*"
+# Vendor and part as cve_record writes them for these products.
+EDK2_CPE = "cpe:2.3:o:edk2:edk2:202505:*:*:*:*:*:*:*"
+OOT_CPE = "cpe:2.3:o:jetson_linux:jetson_linux:39.2.1:*:*:*:*:*:*:*"
+TEGRA_MCS = (("jetson-l4t", "8"), ("jetson-rt", "9"), ("jetson-l4t-rt", "a"))
 # Compiled sources of the two kernels. init/main.c passes the scanner's check
 # that a kernel's list is real.
 DEFAULT_SOURCES = ("init/main.c", "kernel/fork.c")
@@ -113,9 +117,17 @@ def scanner():
     return tool if tool and os.access(tool, os.X_OK) else None
 
 
-def cve_record(cve, program_files, product="linux_kernel", less_than="6.18.99"):
+def cve_record(cve, program_files, product="linux_kernel", less_than="6.18.99", also=()):
     """A cvelistV5 record: product below less_than affected, its fix in
-    program_files."""
+    program_files; also holds further (product, less_than)."""
+    record = _cve_record(cve, program_files, product, less_than)
+    for other, other_less_than in also:
+        record["containers"]["cna"]["affected"] += _cve_record(
+            cve, (), other, other_less_than)["containers"]["cna"]["affected"]
+    return record
+
+
+def _cve_record(cve, program_files, product, less_than):
     vendor = "linux" if product == "linux_kernel" else product
     return {
         "dataType": "CVE_RECORD", "dataVersion": "5.1",
@@ -577,7 +589,7 @@ class RealLibTest(unittest.TestCase):
         self.assertEqual(coverage["alt_not_covered"], [{
             "mc": "jetson-rt", "recipe": "linux-yocto-rt",
             "reason": "VEX overlap: linux_kernel 6.12.47 is also linux-raspberrypi, "
-                      "with other statements"}])
+                      "with other statements on CVE-2026-1003"}])
         self.assertNotIn("CVE-2026-1003", json.dumps(document))
 
     def test_a_statement_differing_in_notes_only_counts_as_other(self):
@@ -635,6 +647,27 @@ class RealLibTest(unittest.TestCase):
         self.assertEqual(coverage["unresolved_ids"], 0)
         self.assertEqual(sorted(self.sources_of(document)), ["1.36.1", "6.12.47"])
 
+    def test_a_statement_of_an_alternate_left_out_this_pass_is_not_compared_with(self):
+        # The first alternate goes on an unresolved link and carries a
+        # statement the second lacks; its documents are still in this pass's
+        # assembly, and must not leave the second out.
+        self.kernel_trees()
+        l4t, l4t_rt = self.top / "tmp-jetson-l4t", self.top / "tmp-jetson-l4t-rt"
+        for tmp in (l4t, l4t_rt):
+            self.write_bitbake(tmp)
+        only_here = self.write_recipe(l4t, "l4t-only-native", "1.0", "a" * 64, [],
+                                      arch="x86_64")
+        for tmp, pn, cves, deps, h in ((l4t, "linux-l4t", ["CVE-2026-1003"], [only_here], "b"),
+                                       (l4t_rt, "linux-l4t-rt", [], [], "c")):
+            self.write_recipe(tmp, pn, "6.8.12", h * 64, ["kernel", "kernel-image-6.8.12"],
+                              cves, deps, cpe=KERNEL_CPE % "6.8.12")
+            self.write_pkgdata(tmp, pn, "6.8.12", ["kernel", "kernel-image-6.8.12"])
+        _document, coverage = self.run_feed_sbom(
+            mc_recipes="jetson-l4t:linux-l4t jetson-l4t-rt:linux-l4t-rt")
+        self.assertEqual(coverage["alt_included"], ["jetson-l4t-rt:linux-l4t-rt"])
+        entry, = coverage["alt_not_covered"]
+        self.assertTrue(entry["reason"].startswith("unresolved reference: "), entry)
+
     def test_a_module_of_a_kernel_left_out_never_finds_the_default_kernel(self):
         # The 6.6 kernel goes on an unresolved link; its module names its build
         # by the same alias as the default kernel's, which must not catch it.
@@ -667,10 +700,144 @@ class RealLibTest(unittest.TestCase):
         self.assertEqual(sorted(e["recipe"] for e in coverage["alt_not_covered"]),
                          ["linux-raspberrypi", "rpi-module"])
 
-    def scan(self, records=()):
+    def tegra_trees(self, alt_cves=None, alt_cpe=OOT_CPE):
+        """Jetson's nvidia-kernel-oot (product jetson_linux) beside
+        edk2-firmware-tegra (edk2), both at package version 39.2.1, the firmware
+        with a statement about an edk2 CVE; nvidia-kernel-oot again in each of
+        three alternate multiconfigs, with alt_cves[mc] as its statements."""
+        alt_cves = alt_cves or {}
+        self.write_bitbake(self.tmp)
+        self.write_recipe(self.tmp, "edk2-firmware-tegra", "39.2.1", "6" * 64,
+                          ["edk2-firmware-tegra"], [("CVE-2026-3001", "fixed-version")],
+                          cpe=EDK2_CPE)
+        self.write_pkgdata(self.tmp, "edk2-firmware-tegra", "39.2.1", ["edk2-firmware-tegra"])
+        self.write_recipe(self.tmp, "nvidia-kernel-oot", "39.2.1", "7" * 64,
+                          ["nvidia-kernel-oot-base"], cpe=OOT_CPE)
+        self.write_pkgdata(self.tmp, "nvidia-kernel-oot", "39.2.1", ["nvidia-kernel-oot-base"])
+        for mc, h in TEGRA_MCS:
+            tmp = self.top / ("tmp-" + mc)
+            self.write_bitbake(tmp)
+            self.write_recipe(tmp, "nvidia-kernel-oot", "39.2.1", h * 64,
+                              ["nvidia-kernel-oot-base"], alt_cves.get(mc, ()), cpe=alt_cpe)
+            self.write_pkgdata(tmp, "nvidia-kernel-oot", "39.2.1", ["nvidia-kernel-oot-base"])
+        return self.run_feed_sbom(
+            mc_recipes=" ".join("%s:nvidia-kernel-oot" % mc for mc, _h in TEGRA_MCS))
+
+    BOTH_SIDES = {"jetson-rt": [("CVE-2026-3001", "backported-patch")]}
+
+    def test_every_alternate_module_recipe_stays_beside_firmware_of_its_version(self):
+        _document, coverage = self.tegra_trees()
+        self.assertEqual(coverage["alt_included"], [
+            "jetson-l4t:nvidia-kernel-oot", "jetson-rt:nvidia-kernel-oot",
+            "jetson-l4t-rt:nvidia-kernel-oot"])
+        self.assertEqual(coverage["alt_not_covered"], [])
+
+    def test_another_cpe_vendor_is_no_twin(self):
+        _document, coverage = self.tegra_trees(
+            alt_cpe="cpe:2.3:o:*:jetson_linux:39.2.1:*:*:*:*:*:*:*")
+        self.assertEqual(coverage["alt_included"], [])
+        self.assertEqual({e["reason"] for e in coverage["alt_not_covered"]}, {
+            "VEX overlap: 39.2.1 is also edk2-firmware-tegra, with other "
+            "statements on CVE-2026-3001"})
+
+    def test_a_statement_about_the_firmware_cve_on_the_module_recipe_is_an_overlap(self):
+        _document, coverage = self.tegra_trees(alt_cves=self.BOTH_SIDES)
+        self.assertEqual(coverage["alt_included"], [
+            "jetson-l4t:nvidia-kernel-oot", "jetson-l4t-rt:nvidia-kernel-oot"])
+        self.assertEqual(coverage["alt_not_covered"], [{
+            "mc": "jetson-rt", "recipe": "nvidia-kernel-oot",
+            "reason": "VEX overlap: 39.2.1 is also edk2-firmware-tegra, with other "
+                      "statements on CVE-2026-3001"}])
+
+    TEGRA_RECORDS = (("CVE-2026-3001", [], "edk2", "202599"),
+                     ("CVE-2026-3002", [], "jetson_linux", "39.9.9"))
+
+    def tegra_scan(self, alt_cves=None, bypass=False):
+        if bypass:
+            real = feedsbom.drop_vex_overlap
+            feedsbom.drop_vex_overlap = lambda included, alt, default: (included, [])
+            self.addCleanup(setattr, feedsbom, "drop_vex_overlap", real)
+        _document, coverage = self.tegra_trees(alt_cves)
+        listed = self.scan(self.TEGRA_RECORDS, entries=True)
+        oot = [issues for name, _v, issues in listed if "nvidia-kernel-oot" in name]
+        firmware, = [issues for name, _v, issues in listed if "edk2" in name]
+        return coverage, oot, firmware
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_the_firmware_statement_never_reaches_the_module_recipe(self):
+        coverage, oot, firmware = self.tegra_scan()
+        self.assertEqual(len(coverage["alt_included"]), 3)
+        self.assertEqual(firmware["CVE-2026-3001"][0], "Patched")
+        self.assertEqual(len(oot), 4)
+        for issues in oot:
+            self.assertNotIn("CVE-2026-3001", issues)
+            self.assertEqual(issues["CVE-2026-3002"][0], "Unpatched")
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_a_record_naming_both_products_reaches_every_module_build_alike(self):
+        # The scanner gives the firmware's fix to every nvidia-kernel-oot build
+        # once a record names jetson_linux too; the alternates stay because
+        # their twin, the default build, gets exactly the same.
+        _document, coverage = self.tegra_trees()
+        self.assertEqual(len(coverage["alt_included"]), 3)
+        records = (self.TEGRA_RECORDS[0] + ([("jetson_linux", "39.9.9")],),
+                   self.TEGRA_RECORDS[1])
+        listed = self.scan(records, entries=True)
+        oot = [issues for name, _v, issues in listed if "nvidia-kernel-oot" in name]
+        self.assertEqual(len(oot), 4)
+        self.assertEqual(oot[0]["CVE-2026-3001"][0], "Patched")
+        self.assertEqual(oot, [oot[0]] * 4)
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_without_the_check_the_scanner_still_keeps_them_apart(self):
+        _coverage, oot, _firmware = self.tegra_scan(bypass=True)
+        self.assertEqual(len(oot), 4)
+        for issues in oot:
+            self.assertNotIn("CVE-2026-3001", issues)
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_a_statement_on_both_sides_reaches_every_module_build(self):
+        # Both statements say fixed, with other notes: the scanner matches the
+        # CVE to every nvidia-kernel-oot build, the default's included.
+        _coverage, oot, _firmware = self.tegra_scan(alt_cves=self.BOTH_SIDES, bypass=True)
+        self.assertEqual([issues["CVE-2026-3001"][0] for issues in oot], ["Patched"] * 4)
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_with_the_check_that_module_build_is_left_out_and_nothing_leaks(self):
+        coverage, oot, _firmware = self.tegra_scan(alt_cves=self.BOTH_SIDES)
+        self.assertEqual([e["mc"] for e in coverage["alt_not_covered"]], ["jetson-rt"])
+        self.assertEqual(len(oot), 3)
+        for issues in oot:
+            self.assertNotIn("CVE-2026-3001", issues)
+
+    def test_a_hole_in_the_default_tree_fails_naming_its_recipe(self):
+        other = self.top / "tmp-other"
+        self.write_bitbake(other)
+        self.write_bitbake(self.tmp)
+        gone = self.write_recipe(other, "gone-native", "1.0", "8" * 64, [], arch="x86_64")
+        self.write_recipe(self.tmp, "needs-gone", "1.0", "9" * 64, ["needs-gone"], deps=[gone])
+        self.write_pkgdata(self.tmp, "needs-gone", "1.0", ["needs-gone"])
+        with self.assertRaises(Fatal) as cm:
+            self.run_feed_sbom(alt=False)
+        self.assertIn("refers to 1 identifier(s)", str(cm.exception))
+        self.assertIn("belong to the documents of gone-native,", str(cm.exception))
+        self.assertEqual(spdxalias.alias_recipe(gone), "gone-native")
+
+    def test_the_feed_asks_for_the_spdx_tasks_oe_core_asks_for_an_image(self):
+        meta = Path(os.environ["OE_CORE_LIB"]).parent
+        image = (meta / "classes-recipe" / "create-spdx-image-3.0.bbclass").read_text()
+        oe_tasks = re.search(r'^do_create_image_sbom_spdx\[recrdeptask\] \+= "([^"]*)"',
+                             image, re.M).group(1).split()
+        ours = re.search(r'appendVarFlag\("do_feed_sbom", "recrdeptask",\s*" ([^"]*)"\)',
+                         RECIPE.read_text()).group(1).split()
+        self.assertEqual(sorted(ours), sorted(oe_tasks))
+        sstate = (meta / "classes-global" / "sstate.bbclass").read_text()
+        self.assertIn('"do_create_spdx"', re.search(r"directtasks = \[(.*?)\]", sstate).group(1))
+
+    def scan(self, records=(), entries=False):
         """{(entry name, version): {CVE: (status, detail)}} from sbom-cve-check
         run on the feed document against a cvelist database of the RECORDS and
-        records, cve_record arguments."""
+        records, cve_record arguments; with entries, [(name, version, issues)]."""
         db = self.top / "cvelist"
         for args in tuple(RECORDS) + tuple(records):
             cve = args[0]
@@ -692,9 +859,10 @@ class RealLibTest(unittest.TestCase):
              "--add-db", "cve-db-cvelist", str(db), "offline_mode=true",
              "--export-type", "yocto-cve-check-manifest", "--export-path", str(out)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        return {(e["name"], e["version"]): {i["id"]: (i["status"], i.get("detail"))
-                                           for i in e["issue"]}
-                for e in json.loads(out.read_text())["package"]}
+        listed = [(e["name"], e["version"], {i["id"]: (i["status"], i.get("detail"))
+                                             for i in e["issue"]})
+                  for e in json.loads(out.read_text())["package"]]
+        return listed if entries else {(n, v): i for n, v, i in listed}
 
     @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
     def test_the_scan_filters_each_kernel_on_its_own_sources(self):
