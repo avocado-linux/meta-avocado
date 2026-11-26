@@ -414,8 +414,8 @@ plain file name, and a redirect target found in neither place.
 
 **Changing any of this needs a reflash.** The overlay lists live in the
 bootloader on QSPI, written at flash-time signing. Editing a list, the
-camera opt-in or a carrier tree on a provisioned board has no effect until
-you reflash it.
+camera opt-in on a provisioned board has no effect until you reflash it. A
+carrier tree can also reach the board by OS update, see the next section.
 
 ### Updating the device tree over the air
 
@@ -454,6 +454,10 @@ needs a reflash:
 - The boot overlay lists (`BOOTCONTROL_OVERLAYS`,
   `PLUGIN_MANAGER_OVERLAYS`, `OVERLAY_DTB_FILE`), which live in the
   bootloader on QSPI. The update does not touch the bootloader.
+- The devkit camera strip. It rewrites the dynamic overlay that the flash
+  embeds in the bootloader, so a board flashed before a carrier tree existed
+  keeps the devkit camera fragments and resets the carrier's camera nodes at
+  every boot until you reflash it.
 
 **Scope.** This applies to unfused boards only.
 
