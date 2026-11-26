@@ -21,3 +21,8 @@ OPENGL_PACKAGES = " \
   libdrm-tests \
   xkeyboard-config \
 "
+
+# wpewebkit is a whole-browser compile like chromium and qtwebengine.
+# kas/feature/almost-complete.yml sets AVOCADO_SKIP_WEB_ENGINES to leave all
+# three out, and the backend and launcher that only wpewebkit uses go with it.
+OPENGL_PACKAGES:remove = "${@'wpewebkit wpebackend-fdo cog' if d.getVar('AVOCADO_SKIP_WEB_ENGINES') == '1' else ''}"
