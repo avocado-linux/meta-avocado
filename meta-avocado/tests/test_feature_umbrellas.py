@@ -18,8 +18,41 @@ ROOT = Path(__file__).resolve().parents[2]
 FEATURE = ROOT / "kas" / "feature"
 QT_GROUP = ROOT / "meta-avocado" / "recipes-avocado" / "packagegroups" / "packagegroup-avocado-feature-qt.bb"
 
-# What almost-complete.yml leaves out of complete.yml, and nothing else.
-SLOW = {"kas/feature/browsers.yml"}
+GRAPHICS_GROUP = ROOT / "meta-avocado" / "recipes-avocado" / "packagegroups" / "packagegroup-avocado-feature-graphics.bb"
+
+# What almost-complete.yml leaves out of complete.yml, and nothing else: the
+# browsers, and the Qt stack nobody builds an image with.
+SLOW = {"kas/feature/browsers.yml", "kas/feature/qt.yml"}
+
+# The webkit stack the graphics group carries: the engine, the backend only it
+# uses and the launcher only it runs.
+WEBKIT = {"wpewebkit", "wpebackend-fdo", "cog"}
+
+
+class _Datastore:
+    """Just enough of a bitbake datastore for the group's inline python."""
+
+    def __init__(self, **values):
+        self.values = values
+
+    def getVar(self, name):
+        return self.values.get(name)
+
+
+def opengl_packages(skip):
+    """The graphics group's OPENGL_PACKAGES with AVOCADO_SKIP_WEB_ENGINES set to skip.
+
+    Reads the list and every unqualified :remove the way bitbake does, with no
+    machine override applied.
+    """
+    src = GRAPHICS_GROUP.read_text()
+    listing = re.search(r'^OPENGL_PACKAGES = "(.*?)"$', src, re.M | re.S).group(1)
+    packages = listing.replace("\\\n", " ").split()
+    d = _Datastore(AVOCADO_SKIP_WEB_ENGINES=skip)
+    for expr in re.findall(r'^OPENGL_PACKAGES:remove = "\$\{@(.*)\}"$', src, re.M):
+        gone = eval(expr, {"d": d}).split()
+        packages = [p for p in packages if p not in gone]
+    return packages
 
 
 def includes(path):
@@ -46,12 +79,16 @@ class Umbrellas(unittest.TestCase):
         self.assertRegex(src, r"AVOCADO_SKIP_WEB_ENGINES")
         self.assertRegex(src, r"qtwebengine")
 
-    def test_almost_complete_no_qt_is_almost_complete_minus_qt(self):
+    def test_almost_complete_leaves_the_qt_stack_out(self):
+        self.assertIn("kas/feature/qt.yml", includes(FEATURE / "complete.yml"))
+        self.assertNotIn("kas/feature/qt.yml", includes(FEATURE / "almost-complete.yml"))
+
+    def test_almost_complete_no_qt_lists_the_same_fragments_as_almost_complete(self):
         """The no-qt file copies the include list by hand; this is what keeps the copy honest."""
-        almost = includes(FEATURE / "almost-complete.yml")
-        no_qt = includes(FEATURE / "almost-complete-no-qt.yml")
-        self.assertIn("kas/feature/qt.yml", almost)
-        self.assertEqual(no_qt, [f for f in almost if f != "kas/feature/qt.yml"])
+        self.assertEqual(
+            includes(FEATURE / "almost-complete-no-qt.yml"),
+            includes(FEATURE / "almost-complete.yml"),
+        )
 
     def test_almost_complete_no_qt_keeps_the_web_engine_skip(self):
         skip = re.compile(r'^\s*AVOCADO_SKIP_WEB_ENGINES\s*=\s*"1"\s*$', re.M)
@@ -81,6 +118,20 @@ class Armv8Userland(unittest.TestCase):
             if umbrella.name == "armv8-userland.yml":
                 continue
             self.assertNotIn("kas/feature/armv8-userland.yml", includes(umbrella), umbrella.name)
+
+
+class GraphicsGroupWebkit(unittest.TestCase):
+    def test_webkit_is_in_the_graphics_group_by_default(self):
+        got = opengl_packages(None)
+        self.assertTrue(WEBKIT <= set(got), got)
+        self.assertIn("weston", got)
+
+    def test_skipping_web_engines_drops_the_webkit_stack_and_nothing_else(self):
+        kept = set(opengl_packages(None)) - WEBKIT
+        self.assertEqual(set(opengl_packages("1")), kept)
+
+    def test_other_values_of_the_variable_keep_webkit(self):
+        self.assertTrue(WEBKIT <= set(opengl_packages("0")))
 
 
 if __name__ == "__main__":

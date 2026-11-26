@@ -1,16 +1,15 @@
 header:
   version: 16
 
-# almost-complete.yml without the qt group, for builds where the Qt sources
-# (code.qt.io) cannot be fetched. The includes are the same fragments as
-# almost-complete.yml minus the qt fragment, and the web-engine skip is kept.
-# This is not a replacement for almost-complete.yml, which stays the dev
-# default; use this one only when the Qt sources are unreachable.
+# The same fragments as almost-complete.yml, which no longer includes the qt
+# fragment either. This file is kept so that a caller outside this repository
+# that names it keeps working.
+# devtool-debt: a copy of almost-complete.yml's include list. Ceiling: one
+# caller that still names this file. Upgrade trigger: no caller names it, then
+# delete the file and its test.
 #
-# Keep the includes below identical to almost-complete.yml's, minus the qt
-# fragment. meta-avocado/tests/test_feature_umbrellas.py covers the
-# almost-complete.yml and complete.yml pair; this file has to be kept in step
-# by hand.
+# meta-avocado/tests/test_feature_umbrellas.py fails when this list and
+# almost-complete.yml's differ.
   includes:
   - repo: meta-avocado
     file: kas/feature/system-base.yml
