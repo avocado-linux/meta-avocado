@@ -12,7 +12,8 @@
     },
     "os_artifacts": {
       "rootfs": { "image_key": "rootfs", "slot_partitions": ["APP", "APP_b"] },
-      "boot": { "image_key": "boot", "slot_partitions": ["A_kernel", "B_kernel"] }
+      "boot": { "image_key": "boot", "slot_partitions": ["A_kernel", "B_kernel"] },
+      "dtb": { "image_key": "kernel_dtb_ota", "slot_partitions": ["A_kernel-dtb", "B_kernel-dtb"] }
     },
     "activate": [
       {
@@ -108,6 +109,7 @@
           "size": 128,
           "size_unit": "mebibytes"
         },
+        "kernel_dtb_ota": "kernel-dtb-ota.dtb",
         "tegraflash_initramfs": "tegra-initrd-flash-initramfs-avocado-jetson-orin-nano.cboot",
         "tegraflash_esp": "tegra-espimage-avocado-jetson-orin-nano.esp",
         "tegraflash_tos": "tos-avocado-jetson-orin-nano.img",

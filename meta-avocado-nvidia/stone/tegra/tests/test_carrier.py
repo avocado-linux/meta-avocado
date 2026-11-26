@@ -403,3 +403,57 @@ def test_a_tree_for_another_board_family_gets_no_warning(tmp_path):
 def test_no_selected_tree_in_the_flash_environment_gets_no_warning(tmp_path):
     data, work = _setup(tmp_path, {OLD_TREE: "merged"})
     assert _tree_warnings(_run(data, work)) == []
+
+
+def test_patches_keep_file_order_across_both_targets():
+    text = "CARRIER_ENV_B=2\nCARRIER_FV_A=1\nOTHER=x\nCARRIER_ENV_C=3\n"
+    assert carrier_mod.carrier_patches(text) == [
+        (".env.initrd-flash", "B", "2"),
+        ("flashvars", "A", "1"),
+        (".env.initrd-flash", "C", "3"),
+    ]
+
+
+def test_patches_keep_a_repeated_name_in_order():
+    text = "CARRIER_FV_A=1\nCARRIER_FV_A=2\n"
+    assert carrier_mod.carrier_patches(text) == [("flashvars", "A", "1"), ("flashvars", "A", "2")]
+
+
+def test_patches_strip_double_then_single_quotes():
+    text = "CARRIER_FV_A=\"x\"\nCARRIER_FV_B='y'\nCARRIER_FV_C=\"'z'\"\n"
+    assert [p[2] for p in carrier_mod.carrier_patches(text)] == ["x", "y", "z"]
+
+
+def test_patches_refuse_an_unsafe_value_with_the_existing_message():
+    with pytest.raises(EngineError) as exc:
+        carrier_mod.carrier_patches("CARRIER_FV_A=$(id)\n")
+    assert str(exc.value) == (
+        "carrier value of CARRIER_FV_A contains '$', which the shell would act on; "
+        "refusing to write it into flashvars"
+    )
+
+
+def test_patches_without_validation_return_the_unsafe_value():
+    assert carrier_mod.carrier_patches("CARRIER_ENV_A=a`b\n", validate=False) == [
+        (".env.initrd-flash", "A", "a`b")
+    ]
+
+
+def test_label_reads_the_first_matching_line_and_strips_double_quotes_only():
+    text = "X=1\nCARRIER_LABEL=\"'Board'\"\nCARRIER_LABEL=second\n"
+    assert carrier_mod.carrier_label(text) == "'Board'"
+
+
+def test_label_is_none_without_a_label_line():
+    assert carrier_mod.carrier_label("CARRIER_FV_A=1\n") is None
+
+
+def test_an_unsafe_third_line_logs_and_rewrites_the_first_two_before_refusing(tmp_path):
+    env = "CARRIER_FV_ODMDATA=1\nCARRIER_FV_DTBFILE=b.dtb\nCARRIER_FV_X=$(id)\n"
+    data, work = _setup(tmp_path, {"carrier.env": env})
+    out = []
+    with pytest.raises(EngineError):
+        apply_carrier(data, SLOT, work, log=out.append)
+    assert "  flashvars: ODMDATA=1" in out
+    assert "  flashvars: DTBFILE=b.dtb" in out
+    assert 'ODMDATA="1"' in _fv(work)

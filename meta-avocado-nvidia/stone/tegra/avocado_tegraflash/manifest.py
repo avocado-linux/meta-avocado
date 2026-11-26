@@ -133,6 +133,25 @@ def read_manifest(path: str | Path) -> Manifest:
     return Manifest(**values)
 
 
+def read_ota_image(path: str | Path) -> str:
+    """The file name images.kernel_dtb_ota declares, "" when absent.
+
+    Deliberately outside KEYS and Manifest: provisioning must not read or stage it; only
+    the build-time check publishes the file the OS update carries under that name.
+    """
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise EngineError(f"cannot read manifest {path}: {exc}") from exc
+    storage = _object(_object(doc, "(top level)").get("storage_devices"), "storage_devices")
+    rootdisk = _object(storage.get("rootdisk"), "storage_devices.rootdisk")
+    where = "storage_devices.rootdisk.images"
+    value = _object(rootdisk.get("images"), where).get("kernel_dtb_ota")
+    if value is None:
+        return ""
+    return os.path.basename(_text(value, f"{where}.kernel_dtb_ota"))
+
+
 REQUIRED_IMAGES = (
     "rootfs",
     "var",

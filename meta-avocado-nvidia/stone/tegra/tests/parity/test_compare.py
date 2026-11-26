@@ -229,6 +229,9 @@ def test_deviation_registry_names():
         "fwup-task-refused",
         "boot-tools-from-tools-dir",
         "force-policy-table",
+        "boot-overlay-list-unreadable-refused",
+        "devkit-camera-fragments-stripped",
+        "modified-boot-overlay-refused",
         "erase-flag-spellings",
     }
     assert all(isinstance(v, str) and v and "\n" not in v for v in deviations.DEVIATIONS.values())
