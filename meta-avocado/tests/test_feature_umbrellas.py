@@ -20,8 +20,9 @@ QT_GROUP = ROOT / "meta-avocado" / "recipes-avocado" / "packagegroups" / "packag
 
 GRAPHICS_GROUP = ROOT / "meta-avocado" / "recipes-avocado" / "packagegroups" / "packagegroup-avocado-feature-graphics.bb"
 
-# What almost-complete.yml leaves out of complete.yml, and nothing else.
-SLOW = {"kas/feature/browsers.yml"}
+# What almost-complete.yml leaves out of complete.yml, and nothing else: the
+# browsers, and the Qt stack nobody builds an image with.
+SLOW = {"kas/feature/browsers.yml", "kas/feature/qt.yml"}
 
 # The webkit stack the graphics group carries: the engine, the backend only it
 # uses and the launcher only it runs.
@@ -78,12 +79,16 @@ class Umbrellas(unittest.TestCase):
         self.assertRegex(src, r"AVOCADO_SKIP_WEB_ENGINES")
         self.assertRegex(src, r"qtwebengine")
 
-    def test_almost_complete_no_qt_is_almost_complete_minus_qt(self):
+    def test_almost_complete_leaves_the_qt_stack_out(self):
+        self.assertIn("kas/feature/qt.yml", includes(FEATURE / "complete.yml"))
+        self.assertNotIn("kas/feature/qt.yml", includes(FEATURE / "almost-complete.yml"))
+
+    def test_almost_complete_no_qt_lists_the_same_fragments_as_almost_complete(self):
         """The no-qt file copies the include list by hand; this is what keeps the copy honest."""
-        almost = includes(FEATURE / "almost-complete.yml")
-        no_qt = includes(FEATURE / "almost-complete-no-qt.yml")
-        self.assertIn("kas/feature/qt.yml", almost)
-        self.assertEqual(no_qt, [f for f in almost if f != "kas/feature/qt.yml"])
+        self.assertEqual(
+            includes(FEATURE / "almost-complete-no-qt.yml"),
+            includes(FEATURE / "almost-complete.yml"),
+        )
 
     def test_almost_complete_no_qt_keeps_the_web_engine_skip(self):
         skip = re.compile(r'^\s*AVOCADO_SKIP_WEB_ENGINES\s*=\s*"1"\s*$', re.M)
