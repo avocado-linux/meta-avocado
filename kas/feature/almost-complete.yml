@@ -2,18 +2,21 @@ header:
   version: 16
 
 # complete.yml without the slow packages: the same fragments minus browsers
-# (chromium), the qt group without qtwebengine and the graphics group without
-# wpewebkit. Each of those is a whole-browser compile inside a single
+# (chromium) and minus the qt stack, and the graphics group without wpewebkit.
+# Chromium and wpewebkit are each a whole-browser compile inside a single
 # do_compile task, so bitbake cannot spread it across its parallel tasks and
-# it sets the wall-clock time of an umbrella build. complete.yml keeps its
-# meaning for CI and the build cluster; use this one for dev builds and feed
-# iterations that do not need a browser.
+# it sets the wall-clock time of an umbrella build; the qt stack is a long
+# build that no image of ours uses. complete.yml keeps its meaning for CI and
+# the build cluster; use this one for dev builds and feed iterations that do
+# not need a browser or Qt.
 #
-# Keep the includes below identical to complete.yml's, minus browsers.yml.
+# Keep the includes below identical to complete.yml's, minus browsers.yml and
+# qt.yml.
 # meta-avocado/tests/test_feature_umbrellas.py fails when the two drift.
 # Stack kas/feature/web-engines.yml to build chromium and qtwebengine on their
-# own. wpewebkit comes back with the graphics group when
-# AVOCADO_SKIP_WEB_ENGINES is not set, for example under complete.yml.
+# own, or kas/feature/qt.yml to bring the qt stack back. wpewebkit comes back
+# with the graphics group when AVOCADO_SKIP_WEB_ENGINES is not set, for example
+# under complete.yml.
   includes:
   - repo: meta-avocado
     file: kas/feature/system-base.yml
@@ -25,8 +28,6 @@ header:
     file: kas/feature/python.yml
   - repo: meta-avocado
     file: kas/feature/graphics.yml
-  - repo: meta-avocado
-    file: kas/feature/qt.yml
   - repo: meta-avocado
     file: kas/feature/cameras.yml
   - repo: meta-avocado

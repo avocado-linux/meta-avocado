@@ -36,11 +36,11 @@ only.
 except `ai`. No board file includes it; append it explicitly to ship the full
 set (see §3).
 
-`kas/feature/almost-complete.yml` is the same umbrella without the three slow
-web engines: it leaves out `browsers` (chromium) and sets
-`AVOCADO_SKIP_WEB_ENGINES = "1"`, which drops qtwebengine from the `qt` group
-and wpewebkit, wpebackend-fdo and cog from the `graphics` group.
-`complete.yml` keeps its meaning for CI and the build cluster.
+`kas/feature/almost-complete.yml` is the same umbrella without the slow
+packages: it leaves out `browsers` (chromium) and the whole `qt` stack, and sets
+`AVOCADO_SKIP_WEB_ENGINES = "1"`, which drops wpewebkit, wpebackend-fdo and cog
+from the `graphics` group (and qtwebengine from the `qt` group, if `qt.yml` is
+stacked on it). `complete.yml` keeps its meaning for CI and the build cluster.
 
 ## 2. Feature groups
 
@@ -114,8 +114,9 @@ kas build kas/machine/qemuarm64.yml:kas/feature/complete.yml
 ### Everything except the slow packages
 
 Chromium, qtwebengine and wpewebkit are each a whole-browser compile in one
-`do_compile` task, so they outlast the rest of an umbrella build. To skip all
-three, append `almost-complete.yml` instead of `complete.yml`:
+`do_compile` task, so they outlast the rest of an umbrella build, and the Qt
+stack is a long build of its own that no image uses. To skip all of them, append
+`almost-complete.yml` instead of `complete.yml`:
 
 ```bash
 kas build kas/machine/qemuarm64.yml:kas/feature/almost-complete.yml
@@ -129,7 +130,8 @@ kas build kas/machine/qemuarm64.yml:kas/feature/web-engines.yml
 ```
 
 wpewebkit has no opt-in group of its own: it is part of the `graphics` group, so
-build `graphics.yml` without `AVOCADO_SKIP_WEB_ENGINES` to get it.
+build `graphics.yml` without `AVOCADO_SKIP_WEB_ENGINES` to get it. To bring the
+rest of the Qt stack back, stack `qt.yml` on `almost-complete.yml`.
 
 ### DeepX (NPU) boards
 

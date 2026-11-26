@@ -22,8 +22,9 @@ QT_GROUP = ROOT / "meta-avocado" / "recipes-avocado" / "packagegroups" / "packag
 
 GRAPHICS_GROUP = ROOT / "meta-avocado" / "recipes-avocado" / "packagegroups" / "packagegroup-avocado-feature-graphics.bb"
 
-# What almost-complete.yml leaves out of complete.yml, and nothing else.
-SLOW = {"kas/feature/browsers.yml"}
+# What almost-complete.yml leaves out of complete.yml, and nothing else: the
+# browsers, and the Qt stack nobody builds an image with.
+SLOW = {"kas/feature/browsers.yml", "kas/feature/qt.yml"}
 
 # The webkit stack the graphics group carries: the engine, the backend only it
 # uses and the launcher only it runs.
@@ -75,6 +76,10 @@ class Umbrellas(unittest.TestCase):
         complete = includes(FEATURE / "complete.yml")
         almost = includes(FEATURE / "almost-complete.yml")
         self.assertEqual(almost, [f for f in complete if f not in SLOW])
+
+    def test_almost_complete_leaves_the_qt_stack_out(self):
+        self.assertIn("kas/feature/qt.yml", includes(FEATURE / "complete.yml"))
+        self.assertNotIn("kas/feature/qt.yml", includes(FEATURE / "almost-complete.yml"))
 
     def test_only_almost_complete_skips_web_engines(self):
         skip = re.compile(r'^\s*AVOCADO_SKIP_WEB_ENGINES\s*=\s*"1"\s*$', re.M)
