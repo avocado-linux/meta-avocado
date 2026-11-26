@@ -389,6 +389,25 @@ def test_missing_carrier_slot_warns_and_exits_0(tmp_path):
     assert "carrier" in result.stdout
 
 
+def test_skipped_check_exits_1_when_the_update_tree_is_declared(tmp_path, rig):
+    inp, _ = rig
+    ota = write_manifest(tmp_path / "m-ota.json", ota=True)
+    no_tools = run(inp, ota, env={"PATH": ""})
+    assert no_tools.returncode == 1, no_tools.stdout
+    assert "fdtoverlay" in no_tools.stderr
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    no_bsp = run(bare, ota)
+    assert no_bsp.returncode == 1, no_bsp.stdout
+    assert "BSP directory" in no_bsp.stderr
+    lone = tmp_path / "lone"
+    make_bsp(tmp_path, lone / "bsp")
+    no_carrier = run(lone, ota)
+    assert no_carrier.returncode == 1, no_carrier.stdout
+    assert "carrier slot" in no_carrier.stderr
+    assert not (lone / OTA).exists()
+
+
 def test_no_carrier_in_the_manifest_runs_the_stage_without_one(tmp_path):
     inp = tmp_path / "input"
     make_bsp(tmp_path, inp / "bsp")

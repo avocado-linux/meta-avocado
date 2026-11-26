@@ -147,12 +147,23 @@ def _publish(name: str, tree: Path, partition: int, input_dir: Path) -> None:
         raise
 
 
+def _skip(args: argparse.Namespace, log, reason: str) -> int:
+    """Skip the check with a warning, or fail when the manifest declares the update tree.
+
+    With the tree declared, a skip would leave `stone bundle` to fail on a missing
+    file, or to pack a copy an earlier build left behind.
+    """
+    if read_ota_image(args.manifest_file):
+        raise EngineError(f"{reason}, and the manifest declares the device-tree update image that this check writes")
+    log(f"WARNING: {reason}; the boot overlay check is skipped")
+    return 0
+
+
 def check(args: argparse.Namespace, log=print) -> int:
     """Run the check; return the process exit status."""
     missing = [tool for tool in _TOOLS if shutil.which(tool) is None]
     if missing:
-        log(f"WARNING: {' and '.join(missing)} not found; the boot overlay check is skipped")
-        return 0
+        return _skip(args, log, f"{' and '.join(missing)} not found")
 
     roots = [r for r in args.include_paths.split(":") if r] + [args.input_dir]
     if args.sdk_stone_dir:
@@ -160,17 +171,12 @@ def check(args: argparse.Namespace, log=print) -> int:
     man = read_manifest(args.manifest_file)
     bsp = _resolve_dir(man.tegraflash_bsp, roots) if man.tegraflash_bsp else None
     if bsp is None:
-        log("WARNING: the BSP directory named by the manifest was not found; the boot overlay check is skipped")
-        return 0
+        return _skip(args, log, "the BSP directory named by the manifest was not found")
     carrier = None
     if man.tegraflash_carrier_bsp:
         carrier = _resolve_dir(man.tegraflash_carrier_bsp, roots)
         if carrier is None:
-            log(
-                f"WARNING: the carrier slot {man.tegraflash_carrier_bsp} was not found; "
-                "the boot overlay check is skipped"
-            )
-            return 0
+            return _skip(args, log, f"the carrier slot {man.tegraflash_carrier_bsp} was not found")
 
     with tempfile.TemporaryDirectory(prefix="avocado-buildcheck-") as tmp:
         view, stock, flashed = _scratch(Path(tmp), bsp, carrier)
