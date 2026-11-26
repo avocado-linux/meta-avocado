@@ -796,7 +796,9 @@ sign_binaries_t234() {
     fi
     create_rcm_boot_script
   else
-    return 1
+    # The helper's own status, so 3 (the board did not answer the board-info
+    # read) reaches report_t234_step_failure.
+    return $?
   fi
   if ! copy_bootloader_files_t234 bootloader_staging; then
     return 1
@@ -841,6 +843,57 @@ run_rcm_boot_t234() {
   fi
   report_rcm_boot_failure
   return 1
+}
+
+# Say what failed in the T234 flow, then show the end of the flash log: the real
+# error otherwise stays in log.initrd-flash.* and the terminal shows only a
+# generic step failure. $1 is "sign" or "rcm-boot", $2 the failed step's status.
+# Status 3 from the signing step is the flash helper's "board did not answer the
+# board-info read", which is not a signing failure.
+report_t234_step_failure() {
+  local step="$1" status="$2" tail_lines
+  # Read the tail before the ERR line is appended, so it shows the flash output.
+  # ASCII control characters other than tab and newline are dropped, ESC among
+  # them: the log carries board EEPROM fields verbatim, and an escape sequence in
+  # one must not drive the operator's terminal. Bytes of 0x80 and above are kept,
+  # since they are part of UTF-8 text, so C1 controls (U+009B) pass; the helper's
+  # own stderr reaches the terminal unfiltered as well.
+  tail_lines=$(tail -n 40 "$logfile" 2>/dev/null | LC_ALL=C tr -d '\000-\010\013-\037\177')
+  case "$step:$status" in
+    sign:3)
+      echo "ERR: device not responding in recovery mode (RCM) at $(date -Is): it did not answer the board-info read; power it off and enter recovery mode from cold, then retry" | tee -a "$logfile"
+      ;;
+    sign:*)
+      echo "ERR: signing failed at $(date -Is)" | tee -a "$logfile"
+      ;;
+    *)
+      echo "ERR: RCM boot failed at $(date -Is)" | tee -a "$logfile"
+      ;;
+  esac
+  {
+    echo "== Last 40 lines of the flash log $logfile =="
+    printf '%s\n' "$tail_lines"
+  } >&2
+}
+
+# Run one T234 step with its stdout in the flash log and its stderr on the
+# terminal. A failure is reported with the step's own status and ends the run.
+# The status is taken with `||`: after `if !` it is always 0, and status 3 would
+# never reach the report. $1 is "sign" or "rcm-boot".
+run_t234_step() {
+  local step="$1" rc=0
+  # shellcheck disable=SC2069
+  case "$step" in
+    sign) sign_binaries_t234 2>&1 >>"$logfile" || rc=$? ;;
+    rcm-boot) run_rcm_boot_t234 2>&1 >>"$logfile" || rc=$? ;;
+    *)
+      echo "ERR: unknown T234 step: $step" >&2
+      exit 1
+      ;;
+  esac
+  [ "$rc" -eq 0 ] && return 0
+  report_t234_step_failure "$step" "$rc"
+  exit 1
 }
 
 copy_bootloader_files_t234() {
@@ -1315,12 +1368,7 @@ if [ "$CHIPID" = "0x23" ]; then
   step_banner "Signing binaries"
   rm -rf bootloader_staging
   mkdir bootloader_staging
-  # Log stdout but keep stderr on the terminal.
-  # shellcheck disable=SC2069
-  if ! sign_binaries_t234 2>&1 >>"$logfile"; then
-    echo "ERR: signing failed at $(date -Is)" | tee -a "$logfile"
-    exit 1
-  fi
+  run_t234_step sign
   if [ -z "$PRESIGNED" ]; then
     # boardvars.sh is written by the flash helper at runtime.
     # shellcheck disable=SC1091
@@ -1332,12 +1380,7 @@ if [ "$CHIPID" = "0x23" ]; then
     echo "ERR: Device not found at $(date -Is)" | tee -a "$logfile"
     exit 1
   fi
-  # Log stdout but keep stderr on the terminal.
-  # shellcheck disable=SC2069
-  if ! run_rcm_boot_t234 2>&1 >>"$logfile"; then
-    echo "ERR: RCM boot failed at $(date -Is)" | tee -a "$logfile"
-    exit 1
-  fi
+  run_t234_step rcm-boot
   # boardvars.sh is written by the flash helper at runtime.
   # shellcheck disable=SC1091
   [ ! -f ./boardvars.sh ] || . ./boardvars.sh

@@ -30,6 +30,13 @@ Before=shutdown.target initrd-switch-root.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/systemctl daemon-reload
+# A restart, not an ordering: systemd-modules-load reads modules-load.d once,
+# early, before the merge, so a confext's entries are never seen. Ordering it
+# after the merge would hold every module load behind local-fs.target, whose
+# devices appear only after coldplug and that first module pass - the same hang
+# that removed the coldplug ordering. The leading "-" keeps one missing module
+# (systemd-modules-load exits non-zero) from skipping the target restart below.
+ExecStart=-/usr/bin/systemctl restart systemd-modules-load.service
 ExecStart=/usr/bin/systemctl restart --no-block sockets.target timers.target paths.target multi-user.target
 
 [Install]

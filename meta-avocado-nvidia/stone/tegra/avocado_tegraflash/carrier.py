@@ -11,6 +11,7 @@ _FV = "CARRIER_FV_"
 _ENV = "CARRIER_ENV_"
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _UNSAFE = '"$`\\\n'
+_P3701_TREE = re.compile(r"tegra234-p3737-0000\+p3701-[0-9]{4}-nv\.dtb")
 
 
 def _strip_quotes(val: str, quotes: tuple[str, ...] = ('"', "'")) -> str:
@@ -79,7 +80,42 @@ def apply_carrier(
         return
     log(f"Carrier-BSP overlay: {source} ({count} file(s))")
     merge_tree(source, work_dir)
+    _apply_env(work_dir, log)
+    _warn_unselected_trees(source, work_dir, log)
 
+
+def _selected_tree(work_dir: str) -> str:
+    """The DTBFILE the flash will write, from the staged environment file; "" when absent."""
+    path = os.path.join(work_dir, ".env.initrd-flash")
+    if not os.path.isfile(path):
+        return ""
+    for line in read_text_preserving(path).split("\n"):
+        if line.startswith("DTBFILE="):
+            return _strip_quotes(line[len("DTBFILE=") :])
+    return ""
+
+
+def _warn_unselected_trees(source: str, work_dir: str, log: Callable[[str], None]) -> None:
+    """Warn when the carrier ships an AGX Orin kernel tree under a name the flash does not select.
+
+    The flash writes the one tree DTBFILE names. A carrier tree under another P3701
+    name, typically the old SKU 0000 stock name, is copied into the work directory and
+    never flashed, with nothing else to say so.
+    """
+    selected = os.path.basename(_selected_tree(work_dir))
+    if not selected:
+        return
+    for entry in sorted(os.scandir(source), key=lambda e: e.name):
+        shipped = entry.is_file(follow_symlinks=False) or entry.is_symlink()
+        if shipped and entry.name != selected and _P3701_TREE.fullmatch(entry.name):
+            log(
+                f"  WARNING: carrier BSP ships {entry.name}, but the flash selects {selected}; "
+                f"{entry.name} will not be flashed; shadow {selected} instead, "
+                f"or set CARRIER_ENV_DTBFILE to {entry.name} for a module of another SKU"
+            )
+
+
+def _apply_env(work_dir: str, log: Callable[[str], None]) -> None:
     carrier_env = os.path.join(work_dir, "carrier.env")
     if not os.path.isfile(carrier_env):
         return

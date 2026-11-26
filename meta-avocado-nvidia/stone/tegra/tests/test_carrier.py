@@ -342,3 +342,64 @@ def test_absolute_carrier_name_stays_inside_the_data_dir(tmp_path):
     out = []
     apply_carrier(data, str(Path(data) / SLOT), work, log=out.append)
     assert out[0].startswith("Carrier-BSP source not found:")
+
+
+# --- a stock-named tree the flash does not select must not be skipped without a warning ---
+
+OLD_TREE = "tegra234-p3737-0000+p3701-0000-nv.dtb"
+NEW_TREE = "tegra234-p3737-0000+p3701-0005-nv.dtb"
+FLASH_ENV = f'DTBFILE="{NEW_TREE}"\nROOTFS=x\n'
+
+
+def _tree_warnings(out):
+    return [line for line in out if "WARNING" in line and ".dtb" in line]
+
+
+def test_a_tree_under_the_old_stock_name_is_warned_about_naming_both_files_and_the_fix(tmp_path):
+    data, work = _setup(tmp_path, {OLD_TREE: "merged"}, initrd=FLASH_ENV)
+    (warning,) = _tree_warnings(_run(data, work))
+    assert OLD_TREE in warning and NEW_TREE in warning
+    assert "not be flashed" in warning and "shadow" in warning
+
+
+def test_a_tree_under_the_old_name_is_warned_about_even_with_a_carrier_env_that_redirects_nothing(tmp_path):
+    data, work = _setup(tmp_path, {OLD_TREE: "merged", "carrier.env": 'CARRIER_LABEL="x"\n'}, initrd=FLASH_ENV)
+    assert len(_tree_warnings(_run(data, work))) == 1
+
+
+def test_a_tree_under_the_old_name_is_warned_about_without_any_carrier_env(tmp_path):
+    data, work = _setup(tmp_path, {OLD_TREE: "merged"}, initrd=FLASH_ENV)
+    assert len(_tree_warnings(_run(data, work))) == 1
+
+
+def test_a_tree_under_the_selected_name_gets_no_warning(tmp_path):
+    data, work = _setup(tmp_path, {NEW_TREE: "merged"}, initrd=FLASH_ENV)
+    assert _tree_warnings(_run(data, work)) == []
+
+
+def test_both_names_shadowed_warns_only_about_the_unselected_one(tmp_path):
+    data, work = _setup(tmp_path, {NEW_TREE: "a", OLD_TREE: "b"}, initrd=FLASH_ENV)
+    (warning,) = _tree_warnings(_run(data, work))
+    assert f"ships {OLD_TREE}" in warning and f"ships {NEW_TREE}" not in warning
+
+
+def test_a_redirect_to_the_old_name_makes_it_the_selected_tree(tmp_path):
+    files = {OLD_TREE: "merged", "carrier.env": f'CARRIER_ENV_DTBFILE="{OLD_TREE}"\n'}
+    data, work = _setup(tmp_path, files, initrd=FLASH_ENV)
+    assert _tree_warnings(_run(data, work)) == []
+
+
+def test_a_symlinked_tree_under_the_old_name_is_warned_about_too(tmp_path):
+    data, work = _setup(tmp_path, {"other.bin": "x"}, initrd=FLASH_ENV)
+    (Path(data) / SLOT / OLD_TREE).symlink_to("elsewhere.dtb")
+    assert len(_tree_warnings(_run(data, work))) == 1
+
+
+def test_a_tree_for_another_board_family_gets_no_warning(tmp_path):
+    data, work = _setup(tmp_path, {"tegra234-p3768-0000+p3767-0001-nv.dtb": "x"}, initrd=FLASH_ENV)
+    assert _tree_warnings(_run(data, work)) == []
+
+
+def test_no_selected_tree_in_the_flash_environment_gets_no_warning(tmp_path):
+    data, work = _setup(tmp_path, {OLD_TREE: "merged"})
+    assert _tree_warnings(_run(data, work)) == []

@@ -158,15 +158,28 @@ def test_erase_flags_default_false(name):
     assert getattr(cfg(), name.lower()) is False
 
 
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "True"])
 @pytest.mark.parametrize("name", ["ERASE_NVME", "ERASE_EMMC", "ERASE_ONLY"])
-def test_erase_flag_is_true_for_exactly_one(name):
-    assert getattr(cfg(**{name: "1"}), name.lower()) is True
+@pytest.mark.deviation("erase-flag-spellings")
+def test_erase_flag_is_true_for_one_or_true_in_any_case(name, value):
+    assert getattr(cfg(**{name: value}), name.lower()) is True
 
 
-@pytest.mark.parametrize("value", ["true", "0", "yes", " 1", "1 ", "01", "", "TRUE", "١"])
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", ""])
 @pytest.mark.parametrize("name", ["ERASE_NVME", "ERASE_EMMC", "ERASE_ONLY"])
-def test_erase_flag_is_false_for_anything_but_exactly_one(name, value):
+def test_erase_flag_is_false_for_zero_false_or_empty(name, value):
     assert getattr(cfg(**{name: value}), name.lower()) is False
+
+
+@pytest.mark.parametrize("value", ["yes", "on", " 1", "1 ", "01", "١"])
+@pytest.mark.parametrize("name", ["ERASE_NVME", "ERASE_EMMC", "ERASE_ONLY"])
+@pytest.mark.deviation("erase-flag-spellings")
+def test_erase_flag_refuses_any_other_value_naming_variable_and_value(name, value):
+    with pytest.raises(EngineError) as exc:
+        cfg(**{name: value})
+    assert name in str(exc.value)
+    assert repr(value) in str(exc.value)
+    assert "1, true, 0 or false" in str(exc.value)
 
 
 def test_erase_flags_are_independent():

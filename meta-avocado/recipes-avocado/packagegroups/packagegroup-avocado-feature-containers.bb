@@ -11,6 +11,7 @@ RDEPENDS:${PN} = " \
 
 CONTAINER_PACKAGES = " \
   docker \
+  docker-compose \
   podman \
   podman-compose \
   k3s \

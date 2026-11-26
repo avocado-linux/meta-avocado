@@ -147,6 +147,11 @@ jobs:
         run: |
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvme-pin-for-flash.sh
           bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-nvdd-pin-gate.sh
+      - name: Tegra T234 flash helper board-info read and flash failure report
+        shell: bash
+        run: |
+          bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-board-info-read.sh
+          bash meta-avocado-nvidia/recipes-bsp/tegra-binaries/tests/test-flash-failure-report.sh
       - name: Tegra setup-nv-boot-control ordered before the fTPM setup units
         shell: bash
         run: sh meta-avocado-nvidia/recipes-bsp/tools/tests/test-setup-nv-boot-control-order.sh

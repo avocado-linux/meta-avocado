@@ -9,3 +9,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/btrfs-tools:"
 
 SRC_URI:append:class-native = " file://0001-Fix-uid-gid-stat-for-fakeroot.patch"
+
+# oe-core leaves the zstd PACKAGECONFIG off, so the SDK's mkfs.btrfs fails with
+# "zstd support not compiled in" for a var partition declaring compression
+# 'zstd:3'.
+PACKAGECONFIG:append:class-nativesdk = " zstd"
