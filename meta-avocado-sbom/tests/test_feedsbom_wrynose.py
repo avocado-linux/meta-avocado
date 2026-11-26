@@ -89,6 +89,10 @@ ARCHS = "allarch armv8a %s x86_64" % ARCH
 FEED_NAME = "avocado-feed-jetson-orin-nano"
 KERNEL_CPE = "cpe:2.3:o:linux:linux_kernel:%s:*:*:*:*:*:*:*"
 
+EDK2_CPE = "cpe:2.3:a:tianocore:edk2:202505:*:*:*:*:*:*:*"
+OOT_CPE = "cpe:2.3:a:nvidia:jetson_linux:39.2.1:*:*:*:*:*:*:*"
+TEGRA_MCS = (("jetson-l4t", "8"), ("jetson-rt", "9"), ("jetson-l4t-rt", "a"))
+
 # The kernel's compiled sources: what create_spdx keeps of the source walk
 # under SPDX_INCLUDE_COMPILED_SOURCES. init/main.c passes the scanner's check
 # that a kernel's list is real.
@@ -348,6 +352,25 @@ class Trees:
                           build_deps=rt_build_deps, sources=COMPILED,
                           cpe=KERNEL_CPE % rt_version)
 
+    def tegra(self, alt_vex=None, run=True, alt_cpe=OOT_CPE):
+        """Jetson's nvidia-kernel-oot (CPE product jetson_linux) beside
+        edk2-firmware-tegra (edk2), both at recipe version 39.2.1, the firmware
+        with a statement about an edk2 CVE; nvidia-kernel-oot again in each of
+        three alternate multiconfigs, with alt_vex[mc] as its statements."""
+        alt_vex = alt_vex or {}
+        self.write_recipe("edk2-firmware-tegra", "39.2.1", "6" * 64, ["edk2-firmware-tegra"],
+                          vex=[("CVE-2026-2001", "Patched", "fixed-version")], cpe=EDK2_CPE)
+        self.write_recipe("nvidia-kernel-oot", "39.2.1", "7" * 64,
+                          ["nvidia-kernel-oot-base", "nv-kernel-module-x-6.18.52"], cpe=OOT_CPE)
+        for mc, h in TEGRA_MCS:
+            self.write_recipe("nvidia-kernel-oot", "39.2.1", h * 64,
+                              ["nvidia-kernel-oot-base", "nv-kernel-module-x-%s" % mc],
+                              mc=mc, vex=alt_vex.get(mc, ()), cpe=alt_cpe)
+        if run:
+            return self.run_feed_sbom(
+                mc_recipes=" ".join("%s:nvidia-kernel-oot" % mc for mc, _h in TEGRA_MCS),
+                compiled=())
+
     def run_feed_sbom(self, mc_recipes="jetson-rt:linux-yocto-rt", compiled=("linux-yocto",)):
         deploy = self.tmp / "deploy"
         feed_dir = deploy / "avocado-cve"
@@ -521,7 +544,8 @@ class RealLibTest(Trees, unittest.TestCase):
         self.assertEqual(coverage["alt_included"], [])
         self.assertEqual(coverage["alt_not_covered"], [{
             "mc": "jetson-rt", "recipe": "linux-yocto-rt",
-            "reason": "VEX overlap: linux_kernel 6.18.52 is also linux-yocto, with other statements"}])
+            "reason": "VEX overlap: linux_kernel 6.18.52 is also linux-yocto, with other "
+                      "statements on CVE-2026-1003"}])
         self.assertEqual(self.specs(document),
                          [("bc-native", "1.08.2+git"), ("busybox", "1.37.0+git"),
                           ("linux-yocto", "6.18.52+git")])
@@ -564,6 +588,62 @@ class RealLibTest(Trees, unittest.TestCase):
         self.assertEqual(coverage["alt_included"], ["jetson-l4t-rt:linux-l4t-rt"])
         entry, = coverage["alt_not_covered"]
         self.assertTrue(entry["reason"].startswith("unresolved reference: "), entry)
+
+    def test_a_native_dependency_at_the_alternate_version_is_compared_with(self):
+        # The native's recipe document comes in through busybox's link, with a
+        # statement the scanner would apply to the L4T kernel by version.
+        self.write_recipe("tool-native", "6.8.12", "1" * 64, arch="x86_64",
+                          vex=[("CVE-2026-4001", "Patched", "fixed-version")])
+        self.write_recipe("busybox", "1.37.0", "3" * 64, ["busybox"], deps=["tool-native"])
+        self.write_recipe("linux-l4t", "6.8.12", "b" * 64, ["kernel", "kernel-image-6.8.12"],
+                          mc="jetson-l4t", cpe=KERNEL_CPE % "6.8.12")
+        document, coverage = self.run_feed_sbom(mc_recipes="jetson-l4t:linux-l4t", compiled=())
+        self.assertIn(("tool-native", "6.8.12+git"), self.specs(document))
+        self.assertEqual(coverage["alt_included"], [])
+        self.assertEqual(coverage["alt_not_covered"], [{
+            "mc": "jetson-l4t", "recipe": "linux-l4t",
+            "reason": "VEX overlap: 6.8.12 is also tool-native, with other statements "
+                      "on CVE-2026-4001"}])
+
+    def test_a_statement_of_an_alternate_left_out_this_pass_is_not_compared_with(self):
+        # The first alternate goes on an unresolved link and carries a
+        # statement the second lacks; its documents are still in this pass's
+        # assembly, and must not leave the second out.
+        self.jetson(rt_vex=[])
+        self.write_recipe("l4t-only-native", "1.0", "a" * 64, mc="jetson-l4t", arch="x86_64")
+        for mc, pn, vex, deps in (
+                ("jetson-l4t", "linux-l4t", [("CVE-2026-1003", "Patched", "backported-patch")],
+                 [("jetson-l4t", "l4t-only-native")]),
+                ("jetson-l4t-rt", "linux-l4t-rt", [], [])):
+            self.write_recipe(pn, "6.8.12", "b" * 64, ["kernel", "kernel-image-6.8.12"],
+                              mc=mc, vex=vex, deps=deps, cpe=KERNEL_CPE % "6.8.12")
+        _document, coverage = self.run_feed_sbom(
+            mc_recipes="jetson-l4t:linux-l4t jetson-l4t-rt:linux-l4t-rt")
+        self.assertEqual(coverage["alt_included"], ["jetson-l4t-rt:linux-l4t-rt"])
+        entry, = coverage["alt_not_covered"]
+        self.assertTrue(entry["reason"].startswith("unresolved reference: "), entry)
+
+    def test_a_dependency_of_an_alternate_left_out_this_pass_is_not_compared_with(self):
+        # Two alternates of one recipe and version. The first goes on an
+        # unresolved link and alone links to a native at that version with a
+        # statement; the native's documents come in with it, and must not
+        # leave the second out.
+        self.write_recipe("busybox", "1.37.0", "3" * 64, ["busybox"])
+        self.write_recipe("tool-native", "6.8.12", "1" * 64, arch="x86_64",
+                          vex=[("CVE-2026-4001", "Patched", "fixed-version")])
+        self.write_recipe("l4t-only-native", "1.0", "a" * 64, mc="jetson-l4t", arch="x86_64")
+        for mc, h, deps in (("jetson-l4t", "b", [("", "tool-native"),
+                                                 ("jetson-l4t", "l4t-only-native")]),
+                            ("jetson-l4t-rt", "c", [])):
+            self.write_recipe("linux-l4t", "6.8.12", h * 64, ["kernel", "kernel-image-6.8.12"],
+                              mc=mc, deps=deps, cpe=KERNEL_CPE % "6.8.12")
+        document, coverage = self.run_feed_sbom(
+            mc_recipes="jetson-l4t:linux-l4t jetson-l4t-rt:linux-l4t", compiled=())
+        self.assertEqual(coverage["alt_included"], ["jetson-l4t-rt:linux-l4t"])
+        entry, = coverage["alt_not_covered"]
+        self.assertEqual(entry["mc"], "jetson-l4t")
+        self.assertTrue(entry["reason"].startswith("unresolved reference: "), entry)
+        self.assertNotIn("tool-native", [name for name, _v in self.specs(document)])
 
     def test_an_alternate_without_its_build_document_is_left_out(self):
         # Its package would otherwise find the default kernel's build under
@@ -682,6 +762,70 @@ class RealLibTest(Trees, unittest.TestCase):
         with self.assertRaises(Fatal) as cm:
             self.run_feed_sbom(mc_recipes="")
         self.assertIn("refers to 1 identifier(s)", str(cm.exception))
+        # Named by the recipe whose document is missing.
+        self.assertIn("belong to the documents of gone-native,", str(cm.exception))
+
+    def test_alias_recipe_reads_the_pn_of_an_oe_core_alias(self):
+        self.write_recipe("jsoncpp-native", "1.9.6", "1" * 64, arch="x86_64")
+        for kind in ("recipe", "build"):
+            with self.subTest(kind=kind):
+                self.assertEqual(spdxalias.alias_recipe(self.link("", "jsoncpp-native", kind)),
+                                 "jsoncpp-native")
+
+    # --- Every SPDX document the feed document links to ---------------------
+
+    def test_the_feed_asks_for_the_spdx_tasks_oe_core_asks_for_an_image(self):
+        # OE-Core's sstate restores these only for a task that runs
+        # (setscene_depvalid's direct-only tasks); its image SBOM task makes
+        # them recursive dependencies. The feed asks for the same set, split:
+        # recipe-level documents over the feed targets' graph (do_feed_sbom),
+        # builds over the graph of the kernels whose builds it carries
+        # (do_feed_builds).
+        meta = wrynose_lib().parent
+        image = (meta / "classes-recipe" / "create-spdx-image-3.0.bbclass").read_text()
+        oe_tasks = re.search(r'^do_create_image_sbom_spdx\[recrdeptask\] \+= "([^"]*)"',
+                             image, re.M).group(1).split()
+        text = RECIPE.read_text()
+        recipe_level = re.search(r'appendVarFlag\("do_feed_sbom", "recrdeptask",\s*" ([^"]*)"\)',
+                                 text).group(1).split()
+        builds = re.findall(r'"(do_\w+)"', re.search(r"build_tasks = \(([^)]*)\)", text).group(1))
+        self.assertEqual(recipe_level, ["do_create_recipe_spdx"])
+        self.assertEqual(sorted(recipe_level + builds), sorted(oe_tasks))
+        sstate = (meta / "classes-global" / "sstate.bbclass").read_text()
+        direct = re.search(r"directtasks = \[(.*?)\]", sstate).group(1)
+        for task in ("do_create_recipe_spdx", "do_create_spdx"):
+            self.assertIn('"%s"' % task, direct)
+
+    # --- A module recipe beside firmware of its version (Jetson) -------------
+
+    def test_every_alternate_module_recipe_stays_beside_firmware_of_its_version(self):
+        _document, coverage = self.tegra()
+        self.assertEqual(coverage["alt_included"], [
+            "jetson-l4t:nvidia-kernel-oot", "jetson-rt:nvidia-kernel-oot",
+            "jetson-l4t-rt:nvidia-kernel-oot"])
+        self.assertEqual(coverage["alt_not_covered"], [])
+
+    def test_another_cpe_vendor_is_no_twin(self):
+        # One product name, but a vendor wildcard the scanner matches more
+        # widely with: judged on its own, it shares a version with the firmware.
+        _document, coverage = self.tegra(
+            alt_cpe="cpe:2.3:a:*:jetson_linux:39.2.1:*:*:*:*:*:*:*")
+        self.assertEqual(coverage["alt_included"], [])
+        self.assertEqual({e["reason"] for e in coverage["alt_not_covered"]}, {
+            "VEX overlap: 39.2.1+git is also edk2-firmware-tegra, with other "
+            "statements on CVE-2026-2001"})
+
+    def test_a_statement_about_the_firmware_cve_on_the_module_recipe_is_an_overlap(self):
+        # Both now carry a statement about CVE-2026-2001, each naming its own
+        # product, so the scanner matches the CVE to both.
+        _document, coverage = self.tegra(
+            alt_vex={"jetson-rt": [("CVE-2026-2001", "Ignored", "cpe-incorrect")]})
+        self.assertEqual(coverage["alt_included"], [
+            "jetson-l4t:nvidia-kernel-oot", "jetson-l4t-rt:nvidia-kernel-oot"])
+        self.assertEqual(coverage["alt_not_covered"], [{
+            "mc": "jetson-rt", "recipe": "nvidia-kernel-oot",
+            "reason": "VEX overlap: 39.2.1+git is also edk2-firmware-tegra, with other "
+                      "statements on CVE-2026-2001"}])
 
 
 def scanner():
@@ -689,12 +833,21 @@ def scanner():
     return tool if tool and os.access(tool, os.X_OK) else None
 
 
-def cve_record(cve, program_files=(), less_than="6.18.99"):
-    """A cvelistV5 record: linux_kernel below less_than affected, its fix in
-    program_files."""
+def cve_record(cve, program_files=(), less_than="6.18.99",
+               cpe="cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*", also=()):
+    """A cvelistV5 record: cpe's product (linux_kernel) below less_than
+    affected, its fix in program_files; also holds further (cpe, less_than)."""
+    record = _cve_record(cve, program_files, less_than, cpe)
+    for other_cpe, other_less_than in also:
+        record["containers"]["cna"]["affected"] += _cve_record(
+            cve, (), other_less_than, other_cpe)["containers"]["cna"]["affected"]
+    return record
+
+
+def _cve_record(cve, program_files, less_than, cpe):
     affected = {
-        "vendor": "Linux", "product": "Linux",
-        "cpes": ["cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"],
+        "vendor": cpe.split(":")[3], "product": cpe.split(":")[4],
+        "cpes": [cpe],
         "defaultStatus": "unaffected",
         "versions": [{"version": "0", "lessThan": less_than, "status": "affected",
                       "versionType": "semver"}],
@@ -726,13 +879,13 @@ class ScanTest(Trees, unittest.TestCase):
                ("CVE-2026-1002", ["kernel/fork.c"]),
                ("CVE-2026-1003", []))
 
-    def scan(self, records=None, by_version=False):
+    def scan(self, records=None, by_version=False, entries=False):
         db = self.top / "cvelist"
-        for cve, files in records or self.RECORDS:
+        for cve, files, *extra in records or self.RECORDS:
             year, number = cve.split("-")[1:]
             path = db / "cves" / year / (number[:-3] + "xxx") / (cve + ".json")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(cve_record(cve, files)))
+            path.write_text(json.dumps(cve_record(cve, files, **(extra[0] if extra else {}))))
         git = ["git", "-C", str(db), "-c", "user.name=t", "-c", "user.email=t@t",
                "-c", "commit.gpgsign=false"]
         subprocess.run(git[:3] + ["init", "-q"], check=True)
@@ -748,10 +901,13 @@ class ScanTest(Trees, unittest.TestCase):
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             env=dict(os.environ, SBOM_CVE_CHECK_DATABASES_DIR=str(self.top / "dbs")))
         result = {}
+        listed = []
         for entry in json.loads(out.read_text())["package"]:
+            issues = {i["id"]: (i["status"], i.get("detail")) for i in entry["issue"]}
+            listed.append((entry["name"], entry["version"], issues))
             key = (entry["name"], entry["version"]) if by_version else entry["name"]
-            result[key] = {i["id"]: (i["status"], i.get("detail")) for i in entry["issue"]}
-        return result
+            result[key] = issues
+        return listed if entries else result
 
     # Raspberry Pi: one recipe at two versions, both listing compiled sources,
     # and two CVEs, each fixed in a file only one of the two compiles.
@@ -840,6 +996,75 @@ class ScanTest(Trees, unittest.TestCase):
             self.assertEqual(result[kernel]["CVE-2026-1003"][0], "Unpatched")
         self.assertEqual(result["linux-yocto"]["CVE-2026-1001"][0], "Ignored")
         self.assertEqual(result["linux-yocto-rt"]["CVE-2026-1001"][0], "Unpatched")
+
+    # Jetson: an edk2 CVE the firmware has a statement about, and a
+    # jetson_linux CVE nothing does.
+    TEGRA_RECORDS = (
+        ("CVE-2026-2001", [], {"cpe": "cpe:2.3:a:tianocore:edk2:*:*:*:*:*:*:*:*",
+                               "less_than": "202599"}),
+        ("CVE-2026-2002", [], {"cpe": "cpe:2.3:a:nvidia:jetson_linux:*:*:*:*:*:*:*:*",
+                               "less_than": "39.9.9"}))
+
+    BOTH_SIDES = {"jetson-rt": [("CVE-2026-2001", "Ignored", "cpe-incorrect")]}
+
+    def tegra_scan(self, alt_vex=None, bypass=False):
+        if bypass:
+            real = feedsbom.drop_vex_overlap
+            feedsbom.drop_vex_overlap = lambda included, alt, default: (included, [])
+            self.addCleanup(setattr, feedsbom, "drop_vex_overlap", real)
+        _document, coverage = self.tegra(alt_vex=alt_vex)
+        listed = self.scan(self.TEGRA_RECORDS, entries=True)
+        oot = [issues for name, _v, issues in listed if name == "nvidia-kernel-oot"]
+        firmware, = [issues for name, _v, issues in listed if name == "edk2-firmware-tegra"]
+        return coverage, oot, firmware
+
+    def test_the_firmware_statement_never_reaches_the_module_recipe(self):
+        coverage, oot, firmware = self.tegra_scan()
+        self.assertEqual(len(coverage["alt_included"]), 3)
+        self.assertEqual(firmware["CVE-2026-2001"][0], "Patched")
+        # One build per multiconfig, each matched to the jetson_linux CVE only.
+        self.assertEqual(len(oot), 4)
+        for issues in oot:
+            self.assertNotIn("CVE-2026-2001", issues)
+            self.assertEqual(issues["CVE-2026-2002"][0], "Unpatched")
+
+    def test_a_record_naming_both_products_reaches_every_module_build_alike(self):
+        # The scanner gives the firmware's fix to every nvidia-kernel-oot build
+        # once a record names jetson_linux too; the alternates stay because
+        # their twin, the default build, gets exactly the same.
+        records = ((self.TEGRA_RECORDS[0][0], [],
+                    dict(self.TEGRA_RECORDS[0][2],
+                         also=[("cpe:2.3:a:nvidia:jetson_linux:*:*:*:*:*:*:*:*", "39.9.9")])),
+                   self.TEGRA_RECORDS[1])
+        _document, coverage = self.tegra()
+        self.assertEqual(len(coverage["alt_included"]), 3)
+        listed = self.scan(records, entries=True)
+        oot = [issues for name, _v, issues in listed if name == "nvidia-kernel-oot"]
+        self.assertEqual(len(oot), 4)
+        self.assertEqual(oot[0]["CVE-2026-2001"][0], "Patched")
+        self.assertEqual(oot, [oot[0]] * 4)
+
+    def test_without_the_check_the_scanner_still_keeps_them_apart(self):
+        # What makes the narrower check safe: version alone does not carry a
+        # statement to a build the CVE is not matched to.
+        _coverage, oot, _firmware = self.tegra_scan(bypass=True)
+        self.assertEqual(len(oot), 4)
+        for issues in oot:
+            self.assertNotIn("CVE-2026-2001", issues)
+
+    def test_a_statement_on_both_sides_carries_the_firmware_status_to_every_module(self):
+        # What the check still prevents: with the module recipe's own
+        # statement about the firmware CVE left in, the scanner matches that CVE
+        # to every nvidia-kernel-oot build and the firmware's fix wins.
+        _coverage, oot, _firmware = self.tegra_scan(alt_vex=self.BOTH_SIDES, bypass=True)
+        self.assertEqual([issues["CVE-2026-2001"][0] for issues in oot], ["Patched"] * 4)
+
+    def test_with_the_check_that_module_build_is_left_out_and_nothing_leaks(self):
+        coverage, oot, _firmware = self.tegra_scan(alt_vex=self.BOTH_SIDES)
+        self.assertEqual([e["mc"] for e in coverage["alt_not_covered"]], ["jetson-rt"])
+        self.assertEqual(len(oot), 3)
+        for issues in oot:
+            self.assertNotIn("CVE-2026-2001", issues)
 
 
 if __name__ == "__main__":

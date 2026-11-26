@@ -76,6 +76,19 @@ def multiconfig_map(doc_aliases, mc):
     return mapping
 
 
+def alias_recipe(identifier):
+    """The PN whose document gave an element its alias, or None when the
+    identifier is not an element alias.
+
+    oe.sbom30.ObjectSet.new_alias_id puts the PN right after the prefix:
+    <ALIAS_PREFIX><hash>/<PN>/UNIHASH/<element>.
+    """
+    if not isinstance(identifier, str) or not identifier.startswith(ALIAS_PREFIX):
+        return None
+    parts = identifier[len(ALIAS_PREFIX):].split("/")
+    return parts[1] if len(parts) > 2 and parts[1] else None
+
+
 def remap(value, mapping):
     """value with every string mapping names rewritten: a whole document alias,
     or an element alias by its prefix. Everything else is returned as it is.

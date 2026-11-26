@@ -235,6 +235,124 @@ class MergeListTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.listed()
 
+JETSON_MCS = (("jetson-l4t", "linux-noble-nvidia-tegra", "6.8.12-l4t"),
+              ("jetson-rt", "linux-yocto-rt", "6.18.52-rt6-yocto-preempt-rt"),
+              ("jetson-l4t-rt", "linux-noble-nvidia-tegra-rt", "6.8.12-l4t-rt"))
+JETSON_MC_RECIPES = " ".join("%s:%s %s:%s" % (mc, kernel, mc, OOT)
+                             for mc, kernel, _k in JETSON_MCS)
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash not installed")
+class ThreeAlternatesTests(unittest.TestCase):
+    """Jetson: three alternate multiconfigs each build nvidia-kernel-oot against
+    their own kernel, beside the default multiconfig's. Its packages carry the
+    kernel version in some names and not in others (nvidia-kernel-oot-base)."""
+
+    def setUp(self):
+        self.top = tempfile.mkdtemp(prefix="avocado-multikernel-3-")
+        self.addCleanup(shutil.rmtree, self.top, ignore_errors=True)
+        self.deploy = os.path.join(self.top, "tmp", "deploy")
+        self.feed = os.path.join(self.deploy, "rpm")
+        os.makedirs(self.feed)
+
+    def write_rpm(self, rpm_dir, name, version, release, buildtime=None):
+        rel = "%s/%s-%s-%s.%s.rpm" % (ARCH, name, version, release, ARCH)
+        path = os.path.join(rpm_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(rpm_bytes(name, version, release, ARCH, buildtime=buildtime))
+        return path
+
+    def pkgdata(self, tmp, recipe, packages):
+        reverse = os.path.join(self.top, tmp, "pkgdata", "jetson", "runtime-reverse")
+        os.makedirs(reverse, exist_ok=True)
+        for name, pkgr in packages.items():
+            with open(os.path.join(reverse, name), "w") as f:
+                f.write("PN: %s\nPV: 39.2.1\nPKGV: 39.2.1\nPKGR: %s\nPKGSIZE:%s: 10\n"
+                        % (recipe, pkgr, name))
+
+    def trees(self, releases):
+        """releases: the default's nvidia-kernel-oot release, then each
+        alternate's. The same release in two trees is one NEVRA and one file
+        path, as without a PR server; the alternate's copy then has another
+        header (its build time), so which copy was read shows in the digest."""
+        default = releases[0]
+        self.write_rpm(self.feed, "nvidia-kernel-oot-base", "39.2.1", default)
+        self.write_rpm(self.feed, "nv-kernel-module-x-6.18.52", "39.2.1", default)
+        self.pkgdata("tmp", OOT, {"nvidia-kernel-oot-base": default,
+                                  "nv-kernel-module-x-6.18.52": default})
+        for i, ((mc, kernel, kver), release) in enumerate(zip(JETSON_MCS, releases[1:])):
+            base = os.path.join(self.top, "tmp-%s" % mc)
+            rpm_dir = os.path.join(base, "deploy", "rpm")
+            owned = {
+                kernel: [self.write_rpm(rpm_dir, "kernel-%s" % kver, "39.2.1", "r0")],
+                OOT: [self.write_rpm(rpm_dir, "nvidia-kernel-oot-base", "39.2.1", release,
+                                     buildtime=1001 + i),
+                      self.write_rpm(rpm_dir, "nv-kernel-module-x-%s" % kver, "39.2.1",
+                                     release)],
+            }
+            control = os.path.join(base, "sstate-control")
+            os.makedirs(control, exist_ok=True)
+            for recipe, paths in owned.items():
+                with open(os.path.join(control, "manifest-%s-%s.package_write_rpm"
+                                       % (ARCH, recipe)), "w") as f:
+                    f.write("%s/%s/\n" % (rpm_dir, ARCH))
+                    f.writelines(path + "\n" for path in paths)
+            self.pkgdata("tmp-%s" % mc, kernel, {"kernel-%s" % kver: "r0"})
+            self.pkgdata("tmp-%s" % mc, OOT, {"nvidia-kernel-oot-base": release,
+                                              "nv-kernel-module-x-%s" % kver: release})
+        script = "\n".join([
+            "set -e", "bbnote() { :; }", "bbwarn() { echo \"WARNING: $*\" >&2; }",
+            'AVOCADO_MULTIKERNEL_MC_RECIPES="%s"' % JETSON_MC_RECIPES,
+            'TOPDIR="%s"' % self.top, 'DEPLOY_DIR="%s"' % self.deploy,
+            "do_multikernel_merge() {", merge_body(), "}", "do_multikernel_merge"])
+        subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True)
+        out = os.path.join(self.deploy, "avocado-cve", "avocado-rpm-manifest.json")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        tmp = os.path.join(self.top, "tmp")
+        report_rpm_manifest({
+            "AVOCADO_CVE_SCOPE": "feed", "MACHINE": MACHINE, "DISTRO_VERSION": "2026.1",
+            "TOPDIR": self.top, "TMPDIR": tmp, "DEPLOY_DIR": self.deploy,
+            "DEPLOY_DIR_RPM": self.feed, "PKGDATA_DIR": os.path.join(tmp, "pkgdata", "jetson"),
+            "AVOCADO_RPM_MANIFEST_FILE": out, "AVOCADO_MULTIKERNEL_MC_RECIPES": JETSON_MC_RECIPES,
+        })
+        with open(out) as f:
+            doc = json.load(f)
+        self.assertEqual(rpms.check_manifest(doc), [])
+        # Each entry's digest is the header of the file the feed serves there.
+        for p in doc["packages"]:
+            served = rpms.read_rpm_header(os.path.join(self.feed, p["file"]))
+            self.assertEqual((p["sha256header"], p["epoch"], p["release"]),
+                             (served["sha256header"], served["epoch"], served["release"]))
+        return doc
+
+    @staticmethod
+    def entries(doc, name):
+        return [(p["release"], p["epoch"], p["file"]) for p in doc["packages"] if p["name"] == name]
+
+    def test_one_nevra_built_in_four_trees_is_listed_once_with_the_feed_copy(self):
+        doc = self.trees(["r0.3"] * 4)
+        self.assertEqual(self.entries(doc, "nvidia-kernel-oot-base"), [
+            ("r0.3", None, "%s/nvidia-kernel-oot-base-39.2.1-r0.3.%s.rpm" % (ARCH, ARCH))])
+        # Every published list names the default's file.
+        for mc, _kernel, _kver in JETSON_MCS:
+            self.assertIn("%s/nvidia-kernel-oot-base-39.2.1-r0.3.%s.rpm" % (ARCH, ARCH),
+                          rpms.read_merged_rpms(rpms.merged_rpms_path(self.deploy, mc)))
+        self.assertEqual(len(doc["packages"]), 1 + 4 + 3)
+
+    def test_with_a_pr_server_each_tree_has_its_own_release_and_each_file_is_listed(self):
+        doc = self.trees(["r0.6", "r0.7", "r0.8", "r0.9"])
+        self.assertEqual(self.entries(doc, "nvidia-kernel-oot-base"), [
+            (r, None, "%s/nvidia-kernel-oot-base-39.2.1-%s.%s.rpm" % (ARCH, r, ARCH))
+            for r in ("r0.6", "r0.7", "r0.8", "r0.9")])
+        # Four files, four headers: no digest repeats.
+        digests = [p["sha256header"] for p in doc["packages"]]
+        self.assertEqual(len(digests), len(set(digests)))
+        on_disk = {os.path.relpath(os.path.join(root, f), self.feed)
+                   for root, _dirs, files in os.walk(self.feed) for f in files}
+        self.assertEqual({p["file"] for p in doc["packages"]}, on_disk)
+
+
 class Data:
     def __init__(self, **values):
         self.values = values
@@ -270,21 +388,97 @@ class MergeOrderTests(unittest.TestCase):
         return d
 
     def test_feed_scope_on_a_multi_kernel_machine_reruns_the_merge(self):
-        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_MULTIKERNEL_MC_RECIPES=MC_RECIPES)
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_MULTIKERNEL_MC_RECIPES=MC_RECIPES,
+                               AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
         self.assertEqual(d.flags[("do_feed_sbom", "depends")],
                          " avocado-distro:do_multikernel_merge")
         self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
 
     def test_a_single_kernel_feed_leaves_the_merge_alone(self):
-        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed")
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
         self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
-        self.assertNotIn(("deleted", "do_rm_work_all"), d.tasks)
+
+    def test_feed_scope_asks_for_every_recipe_level_spdx_task_of_the_feed_targets(self):
+        # A recipe's documents link to its build dependencies' documents, and
+        # sstate restores those only for a task that runs. The targets' graph
+        # is read through a task that is never scheduled.
+        for mc_recipes in ("", MC_RECIPES):
+            with self.subTest(mc_recipes=mc_recipes):
+                d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                                       AVOCADO_MULTIKERNEL_MC_RECIPES=mc_recipes,
+                                       AVOCADO_FEED_SBOM_TARGETS="avocado-distro extra-feed")
+                self.assertEqual(d.flags[("do_feed_sbom", "recrdeptask")],
+                                 " do_create_recipe_spdx")
+                self.assertEqual(d.flags[("do_feed_sbom", "recideptask")], "do_feed_targets")
+                self.assertEqual(d.flags[("do_feed_targets", "depends")].split(),
+                                 ["avocado-distro:do_build", "extra-feed:do_build"])
+                self.assertEqual(d.flags[("do_feed_targets", "noexec")], "1")
+                self.assertIn(("do_feed_targets", None, None), d.tasks)
+                # Through the SPDX tasks rm_work would schedule their recipes' rm_work.
+                self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
+
+    def test_the_kernel_with_compiled_sources_brings_its_build_graph(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="avocado-distro",
+                               **{"PREFERRED_PROVIDER_virtual/kernel": "linux-yocto",
+                                  "SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto": "1"})
+        self.assertIn(("do_feed_builds", "do_feed_sbom", None), d.tasks)
+        self.assertEqual(d.flags[("do_feed_builds", "depends")].split(),
+                         ["virtual/kernel:do_create_spdx", "virtual/kernel:do_create_package_spdx"])
+        self.assertEqual(d.flags[("do_feed_builds", "recrdeptask")],
+                         " do_create_spdx do_create_package_spdx")
+        self.assertEqual(d.flags[("do_feed_builds", "noexec")], "1")
+        self.assertNotIn(("do_feed_builds", "mcdepends"), d.flags)
+        self.assertNotIn(("do_feed_sbom", "mcdepends"), d.flags)
+
+    def test_an_alternate_kernel_with_compiled_sources_brings_its_build_graph(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="avocado-distro",
+                               AVOCADO_MULTIKERNEL_MC_RECIPES=MC_RECIPES,
+                               **{"PREFERRED_PROVIDER_virtual/kernel": "linux-yocto",
+                                  "SPDX_INCLUDE_COMPILED_SOURCES:pn-%s" % KERNEL: "1"})
+        # Its own documents, on the task whose recursion already covers what
+        # the merge reaches: bitbake pools a multiconfig's mcdepends.
+        self.assertEqual(d.flags[("do_feed_sbom", "mcdepends")].split(),
+                         ["mc::%s:%s:do_create_spdx" % (MC, KERNEL),
+                          "mc::%s:%s:do_create_package_spdx" % (MC, KERNEL)])
+        self.assertNotIn(("do_feed_builds", "mcdepends"), d.flags)
+        # Its links to its build dependencies' builds resolve in the default
+        # tree, so the default kernel's build graph comes instead.
+        self.assertEqual(d.flags[("do_feed_builds", "depends")].split(),
+                         ["virtual/kernel:do_create_spdx", "virtual/kernel:do_create_package_spdx"])
+
+    def test_the_kernel_preferred_through_preferred_providers(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="avocado-distro",
+                               PREFERRED_PROVIDERS="virtual/bootloader:u-boot virtual/kernel:linux-yocto",
+                               **{"SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto": "1"})
+        self.assertEqual(d.flags[("do_feed_builds", "depends")].split(),
+                         ["virtual/kernel:do_create_spdx", "virtual/kernel:do_create_package_spdx"])
+
+    def test_no_kernel_with_compiled_sources_adds_no_build_task(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="avocado-distro",
+                               AVOCADO_MULTIKERNEL_MC_RECIPES=MC_RECIPES,
+                               **{"PREFERRED_PROVIDER_virtual/kernel": "linux-yocto"})
+        self.assertFalse([t for t in d.tasks if t[0] == "do_feed_builds"])
+        self.assertFalse([f for f in d.flags if f[0] == "do_feed_builds"])
+
+    def test_no_feed_target_asks_for_nothing_beyond_this_recipe(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="",
+                               **{"PREFERRED_PROVIDER_virtual/kernel": "linux-yocto",
+                                  "SPDX_INCLUDE_COMPILED_SOURCES": "1"})
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+        self.assertNotIn(("do_feed_sbom", "recrdeptask"), d.flags)
+        self.assertFalse([t for t in d.tasks if t[0] in ("do_feed_targets", "do_feed_builds")])
 
     def test_image_scope_leaves_the_merge_alone(self):
         d = self.run_anonymous(AVOCADO_CVE_SCOPE="image", AVOCADO_CVE_IMAGE="x",
-                               AVOCADO_MULTIKERNEL_MC_RECIPES=MC_RECIPES)
+                               AVOCADO_MULTIKERNEL_MC_RECIPES=MC_RECIPES,
+                               AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
         self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+        self.assertNotIn(("do_feed_sbom", "recrdeptask"), d.flags)
         self.assertEqual(d.tasks, [])
+
+    def test_the_default_feed_target_is_avocado_distro(self):
+        with open(REPORT_BB) as f:
+            self.assertRegex(f.read(), r'(?m)^AVOCADO_FEED_SBOM_TARGETS \?= "avocado-distro"$')
 
 if __name__ == "__main__":
     unittest.main()

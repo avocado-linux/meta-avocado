@@ -277,25 +277,52 @@ def drop_wrong_reference(included, wrong):
     return kept, not_covered
 
 
-def vex_overlap(build, other):
-    """(product or None, version) build and other both claim, or None, when
-    their statements differ. Each is a dict with "products", "versions" and
-    "statements" sets.
+def _statements_by_cve(statements):
+    by_cve = {}
+    for statement in statements:
+        by_cve.setdefault(statement[0], set()).add(statement)
+    return by_cve
 
-    sbom-cve-check 1.4.0 applies a VEX statement in the scanned document to every
+
+def vex_overlap(build, other):
+    """(product or None, version, CVE): a version build and other share and
+    the first CVE their statements differ on, or None. Each is a dict with
+    "products", "versions" and "statements" sets; a statement is a tuple whose
+    first item is its CVE.
+
+    sbom-cve-check 1.4.0 applies a VEX statement in the scanned document to a
     build whose version equals the version of the package the statement is
-    about, whatever build that package belongs to and whatever its product
-    (database/annot_utils.py checks the version before any CPE). Two builds at
-    one version therefore get each other's statements for any CVE both are
-    matched to: harmless when they carry the same ones, wrong when they do not.
+    about, whatever build that package belongs to (database/annot_utils.py
+    checks the version before any CPE), for each CVE it matched to that build.
+    Which CVEs those are depends on the records, which change between rescans
+    and can name two products at once, and on the scanner's product aliases,
+    so a differing statement at a shared version is never ruled harmless here.
     """
-    if build["statements"] == other["statements"]:
-        return None
     versions = build["versions"] & other["versions"]
     if not versions:
         return None
-    products = build["products"] & other["products"]
-    return (min(products) if products else None), min(versions)
+    mine = _statements_by_cve(build["statements"])
+    theirs = _statements_by_cve(other["statements"])
+    for cve in sorted(set(mine) | set(theirs)):
+        if mine.get(cve, set()) != theirs.get(cve, set()):
+            products = build["products"] & other["products"]
+            return (min(products) if products else None), min(versions), cve
+    return None
+
+
+def vex_twin(build, default_builds):
+    """Whether a default build has build's products, versions and statements,
+    and whatever else its dict carries: the recipe task gives the full CPEs
+    and the package version too, since the scanner matches on vendor and part
+    as well, and on the package version before any CPE.
+
+    The scanner then treats the two alike: whatever statement build would give
+    another build, or take from it, the default build already gives or takes,
+    so leaving build in changes no result in the document. On Jetson each
+    alternate multiconfig's nvidia-kernel-oot is the default one's twin, and it
+    shares only a version number with edk2-firmware-tegra.
+    """
+    return any(build == other for other in default_builds.values())
 
 
 def drop_vex_overlap(included, alt_builds, default_builds):
@@ -303,9 +330,10 @@ def drop_vex_overlap(included, alt_builds, default_builds):
     an alternate build's VEX statements with another build's.
 
     alt_builds maps alt_label(mc, recipe) to that build's dict (see
-    vex_overlap); default_builds maps a default recipe to its dict. Each
-    alternate is compared with every default build and with every alternate
-    kept before it, so of two alternates that overlap the first one stays.
+    vex_overlap); default_builds maps a default recipe to its dict. An
+    alternate with a twin among the default builds (vex_twin) stays. Any other
+    is compared with every default build and with every alternate kept before
+    it, so of two alternates that overlap the first one stays.
     """
     kept = []
     not_covered = []
@@ -314,20 +342,20 @@ def drop_vex_overlap(included, alt_builds, default_builds):
         label = alt_label(mc, recipe)
         build = alt_builds.get(label)
         found = None
-        if build is not None:
+        if build is not None and not vex_twin(build, default_builds):
             for name, other in others:
                 overlap = vex_overlap(build, other)
                 if overlap:
                     found = (name, overlap)
                     break
         if found:
-            name, (product, version) = found
+            name, (product, version, cve) = found
             not_covered.append(
                 {
                     "mc": mc,
                     "recipe": recipe,
-                    "reason": "VEX overlap: %s is also %s, with other statements"
-                    % (" ".join(p for p in (product, version) if p), name),
+                    "reason": "VEX overlap: %s is also %s, with other statements on %s"
+                    % (" ".join(p for p in (product, version) if p), name, cve),
                 }
             )
             continue
