@@ -1,4 +1,4 @@
-"""`avocado-flash` launcher entry (opt-in, AVOCADO_FLASH_LAUNCHER=1).
+"""`avocado-flash` launcher entry (the route for sd, emmc, ums and nvme).
 
     main(argv, resolved) -> exit status
 
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +48,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--stale-ok", action="store_true")
     ap.add_argument("-y", "--assume-yes", action="store_true")
     ap.add_argument("--workdir", type=Path)
-    # Accepted so a shared command line parses; fuse-srk and ums read them in avocado-flash.
+    # Accepted so a shared command line parses; fuse-srk reads them in avocado-flash, ums here.
     ap.add_argument("-p", "--port", default="/dev/ttyACM0")
     ap.add_argument("-k", "--keys", type=Path)
     ap.add_argument("--key-type")
@@ -96,9 +97,29 @@ def _context(resolved: Resolved, args) -> RunContext:
     )
 
 
+def _refuse_mounted(device: str) -> None:
+    """Refuse a target with anything mounted on it, dry runs included.
+
+    The sd profiles unmount the target after the confirmation, which -y skips, so
+    a stale device path naming a mounted disk would be unmounted and erased. The
+    operator unmounts; this never does. A failing lsblk refuses rather than
+    reading as "nothing is mounted".
+    """
+    try:
+        proc = subprocess.run(["lsblk", "-nro", "MOUNTPOINT", device], capture_output=True, text=True)
+    except OSError:
+        proc = None
+    if proc is None or proc.returncode != 0:
+        raise LauncherError(f"refusing {device}: cannot read its mount state (lsblk failed)")
+    if any(line.strip() for line in proc.stdout.splitlines()):
+        raise LauncherError(f"refusing {device}: it has mounted partitions; unmount them and run again")
+
+
 def _provision(resolved: Resolved, opts: LaunchOpts, args) -> int:
     # The bmaptool refusal precedes every other piece of work, manifest reading included.
     build_run_env(opts, {}, map_profile(opts.medium, opts.boot_media))
+    if opts.medium == "sd":
+        _refuse_mounted(opts.device)
     return run_stone(opts, _context(resolved, args))
 
 
@@ -121,7 +142,7 @@ def route_ums(resolved: Resolved, args, host=None) -> int:
     # Refusals that need no board come before the export is started.
     build_run_env(opts, {}, map_profile("ums"))
     ctx = _context(resolved, args)
-    with ums_session(host, args.port, args.usb_controller, args.ums_dev) as disk:
+    with ums_session(host, args.port, args.usb_controller, args.ums_dev, interrupt=args.interrupt) as disk:
         opts.exported_device = disk
         return run_stone(opts, ctx)
 
@@ -148,7 +169,21 @@ def _nvme_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _manifest_rcm_ids(manifest: dict) -> list:
+    rootdisk = (manifest.get("storage_devices") or {}).get("rootdisk") or {}
+    return (rootdisk.get("tegraflash") or {}).get("rcm_ids") or []
+
+
 def route_nvme(resolved: Resolved, args) -> int:
+    ctx = _context(resolved, args)
+    # The engine only refuses an unattended run with no id; interactively it accepts a
+    # retype of whatever board is in recovery, which cannot tell one Jetson from another.
+    if not args.dry_run and not args.rcm_id and not _manifest_rcm_ids(ctx.manifest):
+        raise LauncherError(
+            f"no recovery-mode USB id is recorded for {resolved.machine}: the manifest has no "
+            "tegraflash.rcm_ids, so the board in recovery cannot be checked against the image.\n"
+            "Pass the board's id with --rcm-id vvvv:pppp (lsusb shows it in recovery mode)."
+        )
     opts = LaunchOpts(
         medium="nvme",
         assume_yes=args.assume_yes,
@@ -164,7 +199,7 @@ def route_nvme(resolved: Resolved, args) -> int:
         if "kept:" in message:
             kept.append(message.rsplit("kept:", 1)[1].strip())
 
-    rc = run_stone(opts, _context(resolved, args), out=out)
+    rc = run_stone(opts, ctx, out=out)
     if rc == 0:
         if opts.dry_run:
             print("dry run: stone prepared the inputs only; the board was not contacted")

@@ -5,8 +5,9 @@
 
 `host` is the console driver avocado-flash already holds, passed in rather than
 copied (the script has no .py extension and cannot be imported): UBoot,
-interrupt_to_uboot, ums_expose, ums_release, block_devices, and optionally
-usb_gadget_present. The session adds the launcher's contract on top of it:
+interrupt_to_uboot, wait_for_uboot, ums_expose, ums_release, block_devices, and
+optionally usb_gadget_present. Only `interrupt=True` (--interrupt) reboots the
+board to catch U-Boot; otherwise the board must already sit at a U-Boot prompt. The session adds the launcher's contract on top of it:
 a stale export is stopped before the first listing, the exported disk is the
 single whole disk absent from the earlier listing, and the export is released
 on every exit once it was started - and never otherwise.
@@ -65,9 +66,13 @@ def ums_session(
     sleep=time.sleep,
     clock=time.monotonic,
     stale_wait=15.0,
+    interrupt=False,
 ):
     ub = host.UBoot(port)
-    host.interrupt_to_uboot(ub)
+    if interrupt:
+        host.interrupt_to_uboot(ub)
+    else:
+        host.wait_for_uboot(ub)
     _stop_stale_export(host, ub, log, sleep, clock, stale_wait)
 
     before = _whole_disks(host.block_devices())

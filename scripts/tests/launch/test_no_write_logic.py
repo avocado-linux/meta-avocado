@@ -117,7 +117,7 @@ def violations(rows, launcher_pid, expected, t=None):
 
 def launcher_run(t, argv_tail, nvme=False):
     """Run the real avocado-flash entry; return the pid of the launcher process."""
-    env = {"PATH": f"{t.bin}:/usr/bin:/bin", "HOME": str(t.tmp), "AVOCADO_FLASH_LAUNCHER": "1"}
+    env = {"PATH": f"{t.bin}:/usr/bin:/bin", "HOME": str(t.tmp)}
     from test_launcher_cli import SCRIPT
 
     head = [sys.executable, str(SCRIPT)]

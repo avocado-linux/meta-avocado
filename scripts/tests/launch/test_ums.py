@@ -26,6 +26,9 @@ class FakeHost:
     def interrupt_to_uboot(self, ub):
         self.calls.append(("interrupt", ub))
 
+    def wait_for_uboot(self, ub):
+        self.calls.append(("wait", ub))
+
     def ums_release(self, ub, quiet=False):
         self.calls.append(("release", quiet))
         if not self.stale_stays:
@@ -62,12 +65,26 @@ def test_one_new_disk_is_yielded_and_released():
     assert run(host) == "/dev/sdb"
     assert host.calls == [
         ("UBoot", "/dev/ttyACM0"),
-        ("interrupt", "ub"),
+        ("wait", "ub"),
         ("listing",),
         ("expose", 0, "mmc1"),
         ("listing",),
         ("release", False),
     ]
+
+
+def test_without_interrupt_the_board_is_never_rebooted():
+    host = FakeHost({"sda"}, {"sda", "sdb"})
+    run(host)
+    assert "interrupt" not in names(host)
+    assert names(host)[:2] == ["UBoot", "wait"]
+
+
+def test_interrupt_reboots_to_uboot_instead_of_waiting():
+    host = FakeHost({"sda"}, {"sda", "sdb"})
+    run(host, interrupt=True)
+    assert names(host)[:2] == ["UBoot", "interrupt"]
+    assert "wait" not in names(host)
 
 
 def test_two_new_disks_refuse_listing_both_and_release():
@@ -168,7 +185,7 @@ def test_no_release_when_console_never_reached():
     def boom(ub):
         raise RuntimeError("no prompt")
 
-    host.interrupt_to_uboot = boom
+    host.wait_for_uboot = boom
     with pytest.raises(RuntimeError):
         run(host)
     assert "release" not in names(host)
@@ -199,4 +216,4 @@ def test_dry_run_body_gets_same_enter_exit_sequence():
     seen = []
     run(host, lambda d: seen.append(("dry run", d)))
     assert seen == [("dry run", "/dev/sdb")]
-    assert names(host) == ["UBoot", "interrupt", "listing", "expose", "listing", "release"]
+    assert names(host) == ["UBoot", "wait", "listing", "expose", "listing", "release"]

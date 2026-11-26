@@ -16,9 +16,8 @@ A flash board is three pieces that have to agree:
 - The recovery id and its evidence in the same manifest
   (`tegraflash.rcm_ids` and `tegraflash.rcm_evidence`). No Python board table is
   involved: the engine and the launcher's `boards` verb read the manifest. The
-  old registry in `scripts/avocado_flash_boards/` still exists but is retired by
-  this change's default flip of the launcher (`AVOCADO_FLASH_LAUNCHER`); do not
-  add a board to it.
+  old Python registry is gone with the launcher's default flip; there is nothing
+  else to add a board to.
 
 Two doors write a board, and both run the same file. The host door,
 `avocado-flash nvme`, runs `stone-provision-tegraflash.sh` from the deploy
@@ -252,7 +251,7 @@ This section is the release note for the move to the shared engine.
 | The boardctl target and serial are single arguments (`boardctl-single-arguments`) | A boardctl target or serial containing whitespace, which used to be split | Nothing; the value now arrives whole |
 | A named device no longer skips the retype; only `AVOCADO_PROVISION_FORCE=1` does. With no terminal and no signal the run proceeds with a notice, and `AVOCADO_PROVISION_FORCE=0` with no terminal refuses | Anyone who passed an explicit device to skip the prompt, and unattended runs | Set `AVOCADO_PROVISION_FORCE=1` where skipping is intended |
 | The engine refuses a run with no pinned kernel, and an unattended run for a board with no declared recovery id | Downstream manifests and lab scripts | Pin the kernel, or set `AVOCADO_PROVISION_ALLOW_UNPINNED_KERNEL=1`; declare `rcm_ids` or set `AVOCADO_PROVISION_RCM_ID` |
-| `AVOCADO_FLASH_LAUNCHER=1` routes `avocado-flash` through the stone-profile launcher (opt-in; the default flip is planned by this change) | Anyone driving `avocado-flash` | Nothing yet |
+| `avocado-flash` sd, emmc, ums and nvme run through the stone-profile launcher; `AVOCADO_FLASH_LAUNCHER` is no longer read, and the old uuu path is gone. A medium runs only for a board whose manifest declares that profile, so `avocado-flash sd` refuses intel-x86-64-v2, intel-x86-64-v3, intel-x86-64-v4, amd-x86-64-v4, arm64-uefi-v9, reterminal, reterminal-dm and grinn-astra-1680-sbc (the Jetson, Qualcomm and QEMU manifests declare no `sd` either and keep their own profiles), and `ums` runs only on imx93-frdm. The bmaptool backend is gone, and the x86 and arm64 img profiles no longer build a `<platform>-rootdisk.fw` | Anyone driving `avocado-flash`, setting the variable, or flashing one of the boards named here | Unset the variable. Provision those boards with `avocado provision <runtime> --profile <profile>`, using a profile their manifest declares (`usb` on the x86, arm64 and reTerminal boards, `usb-emmc` on grinn-astra-1680-sbc). Drop `-b bmaptool` |
 | `avocado-flash nvme` requires python3 3.10 or newer, `cpp`, `fdtget`, `fdtput` and `lsusb` on the host, and no longer needs `jq`. It requires the engine directory in the deploy tree | Everyone using the host door | Install the tools; rebuild an older image tree with the `avocado-stone` target (it is refused with that message) |
 | An image tree built before this change keeps the old 694-line script, and none of the new refusals apply to it | Anyone running an old tree | Nothing; reverting the series restores the old behaviour everywhere |
 

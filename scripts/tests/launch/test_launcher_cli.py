@@ -1,4 +1,4 @@
-"""End to end through scripts/avocado-flash with AVOCADO_FLASH_LAUNCHER=1.
+"""End to end through scripts/avocado-flash; every write medium goes through the launcher.
 
 Hermetic: stone, fwup, uuu, dd, bmaptool and sudo are shell stubs in a tmp PATH
 dir. Each appends its argv and its parent's name to one log, so the tests assert
@@ -48,6 +48,13 @@ class Tree:
         self.workdir = tmp / "work"
         for name in STUBS:
             self._stub(name)
+        self.set_lsblk()
+
+    def set_lsblk(self, mountpoints="", rc=0):
+        """lsblk answers the sd mount check; it is not a write tool, so it does not log."""
+        path = self.bin / "lsblk"
+        path.write_text(f"#!/bin/sh\nprintf '%s' '{mountpoints}'\nexit {rc}\n")
+        path.chmod(0o755)
 
     def _stub(self, name):
         path = self.bin / name
@@ -65,7 +72,7 @@ class Tree:
             return []
         return [line.split(" ", 1)[0] for line in self.log.read_text().splitlines()]
 
-    def run(self, *args, launcher="1", extra_env=None):
+    def run(self, *args, launcher=None, extra_env=None):
         env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.tmp)}
         if launcher is not None:
             env["AVOCADO_FLASH_LAUNCHER"] = launcher
@@ -117,6 +124,24 @@ def test_sd_starts_only_stone_with_absolute_input_and_var_size(tree):
     assert env["AVOCADO_PROVISION_FORCE"] == "0"
     assert "AVOCADO_PROVISION_DRY_RUN" not in env
     assert "sudo" not in tree.started()
+
+
+@pytest.mark.parametrize("dry", [[], ["--dry-run"]], ids=["real", "dry-run"])
+def test_sd_refuses_a_mounted_target_before_stone(tree, dry):
+    # A stale path naming a mounted disk must stop here, not be unmounted by the profile.
+    tree.set_lsblk("\n/run/media/user/BACKUP\n")
+    rc, out = tree.run("--workdir", str(tree.workdir), "-y", *dry, "sd", "/dev/fakedisk")
+    assert rc == 1, out
+    assert "refusing /dev/fakedisk: it has mounted partitions" in out
+    assert tree.started() == []
+
+
+def test_sd_refuses_when_the_mount_state_cannot_be_read(tree):
+    tree.set_lsblk(rc=32)
+    rc, out = tree.run("--workdir", str(tree.workdir), "-y", "sd", "/dev/fakedisk")
+    assert rc == 1, out
+    assert "cannot read its mount state" in out
+    assert tree.started() == []
 
 
 def test_sd_stone_is_started_by_the_python_launcher_not_a_shell_chain(tree):
@@ -187,10 +212,10 @@ def test_bmaptool_is_refused_with_no_process_started(tree):
 
 
 def test_two_deploy_trees_still_refused(tmp_path):
-    # Resolution stays in avocado-flash: ensure it still refuses with the opt-in on.
+    # Resolution stays in avocado-flash: ensure it still refuses with several build trees.
     for n in ("build-a", "build-b"):
         (tmp_path / "ws" / n / "build" / "tmp" / "deploy").mkdir(parents=True)
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "AVOCADO_FLASH_LAUNCHER": "1"}
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "sd", "/dev/fakedisk"], env=env, cwd=tmp_path / "ws",
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
@@ -200,10 +225,16 @@ def test_two_deploy_trees_still_refused(tmp_path):
 
 
 @pytest.mark.parametrize("value", [None, "0", "true", ""])
-def test_opt_in_unset_or_other_keeps_the_old_path(tree, value):
-    # The old sd path refuses a non-block device before writing anything; the
-    # launcher would instead have started stone.
-    rc, out = tree.run("sd", "/dev/fakedisk", launcher=value)
-    assert rc != 0
-    assert tree.started() == []
-    assert "stone" not in out
+def test_sd_reaches_the_launcher_whatever_the_old_opt_in_says(tree, value):
+    # The retired opt-in no longer selects the old write path: sd starts stone.
+    rc, out = tree.run("--workdir", str(tree.workdir), "sd", "/dev/fakedisk", launcher=value)
+    assert rc == 0, out
+    assert tree.started() == ["stone"]
+
+
+@pytest.mark.parametrize("value", [None, "0", "1"])
+def test_emmc_reaches_the_launcher_whatever_the_old_opt_in_says(tree, value):
+    rc, out = tree.run("--workdir", str(tree.workdir), "emmc", launcher=value)
+    assert rc == 0, out
+    assert tree.started() == ["stone"]
+    assert tree.env("stone")["AVOCADO_PROVISION_PROFILE"] == "uuu-emmc"

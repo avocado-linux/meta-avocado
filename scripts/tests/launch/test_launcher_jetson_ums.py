@@ -1,10 +1,11 @@
-"""nvme and ums through the launcher (AVOCADO_FLASH_LAUNCHER=1).
+"""nvme and ums through the launcher.
 
 Hermetic: stone, sudo, lsusb and the Jetson host tools are shell stubs in a tmp
 PATH dir that append to one process log. Nothing here touches a board, a serial
 console, USB, or real sudo. ums runs in process with a fake console driver.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -48,6 +49,18 @@ class JTree(Tree):
         (self.bin / "python3").chmod(0o755)
         self._stub("lsusb")
         self.set_sudo()
+        # A real nvme run needs a recorded recovery id; the refusal test strips it.
+        self.set_rcm_ids(["0955:7523"])
+
+    def set_rcm_ids(self, ids):
+        path = self.deploy / "stone" / "stone-test.json"
+        manifest = json.loads(path.read_text())
+        tegraflash = manifest["storage_devices"]["rootdisk"].setdefault("tegraflash", {})
+        if ids:
+            tegraflash["rcm_ids"] = ids
+        else:
+            tegraflash.pop("rcm_ids", None)
+        path.write_text(json.dumps(manifest))
 
     def _quiet(self, name):
         (self.bin / name).write_text("#!/bin/sh\nexit 0\n")
@@ -67,7 +80,7 @@ class JTree(Tree):
         )
         path.chmod(0o755)
 
-    def nvme(self, *args, launcher="1", path=None):
+    def nvme(self, *args, launcher=None, path=None):
         env = {"PATH": path or f"{self.bin}:/usr/bin:/bin", "HOME": str(self.tmp)}
         if launcher is not None:
             env["AVOCADO_FLASH_LAUNCHER"] = launcher
@@ -99,7 +112,7 @@ def jt(tmp_path):
 
 
 def test_nvme_not_first_is_refused_before_any_usb_action(jt):
-    env = {"PATH": f"{jt.bin}:/usr/bin:/bin", "HOME": str(jt.tmp), "AVOCADO_FLASH_LAUNCHER": "1"}
+    env = {"PATH": f"{jt.bin}:/usr/bin:/bin", "HOME": str(jt.tmp)}
     rc, out = jt._spawn([sys.executable, str(SCRIPT), "-m", MACHINE, "nvme"], env)
     assert rc != 0
     assert "nvme must be the first argument" in out
@@ -156,6 +169,38 @@ def test_real_nvme_runs_stone_whole_under_sudo_and_prints_the_next_steps(jt):
     assert list(jt.workdir.iterdir()) == []  # the scratch is gone, the named parent is never deleted
 
 
+def test_real_nvme_with_no_recovery_id_anywhere_is_refused_before_any_process(jt):
+    # Interactive or not: the retype alone cannot tell an Orin Nano from an Orin NX in recovery.
+    jt.set_rcm_ids(None)
+    rc, out = jt.nvme("--workdir", str(jt.workdir))
+    assert rc == 1, out
+    assert "--rcm-id" in out
+    assert jt.started() == []
+    assert not jt.workdir.exists()
+
+
+@NEEDS_USER
+def test_real_nvme_with_a_manifest_recovery_id_needs_no_rcm_id(jt):
+    rc, out = jt.nvme("--workdir", str(jt.workdir))
+    assert rc == 0, out
+    assert "stone" in jt.started()
+
+
+@NEEDS_USER
+def test_real_nvme_with_rcm_id_and_no_manifest_id_runs(jt):
+    jt.set_rcm_ids(None)
+    rc, out = jt.nvme("--workdir", str(jt.workdir), "--rcm-id", "0955:7523")
+    assert rc == 0, out
+    assert jt.env("stone")["AVOCADO_PROVISION_RCM_ID"] == "0955:7523"
+
+
+def test_nvme_dry_run_with_no_recovery_id_still_prepares(jt):
+    jt.set_rcm_ids(None)
+    rc, out = jt.nvme("--dry-run", "--workdir", str(jt.workdir))
+    assert rc == 0, out
+    assert jt.started() == ["stone"]
+
+
 def test_nvme_dry_run_runs_stone_as_the_user_with_dry_run_set(jt):
     rc, out = jt.nvme("--dry-run", "--workdir", str(jt.workdir))
     assert rc == 0, out
@@ -197,14 +242,12 @@ def test_nvme_options_reach_the_launcher_before_the_shared_parser(jt):
     assert env["AVOCADO_PROVISION_RCM_ID"] == "0955:7523"
 
 
-def test_opt_in_unset_keeps_the_old_nvme_path(jt):
-    # The old parser offers only nvme and sd; the launcher also offers emmc.
-    rc, out = jt.nvme("--boot-media", "emmc", launcher=None)
-    assert rc == 2
-    assert "invalid choice" in out
-    rc, out = jt.nvme("--boot-media", "emmc", launcher="1")
+def test_nvme_reaches_the_launcher_without_the_old_opt_in(jt):
+    # The old parser offered only nvme and sd; emmc as a boot medium exists only in the launcher.
+    rc, out = jt.nvme("--boot-media", "emmc")
     assert rc == 1
     assert "tegraflash-emmc" in out
+    assert "invalid choice" not in out
     assert jt.started() == []
 
 
@@ -222,6 +265,9 @@ class FakeHost:
 
     def interrupt_to_uboot(self, ub):
         self.calls.append(("interrupt",))
+
+    def wait_for_uboot(self, ub):
+        self.calls.append(("wait",))
 
     def block_devices(self):
         return {"sda", "sdb"} if self.exported else {"sda"}
@@ -256,7 +302,14 @@ def test_ums_sets_the_new_disk_as_device_and_releases(ums_tree):
     env = ums_tree.env("stone")
     assert env["AVOCADO_PROVISION_DEVICE"] == "/dev/sdb"
     assert env["AVOCADO_PROVISION_PROFILE"] == "ums"
-    assert host.calls == [("UBoot", "/dev/ttyUSB9"), ("interrupt",), ("expose", 1, "mmc 0"), ("release",)]
+    assert host.calls == [("UBoot", "/dev/ttyUSB9"), ("wait",), ("expose", 1, "mmc 0"), ("release",)]
+
+
+def test_ums_interrupt_flag_reaches_the_session(ums_tree):
+    rc, host = ums_run(ums_tree, "--interrupt")
+    assert rc == 0
+    assert host.calls[:2] == [("UBoot", "/dev/ttyACM0"), ("interrupt",)]
+    assert ("wait",) not in host.calls
 
 
 def test_ums_dry_run_still_exports_and_releases(ums_tree):

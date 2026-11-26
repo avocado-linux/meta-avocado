@@ -57,7 +57,7 @@ def test_real_tree_lists_exactly_seven_jetsons(no_subprocess, capsys):
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert len(lines) == 7
     assert any("jetson-orin-nano" in ln and "0955:7523" in ln for ln in lines)
-    assert sum("none recorded" in ln for ln in lines) == 6
+    assert sum("none recorded" in ln for ln in lines) == 4
 
 
 def test_lists_machine_family_and_ids(tmp_path, capsys, no_subprocess):

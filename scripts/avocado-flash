@@ -5,7 +5,7 @@ medium needs - and, separately, program its AHAB SRK hash fuses.
 Backends are selected from the medium rather than hardcoded, so a board that
 provisions over a different transport is a new backend rather than a new tool.
 
-  sd        removable block device   fwup (default) or bmaptool
+  sd        removable block device   fwup
   emmc      USB serial download      uuu
   fuse-srk  serial console           one-time programmable fuses
 
@@ -31,7 +31,6 @@ import subprocess
 import sys
 import time
 import types
-from datetime import datetime
 from pathlib import Path
 
 PROMPT = b"u-boot=> "
@@ -115,315 +114,13 @@ def resolve_machine(deploy: Path, explicit: str | None) -> str:
     raise Fatal(f"several machines built ({' '.join(dirs)}); pass --machine")
 
 
-def assert_payload_fresh(payload: Path, deploy: Path, machine: str, stale_ok: bool) -> None:
-    """Refuse a payload older than the build output it should carry.
-
-    An ordinary build stops at do_stone_bundle; the fwup archive and raw image
-    come from do_stone_provision one task later, so after a rebuild they sit
-    there looking complete while carrying yesterday's bootloader and kernel.
-    Symlinks are followed on both sides: imx-boot and the fitImage are links in
-    the deploy tree, and a link's own mtime never changes when its target does.
-    """
-    images = deploy / "images" / machine
-    if stale_ok or not images.is_dir() or not payload.is_file():
-        return
-    since = payload.resolve().stat().st_mtime
-    newer = []
-    for root, _dirs, files in os.walk(images, followlinks=True):
-        for name in files:
-            f = Path(root) / name
-            try:
-                mtime = f.resolve().stat().st_mtime
-            except OSError:
-                continue
-            if mtime > since:
-                newer.append((mtime, f))
-    if not newer:
-        return
-    newest_mtime, newest = max(newer)
-    stamp = lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
-    raise Fatal(
-        "payload is older than the build output it should carry\n"
-        f"  payload: {payload}\n           {stamp(since)}\n"
-        f"  newest:  {newest}\n           {stamp(newest_mtime)}\n"
-        f"  {len(newer)} file(s) under {images} are newer than the payload.\n"
-        "  Refresh it with the provisioning step (bitbake avocado-stone -c stone_provision)\n"
-        "  and flash again. To write this payload anyway, pass --stale-ok."
-    )
-
-
-def resolve_fwup_archive(deploy: Path, machine: str) -> Path:
-    """The fwup archive is produced by stone provision, not by stone bundle.
-
-    A bundle-only rebuild refreshes os-bundle.aos and leaves this stale, so its
-    age is reported rather than yesterday's bootloader being written silently.
-
-    .img is deliberately not accepted: that is the unpacked raw image, which the
-    bmaptool path takes. Handing it to fwup as an archive fails further in and
-    less legibly than saying so here.
-    """
-    build = deploy / "stone/_build"
-    found = [p for p in (build / f"{machine}-rootdisk.zip",
-                         build / f"{machine}-rootdisk.fw") if p.is_file()]
-    if len(found) == 1:
-        return found[0]
-    if not found:
-        raise Fatal(
-            f"no fwup archive for {machine} under {build}\n"
-            f"  looked for: {machine}-rootdisk.zip, {machine}-rootdisk.fw\n"
-            "  Not every machine produces a fwup archive. If this one deploys a raw\n"
-            "  image instead, write it with --backend bmaptool; otherwise run the\n"
-            "  provisioning step that builds the stone archive."
-        )
-    raise Fatal(
-        f"several fwup archives for {machine} under {build} "
-        f"({' '.join(str(f) for f in found)}); remove the stale one"
-    )
-
-
-def resolve_raw_image(deploy: Path, machine: str) -> Path:
-    """Both globs are scoped to the machine.
-
-    The second used to search the flat, shared stone/_build with no machine
-    filter, so asking for a machine that had not been provisioned matched
-    whatever *-rootdisk.img was there and wrote that machine's image to the card,
-    while the error one line below claimed per-machine scoping.
-    """
-    for cand in sorted((deploy / "images" / machine).glob("*.wic")):
-        if cand.is_file():
-            return cand
-    cand = deploy / "stone/_build" / f"{machine}-rootdisk.img"
-    if cand.is_file():
-        return cand
-
-    # Name the producer. Nothing in the Yocto build writes this file, so a bare
-    # "not found" reads as a broken build rather than a step not run.
-    raise Fatal(
-        f"no raw .wic or rootdisk.img found for {machine}\n"
-        f"  expected: {deploy}/stone/_build/{machine}-rootdisk.img\n"
-        "  produce it with the provisioning step that builds the stone archive, or\n"
-        "  from an existing archive with:\n"
-        f"    fwup -a -i {deploy}/stone/_build/{machine}-rootdisk.zip \\\n"
-        f"         -d {deploy}/stone/_build/{machine}-rootdisk.img -t complete"
-    )
-
-
 # ------------------------------------------------------------- native tools
-
-
-def find_native_sysroot(deploy: Path, tool: str) -> Path | None:
-    """Backends are found in the build's native sysroots rather than assumed on
-    the host: fwup is not packaged for most distributions, and the per-recipe
-    component directories do not resolve their shared libraries because those
-    live in sibling component trees. A recipe sysroot does resolve them.
-    """
-    top = Path(str(deploy).split("/deploy")[0])
-    for sysroot in top.glob("work/*/avocado-stone/*/recipe-sysroot-native"):
-        if (sysroot / "usr/bin" / tool).is_file() and os.access(sysroot / "usr/bin" / tool, os.X_OK):
-            return sysroot
-    return None
-
-
-def native_tool_cmd(deploy: Path, tool: str, args: list[str]) -> list[str]:
-    sysroot = find_native_sysroot(deploy, tool)
-    if sysroot:
-        # sudo drops LD_LIBRARY_PATH, so it is passed through env rather than
-        # exported.
-        return ["sudo", "env", f"LD_LIBRARY_PATH={sysroot}/usr/lib",
-                str(sysroot / "usr/bin" / tool), *args]
-    if shutil.which(tool):
-        return ["sudo", tool, *args]
-    raise Fatal(f"{tool} not found in the build sysroot or on PATH (run a build first)")
 
 
 # ------------------------------------------------------------------- safety
 
 
-def assert_safe_block_device(dev: str) -> None:
-    """Refuse anything that is not an unmounted whole disk on a removable bus.
-
-    fwup and bmaptool both rewrite the partition table from sector 0, so a
-    mistyped letter destroys whatever it names with no prompt and no undo, and
-    development hosts routinely carry multi-terabyte disks on the same /dev/sd*
-    namespace as the card reader.
-
-    Coarser than it looks in one direction: a USB enclosure holding a large disk
-    is on a USB bus and passes. The retype-the-device prompt stands behind that.
-    """
-    p = Path(dev)
-    if not p.exists() or not p.is_block_device():
-        raise Fatal(f"not a block device: {dev}")
-
-    # Resolve before deriving the sysfs name. /dev/disk/by-id and by-path entries
-    # are symlinks, so they satisfy the block-device test while /sys/block/<link>
-    # does not exist - which made the whole-disk check reject them as partitions.
-    # Those are the names a board farm hands out, on the -y path that has no
-    # prompt left to catch a mistake.
-    resolved = p.resolve()
-    if not Path("/sys/block") .joinpath(resolved.name).is_dir():
-        raise Fatal(f"refusing a partition: pass the whole disk (e.g. /dev/sdb, not {dev})")
-
-    # Ask udev which bus the device is on, rather than the kernel's removable
-    # flag. That flag is wrong in both directions: drivers/mmc/core/block.c never
-    # sets GENHD_FL_REMOVABLE, so an SD card in a native SDHCI reader reports
-    # removable=0, while scsi_scan.c copies the SCSI RMB bit verbatim, so a USB
-    # enclosure asserting RMB passed.
-    #
-    # ID_PATH rather than ID_BUS: ID_BUS is only set for ata/scsi/usb and is empty
-    # on nvme, so keying on it would refuse an mmc device for want of a value.
-    if not shutil.which("udevadm"):
-        raise Fatal(
-            f"refusing {dev}: udevadm is needed to identify the device's bus and was not found"
-        )
-    proc = subprocess.run(
-        ["udevadm", "info", "--query=property", "--property=ID_PATH", "--value", str(resolved)],
-        capture_output=True, text=True,
-    )
-    id_path = proc.stdout.strip() if proc.returncode == 0 else ""
-    if not id_path:
-        raise Fatal(f"refusing {dev}: udev reports no ID_PATH for it, so its bus cannot be established")
-    if "-usb-" not in id_path and "mmc" not in id_path:
-        raise Fatal(
-            f"refusing {dev}: it is on '{id_path}', not a USB or MMC bus - "
-            "pass a card reader, SD slot or USB stick"
-        )
-
-    # MOUNTPOINT is singular on purpose: the plural column arrived in util-linux
-    # 2.37, and scarthgap's SANITY_TESTED_DISTROS still lists hosts on 2.32-2.36
-    # where lsblk exits 1 with `unknown column: MOUNTPOINTS`. On those the guard
-    # passed and fwup rewrote the partition table under a live mount. The exit
-    # status is read rather than the pipeline's, so a failing lsblk refuses
-    # instead of looking like "nothing is mounted".
-    proc = subprocess.run(["lsblk", "-nro", "MOUNTPOINT", dev], capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise Fatal(f"refusing {dev}: cannot read its mount state (lsblk failed)")
-    if any(line.strip() for line in proc.stdout.splitlines()):
-        subprocess.run(["lsblk", "-o", "NAME,SIZE,TYPE,RM,MOUNTPOINT", dev])
-        raise Fatal(f"refusing {dev}: it has mounted partitions")
-
-
-def confirm_destructive(target: str, payload: str | None, dry_run: bool, assume_yes: bool) -> None:
-    """Ask before a destructive write, showing what is about to be written where.
-
-    The payload is resolved by the caller first: the prompt used to come before
-    that, so the retype gate - the only thing between a typo and a wiped disk -
-    was cleared as a reflex before the tool had established it had anything to
-    write at all.
-    """
-    if dry_run or assume_yes:
-        return
-
-    print(f"=== writing the whole OS to {target} (destructive) ===")
-    if payload:
-        print(f"  payload: {payload}")
-    if Path(target).exists() and Path(target).is_block_device():
-        subprocess.run(["lsblk", "-o", "NAME,SIZE,TYPE,RM,MODEL", target])
-    print()
-    reply = input("type the target again to confirm: ").strip()
-    if reply != target:
-        raise Fatal("mismatch, aborting")
-
-
-def execute(cmd: list[str], dry_run: bool) -> None:
-    if dry_run:
-        print("dry-run: " + " ".join(cmd))
-        return
-    proc = subprocess.run(cmd)
-    if proc.returncode != 0:
-        raise Fatal(f"command failed with exit {proc.returncode}: {' '.join(cmd)}")
-
-
-def finish(next_step: str, target: str, dry_run: bool) -> None:
-    """Close out a write, or say plainly that none happened.
-
-    Neither the sync nor the completion message used to be guarded, so a dry run
-    printed "done. set the board's boot switches..." having written nothing: an
-    operator powers the board, sees the previous image, and concludes the flash
-    failed rather than that it never ran. sync is also a real syscall against
-    every mounted filesystem, so running it broke the dry-run promise.
-    """
-    if dry_run:
-        print(f"dry run: nothing was written to {target}.")
-        return
-    os.sync()
-    print(f"done. {next_step}")
-
-
 # ----------------------------------------------------------------- backends
-
-
-def flash_fwup(deploy: Path, dev: str, archive: Path, task: str, dry_run: bool) -> None:
-    mtime = datetime.fromtimestamp(archive.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-    info(f"archive: {archive} ({mtime})")
-    info(f"task:    {task}")
-    execute(native_tool_cmd(deploy, "fwup", ["-a", "-i", str(archive), "-d", dev, "-t", task]), dry_run)
-
-
-def flash_bmaptool(deploy: Path, dev: str, image: Path, dry_run: bool) -> None:
-    # Append, do not replace the extension. oe-core's image_types.bbclass emits
-    # ${IMAGE_NAME}.${type}.bmap, i.e. <image>.wic.bmap - stripping .wic first
-    # produced a name Yocto never writes, so every run took the --nobmap branch
-    # and forfeited the per-region SHA256 verification this tool advertises.
-    bmap = Path(str(image) + ".bmap")
-    if not shutil.which("bmaptool"):
-        raise Fatal("bmaptool not installed")
-
-    info(f"image: {image}")
-    if bmap.is_file():
-        info(f"bmap:  {bmap} (per-region checksums verified)")
-        cmd = ["sudo", "bmaptool", "copy", "--bmap", str(bmap), str(image), dev]
-    else:
-        # No --nobmap: let bmaptool look for itself, so a bmap this function did
-        # not predict still gets used.
-        info("no bmap beside the image - full copy, and no per-region verification")
-        cmd = ["sudo", "bmaptool", "copy", str(image), dev]
-    execute(cmd, dry_run)
-
-
-def flash_uuu(deploy: Path, machine: str, dry_run: bool, assume_yes: bool) -> None:
-    boot = deploy / "images" / machine / "imx-boot"
-    if not boot.is_file():
-        raise Fatal(f"no imx-boot for {machine}")
-    image = resolve_raw_image(deploy, machine)
-
-    # Pin the target instead of matching a vendor ID and hoping. `lsusb -d 1fc9:`
-    # answers "is any NXP device in SDP mode", and uuu without -m then takes
-    # whichever known device enumerated first - so with a second i.MX board on the
-    # bench for an unrelated bisect, this wrote to that one.
-    proc = subprocess.run(["lsusb"], capture_output=True, text=True)
-    devices = []
-    for line in proc.stdout.splitlines():
-        m = re.search(r"Bus (\d+) Device (\d+): ID ((?:1fc9|15a2):[0-9a-f]{4})", line)
-        if m:
-            devices.append((f"{m.group(1)}:{m.group(2)}", m.group(3)))
-
-    if not devices:
-        raise Fatal("no NXP device in serial download mode (check the boot switches)")
-    if len(devices) > 1:
-        listed = "\n".join(f"  {p} {i}" for p, i in devices)
-        raise Fatal(
-            "several NXP devices in serial download mode:\n" + listed + "\n"
-            "  uuu would take whichever enumerated first, so refusing rather than guessing.\n"
-            "  Leave exactly one board in serial download mode."
-        )
-    usb_path, usb_id = devices[0]
-
-    if not shutil.which("uuu"):
-        raise Fatal("uuu not installed")
-
-    info(f"bootloader: {boot}")
-    info(f"image:      {image} ({image.stat().st_size // (1024 * 1024)} MiB)")
-    info(f"usb path:   {usb_path} ({usb_id})")
-
-    # The eMMC write is as destructive as the SD one and used to reach uuu with
-    # no prompt at all, so -y was irrelevant on this path because nothing asked.
-    confirm_destructive(usb_path, str(image), dry_run, assume_yes)
-
-    # emmc_all, not emmc. Both built-ins default the image to the bootloader when
-    # it is omitted, so `uuu -b emmc <boot>` wrote imx-boot into the eMMC boot
-    # partition and nothing else - the board came back running whatever OS was
-    # already on it, under a new bootloader, which looks like a successful flash.
-    execute(["sudo", "uuu", "-m", usb_path, "-b", "emmc_all", str(boot), str(image)], dry_run)
 
 
 # ------------------------------------------------------- reaching U-Boot
@@ -625,24 +322,6 @@ def ums_expose(ub: "UBoot", controller: int, dev: str, timeout: float = 25.0) ->
         "  carries no data; P16 is the CH342F debug console. A cable in either of\n"
         "  those enumerates nothing here."
     )
-
-
-def unmount_all(dev: str) -> None:
-    """Drop any partitions udisks auto-mounted the moment the device appeared.
-
-    Writing under a live mount is what the block-device guard exists to prevent,
-    and on this path the host mounts the device itself a second after U-Boot
-    exports it.
-    """
-    proc = subprocess.run(["lsblk", "-nro", "NAME,MOUNTPOINT", dev],
-                          capture_output=True, text=True)
-    for line in proc.stdout.splitlines():
-        parts = line.split(None, 1)
-        if len(parts) == 2 and parts[1].strip():
-            target = f"/dev/{parts[0]}"
-            info(f"unmounting {target} from {parts[1].strip()}")
-            subprocess.run(["udisksctl", "unmount", "-b", target],
-                           capture_output=True, text=True)
 
 
 def ums_release(ub: "UBoot", quiet: bool = False) -> None:
@@ -983,8 +662,6 @@ backends:
   fwup      writes the stone fwup archive. The default for 'sd' because it is the
             only backend that evaluates the manifest, so partitions marked expand
             grow to fill the medium.
-  bmaptool  writes a raw .wic/.img, skipping unmapped blocks and verifying a
-            SHA256 per mapped region.
   uuu       NXP serial-download protocol; the board must already be in serial
             download mode.
 
@@ -1045,35 +722,17 @@ def dispatch_ssh_emmc(argv: list[str]) -> int:
     return cli.main(argv)
 
 
-def dispatch_nvme(argv: list[str]) -> int:
-    """Hand the nvme medium its own argument list; see dispatch_ssh_emmc."""
-    here = str(Path(__file__).resolve().parent)
-    if here not in sys.path:
-        sys.path.insert(0, here)
-    from avocado_flash_tegra import cli
-
-    host = cli.Host(
-        resolve_deploy_dir=resolve_deploy_dir,
-        resolve_machine=resolve_machine,
-        confirm_destructive=confirm_destructive,
-        fatal=Fatal,
-    )
-    return cli.main(argv, host=host)
-
-
 def dispatch_boards(argv: list[str]) -> int:
     """List the known boards; see dispatch_ssh_emmc for why this skips the parser."""
+    if argv:
+        print("avocado-flash boards: takes no arguments")
+        return 2
     here = str(Path(__file__).resolve().parent)
     if here not in sys.path:
         sys.path.insert(0, here)
-    from avocado_flash_boards import cli
+    from avocado_flash_launch import boards
 
-    return cli.main(argv)
-
-
-def launcher_enabled() -> bool:
-    """The stone-provision launcher is opt-in until the old write paths are retired."""
-    return os.environ.get("AVOCADO_FLASH_LAUNCHER") == "1"
+    return boards.boards(Path(__file__).resolve(), None)
 
 
 def _launcher_cli():
@@ -1086,12 +745,19 @@ def _launcher_cli():
     return cli
 
 
+def wait_for_uboot(ub: "UBoot") -> None:
+    """Without --interrupt the board must already sit at a U-Boot prompt; never reboot it."""
+    ub.sync()
+    info("at a U-Boot prompt")
+
+
 def dispatch_launcher(argv: list[str], deploy: Path, machine: str) -> int:
     """Run sd/emmc/ums through the launcher; resolution above stays in this script."""
     cli = _launcher_cli()
     host = types.SimpleNamespace(
         UBoot=UBoot,
         interrupt_to_uboot=interrupt_to_uboot,
+        wait_for_uboot=wait_for_uboot,
         ums_expose=ums_expose,
         ums_release=ums_release,
         block_devices=block_devices,
@@ -1116,9 +782,7 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "ssh-emmc":
         return dispatch_ssh_emmc(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "nvme":
-        if launcher_enabled():
-            return dispatch_launcher_nvme(sys.argv[2:])
-        return dispatch_nvme(sys.argv[2:])
+        return dispatch_launcher_nvme(sys.argv[2:])
     if "nvme" in sys.argv[1:]:
         raise Fatal("nvme must be the first argument: avocado-flash nvme [options]")
     args = build_parser().parse_args()
@@ -1128,93 +792,16 @@ def main() -> int:
     print(f"machine: {machine}")
     print(f"deploy:  {deploy}")
 
-    if launcher_enabled() and args.medium != "fuse-srk":
+    if args.medium != "fuse-srk":
         return dispatch_launcher(sys.argv[1:], deploy, machine)
 
-    # Only fwup evaluates the manifest's tasks. Refusing rather than ignoring the
-    # flag matters because the two differ in whether /var survives: a --task
-    # upgrade silently downgraded to a whole-medium write destroys the state the
-    # caller asked to keep, and the write looks successful either way.
-    if args.task != "complete" and args.backend not in (None, "fwup"):
-        raise Fatal(f"--task applies to the fwup backend only (got backend '{args.backend}')")
-    if args.task != "complete" and args.medium != "sd":
+    # fuse-srk takes no fwup task, so refuse the flag rather than ignore it.
+    if args.task != "complete":
         raise Fatal(f"--task applies to the fwup backend only (medium '{args.medium}')")
 
-    if args.medium == "sd":
-        if not args.device:
-            raise Fatal("'sd' needs a device (see --help)")
-        assert_safe_block_device(args.device)
-
-        # Resolve the payload before asking, and show it in the prompt: clearing
-        # the retype gate before the tool knows it has anything to write trains
-        # people to clear it by reflex.
-        backend = args.backend or "fwup"
-        if backend == "fwup":
-            payload = resolve_fwup_archive(deploy, machine)
-        elif backend == "bmaptool":
-            payload = resolve_raw_image(deploy, machine)
-        else:
-            raise Fatal(f"backend {backend} cannot write a block device")
-        assert_payload_fresh(payload, deploy, machine, args.stale_ok)
-
-        confirm_destructive(args.device, str(payload), args.dry_run, args.assume_yes)
-
-        if backend == "fwup":
-            flash_fwup(deploy, args.device, payload, args.task, args.dry_run)
-        else:
-            flash_bmaptool(deploy, args.device, payload, args.dry_run)
-        finish("set the board's boot switches to the SD position and power on.",
-               args.device, args.dry_run)
-
-    elif args.medium == "ums":
-        if args.device:
-            raise Fatal(
-                f"ums discovers the device itself (got {args.device}); it is the whole "
-                "point of the verb that the card does not move"
-            )
-        payload = resolve_fwup_archive(deploy, machine)
-        assert_payload_fresh(payload, deploy, machine, args.stale_ok)
-
-        ub = UBoot(args.port)
-        target = None
-        try:
-            if args.interrupt:
-                interrupt_to_uboot(ub)
-            else:
-                ub.sync()
-                info("at a U-Boot prompt")
-            info(f"exporting {args.ums_dev} over USB controller {args.usb_controller}")
-            target = ums_expose(ub, args.usb_controller, args.ums_dev)
-            info(f"board appeared as {target}")
-
-            unmount_all(target)
-            # The same guard the sd path uses. The device is on a USB bus here, so
-            # this passes - but it also catches a mount that reappeared and the
-            # case where the discovered node is somehow a partition.
-            assert_safe_block_device(target)
-
-            confirm_destructive(target, str(payload), args.dry_run, args.assume_yes)
-            flash_fwup(deploy, target, payload, args.task, args.dry_run)
-            finish("power-cycle the board; the card was never removed.",
-                   target, args.dry_run)
-        finally:
-            if target:
-                os.sync()
-            ums_release(ub)
-            ub.close()
-
-    elif args.medium == "emmc":
-        backend = args.backend or "uuu"
-        if backend != "uuu":
-            raise Fatal(f"backend {backend} cannot write over serial download")
-        flash_uuu(deploy, machine, args.dry_run, args.assume_yes)
-        finish("set the board's boot switches to the eMMC position and power on.",
-               "the board", args.dry_run)
-
-    else:
-        if args.device:
-            raise Fatal(f"fuse-srk takes no device argument (got {args.device})")
-        fuse_srk(args, deploy, machine)
+    if args.device:
+        raise Fatal(f"fuse-srk takes no device argument (got {args.device})")
+    fuse_srk(args, deploy, machine)
 
     return 0
 
