@@ -1,0 +1,129 @@
+name: PR-SBOM-Tests
+
+# Runs the meta-avocado-sbom and meta-avocado unit tests with everything they
+# need, and fails if any test skips.
+#
+# The CVE report tests run the generator against the pinned OE-core's own SPDX
+# library (OE_CORE_LIB) and scan its output with sbom-cve-check
+# (SBOM_CVE_CHECK). Without either, those tests skip with success, and a run
+# that skipped them reads like one that passed them. So this job supplies both,
+# plus rpm and jsonschema for the tests that compare against those, and treats
+# any skip as a failure (.github/ci/unittest-no-skips.py).
+#
+# OE-core: meta/lib only, at the commit kas/vendor/oe.yml pins, read from that
+# file so a pin bump is tested against the new tree with no change here.
+#
+# Python packages: .github/ci/sbom-tests-requirements.txt, pinned by version and
+# hash, downloaded once and installed from that download. sbom-cve-check must be
+# the version the layer's recipe builds; a step below checks it.
+#
+# meta-avocado/tests also runs in the parse job, which sets no OE_CORE_LIB. It
+# runs here too so tests there that need it cannot skip.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [wrynose]
+
+# Least privilege: this job only checks out and runs tests.
+permissions:
+  contents: read
+
+# Cancel superseded runs so a burst of `synchronize` pushes does not stack up.
+concurrency:
+  group: sbom-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sbom-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OE_CORE_LIB: ${{ github.workspace }}/vendor-openembedded-core/meta/lib
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Read the OE-core pin
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(awk '/^[^ ]/{f=0} /^  openembedded-core:$/{f=1;next} /^  [^ ]/{f=0} f&&/^    commit:/{print $2;exit}' kas/vendor/oe.yml)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "no openembedded-core pin found in kas/vendor/oe.yml" >&2; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch OE-core meta/lib
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: avocado-linux/vendor-openembedded-core
+          ref: ${{ steps.pin.outputs.sha }}
+          path: vendor-openembedded-core
+          sparse-checkout: meta/lib
+          persist-credentials: false
+
+      # The requirements hashes are for CPython 3.12 wheels.
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install rpm
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends rpm
+
+      # A layer that no longer carries the recipe (OE-core's own is used) has
+      # nothing to compare against.
+      - name: Check the sbom-cve-check pin against the recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="$(sed -n 's/^sbom-cve-check==\([^ ]*\).*/\1/p' .github/ci/sbom-tests-requirements.txt)"
+          shopt -s nullglob
+          recipes=(meta-avocado-sbom/recipes-devtools/sbom-cve-check/python3-sbom-cve-check_*.bb)
+          if [ "${#recipes[@]}" -eq 0 ]; then
+            echo "no python3-sbom-cve-check recipe in the layer; pinned $want"
+            exit 0
+          fi
+          for r in "${recipes[@]}"; do
+            pv="${r##*_}"; pv="${pv%.bb}"
+            if [ "$pv" != "$want" ]; then
+              echo "$r builds $pv, the job pins $want: update .github/ci/sbom-tests-requirements.txt" >&2
+              exit 1
+            fi
+          done
+          echo "recipe and job both use $want"
+
+      - name: Install sbom-cve-check and the test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          req=.github/ci/sbom-tests-requirements.txt
+          python -m venv "$RUNNER_TEMP/venv"
+          pip="$RUNNER_TEMP/venv/bin/pip"
+          "$pip" download --quiet --require-hashes --only-binary :all: -d "$RUNNER_TEMP/wheels" -r "$req"
+          "$pip" install --quiet --require-hashes --no-index --find-links "$RUNNER_TEMP/wheels" -r "$req"
+          "$RUNNER_TEMP/venv/bin/sbom-cve-check" --version
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "SBOM_CVE_CHECK=$RUNNER_TEMP/venv/bin/sbom-cve-check" >> "$GITHUB_ENV"
+          # For the tests that read what the spdx-python-model wheel holds.
+          wheel=("$RUNNER_TEMP"/wheels/spdx_python_model-*-py3-none-any.whl)
+          echo "SPDX_PYTHON_MODEL_WHEEL=${wheel[0]}" >> "$GITHUB_ENV"
+
+      - name: meta-avocado-sbom tests
+        shell: bash
+        working-directory: meta-avocado-sbom/tests
+        env:
+          PYTHONPATH: ../lib
+        run: python3 ../../.github/ci/unittest-no-skips.py .
+
+      - name: meta-avocado tests
+        shell: bash
+        env:
+          PYTHONPATH: meta-avocado/lib
+        run: python3 .github/ci/unittest-no-skips.py meta-avocado/tests
