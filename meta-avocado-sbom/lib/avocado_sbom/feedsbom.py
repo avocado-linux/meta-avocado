@@ -8,7 +8,8 @@ document is a hole in the scan; it is counted, named in a coverage record and
 gated by a ceiling instead of being skipped silently.
 
 This module is plain logic over plain values. It imports neither oe nor bb, so
-it runs and is tested outside a build.
+it runs and is tested outside a build; name_alt_builds is handed OE-core's
+spdx30 module.
 """
 
 import json
@@ -210,8 +211,56 @@ def referenced_aliases(shared, target_ids):
 
 
 def alt_label(mc, recipe):
-    """How the coverage record names an alternate recipe it includes."""
+    """How the coverage record names an alternate recipe it includes, and the
+    name name_alt_builds gives that build in the feed document."""
     return "%s:%s" % (mc, recipe)
+
+
+def name_alt_builds(objset, kept, spdx30):
+    """Name each kept alternate build "<mc>:<recipe>" in the assembled
+    document, where sbom-cve-check reads a build's name.
+
+    The scanner exports one entry per build, named after the build's recipe
+    package (a package with the specification purpose that generates its
+    packages), or with none, after its build element up to the first colon.
+    Two builds of one recipe in different multiconfigs would otherwise come out
+    under the same name, at the same version when the recipe's version does
+    not follow the kernel's (nvidia-kernel-oot), and the report could not tell
+    them apart. The name feeds nothing else: CVEs are matched on CPEs and VEX
+    statements on versions and CPEs.
+
+    kept holds (mc, recipe, handles) as the alternate checks leave them, each
+    handle an (object set, root package) of the recipe. A root that is a
+    recipe package (wrynose's static documents) is renamed. A root that is one
+    of the recipe's packages (scarthgap's create-spdx writes no recipe
+    package) gets a recipe package of that name that generates it, as
+    wrynose's documents have. Run it after every check that selects packages by
+    name, and before the document is written: spdx30 is OE-core's oe.spdx30.
+    """
+    named = []
+    for mc, recipe, handles in kept:
+        label = alt_label(mc, recipe)
+        for _loaded, root in handles:
+            element = objset.find_by_id(root._id)
+            if element is None:
+                raise FeedSbomError("%s: the document lost its root package %s"
+                                    % (label, root._id))
+            purpose = spdx30.software_SoftwarePurpose.specification
+            if element.software_primaryPurpose == purpose:
+                element.name = label
+            else:
+                spec = objset.add(spdx30.software_Package(
+                    _id=objset.new_spdxid("multiconfig", mc, "recipe", recipe),
+                    creationInfo=objset.doc.creationInfo,
+                    name=label,
+                    software_packageVersion=element.software_packageVersion,
+                    software_primaryPurpose=purpose,
+                ))
+                objset.new_scoped_relationship(
+                    [spec], spdx30.RelationshipType.generates,
+                    spdx30.LifecycleScopeType.build, [element])
+            named.append(label)
+    return named
 
 
 def drop_alias_collided(included, shared_by_label, target_ids):

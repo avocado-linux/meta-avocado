@@ -485,6 +485,25 @@ class PublishedTests(Tree):
         with self.assertRaises(OSError):
             rpms.read_merged_rpms(rpms.merged_rpms_path(self.tmp, "jetson-l4t"))
 
+    def test_the_recipes_a_merge_published_are_those_of_its_current_files(self):
+        packages = {
+            "kernel-module-a-6.6.78": {"recipe": "mod-a", "version": "1.0-r0"},
+            "kernel-module-b-6.6.78": {"recipe": "mod-b", "version": "2.0-r1"},
+            "devsrc": {"recipe": "devsrc", "version": "6.6.78-git-r0"},
+            "tool": {"recipe": "tool", "version": "1.0-r0"},
+            "versionless": {"recipe": "empty", "version": ""},
+        }
+        published = {
+            "cortexa76/kernel-module-a-6.6.78-1.0-r0.cortexa76.rpm",
+            # An older release of mod-b, still in the tree.
+            "cortexa76/kernel-module-b-6.6.78-2.0-r0.cortexa76.rpm",
+            # rpm's spelling of a "-" in the version.
+            "cortexa76/devsrc-6.6.78+git-r0.cortexa76.rpm",
+            "cortexa76/tool-1.0-r0.noarch.rpm",
+            "not-an-rpm-path",
+        }
+        self.assertEqual(rpms.published_recipes(packages, published), {"mod-a", "devsrc"})
+
 class PackageSizesTests(Tree):
     def write_pkgdata(self, name, size_line):
         directory = os.path.join(self.tmp, "pkgdata", "runtime-reverse")
