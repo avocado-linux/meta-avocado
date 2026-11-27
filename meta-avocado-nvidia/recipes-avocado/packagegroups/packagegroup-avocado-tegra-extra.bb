@@ -5,13 +5,18 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 PACKAGES = "${PN}"
 
+# Every name here must be a package the feed carries, or dnf cannot install
+# the group. tegra-binaries only unpacks the BSP for other recipes and ships
+# no package. kernel-module-r8168 is left out too: NVIDIA's OOT tree builds
+# r8168 only for its 5.15 kernel, so nothing provides it with linux-yocto
+# (whose in-tree r8169 drives the same NICs), and a kernel's modules belong in
+# that kernel's own module groups, not in a group shared by every kernel.
 RDEPENDS:${PN} = " \
   deepstream-7.1-pyds \
   deepstream-7.1 \
   python3-tensorrt \
   tegra-firmware \
   tegra-redundant-boot-base \
-  tegra-binaries \
   tegra-nvphs \
   tegra-nvs-service \
   tegra-nvsciipc \
@@ -39,7 +44,6 @@ RDEPENDS:${PN} = " \
   tensorrt-trtexec-prebuilt \
   nvidia-docker \
   linux-firmware-rtl8168 \
-  kernel-module-r8168 \
   ${GSTREAMER_PACKAGES} \
   swupdate \
   avocado-boot-device \
