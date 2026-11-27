@@ -1,47 +1,74 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""The consumer's binding rules for one package of a report, as plain Python.
+"""The consumer's rules for a version 2 report and its RPM manifest, as plain
+Python.
 
-A report is read by a service that gives every package build a verdict: which
-record of its recipe describes it, and what each CVE there means for it. These
-are those rules, kept here so the tests can say what a report change does to a
-package's verdict rather than only what the JSON looks like. Status "All" only,
-which is the only status that service accepts.
+A report is read by a service that gives every RPM a verdict: which package
+build it is, which build that is, and what each CVE of that build's record
+means for it. These are those rules, kept here so the tests can say what a
+report change does to an RPM's verdict rather than only what the JSON looks
+like. Status "All" only, which is the only status that service accepts.
 """
 
 
-def _recipe_record(record, entry, by_version):
-    version = entry.get("recipe_version")
-    if isinstance(version, str):
-        for each in [record] + list(record.get("alt_versions") or []):
-            if each.get("version") == version:
-                return ("scanned", each["cves"])
-        return ("not_checked", "recipe-version-unmatched")
-    if by_version:
-        return ("not_checked", "recipe-version-unmatched")
-    if record.get("alt_versions"):
-        return ("not_checked", "recipe-version-unmatched")
-    return ("scanned", record["cves"])
+class Rejected(ValueError):
+    """The service refuses the whole upload."""
 
 
-def coverage(report, package):
-    """("scanned", cves) or ("not_checked", reason) for one package name."""
-    entry = report["packages"].get(package)
-    if entry is None:
-        return ("not_checked", "no-report-entry")
-    recipe = entry["recipe"]
-    by_version = any(isinstance(p.get("recipe_version"), str)
-                     for p in report["packages"].values())
-    no_record = report.get("no_cve_record_recipes")
-    if recipe in report["unscanned_recipes"]:
-        return ("not_checked", "recipe-unscanned")
-    if recipe in (no_record or []):
+def normalize(version):
+    if ":" in version and version.split(":", 1)[0].isdigit():
+        version = version.split(":", 1)[1]
+    return version.replace("+", "-")
+
+
+def validate(report, manifest):
+    """Raise Rejected as the service does on intake."""
+    if report.get("version") != "2":
+        raise Rejected("report.version %s is not supported" % report.get("version"))
+    builds = report.get("builds")
+    if not isinstance(builds, dict):
+        raise Rejected("builds is not a map")
+    for bid, build in builds.items():
+        if not isinstance(build.get("recipe"), str) or build.get("coverage") not in (
+                "scanned", "no-cve-record", "unscanned"):
+            raise Rejected("builds.%s is malformed" % bid)
+    for name, entries in report["packages"].items():
+        if not isinstance(entries, list) or not entries:
+            raise Rejected("packages.%s is not a non-empty list" % name)
+        seen = set()
+        for entry in entries:
+            if entry.get("build") not in builds:
+                raise Rejected("packages.%s names unknown build %s" % (name, entry.get("build")))
+            key = normalize(entry["version"])
+            if key in seen:
+                raise Rejected("packages.%s lists %s twice" % (name, key))
+            seen.add(key)
+    for rpm in manifest["packages"]:
+        if package_build(report, rpm) is None:
+            raise Rejected("rpm_manifest: %s %s-%s is not in the report's packages"
+                           % (rpm["name"], rpm["version"], rpm["release"]))
+
+
+def package_build(report, rpm):
+    """The package build an RPM joins: same name, same normalized
+    version-release. None when there is none."""
+    want = normalize("%s-%s" % (rpm["version"], rpm["release"]))
+    for entry in report["packages"].get(rpm["name"], ()):
+        if normalize(entry["version"]) == want:
+            return entry
+    return None
+
+
+def build_coverage(report, bid):
+    """("scanned", cves) or ("not_checked", reason) for one build."""
+    build = report["builds"][bid]
+    if build["coverage"] == "scanned":
+        return ("scanned", build["cves"])
+    if build["coverage"] == "no-cve-record":
         return ("not_checked", "no-cve-record")
-    if isinstance(report["recipes"].get(recipe), dict):
-        return _recipe_record(report["recipes"][recipe], entry, by_version)
-    if no_record is None:
-        return ("not_checked", "coverage-unknown")
-    return ("scanned", [])
+    if "not_covered" in build:
+        return ("not_checked", "build-not-covered")
+    return ("not_checked", "build-unscanned")
 
 
 def _detail(cve):
@@ -73,47 +100,35 @@ def finding(cve):
     return None
 
 
-def verdict(report, package):
-    """("checked", {cve id: finding}) or ("not_checked", reason)."""
-    kind, value = coverage(report, package)
+def build_verdict(report, bid):
+    """("checked", {cve id: finding}) or ("not_checked", reason) for one build."""
+    kind, value = build_coverage(report, bid)
     if kind == "not_checked":
         return kind, value
     return "checked", {c["id"]: finding(c) for c in value if finding(c)}
 
 
-def _normalize(version):
-    if ":" in version and version.split(":", 1)[0].isdigit():
-        version = version.split(":", 1)[1]
-    return version.replace("+", "-")
-
-
 def rpm_verdicts(report, manifest):
-    """{(name, version, release, arch): verdict or ("not_checked", reason)}
-    for each RPM of a manifest, joined to the report as the consumer joins
-    them: by name to the report's package map, then the map entry's version
-    against the RPM's version-release; two rows of one name that both match
-    are ambiguous."""
-    joins = []
-    for rpm in manifest["packages"]:
-        entry = report["packages"].get(rpm["name"])
-        if entry is None:
-            join = ("not_checked", "no-report-entry")
-        elif not entry.get("version"):
-            join = ("not_checked", "ambiguous-version")
-        elif _normalize(entry["version"]) != _normalize(
-                "%s-%s" % (rpm["version"], rpm["release"])):
-            join = ("not_checked", "version-mismatch")
-        else:
-            join = None
-        joins.append((rpm, join))
-    matched = {}
-    for rpm, join in joins:
-        if join is None:
-            matched[rpm["name"]] = matched.get(rpm["name"], 0) + 1
+    """{(name, version, release, arch): verdict} for each RPM of a manifest,
+    after validate: each RPM joins its package build, then that build's
+    record. Two RPMs that join one package build (their arch differs) are
+    ambiguous."""
+    validate(report, manifest)
+    joins = [(rpm, package_build(report, rpm)) for rpm in manifest["packages"]]
+    count = {}
+    for _rpm, entry in joins:
+        count[id(entry)] = count.get(id(entry), 0) + 1
     result = {}
-    for rpm, join in joins:
-        if join is None:
-            join = (("not_checked", "ambiguous-version") if matched[rpm["name"]] > 1
-                    else verdict(report, rpm["name"]))
-        result[(rpm["name"], rpm["version"], rpm["release"], rpm["arch"])] = join
+    for rpm, entry in joins:
+        key = (rpm["name"], rpm["version"], rpm["release"], rpm["arch"])
+        result[key] = (("not_checked", "ambiguous-version") if count[id(entry)] > 1
+                       else build_verdict(report, entry["build"]))
     return result
+
+
+def package_verdict(report, name, version):
+    """The verdict of the package build of name at version (PKGV-PKGR)."""
+    for entry in report["packages"][name]:
+        if normalize(entry["version"]) == normalize(version):
+            return build_verdict(report, entry["build"])
+    raise KeyError((name, version))

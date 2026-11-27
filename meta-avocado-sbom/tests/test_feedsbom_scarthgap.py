@@ -33,7 +33,10 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "lib"))
+
+import binding_rules  # noqa: E402
 
 from avocado_sbom import feedcheck, feedsbom, report, spdxalias  # noqa: E402
 
@@ -810,6 +813,132 @@ class RealLibTest(unittest.TestCase):
         for issues in oot:
             self.assertNotIn("CVE-2026-3001", issues)
 
+    # --- alternate builds named apart --------------------------------------
+
+    def recipe_packages(self, document):
+        """{recipe package name: (version, [names of the packages it generates])}"""
+        nodes = self.graph(document)
+        found = {}
+        for n in nodes.values():
+            if (n.get("type") == "software_Package"
+                    and n.get("software_primaryPurpose") == "specification"):
+                found[n["name"]] = (n["software_packageVersion"], sorted(
+                    nodes[t]["name"] + "@" + t.split("/")[-3][:1] for r in nodes.values()
+                    if r.get("relationshipType") == "generates" and r.get("scope") == "build"
+                    and r["from"] == n["spdxId"] for t in r["to"]))
+        return found
+
+    def test_each_kept_alternate_gets_a_recipe_package_of_its_name(self):
+        document, coverage = self.tegra_trees(alt_cves=self.BOTH_SIDES)
+        self.assertEqual(coverage["alt_included"], [
+            "jetson-l4t:nvidia-kernel-oot", "jetson-l4t-rt:nvidia-kernel-oot"])
+        # scarthgap's documents have none of their own; the default builds and
+        # the alternate left out get none.
+        self.assertEqual(self.recipe_packages(document), {
+            "jetson-l4t:nvidia-kernel-oot": ("39.2.1", ["nvidia-kernel-oot-base@8"]),
+            "jetson-l4t-rt:nvidia-kernel-oot": ("39.2.1", ["nvidia-kernel-oot-base@a"])})
+        self.assertNotIn("jetson-rt:", json.dumps(document))
+        # Roots, packages and builds keep their names.
+        nodes = self.graph(document)
+        sbom, = [n for n in document["@graph"] if n.get("type") == "software_Sbom"]
+        self.assertEqual(sorted(nodes[r]["name"] for r in sbom["rootElement"]),
+                         ["edk2-firmware-tegra"] + ["nvidia-kernel-oot-base"] * 3)
+        self.assertEqual(sorted(n["name"] for n in nodes.values() if n.get("type") == "build_Build"),
+                         ["edk2-firmware-tegra:do_create_spdx:recipe"]
+                         + ["nvidia-kernel-oot:do_create_spdx:recipe"] * 3)
+
+    def test_naming_a_root_the_document_lost_fails(self):
+        class Lost:
+            def find_by_id(self, _id):
+                return None
+        root = type("Root", (), {"_id": "x"})()
+        with self.assertRaises(feedsbom.FeedSbomError):
+            feedsbom.name_alt_builds(Lost(), [("mc", "r", [(None, root)])], self.oe.spdx30)
+
+    # --- naming the alternate builds changes no scan result -----------------
+
+    def named_and_plain(self, fixture, records):
+        """[(name, version, issues)] of the scan of fixture's document, with
+        the alternate builds named and with name_alt_builds bypassed."""
+        scans = []
+        for named in (True, False):
+            # A tree of its own; OE-core's modules stay loaded.
+            self.top = Path(tempfile.mkdtemp(prefix="feed-scarthgap-"))
+            self.addCleanup(shutil.rmtree, self.top)
+            self.tmp = self.top / "tmp"
+            self.alt_tmp = self.top / ("tmp-" + MC)
+            if not named:
+                real = feedsbom.name_alt_builds
+                feedsbom.name_alt_builds = lambda objset, kept, spdx30: []
+                self.addCleanup(setattr, feedsbom, "name_alt_builds", real)
+            fixture()
+            scans.append(self.scan(records, entries=True))
+        return scans
+
+    def assert_same_issues(self, fixture, records, labels):
+        named, plain = self.named_and_plain(fixture, records)
+
+        def by_recipe(listed):
+            return sorted((name.rpartition(":")[2], version, sorted(issues.items()))
+                          for name, version, issues in listed)
+        self.assertEqual(by_recipe(named), by_recipe(plain))
+        self.assertEqual(sorted(n for n, _v, _i in named if ":" in n), sorted(labels))
+        self.assertFalse([n for n, _v, _i in plain if ":" in n])
+        # Something was scanned, or equal lists would prove nothing.
+        self.assertTrue([i for _n, _v, i in named if i])
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_the_names_change_no_issue_of_two_filtered_kernels(self):
+        def fixture():
+            self.run_feed_sbom(mc_recipes=self.kernel_trees())
+        self.assert_same_issues(fixture, (), ["%s:linux-raspberrypi" % MC])
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_the_names_change_no_issue_of_four_module_builds_at_one_version(self):
+        records = (self.TEGRA_RECORDS[0] + ([("jetson_linux", "39.9.9")],),
+                   self.TEGRA_RECORDS[1])
+        self.assert_same_issues(self.tegra_trees, records,
+                                ["%s:nvidia-kernel-oot" % mc for mc, _h in TEGRA_MCS])
+
+    # --- from the scan to the report ----------------------------------------
+
+    def tegra_report(self, alt_cves=None):
+        _document, coverage = self.tegra_trees(alt_cves)
+        self.scan(self.TEGRA_RECORDS)
+        pkgdata = lambda tmp: str(tmp / "pkgdata" / "raspberrypi5")  # noqa: E731
+        doc, _stats = report.build_report(
+            [str(self.scan_path)], [pkgdata(self.tmp)], machine=MACHINE,
+            status=report.STATUS_ALL,
+            alt_trees=[(mc, pkgdata(self.top / ("tmp-" + mc)), {"nvidia-kernel-oot"})
+                       for mc, _h in TEGRA_MCS],
+            not_covered=report.not_covered_builds(coverage))
+        return doc
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_each_module_build_gets_its_own_record(self):
+        doc = self.tegra_report()
+        for mc in [""] + [mc for mc, _h in TEGRA_MCS]:
+            build = doc["builds"][report.build_id(mc, "nvidia-kernel-oot")]
+            self.assertEqual(build["coverage"], "scanned", mc)
+            self.assertEqual([(c["id"], c["status"]) for c in build["cves"]],
+                             [("CVE-2026-3002", "Unpatched")], mc)
+        self.assertEqual(doc["counts"]["stale_dropped"], 0)
+        # One NEVRA in four trees: one package build, the default's.
+        self.assertEqual(doc["packages"]["nvidia-kernel-oot-base"],
+                         [{"version": "39.2.1-r0", "build": "nvidia-kernel-oot"}])
+        self.assertEqual(doc["counts"]["shared_package_builds"], 3)
+
+    @unittest.skipUnless(scanner(), "set SBOM_CVE_CHECK to sbom-cve-check 1.4.0 to scan")
+    def test_a_left_out_module_build_is_not_covered(self):
+        doc = self.tegra_report(alt_cves=self.BOTH_SIDES)
+        left_out = doc["builds"]["jetson-rt:nvidia-kernel-oot"]
+        self.assertEqual(left_out["coverage"], "unscanned")
+        self.assertIn("VEX overlap", left_out["not_covered"])
+        self.assertEqual(binding_rules.build_verdict(doc, "jetson-rt:nvidia-kernel-oot"),
+                         ("not_checked", "build-not-covered"))
+        self.assertEqual(binding_rules.build_verdict(doc, "jetson-l4t:nvidia-kernel-oot"),
+                         ("checked", {"CVE-2026-3002": "affected"}))
+
     def test_a_hole_in_the_default_tree_fails_naming_its_recipe(self):
         other = self.top / "tmp-other"
         self.write_bitbake(other)
@@ -891,11 +1020,11 @@ class RealLibTest(unittest.TestCase):
         doc, _stats = report.build_report(
             [str(self.scan_path)], [str(self.tmp / "pkgdata" / "raspberrypi5")],
             status=report.STATUS_ALL, compiled_sources={"linux-raspberrypi"})
-        busybox = {c["id"]: c for c in doc["recipes"]["busybox"]["cves"]}
+        busybox = {c["id"]: c for c in doc["builds"]["busybox"]["cves"]}
         self.assertEqual(busybox["CVE-2026-2101"]["status"], "Unpatched")
         self.assertNotIn("detail", busybox["CVE-2026-2101"])
         self.assertEqual(busybox["CVE-2026-2101"]["scanner"]["detail"], "not-applicable-config")
-        kernel = {c["id"]: c for c in doc["recipes"]["linux-raspberrypi"]["cves"]}
+        kernel = {c["id"]: c for c in doc["builds"]["linux-raspberrypi"]["cves"]}
         self.assertEqual((kernel["CVE-2026-2001"]["status"], kernel["CVE-2026-2001"]["detail"]),
                          ("Ignored", "not-applicable-config"))
 

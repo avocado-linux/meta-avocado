@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://avocadolinux.org/schema/avocado-rpm-manifest-v1.schema.json",
   "title": "Avocado RPM manifest, version 1",
-  "description": "The RPMs a build produced, each with the digest of its header, written next to the CVE report. A correlation service joins it to the report on the package name and to a repository on the header digest. The shape is frozen, the contents are not: nothing here constrains which packages appear. Unknown keys are permitted - additions do not bump the major. See meta-avocado-sbom/README.",
+  "description": "The RPMs a build produced, each with the digest of its header, written next to the CVE report. A correlation service joins it to the report on the package name and version-release, and to a repository on the header digest. The shape is frozen, the contents are not: nothing here constrains which packages appear. Unknown keys are permitted - additions do not bump the major. See meta-avocado-sbom/README.",
   "type": "object",
   "required": ["version", "generated", "packages"],
   "properties": {

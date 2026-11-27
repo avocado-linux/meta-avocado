@@ -22,12 +22,17 @@ layer's, each read straight from the file that carries it:
 
 import os
 import re
+import sys
 import tempfile
 import textwrap
 import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lib"))
+
+import test_report_compiled_sources as compiled  # noqa: E402
 LAYER = os.path.normpath(os.path.join(HERE, ".."))
 REPORT_BB = os.path.join(LAYER, "recipes-avocado", "avocado-cve-report",
                          "avocado-cve-report.bb")
@@ -308,6 +313,56 @@ class SpdxPythonModelTests(unittest.TestCase):
         tops = {n.split("/", 1)[0] for n in names}
         self.assertEqual(tops, {"spdx_python_model", "spdx_python_model-0.0.6.dist-info"})
         self.assertIn("spdx_python_model-0.0.6.dist-info/licenses/LICENSE", names)
+
+
+class MultikernelMergeTests(compiled.RecipeHarness, unittest.TestCase):
+    """scarthgap's do_multikernel_merge publishes every RPM of an alternate
+    multiconfig that carries its kernel's version, whichever recipe built it,
+    and a multiconfig's whole tree at its first pair."""
+
+    REASON = "AVOCADO_MULTIKERNEL_MC_RECIPES does not name it"
+
+    def test_a_recipe_the_merge_published_unnamed_has_its_own_build(self):
+        doc = self.feed(
+            {"alt_not_covered": []},
+            alt_packages=[("kernel-module-oot-6.6.78", "oot-module", "1.0"),
+                          ("kernel-module-old-6.6.78", "old-module", "2.0"),
+                          ("alt-only-tool", "alt-only-tool", "1.0")],
+            merged=["raspberrypi5/kernel-module-oot-6.6.78-1.0-r0.raspberrypi5.rpm",
+                    # An older release, still in the tree.
+                    "raspberrypi5/kernel-module-old-6.6.78-1.9-r0.raspberrypi5.rpm"])
+        build = doc["builds"]["rpi-6_6:oot-module"]
+        self.assertEqual(build["coverage"], "unscanned")
+        self.assertIn(self.REASON, build["not_covered"])
+        self.assertEqual(doc["packages"]["kernel-module-oot-6.6.78"],
+                         [{"version": "1.0-r0", "build": "rpi-6_6:oot-module"}])
+        self.assertNotIn("rpi-6_6:old-module", doc["builds"])
+        self.assertNotIn("rpi-6_6:alt-only-tool", doc["builds"])
+        self.assertEqual(doc["counts"]["not_covered_builds"], 1)
+
+    def test_a_shared_file_is_the_first_multiconfigs_to_merge(self):
+        top = os.path.join(self.root, "top")
+        deploy = os.path.join(self.root, "deploy")
+        os.makedirs(os.path.join(deploy, "avocado-multikernel"))
+        for mc in ("mc-a", "mc-b"):
+            tree = os.path.join(top, "tmp-" + mc, "pkgdata", "raspberrypi5", "runtime-reverse")
+            os.makedirs(tree)
+            for name, pn, pv in (("kernel-" + mc, "linux", "6.6.78"),
+                                 ("foo-6.6.78", "foo", "1.0")):
+                with open(os.path.join(tree, name), "w") as f:
+                    f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n" % (pn, pv, pv))
+            with open(os.path.join(deploy, "avocado-multikernel", mc + "-rpms.txt"), "w") as f:
+                f.write("raspberrypi5/foo-6.6.78-1.0-r0.raspberrypi5.rpm\n")
+        coverage = os.path.join(self.root, "feed.coverage.json")
+        with open(coverage, "w") as f:
+            f.write('{"alt_not_covered": []}')
+        doc = self.run_task({
+            "AVOCADO_CVE_SCOPE": "feed", "TOPDIR": top, "TMPDIR": self.root,
+            "DEPLOY_DIR": deploy, "DEPLOY_DIR_RPM": os.path.join(deploy, "rpm"),
+            "AVOCADO_MULTIKERNEL_MC_RECIPES": "mc-a:linux mc-b:foo mc-a:foo mc-b:linux",
+            "AVOCADO_FEED_COVERAGE_FILE": coverage})
+        self.assertEqual(doc["packages"]["foo-6.6.78"],
+                         [{"version": "1.0-r0", "build": "mc-a:foo"}])
 
 
 if __name__ == "__main__":
