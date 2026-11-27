@@ -248,12 +248,15 @@ documents link to those of its build dependencies, recursively, and OE-Core's
 sstate restores a dependency's SPDX documents only for a task that actually
 runs, so in a tree restored from sstate a recipe whose own documents came from
 sstate links to documents nothing wrote. do_feed_sbom asks for the
-recipe-level SPDX task (do_create_recipe_spdx) of every recipe in the task
-graph of the feed's meta-targets, AVOCADO_FEED_SBOM_TARGETS (avocado-distro),
-and for the build SPDX tasks of every recipe in the graph of each kernel whose
-build the document carries (see below; an alternate's build links resolve in
-the default tree, so it brings the default kernel's graph too), through
-recrdeptask, as OE-Core's image
+recipe-level SPDX task (do_create_recipe_spdx) of every recipe the feed's
+meta-targets, AVOCADO_FEED_SBOM_TARGETS (avocado-distro), build or package,
+the runtime dependencies of what they install included (bitbake reads a task
+graph as it stands before recursion, so their graph is followed through each
+recipe's packaging, as an image's do_rootfs follows it, or it would stop one
+package past what an image installs), and for the build SPDX tasks of every
+recipe in the graph of each kernel whose build the document carries (see
+below; an alternate's build links resolve in the default tree, so it brings
+the default kernel's graph too), through recrdeptask, as OE-Core's image
 SBOM task does for an image. It never schedules the meta-targets' own tasks:
 their graph is read for its recipes (recideptask) and nothing else, so the
 report run restores or runs only the SPDX tasks whose documents the tree lacks,
