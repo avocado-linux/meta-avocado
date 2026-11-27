@@ -23,20 +23,12 @@
 #      It lists the RPMs it published in
 #      ${DEPLOY_DIR}/avocado-multikernel/<mc>-rpms.txt, which avocado-cve-report's
 #      RPM manifest reads so it names exactly what the feed serves.
-#   3. Each alt-mc recipe's evidence — its cve-check results under
-#      CVE_CHECK_DIR, its SPDX documents under DEPLOY_DIR_SPDX — into a <mc>/
-#      subdirectory of each. Both mcs write the same recipe's results under one
-#      filename (linux-raspberrypi_cve.json), so no additive copy keeps both,
-#      and a subdirectory is a path no task installs — which is what keeps
-#      do_create_spdx's "files already exist" shared-area guard out of it.
-#      avocado-cve-report reads it back as alt_versions on the recipe.
-#
-#      ponytail: the opt-out and backport markers land there too, and
-#      read_optouts/read_backports glob the top level only, so an alt-mc
-#      backport reports "cve-check" evidence instead of "patch-file" —
-#      understating what we patched. Neither kernel emits one today; fix it
-#      when either one gains a backport or opt-out marker. The fix is a
-#      (name, version) key, which reaches check_unscanned_declared too.
+#   3. Each alt-mc recipe's SPDX documents under DEPLOY_DIR_SPDX, into a <mc>/
+#      subdirectory of it. Both mcs write the same recipe's documents under one
+#      filename, so no additive copy keeps both, and a subdirectory is a path
+#      no task installs — which is what keeps do_create_spdx's "files already
+#      exist" shared-area guard out of it. avocado-cve-report scans the image's
+#      SBOM and does not read these yet.
 
 python () {
     pairs = (d.getVar('AVOCADO_MULTIKERNEL_MC_RECIPES') or '').split()
@@ -67,16 +59,16 @@ do_multikernel_merge() {
         mc="${pair%%:*}"
         base="${TOPDIR}/tmp-${mc}/deploy"
 
-        # Both evidence trees are under ${DEPLOY_DIR}, and the alt mc's copy is
-        # the same path with its own tmp tree in front, so each source is
-        # derived by swapping that prefix. Unset or outside ${DEPLOY_DIR} - no
-        # cve-check, no create-spdx, a relocated tree - is skipped.
+        # The SPDX tree is under ${DEPLOY_DIR}, and the alt mc's copy is the
+        # same path with its own tmp tree in front, so the source is derived by
+        # swapping that prefix. Unset or outside ${DEPLOY_DIR} - no
+        # create-spdx, a relocated tree - is skipped.
         #
         # What to copy is decided from the alt mc's own output alone, like the
         # rpm filter below and for the same reason: this task runs before
         # do_compile, and do_compile is what depends on the rest of the distro,
-        # so the default mc's cve/ and spdx/ are mostly absent here. Comparing
-        # against them would copy a different set depending on when it ran.
+        # so the default mc's spdx/ is mostly absent here. Comparing against it
+        # would copy a different set depending on when it ran.
         #
         # Read into shell variables first: bitbake expands a bare ${VAR} in a
         # shell function, but leaves ${VAR#...} alone - its expansion regexp
@@ -84,19 +76,7 @@ do_multikernel_merge() {
         # stripping the prefix off the bitbake form yields "" every time.
         recipe="${pair#*:}"
         deploy_dir="${DEPLOY_DIR}"
-        cve_dir="${CVE_CHECK_DIR}"
         spdx_dir="${DEPLOY_DIR_SPDX}"
-
-        cve_rel="${cve_dir#$deploy_dir/}"
-        if [ -n "${cve_dir}" ] && [ "${cve_rel}" != "${cve_dir}" ]; then
-            for suffix in "" _cve.json _backports.json _optout.json; do
-                src="${base}/${cve_rel}/${recipe}${suffix}"
-                [ -f "${src}" ] || continue
-                bbnote "avocado-multikernel: merging alt-mc ${mc} ${recipe}${suffix} into ${cve_dir}/${mc}"
-                mkdir -p "${cve_dir}/${mc}"
-                cp -a "${src}" "${cve_dir}/${mc}/${recipe}${suffix}"
-            done
-        fi
 
         spdx_rel="${spdx_dir#$deploy_dir/}"
         spdx_src="${base}/${spdx_rel}"
