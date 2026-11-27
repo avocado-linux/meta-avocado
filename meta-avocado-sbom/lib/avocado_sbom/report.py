@@ -20,10 +20,14 @@ class Stats(dict):
         "package_collisions",
         "stale_dropped",
         "unscanned_recipes",
+        "no_cve_record_recipes",
+        "alt_recipes",
+        "alt_cves",
         "unpatched_cves",
         "ignored_cves",
         "patched_cves",
         "unknown_status_cves",
+        "unverified_compiled_source_cves",
     )
 
     def __init__(self):
@@ -66,46 +70,112 @@ def _read_pkgdata_fields(path):
         return {}
     return fields
 
+def _pkgdata_entries(pkgdata_dir, stats):
+    """(package name, recipe, package version, version keys) for each package
+    one pkgdata directory names. The keys are PV and plain PKGV, the versions a
+    manifest entry is matched against."""
+    reverse_dir = os.path.join(pkgdata_dir, "runtime-reverse")
+    if not os.path.isdir(reverse_dir):
+        return
+
+    for path in sorted(glob.glob(os.path.join(reverse_dir, "*"))):
+        name = os.path.basename(path)
+        fields = _read_pkgdata_fields(path)
+        recipe = fields.get("PN")
+        if not recipe:
+            stats.pkgdata_unreadable += 1
+            continue
+
+        version = _join_version(
+            fields.get("PKGV") or fields.get("PKGV:pkg"),
+            fields.get("PKGR") or fields.get("PKGR:pkg"),
+        )
+        keys = {v for v in (fields.get("PV"), fields.get("PKGV")) if v}
+        yield name, recipe, version, keys
+
+def _add_package(packages, name, recipe, version, origin, stats):
+    """Whether this directory won the name: the first one to claim it does."""
+    if name in packages:
+        if (packages[name]["recipe"] != recipe or
+            packages[name]["version"] != version):
+            stats.package_collisions += 1
+        return False
+    packages[name] = {
+        "recipe": recipe,
+        "version": version,
+        "origin": origin,
+    }
+    return True
+
 def read_pkgdata(pkgdata_dirs, stats):
     packages = {}
     recipe_versions = {}
 
     for pkgdata_dir in pkgdata_dirs:
         origin = os.path.basename(pkgdata_dir.rstrip("/"))
-        reverse_dir = os.path.join(pkgdata_dir, "runtime-reverse")
-        if not os.path.isdir(reverse_dir):
-            continue
-
-        for path in sorted(glob.glob(os.path.join(reverse_dir, "*"))):
-            name = os.path.basename(path)
-            fields = _read_pkgdata_fields(path)
-            recipe = fields.get("PN")
-            if not recipe:
-                stats.pkgdata_unreadable += 1
-                continue
-
-            version = _join_version(
-                fields.get("PKGV") or fields.get("PKGV:pkg"),
-                fields.get("PKGR") or fields.get("PKGR:pkg"),
-            )
-            recipe_versions.setdefault(recipe, set()).update(
-                v for v in (fields.get("PV"), fields.get("PKGV")) if v
-            )
-
-            if name in packages:
-                if (packages[name]["recipe"] != recipe or
-                    packages[name]["version"] != version):
-                    stats.package_collisions += 1
-                continue
-
-            packages[name] = {
-                "recipe": recipe,
-                "version": version,
-                "origin": origin,
-            }
+        for name, recipe, version, keys in _pkgdata_entries(pkgdata_dir, stats):
+            recipe_versions.setdefault(recipe, set()).update(keys)
+            _add_package(packages, name, recipe, version, origin, stats)
 
     stats.packages = len(packages)
     return packages, recipe_versions
+
+def alt_tree_problem(pkgdata_dir, recipes):
+    """Why an alternate multiconfig's pkgdata cannot stand for it, or None.
+
+    Read as it is, a tree missing a declared recipe leaves that recipe's
+    packages out of the report and the RPM manifest while both still pass:
+    the default multiconfig's packages carry every other check. recipes None
+    asks only for some readable package.
+    """
+    if not os.path.isdir(os.path.join(pkgdata_dir, "runtime-reverse")):
+        return "%s has no runtime-reverse directory" % pkgdata_dir
+    found = {recipe for _n, recipe, _v, _k in _pkgdata_entries(pkgdata_dir, Stats())}
+    if recipes is None:
+        return None if found else "%s holds no readable package data" % pkgdata_dir
+    missing = sorted(set(recipes) - found)
+    if missing:
+        return "%s holds no package of %s" % (pkgdata_dir, ", ".join(missing))
+    return None
+
+def read_alt_pkgdata(alt_trees, packages, recipe_versions, stats):
+    """Add an alternate multiconfig's packages to what read_pkgdata returned.
+
+    alt_trees is a list of (pkgdata_dir, recipes): each multiconfig's pkgdata,
+    and the recipes of it that reach the feed (AVOCADO_MULTIKERNEL_MC_RECIPES),
+    the only ones read. None reads every recipe.
+
+    A recipe the default multiconfig also built is the same recipe at a second
+    version, the 6.6 kernel beside the 6.12 one. Those versions are returned
+    as {recipe: {version: [package names]}}: a manifest entry at one of them
+    becomes an alt_versions record, and the names are the packages built from
+    it. A name the default multiconfig already claimed ("kernel", "kernel-dev")
+    stays the default's, so it is in no list. A recipe only an alternate
+    multiconfig built is an ordinary one, read like the default's.
+    """
+    alt = {}
+    # The versions the first tree to build each recipe built it at.
+    primary = {r: set(v) for r, v in recipe_versions.items()}
+
+    for pkgdata_dir, recipes in alt_trees:
+        origin = os.path.basename(pkgdata_dir.rstrip("/"))
+        known = set(primary)
+        for name, recipe, version, keys in _pkgdata_entries(pkgdata_dir, stats):
+            if recipes is not None and recipe not in recipes:
+                continue
+            recipe_versions.setdefault(recipe, set()).update(keys)
+            won = _add_package(packages, name, recipe, version, origin, stats)
+            if recipe not in known:
+                primary.setdefault(recipe, set()).update(keys)
+                continue
+            for key in keys - primary[recipe]:
+                names = alt.setdefault(recipe, {}).setdefault(key, set())
+                if won:
+                    names.add(name)
+
+    stats.packages = len(packages)
+    return {r: {v: sorted(n) for v, n in by_version.items()}
+            for r, by_version in alt.items()}
 
 CVE_FIELDS = (
     "id",
@@ -161,25 +231,108 @@ def _strip_pe(version):
         return rest
     return version
 
-def _count_listed(stats, items):
-    """At All, count the CVEs the report lists under their own status.
+class Coverage:
+    """What the manifests say about each recipe beyond its CVEs.
 
-    This runs where a CVE is added to the report, after a repeated id has been
-    dropped, so unpatched_cves + patched_cves + ignored_cves equals cves even
-    when two manifests or a multilib variant name the same recipe.
+    seen       recipes with at least one readable entry at a version this
+               build has
+    matched    of those, the ones where some such entry matched a CVE record:
+               a non-empty "issue" list
+    assessed   of those, the ones where some such entry carried an issue with
+               a status this report knows
     """
-    for item in items:
-        stats[_FILTERED_COUNTER[item["status"]]] += 1
 
-def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary=True):
+    def __init__(self):
+        self.seen = set()
+        self.matched = set()
+        self.assessed = set()
+
+    @property
+    def no_record(self):
+        """Scanned, and every copy came back with nothing matched.
+
+        sbom-cve-check exports an entry for every component it scanned, with an
+        empty "issue" list when no CVE record names its identifiers or it has
+        none. cvesInRecord adds nothing: the tool sets it from that same list.
+        """
+        return self.seen - self.matched
+
+def _record(version, packaged):
+    return {"version": version, "packaged": packaged, "cves": []}
+
+# What sbom-cve-check 1.4.0 writes for a CVE its compiled-source filter drops:
+# the record names the files the fix touches and none is in the build's list of
+# sources (analysis/compiled_sources.py). A recipe's own CVE_STATUS can carry the
+# same detail, with its own reason as the description, so both are matched.
+COMPILED_SOURCE_DETAIL = "not-applicable-config"
+COMPILED_SOURCE_DESCRIPTION = "vulnerable_code_not_present: Source code not compiled by config"
+# The CPE product of a kernel. The scanner uses a kernel's list only when it
+# names files every kernel build compiles, so only a real source walk passes.
+KERNEL_PRODUCT = "linux_kernel"
+
+def trusts_compiled_sources(name, products, compiled_sources):
+    """Whether the compiled-source filter's result stands for this entry.
+
+    The scanner reads the build's source files as the recipe's compiled sources.
+    A recipe built with SPDX_INCLUDE_COMPILED_SOURCES lists what its build
+    compiled; any other lists only what it fetched, so a CVE in a file it never
+    fetched by name reads as not compiled. compiled_sources is the set of
+    recipes built with the setting, or None when the report does not know it
+    (a report written before it carried the list): then only kernels are
+    trusted, which is every recipe the setting was ever made for, and for which
+    the scanner rejects a list that did not come from a source walk.
+
+    do_cve_report reads the setting from its own datastore, which sees the
+    same :pn- lines a recipe's parse does. A recipe that turns it off in its
+    own parse (linux-yocto with module-signing) writes no source walk, and as
+    a kernel its fetched-only list is rejected by the scanner anyway.
+    """
+    if compiled_sources is None:
+        return KERNEL_PRODUCT in products
+    return name in compiled_sources
+
+def _is_compiled_source_ignore(issue):
+    return (issue.get("status") == "Ignored"
+            and issue.get("detail") == COMPILED_SOURCE_DETAIL
+            and issue.get("description") == COMPILED_SOURCE_DESCRIPTION)
+
+def _listed_status(item, status):
+    """A listed CVE's status: its own at status All, else the report's."""
+    return item.get("status", status)
+
+def _entry_products(entry):
+    products = entry.get("products")
+    if not isinstance(products, list):
+        return set()
+    return {p["product"] for p in products
+            if isinstance(p, dict) and isinstance(p.get("product"), str)}
+
+def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary=True,
+                  alt_versions=None, compiled_sources=None):
+    """The recipe -> CVEs map, and the Coverage the manifests give.
+
+    alt_versions is {recipe: versions} for the versions only an alternate
+    multiconfig built (read_alt_pkgdata). An entry at one of them is filed as an
+    alt_versions record of its recipe, never merged into the record of the
+    version the default multiconfig built.
+
+    compiled_sources is the set of recipes whose compiled-source list the
+    filter may trust, or None (see trusts_compiled_sources). Any other recipe's
+    CVE the filter dropped is listed as Unpatched with no detail (the filter replaced
+    the scanner's version result, so which one it was is unknown), with what the
+    scanner said under "scanner".
+    """
     fields = (
         CVE_FIELDS
         if summary
         else tuple(f for f in CVE_FIELDS if f not in CVE_SUMMARY_FIELDS)
     )
     listed = set(CVE_STATUSES) if status == STATUS_ALL else {status}
-    recipes = {}
-    scanned = set()
+    alt_versions = alt_versions or {}
+    coverage = Coverage()
+    # {recipe: {None or alt version: record}}, None being the default
+    # multiconfig's. Insertion order is manifest order.
+    records = {}
 
     paths = sorted(manifests)
     stats.cve_files = len(paths)
@@ -210,16 +363,9 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
                 stats.entries_unreadable += 1
                 continue
 
-            # An entry exists for every component of the SBOM that was scanned,
-            # with an empty "issue" list when nothing matched, so presence is
-            # what separates clean from unexamined - including for the entries
-            # dropped as stale just below, which were scanned at a version this
-            # build does not have. cvesInRecord cannot be used for that here the
-            # way it was with cve-check: sbom-cve-check sets it from the
-            # exported issue list, so a scanned recipe that came back clean
-            # carries "No" too.
-            scanned.add(name)
-
+            # An entry scanned at a version this build does not have says
+            # nothing about the version it does have, so it does not count as
+            # seen: a recipe with no other entry is unscanned.
             known = recipe_versions.get(name)
             stripped = _strip_pe(version)
             if not known:
@@ -230,17 +376,33 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
                     continue
                 version = stripped
 
-            raw_issues = entry.get("issue", [])
+            # sbom-cve-check always writes the key, empty when nothing matched.
+            # Without it the entry says nothing, which is not "no record".
+            raw_issues = entry.get("issue")
             if not isinstance(raw_issues, list) or not all(
                 isinstance(i, dict) for i in raw_issues):
                 stats.entries_unreadable += 1
                 continue
 
+            coverage.seen.add(name)
+            if raw_issues:
+                coverage.matched.add(name)
+
+            trusted = trusts_compiled_sources(name, _entry_products(entry), compiled_sources)
             issues = []
             for issue in raw_issues:
                 issue_status = issue.get("status")
+                scanner = None
+                if not trusted and _is_compiled_source_ignore(issue):
+                    scanner = {k: issue[k] for k in ("status", "detail", "description")}
+                    issue = {k: v for k, v in issue.items() if k not in scanner}
+                    issue_status = "Unpatched"
+                if issue_status in CVE_STATUSES:
+                    coverage.assessed.add(name)
                 if issue_status in listed:
                     item = {k: issue[k] for k in fields if k in issue}
+                    if scanner:
+                        item["scanner"] = scanner
                     if status == STATUS_ALL:
                         # One status is implied by the report's own "status";
                         # a report of every status has to say which each CVE is.
@@ -257,42 +419,100 @@ def read_cve_data(manifests, recipe_versions, stats, status="Unpatched", summary
             if not issues:
                 continue
 
-            packaged = name in recipe_versions
-            existing = recipes.get(name)
-            if existing is not None:
-                # Two entries for one recipe: a directory of manifests, where a
-                # per-image export sits beside the world one, or a multilib
-                # variant. Merge by CVE id rather than overwrite, or the counts
-                # would keep the CVEs the report body just lost.
-                seen = {c.get("id") for c in existing["cves"]}
-                new = [i for i in issues if i.get("id") not in seen]
-                existing["cves"].extend(new)
-                stats.cves += len(new)
+            alt = version if version in alt_versions.get(name, ()) else None
+            by_version = records.setdefault(name, {})
+            record = by_version.get(alt)
+            if record is None:
+                record = by_version[alt] = _record(version, name in recipe_versions)
+            # Two entries for one record: a directory of manifests, where a
+            # per-image export sits beside the world one, or a multilib
+            # variant. Merge by CVE id rather than overwrite, or the counts
+            # would keep the CVEs the report body just lost. The version first
+            # recorded stands.
+            # A CVE another manifest reports Unpatched outright wins over one
+            # this report turned to unverified, whichever manifest came first;
+            # otherwise the first manifest's stands.
+            at = {c.get("id"): n for n, c in enumerate(record["cves"])}
+            for item in issues:
+                n = at.get(item.get("id"))
+                if n is None:
+                    at[item.get("id")] = len(record["cves"])
+                    record["cves"].append(item)
+                elif ("scanner" in record["cves"][n] and "scanner" not in item
+                      and _listed_status(item, status) == "Unpatched"):
+                    record["cves"][n] = item
+
+    recipes = {}
+    for name, by_version in records.items():
+        # The default multiconfig's record, or the first alternate one when the
+        # default listed nothing: a placeholder at the default version with no
+        # CVEs would bind that kernel's packages as clean.
+        main = by_version.pop(None, None)
+        alts = list(by_version.values())
+        if main is None:
+            main = alts.pop(0)
+        if alts:
+            main["alt_versions"] = alts
+        recipes[name] = main
+
+    for record in recipes.values():
+        stats.cves += len(record["cves"])
+        if record["packaged"]:
+            stats.packaged_recipes += 1
+            stats.packaged_cves += len(record["cves"])
+        alts = record.get("alt_versions", [])
+        if alts:
+            stats.alt_recipes += 1
+            stats.alt_cves += sum(len(a["cves"]) for a in alts)
+        for each in [record] + alts:
+            for cve in each["cves"]:
+                if "scanner" in cve:
+                    stats.unverified_compiled_source_cves += 1
                 if status == STATUS_ALL:
-                    _count_listed(stats, new)
-                if existing["packaged"]:
-                    stats.packaged_cves += len(new)
-                continue
-
-            recipes[name] = {
-                "version": version,
-                "packaged": packaged,
-                "cves": issues,
-            }
-            stats.cves += len(issues)
-            if status == STATUS_ALL:
-                _count_listed(stats, issues)
-
-            if packaged:
-                stats.packaged_recipes += 1
-                stats.packaged_cves += len(issues)
+                    # What the report lists, counted off the report, so a CVE
+                    # two entries share is counted once: unpatched_cves +
+                    # patched_cves + ignored_cves equals cves + alt_cves.
+                    stats[_FILTERED_COUNTER[cve["status"]]] += 1
 
     stats.recipes = len(recipes)
-    return recipes, scanned
+    return recipes, coverage
+
+def stamp_recipe_versions(packages, recipes, alt_packages):
+    """Give each package built at a version "recipes" has a record of that
+    version as "recipe_version".
+
+    Both kernels' packages name one recipe, so the recipe alone cannot join a
+    6.6 module to the 6.6 record. A package of a version with no record gets
+    no stamp: a consumer then knows no record describes it, rather than reading
+    the other version's CVEs as its own.
+    """
+    by_recipe = {}
+    for name, pkg in packages.items():
+        pkg.pop("recipe_version", None)
+        by_recipe.setdefault(pkg["recipe"], []).append(name)
+
+    for recipe, record in recipes.items():
+        alt = alt_packages.get(recipe, {})
+        alt_names = {n for names in alt.values() for n in names}
+        for each in [record] + record.get("alt_versions", []):
+            version = each["version"]
+            if version in alt:
+                names = alt[version]
+            else:
+                names = [n for n in by_recipe.get(recipe, ()) if n not in alt_names]
+            for name in names:
+                packages[name]["recipe_version"] = version
 
 REPORT_VERSION = "1"
 
-def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summary=True):
+def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summary=True,
+                 alt_trees=(), compiled_sources=None):
+    """alt_trees are the alternate multiconfigs' (pkgdata_dir, recipes), read
+    after pkgdata_dirs; see read_alt_pkgdata. compiled_sources names the
+    recipes built with SPDX_INCLUDE_COMPILED_SOURCES, or is a function telling
+    whether a recipe was, asked for every recipe in package data, or is None
+    when that is not known; see trusts_compiled_sources. The report carries
+    the set."""
     if status not in REPORT_STATUSES:
         raise ValueError(
             "unknown CVE status %r; expected one of %s"
@@ -301,8 +521,13 @@ def build_report(manifests, pkgdata_dirs, machine=None, status="Unpatched", summ
 
     stats = Stats()
     packages, recipe_versions = read_pkgdata(pkgdata_dirs, stats)
-    return _assemble(manifests, packages, recipe_versions, stats,
-                     machine, status, summary)
+    alt_packages = read_alt_pkgdata(alt_trees, packages, recipe_versions, stats)
+    if callable(compiled_sources):
+        compiled_sources = {r for r in recipe_versions if compiled_sources(r)}
+    elif compiled_sources is not None:
+        compiled_sources = set(compiled_sources)
+    return _assemble(manifests, packages, recipe_versions, alt_packages, stats,
+                     machine, status, summary, compiled_sources)
 
 def packages_digest(packages):
     digest = hashlib.sha256()
@@ -360,6 +585,33 @@ def _anchor_parts(anchor, path):
 
     if anchor.get("packages_digest") != packages_digest(packages):
         raise _anchor_error(path, "packages do not match packages_digest")
+    # recipe_version is recomputed from this scan's records.
+    packages_in = packages
+    packages = {n: {k: p[k] for k in ("recipe", "version", "origin")}
+                for n, p in packages_in.items()}
+
+    if "alt_packages" in anchor:
+        alt_packages = anchor["alt_packages"]
+        if not isinstance(alt_packages, dict) or not all(
+                isinstance(by_version, dict) and all(
+                    isinstance(v, str) and v and isinstance(names, list) and all(
+                        isinstance(n, str) and packages.get(n, {}).get("recipe") == r
+                        for n in names)
+                    for v, names in by_version.items())
+                for r, by_version in alt_packages.items()):
+            raise _anchor_error(path, "alt_packages is malformed")
+    else:
+        alt_packages = _alt_packages_from_records(anchor, packages_in)
+
+    # Absent from a report written before it carried the list: then only kernels
+    # keep the filter's result, the rule that report's build was made for.
+    compiled_sources = None
+    if "compiled_source_recipes" in anchor:
+        compiled_sources = anchor["compiled_source_recipes"]
+        if not isinstance(compiled_sources, list) or not all(
+                isinstance(r, str) and r for r in compiled_sources):
+            raise _anchor_error(path, "compiled_source_recipes is malformed")
+        compiled_sources = set(compiled_sources)
 
     # read_pkgdata keys every recipe that wrote a pkgdata file, and the report
     # drops the ones with no version. Restore those for the "packaged" test. One
@@ -368,7 +620,37 @@ def _anchor_parts(anchor, path):
     recipe_versions = {name: set(v) for name, v in versions.items()}
     for pkg in packages.values():
         recipe_versions.setdefault(pkg["recipe"], set())
-    return packages, recipe_versions, carried
+    return packages, recipe_versions, alt_packages, carried, compiled_sources
+
+def _alt_packages_from_records(anchor, packages):
+    """alt_packages for a report written before it carried them.
+
+    A report that already filed a second version under alt_versions (scarthgap's
+    cve-check generator) stamped its packages with that version, which is the
+    same split. Without it every package of the recipe would be read as the
+    default version's, and a rescan would file the 6.6 modules under the 6.12
+    kernel's CVEs.
+    """
+    recipes = anchor.get("recipes")
+    if not isinstance(recipes, dict):
+        return {}
+    alt = {}
+    # Every recorded version, even one whose packages all lost their names to
+    # the default's, or its CVEs would merge into the default record.
+    for recipe, record in recipes.items():
+        alts = record.get("alt_versions") if isinstance(record, dict) else None
+        if isinstance(alts, list):
+            for a in alts:
+                if isinstance(a, dict) and isinstance(a.get("version"), str) and a["version"]:
+                    alt.setdefault(recipe, {}).setdefault(a["version"], [])
+    for name, pkg in sorted(packages.items()):
+        record = recipes.get(pkg["recipe"])
+        alts = record.get("alt_versions") if isinstance(record, dict) else None
+        version = pkg.get("recipe_version")
+        if isinstance(alts, list) and any(
+                isinstance(a, dict) and a.get("version") == version for a in alts):
+            alt.setdefault(pkg["recipe"], {}).setdefault(version, []).append(name)
+    return alt
 
 def build_report_from_anchor(manifests, anchor, status=None, summary=True,
                              anchor_path="anchor report"):
@@ -379,7 +661,8 @@ def build_report_from_anchor(manifests, anchor, status=None, summary=True,
     written before they were added is refused. machine, distro_version and,
     unless `status` is given, the status are taken from it.
     """
-    packages, recipe_versions, carried = _anchor_parts(anchor, anchor_path)
+    packages, recipe_versions, alt_packages, carried, compiled_sources = _anchor_parts(
+        anchor, anchor_path)
     if status is None:
         status = anchor.get("status")
     if status not in REPORT_STATUSES:
@@ -392,18 +675,33 @@ def build_report_from_anchor(manifests, anchor, status=None, summary=True,
     stats.packages = len(packages)
     for key, value in carried.items():
         stats[key] = value
-    report, stats = _assemble(manifests, packages, recipe_versions, stats,
-                              anchor.get("machine"), status, summary)
+    report, stats = _assemble(manifests, packages, recipe_versions, alt_packages,
+                              stats, anchor.get("machine"), status, summary,
+                              compiled_sources)
     if anchor.get("distro_version"):
         report["distro_version"] = anchor["distro_version"]
     return report, stats
 
-def _assemble(manifests, packages, recipe_versions, stats, machine, status, summary):
-    recipes, scanned = read_cve_data(
-        manifests, recipe_versions, stats, status=status, summary=summary
+def _assemble(manifests, packages, recipe_versions, alt_packages, stats, machine,
+              status, summary, compiled_sources=None):
+    recipes, coverage = read_cve_data(
+        manifests, recipe_versions, stats, status=status, summary=summary,
+        alt_versions={r: set(v) for r, v in alt_packages.items()},
+        compiled_sources=compiled_sources,
     )
+    stamp_recipe_versions(packages, recipes, alt_packages)
 
-    unscanned = sorted({p["recipe"] for p in packages.values()} - scanned)
+    # Every recipe that shipped a package lands in exactly one of: "recipes",
+    # no_cve_record_recipes, unscanned_recipes, or none of them, which a
+    # consumer reads as scanned and clean. So none is kept for a recipe whose
+    # entries matched CVEs at a status this report knows and listed none of
+    # them at its status. Anything short of that is unscanned: no entry, only
+    # entries at a version this build does not have, only unreadable ones, or
+    # only issues of an unknown status.
+    shipped = {p["recipe"] for p in packages.values()}
+    no_record = sorted(shipped & coverage.no_record)
+    unscanned = sorted(shipped - coverage.no_record - coverage.assessed - set(recipes))
+    stats.no_cve_record_recipes = len(no_record)
     stats.unscanned_recipes = len(unscanned)
 
     report = {
@@ -423,6 +721,9 @@ def _assemble(manifests, packages, recipe_versions, stats, machine, status, summ
             "cve_files": stats.cve_files,
             "stale_dropped": stats.stale_dropped,
             "unscanned_recipes": stats.unscanned_recipes,
+            "no_cve_record_recipes": stats.no_cve_record_recipes,
+            "alt_recipes": stats.alt_recipes,
+            "alt_cves": stats.alt_cves,
             "cve_files_unreadable": stats.cve_files_unreadable,
             "entries_unreadable": stats.entries_unreadable,
             "pkgdata_unreadable": stats.pkgdata_unreadable,
@@ -431,10 +732,19 @@ def _assemble(manifests, packages, recipe_versions, stats, machine, status, summ
             "ignored_cves": stats.ignored_cves,
             "patched_cves": stats.patched_cves,
             "unknown_status_cves": stats.unknown_status_cves,
+            "unverified_compiled_source_cves": stats.unverified_compiled_source_cves,
         },
         "recipes": recipes,
         "packages": packages,
         "unscanned_recipes": unscanned,
+        "no_cve_record_recipes": no_record,
+        # Which packages an alternate multiconfig built at a second version of
+        # a recipe, for a rescan to file them the same way: packages carry
+        # PKGV-PKGR, which does not say which multiconfig built them.
+        "alt_packages": {
+            name: {v: list(names) for v, names in sorted(by_version.items())}
+            for name, by_version in sorted(alt_packages.items())
+        },
         # What read_cve_data matched entries against. A rescan without the
         # build tree needs it: packages carry PKGV-PKGR, which no entry does.
         "recipe_versions": {
@@ -443,6 +753,10 @@ def _assemble(manifests, packages, recipe_versions, stats, machine, status, summ
             if versions
         },
     }
+    if compiled_sources is not None:
+        # The recipes whose compiled-source filter results stand, for a rescan
+        # to apply the same rule. Without it only kernels' do.
+        report["compiled_source_recipes"] = sorted(compiled_sources)
     if machine:
         report["machine"] = machine
 
@@ -569,6 +883,22 @@ def main():
         "--pkgdata-dir", action="append", default=[], help="override, repeatable"
     )
     parser.add_argument(
+        "--alt-pkgdata-dir", action="append", default=[],
+        help="an alternate multiconfig's pkgdata, read after the others; a "
+        "recipe it builds at a second version gets alt_versions records. "
+        "Repeatable")
+    parser.add_argument(
+        "--alt-recipe", action="append", default=[],
+        help="read only this recipe from every --alt-pkgdata-dir, as the build "
+        "reads only AVOCADO_MULTIKERNEL_MC_RECIPES. Repeatable; default every "
+        "recipe")
+    parser.add_argument(
+        "--compiled-source-recipe", action="append", default=None,
+        help="a recipe built with SPDX_INCLUDE_COMPILED_SOURCES, whose "
+        "not-applicable-config results from the compiled-source filter stand. "
+        "Repeatable. Without it only kernels' do, and the report does not "
+        "carry the list")
+    parser.add_argument(
         "--machine",
         help="MACHINE recorded in the report, and the ${DEPLOY_DIR}/images "
         "subdirectory the manifest is read from",
@@ -616,6 +946,10 @@ def main():
                 parser.error("no sbom-cve-check manifest at %s" % path)
             manifests.extend(found)
     pkgdata_dirs = args.pkgdata_dir or pkgdata_dirs
+    for path in args.alt_pkgdata_dir:
+        problem = alt_tree_problem(path, set(args.alt_recipe) or None)
+        if problem:
+            parser.error("--alt-pkgdata-dir: %s" % problem)
 
     if args.tmpdir and not manifests:
         # Distinct from the argument error below: the paths were worked out,
@@ -644,6 +978,9 @@ def main():
         machine=args.machine,
         status=args.status,
         summary=not args.no_summary,
+        alt_trees=[(path, set(args.alt_recipe) or None)
+                   for path in args.alt_pkgdata_dir],
+        compiled_sources=args.compiled_source_recipe,
     )
 
     # Files found is not files read. A truncated manifest gets this far and
@@ -674,8 +1011,10 @@ def main():
 def _main_from_report(parser, args):
     import sys
 
-    if args.tmpdir or args.pkgdata_dir or args.machine:
-        parser.error("--from-report replaces --tmpdir, --pkgdata-dir and --machine")
+    if (args.tmpdir or args.pkgdata_dir or args.alt_pkgdata_dir or args.machine
+            or args.compiled_source_recipe is not None):
+        parser.error("--from-report replaces --tmpdir, --pkgdata-dir, "
+                     "--alt-pkgdata-dir, --compiled-source-recipe and --machine")
     if not args.manifest:
         parser.error("--from-report needs --manifest")
     manifests = []
@@ -744,6 +1083,9 @@ def _write_and_summarize(report, stats, output, status):
     )
     for key in (
         "unscanned_recipes",
+        "no_cve_record_recipes",
+        "alt_recipes",
+        "alt_cves",
         "stale_dropped",
         "package_collisions",
         "cve_files_unreadable",
@@ -753,6 +1095,7 @@ def _write_and_summarize(report, stats, output, status):
         "ignored_cves",
         "patched_cves",
         "unknown_status_cves",
+        "unverified_compiled_source_cves",
     ):
         if stats.get(key):
             print("  %s: %d" % (key, stats[key]), file=sys.stderr)

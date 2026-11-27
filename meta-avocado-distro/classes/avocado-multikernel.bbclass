@@ -17,7 +17,10 @@
 #   2. do_multikernel_merge runs after do_configure and before do_compile
 #      (which calls avocado-repo-map's do_create_repo_map). From each alt-mc
 #      deploy dir it merges into ${DEPLOY_DIR}: from rpm/ exactly the RPMs the
-#      named alt-mc recipes produced, plus pulp-uploads/ additively. spdx/ is
+#      named alt-mc recipes produced, plus pulp-uploads/ additively. It lists
+#      the RPMs it published in ${DEPLOY_DIR}/avocado-multikernel/<mc>-rpms.txt,
+#      which avocado-cve-report's RPM manifest reads so it names exactly what
+#      the feed serves. spdx/ is
 #      intentionally excluded: both kernels produce SPDX files with the same
 #      unversioned package names (kernel.spdx.json etc.), so merging them into
 #      the shared deploy area causes a "files already exist" collision in
@@ -45,6 +48,15 @@ python () {
 
 do_multikernel_merge[nostamp] = "1"
 do_multikernel_merge() {
+    # Each multiconfig's RPM list, one path under rpm/ per line: invalidated
+    # before anything is copied and published only after every entry for its
+    # multiconfig, so a merge that fails or is interrupted leaves no list rather
+    # than a partial or stale one. avocado_sbom.rpms reads it at this path.
+    for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
+        merged_list="${DEPLOY_DIR}/avocado-multikernel/${pair%%:*}-rpms.txt"
+        rm -f "${merged_list}" "${merged_list}.tmp"
+    done
+
     for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
         mc="${pair%%:*}"
         recipe="${pair#*:}"
@@ -93,6 +105,9 @@ do_multikernel_merge() {
         # resolve before the shell sees the function, and a nested
         # ${src#${rpmroot}/} is not worth relying on it leaving alone.
         rpmroot="${base}/deploy/rpm"
+        merged_list="${DEPLOY_DIR}/avocado-multikernel/${mc}-rpms.txt"
+        mkdir -p "$(dirname "${merged_list}")"
+        touch "${merged_list}.tmp"
         manifest="$(ls "${base}/sstate-control/manifest-"*"-${recipe}.package_write_rpm" 2>/dev/null | head -1)"
         if [ -z "${manifest}" ]; then
             bbwarn "avocado-multikernel: no package_write_rpm manifest for '${recipe}' under ${base}/sstate-control; skipping its rpm merge"
@@ -108,6 +123,11 @@ do_multikernel_merge() {
                 esac
                 rel="${src#$rpmroot/}"
                 dest="${DEPLOY_DIR}/rpm/${rel}"
+                # Already present is still published: the feed serves that
+                # path, possibly the default mc's copy of a NEVRA both built
+                # (nvidia-kernel-oot), and the RPM manifest reads its header
+                # from the feed.
+                printf '%s\n' "${rel}" >> "${merged_list}.tmp"
                 if [ -e "${dest}" ] || [ -L "${dest}" ]; then
                     bbnote "avocado-multikernel: skip (already present) rpm/${rel}"
                     continue
@@ -133,6 +153,13 @@ do_multikernel_merge() {
                 cp -a "${src}/${f}" "${dest}"
             done
         fi
+    done
+
+    for pair in ${AVOCADO_MULTIKERNEL_MC_RECIPES}; do
+        merged_list="${DEPLOY_DIR}/avocado-multikernel/${pair%%:*}-rpms.txt"
+        [ -f "${merged_list}.tmp" ] || continue
+        sort -u -o "${merged_list}.tmp" "${merged_list}.tmp"
+        mv -f "${merged_list}.tmp" "${merged_list}"
     done
 }
 addtask multikernel_merge after do_configure before do_compile

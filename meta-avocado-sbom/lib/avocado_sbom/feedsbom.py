@@ -147,6 +147,30 @@ def alt_tmpdir(topdir, mc):
     return "%s/tmp-%s" % (topdir, mc)
 
 
+def alt_path(topdir, tmpdir, path, mc):
+    """path, a directory under the default TMPDIR, in the multiconfig's TMPDIR.
+
+    Raises FeedSbomError when path is not under tmpdir, since the multiconfig's
+    copy then cannot be derived from it.
+    """
+    tmpdir = tmpdir.rstrip("/")
+    if not path.startswith(tmpdir + "/"):
+        raise FeedSbomError("%s is not under TMPDIR %s" % (path, tmpdir))
+    return alt_tmpdir(topdir, mc) + path[len(tmpdir):]
+
+
+def alt_recipes_by_mc(pairs):
+    """{mc: set of recipes} from parse_alt_recipes' pairs, in first-seen order.
+
+    These are the recipes of each multiconfig that reach the feed, so the only
+    ones whose packages the report and the RPM manifest read from its tree.
+    """
+    by_mc = {}
+    for mc, recipe in pairs:
+        by_mc.setdefault(mc, set()).add(recipe)
+    return by_mc
+
+
 def classify_alt(pairs, find_alt_roots):
     """Split (mc, recipe) pairs into (mc, recipe, handles) and those with no document.
 
@@ -223,21 +247,29 @@ def drop_alias_collided(included, shared_by_label, target_ids):
 def drop_wrong_reference(included, wrong):
     """Split included into (kept, not covered) by whether a statement hit another version.
 
-    wrong holds wrong_kernel_references' output, each carrying the recipe name.
+    wrong holds wrong_kernel_references' output, each carrying the recipe name and
+    "mc", the alternate multiconfig the reference was traced to. One traced to a
+    multiconfig drops that multiconfig's build of the recipe only, since one
+    recipe can be built in several (Jetson builds nvidia-kernel-oot in three).
+    One traced to none, "mc" empty or absent, drops every alternate build of the
+    recipe: it came from the default kernel's side and any of them may be the
+    other end.
     """
     counts = {}
     for statement in wrong:
-        counts[statement["recipe"]] = counts.get(statement["recipe"], 0) + 1
+        key = (statement.get("mc") or "", statement["recipe"])
+        counts[key] = counts.get(key, 0) + 1
     kept = []
     not_covered = []
     for mc, recipe, handles in included:
-        if recipe in counts:
+        count = counts.get((mc, recipe), 0) + counts.get(("", recipe), 0)
+        if count:
             not_covered.append(
                 {
                     "mc": mc,
                     "recipe": recipe,
                     "reason": "reference collision: %d statement(s) target another version"
-                    % counts[recipe],
+                    % count,
                 }
             )
         else:
@@ -245,27 +277,114 @@ def drop_wrong_reference(included, wrong):
     return kept, not_covered
 
 
-def drop_compiled_source_kernels(included, recipes):
-    """Split included into (kept, not covered) by whether the recipe has compiled sources.
+def _statements_by_cve(statements):
+    by_cve = {}
+    for statement in statements:
+        by_cve.setdefault(statement[0], set()).add(statement)
+    return by_cve
 
-    With the default kernel's builds and package documents in the document, the
-    scanner reported the alternate kernel at the default kernel's version (seen on
-    a Raspberry Pi 5 build; the identity aliases the two kernels share are the
-    suspected cause, not a verified one). An alternate kernel of a recipe whose
-    compiled sources are in the document is therefore left out and named in the
-    coverage record, instead of being scanned under the wrong version.
+
+def vex_overlap(build, other):
+    """(product or None, version, CVE): a version build and other share and
+    the first CVE their statements differ on, or None. Each is a dict with
+    "products", "versions" and "statements" sets; a statement is a tuple whose
+    first item is its CVE.
+
+    sbom-cve-check 1.4.0 applies a VEX statement in the scanned document to a
+    build whose version equals the version of the package the statement is
+    about, whatever build that package belongs to (database/annot_utils.py
+    checks the version before any CPE), for each CVE it matched to that build.
+    Which CVEs those are depends on the records, which change between rescans
+    and can name two products at once, and on the scanner's product aliases,
+    so a differing statement at a shared version is never ruled harmless here.
     """
-    wanted = set(recipes)
+    versions = build["versions"] & other["versions"]
+    if not versions:
+        return None
+    mine = _statements_by_cve(build["statements"])
+    theirs = _statements_by_cve(other["statements"])
+    for cve in sorted(set(mine) | set(theirs)):
+        if mine.get(cve, set()) != theirs.get(cve, set()):
+            products = build["products"] & other["products"]
+            return (min(products) if products else None), min(versions), cve
+    return None
+
+
+def vex_twin(build, default_builds):
+    """Whether a default build has build's products, versions and statements,
+    and whatever else its dict carries: the recipe task gives the full CPEs
+    and the package version too, since the scanner matches on vendor and part
+    as well, and on the package version before any CPE.
+
+    The scanner then treats the two alike: whatever statement build would give
+    another build, or take from it, the default build already gives or takes,
+    so leaving build in changes no result in the document. On Jetson each
+    alternate multiconfig's nvidia-kernel-oot is the default one's twin, and it
+    shares only a version number with edk2-firmware-tegra.
+    """
+    return any(build == other for other in default_builds.values())
+
+
+def drop_vex_overlap(included, alt_builds, default_builds):
+    """Split included into (kept, not covered) by whether the scanner would mix
+    an alternate build's VEX statements with another build's.
+
+    alt_builds maps alt_label(mc, recipe) to that build's dict (see
+    vex_overlap); default_builds maps a default recipe to its dict. An
+    alternate with a twin among the default builds (vex_twin) stays. Any other
+    is compared with every default build and with every alternate kept before
+    it, so of two alternates that overlap the first one stays.
+    """
     kept = []
     not_covered = []
+    others = sorted(default_builds.items())
     for mc, recipe, handles in included:
-        if recipe in wanted:
+        label = alt_label(mc, recipe)
+        build = alt_builds.get(label)
+        found = None
+        if build is not None and not vex_twin(build, default_builds):
+            for name, other in others:
+                overlap = vex_overlap(build, other)
+                if overlap:
+                    found = (name, overlap)
+                    break
+        if found:
+            name, (product, version, cve) = found
             not_covered.append(
                 {
                     "mc": mc,
                     "recipe": recipe,
-                    "reason": "compiled source documents of the default kernel "
-                    "share its identity aliases",
+                    "reason": "VEX overlap: %s is also %s, with other statements on %s"
+                    % (" ".join(p for p in (product, version) if p), name, cve),
+                }
+            )
+            continue
+        kept.append((mc, recipe, handles))
+        if build is not None:
+            others.append((label, build))
+    return kept, not_covered
+
+
+def drop_unresolved(included, needs, unresolved):
+    """Split included into (kept, not covered) by whether the alternate's own
+    documents refer to an identifier the assembled document left unresolved.
+
+    needs maps alt_label(mc, recipe) to the identifiers that alternate's
+    documents refer to but do not define. An alternate kernel's document can
+    link to a recipe only its multiconfig built, which the default tree's
+    documents cannot resolve; that drops the kernel, not the whole feed.
+    """
+    unresolved = set(unresolved)
+    kept = []
+    not_covered = []
+    for mc, recipe, handles in included:
+        hit = unresolved & set(needs.get(alt_label(mc, recipe), ()))
+        if hit:
+            not_covered.append(
+                {
+                    "mc": mc,
+                    "recipe": recipe,
+                    "reason": "unresolved reference: %d identifier(s)" % len(hit),
                 }
             )
         else:

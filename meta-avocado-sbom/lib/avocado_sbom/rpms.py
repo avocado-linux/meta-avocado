@@ -173,13 +173,34 @@ def read_package_sizes(pkgdata_dir):
             continue
     return sizes
 
+def merged_rpms_path(deploy_dir, mc):
+    """Where avocado-multikernel.bbclass lists the RPMs it merged for mc.
+
+    The class spells the same path in shell; the two change together.
+    """
+    return os.path.join(deploy_dir, "avocado-multikernel", "%s-rpms.txt" % mc)
+
+def read_merged_rpms(path):
+    """The paths under the rpm directory one merge published, as a set.
+
+    Raises OSError when the list is absent: the merge did not run, or failed.
+    """
+    with open(path) as f:
+        return {line.strip() for line in f if line.strip()}
+
 def build_manifest(sources, machine=None, distro_version=None, now=None):
     """The document: every package the build produced, with its header digest.
 
-    sources is a list of (packages, rpm_dir): packages is
-    report.read_pkgdata()'s first return for one pkgdata directory, rpm_dir the
-    deploy directory holding that build's RPMs. A second pair covers a second
-    multiconfig, whose kernel is built at another version into its own tree.
+    sources is a list of (packages, rpm_dir) or (packages, rpm_dir,
+    published): packages is report.read_pkgdata()'s first return for one
+    pkgdata directory, rpm_dir the deploy directory holding that build's RPMs.
+    A further source covers a second multiconfig, whose kernel is built at
+    another version into its own tree. Only part of that tree reaches the
+    feed, so its source carries published, read_merged_rpms()'s set, and
+    rpm_dir is the feed's: a package whose file the merge did not publish is
+    left out, and a published file that is missing is an error. A published
+    file no package names, an older release, is not listed, as the default
+    tree's older releases are not.
 
     pkgdata says which version and release of each package this build made, and
     the deploy directory keeps every release ever built, so the file is named
@@ -191,18 +212,29 @@ def build_manifest(sources, machine=None, distro_version=None, now=None):
     never skipped: a package missing here reads as unassessed downstream, which
     is a claim about the build and not a note about this file.
     """
-    if not any(packages for packages, _rpm_dir in sources):
+    if not any(source[0] for source in sources):
         raise ManifestError(["pkgdata names no package, so there is nothing to "
                              "list"])
 
     entries = {}
     problems = []
-    for packages, rpm_dir in sources:
+    for source in sources:
+        packages, rpm_dir = source[:2]
+        published = source[2] if len(source) > 2 else None
         try:
             index = _index_rpm_dir(rpm_dir)
         except OSError as e:
             problems.append("cannot list %s: %s" % (rpm_dir, e))
             continue
+
+        # {stem: [path, ...]}: the file name is <stem>.<arch>.rpm under <arch>/.
+        published_stems = {}
+        for path in published or ():
+            arch, _sep, filename = path.partition("/")
+            suffix = ".%s.rpm" % arch
+            if arch and filename.endswith(suffix):
+                published_stems.setdefault(filename[:-len(suffix)], []).append(path)
+        listed = 0
 
         for name in sorted(packages):
             version = packages[name]["version"]
@@ -225,7 +257,21 @@ def build_manifest(sources, machine=None, distro_version=None, now=None):
             stem = "%s-%s-%s" % (name, rpm_version, pkgr)
 
             found = [arch for arch, files in sorted(index.items())
-                     if "%s.%s.rpm" % (stem, arch) in files]
+                     if "%s.%s.rpm" % (stem, arch) in files
+                     and (published is None
+                          or "%s/%s.%s.rpm" % (arch, stem, arch) in published)]
+            # Every published copy must be there, not just one: a stem listed
+            # under two arches with one file gone would otherwise pass.
+            missing = [path for path in published_stems.get(stem, ())
+                       if path.partition("/")[0] not in found]
+            if missing:
+                problems.append("%s: the merge published %s, but it is not "
+                                "under %s" % (name, ", ".join(sorted(missing)),
+                                              rpm_dir))
+                continue
+            if not found and published is not None:
+                # Built in that tree, not merged into the feed.
+                continue
             if not found:
                 # package_rpm writes no RPM for a package that holds nothing
                 # unless ALLOW_EMPTY, while pkgdata still names it: PKGSIZE 0
@@ -275,6 +321,7 @@ def build_manifest(sources, machine=None, distro_version=None, now=None):
                 "sha256header": header["sha256header"],
                 "file": relative,
             }
+            listed += 1
             key = (entry["name"], entry["arch"], entry["version"], entry["release"])
             seen = entries.get(key)
             if seen is None:
@@ -285,6 +332,13 @@ def build_manifest(sources, machine=None, distro_version=None, now=None):
                                 "headers (%s and %s), so the list cannot name one"
                                 % (name, key[0], key[2], key[3], key[1],
                                    seen["sha256header"], entry["sha256header"]))
+
+        # Every merge publishes at least the alt kernel, so a list that names
+        # none of this build's packages is another build's.
+        if published is not None and not listed:
+            problems.append("none of the %d RPM(s) the merge published under %s "
+                            "is one the pkgdata beside it names, so the list "
+                            "is from another build" % (len(published), rpm_dir))
 
     if problems:
         raise ManifestError(problems)
