@@ -135,9 +135,12 @@ has to carry debug info. kas/feature/sbom.yml sets:
   AVOCADO_KERNEL_DEBUGINFO = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-dev = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-yocto-rt = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-qcom = "1"
   SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-qcom-rt = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-noble-nvidia-tegra = "1"
+  SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-noble-nvidia-tegra-rt = "1"
 
 The switch changes the kernel's packages, so it is in sbom.yml, which feed
 builds stack: a scan has to see the kernel the feed published, or the kernel's
@@ -159,14 +162,34 @@ debug info off, and their modules are plain .ko, so the DWARF already lands in
 kernel-dbg and the SPDX lines alone give them the list. Their packages do not
 change.
 
-linux-yocto-rt, the L4T kernels and the other vendor kernels are left as they
-are, and the scan matches them on version ranges.
+linux-yocto-rt (Jetson's jetson-rt multiconfig) does not read the switch
+either. It builds the same 6.18 tree with the Tegra kernel cache's preempt-rt
+BSP, which turns on the same full debug info as the standard one, and its
+modules are neither compressed nor signed (module-signing reaches linux-yocto
+only). Its packages do not change.
+
+The L4T kernels, linux-noble-nvidia-tegra and linux-noble-nvidia-tegra-rt
+(jetson-l4t and jetson-l4t-rt), build NVIDIA's 6.8 tree with its arm64
+defconfig, which builds DWARF but sets DEBUG_INFO_REDUCED: struct types defined
+in included headers are left out, and with them headers that only define
+structures. avocado-linux-noble-tegra.inc in meta-avocado-nvidia adds
+avocado-cve-debug.cfg on the switch, which turns reduced debug info off and
+changes nothing else. Their modules are plain .ko (no compression, and
+meta-tegra's disable-module-signing.cfg turns signing off). nvidia-kernel-oot
+builds NVIDIA's out-of-tree drivers as a recipe of its own, scanned under its
+own product; the in-tree drivers it replaces (host1x, tegra-drm,
+tegra-bpmp-thermal) are still built by the kernel, so their sources stay in the
+kernel's list.
+
+The other vendor kernels are left as they are, and the scan matches them on
+version ranges.
 
 What the switch does to each machine's kernel configuration:
 
   no change, debug info is          amd-x86-64-v4, arm64-uefi-v9, the Jetson
   already on                        machines' linux-yocto, nanopi-r5s,
                                     orangepi-5-plus
+  turns reduced debug info off      the Jetson machines' L4T kernels
   adds debug info only              intel-x86-64-v2/v3/v4 (DEBUG_KERNEL from
                                     x86_64_defconfig), the Raspberry Pi
                                     machines (EXPERT in the bcm27xx defconfigs
