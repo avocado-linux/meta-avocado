@@ -55,7 +55,7 @@ class MergeListTests(unittest.TestCase):
         with open(path, "wb") as f:
             f.write(rpm_bytes(name, version, release, arch))
 
-    def merge(self, cve_dir="", check=True):
+    def merge(self, spdx_dir="", check=True):
         # bitbake substitutes these datastore variables; plain shell variables
         # of the same names stand in for them.
         script = "\n".join([
@@ -66,8 +66,7 @@ class MergeListTests(unittest.TestCase):
             % (MC, MC),
             'TOPDIR="%s"' % self.top,
             'DEPLOY_DIR="%s"' % self.deploy,
-            'CVE_CHECK_DIR="%s"' % cve_dir,
-            'DEPLOY_DIR_SPDX=""',
+            'DEPLOY_DIR_SPDX="%s"' % spdx_dir,
             "do_multikernel_merge() {",
             merge_body(),
             "}",
@@ -117,30 +116,59 @@ class MergeListTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.listed()
 
+    def test_the_alt_kernels_spdx_documents_land_under_the_mc(self):
+        self.build_alt_tree()
+        spdx_dir = os.path.join(self.deploy, "spdx", "3.0.1")
+        alt_spdx = os.path.join(self.top, "tmp-%s" % MC, "deploy", "spdx", "3.0.1")
+        docs = {
+            "armv8a/recipes/recipe-nvidia-kernel-oot.spdx.json": "nvidia-kernel-oot",
+            "armv8a/packages/package-kernel.spdx.json": "linux-jammy-nvidia-tegra",
+            "armv8a/recipes/recipe-base-files.spdx.json": "base-files",
+        }
+        for rel, pn in docs.items():
+            path = os.path.join(alt_spdx, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write('{"@id": "http://spdx.org/spdxdocs/%s-0123abcd-0000"}' % pn)
+        self.merge(spdx_dir=spdx_dir)
+        merged = {os.path.relpath(os.path.join(root, f), os.path.join(spdx_dir, MC))
+                  for root, _dirs, files in os.walk(os.path.join(spdx_dir, MC))
+                  for f in files}
+        self.assertEqual(merged, {
+            "armv8a/recipes/recipe-nvidia-kernel-oot.spdx.json",
+            "armv8a/packages/package-kernel.spdx.json",
+        })
+
     def test_a_merge_that_fails_part_way_leaves_no_list(self):
-        # A failed evidence copy, in the first entry (before any RPM merge) or
-        # the second (after the first entry for the same multiconfig merged
-        # its RPMs), on top of a list a previous merge left.
+        # A failed SPDX copy, in the first entry (before any RPM merge) or the
+        # second (after the first entry for the same multiconfig merged its
+        # RPMs), on top of a list a previous merge left.
         for failing in ("linux-jammy-nvidia-tegra", "nvidia-kernel-oot"):
             with self.subTest(failing=failing):
                 self.setUp()
                 self.build_alt_tree()
                 self.merge()
                 self.assertTrue(self.listed())
-                alt_cve = os.path.join(self.top, "tmp-%s" % MC, "deploy", "cve")
-                os.makedirs(alt_cve)
+                spdx_dir = os.path.join(self.deploy, "spdx", "3.0.1")
+                alt_spdx = os.path.join(self.top, "tmp-%s" % MC, "deploy", "spdx", "3.0.1")
                 for recipe in ("linux-jammy-nvidia-tegra", "nvidia-kernel-oot"):
-                    with open(os.path.join(alt_cve, recipe + "_cve.json"), "w") as f:
-                        f.write("{}")
-                unreadable = os.path.join(alt_cve, failing + "_cve.json")
-                os.chmod(unreadable, 0)
-                self.addCleanup(os.chmod, unreadable, 0o644)
-                result = self.merge(cve_dir=os.path.join(self.deploy, "cve"), check=False)
-                self.assertIn("%s_cve.json" % failing, result.stderr)
+                    doc = os.path.join(alt_spdx, recipe, "recipe-%s.spdx.json" % recipe)
+                    os.makedirs(os.path.dirname(doc))
+                    with open(doc, "w") as f:
+                        f.write('{"@id": "http://spdx.org/spdxdocs/%s-0123abcd-0000"}' % recipe)
+                # A file where the copy needs a directory: mkdir -p fails.
+                os.makedirs(os.path.join(spdx_dir, MC))
+                with open(os.path.join(spdx_dir, MC, failing), "w") as f:
+                    f.write("")
+                result = self.merge(spdx_dir=spdx_dir, check=False)
                 self.assertNotEqual(result.returncode, 0)
                 with self.assertRaises(OSError):
                     self.listed()
-
+                # Which entry failed: the first entry's documents were copied only when the
+                # failure came in the second. mkdir's message varies by implementation.
+                first = os.path.join(spdx_dir, MC, "linux-jammy-nvidia-tegra",
+                                     "recipe-linux-jammy-nvidia-tegra.spdx.json")
+                self.assertEqual(os.path.exists(first), failing == "nvidia-kernel-oot")
 
 if __name__ == "__main__":
     unittest.main()

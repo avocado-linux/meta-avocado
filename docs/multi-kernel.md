@@ -96,11 +96,8 @@ After `kas build kas/machine/<target>.yml` completes, the default mc's
   packagegroups, all KERNEL_VERSION-qualified)
 - Both mcs' Pulp upload manifests merged into `tmp/deploy/pulp-uploads/`
 - Each alt-mc recipe's own SPDX documents under
-  `tmp/deploy/spdx/<version>/<mc>/`, and its cve-check results under
-  `${CVE_CHECK_DIR}/<mc>/` when a build inherits cve-check (the CVE scan in
-  `kas/feature/cve-check.yml` no longer does) - in a subdirectory rather than
-  merged in place, because both mcs write the same recipe's document and result
-  under one filename
+  `tmp/deploy/spdx/<version>/<mc>/` - in a subdirectory rather than merged in
+  place, because both mcs write the same recipe's document under one filename
 - A unified `tmp/deploy/rpm/avocado-repo.map` covering every arch present
 
 CI's Tekton task definition needs **zero changes** for multi-kernel — every
