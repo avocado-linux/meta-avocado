@@ -34,6 +34,16 @@ do_kernel_configme:append() {
     : > ${S}/.scmversion
 }
 
+# Debug-info kernel for the kernel CVE filter, on the switch
+# avocado-kernel-feed.bbclass applies to linux-yocto only (see there). The L4T
+# defconfig already builds DWARF but sets DEBUG_INFO_REDUCED, which drops struct
+# types defined in included headers, so a header that only defines structures
+# is missing from the list and a CVE fixed in one would read as not compiled.
+# The fragment turns reduced debug info off and changes nothing else.
+# Modules stay plain .ko (no MODULE_COMPRESS; disable-module-signing.cfg turns
+# MODULE_SIG off), so OE-core splits and strips them.
+SRC_URI:append = " ${@'file://avocado-cve-debug.cfg' if d.getVar('AVOCADO_KERNEL_DEBUGINFO') == '1' else ''}"
+
 # KVM on Jetson AGX Orin: guests under the 6.8 kernel failed pointer
 # authentication (6.8 loads a guest's PAuth keys lazily, on a trap). Upstream
 # loads them eagerly since 6.10; backported. Both L4T kernels (stock and RT).

@@ -43,8 +43,8 @@ RPROVIDES:${KERNEL_PACKAGE_NAME}-base += "avocado-kernel-${KERNEL_VERSION}"
 #
 # linux-yocto and linux-yocto-dev only. linux-yocto-rt also reads
 # KERNEL_EXTRA_FEATURES and inherits this class, so the PN test is what keeps
-# it, and every vendor kernel, unchanged. linux-raspberrypi keys a config
-# fragment off the same switch in its own bbappend.
+# it, and every vendor kernel, unchanged. linux-raspberrypi and the L4T kernels
+# key a config fragment off the same switch in their own bbappends.
 #
 # Not with module-signing: OE-core neither splits nor strips a signed module,
 # so its DWARF would ship and its sources would be missing from the list, and a
