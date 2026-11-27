@@ -1,0 +1,180 @@
+{
+  "alt_packages": {
+    "kernel-devsrc": {
+      "6.6.78+git": [
+        "kernel-devsrc-6.6.78"
+      ]
+    },
+    "linux-raspberrypi": {
+      "6.6.78+git": [
+        "kernel-image-image-6.6.78",
+        "kernel-module-foo-6.6.78"
+      ]
+    }
+  },
+  "compiled_source_recipes": [
+    "linux-raspberrypi"
+  ],
+  "counts": {
+    "alt_cves": 2,
+    "alt_recipes": 1,
+    "cve_files": 1,
+    "cve_files_unreadable": 0,
+    "cves": 2,
+    "entries_unreadable": 0,
+    "ignored_cves": 0,
+    "no_cve_record_recipes": 2,
+    "package_collisions": 2,
+    "packaged_cves": 2,
+    "packaged_recipes": 2,
+    "packages": 10,
+    "patched_cves": 0,
+    "pkgdata_unreadable": 0,
+    "recipes": 2,
+    "stale_dropped": 0,
+    "unknown_status_cves": 0,
+    "unpatched_cves": 4,
+    "unscanned_recipes": 0,
+    "unverified_compiled_source_cves": 0
+  },
+  "distro_version": "2026.1",
+  "generated": "2000-01-01T00:00:00Z",
+  "machine": "raspberrypi5",
+  "no_cve_record_recipes": [
+    "base-files",
+    "kernel-devsrc"
+  ],
+  "packages": {
+    "base-files": {
+      "origin": "raspberrypi5",
+      "recipe": "base-files",
+      "version": "3.0.14-r0"
+    },
+    "kernel": {
+      "origin": "raspberrypi5",
+      "recipe": "linux-raspberrypi",
+      "recipe_version": "6.12.87+git",
+      "version": "6.12.87+git-r0"
+    },
+    "kernel-dev": {
+      "origin": "raspberrypi5",
+      "recipe": "linux-raspberrypi",
+      "recipe_version": "6.12.87+git",
+      "version": "6.12.87+git-r0"
+    },
+    "kernel-devsrc-6.12.87": {
+      "origin": "raspberrypi5",
+      "recipe": "kernel-devsrc",
+      "version": "6.12.87+git-r0"
+    },
+    "kernel-devsrc-6.6.78": {
+      "origin": "raspberrypi5",
+      "recipe": "kernel-devsrc",
+      "version": "6.6.78+git-r0"
+    },
+    "kernel-image-image-6.12.87": {
+      "origin": "raspberrypi5",
+      "recipe": "linux-raspberrypi",
+      "recipe_version": "6.12.87+git",
+      "version": "6.12.87+git-r0"
+    },
+    "kernel-image-image-6.6.78": {
+      "origin": "raspberrypi5",
+      "recipe": "linux-raspberrypi",
+      "recipe_version": "6.6.78+git",
+      "version": "6.6.78+git-r0"
+    },
+    "kernel-module-foo-6.12.87": {
+      "origin": "raspberrypi5",
+      "recipe": "linux-raspberrypi",
+      "recipe_version": "6.12.87+git",
+      "version": "6.12.87+git-r0"
+    },
+    "kernel-module-foo-6.6.78": {
+      "origin": "raspberrypi5",
+      "recipe": "linux-raspberrypi",
+      "recipe_version": "6.6.78+git",
+      "version": "6.6.78+git-r0"
+    },
+    "libssl3": {
+      "origin": "raspberrypi5",
+      "recipe": "openssl",
+      "recipe_version": "3.5.7",
+      "version": "3.5.7-r0"
+    }
+  },
+  "packages_digest": "sha256:78e378224b2957d57abea61bbe4d5206f8cee45b9c214b9632bbf481ec44be3e",
+  "recipe_versions": {
+    "base-files": [
+      "3.0.14"
+    ],
+    "kernel-devsrc": [
+      "6.12.87+git",
+      "6.6.78+git"
+    ],
+    "linux-raspberrypi": [
+      "6.12.87+git",
+      "6.6.78+git"
+    ],
+    "openssl": [
+      "3.5.7"
+    ]
+  },
+  "recipes": {
+    "linux-raspberrypi": {
+      "alt_versions": [
+        {
+          "cves": [
+            {
+              "description": "d CVE-2026-1",
+              "id": "CVE-2026-1",
+              "link": "l",
+              "scorev3": "7.5",
+              "status": "Unpatched",
+              "summary": "s CVE-2026-1"
+            },
+            {
+              "description": "d CVE-2026-3",
+              "id": "CVE-2026-3",
+              "link": "l",
+              "scorev3": "7.5",
+              "status": "Unpatched",
+              "summary": "s CVE-2026-3"
+            }
+          ],
+          "packaged": true,
+          "version": "6.6.78+git"
+        }
+      ],
+      "cves": [
+        {
+          "description": "d CVE-2026-1",
+          "id": "CVE-2026-1",
+          "link": "l",
+          "scorev3": "7.5",
+          "status": "Unpatched",
+          "summary": "s CVE-2026-1"
+        }
+      ],
+      "packaged": true,
+      "version": "6.12.87+git"
+    },
+    "openssl": {
+      "cves": [
+        {
+          "description": "d CVE-2026-9",
+          "id": "CVE-2026-9",
+          "link": "l",
+          "scorev3": "7.5",
+          "status": "Unpatched",
+          "summary": "s CVE-2026-9"
+        }
+      ],
+      "packaged": true,
+      "version": "3.5.7"
+    }
+  },
+  "status": "All",
+  "unscanned_recipes": [],
+  "version": "1"
+}

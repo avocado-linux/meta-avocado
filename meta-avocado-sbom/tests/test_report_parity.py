@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 
-"""Prove the report fields a consumer binds package verdicts on: alt_versions
-with recipe_version, no_cve_record_recipes, and the CVE_STATUS detail of an
-Ignored CVE, each from a build tree and from a previous report.
+"""Prove what a consumer binds each RPM to: its package build, by name and
+version-release, and that build's own record, for builds of one recipe in
+several multiconfigs, at one version or another, kept in the feed document or
+left out of it.
 
   python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'
 """
@@ -23,363 +24,432 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 
 import binding_rules  # noqa: E402
+import report_trees as rt  # noqa: E402
 from avocado_sbom import feedsbom, report  # noqa: E402
-from avocado_sbom.report import (  # noqa: E402
-    MANIFEST_SUFFIX,
-    REPORT_STATUSES,
-    build_report,
-    build_report_from_anchor,
-    write_report,
-)
+from avocado_sbom.report import build_report, build_report_from_anchor  # noqa: E402
+from report_trees import entry, issue, round_trip  # noqa: E402
 
-DEFAULT = "6.12.87+git"
-ALT = "6.6.78+git"
+SCHEMA = os.path.join(HERE, "..", "schema", "avocado-cve-report-v2.schema.json")
+OOT = "nvidia-kernel-oot"
+ARCH = "jetson"
 
-def issue(cve, status="Unpatched", **extra):
-    item = {"id": cve, "status": status, "summary": "s " + cve,
-            "description": "d " + cve, "scorev3": "7.5", "link": "l"}
-    item.update(extra)
-    return item
 
-def entry(name, version, *issues):
-    return {"name": name, "version": version, "issue": list(issues)}
+def rpm(name, version, release, arch=ARCH):
+    return {"name": name, "version": version, "release": release, "arch": arch}
 
-def round_trip(doc, root):
-    path = os.path.join(root, "anchor.json")
-    write_report(doc, path)
-    with open(path) as f:
-        return json.load(f)
 
-def as_bytes(doc, root):
-    doc = dict(doc, generated="2000-01-01T00:00:00Z")
-    path = os.path.join(root, "bytes.json")
-    write_report(doc, path)
-    with open(path, "rb") as f:
-        data = f.read()
-    os.unlink(path)
-    return data
+class JetsonTests(unittest.TestCase):
+    """Jetson AGX Orin: the default multiconfig's linux-yocto and three
+    alternate multiconfigs' kernels, each with its own nvidia-kernel-oot at
+    one recipe version. A PR server gives each multiconfig's build its own
+    release, so nvidia-kernel-oot-base is four RPMs of one name; the kernels
+    all package "kernel" and "kernel-dev", the stock and RT kernels at one
+    version, and kernel-devsrc is 1.0 in every tree."""
 
-class Tree:
-    """A multi-kernel build: the default multiconfig's pkgdata and one
-    alternate multiconfig's, the second kernel at another version."""
-
-    def __init__(self, root):
-        self.root = root
-        self.machine = os.path.join(root, "tmp", "pkgdata", "raspberrypi5")
-        self.alt = os.path.join(root, "tmp-raspberrypi-6_6", "pkgdata", "raspberrypi5")
-        for d in (self.machine, self.alt):
-            os.makedirs(os.path.join(d, "runtime-reverse"))
-
-    def pkg(self, name, recipe, pv, pkgv=None, alt=False):
-        base = self.alt if alt else self.machine
-        with open(os.path.join(base, "runtime-reverse", name), "w") as f:
-            f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n" % (recipe, pv, pkgv or pv))
-
-    def manifest(self, name, entries):
-        path = os.path.join(self.root, name + MANIFEST_SUFFIX)
-        with open(path, "w") as f:
-            json.dump({"package": entries}, f)
-        return path
-
-    def kernels(self):
-        for alt, pv in ((False, DEFAULT), (True, ALT)):
-            short = pv.split("+")[0]
-            # kernel.bbclass never puts the version in these names, so both
-            # multiconfigs package them; the default's copy wins.
-            self.pkg("kernel", "linux-raspberrypi", pv, alt=alt)
-            self.pkg("kernel-dev", "linux-raspberrypi", pv, alt=alt)
-            self.pkg("kernel-image-image-%s" % short, "linux-raspberrypi", pv, alt=alt)
-            self.pkg("kernel-module-foo-%s" % short, "linux-raspberrypi", pv, alt=alt)
-            self.pkg("kernel-devsrc-%s" % short, "kernel-devsrc", pv, alt=alt)
-        # The alternate multiconfig builds the rest of the image too; none of
-        # it reaches the feed.
-        self.pkg("base-files", "base-files", "3.0.14", alt=True)
-        self.pkg("alt-only-tool", "alt-only-tool", "1.0", alt=True)
-        self.pkg("base-files", "base-files", "3.0.14")
-        self.pkg("libssl3", "openssl", "3.5.7")
-
-    @property
-    def alt_trees(self):
-        return [(self.alt, {"linux-raspberrypi", "kernel-devsrc"})]
-
-class SharedNameReleasesTests(unittest.TestCase):
-    """Jetson: nvidia-kernel-oot built against four kernels, at one recipe
-    version. With a PR server each multiconfig's build gets its own release,
-    so nvidia-kernel-oot-base is four RPMs of one name, while the modules
-    carry the kernel version in their names."""
-
-    MCS = (("jetson-l4t", "r0.7", "6.8.12-l4t"), ("jetson-rt", "r0.8", "6.18.52-rt"),
-           ("jetson-l4t-rt", "r0.9", "6.8.12-l4t-rt"))
+    # (mc, kernel recipe, kernel version, release of the trees' own builds)
+    TREES = (("", "linux-yocto", "6.18.52", "r0.1"),
+             ("jetson-l4t", "linux-noble-nvidia-tegra", "6.8.12", "r0.2"),
+             ("jetson-rt", "linux-yocto-rt", "6.18.52", "r0.3"),
+             ("jetson-l4t-rt", "linux-noble-nvidia-tegra-rt", "6.8.12", "r0.4"))
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root)
-        self.trees = []
-        for mc, release, kver in (("", "r0.6", "6.18.52"),) + self.MCS:
-            base = os.path.join(self.root, "tmp-" + mc if mc else "tmp", "pkgdata", "jetson")
-            reverse = os.path.join(base, "runtime-reverse")
-            os.makedirs(reverse)
-            for name in ("nvidia-kernel-oot-base", "nv-kernel-module-x-" + kver):
-                with open(os.path.join(reverse, name), "w") as f:
-                    f.write("PN: nvidia-kernel-oot\nPV: 39.2.1\nPKGV: 39.2.1\nPKGR: %s\n"
-                            % release)
-            self.trees.append(base)
-        self.scan = os.path.join(self.root, "feed" + MANIFEST_SUFFIX)
+        self.tree = rt.Tree(self.root, machine=ARCH)
+        self.rpms = []
+        for mc, kernel, kver, release in self.TREES:
+            if mc:
+                self.tree.alt(mc, {kernel, OOT, "kernel-devsrc"})
+            suffix = "-" + mc if mc else ""
+            for name in ("kernel", "kernel-dev", "kernel-image-%s%s" % (kver, suffix)):
+                self.pkg(name, kernel, kver + "+git", release, mc)
+            for name in ("nvidia-kernel-oot-base", "nv-kernel-module-x-%s%s" % (kver, suffix)):
+                self.pkg(name, OOT, "39.2.1", release, mc)
+            self.pkg("kernel-devsrc", "kernel-devsrc", "1.0", release, mc)
+        self.scan = self.tree.manifest("feed", {"package": [
+            entry("linux-yocto", "6.18.52+git", issue("CVE-2026-1")),
+            entry("jetson-l4t:linux-noble-nvidia-tegra", "6.8.12+git", issue("CVE-2026-2")),
+            entry("jetson-rt:linux-yocto-rt", "6.18.52+git", issue("CVE-2026-1"),
+                  issue("CVE-2026-3", "Patched", detail="backported-patch")),
+            entry("jetson-l4t-rt:linux-noble-nvidia-tegra-rt", "6.8.12+git",
+                  issue("CVE-2026-2"), issue("CVE-2026-4")),
+            # One per build, the same CVEs in each: they share product and
+            # statements, or the feed document left them out.
+            entry(OOT, "39.2.1", issue("CVE-2026-7")),
+            entry("jetson-l4t:" + OOT, "39.2.1", issue("CVE-2026-7")),
+            entry("jetson-rt:" + OOT, "39.2.1", issue("CVE-2026-7")),
+            entry("jetson-l4t-rt:" + OOT, "39.2.1", issue("CVE-2026-7")),
+            entry("kernel-devsrc", "1.0"),
+            entry("jetson-l4t:kernel-devsrc", "1.0"),
+            entry("jetson-rt:kernel-devsrc", "1.0"),
+            entry("jetson-l4t-rt:kernel-devsrc", "1.0"),
+        ]})
+
+    def pkg(self, name, recipe, pv, release, mc):
+        self.tree.pkg(name, recipe, pv, pkgr=release, mc=mc)
+        self.rpms.append(rpm(name, pv, release))
+
+    def build(self, not_covered=None):
+        doc, stats = build_report([self.scan], self.tree.dirs, machine=ARCH, status="All",
+                                  alt_trees=self.tree.alt_trees, not_covered=not_covered)
+        return doc, stats
+
+    def test_every_rpm_joins_its_own_build(self):
+        doc, stats = self.build()
+        verdicts = binding_rules.rpm_verdicts(doc, {"packages": self.rpms})
+        self.assertEqual(len(verdicts), len(self.rpms))
+        cves = {"linux-yocto": {"CVE-2026-1": "affected"},
+                "linux-noble-nvidia-tegra": {"CVE-2026-2": "affected"},
+                "linux-yocto-rt": {"CVE-2026-1": "affected", "CVE-2026-3": "patched"},
+                "linux-noble-nvidia-tegra-rt": {"CVE-2026-2": "affected",
+                                                "CVE-2026-4": "affected"}}
+        for mc, kernel, kver, release in self.TREES:
+            suffix = "-" + mc if mc else ""
+            for name in ("kernel", "kernel-dev", "kernel-image-%s%s" % (kver, suffix)):
+                self.assertEqual(verdicts[(name, kver + "+git", release, ARCH)],
+                                 ("checked", cves[kernel]), (mc, name))
+            for name in ("nvidia-kernel-oot-base", "nv-kernel-module-x-%s%s" % (kver, suffix)):
+                self.assertEqual(verdicts[(name, "39.2.1", release, ARCH)],
+                                 ("checked", {"CVE-2026-7": "affected"}), (mc, name))
+            self.assertEqual(verdicts[("kernel-devsrc", "1.0", release, ARCH)],
+                             ("not_checked", "no-cve-record"))
+        self.assertEqual([k for k, v in verdicts.items() if v[0] == "not_checked"],
+                         [k for k in verdicts if k[0] == "kernel-devsrc"])
+        self.assertEqual(stats.stale_dropped, 0)
+
+    def test_each_build_is_its_own_record(self):
+        doc, _ = self.build()
+        builds = doc["builds"]
+        for mc, _kernel, _kver, _release in self.TREES:
+            bid = report.build_id(mc, OOT)
+            self.assertEqual((builds[bid]["recipe"], builds[bid]["mc"], builds[bid]["version"],
+                              builds[bid]["version_keys"], builds[bid]["coverage"]),
+                             (OOT, mc, "39.2.1", ["39.2.1"], "scanned"))
+            self.assertEqual([c["id"] for c in builds[bid]["cves"]], ["CVE-2026-7"])
+        self.assertEqual(doc["counts"]["builds"], 12)
+        self.assertEqual(doc["counts"]["alternate_builds"], 9)
+        self.assertEqual(doc["packages"]["nvidia-kernel-oot-base"], [
+            {"version": "39.2.1-r0.%d" % n, "build": report.build_id(mc, OOT)}
+            for n, (mc, _k, _v, _r) in enumerate(self.TREES, 1)])
+        self.assertEqual(doc["packages"]["kernel"], [
+            {"version": "6.18.52+git-r0.1", "build": "linux-yocto"},
+            {"version": "6.18.52+git-r0.3", "build": "jetson-rt:linux-yocto-rt"},
+            {"version": "6.8.12+git-r0.2", "build": "jetson-l4t:linux-noble-nvidia-tegra"},
+            {"version": "6.8.12+git-r0.4", "build": "jetson-l4t-rt:linux-noble-nvidia-tegra-rt"}])
+        self.assertEqual(doc["packages"]["kernel-devsrc"], [
+            {"version": "1.0-r0.%d" % n, "build": report.build_id(mc, "kernel-devsrc")}
+            for n, (mc, _k, _v, _r) in enumerate(self.TREES, 1)])
+        self.assertEqual((doc["counts"]["shared_package_builds"],
+                          doc["counts"]["package_collisions"]), (0, 0))
+
+    def test_a_left_out_alternates_packages_are_not_covered_never_the_defaults(self):
+        # The regression: an alternate of a recipe the default also built, at
+        # the default's version, left out of the document. Its distinct names
+        # once took the default's record and bound checked with its verdicts.
+        reason = "VEX overlap: jetson_linux 39.2.1 is also nvidia-kernel-oot, with other " \
+                 "statements on CVE-2026-9"
+        with open(self.scan) as f:
+            data = json.load(f)
+        data["package"] = [e for e in data["package"] if e["name"] != "jetson-rt:" + OOT]
         with open(self.scan, "w") as f:
-            # One scanner entry per build, the same CVEs in each: they share
-            # product and statements, or the feed document left them out.
-            json.dump({"package": [entry("nvidia-kernel-oot", "39.2.1", issue("CVE-2026-7"))
-                                   for _ in range(4)]}, f)
+            json.dump(data, f)
+        doc, stats = self.build(not_covered={"jetson-rt:" + OOT: reason})
+        left_out = doc["builds"]["jetson-rt:" + OOT]
+        self.assertEqual((left_out["coverage"], left_out["not_covered"]), ("unscanned", reason))
+        self.assertNotIn("cves", left_out)
+        verdicts = binding_rules.rpm_verdicts(doc, {"packages": self.rpms})
+        for name in ("nv-kernel-module-x-6.18.52-jetson-rt", "nvidia-kernel-oot-base"):
+            self.assertEqual(verdicts[(name, "39.2.1", "r0.3", ARCH)],
+                             ("not_checked", "build-not-covered"))
+        self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", "r0.1", ARCH)],
+                         ("checked", {"CVE-2026-7": "affected"}))
+        self.assertEqual(stats.not_covered_builds, 1)
 
-    def test_one_record_and_each_module_bound_to_it(self):
-        doc, _stats = build_report([self.scan], [self.trees[0]], machine="m", status="All",
-                                   alt_trees=[(t, {"nvidia-kernel-oot"}) for t in self.trees[1:]])
-        record = doc["recipes"]["nvidia-kernel-oot"]
-        self.assertEqual([c["id"] for c in record["cves"]], ["CVE-2026-7"])
-        self.assertNotIn("alt_versions", record)
-        packages = doc["packages"]
-        self.assertEqual(packages["nvidia-kernel-oot-base"]["version"], "39.2.1-r0.6")
-        for _mc, release, kver in self.MCS:
-            module = packages["nv-kernel-module-x-" + kver]
-            self.assertEqual((module["version"], module["recipe_version"]),
-                             ("39.2.1-" + release, "39.2.1"))
+    def test_a_document_that_does_not_name_alternates_leaves_them_unscanned(self):
+        # A scan of a document from before the alternates were named: their
+        # entries file under the default build of their name, or under a
+        # build of their own with no package data, so the alternate builds
+        # stay unscanned rather than take a record that is not theirs.
+        scan = self.tree.manifest("plain", {"package": [
+            entry(kernel, kver + "+git", issue("CVE-2026-1"))
+            for _mc, kernel, kver, _r in self.TREES] + [entry(OOT, "39.2.1")] * 4})
+        doc, stats = build_report([scan], self.tree.dirs, status="All",
+                                  alt_trees=self.tree.alt_trees)
+        self.assertEqual(doc["builds"]["jetson-rt:" + OOT]["coverage"], "unscanned")
+        self.assertEqual(doc["builds"]["jetson-rt:linux-yocto-rt"]["coverage"], "unscanned")
+        self.assertEqual(doc["builds"][OOT]["coverage"], "no-cve-record")
+        # Same recipe name only in an alternate: an entry under the plain name
+        # is a build of its own, unpackaged, and binds nothing.
+        self.assertIs(doc["builds"]["linux-yocto-rt"]["packaged"], False)
+        self.assertEqual(stats.stale_dropped, 0)
 
-        def rpm(name, release, arch="jetson"):
-            return {"name": name, "version": "39.2.1", "release": release, "arch": arch}
-        manifest = {"packages": [rpm("nvidia-kernel-oot-base", r)
-                                 for r in ("r0.6", "r0.7", "r0.8", "r0.9")]
-                    + [rpm("nv-kernel-module-x-" + k, r) for _mc, r, k in self.MCS]}
-        verdicts = binding_rules.rpm_verdicts(doc, manifest)
-        checked = ("checked", {"CVE-2026-7": "affected"})
-        # The default's release binds; the alternates' releases of the shared
-        # name meet the default's version in the package map, and bind nothing.
-        self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", "r0.6", "jetson")],
-                         checked)
-        for release in ("r0.7", "r0.8", "r0.9"):
-            self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", release, "jetson")],
-                             ("not_checked", "version-mismatch"))
-        for _mc, release, kver in self.MCS:
-            self.assertEqual(verdicts[("nv-kernel-module-x-" + kver, "39.2.1", release, "jetson")],
-                             checked)
-        # Two rows of the default's release, one per arch, both match: ambiguous.
-        manifest["packages"].append(rpm("nvidia-kernel-oot-base", "r0.6", "armv8a"))
-        verdicts = binding_rules.rpm_verdicts(doc, manifest)
-        for arch in ("jetson", "armv8a"):
-            self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", "r0.6", arch)],
+    def test_two_rpms_of_one_package_build_are_ambiguous(self):
+        doc, _ = self.build()
+        rpms = self.rpms + [rpm("nvidia-kernel-oot-base", "39.2.1", "r0.1", "armv8a")]
+        verdicts = binding_rules.rpm_verdicts(doc, {"packages": rpms})
+        for arch in (ARCH, "armv8a"):
+            self.assertEqual(verdicts[("nvidia-kernel-oot-base", "39.2.1", "r0.1", arch)],
                              ("not_checked", "ambiguous-version"))
 
+    def test_an_rpm_with_no_package_build_rejects_the_upload(self):
+        doc, _ = self.build()
+        for extra in (rpm("nvidia-kernel-oot-base", "39.2.1", "r0.9"), rpm("stray", "1", "r0")):
+            with self.subTest(extra=extra):
+                with self.assertRaises(binding_rules.Rejected):
+                    binding_rules.rpm_verdicts(doc, {"packages": self.rpms + [extra]})
 
-class AltVersionsTests(unittest.TestCase):
+    def test_a_rebuild_from_the_report_binds_the_same(self):
+        doc, _ = self.build(not_covered={"jetson-l4t-rt:" + OOT: "why"})
+        again, _ = build_report_from_anchor([self.scan], round_trip(doc, self.root))
+        manifest = {"packages": self.rpms}
+        self.assertEqual(binding_rules.rpm_verdicts(again, manifest),
+                         binding_rules.rpm_verdicts(doc, manifest))
+
+
+class SameVersionTests(unittest.TestCase):
+    """Builds of one recipe at one version in two multiconfigs."""
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root)
-        self.tree = Tree(self.root)
-        self.tree.kernels()
-        self.scan = self.tree.manifest("feed", [
-            entry("linux-raspberrypi", DEFAULT, issue("CVE-2026-1"),
+        self.tree = rt.Tree(self.root)
+
+    def test_a_compiled_source_alternate_at_the_defaults_version_keeps_its_own_record(self):
+        # The compiled-source filter makes two builds at one version differ.
+        self.tree.alt("mc-rt", {"linux-yocto"})
+        self.tree.pkg("kernel-image-6.18.52", "linux-yocto", "6.18.52", pkgr="r0.1")
+        self.tree.pkg("kernel-image-6.18.52", "linux-yocto", "6.18.52", pkgr="r0.2", mc="mc-rt")
+        filtered = dict(detail=report.COMPILED_SOURCE_DETAIL,
+                        description=report.COMPILED_SOURCE_DESCRIPTION)
+        scan = self.tree.manifest("feed", {"package": [
+            dict(entry("linux-yocto", "6.18.52", issue("CVE-2026-1", "Ignored", **filtered),
+                       issue("CVE-2026-2")), products=[{"product": "linux_kernel"}]),
+            dict(entry("mc-rt:linux-yocto", "6.18.52", issue("CVE-2026-1"),
+                       issue("CVE-2026-2", "Ignored", **filtered)),
+                 products=[{"product": "linux_kernel"}]),
+        ]})
+        doc, _ = build_report([scan], self.tree.dirs, status="All",
+                              alt_trees=self.tree.alt_trees, compiled_sources={"linux-yocto"})
+        verdicts = binding_rules.rpm_verdicts(doc, {"packages": [
+            rpm("kernel-image-6.18.52", "6.18.52", "r0.1"),
+            rpm("kernel-image-6.18.52", "6.18.52", "r0.2")]})
+        self.assertEqual(verdicts[("kernel-image-6.18.52", "6.18.52", "r0.1", ARCH)],
+                         ("checked", {"CVE-2026-2": "affected"}))
+        self.assertEqual(verdicts[("kernel-image-6.18.52", "6.18.52", "r0.2", ARCH)],
+                         ("checked", {"CVE-2026-1": "affected"}))
+        self.assertIs(doc["builds"]["mc-rt:linux-yocto"]["compiled_sources"], True)
+
+    def test_compiled_source_trust_is_per_build_through_a_rebuild(self):
+        # The default kernel lists its compiled sources and the alternate build
+        # of the same recipe does not: the alternate's filtered CVE stays
+        # unverified at build time and in every rebuild.
+        self.tree.alt("mc-rt", {"linux-yocto"})
+        self.tree.pkg("kernel-image-6.18.52", "linux-yocto", "6.18.52", pkgr="r0.1")
+        self.tree.pkg("kernel-image-6.18.52", "linux-yocto", "6.18.52", pkgr="r0.2", mc="mc-rt")
+        filtered = dict(detail=report.COMPILED_SOURCE_DETAIL,
+                        description=report.COMPILED_SOURCE_DESCRIPTION)
+        scan = self.tree.manifest("feed", {"package": [
+            dict(entry(name, "6.18.52", issue("CVE-2026-1", "Ignored", **filtered)),
+                 products=[{"product": "linux_kernel"}])
+            for name in ("linux-yocto", "mc-rt:linux-yocto")]})
+        asked = []
+
+        def opted_in(mc, recipe):
+            asked.append((mc, recipe))
+            return not mc
+        built, _ = build_report([scan], self.tree.dirs, status="All",
+                                alt_trees=self.tree.alt_trees, compiled_sources=opted_in)
+        self.assertEqual(sorted(asked), [("", "linux-yocto"), ("mc-rt", "linux-yocto")])
+        anchor = round_trip(built, self.root)
+        rebuilt, _ = build_report_from_anchor([scan], anchor)
+        for doc in (built, rebuilt):
+            builds = doc["builds"]
+            self.assertIs(builds["linux-yocto"]["compiled_sources"], True)
+            self.assertIs(builds["mc-rt:linux-yocto"]["compiled_sources"], False)
+            self.assertEqual(builds["linux-yocto"]["cves"][0]["status"], "Ignored")
+            alt = builds["mc-rt:linux-yocto"]["cves"][0]
+            self.assertEqual(alt["status"], "Unpatched")
+            self.assertIn("scanner", alt)
+        rebuilt["generated"] = anchor["generated"]
+        self.assertEqual(round_trip(rebuilt, self.root), anchor)
+
+    def shared_nevra(self, not_covered, default=False, scanned=("foo", "mc-a:foo", "mc-b:foo"),
+                     merge_order=()):
+        for mc in ("mc-a", "mc-b"):
+            self.tree.alt(mc, {"foo"})
+            self.tree.pkg("foo-base", "foo", "1.0", mc=mc)
+        if default:
+            self.tree.pkg("foo-base", "foo", "1.0")
+        scan = self.tree.manifest("feed", {"package": [
+            entry(name, "1.0", issue("CVE-2026-5")) for name in scanned
+            if name not in not_covered]})
+        doc, stats = build_report([scan], self.tree.dirs, status="All",
+                                  alt_trees=self.tree.alt_trees, not_covered=not_covered,
+                                  merge_order=merge_order)
+        return doc, stats
+
+    def verdict(self, doc):
+        verdicts = binding_rules.rpm_verdicts(doc, {"packages": [rpm("foo-base", "1.0", "r0")]})
+        return list(verdicts.values())
+
+    def test_the_same_nevra_in_two_alternates_is_the_first_ones(self):
+        # The multikernel merge never replaces a file in the feed, so the
+        # feed serves the first alternate's.
+        doc, stats = self.shared_nevra({})
+        self.assertEqual(doc["packages"]["foo-base"], [{"version": "1.0-r0", "build": "mc-a:foo"}])
+        self.assertEqual(stats.shared_package_builds, 1)
+
+    def test_the_first_is_the_first_the_merge_publishes(self):
+        doc, _ = self.shared_nevra({}, merge_order=["mc-b:foo", "mc-a:foo"])
+        self.assertEqual(doc["packages"]["foo-base"], [{"version": "1.0-r0", "build": "mc-b:foo"}])
+
+    def test_the_first_alternate_left_out_still_owns_the_file_and_is_not_covered(self):
+        # The second alternate's record describes another build's bytes.
+        doc, _ = self.shared_nevra({"mc-a:foo": "unresolved reference: 1 identifier(s)"})
+        self.assertEqual(doc["packages"]["foo-base"], [{"version": "1.0-r0", "build": "mc-a:foo"}])
+        self.assertEqual(self.verdict(doc), [("not_checked", "build-not-covered")])
+
+    def test_the_same_nevra_the_default_built_is_the_defaults(self):
+        doc, stats = self.shared_nevra({}, default=True)
+        self.assertEqual(doc["packages"]["foo-base"], [{"version": "1.0-r0", "build": "foo"}])
+        self.assertEqual(stats.shared_package_builds, 2)
+        self.assertEqual(self.verdict(doc), [("checked", {"CVE-2026-5": "affected"})])
+        # Even when the default build is unscanned and an alternate is scanned.
+        doc, _ = self.shared_nevra({}, default=True, scanned=("mc-a:foo", "mc-b:foo"))
+        self.assertEqual(doc["packages"]["foo-base"][0]["build"], "foo")
+        self.assertEqual(self.verdict(doc), [("not_checked", "build-unscanned")])
+
+    def test_the_same_name_and_version_from_another_recipe_is_a_collision(self):
+        self.tree.alt("mc-a", {"bar"})
+        self.tree.pkg("libx", "foo", "1.0")
+        self.tree.pkg("libx", "bar", "1.0", mc="mc-a")
+        scan = self.tree.manifest("feed", {"package": [entry("foo", "1.0")]})
+        doc, stats = build_report([scan], self.tree.dirs, status="All",
+                                  alt_trees=self.tree.alt_trees)
+        self.assertEqual(doc["packages"]["libx"], [{"version": "1.0-r0", "build": "foo"}])
+        self.assertEqual((stats.package_collisions, stats.shared_package_builds), (1, 0))
+
+    def test_a_plus_and_a_hyphen_are_one_version(self):
+        # The consumer compares versions with "+" read as "-".
+        self.tree.alt("mc-a", {"foo"})
+        self.tree.pkg("foo-base", "foo", "1.0+git", pkgr="r0")
+        self.tree.pkg("foo-base", "foo", "1.0-git", pkgr="r0", mc="mc-a")
+        doc, stats = build_report([self.tree.manifest("s", {"package": []})], self.tree.dirs,
+                                  status="All", alt_trees=self.tree.alt_trees)
+        self.assertEqual(doc["packages"]["foo-base"],
+                         [{"version": "1.0+git-r0", "build": "foo"}])
+        self.assertEqual(stats.shared_package_builds, 1)
+
+
+class RaspberryPiTests(unittest.TestCase):
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.tree = rt.Tree(self.root)
+        rt.rpi_kernels(self.tree)
+        self.alt = "%s:linux-raspberrypi" % rt.RPI_MC
+        self.scan = self.tree.manifest("feed", {"package": [
+            entry("linux-raspberrypi", rt.DEFAULT_KERNEL, issue("CVE-2026-1"),
                   issue("CVE-2026-2", "Patched", detail="fixed-version: 6.12.50")),
             # The same id in both kernels: one record each, never merged.
-            entry("linux-raspberrypi", ALT, issue("CVE-2026-1"), issue("CVE-2026-3")),
-            entry("kernel-devsrc", DEFAULT),
-            entry("kernel-devsrc", ALT),
+            entry(self.alt, rt.ALT_KERNEL, issue("CVE-2026-1"), issue("CVE-2026-3")),
+            entry("kernel-devsrc", rt.DEFAULT_KERNEL),
+            entry("%s:kernel-devsrc" % rt.RPI_MC, rt.ALT_KERNEL),
             entry("openssl", "3.5.7", issue("CVE-2026-9")),
             entry("base-files", "3.0.14"),
-        ])
+        ]})
 
-    def build(self, scan=None, alt=True, status="All"):
-        return build_report([scan or self.scan], [self.tree.machine], machine="m",
-                            status=status,
+    def build(self, alt=True, status="All"):
+        return build_report([self.scan], self.tree.dirs, machine="m", status=status,
                             alt_trees=self.tree.alt_trees if alt else ())
 
-    def test_the_second_version_is_an_alt_record(self):
+    def test_each_kernel_is_its_own_build(self):
         doc, stats = self.build()
-        kernel = doc["recipes"]["linux-raspberrypi"]
-        self.assertEqual(kernel["version"], DEFAULT)
-        self.assertEqual([c["id"] for c in kernel["cves"]], ["CVE-2026-1", "CVE-2026-2"])
-        self.assertEqual(kernel["alt_versions"], [{
-            "version": ALT, "packaged": True,
-            "cves": [issue("CVE-2026-1"), issue("CVE-2026-3")],
-        }])
+        self.assertEqual([c["id"] for c in doc["builds"]["linux-raspberrypi"]["cves"]],
+                         ["CVE-2026-1", "CVE-2026-2"])
+        self.assertEqual(doc["builds"][self.alt]["cves"],
+                         [dict(issue("CVE-2026-1"), status="Unpatched"),
+                          dict(issue("CVE-2026-3"), status="Unpatched")])
         self.assertEqual(stats.stale_dropped, 0)
-        self.assertEqual(doc["counts"]["alt_recipes"], 1)
-        self.assertEqual(doc["counts"]["alt_cves"], 2)
-        self.assertEqual(doc["counts"]["cves"], 3)
         counts = doc["counts"]
+        self.assertEqual(counts["cves"], 5)
         self.assertEqual(counts["unpatched_cves"] + counts["patched_cves"]
-                         + counts["ignored_cves"], counts["cves"] + counts["alt_cves"])
+                         + counts["ignored_cves"], counts["cves"])
 
-    def test_packages_carry_the_version_they_were_built_from(self):
+    def test_both_kernels_shared_names_are_checked(self):
         doc, _ = self.build()
-        packages = doc["packages"]
-        self.assertEqual(packages["kernel-module-foo-6.6.78"]["recipe_version"], ALT)
-        self.assertEqual(packages["kernel-image-image-6.6.78"]["recipe_version"], ALT)
-        self.assertEqual(packages["kernel-module-foo-6.12.87"]["recipe_version"], DEFAULT)
-        # A name both multiconfigs package stays the default's.
-        self.assertEqual(packages["kernel"]["version"], DEFAULT + "-r0")
-        self.assertEqual(packages["kernel"]["recipe_version"], DEFAULT)
-        self.assertEqual(packages["libssl3"]["recipe_version"], "3.5.7")
-        self.assertEqual(doc["alt_packages"], {
-            "kernel-devsrc": {ALT: ["kernel-devsrc-6.6.78"]},
-            "linux-raspberrypi": {ALT: ["kernel-image-image-6.6.78",
-                                        "kernel-module-foo-6.6.78"]},
-        })
-        self.assertGreater(doc["counts"]["package_collisions"], 0)
+        for name in ("kernel", "kernel-dev"):
+            self.assertEqual(binding_rules.package_verdict(doc, name, rt.DEFAULT_KERNEL + "-r0"),
+                             ("checked", {"CVE-2026-1": "affected", "CVE-2026-2": "patched"}))
+            self.assertEqual(binding_rules.package_verdict(doc, name, rt.ALT_KERNEL + "-r0"),
+                             ("checked", {"CVE-2026-1": "affected", "CVE-2026-3": "affected"}))
+        self.assertEqual(binding_rules.package_verdict(doc, "kernel-module-foo-6.6.78",
+                                                       rt.ALT_KERNEL + "-r0"),
+                         ("checked", {"CVE-2026-1": "affected", "CVE-2026-3": "affected"}))
+        self.assertEqual(binding_rules.package_verdict(doc, "libssl3", "3.5.7-r0"),
+                         ("checked", {"CVE-2026-9": "affected"}))
 
     def test_only_the_named_recipes_are_read_from_the_alternate_tree(self):
         doc, _ = self.build()
         self.assertNotIn("alt-only-tool", doc["packages"])
-        self.assertEqual(doc["packages"]["base-files"]["origin"], "raspberrypi5")
+        self.assertNotIn("%s:base-files" % rt.RPI_MC, doc["builds"])
+        self.assertEqual(doc["packages"]["base-files"],
+                         [{"version": "3.0.14-r0", "build": "base-files"}])
 
-    def test_the_binding_files_each_kernel_under_its_own_record(self):
-        doc, _ = self.build()
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.6.78"),
-                         ("checked", {"CVE-2026-1": "affected", "CVE-2026-3": "affected"}))
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.12.87"),
-                         ("checked", {"CVE-2026-1": "affected", "CVE-2026-2": "patched"}))
-        self.assertEqual(binding_rules.verdict(doc, "libssl3"),
-                         ("checked", {"CVE-2026-9": "affected"}))
-
-    def test_without_the_alternate_tree_the_second_version_is_stale(self):
+    def test_without_the_alternate_tree_its_entries_are_builds_of_their_own(self):
         doc, stats = self.build(alt=False)
-        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
-        self.assertEqual(stats.stale_dropped, 2)
-        self.assertEqual(doc["alt_packages"], {})
         self.assertNotIn("kernel-module-foo-6.6.78", doc["packages"])
+        self.assertIs(doc["builds"][self.alt]["packaged"], False)
+        self.assertEqual(doc["counts"]["alternate_builds"], 2)
+        self.assertEqual(stats.stale_dropped, 0)
 
-    def test_an_alt_version_with_nothing_listed_binds_nothing(self):
-        scan = self.tree.manifest("quiet-alt", [
-            entry("linux-raspberrypi", DEFAULT, issue("CVE-2026-1")),
-            entry("linux-raspberrypi", ALT),
-        ])
-        doc, _ = self.build(scan)
-        self.assertNotIn("alt_versions", doc["recipes"]["linux-raspberrypi"])
-        self.assertNotIn("recipe_version", doc["packages"]["kernel-module-foo-6.6.78"])
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.6.78"),
-                         ("not_checked", "recipe-version-unmatched"))
-
-    def test_the_alt_record_leads_when_the_default_listed_nothing(self):
-        # A placeholder entry at the default version with no CVEs would bind
-        # the default kernel's packages as scanned and clean.
-        scan = self.tree.manifest("quiet-default", [
-            entry("linux-raspberrypi", DEFAULT),
-            entry("linux-raspberrypi", ALT, issue("CVE-2026-3")),
-        ])
-        doc, _ = self.build(scan)
-        kernel = doc["recipes"]["linux-raspberrypi"]
-        self.assertEqual(kernel["version"], ALT)
-        self.assertNotIn("alt_versions", kernel)
-        self.assertNotIn("recipe_version", doc["packages"]["kernel-module-foo-6.12.87"])
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.12.87"),
-                         ("not_checked", "recipe-version-unmatched"))
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.6.78"),
-                         ("checked", {"CVE-2026-3": "affected"}))
-        self.assertNotIn("linux-raspberrypi", doc["no_cve_record_recipes"])
-
-    def test_a_rescan_from_the_report_files_them_the_same_way(self):
-        anchor = round_trip(self.build()[0], self.root)
-        rescan = self.tree.manifest("rescan", [
-            entry("linux-raspberrypi", DEFAULT,
-                  issue("CVE-2026-1", "Patched", detail="fixed-version: 6.12.90")),
-            entry("linux-raspberrypi", ALT, issue("CVE-2026-3"), issue("CVE-2026-4")),
-            entry("openssl", "3.5.7"),
-        ])
-        for status in REPORT_STATUSES:
-            with self.subTest(status=status):
-                want, want_stats = self.build(rescan, status=status)
-                got, got_stats = build_report_from_anchor([rescan], anchor, status=status)
-                self.assertEqual(as_bytes(got, self.root), as_bytes(want, self.root))
-                self.assertEqual(dict(got_stats), dict(want_stats))
-        got, _ = build_report_from_anchor([rescan], anchor)
-        self.assertEqual(binding_rules.verdict(got, "kernel-module-foo-6.6.78"),
-                         ("checked", {"CVE-2026-3": "affected", "CVE-2026-4": "affected"}))
-
-    def test_a_version_whose_every_name_the_default_took_is_still_its_own(self):
-        # Each of its packages lost its name to the default's, so none carries
-        # the version; its CVEs still must not join the default's record.
-        self.tree.pkg("libfoo", "foo", "2.0")
-        self.tree.pkg("libfoo", "foo", "2.1", alt=True)
-        scan = self.tree.manifest("foo", [
-            entry("foo", "2.0", issue("CVE-2026-7")),
-            entry("foo", "2.1", issue("CVE-2026-8")),
-        ])
-        doc, _ = build_report([scan], [self.tree.machine], status="All",
-                              alt_trees=[(self.tree.alt, {"foo"})])
-        foo = doc["recipes"]["foo"]
-        self.assertEqual([c["id"] for c in foo["cves"]], ["CVE-2026-7"])
-        self.assertEqual(foo["alt_versions"][0]["version"], "2.1")
-        self.assertEqual(doc["alt_packages"], {"foo": {"2.1": []}})
-        self.assertEqual(binding_rules.verdict(doc, "libfoo"),
-                         ("checked", {"CVE-2026-7": "affected"}))
-
-    def test_an_earlier_report_keeps_an_alt_record_that_owns_no_package(self):
-        self.tree.pkg("libfoo", "foo", "2.0")
-        self.tree.pkg("libfoo", "foo", "2.1", alt=True)
-        scan = self.tree.manifest("foo", [
-            entry("foo", "2.0", issue("CVE-2026-7")),
-            entry("foo", "2.1", issue("CVE-2026-8")),
-        ])
-        doc, _ = build_report([scan], [self.tree.machine], status="All",
-                              alt_trees=[(self.tree.alt, {"foo"})])
-        anchor = round_trip(doc, self.root)
-        del anchor["alt_packages"]
-        again, _ = build_report_from_anchor([scan], anchor)
-        self.assertEqual(again["alt_packages"]["foo"], {"2.1": []})
-        self.assertEqual(binding_rules.verdict(again, "libfoo"),
-                         ("checked", {"CVE-2026-7": "affected"}))
-
-    def test_a_rescan_leaves_the_report_it_was_given_alone(self):
-        anchor = round_trip(self.build()[0], self.root)
-        before = json.dumps(anchor, sort_keys=True)
-        quiet = self.tree.manifest("quiet", [entry("openssl", "3.5.7")])
-        doc, _ = build_report_from_anchor([quiet], anchor)
-        self.assertEqual(json.dumps(anchor, sort_keys=True), before)
-        self.assertNotIn("recipe_version", doc["packages"]["kernel-module-foo-6.6.78"])
-
-    def test_a_report_with_an_earlier_alt_record_keeps_the_split(self):
-        # A report written before alt_packages existed, which already filed the
-        # second kernel under alt_versions and stamped its packages.
-        anchor = round_trip(self.build()[0], self.root)
-        del anchor["alt_packages"]
-        rescan = self.tree.manifest("image-only", [
-            entry("linux-raspberrypi", DEFAULT, issue("CVE-2026-1")),
-        ])
-        doc, _ = build_report_from_anchor([rescan], anchor)
-        self.assertEqual(doc["alt_packages"]["linux-raspberrypi"],
-                         {ALT: ["kernel-image-image-6.6.78", "kernel-module-foo-6.6.78"]})
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.6.78"),
-                         ("not_checked", "recipe-version-unmatched"))
-        self.assertEqual(binding_rules.verdict(doc, "kernel-module-foo-6.12.87"),
+    def test_an_alternate_with_nothing_listed_is_no_cve_record(self):
+        scan = self.tree.manifest("quiet-alt", {"package": [
+            entry("linux-raspberrypi", rt.DEFAULT_KERNEL, issue("CVE-2026-1")),
+            entry(self.alt, rt.ALT_KERNEL),
+        ]})
+        doc, _ = build_report([scan], self.tree.dirs, status="All",
+                              alt_trees=self.tree.alt_trees)
+        self.assertEqual(binding_rules.build_verdict(doc, self.alt),
+                         ("not_checked", "no-cve-record"))
+        self.assertEqual(binding_rules.build_verdict(doc, "linux-raspberrypi"),
                          ("checked", {"CVE-2026-1": "affected"}))
 
-    def test_a_malformed_alt_packages_is_refused(self):
-        anchor = round_trip(self.build()[0], self.root)
-        for value in ([], {"linux-raspberrypi": []},
-                      {"linux-raspberrypi": {ALT: "kernel"}},
-                      {"linux-raspberrypi": {"": []}},
-                      {"linux-raspberrypi": {ALT: ["no-such-package"]}},
-                      {"openssl": {ALT: ["kernel-module-foo-6.6.78"]}}):
-            with self.subTest(value=value):
-                bad = json.loads(json.dumps(anchor))
-                bad["alt_packages"] = value
-                with self.assertRaises(ValueError) as ctx:
-                    build_report_from_anchor([self.scan], bad)
-                self.assertIn("alt_packages", str(ctx.exception))
+    def test_the_default_listing_nothing_takes_no_other_record(self):
+        scan = self.tree.manifest("quiet-default", {"package": [
+            entry(self.alt, rt.ALT_KERNEL, issue("CVE-2026-3")),
+        ]})
+        doc, _ = build_report([scan], self.tree.dirs, status="All",
+                              alt_trees=self.tree.alt_trees)
+        self.assertEqual(binding_rules.build_verdict(doc, "linux-raspberrypi"),
+                         ("not_checked", "build-unscanned"))
+        self.assertEqual(binding_rules.build_verdict(doc, self.alt),
+                         ("checked", {"CVE-2026-3": "affected"}))
+
+    def test_an_alternate_entry_at_another_version_is_stale(self):
+        scan = self.tree.manifest("stale", {"package": [
+            entry(self.alt, rt.DEFAULT_KERNEL, issue("CVE-2026-3"))]})
+        doc, stats = build_report([scan], self.tree.dirs, status="All",
+                                  alt_trees=self.tree.alt_trees)
+        self.assertEqual(stats.stale_dropped, 1)
+        self.assertEqual(doc["builds"][self.alt]["coverage"], "unscanned")
+
 
 class NoCveRecordTests(unittest.TestCase):
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root)
-        self.tree = Tree(self.root)
+        self.tree = rt.Tree(self.root)
         for recipe in ("avocadoctl", "glibc-locale", "zlib", "attr", "acl",
                        "busybox", "dbus", "cmocka", "twice"):
             self.tree.pkg("pkg-" + recipe, recipe, "1.0")
 
     def build(self, entries, status="All"):
-        scan = self.tree.manifest("scan", entries)
-        doc, stats = build_report([scan], [self.tree.machine], status=status)
-        return doc, stats, scan
+        scan = self.tree.manifest("scan", {"package": entries})
+        doc, stats = build_report([scan], self.tree.dirs, status=status)
+        return doc, stats
 
     def entries(self):
         return [
@@ -387,8 +457,7 @@ class NoCveRecordTests(unittest.TestCase):
             # empty issue list.
             entry("avocadoctl", "1.0"),
             entry("glibc-locale", "1.0"),
-            entry("zlib", "1.0", issue("CVE-2026-1", "Patched",
-                                       detail="fixed-version: 0.9")),
+            entry("zlib", "1.0", issue("CVE-2026-1", "Patched", detail="fixed-version: 0.9")),
             # Scanned only at a version this build does not have.
             entry("attr", "0.9", issue("CVE-2026-2")),
             # Only a status this report does not know.
@@ -402,86 +471,92 @@ class NoCveRecordTests(unittest.TestCase):
             # "acl" has no entry at all.
         ]
 
-    def test_the_list_is_what_the_scanner_could_not_match(self):
-        doc, stats, _ = self.build(self.entries())
-        self.assertEqual(doc["no_cve_record_recipes"], ["avocadoctl", "glibc-locale"])
-        self.assertEqual(doc["counts"]["no_cve_record_recipes"], 2)
-        self.assertEqual(binding_rules.verdict(doc, "pkg-avocadoctl"),
+    def coverage(self, doc):
+        return {bid: b["coverage"] for bid, b in doc["builds"].items()}
+
+    def test_what_the_scanner_could_not_match_is_no_cve_record(self):
+        doc, _ = self.build(self.entries())
+        self.assertEqual(sorted(b for b, c in self.coverage(doc).items()
+                                if c == "no-cve-record"), ["avocadoctl", "glibc-locale"])
+        self.assertEqual(doc["counts"]["no_cve_record_builds"], 2)
+        self.assertEqual(binding_rules.build_verdict(doc, "avocadoctl"),
                          ("not_checked", "no-cve-record"))
 
     def test_what_was_not_usably_scanned_is_unscanned_never_clean(self):
-        doc, stats, _ = self.build(self.entries())
-        self.assertEqual(doc["unscanned_recipes"],
-                         ["acl", "attr", "busybox", "cmocka", "dbus"])
-        self.assertEqual(stats.stale_dropped, 1)
-        self.assertEqual(stats.entries_unreadable, 2)
-        for recipe in ("acl", "attr", "busybox", "cmocka", "dbus"):
-            self.assertEqual(binding_rules.verdict(doc, "pkg-" + recipe),
-                             ("not_checked", "recipe-unscanned"))
+        doc, stats = self.build(self.entries())
+        unscanned = sorted(b for b, c in self.coverage(doc).items() if c == "unscanned")
+        self.assertEqual(unscanned, ["acl", "attr", "busybox", "cmocka", "dbus"])
+        self.assertEqual(doc["counts"]["unscanned_builds"], 5)
+        self.assertEqual((stats.stale_dropped, stats.entries_unreadable), (1, 2))
+        for bid in unscanned:
+            self.assertEqual(binding_rules.build_verdict(doc, bid),
+                             ("not_checked", "build-unscanned"))
 
-    def test_every_shipped_recipe_is_accounted_for_at_all(self):
-        doc, _, _ = self.build(self.entries())
-        lists = [set(doc["recipes"]), set(doc["no_cve_record_recipes"]),
-                 set(doc["unscanned_recipes"])]
-        shipped = {p["recipe"] for p in doc["packages"].values()}
-        for recipe in shipped:
-            self.assertEqual(sum(recipe in each for each in lists), 1, recipe)
-        for name in doc["packages"]:
-            self.assertNotEqual(binding_rules.coverage(doc, name), ("scanned", []), name)
+    def test_nothing_reads_as_clean_unless_it_was_scanned_clean(self):
+        doc, _ = self.build(self.entries())
+        for bid, build in doc["builds"].items():
+            if build["coverage"] == "scanned":
+                self.assertTrue(build["cves"], bid)
 
-    def test_a_single_status_report_keeps_matched_recipes_out_of_the_lists(self):
-        # zlib matched a CVE that this status leaves out: clean at Unpatched,
-        # as before, rather than unscanned.
-        doc, _, _ = self.build(self.entries(), status="Unpatched")
-        self.assertNotIn("zlib", doc["recipes"])
-        self.assertNotIn("zlib", doc["unscanned_recipes"])
-        self.assertNotIn("zlib", doc["no_cve_record_recipes"])
+    def test_a_single_status_report_keeps_matched_builds_scanned(self):
+        # zlib matched a CVE that this status leaves out: clean at Unpatched.
+        doc, _ = self.build(self.entries(), status="Unpatched")
+        self.assertEqual((doc["builds"]["zlib"]["coverage"], doc["builds"]["zlib"]["cves"]),
+                         ("scanned", []))
 
-    def test_the_list_is_scoped_to_recipes_that_shipped(self):
-        doc, _, _ = self.build(self.entries() + [entry("gcc-cross", "1.0")])
-        self.assertNotIn("gcc-cross", doc["no_cve_record_recipes"])
+    def test_an_unpackaged_entry_is_a_build_that_binds_nothing(self):
+        doc, _ = self.build(self.entries() + [entry("gcc-cross", "1.0")])
+        self.assertEqual((doc["builds"]["gcc-cross"]["packaged"],
+                          doc["builds"]["gcc-cross"]["coverage"]), (False, "no-cve-record"))
+        self.assertNotIn("version_keys", doc["builds"]["gcc-cross"])
+        self.assertEqual(doc["counts"]["no_cve_record_builds"], 2)
 
-    def test_a_rescan_from_the_report_lists_the_same(self):
-        doc, _, _ = self.build(self.entries())
-        anchor = round_trip(doc, self.root)
-        rescan = self.tree.manifest("rescan", self.entries()[2:] + [
-            entry("avocadoctl", "1.0", issue("CVE-2026-5")),
-            entry("acl", "1.0"),
-        ])
-        want, _ = build_report([rescan], [self.tree.machine], status="All")
-        got, _ = build_report_from_anchor([rescan], anchor)
-        self.assertEqual(as_bytes(got, self.root), as_bytes(want, self.root))
-        self.assertEqual(got["no_cve_record_recipes"], ["acl"])
-        self.assertIn("avocadoctl", got["recipes"])
 
 class UpstreamWontfixTests(unittest.TestCase):
     """create-spdx writes a CVE_STATUS keyword as the VEX statement's status
     notes and sbom-cve-check exports those as "detail"; the report keeps it."""
 
-    def setUp(self):
-        self.root = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.root)
-        self.tree = Tree(self.root)
-        self.tree.pkg("shadow", "shadow", "4.19.4")
-        self.scan = self.tree.manifest("scan", [entry(
+    def test_the_detail_survives_both_paths_and_no_summary(self):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        tree = rt.Tree(root)
+        tree.pkg("shadow", "shadow", "4.19.4")
+        scan = tree.manifest("scan", {"package": [entry(
             "shadow", "4.19.4",
             issue("CVE-2013-4235", "Ignored", detail="upstream-wontfix",
                   description="Severity is low and marked as closed and won't fix."),
-            issue("CVE-2026-6", "Ignored", detail="cpe-incorrect"),
-        )])
-
-    def test_the_detail_survives_both_paths_and_no_summary(self):
+            issue("CVE-2026-6", "Ignored", detail="cpe-incorrect"))]})
         for summary in (True, False):
             with self.subTest(summary=summary):
-                doc, _ = build_report([self.scan], [self.tree.machine],
-                                      status="All", summary=summary)
-                anchor = round_trip(doc, self.root)
-                again, _ = build_report_from_anchor([self.scan], anchor, summary=summary)
+                doc, _ = build_report([scan], tree.dirs, status="All", summary=summary)
+                again, _ = build_report_from_anchor([scan], round_trip(doc, root))
                 for each in (doc, again):
-                    cves = {c["id"]: c for c in each["recipes"]["shadow"]["cves"]}
+                    cves = {c["id"]: c for c in each["builds"]["shadow"]["cves"]}
                     self.assertEqual(cves["CVE-2013-4235"]["detail"], "upstream-wontfix")
-                    self.assertEqual(binding_rules.verdict(each, "shadow"),
+                    self.assertEqual(binding_rules.build_verdict(each, "shadow"),
                                      ("checked", {"CVE-2013-4235": "affected"}))
+
+
+class NamesTests(unittest.TestCase):
+
+    def test_a_build_id_is_the_label_the_feed_document_gives(self):
+        self.assertEqual(report.build_id("jetson-rt", OOT), feedsbom.alt_label("jetson-rt", OOT))
+        self.assertEqual(report.build_id("", OOT), OOT)
+        for name in (OOT, "jetson-rt:" + OOT):
+            self.assertEqual(report.build_id(*report.split_build_id(name)), name)
+        self.assertEqual(report.split_build_id(":x"), ("", ":x"))
+
+    def test_the_coverage_record_names_the_builds_left_out(self):
+        record = {"alt_not_covered": [
+            {"mc": "jetson-rt", "recipe": OOT, "reason": "VEX overlap: x"},
+            {"mc": "", "recipe": "nocolon", "reason": "malformed entry"}]}
+        self.assertEqual(report.not_covered_builds(record), {"jetson-rt:" + OOT: "VEX overlap: x"})
+        for bad in ({}, {"alt_not_covered": {}}, {"alt_not_covered": ["x"]},
+                    {"alt_not_covered": [{"mc": "a", "recipe": "b"}]}, []):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    report.not_covered_builds(bad)
+
 
 class AltTreeHelpersTests(unittest.TestCase):
 
@@ -500,42 +575,104 @@ class AltTreeHelpersTests(unittest.TestCase):
     def test_an_alternate_tree_must_hold_every_declared_recipe(self):
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root)
-        tree = Tree(root)
+        tree = rt.Tree(root)
+        alt = tree.alt("rpi")
         recipes = {"linux-raspberrypi", "kernel-devsrc"}
         # Empty, then only a dependency the feed does not take from it.
         self.assertIn("no package of kernel-devsrc, linux-raspberrypi",
-                      report.alt_tree_problem(tree.alt, recipes))
-        self.assertEqual(report.alt_tree_problem(tree.alt, None),
-                         "%s holds no readable package data" % tree.alt)
-        tree.pkg("base-files", "base-files", "3.0.14", alt=True)
+                      report.alt_tree_problem(alt, recipes))
+        self.assertEqual(report.alt_tree_problem(alt, None),
+                         "%s holds no readable package data" % alt)
+        tree.pkg("base-files", "base-files", "3.0.14", mc="rpi")
         self.assertIn("no package of kernel-devsrc, linux-raspberrypi",
-                      report.alt_tree_problem(tree.alt, recipes))
-        self.assertIsNone(report.alt_tree_problem(tree.alt, None))
-        tree.pkg("kernel-image-6.6.78", "linux-raspberrypi", ALT, alt=True)
-        self.assertIn("no package of kernel-devsrc",
-                      report.alt_tree_problem(tree.alt, recipes))
-        tree.pkg("kernel-devsrc-6.6.78", "kernel-devsrc", ALT, alt=True)
-        self.assertIsNone(report.alt_tree_problem(tree.alt, recipes))
+                      report.alt_tree_problem(alt, recipes))
+        self.assertIsNone(report.alt_tree_problem(alt, None))
+        tree.pkg("kernel-image-6.6.78", "linux-raspberrypi", rt.ALT_KERNEL, mc="rpi")
+        self.assertIn("no package of kernel-devsrc", report.alt_tree_problem(alt, recipes))
+        tree.pkg("kernel-devsrc-6.6.78", "kernel-devsrc", rt.ALT_KERNEL, mc="rpi")
+        self.assertIsNone(report.alt_tree_problem(alt, recipes))
         self.assertIn("no runtime-reverse",
                       report.alt_tree_problem(os.path.join(root, "nowhere"), recipes))
 
+    def test_an_alternate_tree_needs_its_multiconfig(self):
+        with self.assertRaises(ValueError):
+            report.read_trees([], [("", "/nowhere", None)], report.Stats())
+
     def test_alt_recipes_by_mc(self):
-        pairs, _ = feedsbom.parse_alt_recipes(
-            "b:linux b:kernel-devsrc a:linux-l4t b:linux")
+        pairs, _ = feedsbom.parse_alt_recipes("b:linux b:kernel-devsrc a:linux-l4t b:linux")
         self.assertEqual(list(feedsbom.alt_recipes_by_mc(pairs).items()),
                          [("b", {"linux", "kernel-devsrc"}), ("a", {"linux-l4t"})])
+
+
+class SchemaTests(unittest.TestCase):
+    """Every report the tests here build is valid against the version 2
+    schema, and the schema refuses what the consumer refuses on shape."""
+
+    def setUp(self):
+        try:
+            import jsonschema  # noqa: F401
+        except ImportError:
+            self.skipTest("jsonschema not installed")
+        with open(SCHEMA) as f:
+            self.schema = json.load(f)
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+
+    def reports(self):
+        jetson = JetsonTests("test_every_rpm_joins_its_own_build")
+        jetson.setUp()
+        self.addCleanup(jetson.doCleanups)
+        yield jetson.build(not_covered={"jetson-rt:" + OOT: "why"})[0]
+        tree = rt.Tree(self.root)
+        scan = rt.one_tree(tree)
+        for status in report.REPORT_STATUSES:
+            for compiled in (None, {"linux-raspberrypi"}):
+                yield build_report(rt.one_tree_rescan(tree) + [scan], tree.dirs, status=status,
+                                   summary=status != "Patched", compiled_sources=compiled)[0]
+
+    def test_the_reports_are_valid(self):
+        import jsonschema
+        for doc in self.reports():
+            jsonschema.validate(round_trip(doc, self.root), self.schema)
+
+    def test_the_schema_refuses_what_the_consumer_refuses(self):
+        import jsonschema
+        doc = round_trip(next(self.reports()), self.root)
+        bid = "jetson-rt:" + OOT
+        cases = [
+            lambda d: d.update(version="1"),
+            lambda d: d.pop("builds"),
+            lambda d: d["builds"][bid].update(coverage="clean"),
+            lambda d: d["builds"][bid].pop("not_covered") and d["builds"][bid].update(
+                coverage="scanned"),
+            lambda d: d["builds"][OOT].pop("cves"),
+            lambda d: d["builds"][OOT].update(coverage="no-cve-record"),
+            lambda d: d["packages"].update(kernel=[]),
+            lambda d: d["packages"]["kernel"][0].pop("build"),
+            lambda d: d.update(summary="yes"),
+            lambda d: d["counts"].update(builds=-1),
+            lambda d: d["builds"][OOT].pop("version_keys"),
+        ]
+        for n, mutate in enumerate(cases):
+            with self.subTest(case=n):
+                bad = json.loads(json.dumps(doc))
+                mutate(bad)
+                with self.assertRaises(jsonschema.ValidationError):
+                    jsonschema.validate(bad, self.schema)
+
 
 class CliTests(unittest.TestCase):
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.root)
-        self.tree = Tree(self.root)
-        self.tree.kernels()
-        self.scan = self.tree.manifest("feed", [
-            entry("linux-raspberrypi", DEFAULT, issue("CVE-2026-1")),
-            entry("linux-raspberrypi", ALT, issue("CVE-2026-3")),
-        ])
+        self.tree = rt.Tree(self.root)
+        rt.rpi_kernels(self.tree)
+        self.alt = self.tree.alts[rt.RPI_MC][0]
+        self.scan = self.tree.manifest("feed", {"package": [
+            entry("linux-raspberrypi", rt.DEFAULT_KERNEL, issue("CVE-2026-1")),
+            entry("%s:linux-raspberrypi" % rt.RPI_MC, rt.ALT_KERNEL, issue("CVE-2026-3")),
+        ]})
 
     def run_main(self, *argv):
         err = io.StringIO()
@@ -547,47 +684,69 @@ class CliTests(unittest.TestCase):
                 rc = e.code
         return rc, err.getvalue()
 
-    def test_the_cli_reads_an_alternate_tree(self):
+    def test_the_cli_reads_an_alternate_tree_and_the_coverage_record(self):
+        coverage = os.path.join(self.root, "coverage.json")
+        with open(coverage, "w") as f:
+            json.dump({"alt_not_covered": [{"mc": rt.RPI_MC, "recipe": "kernel-devsrc",
+                                            "reason": "why"}]}, f)
         out = os.path.join(self.root, "out.json")
         rc, err = self.run_main(
             "--manifest", self.scan, "--pkgdata-dir", self.tree.machine,
-            "--alt-pkgdata-dir", self.tree.alt, "--alt-recipe", "linux-raspberrypi",
-            "--alt-recipe", "kernel-devsrc", "--status", "All", "-o", out)
+            "--pkgdata-dir", self.tree.sdk,
+            "--alt-pkgdata-dir", "%s:%s" % (rt.RPI_MC, self.alt),
+            "--alt-recipe", "%s:linux-raspberrypi" % rt.RPI_MC,
+            "--alt-recipe", "%s:kernel-devsrc" % rt.RPI_MC,
+            "--coverage", coverage, "--status", "All", "-o", out)
         self.assertEqual(rc, 0, err)
-        self.assertIn("alt_recipes: 1", err)
+        self.assertIn("alternate_builds: 2", err)
+        self.assertIn("not_covered_builds: 1", err)
         with open(out) as f:
             doc = json.load(f)
-        want, _ = build_report([self.scan], [self.tree.machine], status="All",
-                               alt_trees=self.tree.alt_trees)
+        want, _ = build_report([self.scan], self.tree.dirs, status="All",
+                               alt_trees=self.tree.alt_trees,
+                               not_covered={"%s:kernel-devsrc" % rt.RPI_MC: "why"})
         doc["generated"] = want["generated"]
         self.assertEqual(doc, json.loads(json.dumps(want)))
 
-    def test_the_cli_refuses_an_alternate_tree_without_package_data(self):
-        empty = os.path.join(self.root, "tmp-empty", "pkgdata", "raspberrypi5")
-        os.makedirs(empty)
-        out = os.path.join(self.root, "out.json")
-        rc, err = self.run_main(
-            "--manifest", self.scan, "--pkgdata-dir", self.tree.machine,
-            "--alt-pkgdata-dir", empty, "--status", "All", "-o", out)
-        self.assertEqual(rc, 2)
-        self.assertIn("runtime-reverse", err)
-        self.assertFalse(os.path.exists(out))
+    def test_the_cli_never_writes_over_the_coverage_record(self):
+        coverage = os.path.join(self.root, "coverage.json")
+        with open(coverage, "w") as f:
+            json.dump({"alt_not_covered": []}, f)
+        with open(coverage, "rb") as f:
+            before = f.read()
+        alias = os.path.join(self.root, "alias.json")
+        os.link(coverage, alias)
+        os.symlink(coverage, os.path.join(self.root, "linked.json.tmp"))
+        for out in (coverage, alias, os.path.join(self.root, "linked.json"), self.scan):
+            with self.subTest(out=out):
+                rc, err = self.run_main(
+                    "--manifest", self.scan, "--pkgdata-dir", self.tree.machine,
+                    "--coverage", coverage, "-o", out)
+                self.assertEqual(rc, 2)
+                self.assertIn("one of the inputs", err)
+        with open(coverage, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertTrue(os.path.exists(self.scan))
 
-    def test_the_cli_refuses_an_alternate_tree_without_a_declared_recipe(self):
+    def test_the_cli_refuses_malformed_alternate_arguments(self):
         out = os.path.join(self.root, "out.json")
-        rc, err = self.run_main(
-            "--manifest", self.scan, "--pkgdata-dir", self.tree.machine,
-            "--alt-pkgdata-dir", self.tree.alt, "--alt-recipe", "linux-raspberrypi",
-            "--alt-recipe", "linux-other", "--status", "All", "-o", out)
-        self.assertEqual(rc, 2)
-        self.assertIn("no package of linux-other", err)
-        self.assertFalse(os.path.exists(out))
+        for extra, words in (
+                (("--alt-pkgdata-dir", self.alt), "<multiconfig>:<value>"),
+                (("--alt-pkgdata-dir", ":" + self.alt), "<multiconfig>:<value>"),
+                (("--alt-recipe", "linux-raspberrypi"), "<multiconfig>:<value>"),
+                (("--alt-recipe", "other:linux-raspberrypi"), "no --alt-pkgdata-dir"),
+                (("--coverage", os.path.join(self.root, "nowhere.json")), "--coverage"),
+                (("--alt-pkgdata-dir", "%s:%s" % (rt.RPI_MC, self.alt),
+                  "--alt-recipe", "%s:linux-other" % rt.RPI_MC), "no package of linux-other"),
+                (("--alt-pkgdata-dir", "e:" + os.path.join(self.root, "empty")),
+                 "runtime-reverse")):
+            with self.subTest(extra=extra):
+                rc, err = self.run_main("--manifest", self.scan, "--pkgdata-dir",
+                                        self.tree.machine, "--status", "All", "-o", out, *extra)
+                self.assertEqual(rc, 2)
+                self.assertIn(words, err)
+                self.assertFalse(os.path.exists(out))
 
-    def test_from_report_refuses_an_alternate_tree(self):
-        out = os.path.join(self.root, "out.json")
-        rc, _ = self.run_main("--from-report", out, "--manifest", self.scan,
-                              "--alt-pkgdata-dir", self.tree.alt, "-o", out)
-        self.assertEqual(rc, 2)
 
 if __name__ == "__main__":
     unittest.main()
