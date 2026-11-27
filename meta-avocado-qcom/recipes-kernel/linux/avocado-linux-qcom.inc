@@ -22,6 +22,7 @@ SRC_URI:append:rubikpi3 = " file://rubikpi3-wifi.cfg file://rubikpi3-thermal.cfg
 # PREEMPT_RT kernels (both require this .inc). Drop once the USB-C DP retimer
 # path is described in the device tree.
 SRC_URI:append:rb3gen2 = " file://qcs6490-rb3gen2-dp-disable.dtso"
+SRC_URI:append:rb3gen2 = " file://rb3gen2-vision-cameras.cfg"
 
 # linux-qcom merges every file://*.cfg through find_cfgs() in its
 # do_configure:prepend, so the fragments need no wiring beyond SRC_URI.

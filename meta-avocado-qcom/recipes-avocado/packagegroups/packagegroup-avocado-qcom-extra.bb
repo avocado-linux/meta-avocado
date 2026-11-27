@@ -127,10 +127,9 @@ RDEPENDS:${PN}:append:rubikpi3 = " \
 # linux-firmware-qcom-qcm6490-compute to its own version, which keeps the shell
 # matched to the cdsp.mbn it runs on.
 #
-# Deliberately NOT here: the QAIRT SDK and camxfirmware-kodiak. Those are the
-# NN runtime and camera stacks, they are large, and the camera path on an
-# upstream kernel needs CamX -- which is the harder half of Vision Kit support
-# and is not attempted by naming a firmware package.
+# The QAIRT SDK and the camera path are in their own rb3gen2 append at the end
+# of this file; camxfirmware-kodiak is not, since the mezzanine camera runs on
+# mainline CAMSS + libcamera rather than CamX.
 # The RubikPi needs the same shared-memory driver as the RB3 Gen 2: `vmm` is
 # one extension shared by every target of the inter-VM reference, and it names
 # kernel-module-avocado-shm unconditionally. Without this the RubikPi fails
@@ -169,3 +168,16 @@ RDEPENDS:${PN} += "avocado-dtc-overlay-deliver"
 
 # The SDK half (nativesdk-avocado-dtc-overlay) is NOT here: this is a target
 # packagegroup, and it ships with the SDK via avocado-sdk-target instead.
+
+# Camera -> NPU -> display on the RB3 Gen 2 Vision Kit, feed-only like the rest:
+# qairt-sdk (QAIRT HTP backend for the Hexagon NPU), the Qualcomm IM SDK
+# GStreamer plugins (qtimlqnn, qtimlvconverter, qtimlpostprocess, overlay),
+# and libcamerasrc for the mezzanine's IMX577 on mainline CAMSS (libcamera's
+# simple pipeline + soft ISP; no CamX). Plugin feature sets are trimmed in
+# kas/machine/rb3gen2.yml.
+RDEPENDS:${PN}:append:rb3gen2 = " \
+    qairt-sdk \
+    gst-plugins-imsdk-oss \
+    gst-plugins-imsdk-prop \
+    libcamera-gst \
+"
