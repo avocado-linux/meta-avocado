@@ -1,35 +1,68 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 
-"""do_multikernel_merge publishes, and lists, exactly the alternate kernel's RPMs.
+"""The RPM manifest lists exactly the alternate-kernel RPMs the merge published.
 
 Runs avocado-multikernel.bbclass's do_multikernel_merge under bash, against a
-fake pair of deploy trees, then reads the list it wrote. The RPM manifest does
-not read that list (it covers the default multiconfig only, as the report
-does), so the list is read here directly.
+fake pair of deploy trees, then builds the manifest from the list it wrote: with
+rpms.build_manifest, and at feed scope with avocado-cve-report's own
+do_rpm_manifest.
 
   python3 -m unittest discover -s meta-avocado-sbom/tests -p 'test_*.py'
 """
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 sys.path.insert(0, HERE)
 
+from avocado_sbom import rpms  # noqa: E402
 from test_rpms import rpm_bytes  # noqa: E402
 
 BBCLASS = os.path.join(HERE, "..", "..", "meta-avocado", "classes",
                        "avocado-multikernel.bbclass")
+REPORT_BB = os.path.join(HERE, "..", "recipes-avocado", "avocado-cve-report",
+                         "avocado-cve-report.bb")
 MC = "jetson-l4t"
 ARCH = "armv8a"
 L4T = "5.15.199-l4t-r36.5"
+MACHINE = "avocado-jetson-orin-nx"
+
+class Fatal(Exception):
+    pass
+
+def report_rpm_manifest(values):
+    """Run avocado-cve-report's do_rpm_manifest, with the recipe's own helper
+    functions, against a datastore holding values."""
+    with open(REPORT_BB) as f:
+        text = f.read()
+    m = re.search(r"^python do_rpm_manifest\(\) \{\n(.*?)^\}\n", text, re.M | re.S)
+    assert m, "do_rpm_manifest not found in %s" % REPORT_BB
+
+    def fatal(msg):
+        raise Fatal(msg)
+
+    def remove(path):
+        if os.path.lexists(path):
+            os.remove(path)
+    bb = types.SimpleNamespace(fatal=fatal, warn=lambda *a: None, note=lambda *a: None,
+                               plain=lambda *a: None, utils=types.SimpleNamespace(remove=remove))
+    d = types.SimpleNamespace(getVar=lambda name: values.get(name))
+    ns = {"bb": bb, "os": os}
+    for block in re.findall(r"^(def \w+\(.*?)(?=^\S)", text + "\n#", re.M | re.S):
+        exec(block, ns)
+    exec("def task(d):\n" + textwrap.indent(textwrap.dedent(m.group(1)), "    "), ns)
+    ns["task"](d)
 
 def merge_body():
     with open(BBCLASS) as f:
@@ -77,10 +110,62 @@ class MergeListTests(unittest.TestCase):
                               text=True, check=check)
 
     def listed(self):
-        # Raises OSError when the merge left no list. The class spells the path.
-        path = os.path.join(self.deploy, "avocado-multikernel", "%s-rpms.txt" % MC)
-        with open(path) as f:
-            return {line.strip() for line in f if line.strip()}
+        return rpms.read_merged_rpms(rpms.merged_rpms_path(self.deploy, MC))
+
+    def pkgdata(self, tmp, recipe, packages):
+        reverse = os.path.join(self.top, tmp, "pkgdata", "jetson", "runtime-reverse")
+        os.makedirs(reverse, exist_ok=True)
+        for name, (pkgv, pkgr) in packages.items():
+            with open(os.path.join(reverse, name), "w") as f:
+                f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: %s\nPKGSIZE:%s: 10\n"
+                        % (recipe, pkgv, pkgv, pkgr, name))
+
+    def feed_rpm_manifest(self):
+        out = os.path.join(self.deploy, "avocado-cve", "avocado-rpm-manifest.json")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        tmp = os.path.join(self.top, "tmp")
+        report_rpm_manifest({
+            "AVOCADO_CVE_SCOPE": "feed", "MACHINE": MACHINE, "DISTRO_VERSION": "2024.1",
+            "TOPDIR": self.top, "TMPDIR": tmp, "DEPLOY_DIR": self.deploy,
+            "DEPLOY_DIR_RPM": self.feed,
+            "PKGDATA_DIR": os.path.join(tmp, "pkgdata", "jetson"),
+            "AVOCADO_RPM_MANIFEST_FILE": out,
+            "AVOCADO_MULTIKERNEL_MC_RECIPES":
+                "%s:linux-jammy-nvidia-tegra %s:nvidia-kernel-oot" % (MC, MC),
+        })
+        with open(out) as f:
+            return json.load(f)
+
+    def feed_trees(self):
+        self.build_alt_tree()
+        self.rpm(self.feed, "base-files", "3.0.14")
+        self.pkgdata("tmp", "base-files", {"base-files": ("3.0.14", "r0.1")})
+        alt = "tmp-%s" % MC
+        self.pkgdata(alt, "linux-jammy-nvidia-tegra",
+                     {"kernel-%s" % L4T: ("5.15.199+git0+abc", "r0.1")})
+        self.pkgdata(alt, "nvidia-kernel-oot",
+                     {"nv-kernel-module-nvidia-%s" % L4T: ("36.5.2", "r0.3"),
+                      "nvidia-kernel-oot": ("36.5.2", "r0.3")})
+        # Built in the alternate tree, not one of its feed recipes.
+        self.pkgdata(alt, "base-files", {"base-files": ("3.0.14", "r0.1")})
+
+    def test_the_feed_scope_manifest_lists_what_the_merge_published(self):
+        self.feed_trees()
+        self.merge()
+        doc = self.feed_rpm_manifest()
+        self.assertEqual(sorted((p["name"], p["file"]) for p in doc["packages"]), [
+            ("base-files", "%s/base-files-3.0.14-r0.1.%s.rpm" % (ARCH, ARCH)),
+            ("kernel-%s" % L4T,
+             "%s/kernel-%s-5.15.199+git0+abc-r0.1.%s.rpm" % (ARCH, L4T, ARCH)),
+            ("nv-kernel-module-nvidia-%s" % L4T,
+             "%s/nv-kernel-module-nvidia-%s-36.5.2-r0.3.%s.rpm" % (ARCH, L4T, ARCH)),
+        ])
+
+    def test_the_feed_scope_manifest_needs_the_merge_list(self):
+        self.feed_trees()
+        with self.assertRaises(Fatal) as caught:
+            self.feed_rpm_manifest()
+        self.assertIn("no list of the RPMs its merge published", str(caught.exception))
 
     def build_alt_tree(self):
         self.rpm(self.alt_rpm, "kernel-%s" % L4T, "5.15.199+git0+abc")
@@ -141,6 +226,29 @@ class MergeListTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     self.listed()
 
+    def test_the_manifest_leaves_out_what_the_merge_did_not_publish(self):
+        self.build_alt_tree()
+        self.rpm(self.feed, "kernel-6.6", "6.6.111", "r0.1")
+        self.merge()
+
+        def pkgdata(names):
+            return {n: {"recipe": "x", "version": v, "origin": "x"}
+                    for n, v in names.items()}
+
+        alt = pkgdata({
+            "kernel-%s" % L4T: "5.15.199-git0-abc-r0.1",
+            "nv-kernel-module-nvidia-%s" % L4T: "36.5.2-r0.3",
+            "nvidia-kernel-oot": "36.5.2-r0.3",
+            "base-files": "3.0.14-r0.1",
+        })
+        doc = rpms.build_manifest(
+            [(pkgdata({"kernel-6.6": "6.6.111-r0.1"}), self.feed),
+             (alt, self.feed, self.listed())],
+            machine="avocado-test")
+        self.assertEqual(sorted(p["name"] for p in doc["packages"]),
+                         ["kernel-%s" % L4T, "kernel-6.6",
+                          "nv-kernel-module-nvidia-%s" % L4T])
+        self.assertEqual(rpms.check_manifest(doc), [])
 
 if __name__ == "__main__":
     unittest.main()

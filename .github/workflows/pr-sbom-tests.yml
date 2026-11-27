@@ -10,8 +10,9 @@ name: PR-SBOM-Tests
 # plus rpm and jsonschema for the tests that compare against those, and treats
 # any skip as a failure (.github/ci/unittest-no-skips.py).
 #
-# OE-core: meta/lib only, at the commit kas/vendor/oe.yml pins, read from that
-# file so a pin bump is tested against the new tree with no change here.
+# OE-core: meta/lib and the SPDX, staging and sstate classes the tests read, at
+# the commit kas/vendor/oe.yml pins, read from that file so a pin bump is tested
+# against the new tree with no change here.
 #
 # Python packages: .github/ci/sbom-tests-requirements.txt, pinned by version and
 # hash, downloaded once and installed from that download. sbom-cve-check must be
@@ -56,13 +57,17 @@ jobs:
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "no openembedded-core pin found in kas/vendor/oe.yml" >&2; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch OE-core meta/lib
+      - name: Fetch OE-core meta/lib and classes
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: avocado-linux/vendor-openembedded-core
           ref: ${{ steps.pin.outputs.sha }}
           path: vendor-openembedded-core
-          sparse-checkout: meta/lib
+          sparse-checkout: |
+            meta/lib
+            meta/classes
+            meta/classes-global
+            meta/classes-recipe
           persist-credentials: false
 
       # The requirements hashes are for CPython 3.12 wheels.

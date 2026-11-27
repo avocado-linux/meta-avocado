@@ -8,7 +8,8 @@ them. These are the parts that differ from OE-core's or from the wrynose
 layer's, each read straight from the file that carries it:
 
   - avocado-cve-report is skipped at world scope, since scarthgap OE-core has
-    no meta-world-recipe-sbom to scan;
+    no meta-world-recipe-sbom to scan; feed scope builds its own document from
+    package documents instead (test_feedsbom_scarthgap.py);
   - the CVE databases unpack into S, since scarthgap's fetcher has no
     UNPACKDIR;
   - the NVD database's license, cve-tou, comes from the database itself
@@ -61,13 +62,20 @@ class Fatal(Exception):
     pass
 
 
-def fake_bb(fetch=None):
+def fake_bb(fetch=None, tasks=None):
     def fatal(msg):
         raise Fatal(msg)
+
+    def addtask(task, before, after, d):
+        tasks.append((task, before, after))
+
+    def deltask(task, d):
+        tasks.append(("deleted", task))
     return types.SimpleNamespace(
         parse=types.SimpleNamespace(SkipRecipe=SkipRecipe),
         fatal=fatal,
         fetch2=fetch,
+        build=types.SimpleNamespace(addtask=addtask, deltask=deltask),
     )
 
 
@@ -82,16 +90,21 @@ class Data:
     def appendVarFlag(self, var, flag, value):
         self.flags[(var, flag)] = self.flags.get((var, flag), "") + value
 
+    def setVarFlag(self, var, flag, value):
+        self.flags[(var, flag)] = value
+
 
 class ReportScopeTests(unittest.TestCase):
     def run_anonymous(self, **values):
         d = Data(**values)
-        python_function(REPORT_BB, "python ()")(d, fake_bb())
+        d.tasks = []
+        python_function(REPORT_BB, "python ()")(d, fake_bb(tasks=d.tasks))
         return d
 
     def test_world_scope_skips_the_recipe(self):
         with self.assertRaises(SkipRecipe) as cm:
             self.run_anonymous(AVOCADO_CVE_SCOPE="world")
+        self.assertIn("kas/feature/cve-check-feed.yml", str(cm.exception))
         self.assertIn("kas/feature/cve-check-image.yml", str(cm.exception))
 
     def test_world_is_still_the_default(self):
@@ -105,9 +118,79 @@ class ReportScopeTests(unittest.TestCase):
         self.assertEqual(d.flags[("do_cve_report", "depends")],
                          " avocado-image-rootfs:do_sbom_cve_check")
 
+    def test_image_scope_adds_no_feed_task(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="image",
+                               AVOCADO_CVE_IMAGE="avocado-image-rootfs")
+        self.assertEqual(d.tasks, [])
+
+    def test_feed_scope_runs_its_own_tasks(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                               SBOM_CVE_CHECK_UPDATE_DB_DEPENDENCIES=" db-native:do_patch")
+        self.assertEqual(d.tasks, [("do_feed_sbom", "do_cve_report", None),
+                                   ("do_feed_scan", "do_cve_report", "do_feed_sbom"),
+                                   ("deleted", "do_rm_work_all")])
+        self.assertNotIn(("do_cve_report", "depends"), d.flags)
+        self.assertEqual(d.flags[("do_feed_sbom", "nostamp")], "1")
+        self.assertEqual(d.flags[("do_feed_scan", "nostamp")], "1")
+        self.assertEqual(d.flags[("do_feed_scan", "depends")].split(),
+                         ["python3-sbom-cve-check-native:do_populate_sysroot",
+                          "db-native:do_patch"])
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+
+    def test_feed_scope_on_a_multi_kernel_machine_reruns_the_merge(self):
+        # The RPM manifest reads the list of RPMs the merge published, which is
+        # this build's only if the merge reran. On the first feed task, so an
+        # alternate kernel the merge's dependencies rebuild is complete before
+        # the document reads it.
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi",
+                               AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
+        self.assertEqual(d.flags[("do_feed_sbom", "depends")],
+                         " avocado-distro:do_multikernel_merge")
+        self.assertNotIn(("do_rpm_manifest", "depends"), d.flags)
+        self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
+
+    def test_feed_scope_asks_for_every_spdx_task_of_the_feed_targets(self):
+        # A recipe's build links to its build dependencies' builds, and sstate
+        # restores those only for a task that runs. The targets' graph is read
+        # through a task that is never scheduled.
+        for mc_recipes in ("", "raspberrypi-6_6:linux-raspberrypi"):
+            with self.subTest(mc_recipes=mc_recipes):
+                d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed",
+                                       AVOCADO_MULTIKERNEL_MC_RECIPES=mc_recipes,
+                                       AVOCADO_FEED_SBOM_TARGETS="avocado-distro extra-feed")
+                self.assertEqual(d.flags[("do_feed_sbom", "recrdeptask")],
+                                 " do_create_spdx do_create_package_spdx")
+                self.assertEqual(d.flags[("do_feed_sbom", "recideptask")], "do_feed_targets")
+                self.assertEqual(d.flags[("do_feed_targets", "depends")].split(),
+                                 ["avocado-distro:do_build", "extra-feed:do_build"])
+                self.assertEqual(d.flags[("do_feed_targets", "noexec")], "1")
+                self.assertIn(("do_feed_targets", None, None), d.tasks)
+                self.assertNotIn(":do_build", d.flags.get(("do_feed_sbom", "depends"), ""))
+                # Through the SPDX tasks rm_work would schedule their recipes' rm_work.
+                self.assertIn(("deleted", "do_rm_work_all"), d.tasks)
+
+    def test_no_feed_target_asks_for_nothing_beyond_this_recipe(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="feed", AVOCADO_FEED_SBOM_TARGETS="")
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+        self.assertNotIn(("do_feed_sbom", "recrdeptask"), d.flags)
+        self.assertFalse([t for t in d.tasks if t[0] == "do_feed_targets"])
+
+    def test_the_default_feed_target_is_avocado_distro(self):
+        self.assertRegex(read(REPORT_BB), r'(?m)^AVOCADO_FEED_SBOM_TARGETS \?= "avocado-distro"$')
+
+    def test_image_scope_leaves_the_merge_alone(self):
+        d = self.run_anonymous(AVOCADO_CVE_SCOPE="image", AVOCADO_CVE_IMAGE="x",
+                               AVOCADO_MULTIKERNEL_MC_RECIPES="raspberrypi-6_6:linux-raspberrypi",
+                               AVOCADO_FEED_SBOM_TARGETS="avocado-distro")
+        self.assertNotIn(("do_feed_sbom", "recrdeptask"), d.flags)
+        self.assertNotIn(("do_feed_sbom", "depends"), d.flags)
+        self.assertNotIn(("do_rpm_manifest", "depends"), d.flags)
+        self.assertEqual(d.tasks, [])
+
     def test_an_unknown_scope_is_fatal(self):
         with self.assertRaises(Fatal):
-            self.run_anonymous(AVOCADO_CVE_SCOPE="feed")
+            self.run_anonymous(AVOCADO_CVE_SCOPE="bogus")
 
     def test_the_recipe_uses_the_layer_nospdx(self):
         # avocado-nospdx also deletes the runtime SPDX task scarthgap's nospdx

@@ -13,6 +13,10 @@ Two artifacts a build leaves in TMPDIR, both persistent across builds:
                                           CVE analysis of the image's SBOM
   ${TMPDIR}/pkgdata/*/runtime-reverse/*   runtime package name -> recipe
 
+At feed scope the first is the analysis of a document built from the whole
+feed instead, ${DEPLOY_DIR}/avocado-cve/avocado-feed-${MACHINE_SHORT_NAME}.sbom-cve-check.yocto.json
+(see "Feed scope").
+
 The first is written by sbom-cve-check. The sbom-cve-check tool reads an SPDX
 3.0 document, matches its purl/CPE identifiers against the cvelistV5 and NVD
 databases, applies the VEX statements in that same document, and exports the
@@ -46,12 +50,12 @@ Requirements
   kas build kas/machine/<machine>.yml:kas/feature/cve-check-image.yml \
       --target avocado-cve-report
 
-kas/feature/cve-check-image.yml includes kas/feature/cve-check.yml, which
-carries this layer, switches the build to create-spdx-3.0 (scarthgap's
-create-spdx is 2.2, and the scan reads 3.0), raises SPDX_INCLUDE_VEX to "all"
-so the scan can see the Patched and Ignored statements, inherits
-avocado-spdx-vex-notes so those statements say why, and points the CVE
-database recipes at AUTOREV. kas/feature/sbom.yml is the SPDX fragment feed
+for one image, or kas/feature/cve-check-feed.yml for the whole feed (see "Feed
+scope"). Both include kas/feature/cve-check.yml, which carries this layer,
+switches the build to create-spdx-3.0 (scarthgap's create-spdx is 2.2, and the
+scan reads 3.0), raises SPDX_INCLUDE_VEX to "all" so the scan can see the
+Patched and Ignored statements, inherits avocado-spdx-vex-notes so those
+statements say why, and points the CVE database recipes at AUTOREV. kas/feature/sbom.yml is the SPDX fragment feed
 builds stack, and sets the same SPDX values, so a scan on top of a feed build
 reuses its SPDX.
 
@@ -101,13 +105,25 @@ nothing examined it, which is not the same as clean.
 World scope, the default of AVOCADO_CVE_SCOPE, scans OE-core's
 meta-world-recipe-sbom. scarthgap OE-core does not have that recipe, so with
 kas/feature/cve-check.yml alone avocado-cve-report is skipped, and bitbake says
-why when asked to build it. Reporting on the whole package feed needs a feed
-SBOM, which scarthgap does not build yet.
+why when asked to build it. Feed scope reports on the whole package feed
+instead; see "Feed scope".
 
 The same code can run standalone against a build tree, if needed:
 
   PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
       --tmpdir build/tmp --machine <machine> -o avocado-cve-report.json
+
+A feed scan of a multi-kernel machine reads the alternate multiconfig too, and
+its manifest is not under ${DEPLOY_DIR_IMAGE}, so name it:
+
+  PYTHONPATH=meta-avocado-sbom/lib python3 -m avocado_sbom.report \
+      --manifest build/tmp/deploy/avocado-cve/avocado-feed-<short>.sbom-cve-check.yocto.json \
+      --pkgdata-dir build/tmp/pkgdata/<machine> \
+      --alt-pkgdata-dir build/tmp-<mc>/pkgdata/<machine> \
+      --alt-recipe <recipe> --machine <machine> --status All -o avocado-cve-report.json
+
+with one --alt-recipe per recipe AVOCADO_MULTIKERNEL_MC_RECIPES names for that
+multiconfig, which is what the build reads at feed scope (see "Feed scope").
 
 A later scan of the same build's SBOM, with newer CVE data, can be turned into
 a report without the build tree. The previous report stands in for pkgdata:
@@ -118,8 +134,12 @@ a report without the build tree. The previous report stands in for pkgdata:
 
 The result is byte for byte the report this layer would have written for that
 manifest, apart from "generated": "packages", "recipe_versions",
-packages_digest, pkgdata_unreadable, package_collisions, machine and
-distro_version carry over, and the status does too unless --status is given.
+"alt_packages", packages_digest, pkgdata_unreadable, package_collisions,
+machine and distro_version carry over, and the status does too unless --status
+is given. Each package's "recipe_version" is worked out again from the new
+scan's records. A previous report without "alt_packages" takes the split from
+its packages' "recipe_version" and its "alt_versions" records, where it has
+them, so a 6.6 module is never filed under the 6.12 kernel's CVEs.
 --no-summary is not recorded in a report, so pass it again if the previous
 report was written with it. A report without "recipe_versions" is refused,
 since matching against the packages' versions loses CVEs (see "Report
@@ -191,20 +211,185 @@ whole patched tree as compiled, init/main.c included, so the scanner trusts the
 list and filters nothing. Set that switch only on a kernel built with DWARF;
 AVOCADO_KERNEL_DEBUGINFO does both for linux-yocto and linux-raspberrypi.
 
-The scan covers the kernel the image installs. A machine that builds a second
-kernel in another multiconfig (AVOCADO_MULTIKERNEL_MC_RECIPES, the Raspberry
-Pi's 6.6 kernel) publishes that kernel in the feed, but it is in no image SBOM,
-so the report has no record of it and its packages get no verdict.
+The scanner takes every source file a build lists as compiled, and for a
+product other than the kernel it checks nothing. A recipe built without the
+switch lists only the files it fetched (its local file:// entries), so a CVE
+whose record names a source file reads as not compiled and comes back Ignored,
+not-applicable-config. Every scope that carries such a build is open to it:
+the image's, and the feed's, which brings every recipe's build. The report
+therefore keeps that result only for a recipe built with
+SPDX_INCLUDE_COMPILED_SOURCES, which do_cve_report reads per recipe, and lists
+the CVE of any other recipe as Unpatched with no detail (the filter replaced the
+scanner's version result, so which one it was is unknown) and what the scanner
+said under "scanner" (see
+"Report format"). A recipe's own CVE_STATUS with the same detail is a
+different statement and stays Ignored.
+
+At image scope the scan covers the kernel the image installs. A machine that
+builds a second kernel in another multiconfig (AVOCADO_MULTIKERNEL_MC_RECIPES,
+the Raspberry Pi's 6.6 kernel) publishes that kernel in the feed, but it is in
+no image SBOM, so the image report has no record of it. Feed scope scans it;
+see "Feed scope".
+
+Feed scope
+----------
+
+Feed scope scans the whole package feed as one unit, the packages a user could
+install. Stack the fragment with the SBOM and CVE fragments, build the feed,
+then run the report:
+
+  kas build kas/machine/<machine>.yml:kas/feature/sbom.yml:kas/feature/cve-check.yml:kas/feature/cve-check-feed.yml \
+      --target avocado-cve-report
+
+The fragment is kas/feature/cve-check-feed.yml. It sets AVOCADO_CVE_SCOPE =
+"feed" and nothing else. Run bitbake avocado-cve-report as its own invocation
+after the feed build has finished, not in the same command as the feed target:
+do_feed_sbom does not wait for the feed's packages, so run together it could
+assemble the document while packages are still being written. It does wait for
+the SPDX tasks whose documents the feed document can link to: a recipe's build
+links to those of its build dependencies, recursively, and OE-Core's sstate
+restores a dependency's SPDX documents only for a task that actually runs, so
+in a tree restored from sstate a recipe whose own documents came from sstate
+links to documents nothing wrote. do_feed_sbom asks for the SPDX tasks of every
+recipe the feed's meta-targets, AVOCADO_FEED_SBOM_TARGETS (avocado-distro),
+build or package, the runtime dependencies of what they install included,
+through recrdeptask, as OE-Core's image SBOM task does for an image. bitbake
+reads a task graph as it stands before recursion, so their graph is followed
+through each recipe's packaging, as an image's do_rootfs follows it: the SPDX
+tasks' own recursion stops at a recipe without them, such as an
+avocado-nospdx packagegroup, and at a tool a recipe's packaging runs.
+avocado-distro and avocado-stone ship no package and inherit
+avocado-nospdx: their build SPDX task would follow their do_compile through the
+whole feed and its images. It never schedules the meta-targets' own tasks: their graph is read for
+its recipes (recideptask) and nothing else, so the report run restores or runs
+only the SPDX tasks whose documents the tree lacks, and the scan's sysroot
+holds the scanner and its databases, not the targets'.
+It runs do_feed_sbom and then the scan. Three files come out in AVOCADO_FEED_SBOM_DIR, which defaults to
+the directory of the CVE report and the RPM manifest
+(${DEPLOY_DIR}/avocado-cve, that is tmp/deploy/avocado-cve), named by
+MACHINE_SHORT_NAME, the MACHINE without its avocado- prefix (raspberrypi5 for
+avocado-raspberrypi5):
+
+  avocado-feed-<MACHINE_SHORT_NAME>.spdx.json
+      the feed SPDX document, built from every recipe that shipped a package
+  avocado-feed-<short>.sbom-cve-check.yocto.json
+      the scanner manifest that avocado-cve-report reads at this scope
+  avocado-feed-<short>.coverage.json
+      the coverage record, with the keys roots, no_document, unresolved_ids,
+      alt_included and alt_not_covered. roots counts the package documents the
+      feed document is rooted at, one per recipe, alternate kernels included,
+      so roots plus no_document is not the number of recipes that shipped.
+
+The document is built from package documents. scarthgap's create-spdx-3.0
+writes no recipe-level package (wrynose's static/static-<recipe>, which the
+wrynose feed document is built from). A recipe has one document for its build,
+recipes/recipe-<recipe>, holding the build and the recipe's CVE elements, and
+one per binary package, and every package of a recipe carries the recipe's
+version, CPEs and VEX statements. The scanner groups packages by the build that
+produced them, so do_feed_sbom takes one package of each recipe, the first by
+name that has a document, and the build document comes along through the
+package's links. A kernel's build document lists the sources it compiled
+(SPDX_INCLUDE_COMPILED_SOURCES), so the kernel CVE filter applies at this
+scope as at image scope, each kernel on its own list. That keeps one copy of each recipe's statements: under
+SPDX_INCLUDE_VEX = "all" every kernel package document carries the kernel's
+whole cve-exclusion list, and the kernel ships thousands of packages. The
+package document read is the one do_create_spdx writes (packages-staging), the
+final one without its runtime dependencies, which would pull in every package
+document they reach.
+
+A recipe that shipped a package but has no package document is named in
+no_document and listed as unscanned in the report: every recipe that inherits
+nospdx, packagegroups among them. AVOCADO_FEED_SBOM_MAX_MISSING is the ceiling
+of recipes without a document before do_feed_sbom fails; it defaults to 33,
+from a wrynose Raspberry Pi 5 feed where 23 of 367 recipes had none. The list
+of what shipped is the build's package data, so it must come from the same
+build tree as the documents: a package data directory shortened by another
+bitbake invocation shortens the scan without a trace.
+
+The task fails closed. An unresolved SPDX identifier (the failure names the
+recipes whose missing documents define it), a missing build or more
+missing recipes than the ceiling fails do_feed_sbom and leaves no document and
+no manifest, so a partial scan is never mistaken for a complete one. A scan
+whose manifest is missing or is not JSON removes the document and record too.
+
+The files stay out of the image deploy directory on purpose. The bootfiles
+package (avocado-img-bootfiles) collects every file in that directory whose name
+its skip patterns do not match, so a feed document or manifest left there would
+be built into an RPM of the feed. The document carries upstream VEX statements,
+so it is scan input only and is never published to customers; python3 -m
+avocado_sbom.feedcheck fails if an avocado-feed- file sits in the image deploy
+directory or a bootfiles RPM lists one.
+
+Alternate kernels are read from AVOCADO_MULTIKERNEL_MC_RECIPES, a list of
+<multiconfig>:<recipe> entries. Each alternate multiconfig's documents are
+loaded from its own TMPDIR, tmp-<multiconfig>: one package document of the
+recipe, picked from that multiconfig's package data, and the recipe's build
+document. Both kernels write their documents under the same names, so both
+carry the same identity aliases, the IDs a package document names its build and
+its CVEs by. Left alone, the alternate kernel's packages would link to the
+default kernel's build. So the alternate multiconfig's documents get aliases of
+their own before they are read (avocado_sbom/spdxalias.py qualifies them with
+the multiconfig), and every other link is left as it is. A kernel that passes
+is listed in alt_included as "<multiconfig>:<recipe>". A kernel is listed in
+alt_not_covered with a reason instead when a merge would point a vulnerability
+statement at the wrong kernel or link its packages to a build that produced
+another version (reference collision), when it shares an identity alias with
+the default kernel that a relationship refers to (alias collision), when its
+documents refer to something only its own multiconfig built, which the default
+tree cannot resolve (unresolved reference), when it shares a version with
+another build in the document but not that build's VEX statements (VEX
+overlap; the scanner matches a statement by version before it looks at the
+product; the reason names the first CVE they differ on), or when its documents
+are missing. A malformed list entry is listed there too. A VEX overlap is
+decided in the document because sbom-cve-check applies a statement to every
+build at the version of the package it is about: an RT kernel's backport left
+in beside a stock kernel of the same version would mark the stock kernel
+patched, and rescans run the same scanner on the same document. Kernels that
+carry the same statements stay; on this line OE-core's linux-yocto-rt leaves
+out the cve-exclusion.inc statements linux-yocto carries, so the two at one
+version would not. So does an alternate build whose products, versions and
+statements a default build has too: the scanner treats the two alike, so
+whatever the alternate would give another build of its version, or take from
+it, the default build already does (nvidia-kernel-oot built in an alternate
+multiconfig, beside edk2-firmware-tegra of the same version). Each
+multiconfig is judged on its own, since one recipe can be built in several: a
+reference collision traced to one alternate multiconfig drops that build only,
+and one seen only on the default kernel's side, which cannot say which
+alternate is the other end, drops every alternate build of the recipe.
+
+The report and the RPM manifest read the same recipes from each alternate
+multiconfig's package data (tmp-<multiconfig>/pkgdata/<MACHINE>), so the second
+kernel's packages are in the report's package map and in the RPM manifest. A
+recipe the default multiconfig also built is the same recipe at a second
+version: its CVEs go into an "alt_versions" record and its packages carry that
+version as "recipe_version" (see "Report format"). The task fails when a
+declared multiconfig's package data is missing or holds no package of a recipe
+it declares, rather than leave that kernel's RPMs out of both documents. A
+kernel in alt_not_covered is not in the scanned document, so its version has no
+record and its packages carry no "recipe_version". An identifier left
+unresolved that no alternate kernel's own documents refer to is a hole in the
+default tree and still fails do_feed_sbom.
 
 Variables
 ---------
 
-  AVOCADO_CVE_SCOPE            "world" (default) or "image"; on scarthgap
-                               only "image" reports, see Usage
+  AVOCADO_CVE_SCOPE            "world" (default), "image" or "feed"; on
+                               scarthgap "world" skips the recipe, see Usage
+                               and Feed scope
+  AVOCADO_FEED_SBOM_MAX_MISSING  ceiling of recipes without an SPDX document
+                               before do_feed_sbom fails, default 33
+  AVOCADO_FEED_SBOM_TARGETS    the meta-targets that build the feed, default
+                               avocado-distro; do_feed_sbom waits for the SPDX
+                               tasks of every recipe in their graph, not for
+                               the targets themselves
+  AVOCADO_FEED_SBOM_DIR        where the feed document, manifest and coverage
+                               record go, default the CVE report directory; never
+                               the image deploy directory
   AVOCADO_CVE_IMAGE            image scanned at image scope, avocado-image-rootfs
   AVOCADO_CVE_MANIFEST         sbom-cve-check manifest to read, or a directory
                                of them; defaults to the world SBOM's export in
-                               ${DEPLOY_DIR_IMAGE}, or the image's at image scope
+                               ${DEPLOY_DIR_IMAGE}, the image's at image scope,
+                               or the feed document's at feed scope
   AVOCADO_CVE_REPORT_FILE      output path
   AVOCADO_CVE_REPORT_STATUS    CVE status to report, default "Unpatched".
                                Set to "Ignored" to audit what
@@ -226,11 +411,15 @@ Variables
                                builds and Patched, Ignored and absent stay
                                distinguishable. At "All", counts.unpatched_cves,
                                patched_cves and ignored_cves count what the
-                               report lists, so they add up to counts.cves; at
+                               report lists, so they add up to counts.cves
+                               plus counts.alt_cves; at
                                any single status they count the CVEs of the
                                other statuses left out of it. When two
                                manifests name one recipe, a CVE id is listed
-                               once, with the status of the first manifest
+                               once, with the status of the first manifest,
+                               unless that one carries "scanner" (the
+                               compiled-source filter was not trusted) and a
+                               later one is Unpatched outright
   AVOCADO_CVE_REPORT_SUMMARY   "0" drops CVE description text
   AVOCADO_RPM_MANIFEST_FILE    output path of the RPM manifest, see "The RPM
                                manifest" below
@@ -245,14 +434,18 @@ Report format
     "packages_digest": "sha256:0f3c...",
     "status": "Unpatched",
     "unscanned_recipes": [ "packagegroup-core-boot", "..." ],
+    "no_cve_record_recipes": [ "avocadoctl", "..." ],
     "counts": { "recipes": 225, "cves": 2206,
                 "packaged_recipes": 177, "packaged_cves": 1927,
                 "packages": 30747, "cve_files": 1, "stale_dropped": 0,
-                "unscanned_recipes": 34, "cve_files_unreadable": 0,
+                "unscanned_recipes": 34, "no_cve_record_recipes": 36,
+                "alt_recipes": 0, "alt_cves": 0, "cve_files_unreadable": 0,
                 "entries_unreadable": 0, "pkgdata_unreadable": 0,
                 "package_collisions": 0, "unpatched_cves": 0,
                 "patched_cves": 0, "ignored_cves": 0,
-                "unknown_status_cves": 0 },
+                "unknown_status_cves": 0,
+                "unverified_compiled_source_cves": 0 },
+    "compiled_source_recipes": [ "linux-yocto" ],
     "recipes": {
       "openssl": {
         "version": "3.5.7",
@@ -263,8 +456,9 @@ Report format
     },
     "packages": {
       "libssl3": { "recipe": "openssl", "version": "3.5.7-r0.0",
-                   "origin": "avocado-qemux86-64" }
-    }
+                   "origin": "avocado-qemux86-64", "recipe_version": "3.5.7" }
+    },
+    "alt_packages": {}
   }
 
 "packaged": false marks a recipe absent from pkgdata, i.e. one that produced no
@@ -284,25 +478,40 @@ runtime package. Two different things land there:
 
   cve_files             manifests consumed; one, unless AVOCADO_CVE_MANIFEST
                         points at a directory holding several
-  unscanned_recipes     recipes that shipped packages but are absent from the
-                        manifest - unscanned, not clean. Named individually in
-                        the top-level "unscanned_recipes" list, so a consumer
-                        can tell a recipe nothing examined from one that was
-                        examined and found clean; both are absent from
-                        "recipes". At image scope this is every recipe that
-                        shipped packages the image does not install, so it is
-                        most of the feed. A recipe that was scanned and came
-                        back clean is not here - it has an entry in the
-                        manifest with an empty issue list
+  unscanned_recipes     recipes that shipped packages but that the manifest
+                        does not describe - unscanned, not clean. Named
+                        individually in the top-level "unscanned_recipes"
+                        list. That is a recipe with no entry at all, one whose
+                        only entries are at a version this build does not have
+                        (stale_dropped) or are malformed (entries_unreadable),
+                        and one whose only issues carry a status this report
+                        does not know (unknown_status_cves). At image scope
+                        this is every recipe that shipped packages the image
+                        does not install, so it is most of the feed. At feed
+                        scope it is normally every recipe that inherits
+                        nospdx, packagegroups among them. Watch for a sharp
+                        rise, which means the SBOM covered less than the
+                        packages pkgdata knows about
+  no_cve_record_recipes recipes that shipped packages, were scanned, and
+                        matched no CVE record: every entry for them came back
+                        with an empty issue list. sbom-cve-check exports one
+                        for every component it scanned, whether it has no CPE
+                        at all or one no record names (avocadoctl). Named
+                        individually in the top-level "no_cve_record_recipes"
+                        list. Not clean either: no record is not no
+                        vulnerability. A recipe with an entry in one list and
+                        a CVE in another manifest is in "recipes" instead
+  alt_recipes           recipes with an "alt_versions" record, and alt_cves
+                        the CVEs those records list
   stale_dropped         manifest entries discarded because no recipe in
-                        pkgdata built that version. Their recipes still count
-                        as scanned, so they are not in "unscanned_recipes" as
-                        well - a version mismatch and a recipe nothing looked
-                        at stay distinguishable
+                        pkgdata built that version. A recipe whose every entry
+                        was dropped is in "unscanned_recipes": the scan says
+                        nothing about the version this build has
   cve_files_unreadable  manifests that would not parse, including files that
                         are valid JSON of the wrong shape
-  entries_unreadable    single manifest entries of the wrong shape, skipped
-                        one by one; the rest of that manifest is still read
+  entries_unreadable    single manifest entries of the wrong shape, an absent
+                        "issue" list included, skipped one by one; the rest of
+                        that manifest is still read
   unknown_status_cves   CVEs filtered out on a status that is not one of
                         Unpatched, Patched or Ignored - nothing sbom-cve-check
                         is known to emit, so a non-zero value means the report
@@ -311,6 +520,25 @@ runtime package. Two different things land there:
   pkgdata_unreadable    pkgdata entries that would not parse
   package_collisions    package names claimed by more than one recipe or
                         version; the first pkgdata directory won
+  unverified_compiled_source_cves
+                        CVEs listed as Unpatched, with no detail, that
+                        the scanner
+                        ignored as not compiled for a recipe whose build lists
+                        only the files it fetched. Each carries the scanner's
+                        status, detail and description under "scanner":
+
+    { "id": "CVE-...", "status": "Unpatched",
+      "scanner": { "status": "Ignored", "detail": "not-applicable-config",
+                   "description": "vulnerable_code_not_present: Source code not compiled by config" } }
+
+"compiled_source_recipes" names the recipes in package data built with
+SPDX_INCLUDE_COMPILED_SOURCES, whose not-applicable-config results from the
+compiled-source filter stand. A rescan from the report applies the same list.
+A report without it (written before it was added, or by report.py without
+--compiled-source-recipe) keeps that result for kernels only, which is what
+the switch was set for, and the scanner rejects a kernel's list that did not
+come from a source walk. The field is optional and additive, so the report
+stays version 1.
 
 "recipe_versions" maps every recipe in pkgdata, scanned clean or not, to its
 packages' PV and plain PKGV, sorted and without repeats:
@@ -327,6 +555,57 @@ the map to reach the same CVEs: "packages" carries PKGV-PKGR, which is not
 what a manifest entry records, and matching against it drops every recipe
 whose PV differs from it, as glibc's does. packages_digest does not cover the
 map, and it is optional and additive, so the report stays version 1.
+
+At "All" every recipe that shipped a package is in exactly one of "recipes",
+"no_cve_record_recipes" and "unscanned_recipes". A consumer may read a shipped
+recipe in none of them as scanned and clean, so the report never leaves one
+there at "All". At a single status a recipe whose CVEs all have other statuses
+is in none of them, which reads as clean at that status.
+
+Multi-kernel machines build a recipe twice, the default multiconfig's kernel
+and an alternate multiconfig's at another version (the 6.6 Raspberry Pi kernel
+beside the 6.12 one). At feed scope both are scanned, and the report keeps them
+apart:
+
+  "recipes": {
+    "linux-raspberrypi": {
+      "version": "6.12.87+git", "packaged": true, "cves": [ ... ],
+      "alt_versions": [
+        { "version": "6.6.78+git", "packaged": true, "cves": [ ... ] }
+      ]
+    }
+  },
+  "packages": {
+    "kernel-module-foo-6.6.78": { "recipe": "linux-raspberrypi",
+                                  "version": "6.6.78-r0",
+                                  "origin": "avocado-raspberrypi5",
+                                  "recipe_version": "6.6.78+git" }
+  },
+  "alt_packages": {
+    "linux-raspberrypi": { "6.6.78+git": [ "kernel-module-foo-6.6.78", "..." ] }
+  }
+
+"recipe_version" on a package names the record it was built from, the entry
+or one of its "alt_versions", because both kernels' packages name one recipe.
+A package whose version has no record carries none: no record describes it,
+and the other version's CVEs are not its own. The entry is the default
+multiconfig's record, or the first alternate one when the default's listed
+nothing. A name both multiconfigs package ("kernel", "kernel-dev") is the
+default's, as for any package name two pkgdata directories claim.
+
+"alt_packages" maps each recipe an alternate multiconfig built at another
+version to the packages that multiconfig built at it, a version with no
+package of its own included with an empty list. It is written on every report,
+empty on a single-kernel machine and at world and image scope, and a rescan
+reads it to file packages the same way, since "packages" carries PKGV-PKGR and
+not which multiconfig built each one. packages_digest covers neither it nor
+"recipe_version".
+
+An Ignored CVE carries "detail", the CVE_STATUS keyword, when the recipe
+declared one. create-spdx writes the keyword as the VEX statement's status
+notes and sbom-cve-check exports those as "detail", and the report keeps it at
+every status and with --no-summary, so upstream-wontfix stays apart from
+cpe-incorrect.
 
 The RPM manifest
 ----------------
@@ -372,12 +651,32 @@ globbed, and takes its arch from the directory it sits in. A package with its
 own PKGV (lvm2's libdevmapper) is named by that one. The header found there
 must then name the same package.
 
-It reads the same machine pkgdata as the report, because the two are consumed
+It reads the same pkgdata as the report, because the two are consumed
 as a pair and a manifest naming a package the report lacks is rejected
 downstream. So on a machine that builds a second kernel in another multiconfig
-(AVOCADO_MULTIKERNEL_MC_RECIPES), only the default multiconfig's RPMs are
-listed: the report does not read tmp-<mc> pkgdata, and the task notes this in
-the build log. SDK pkgdata is not listed either.
+(AVOCADO_MULTIKERNEL_MC_RECIPES), the second kernel's RPMs are listed at feed
+scope, the only scope that scans it: the recipes that variable names, read from
+tmp-<mc> pkgdata. Both kernels' "kernel", "kernel-dev" and "kernel-dbg" are
+listed, as two packages of one name at two versions. The report's package map
+holds one entry per name, the default multiconfig's, so a consumer that joins
+an RPM to it by name and version finds no entry for the alternate's package of
+a shared name. At world and image scope
+only the default multiconfig's RPMs are listed, and the task notes this in the
+build log. SDK pkgdata is not listed either.
+
+On scarthgap avocado-distro's do_multikernel_merge publishes an alternate
+multiconfig's RPMs that carry its kernel's version, not every RPM of the
+recipes it names: nvidia-kernel-oot's own packages (36.5.2, no kernel version
+in the name) stay in the alternate tree. It writes the RPMs it published to
+${DEPLOY_DIR}/avocado-multikernel/<mc>-rpms.txt, and the RPM manifest lists an
+alternate package only if its RPM is on that list, read from
+${DEPLOY_DIR_RPM}, the copy the feed serves. A missing list, or a listed file
+that is not there, fails the task. At feed scope on a multi-kernel machine
+do_feed_sbom, the first feed task, depends on the merge, which is nostamp, so
+the list is this build's, and an alternate kernel the merge's dependencies
+rebuild is complete before the document, the scan or the report read it. The report still names every package of the declared recipes, so it
+may name a package the manifest does not list, as it does a package with no
+RPM.
 
 A package pkgdata names that holds no files (PKGSIZE 0) and has no RPM is not
 listed and is not a failure: package_rpm writes no RPM for an empty package
