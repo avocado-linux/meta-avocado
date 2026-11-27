@@ -112,13 +112,28 @@ class Graph:
     def __init__(self):
         self.deps = {}
         self.noexec = set()
+        # tid -> (recrdeptask task names, recideptask tid or None)
+        self.recursive = {}
 
     def add(self, tid, *deps):
         self.deps.setdefault(tid, set()).update(deps)
         for dep in deps:
             self.deps.setdefault(dep, set())
 
-    def target(self, pn, depends=(), compiled=False):
+    def add_each(self, tid, pns, task):
+        # deptask/rdeptask: an edge to each recipe's task, where it has one.
+        # Recipes are added before the recipes that depend on them.
+        self.add(tid, *[t for t in ("%s:%s" % (pn, task) for pn in pns) if t in self.deps])
+
+    def packaging(self, pn, rdepends, write_depends):
+        # package_rpm.bbclass: do_package_write_rpm[rdeptask] = "do_packagedata",
+        # and [depends] on the do_populate_sysroot of PACKAGE_WRITE_DEPS.
+        self.add(pn + ":do_packagedata", pn + ":do_package")
+        self.add(pn + ":do_package_write_rpm", pn + ":do_packagedata",
+                 *["%s:do_populate_sysroot" % dep for dep in write_depends])
+        self.add_each(pn + ":do_package_write_rpm", rdepends, "do_packagedata")
+
+    def target(self, pn, depends=(), compiled=False, rdepends=(), write_depends=()):
         dep_sysroots = ["%s:do_populate_sysroot" % dep for dep in depends]
         self.add(pn + ":do_fetch")
         self.add(pn + ":do_unpack", pn + ":do_fetch")
@@ -130,11 +145,35 @@ class Graph:
         self.add(pn + ":do_install", pn + ":do_compile")
         self.add(pn + ":do_populate_sysroot", pn + ":do_install")
         self.add(pn + ":do_package", pn + ":do_install")
-        self.add(pn + ":do_packagedata", pn + ":do_package")
-        self.add(pn + ":do_package_write_rpm", pn + ":do_packagedata")
-        self.spdx(pn, depends, package=True)
+        self.packaging(pn, rdepends, write_depends)
+        self.spdx(pn, depends, package=True, rdepends=rdepends)
         self.add(pn + ":do_build", pn + ":do_populate_sysroot", pn + ":do_package_write_rpm",
                  pn + ":do_create_package_spdx")
+
+    def packagegroup(self, pn, rdepends, spdx):
+        # packagegroup.bbclass deletes the build tasks; nospdx the SPDX ones.
+        self.add(pn + ":do_package")
+        self.packaging(pn, rdepends, ())
+        self.add(pn + ":do_build", pn + ":do_package_write_rpm")
+        if spdx:
+            if LINE == "wrynose":
+                self.add(pn + ":do_create_recipe_spdx")
+            self.add(pn + ":do_create_spdx", pn + ":do_package", pn + ":do_packagedata",
+                     *([pn + ":do_create_recipe_spdx"] if LINE == "wrynose" else []))
+            self.add(pn + ":do_create_package_spdx", pn + ":do_create_spdx")
+            self.add_each(pn + ":do_create_package_spdx", rdepends, "do_create_spdx")
+            self.add(pn + ":do_build", pn + ":do_create_package_spdx")
+
+    def image(self, pn, installs):
+        # A packages-only image: do_rootfs[recrdeptask] (image.bbclass,
+        # rootfs_rpm.bbclass) over what it installs, and do_build[rdeptask].
+        self.add(pn + ":do_rootfs")
+        self.add_each(pn + ":do_rootfs", installs, "do_packagedata")
+        self.add_each(pn + ":do_rootfs", installs, "do_package_write_rpm")
+        self.recursive[pn + ":do_rootfs"] = (("do_packagedata", "do_package_write_rpm"), None)
+        self.add(pn + ":do_image_complete", pn + ":do_rootfs")
+        self.add(pn + ":do_build", pn + ":do_image_complete")
+        self.add_each(pn + ":do_build", installs, "do_package_write_rpm")
 
     def native(self, pn, depends=(), fetch_depends=()):
         self.add(pn + ":do_fetch", *fetch_depends)
@@ -149,10 +188,11 @@ class Graph:
         self.spdx(pn, depends, package=False)
         self.add(pn + ":do_build", pn + ":do_populate_sysroot", pn + ":do_create_spdx")
 
-    def spdx(self, pn, depends, package):
+    def spdx(self, pn, depends, package, rdepends=()):
         # OE-Core's create-spdx-3.0: the recipe-level task (wrynose) has no
         # ordering but its build dependencies' own; the build task follows the
-        # build.
+        # build; the package task waits for the runtime dependencies' build
+        # task (do_create_package_spdx[rdeptask]).
         build = [pn + ":do_populate_sysroot", pn + ":do_patch"]
         if LINE == "wrynose":
             self.add(pn + ":do_create_recipe_spdx",
@@ -164,6 +204,7 @@ class Graph:
                  *["%s:do_create_spdx" % dep for dep in depends])
         if package:
             self.add(pn + ":do_create_package_spdx", pn + ":do_create_spdx")
+            self.add_each(pn + ":do_create_package_spdx", rdepends, "do_create_spdx")
 
 
 def ships_no_spdx(pn):
@@ -171,6 +212,14 @@ def ships_no_spdx(pn):
     paths = list(LAYERS.glob("*/recipes-avocado/distro/%s.bb" % pn))
     assert len(paths) == 1, (pn, paths)
     return re.search(r"(?m)^inherit .*\bavocado-nospdx\b", paths[0].read_text()) is not None
+
+
+def packagegroup_has_spdx(pn):
+    """Whether this layer's packagegroup PN keeps its SPDX tasks: wrynose's
+    inherit nospdx, scarthgap's (other than the SDK's) do not."""
+    paths = list(LAYERS.glob("*/recipes-avocado/*/%s*.bb" % pn))
+    assert len(paths) == 1, (pn, paths)
+    return re.search(r"(?m)^inherit .*\b(avocado-)?nospdx\b", paths[0].read_text()) is None
 
 
 def aggregator_spdx(g, pn):
@@ -188,8 +237,12 @@ def aggregator_spdx(g, pn):
 
 def feed_graph():
     """A feed: avocado-distro builds avocado-core (one package recipe, foo, and
-    the kernel) and avocado-stone, whose bundle follows the kernel's deploy;
-    avocado-stone's and avocado-distro's do_populate_sysroot are noexec."""
+    the kernel), avocado-stone, whose bundle follows the kernel's deploy, and
+    the packages-only image avocado-pkg-extra; avocado-stone's and
+    avocado-distro's do_populate_sysroot are noexec. The image installs
+    packagegroup-avocado-extra, which installs systemd, whose packaging runs
+    qemuwrapper-cross (PACKAGE_WRITE_DEPS), and avocado-hitl, which installs
+    nfs-utils, which installs rpcbind; both build against libtirpc."""
     g = Graph()
     g.native("gcc-cross")
     g.native("git-native")
@@ -200,6 +253,15 @@ def feed_graph():
     g.native("db-native", fetch_depends=["git-native:do_populate_sysroot"])
     g.target("foo", ["bar-native"])
     g.target("linux-yocto", ["kmod-native"])
+    g.target("libtirpc")
+    g.target("rpcbind", ["libtirpc"])
+    g.target("nfs-utils", ["libtirpc"], rdepends=["rpcbind"])
+    g.target("qemuwrapper-cross")
+    g.target("systemd", write_depends=["qemuwrapper-cross"])
+    for pn, rdepends in (("avocado-hitl", ["nfs-utils"]),
+                         ("packagegroup-avocado-extra", ["avocado-hitl", "systemd"])):
+        g.packagegroup(pn, rdepends, packagegroup_has_spdx(pn))
+    g.image("avocado-pkg-extra", ["packagegroup-avocado-extra"])
     g.add("linux-yocto:do_deploy", "linux-yocto:do_install")
     g.add("linux-yocto:do_build", "linux-yocto:do_deploy")
     g.add("avocado-core:do_populate_sysroot")
@@ -215,7 +277,7 @@ def feed_graph():
     g.add("avocado-distro:do_multikernel_merge", "avocado-distro:do_configure")
     g.add("avocado-distro:do_compile", "avocado-distro:do_configure",
           "avocado-distro:do_multikernel_merge", "avocado-core:do_build",
-          "avocado-stone:do_build")
+          "avocado-stone:do_build", "avocado-pkg-extra:do_build")
     g.add("avocado-distro:do_install", "avocado-distro:do_compile")
     g.add("avocado-distro:do_populate_sysroot", "avocado-distro:do_install")
     g.add("avocado-distro:do_build", "avocado-distro:do_compile",
@@ -250,40 +312,53 @@ def add_recipe(g, d):
     # mcdepends name tasks of another multiconfig, which bitbake leaves out of
     # BB_TASKDEPDATA (runqueue.py filtermcdeps), so they are not modelled.
 
-    def reach(roots):
-        seen = set()
-        todo = list(roots)
-        while todo:
-            for dep in g.deps[todo.pop()]:
-                if dep not in seen:
-                    seen.add(dep)
-                    todo.append(dep)
-        return seen
-
-    # runqueue.py: recrdeptask adds the named tasks of every recipe the task's
-    # dependencies, and those of its recideptask, reach. OE-Core's base.bbclass
-    # gives every do_build one, unless the recipe replaces it.
+    # OE-Core's base.bbclass gives every do_build a recrdeptask, unless the
+    # recipe replaces it.
     flags = {("do_build", "recrdeptask"): " do_deploy"}
     flags.update(d.flags)
+    for (task, flag), value in flags.items():
+        if flag == "recrdeptask" and value.split():
+            idep = flags.get((task, "recideptask"))
+            g.recursive[PN + ":" + task] = (value.split(), PN + ":" + idep if idep else None)
+    resolve_recursive(g)
+    return g
+
+
+def resolve_recursive(g):
+    """recrdeptask and recideptask as runqueue.py resolves them (Part B): a
+    recursive task gets the named tasks of every recipe that its dependencies,
+    its recideptask task and that task's dependencies reach in the graph as it
+    stood before any recursion (cumulativedeps), repeated until nothing is
+    added, and the named tasks a recursive dependency of it was given."""
+    static = {tid: set(deps) for tid, deps in g.deps.items()}
+    cumulative = {}
+
+    def recipes_reached(tid):
+        if tid not in cumulative:
+            seen, todo = set(), [tid]
+            while todo:
+                for dep in static[todo.pop()]:
+                    if dep not in seen:
+                        seen.add(dep)
+                        todo.append(dep)
+            cumulative[tid] = {t.rsplit(":", 1)[0] for t in seen}
+        return cumulative[tid]
+
     changed = True
     while changed:
         changed = False
-        for (task, flag), value in list(flags.items()):
-            if flag != "recrdeptask":
-                continue
-            me = PN + ":" + task
-            roots = set(g.deps[me])
-            idep = flags.get((task, "recideptask"))
+        for me, (names, idep) in g.recursive.items():
+            total = set(g.deps[me])
             if idep:
-                roots |= {PN + ":" + idep} | g.deps[PN + ":" + idep]
-            pns = {t.rsplit(":", 1)[0] for t in roots | reach(roots)}
-            for pn in pns:
-                for name in value.split():
-                    new = "%s:%s" % (pn, name)
-                    if new != me and new in g.deps and new not in g.deps[me]:
-                        g.deps[me].add(new)
-                        changed = True
-    return g
+                total |= {idep} | g.deps[idep]
+            pns = set().union(*[recipes_reached(t) for t in total])
+            new = {"%s:%s" % (pn, name) for pn in pns for name in names}
+            for dep in g.deps[me] & set(g.recursive):
+                new |= {t for t in g.deps[dep] if t.rsplit(":", 1)[1] in names}
+            new = {t for t in new if t != me and t in g.deps} - g.deps[me]
+            if new:
+                g.deps[me] |= new
+                changed = True
 
 
 def scheduled(g):
@@ -446,6 +521,9 @@ class FeedFlagsTests(unittest.TestCase):
         self.assertIn(("do_feed_targets", None, None), d.tasks)
         self.assertFalse([t for t in d.tasks if "do_feed_targets" in t[1:]])
         self.assertEqual(d.flags[("do_feed_sbom", "recideptask")], "do_feed_targets")
+        # Its own recursion follows every runtime dependency, as an image's
+        # do_rootfs does, for do_feed_sbom to read.
+        self.assertEqual(d.flags[("do_feed_targets", "recrdeptask")], "do_package_write_rpm")
 
 
 @unittest.skipUnless(oe_meta(), "OE_CORE_LIB not set")
@@ -493,11 +571,34 @@ class FeedScheduleTests(unittest.TestCase):
     """What the report run schedules from the modelled feed graph."""
 
     RECIPES = ("foo", "bar-native", "linux-yocto", "kmod-native", "gcc-cross")
+    # nfs-utils is installed by a packagegroup that a packagegroup the image
+    # installs installs, rpcbind by nfs-utils, libtirpc only builds the two,
+    # and qemuwrapper-cross only runs in systemd's packaging.
+    RUNTIME_ONLY = ("nfs-utils", "rpcbind", "libtirpc", "qemuwrapper-cross")
+    DOCUMENT_TASK = {"wrynose": "do_create_recipe_spdx", "scarthgap": "do_create_spdx"}[LINE]
 
     def setUp(self):
         self.d = recipe_flags(**feed_values())
         self.g = add_recipe(feed_graph(), self.d)
         self.kept = scheduled(self.g)
+
+    def test_a_recipe_the_feed_reaches_only_at_run_time_has_its_document_asked_for(self):
+        sbom = self.g.deps[PN + ":do_feed_sbom"]
+        for pn in self.RUNTIME_ONLY + ("systemd",):
+            self.assertIn("%s:%s" % (pn, self.DOCUMENT_TASK), sbom)
+
+    def test_without_following_run_time_dependencies_they_are_left_out(self):
+        # bitbake reads do_feed_targets' graph as it stood before any
+        # recursion, where only the image's direct install reaches packaging.
+        d = recipe_flags(**feed_values())
+        del d.flags[("do_feed_targets", "recrdeptask")]
+        sbom = add_recipe(feed_graph(), d).deps[PN + ":do_feed_sbom"]
+        self.assertIn("systemd:" + self.DOCUMENT_TASK, sbom)
+        # scarthgap's packagegroups keep their SPDX tasks, whose recursion
+        # follows the packages they install; nothing follows a packaging tool.
+        left_out = (self.RUNTIME_ONLY if LINE == "wrynose" else ("qemuwrapper-cross",))
+        for pn in self.RUNTIME_ONLY:
+            self.assertEqual("%s:%s" % (pn, self.DOCUMENT_TASK) in sbom, pn not in left_out, pn)
 
     def test_every_document_the_feed_links_to_is_a_direct_dependency(self):
         # Restored from sstate only for a task that runs, so each one is.
@@ -534,8 +635,13 @@ class FeedScheduleTests(unittest.TestCase):
                     "avocado-stone:do_build", "avocado-stone:do_deploy",
                     "avocado-stone:do_compile", "avocado-stone:do_create_spdx",
                     "foo:do_build", "foo:do_package_write_rpm", "linux-yocto:do_deploy",
-                    PN + ":do_feed_targets"):
+                    "avocado-pkg-extra:do_rootfs", PN + ":do_feed_targets"):
             self.assertNotIn(tid, self.kept)
+        # scarthgap's build SPDX task follows each recipe's build.
+        if LINE == "wrynose":
+            self.assertNotIn("qemuwrapper-cross:do_populate_sysroot", self.kept)
+        # Following run-time dependencies packages nothing.
+        self.assertFalse({t for t in self.kept if t.endswith(":do_package_write_rpm")})
 
     def test_a_meta_target_with_a_build_spdx_task_ships_no_spdx_on_scarthgap(self):
         # On scarthgap the feed asks for every recipe's build SPDX task, and a
@@ -547,7 +653,11 @@ class FeedScheduleTests(unittest.TestCase):
         wide = scheduled(add_recipe(feed_graph(), target_build_wiring(
             recipe_flags(**feed_values()))))
         self.assertLess(len(self.kept), len(wide))
-        self.assertTrue(self.kept - {PN + ":do_feed_builds"} < wide)
+        # Its SPDX recursion read the same graph, so it too missed the run-time
+        # dependencies' documents; everything else kept is part of it.
+        missed = {t.rsplit(":", 1)[0] for t in self.kept - {PN + ":do_feed_builds"} - wide}
+        self.assertEqual(missed, set(self.RUNTIME_ONLY) if LINE == "wrynose"
+                         else {"qemuwrapper-cross"})
 
 
 @unittest.skipUnless(oe_meta(), "OE_CORE_LIB not set")
