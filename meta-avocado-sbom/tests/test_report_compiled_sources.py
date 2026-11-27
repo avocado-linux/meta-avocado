@@ -79,8 +79,13 @@ class Build:
         return doc
 
     @staticmethod
-    def cves(doc, recipe):
-        return {c["id"]: c for c in doc["recipes"].get(recipe, {}).get("cves", [])}
+    def cves(doc, build):
+        return {c["id"]: c for c in doc["builds"].get(build, {}).get("cves", [])}
+
+    @staticmethod
+    def flags(doc):
+        return {b: v["compiled_sources"] for b, v in doc["builds"].items()
+                if "compiled_sources" in v}
 
 
 class BuildReportTest(Build, unittest.TestCase):
@@ -176,34 +181,34 @@ class BuildReportTest(Build, unittest.TestCase):
         self.assertEqual(cve["scanner"], dict(status="Ignored", **FILTERED))
         self.assertNotIn("summary", cve)
 
-    def test_the_report_carries_the_list(self):
+    def test_the_report_carries_a_flag_on_every_build(self):
         doc = self.build(compiled_sources=["linux-raspberrypi"])
-        self.assertEqual(doc["compiled_source_recipes"], ["linux-raspberrypi"])
+        self.assertEqual(self.flags(doc), {"libpam": False, "linux-raspberrypi": True})
 
-    def test_a_function_is_asked_for_every_recipe_in_package_data(self):
+    def test_a_function_is_asked_for_every_build_in_package_data(self):
         asked = []
 
-        def opted_in(recipe):
-            asked.append(recipe)
+        def opted_in(mc, recipe):
+            asked.append((mc, recipe))
             return recipe.startswith("linux-")
         doc = self.build(compiled_sources=opted_in)
-        self.assertEqual(sorted(asked), ["libpam", "linux-raspberrypi"])
-        self.assertEqual(doc["compiled_source_recipes"], ["linux-raspberrypi"])
+        self.assertEqual(sorted(asked), [("", "libpam"), ("", "linux-raspberrypi")])
+        self.assertEqual(self.flags(doc), {"libpam": False, "linux-raspberrypi": True})
         self.assertEqual(self.cves(doc, "libpam")["CVE-2026-54411"]["status"], "Unpatched")
 
-    def test_unknown_trusts_kernels_only_and_writes_no_list(self):
+    def test_unknown_trusts_kernels_only_and_writes_no_flag(self):
         doc = self.build(compiled_sources=None)
-        self.assertNotIn("compiled_source_recipes", doc)
+        self.assertEqual(self.flags(doc), {})
         self.assertEqual(self.cves(doc, "linux-raspberrypi")["CVE-2026-1001"]["status"],
                          "Ignored")
         self.assertEqual(self.cves(doc, "libpam")["CVE-2026-54411"]["status"], "Unpatched")
 
 
 class TrustTest(unittest.TestCase):
-    def test_the_list_decides_when_known(self):
-        self.assertTrue(report.trusts_compiled_sources("busybox", set(), {"busybox"}))
+    def test_the_flag_decides_when_known(self):
+        self.assertTrue(report.trusts_compiled_sources("busybox", set(), {"busybox"}.__contains__))
         self.assertFalse(report.trusts_compiled_sources(
-            "linux-yocto-rt", {"linux_kernel"}, {"linux-yocto"}))
+            "linux-yocto-rt", {"linux_kernel"}, {"linux-yocto"}.__contains__))
 
     def test_unknown_trusts_the_kernel_product(self):
         self.assertTrue(report.trusts_compiled_sources("linux-x", {"linux_kernel"}, None))
@@ -228,37 +233,38 @@ class FromAnchorTest(Build, unittest.TestCase):
         a["generated"] = b["generated"] = "x"
         self.assertEqual(a, b)
 
-    def test_a_rescan_applies_the_carried_list(self):
+    def test_a_rescan_applies_the_carried_flags(self):
         built = self.build(compiled_sources={"linux-raspberrypi", "libpam"})
         rebuilt = self.rebuild(built)
         self.same(rebuilt, built)
         self.assertEqual(self.cves(rebuilt, "libpam")["CVE-2026-54411"]["status"], "Ignored")
 
-    def test_a_rescan_of_an_empty_list_trusts_nothing(self):
+    def test_a_rescan_of_no_flag_set_trusts_nothing(self):
         built = self.build(compiled_sources=set())
-        self.assertEqual(built["compiled_source_recipes"], [])
+        self.assertEqual(self.flags(built), {"libpam": False, "linux-raspberrypi": False})
         rebuilt = self.rebuild(built)
         self.same(rebuilt, built)
         self.assertEqual(self.cves(rebuilt, "linux-raspberrypi")["CVE-2026-1001"]["status"],
                          "Unpatched")
 
-    def test_a_report_without_the_list_trusts_kernels_only(self):
+    def test_a_report_without_the_flags_trusts_kernels_only(self):
         built = self.build(compiled_sources={"linux-raspberrypi", "libpam"})
-        del built["compiled_source_recipes"]
+        for build in built["builds"].values():
+            del build["compiled_sources"]
         rebuilt = self.rebuild(built)
-        self.assertNotIn("compiled_source_recipes", rebuilt)
+        self.assertEqual(self.flags(rebuilt), {})
         self.assertEqual(self.cves(rebuilt, "libpam")["CVE-2026-54411"]["status"], "Unpatched")
         self.assertEqual(self.cves(rebuilt, "linux-raspberrypi")["CVE-2026-1001"]["status"],
                          "Ignored")
         self.same(rebuilt, self.build(compiled_sources=None))
 
-    def test_a_malformed_list_is_refused(self):
+    def test_a_malformed_flag_is_refused(self):
         built = self.build(compiled_sources={"linux-raspberrypi"})
-        for bad in ("linux-raspberrypi", [""], [1], None):
-            built["compiled_source_recipes"] = bad
+        for bad in ("yes", 1, None, []):
+            built["builds"]["libpam"]["compiled_sources"] = bad
             with self.assertRaises(ValueError) as cm:
                 self.rebuild(built)
-            self.assertIn("compiled_source_recipes is malformed", str(cm.exception))
+            self.assertIn("builds['libpam'] is malformed", str(cm.exception))
 
 
 class CliTest(Build, unittest.TestCase):
@@ -280,17 +286,17 @@ class CliTest(Build, unittest.TestCase):
         self.assertEqual(code, 0)
         with open(out) as f:
             doc = json.load(f)
-        self.assertEqual(doc["compiled_source_recipes"], ["linux-raspberrypi"])
+        self.assertEqual(self.flags(doc), {"libpam": False, "linux-raspberrypi": True})
         self.assertEqual(self.cves(doc, "libpam")["CVE-2026-54411"]["status"], "Unpatched")
 
-    def test_without_the_option_no_list(self):
+    def test_without_the_option_no_flag(self):
         out = os.path.join(self.root, "out.json")
         code, _err = self.run_main(
             "--manifest", self.manifest, "--pkgdata-dir", self.pkgdata, "--status", "All",
             "-o", out)
         self.assertEqual(code, 0)
         with open(out) as f:
-            self.assertNotIn("compiled_source_recipes", json.load(f))
+            self.assertEqual(self.flags(json.load(f)), {})
 
     def test_the_option_conflicts_with_a_previous_report(self):
         code, err = self.run_main(
@@ -315,8 +321,13 @@ class D:
         return self.values.get(name)
 
 
-class RecipeTest(Build, unittest.TestCase):
-    """do_cve_report hands the per-recipe setting to the report."""
+class Fatal(Exception):
+    pass
+
+
+class RecipeHarness(Build):
+    """Runs do_cve_report, with the recipe's avocado_cve_* helpers, against a
+    datastore slice."""
 
     def run_task(self, values):
         import re
@@ -325,10 +336,7 @@ class RecipeTest(Build, unittest.TestCase):
         with open(RECIPE) as f:
             text = f.read()
         body = re.search(r"^python do_cve_report\(\) \{\n(.*?)^\}\n", text, re.M | re.S)
-        alt = re.search(r"^(def avocado_cve_alt_trees\(.*?)(?=^\S)", text, re.M | re.S)
-
-        class Fatal(Exception):
-            pass
+        helpers = re.findall(r"^(def avocado_cve_\w+\(.*?)(?=^\S)", text, re.M | re.S)
 
         def fatal(msg):
             raise Fatal(msg)
@@ -338,26 +346,81 @@ class RecipeTest(Build, unittest.TestCase):
                 remove=lambda p: os.path.exists(p) and os.remove(p),
                 to_boolean=lambda s, default: default if not s else s in ("1", "yes", "true")))
         out = os.path.join(self.root, "report.json")
-        d = D(dict(values, AVOCADO_CVE_REPORT_FILE=out, AVOCADO_CVE_MANIFEST=self.manifest,
-                   PKGDATA_DIR=self.pkgdata, MACHINE="avocado-raspberrypi5",
-                   AVOCADO_CVE_REPORT_STATUS="All", AVOCADO_CVE_SCOPE="image"))
+        settings = dict(AVOCADO_CVE_REPORT_FILE=out, AVOCADO_CVE_MANIFEST=self.manifest,
+                        PKGDATA_DIR=self.pkgdata, MACHINE="avocado-raspberrypi5",
+                        AVOCADO_CVE_REPORT_STATUS="All", AVOCADO_CVE_SCOPE="image")
+        settings.update(values)
+        d = D(settings)
         ns = {"bb": bb, "os": os, "d": d}
-        exec(alt.group(1), ns)
+        for helper in helpers:
+            exec(helper, ns)
         exec("def task(d):\n" + textwrap.indent(textwrap.dedent(body.group(1)), "    "), ns)
         ns["task"](d)
         with open(out) as f:
             return json.load(f)
 
+    def feed(self, record, alt_packages=(), merged=()):
+        """Feed scope, with an alternate multiconfig building the 6.6 kernel
+        and the coverage record do_feed_sbom wrote; record None writes none.
+        alt_packages are more (name, recipe, version) in its pkgdata, merged
+        the paths its merge published."""
+        top = os.path.join(self.root, "top")
+        alt = os.path.join(top, "tmp-rpi-6_6", "pkgdata", "raspberrypi5", "runtime-reverse")
+        os.makedirs(alt)
+        for name, pn, pv in (("kernel-image", "linux-raspberrypi", "6.6.78+git"),) + tuple(
+                alt_packages):
+            with open(os.path.join(alt, name), "w") as f:
+                f.write("PN: %s\nPV: %s\nPKGV: %s\nPKGR: r0\n" % (pn, pv, pv))
+        deploy = os.path.join(self.root, "deploy")
+        os.makedirs(os.path.join(deploy, "avocado-multikernel"), exist_ok=True)
+        with open(os.path.join(deploy, "avocado-multikernel", "rpi-6_6-rpms.txt"), "w") as f:
+            f.writelines(path + "\n" for path in merged)
+        coverage = os.path.join(self.root, "feed.coverage.json")
+        if record is not None:
+            with open(coverage, "w") as f:
+                json.dump(record, f)
+        return self.run_task({
+            "AVOCADO_CVE_SCOPE": "feed", "TOPDIR": top, "TMPDIR": self.root,
+            "DEPLOY_DIR": deploy, "DEPLOY_DIR_RPM": os.path.join(deploy, "rpm"),
+            "AVOCADO_MULTIKERNEL_MC_RECIPES": "rpi-6_6:linux-raspberrypi",
+            "AVOCADO_FEED_COVERAGE_FILE": coverage})
+
+
+class RecipeTest(RecipeHarness, unittest.TestCase):
+    """do_cve_report hands the per-recipe setting, and at feed scope the
+    builds the feed document left out, to the report."""
+
     def test_the_pn_setting_decides(self):
         doc = self.run_task({"SPDX_INCLUDE_COMPILED_SOURCES:pn-linux-raspberrypi": "1"})
-        self.assertEqual(doc["compiled_source_recipes"], ["linux-raspberrypi"])
+        self.assertEqual(self.flags(doc), {"libpam": False, "linux-raspberrypi": True})
         self.assertEqual(self.cves(doc, "libpam")["CVE-2026-54411"]["status"], "Unpatched")
         self.assertEqual(self.cves(doc, "linux-raspberrypi")["CVE-2026-1001"]["status"],
                          "Ignored")
 
+    def test_at_feed_scope_the_coverage_record_names_the_builds_left_out(self):
+        reason = "VEX overlap: linux_kernel 6.6.78+git is also x, with other statements on y"
+        doc = self.feed({"alt_not_covered": [
+            {"mc": "rpi-6_6", "recipe": "linux-raspberrypi", "reason": reason},
+            {"mc": "", "recipe": "broken", "reason": "malformed entry"}]})
+        alt = doc["builds"]["rpi-6_6:linux-raspberrypi"]
+        self.assertEqual((alt["coverage"], alt["not_covered"]), ("unscanned", reason))
+        self.assertEqual(doc["packages"]["kernel-image"], [
+            {"version": "6.12.47+git-r0", "build": "linux-raspberrypi"},
+            {"version": "6.6.78+git-r0", "build": "rpi-6_6:linux-raspberrypi"}])
+        self.assertEqual(doc["counts"]["not_covered_builds"], 1)
+
+    def test_at_feed_scope_a_missing_coverage_record_fails(self):
+        for record in (None, {"alt_included": []}):
+            with self.subTest(record=record):
+                with self.assertRaises(Fatal) as ctx:
+                    self.feed(record)
+                self.assertIn("coverage record", str(ctx.exception))
+                self.assertFalse(os.path.exists(os.path.join(self.root, "report.json")))
+                shutil.rmtree(os.path.join(self.root, "top"))
+
     def test_nothing_set_trusts_nothing(self):
         doc = self.run_task({})
-        self.assertEqual(doc["compiled_source_recipes"], [])
+        self.assertEqual(self.flags(doc), {"libpam": False, "linux-raspberrypi": False})
         self.assertEqual(self.cves(doc, "linux-raspberrypi")["CVE-2026-1001"]["status"],
                          "Unpatched")
 

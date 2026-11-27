@@ -188,6 +188,23 @@ def read_merged_rpms(path):
     with open(path) as f:
         return {line.strip() for line in f if line.strip()}
 
+def published_recipes(packages, published):
+    """The recipes with a package whose RPM, at the version and release pkgdata
+    gives it, is in published (read_merged_rpms()'s set). packages is
+    report.read_pkgdata()'s first return for one tree."""
+    stems = set()
+    for path in published:
+        arch, _sep, filename = path.partition("/")
+        suffix = ".%s.rpm" % arch
+        if arch and filename.endswith(suffix):
+            stems.add(filename[:-len(suffix)])
+    found = set()
+    for name, info in packages.items():
+        pkgv, _sep, pkgr = info["version"].rpartition("-")
+        if pkgv and pkgr and "%s-%s-%s" % (name, pkgv.replace("-", "+"), pkgr) in stems:
+            found.add(info["recipe"])
+    return found
+
 def build_manifest(sources, machine=None, distro_version=None, now=None):
     """The document: every package the build produced, with its header digest.
 
