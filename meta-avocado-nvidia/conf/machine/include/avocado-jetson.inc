@@ -31,17 +31,3 @@ IMAGE_TEGRAFLASH_DATA = "${DEPLOY_DIR_IMAGE}/avocado-image-var-${MACHINE_SHORT_N
 PACKAGECONFIG:remove:pn-wpewebkit = "gbm"
 DEPENDS:append:pn-wpewebkit = " libdrm"
 DEPENDS:append:pn-chromium-ozone-wayland = " virtual/libgbm"
-# The Tegra boot chain. meta-tegra spells TF-A arm-trusted-firmware, not the
-# trusted-firmware-a the AVOCADO_CVE_BOOT_CHAIN default names, so the default
-# matches nothing here; optee-os in it does resolve, to meta-tegra's l4t recipe.
-AVOCADO_CVE_BOOT_CHAIN:append = " arm-trusted-firmware edk2-firmware-tegra \
-                                  edk2-firmware-tegra-rcmboot tos-optee \
-                                  tegra-bootfiles tegra-firmware \
-                                  standalone-mm-optee-tegra"
-
-# The two entries above that are NVIDIA redistributable binaries rather than
-# recipes we build: MB1, BootROM patches and the DA agents arrive as signed
-# images with no upstream source and no CPE, so cve-check scans them under BPN
-# and writes a zero indistinguishable from a clean scan. Declared here so
-# avocado-cve-optout leaves a marker instead.
-CVE_CHECK_SKIP_RECIPE:append = " tegra-bootfiles tegra-firmware"

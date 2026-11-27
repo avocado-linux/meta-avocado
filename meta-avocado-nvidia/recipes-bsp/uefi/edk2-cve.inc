@@ -4,7 +4,7 @@
 # one file because CVE_VERSION and the SRCREV it was derived from must not drift
 # apart, and a per-append copy is exactly how they would.
 #
-# meta-tegra sets no CVE_PRODUCT, so cve-check falls back to ${BPN} and the
+# meta-tegra sets no CVE_PRODUCT, so the CPE falls back to ${BPN} and the
 # firmware that owns the whole early boot scans clean on every Jetson. NVD files
 # edk2 under two spellings.
 CVE_PRODUCT = "tianocore:edk2 tianocore:edk_ii"
