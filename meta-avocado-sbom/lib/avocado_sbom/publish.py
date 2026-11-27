@@ -11,7 +11,7 @@ import json
 import os
 import re
 
-from avocado_sbom.report import Stats as _Stats, write_report
+from avocado_sbom.report import Stats as _Stats
 
 # Case-insensitive: upstream ships lowercase patch names too
 # (unzip's cve-2014-8139-crc-overflow.patch).
@@ -199,8 +199,26 @@ def run(in_dir, out_dir, stats, warn):
             continue
 
         if out_dir is not None:
-            write_report(doc, os.path.join(out_dir, os.path.relpath(path, in_dir)),
-                         indent=None)
+            _write_compact(doc, os.path.join(out_dir, os.path.relpath(path, in_dir)))
+
+def _write_compact(doc, out_path):
+    """Write one JSON document atomically and compact. report.write_report
+    indents, which on a filtered SPDX tree multiplies its size.
+    """
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    tmp_path = out_path + ".tmp"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(doc, f, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp_path, out_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 def main():
     import argparse
